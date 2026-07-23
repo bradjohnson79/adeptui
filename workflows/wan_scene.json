@@ -1,0 +1,6 @@
+{
+  "name": "wan_scene_template",
+  "engine": "wan",
+  "description": "WAN 2.2 first/last frame scene unit for chaining",
+  "placeholders": ["positive", "negative", "width", "height", "length", "fps", "seed", "start_image", "end_image"]
+}

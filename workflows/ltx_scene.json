@@ -1,0 +1,6 @@
+{
+  "name": "ltx_scene_template",
+  "engine": "ltx",
+  "description": "LTX Director scene with start/middle/end guides",
+  "placeholders": ["positive", "negative", "width", "height", "length", "fps", "seed", "start_image", "middle_image", "end_image", "audio_file"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "lipsync_latentsync",
+  "engine": "lipsync",
+  "description": "LatentSync post-pass; requires LatentSync ComfyUI nodes",
+  "placeholders": ["video_path", "audio_path", "seed"]
+}

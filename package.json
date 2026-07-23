@@ -1,0 +1,9 @@
+{
+  "name": "ai-video-studio",
+  "private": true,
+  "scripts": {
+    "api": "cd studio-api && .venv\\Scripts\\uvicorn app.main:app --host 127.0.0.1 --port 8742 --reload",
+    "web": "cd studio-web && npm run dev",
+    "install:all": "cd studio-api && python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt && cd ..\\studio-web && npm install"
+  }
+}
