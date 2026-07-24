@@ -3,6 +3,8 @@
 **Source of truth:** `studio-api/app/capabilities/registry.py`
 **Live values:** `GET /api/capabilities` (add `?projectId=…` or use `GET /api/projects/{id}/capabilities`)
 **Kept honest by:** `studio-api/tests/test_capabilities.py`
+**Payload contract:** `ADEPT_PRODUCTION_CAPABILITY_CONTRACTS.md`
+**How to change the registry:** `ADEPT_CAPABILITY_REGISTRY.md`
 
 This table is the *baseline* — what the code can do, judged by reading it. The runtime status
 returned by the API can only be equal to or **weaker** than the baseline: a probe may downgrade
