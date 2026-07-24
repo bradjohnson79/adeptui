@@ -117,6 +117,26 @@ export type CoDirectorProposalStatus =
   | "cancelled"
   | "stale";
 
+/** Server-computed description of what a mutating tool would do (M2.2). */
+export interface CoDirectorToolPreview {
+  summary: string;
+  lines: string[];
+  resourceKind?: string | null;
+  resourceId?: string | null;
+  warnings: string[];
+}
+
+/** The server-owned payload of a `tool_call` proposal. The browser only ever reads this. */
+export interface CoDirectorToolCall {
+  toolId: string;
+  toolSchemaVersion: number;
+  arguments: Record<string, unknown>;
+  capabilitySnapshot: Record<string, unknown>;
+  preview: CoDirectorToolPreview;
+  inputHash: string;
+  baseResourceVersions: Record<string, string | null>;
+}
+
 export interface CoDirectorProposal {
   id: string;
   projectId: string;
@@ -127,6 +147,8 @@ export interface CoDirectorProposal {
   title: string;
   summary: string;
   payload: CoDirectorBibleMutationSet;
+  /** Present only when `proposalType === "tool_call"`. */
+  toolCall?: CoDirectorToolCall | null;
   status: CoDirectorProposalStatus;
   requestId?: string | null;
   createdBy: string;
@@ -144,6 +166,61 @@ export interface CoDirectorExecutionReceipt {
   resultingVersionNumber?: number | null;
   error?: Record<string, unknown> | null;
   executedAt: string;
+  toolId?: string | null;
+  toolInvocationId?: string | null;
+  toolResult?: Record<string, unknown> | null;
+  toolResultTruncated?: boolean;
+}
+
+export interface CoDirectorToolDefinition {
+  toolId: string;
+  toolSchemaVersion: number;
+  kind: "read" | "mutating";
+  title: string;
+  description: string;
+  capability: string;
+  parameters: {
+    name: string;
+    type: string;
+    required: boolean;
+    description: string;
+    maxLength?: number;
+    minimum?: number;
+    maximum?: number;
+    choices?: string[];
+  }[];
+  requiresApproval: boolean;
+  pinnedResources: string[];
+  resultCharBudget: number;
+}
+
+export interface CoDirectorToolAvailability {
+  toolId: string;
+  available: boolean;
+  capability: string;
+  capabilityStatus: string;
+  reason?: string | null;
+  errorCode?: string | null;
+}
+
+export interface CoDirectorToolInvocation {
+  id: string;
+  projectId: string;
+  toolId: string;
+  toolSchemaVersion: number;
+  kind: "read" | "mutating";
+  status: "succeeded" | "failed" | "blocked" | string;
+  arguments: Record<string, unknown>;
+  result?: Record<string, unknown> | null;
+  resultTruncated: boolean;
+  resultHash?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  proposalId?: string | null;
+  requestId?: string | null;
+  durationMs: number;
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface CoDirectorBibleVersion {
@@ -190,7 +267,22 @@ export type CoDirectorStreamEvent =
   | { type: "execution_started"; requestId: string; proposalId: string }
   | { type: "execution_completed"; requestId: string; proposalId: string; receipt: CoDirectorExecutionReceipt }
   | { type: "execution_failed"; requestId: string; proposalId: string; error: ApiErrorDetailShape }
-  | { type: "bible_version_created"; requestId: string; projectId: string; versionNumber: number };
+  | { type: "bible_version_created"; requestId: string; projectId: string; versionNumber: number }
+  // M2.2 tool lifecycle. `tool_requested` arrives while the assistant bubble is still
+  // streaming the request itself, so the UI replaces that bubble with a status line.
+  | { type: "tool_requested"; requestId: string; toolId: string; kind: "read" | "mutating" }
+  | { type: "tool_started"; requestId: string; toolId: string; title: string }
+  | { type: "tool_completed"; requestId: string; toolId: string; invocation: CoDirectorToolInvocation }
+  | { type: "tool_failed"; requestId: string; toolId: string; error: ApiErrorDetailShape }
+  | { type: "tool_result_truncated"; requestId: string; toolId: string; invocationId: string }
+  | { type: "tool_proposal_created"; requestId: string; toolId: string; proposal: CoDirectorProposal }
+  | {
+      type: "capability_blocked";
+      requestId: string;
+      toolId: string;
+      capability?: string | null;
+      error: ApiErrorDetailShape;
+    };
 
 /**
  * Turn any thrown value from a Co-Director request into a structured, user-safe
@@ -1460,6 +1552,51 @@ export const api = {
     req<CoDirectorExecutionReceipt>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/receipt`,
     ),
+  // M2.2 tools. There is no "execute tool" call by design: read tools run through
+  // `runCoDirectorReadTool`, and mutating tools go through the proposal endpoints above.
+  listCoDirectorTools: () =>
+    req<{ toolSchemaVersion: number; tools: CoDirectorToolDefinition[] }>("/api/codirector/tools"),
+  listProjectCoDirectorTools: (projectId: string) =>
+    req<{
+      projectId: string;
+      toolSchemaVersion: number;
+      tools: CoDirectorToolDefinition[];
+      availability: CoDirectorToolAvailability[];
+      capabilities: Record<string, unknown>;
+    }>(`/api/codirector/projects/${encodeURIComponent(projectId)}/tools`),
+  coDirectorToolAvailability: (projectId: string) =>
+    req<{
+      projectId: string;
+      availability: CoDirectorToolAvailability[];
+      capabilities: Record<string, unknown>;
+    }>(`/api/codirector/projects/${encodeURIComponent(projectId)}/tools/availability`),
+  runCoDirectorReadTool: (
+    projectId: string,
+    body: { toolId: string; arguments?: Record<string, unknown>; sceneId?: string; requestId?: string },
+  ) =>
+    req<CoDirectorToolInvocation>(`/api/codirector/projects/${encodeURIComponent(projectId)}/tools/read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  proposeCoDirectorToolCall: (
+    projectId: string,
+    body: { toolId: string; arguments?: Record<string, unknown>; sceneId?: string; requestId?: string },
+  ) =>
+    req<CoDirectorProposal>(`/api/codirector/projects/${encodeURIComponent(projectId)}/tools/proposals`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listCoDirectorToolInvocations: (projectId: string, opts: { toolId?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.toolId) params.set("tool_id", opts.toolId);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const query = params.toString();
+    return req<{ projectId: string; invocations: CoDirectorToolInvocation[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/tool-invocations${query ? `?${query}` : ""}`,
+    );
+  },
   mediaUrl: (absPath?: string | null) => {
     if (!absPath) return "";
     const normalized = absPath.replace(/\//g, "\\").toLowerCase();

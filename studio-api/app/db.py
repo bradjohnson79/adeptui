@@ -232,6 +232,37 @@ class CoDirectorExecutionReceipt(Base):
     executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# --------------------------------------------------------------------------
+# Co-Director M2.2: bounded tool registry. One row per tool invocation — read tools log the
+# result they returned, mutating tools log the approved execution (linked to its proposal), and
+# capability-blocked attempts are logged too so "why didn't it use that tool" is answerable.
+# See docs/architecture/CODIRECTOR_TOOL_REGISTRY.md.
+# --------------------------------------------------------------------------
+
+
+class CoDirectorToolInvocation(Base):
+    __tablename__ = "codirector_tool_invocations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    tool_id: Mapped[str] = mapped_column(String(64), index=True)
+    tool_schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    kind: Mapped[str] = mapped_column(String(16), default="read")
+    status: Mapped[str] = mapped_column(String(16), default="succeeded", index=True)
+    arguments_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    result_truncated: Mapped[int] = mapped_column(Integer, default=0)
+    capability_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    proposal_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(64), default="assistant")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 

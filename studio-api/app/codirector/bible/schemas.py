@@ -60,7 +60,26 @@ ProposalStatus = Literal[
     "stale",
 ]
 
-ProposalType = Literal["bible_create", "bible_update", "entity_create", "entity_update", "fact_add"]
+ProposalType = Literal[
+    "bible_create",
+    "bible_update",
+    "entity_create",
+    "entity_update",
+    "fact_add",
+    # M2.2: the model asked to run a mutating registry tool. `ProposalOut.toolCall` carries the
+    # server-owned payload; `payload` stays an empty BibleMutationSet for these.
+    "tool_call",
+]
+
+BIBLE_PROPOSAL_TYPES: tuple[str, ...] = (
+    "bible_create",
+    "bible_update",
+    "entity_create",
+    "entity_update",
+    "fact_add",
+)
+
+TOOL_CALL_PROPOSAL_TYPE = "tool_call"
 
 
 class BibleEntity(BaseModel):
@@ -157,6 +176,14 @@ class CreateVersionRequest(BaseModel):
 
 
 class ProposalOut(BaseModel):
+    """One durable proposal, of either flavour.
+
+    Bible proposals populate `payload`; tool proposals populate `toolCall` and leave `payload`
+    empty. Keeping both fields (rather than a union) means every existing Bible consumer — the
+    proposal card's mutation list, the preview diff, the E2E specs — keeps reading exactly the
+    field it read before M2.2, and the tool flavour is recognized by `toolCall` being present.
+    """
+
     id: str
     projectId: str
     bibleId: Optional[str] = None
@@ -166,6 +193,7 @@ class ProposalOut(BaseModel):
     title: str
     summary: str
     payload: BibleMutationSet
+    toolCall: Optional[dict[str, Any]] = None
     status: ProposalStatus
     requestId: Optional[str] = None
     createdBy: str = "assistant"
@@ -206,6 +234,12 @@ class ExecutionReceiptOut(BaseModel):
     resultingVersionNumber: Optional[int] = None
     error: Optional[dict[str, Any]] = None
     executedAt: str
+    # M2.2: populated when the approved proposal ran a registry tool rather than applying a
+    # Bible mutation set. A tool that happens to write the Bible still fills resultingVersion*.
+    toolId: Optional[str] = None
+    toolInvocationId: Optional[str] = None
+    toolResult: Optional[dict[str, Any]] = None
+    toolResultTruncated: bool = False
 
 
 class ContextManifest(BaseModel):

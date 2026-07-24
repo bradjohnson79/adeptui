@@ -17,8 +17,13 @@ function describeMutations(proposal: CoDirectorProposal): string[] {
 }
 
 /**
- * Renders a durable Co-Director proposal as an approve/reject/request-revision card — never
- * as raw JSON. The Bible is never mutated until the user explicitly approves.
+ * Renders a durable Co-Director proposal as an approve/reject/request-revision card — never as
+ * raw JSON, and never as something the model can apply itself.
+ *
+ * Two flavours share this shell: a Production Bible mutation set (M2.1), whose lines are derived
+ * from `payload`, and a `tool_call` (M2.2), whose lines come from the server-computed
+ * `toolCall.preview`. The browser never builds a tool preview itself — showing the user anything
+ * other than what the server recorded would make the approval meaningless.
  */
 export function CoDirectorProposalCard({
   proposal,
@@ -36,31 +41,45 @@ export function CoDirectorProposalCard({
   onCancel: () => void;
 }) {
   const [note, setNote] = useState("");
-  const mutationLines = describeMutations(proposal);
+  const toolCall = proposal.proposalType === "tool_call" ? proposal.toolCall : null;
+  const preview = toolCall?.preview;
+  const lines = toolCall ? preview?.lines ?? [] : describeMutations(proposal);
+  const warnings = preview?.warnings ?? [];
   const isStale = proposal.isStale || proposal.status === "stale";
   const isExecuting = proposal.status === "executing";
   const isReviewable = proposal.status === "pending" || proposal.status === "revision_requested";
 
   return (
-    <div className="codirector-cta-card codirector-proposal-card" role="group" aria-label={`Proposal: ${proposal.title}`}>
+    <div
+      className={`codirector-cta-card codirector-proposal-card${toolCall ? " codirector-proposal-tool" : ""}`}
+      role="group"
+      aria-label={`Proposal: ${proposal.title}`}
+    >
       <p className="scene-meta">
-        Production Bible proposal
+        {toolCall ? "Co-Director action · needs your approval" : "Production Bible proposal"}
         {proposal.status === "revision_requested" && " · revision requested"}
       </p>
       <p className="codirector-proposal-title">{proposal.title}</p>
-      {proposal.summary && <p className="muted">{proposal.summary}</p>}
-      {mutationLines.length > 0 && (
+      {(preview?.summary || proposal.summary) && <p className="muted">{preview?.summary || proposal.summary}</p>}
+      {lines.length > 0 && (
         <ul className="assistant-setup-list">
-          {mutationLines.map((line, i) => (
+          {lines.map((line, i) => (
             <li key={i}>{line}</li>
           ))}
         </ul>
       )}
 
+      {warnings.map((warning) => (
+        <p key={warning} className="codirector-proposal-warning">
+          {warning}
+        </p>
+      ))}
+
       {isStale && (
         <p className="codirector-proposal-stale" role="alert">
-          The Production Bible changed since this proposal was created. It can no longer be
-          approved as-is — cancel it and ask Co-Director again.
+          {toolCall
+            ? "The project changed since this action was proposed. It can no longer be approved as-is — cancel it and ask Co-Director again."
+            : "The Production Bible changed since this proposal was created. It can no longer be approved as-is — cancel it and ask Co-Director again."}
         </p>
       )}
 

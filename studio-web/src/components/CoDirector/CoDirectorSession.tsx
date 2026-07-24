@@ -49,6 +49,7 @@ import {
   type CoDirectorAttachment,
   type CoDirectorDisplayMode,
   type CoDirectorMessage,
+  type CoDirectorToolActivity,
   type CoDirectorUIContext,
   type CoDirectorWorkspaceBindings,
   type OverflowPanel,
@@ -78,6 +79,7 @@ type SessionValue = {
   applyNote: string | null;
   proposals: CoDirectorProposal[];
   proposalActingId: string | null;
+  toolActivity: CoDirectorToolActivity | null;
   approveProposal: (proposalId: string) => Promise<void>;
   rejectProposal: (proposalId: string, note?: string) => Promise<void>;
   requestProposalRevision: (proposalId: string, note?: string) => Promise<void>;
@@ -255,6 +257,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [setup, setSetup] = useState<SceneSetup | null>(null);
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
+  const [toolActivity, setToolActivity] = useState<CoDirectorToolActivity | null>(null);
   const [applyNote, setApplyNote] = useState<string | null>(null);
   const [plan, setPlan] = useState<ActionPlan | null>(null);
   const [selectedSteps, setSelectedSteps] = useState<Record<string, boolean>>({});
@@ -526,6 +529,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setBusy(true);
       setSuggestedPrompt(null);
       setSetup(null);
+      setToolActivity(null);
       setApplyNote(null);
       setOverflowPanel((prev) => (prev === "provider" ? prev : "none"));
 
@@ -588,8 +592,36 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           suggestedPromptResult = event.suggestedPrompt || null;
         } else if (event.type === "cancelled") {
           outcome = "cancelled";
-        } else if (event.type === "proposal_created") {
+        } else if (event.type === "proposal_created" || event.type === "tool_proposal_created") {
           setProposals((prev) => [event.proposal, ...prev.filter((p) => p.id !== event.proposal.id)]);
+          if (event.type === "tool_proposal_created") setToolActivity(null);
+        } else if (event.type === "tool_requested") {
+          setToolActivity({ toolId: event.toolId, title: event.toolId, phase: "requested" });
+          if (event.kind === "read") {
+            // The tokens streamed so far were the model asking for a lookup, not an answer. The
+            // server withholds `completed` for that turn and re-asks with the result, so the
+            // partial request text is discarded here and the status line stands in its place.
+            streamedText = "";
+            setMessages((prev) => prev.filter((m) => m.id !== assistantId));
+          }
+        } else if (event.type === "tool_started") {
+          setToolActivity({ toolId: event.toolId, title: event.title, phase: "running" });
+        } else if (event.type === "tool_completed") {
+          setToolActivity((prev) => ({
+            toolId: event.toolId,
+            title: prev?.title || event.toolId,
+            phase: "completed",
+            truncated: prev?.truncated || event.invocation.resultTruncated,
+          }));
+        } else if (event.type === "tool_result_truncated") {
+          setToolActivity((prev) => (prev ? { ...prev, truncated: true } : prev));
+        } else if (event.type === "tool_failed" || event.type === "capability_blocked") {
+          setToolActivity((prev) => ({
+            toolId: event.toolId,
+            title: prev?.title || event.toolId,
+            phase: event.type === "capability_blocked" ? "blocked" : "failed",
+            detail: event.error.message,
+          }));
         } else if (event.type === "error") {
           const classified = classifyCoDirectorError(
             new ApiError(event.error.message || "Co-Director returned an error.", 0, {
@@ -694,7 +726,9 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           setMessages((prev) =>
             prev
               .map((m) =>
-                m.id === assistantId ? { ...m, status: (wasUserCancel ? "cancelled" : "interrupted") as const } : m,
+                m.id === assistantId
+                  ? { ...m, status: wasUserCancel ? ("cancelled" as const) : ("interrupted" as const) }
+                  : m,
               )
               .filter((m) => !(m.id === assistantId && !m.content)),
           );
@@ -952,14 +986,19 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       const projectId = bindingsRef.current.projectId;
       if (!projectId || proposalActingId) return;
       setProposalActingId(proposalId);
+      const approved = proposals.find((p) => p.id === proposalId) ?? null;
+      const isTool = approved?.proposalType === "tool_call";
       try {
-        await api.approveProposal(projectId, proposalId);
+        const receipt = await api.approveProposal(projectId, proposalId);
         setMessages((m) => [
           ...m,
           {
             id: newMessageId(),
             role: "assistant",
-            content: "Proposal approved and applied — a new Production Bible version was created.",
+            content:
+              receipt.toolId || isTool
+                ? `Approved — I applied “${approved?.title || receipt.toolId}”.`
+                : "Proposal approved and applied — a new Production Bible version was created.",
             createdAt: new Date().toISOString(),
           },
         ]);
@@ -972,7 +1011,9 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             role: "assistant",
             content:
               classified.code === "PROPOSAL_STALE"
-                ? "That proposal is out of date because the Bible changed since it was created. Cancel it and ask again."
+                ? isTool
+                  ? "That action is out of date because the project changed since it was proposed. Cancel it and ask again."
+                  : "That proposal is out of date because the Bible changed since it was created. Cancel it and ask again."
                 : `Couldn't approve that proposal: ${classified.message}`,
             createdAt: new Date().toISOString(),
           },
@@ -982,7 +1023,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         await refreshProposals();
       }
     },
-    [proposalActingId, refreshProposals],
+    [proposalActingId, proposals, refreshProposals],
   );
 
   const rejectProposal = useCallback(
@@ -1188,6 +1229,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       applyNote,
       proposals,
       proposalActingId,
+      toolActivity,
       approveProposal,
       rejectProposal,
       requestProposalRevision,
@@ -1271,6 +1313,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       applyNote,
       proposals,
       proposalActingId,
+      toolActivity,
       approveProposal,
       rejectProposal,
       requestProposalRevision,

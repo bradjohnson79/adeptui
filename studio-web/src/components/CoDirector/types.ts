@@ -33,6 +33,21 @@ export interface CoDirectorMessage {
   status?: CoDirectorMessageStatus;
 }
 
+/**
+ * What Co-Director is doing with a bounded read tool this turn (M2.2).
+ *
+ * Read tools run server-side and finish inside a single chat turn, so this is transient status
+ * for one line of UI — it is deliberately not a task list, and never a place from which the user
+ * can trigger or re-run anything.
+ */
+export interface CoDirectorToolActivity {
+  toolId: string;
+  title: string;
+  phase: "requested" | "running" | "completed" | "failed" | "blocked";
+  detail?: string;
+  truncated?: boolean;
+}
+
 export type AttachmentKind = "file" | "library";
 
 export interface CoDirectorAttachment {

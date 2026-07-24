@@ -3,9 +3,10 @@
 **Date:** 2026-07-24
 **Related:** `docs/architecture/CODIRECTOR_IMPLEMENTATION_PLAN.md` (M1, implemented),
 `docs/audit/CODIRECTOR_PROVIDER_RELIABILITY_REPORT.md`
-**Status:** Vision / not implemented. Nothing in this document should be read as a
-description of current behavior — everything here is future work, explicitly out of scope
-for Milestone 1.
+**Status:** Vision, partially superseded. Two sections have since been implemented and carry
+status notes pointing at their as-built docs — Production Bible (M2.1) and Tool calling +
+approvals (M2.1 + M2.2). Everything else remains future work and should **not** be read as a
+description of current behavior.
 
 ---
 
@@ -82,12 +83,30 @@ rather than a fixed enum.
 
 ---
 
-## M2/M3 candidate: Tool calling + approvals
+## M2/M3 candidate: Tool calling + approvals — ✅ implemented in M2.1 + M2.2
 
-**Status update (2026-07-24):** the *approvals* half of this is implemented in M2.1, scoped
-narrowly to Bible mutations (`CODIRECTOR_PROPOSALS_AND_APPROVALS.md`) — there is exactly one
-"tool" (propose a Bible mutation via a ```` ```proposal ```` fence), not the general registry
-described below. A general tool registry covering scene/render/asset actions remains future work.
+**Status update (2026-07-24):** both halves now exist. M2.1 delivered the *approvals* half, scoped
+narrowly to Bible mutations (`CODIRECTOR_PROPOSALS_AND_APPROVALS.md`). M2.2 delivered the *tools*
+half as a **bounded registry** (`CODIRECTOR_TOOL_REGISTRY.md`,
+`CODIRECTOR_TOOL_SECURITY.md`): 15 read tools that run inline within a turn, and 4 mutating tools
+(`create_scene`, `update_scene_title`, `set_scene_prompt`, `record_director_decision`) that can only
+reach a write through a `tool_call` proposal the user approves.
+
+Two things were deliberately built more narrowly than sketched below, and should be read as
+decisions rather than omissions:
+
+- **The registry is closed, not open.** Tools are declared as data and bound to handlers in code;
+  there is no plugin surface, no config-defined tool, and no shell/filesystem/SQL escape hatch. The
+  "MCP-ish" framing below is not the direction taken.
+- **A turn is capped at one read tool plus one follow-up completion.** The autonomous multi-step
+  chaining implied below is still future work and needs the orchestrator/task-graph section, plus a
+  cancellation and progress story, before it would be safe.
+
+`queue_render` and reference attach/remove — both named below — were considered for M2.2 and
+excluded: they start long-running or externally-visible work, which needs its own progress and
+cancellation semantics before it can sit behind a one-click approval.
+
+The rest of this section is left as originally written for historical context.
 
 **Problem:** Co-Director can talk about scenes but can't *act* on the project (create a
 scene, attach a reference, queue a render) without the user manually doing it after reading

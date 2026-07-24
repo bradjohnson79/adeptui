@@ -21,6 +21,45 @@ def _scenario() -> str:
     return (os.environ.get("ADEPT_CODIRECTOR_MOCK_SCENARIO") or "healthy").strip().lower()
 
 
+# Scenarios that exercise the M2.2 tool registry. Kept explicit so an unknown scenario name
+# falls through to the ordinary chat reply instead of silently emitting a tool fence.
+_TOOL_SCENARIOS = frozenset(
+    {
+        "read_tool_success",
+        "read_tool_blocked_capability",
+        "capability_not_configured",
+        "mutation_tool_proposal",
+        "mutation_tool_stale",
+        "mutation_tool_execution_success",
+        "mutation_tool_execution_failure",
+        "tool_loop_limit",
+    }
+)
+
+
+def _tool_fence(response_type: str, tool_id: str, arguments: dict[str, Any] | None = None) -> str:
+    return (
+        "```tool\n"
+        + json.dumps({"responseType": response_type, "toolId": tool_id, "arguments": arguments or {}})
+        + "\n```"
+    )
+
+
+def _is_follow_up_turn(request: ChatRequest) -> bool:
+    """True when this turn is the follow-up after a tool ran.
+
+    The gateway appends the tool's outcome as the last user message, so a real model would see
+    it and answer in prose. The mock mirrors that so E2E scenarios terminate after one tool
+    instead of re-requesting the same tool forever.
+    """
+
+    for message in reversed(request.messages):
+        if message.get("role") == "user":
+            content = message.get("content") or ""
+            return "Tool result for" in content or "could not run" in content
+    return False
+
+
 class MockCoDirectorProvider:
     id = "mock"
     display_name = "Mock Co-Director"
@@ -200,6 +239,8 @@ class MockCoDirectorProvider:
                 "[mock] I want to propose a Bible update, but this response is intentionally "
                 "broken for testing.\n\n```proposal\n{ this is not valid json,,, \n```"
             )
+        else:
+            reply = self._tool_scenario_reply(scenario, request) or reply
 
         if scenario == "slow":
             await asyncio.sleep(0.35)
@@ -211,6 +252,61 @@ class MockCoDirectorProvider:
             provider_id=self.id,
             raw={"mock": True, "scenario": scenario},
         )
+
+    def _tool_scenario_reply(self, scenario: str, request: ChatRequest) -> str | None:
+        """Deterministic replies for the M2.2 tool scenarios.
+
+        Each scenario models one contractual behavior of the registry rather than a happy path:
+        a read tool that succeeds, one blocked by a missing capability, a mutating tool that
+        must become a proposal, and a model that ignores the one-tool-per-turn bound.
+        """
+
+        if scenario not in _TOOL_SCENARIOS:
+            return None
+
+        follow_up = _is_follow_up_turn(request)
+
+        if scenario == "tool_loop_limit":
+            # Deliberately keeps asking, including on the follow-up turn, so the gateway's bound
+            # is what stops it.
+            return (
+                "[mock] Let me check the project's scenes.\n\n"
+                + _tool_fence("read_tool_call", "list_scenes", {})
+            )
+
+        if follow_up:
+            return (
+                "[mock] Based on that lookup, here's what I found: the project is set up and I "
+                "can keep going from here."
+            )
+
+        if scenario == "read_tool_success":
+            return (
+                "[mock] Let me check the current scene list before I answer.\n\n"
+                + _tool_fence("read_tool_call", "list_scenes", {"limit": 10})
+            )
+        if scenario in ("read_tool_blocked_capability", "capability_not_configured"):
+            tool_id = "get_comfyui_health" if scenario == "read_tool_blocked_capability" else "get_reference_capabilities"
+            return (
+                "[mock] Let me check whether the render backend is ready.\n\n"
+                + _tool_fence("read_tool_call", tool_id, {})
+            )
+        if scenario in (
+            "mutation_tool_proposal",
+            "mutation_tool_stale",
+            "mutation_tool_execution_success",
+            "mutation_tool_execution_failure",
+        ):
+            return (
+                "[mock] I'd like to add a scene for that beat. Nothing changes until you "
+                "approve it.\n\n"
+                + _tool_fence(
+                    "mutation_proposal",
+                    "create_scene",
+                    {"name": "Rooftop Standoff", "prompt": "Slow push-in on the rooftop at dusk.", "durationSec": 6.0},
+                )
+            )
+        return None
 
     def supports_stream(self) -> bool:
         return True

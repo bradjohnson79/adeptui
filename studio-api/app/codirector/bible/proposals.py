@@ -1,10 +1,19 @@
 """ProposalService: durable propose → approve/reject/request-revision → execute → receipt.
 
-This is the *only* write path that can change a Production Bible on behalf of the model.
-Chat/providers may only ever call `create_proposal`; approving, rejecting, or executing is a
-separate, explicit, user-triggered action. Execution is idempotent per `(proposal, base
-version, payload)` via `operations.compute_input_hash` — approving an already-completed
-proposal twice returns the original receipt instead of double-applying.
+This is the *only* write path the model can reach on behalf of a user, for either flavour of
+proposal:
+
+- **Bible proposals** (`proposal_type` in `BIBLE_PROPOSAL_TYPES`) carry a `BibleMutationSet` and
+  apply through `operations.apply_mutation_set`.
+- **Tool proposals** (`proposal_type == "tool_call"`, M2.2) carry a server-owned
+  `ToolCallPayload` and apply through `ToolExecutionService.execute_approved_proposal`.
+
+Chat/providers may only ever *create* a proposal; approving, rejecting, or executing is a
+separate, explicit, user-triggered action. `approve()` branches on flavour exactly once — the
+decision record, the terminal-state guards, the staleness gate, and the execution receipt are
+shared, so there is one approval system rather than two. Execution is idempotent per
+`(proposal, base state, payload)`: approving an already-completed proposal twice returns the
+original receipt instead of double-applying.
 """
 
 from __future__ import annotations
@@ -12,7 +21,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +42,12 @@ from ..errors import (
     CoDirectorError,
 )
 from . import operations as ops
-from .schemas import BibleMutationSet, ExecutionReceiptOut, ProposalOut
+from .schemas import (
+    TOOL_CALL_PROPOSAL_TYPE,
+    BibleMutationSet,
+    ExecutionReceiptOut,
+    ProposalOut,
+)
 
 _TERMINAL_STATUSES = {"rejected", "completed", "failed", "cancelled"}
 _REVIEWABLE_STATUSES = {"pending", "revision_requested", "stale"}
@@ -47,13 +61,50 @@ def _payload_from_json(raw: str) -> BibleMutationSet:
     return BibleMutationSet.model_validate(data)
 
 
+def _raw_payload(raw: str) -> dict[str, Any]:
+    try:
+        data = json.loads(raw or "{}")
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def is_tool_proposal(row: CoDirectorProposal) -> bool:
+    return row.proposal_type == TOOL_CALL_PROPOSAL_TYPE
+
+
 def _is_stale(proposal: CoDirectorProposal, bible: Optional[ProductionBible]) -> bool:
+    """Bible staleness: the proposal's base version is no longer the current one."""
+
     current_id = bible.current_version_id if bible else None
     return proposal.based_on_version_id != current_id
 
 
+def _is_tool_proposal_stale(db: Session, row: CoDirectorProposal) -> bool:
+    """Tool staleness: any resource the proposal pinned has moved since it was created."""
+
+    from ..tools.execution import ToolExecutionService
+
+    try:
+        payload = ToolExecutionService.parse_payload(row.payload_json)
+    except CoDirectorError:
+        # An unreadable payload can never be applied safely; treat it as stale so the only
+        # available action is cancel.
+        return True
+    return ToolExecutionService.is_stale(db, project_id=row.project_id, payload=payload)
+
+
+def _stale_for_row(db: Session, row: CoDirectorProposal, bible: Optional[ProductionBible]) -> bool:
+    if row.status not in _REVIEWABLE_STATUSES:
+        return False
+    if is_tool_proposal(row):
+        return _is_tool_proposal_stale(db, row)
+    return _is_stale(row, bible)
+
+
 def _row_to_out(row: CoDirectorProposal, *, is_stale: bool) -> ProposalOut:
     bible_version_number = None
+    tool_call = _raw_payload(row.payload_json) if is_tool_proposal(row) else None
     return ProposalOut(
         id=row.id,
         projectId=row.project_id,
@@ -63,7 +114,8 @@ def _row_to_out(row: CoDirectorProposal, *, is_stale: bool) -> ProposalOut:
         proposalType=row.proposal_type,  # type: ignore[arg-type]
         title=row.title,
         summary=row.summary,
-        payload=_payload_from_json(row.payload_json),
+        payload=BibleMutationSet() if tool_call is not None else _payload_from_json(row.payload_json),
+        toolCall=tool_call,
         status=row.status,  # type: ignore[arg-type]
         requestId=row.request_id,
         createdBy=row.created_by,
@@ -109,6 +161,46 @@ class ProposalService:
         return _row_to_out(row, is_stale=False)
 
     @staticmethod
+    def create_tool_proposal(
+        db: Session,
+        *,
+        project_id: str,
+        payload: Any,
+        title: str,
+        summary: str,
+        request_id: Optional[str] = None,
+        created_by: str = "assistant",
+    ) -> ProposalOut:
+        """Persist a `tool_call` proposal.
+
+        `payload` is a `tools.definitions.ToolCallPayload`, built entirely server-side. It is
+        typed loosely here only to keep `bible` from importing `tools` at module scope (the tool
+        package imports this module to reach `ProposalService`).
+        """
+
+        bible = ops.get_bible(db, project_id)
+        now = datetime.utcnow()
+        row = CoDirectorProposal(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            bible_id=bible.id if bible else None,
+            based_on_version_id=bible.current_version_id if bible else None,
+            proposal_type=TOOL_CALL_PROPOSAL_TYPE,
+            title=title,
+            summary=summary,
+            payload_json=json.dumps(payload.model_dump(mode="json")),
+            status="pending",
+            request_id=request_id,
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return _row_to_out(row, is_stale=False)
+
+    @staticmethod
     def _get_row(db: Session, project_id: str, proposal_id: str) -> CoDirectorProposal:
         row = db.get(CoDirectorProposal, proposal_id)
         if not row:
@@ -133,7 +225,7 @@ class ProposalService:
     def get(db: Session, project_id: str, proposal_id: str) -> ProposalOut:
         row = ProposalService._get_row(db, project_id, proposal_id)
         bible = ops.get_bible(db, project_id)
-        return _row_to_out(row, is_stale=row.status in _REVIEWABLE_STATUSES and _is_stale(row, bible))
+        return _row_to_out(row, is_stale=_stale_for_row(db, row, bible))
 
     @staticmethod
     def list(db: Session, project_id: str, status: Optional[str] = None) -> list[ProposalOut]:
@@ -142,12 +234,29 @@ class ProposalService:
             query = query.filter(CoDirectorProposal.status == status)
         rows = query.order_by(CoDirectorProposal.created_at.desc()).all()
         bible = ops.get_bible(db, project_id)
-        return [_row_to_out(r, is_stale=r.status in _REVIEWABLE_STATUSES and _is_stale(r, bible)) for r in rows]
+        return [_row_to_out(r, is_stale=_stale_for_row(db, r, bible)) for r in rows]
 
     @staticmethod
     def preview(db: Session, project_id: str, proposal_id: str) -> dict:
         row = ProposalService._get_row(db, project_id, proposal_id)
         bible = ops.get_bible(db, project_id)
+
+        if is_tool_proposal(row):
+            # A tool proposal's preview was computed server-side when it was created; re-deriving
+            # it here would let a since-changed world silently rewrite what the user is agreeing
+            # to. Staleness is reported instead, and the stored preview is shown as-is.
+            stale = _is_tool_proposal_stale(db, row)
+            payload_dict = _raw_payload(row.payload_json)
+            return {
+                "proposal": _row_to_out(row, is_stale=stale).model_dump(mode="json"),
+                "currentVersionNumber": None,
+                "wouldCreateVersionNumber": None,
+                "entityDiff": [],
+                "factDiff": [],
+                "toolPreview": payload_dict.get("preview"),
+                "isStale": stale,
+            }
+
         stale = _is_stale(row, bible)
         payload = _payload_from_json(row.payload_json)
 
@@ -267,17 +376,26 @@ class ProposalService:
             )
 
         bible = ops.get_bible(db, project_id)
-        if _is_stale(row, bible):
+        tool_flavoured = is_tool_proposal(row)
+        if _is_tool_proposal_stale(db, row) if tool_flavoured else _is_stale(row, bible):
             row.status = "stale"
             row.updated_at = datetime.utcnow()
             db.commit()
             raise CoDirectorError(
                 PROPOSAL_STALE,
-                "The Production Bible changed since this proposal was created. Preview it again before approving.",
-                details={"proposalId": proposal_id},
+                (
+                    "The project changed since this action was proposed. Ask Co-Director again "
+                    "so it can propose against the current state."
+                    if tool_flavoured
+                    else "The Production Bible changed since this proposal was created. Preview it again before approving."
+                ),
+                details={"proposalId": proposal_id, "proposalType": row.proposal_type},
                 recoverable=True,
                 recommended_action="preview_again",
             )
+
+        if tool_flavoured:
+            return ProposalService._approve_tool_proposal(db, row, note=note, decided_by=decided_by)
 
         payload = _payload_from_json(row.payload_json)
         input_hash = ops.compute_input_hash(row.id, row.based_on_version_id, payload)
@@ -349,6 +467,81 @@ class ProposalService:
             ) from exc
 
     @staticmethod
+    def _approve_tool_proposal(
+        db: Session, row: CoDirectorProposal, *, note: Optional[str], decided_by: str
+    ) -> ExecutionReceiptOut:
+        """Record the decision, then let the *server* run the tool the user approved.
+
+        Structurally identical to the Bible branch: idempotency check → decision row →
+        `executing` → apply → receipt. Only the "apply" step differs.
+        """
+
+        from ..tools.execution import ToolExecutionService
+
+        payload = ToolExecutionService.parse_payload(row.payload_json)
+        input_hash = payload.inputHash or ""
+
+        existing_receipt = (
+            db.query(CoDirectorExecutionReceipt)
+            .filter(
+                CoDirectorExecutionReceipt.proposal_id == row.id,
+                CoDirectorExecutionReceipt.input_hash == input_hash,
+                CoDirectorExecutionReceipt.status == "success",
+            )
+            .first()
+        )
+        if existing_receipt:
+            return _receipt_to_out(db, existing_receipt)
+
+        _record_decision(db, row, decision="approved", note=note, decided_by=decided_by)
+        row.status = "executing"
+        row.updated_at = datetime.utcnow()
+        db.commit()
+
+        try:
+            outcome = ToolExecutionService.execute_approved_proposal(
+                db, proposal=row, payload=payload, decided_by=decided_by
+            )
+        except CoDirectorError as err:
+            receipt = CoDirectorExecutionReceipt(
+                id=str(uuid.uuid4()),
+                proposal_id=row.id,
+                input_hash=input_hash,
+                status="failed",
+                resulting_version_id=None,
+                error_json=json.dumps(err.to_dict()),
+                executed_at=datetime.utcnow(),
+            )
+            db.add(receipt)
+            row.status = "failed"
+            row.updated_at = datetime.utcnow()
+            db.commit()
+            raise
+
+        invocation = outcome["invocation"]
+        receipt = CoDirectorExecutionReceipt(
+            id=str(uuid.uuid4()),
+            proposal_id=row.id,
+            input_hash=input_hash,
+            status="success",
+            resulting_version_id=outcome.get("resultingVersionId"),
+            error_json=None,
+            executed_at=datetime.utcnow(),
+        )
+        db.add(receipt)
+        row.status = "completed"
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(receipt)
+
+        out = _receipt_to_out(db, receipt)
+        out.toolId = payload.toolId
+        out.toolInvocationId = invocation.id
+        out.toolResult = outcome.get("result")
+        out.toolResultTruncated = bool(outcome.get("resultTruncated"))
+        return out
+
+    @staticmethod
     def get_receipt(db: Session, project_id: str, proposal_id: str) -> ExecutionReceiptOut:
         row = ProposalService._get_row(db, project_id, proposal_id)
         receipt = (
@@ -365,7 +558,33 @@ class ProposalService:
                 recoverable=True,
                 recommended_action="none",
             )
-        return _receipt_to_out(db, receipt)
+        out = _receipt_to_out(db, receipt)
+        if is_tool_proposal(row):
+            _attach_tool_details(db, row, out)
+        return out
+
+
+def _attach_tool_details(db: Session, row: CoDirectorProposal, out: ExecutionReceiptOut) -> None:
+    """Fill a receipt's tool fields from the invocation ledger (read-only enrichment)."""
+
+    from ...db import CoDirectorToolInvocation
+
+    out.toolId = _raw_payload(row.payload_json).get("toolId")
+    invocation = (
+        db.query(CoDirectorToolInvocation)
+        .filter(CoDirectorToolInvocation.proposal_id == row.id)
+        .order_by(CoDirectorToolInvocation.created_at.desc())
+        .first()
+    )
+    if not invocation:
+        return
+    out.toolInvocationId = invocation.id
+    out.toolResultTruncated = bool(invocation.result_truncated)
+    if invocation.result_json:
+        try:
+            out.toolResult = json.loads(invocation.result_json)
+        except Exception:
+            out.toolResult = None
 
 
 def _record_decision(db: Session, row: CoDirectorProposal, *, decision: str, note: Optional[str], decided_by: str) -> None:

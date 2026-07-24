@@ -2842,6 +2842,26 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   margin-top: 0.35rem;
   font-family: inherit;
 }
+/* A tool proposal changes project data rather than the Bible — warmer accent so the two
+   flavours of "needs your approval" aren't mistaken for each other at a glance. */
+.codirector-proposal-tool {
+  border-color: rgba(217, 119, 6, 0.4);
+  background: rgba(217, 119, 6, 0.07);
+}
+.codirector-proposal-warning {
+  color: rgb(180, 83, 9);
+  font-size: 0.8rem;
+  margin: 0.3rem 0;
+}
+/* Read-tool status: one quiet line, no affordances. */
+.codirector-tool-status {
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  margin: 0.15rem 0 0.35rem;
+  padding-left: 0.15rem;
+}
+.codirector-tool-status-label { font-weight: 500; }
+.codirector-tool-status-failed .codirector-tool-status-label { color: rgb(180, 83, 9); }
 .codirector-task-head,
 .codirector-task-actions {
   display: flex;

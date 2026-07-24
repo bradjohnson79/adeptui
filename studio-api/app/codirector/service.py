@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, AsyncIterator, Optional
 
@@ -26,18 +27,30 @@ from .bible.context import ProjectContextService
 from .bible.proposals import ProposalService
 from .bible.schemas import ContextManifest, ProposalOut
 from .errors import (
+    CAPABILITY_NOT_CONFIGURED,
+    CAPABILITY_UNAVAILABLE,
     PROJECT_NOT_FOUND,
     REQUEST_CANCELLED,
     STRUCTURED_OUTPUT_INVALID,
+    TOOL_LOOP_LIMIT_REACHED,
     VALIDATION_ERROR,
     CoDirectorError,
 )
 from .providers.base import ChatRequest, ChatResult, CoDirectorProvider, ProviderHealthResult, ProviderModel
 from .providers.mock import MockCoDirectorProvider
 from .providers.ollama import OllamaProvider
-from .structured_output import extract_proposal_block, strip_proposal_blocks
+from .structured_output import ToolCallRequest, parse_structured_reply
+from .tools import registry as tool_registry
+from .tools.capabilities import CapabilityAdapter
+from .tools.definitions import ToolInvocationOut
+from .tools.execution import ToolExecutionService
+from .tools.sanitize import render_result_for_model
 
 PROVIDER_IDS: list[str] = ["ollama", "mock"]
+
+# One read tool per turn, one follow-up completion. The bound exists so a model that likes
+# calling tools can't turn a single user message into an unbounded chain of local work.
+TOOL_LOOP_LIMIT = 1
 
 _active_tasks: dict[str, "asyncio.Task[Any]"] = {}
 _cancelled: set[str] = set()
@@ -250,10 +263,45 @@ def _apply_mode_nudge(messages: list[dict[str, str]], mode: str) -> None:
             )
 
 
-def _build_system_message(context: str) -> dict[str, str]:
+def _tool_instructions() -> str:
+    """Static catalog block describing the tool registry to the model.
+
+    Built from the registry alone — no capability probes run here, so composing a chat turn
+    costs nothing extra. A model asking for a tool whose capability is missing gets a
+    `capability_blocked` event at execution time, which is the honest answer anyway.
+    """
+
+    read_lines = []
+    mutate_lines = []
+    for definition in tool_registry.all_definitions():
+        params = ", ".join(
+            f"{p.name}{'' if p.required else '?'}:{p.type}" for p in definition.parameters
+        )
+        line = f"- {definition.tool_id}({params}) — {definition.description}"
+        (read_lines if definition.kind == "read" else mutate_lines).append(line)
+
+    return (
+        "Co-Director tools:\n\n"
+        "You may look things up, and you may propose changes. You can never apply a change "
+        "yourself — a proposed change is shown to the user for approval and the server applies "
+        "it only after they approve.\n\n"
+        "To use a tool, end your reply with a ```tool fenced JSON block:\n"
+        '```tool\n{"responseType": "read_tool_call", "toolId": "list_scenes", "arguments": {}}\n```\n'
+        "Use responseType \"mutation_proposal\" for a tool that changes project data. Request at "
+        "most ONE tool per reply, and only when you actually need it — answer directly when you "
+        "already know enough. After a read tool returns, answer the user in plain prose without "
+        "requesting another tool.\n\n"
+        "Read tools (run immediately):\n" + "\n".join(read_lines) + "\n\n"
+        "Change tools (require the user's approval):\n" + "\n".join(mutate_lines)
+    )
+
+
+def _build_system_message(context: str, *, include_tools: bool = False) -> dict[str, str]:
     system = assistant_module.SYSTEM_PROMPT
     if context.strip():
         system += "\n\nCurrent studio context:\n" + context.strip()
+    if include_tools:
+        system += "\n\n" + _tool_instructions()
     return {"role": "system", "content": system}
 
 
@@ -315,7 +363,9 @@ async def _prepare_chat_request(
         )
     _apply_mode_nudge(chat_messages, mode)
 
-    full_messages = [_build_system_message(context), *chat_messages]
+    # Tools are project-scoped: without a bound project there is nothing for them to read or
+    # change, so the catalog is omitted and the prompt is identical to M2.1's.
+    full_messages = [_build_system_message(context, include_tools=bool(project_id)), *chat_messages]
     provider = get_provider(provider_id)
     chat_request = ChatRequest(
         request_id=request_id,
@@ -361,40 +411,287 @@ def clear_cancelled(request_id: str) -> None:
     _cancelled.discard(request_id)
 
 
-def _create_proposal_from_reply(
-    db: Session, *, project_id: str | None, request_id: str, reply: str
-) -> tuple[str, ProposalOut | None, CoDirectorError | None]:
-    """Extract a ```proposal fence (if any) and persist it. Never mutates the Bible directly.
+# --------------------------------------------------------------------------
+# M2.2: bounded tool turns. Shared by the streaming and non-streaming chat paths so both agree
+# on the loop bound, the event order, and what counts as a fatal failure (nothing does — a tool
+# problem is always surfaced alongside a completed reply, never instead of one).
+# --------------------------------------------------------------------------
 
-    Returns `(display_text, proposal_or_none, structured_error_or_none)`. A malformed fence
-    yields a non-fatal `STRUCTURED_OUTPUT_INVALID` error — the chat turn still completes.
+
+@dataclass
+class _ToolTurnOutcome:
+    invocation: Optional[ToolInvocationOut] = None
+    error: Optional[CoDirectorError] = None
+    follow_up_prompt: Optional[str] = None
+
+
+@dataclass
+class _StructuredOutcome:
+    """The result of interpreting one provider reply, ready to emit or return."""
+
+    display: str = ""
+    bible_proposal: Optional[ProposalOut] = None
+    tool_proposal: Optional[ProposalOut] = None
+    invocations: list[ToolInvocationOut] = field(default_factory=list)
+    errors: list[CoDirectorError] = field(default_factory=list)
+    follow_up_prompt: Optional[str] = None
+    response_type: str = "message"
+
+
+def _capability_error(err: CoDirectorError) -> bool:
+    return err.code in (CAPABILITY_NOT_CONFIGURED, CAPABILITY_UNAVAILABLE)
+
+
+async def _run_read_tool(
+    db: Session,
+    *,
+    project_id: str,
+    scene_id: Optional[str],
+    request_id: str,
+    tool_call: ToolCallRequest,
+    outcome: _ToolTurnOutcome,
+) -> AsyncIterator[dict[str, Any]]:
+    """Execute one read tool, yielding lifecycle events as it goes."""
+
+    yield {
+        "type": "tool_requested",
+        "requestId": request_id,
+        "toolId": tool_call.tool_id,
+        "kind": "read",
+    }
+    definition = tool_registry.find(tool_call.tool_id)
+    yield {
+        "type": "tool_started",
+        "requestId": request_id,
+        "toolId": tool_call.tool_id,
+        "title": definition.title if definition else tool_call.tool_id,
+    }
+
+    try:
+        invocation = await ToolExecutionService.execute_read(
+            db,
+            project_id=project_id,
+            tool_id=tool_call.tool_id,
+            arguments=tool_call.arguments,
+            scene_id=scene_id,
+            request_id=request_id,
+        )
+    except CoDirectorError as err:
+        outcome.error = err
+        if _capability_error(err):
+            yield {
+                "type": "capability_blocked",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "capability": err.details.get("capability"),
+                "error": err.to_dict(),
+            }
+        else:
+            yield {
+                "type": "tool_failed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "error": err.to_dict(),
+            }
+        outcome.follow_up_prompt = (
+            f"The `{tool_call.tool_id}` tool could not run: {err.message} "
+            "Tell the user plainly what you cannot check right now, and help them with what you "
+            "do know. Do not request another tool."
+        )
+        return
+
+    outcome.invocation = invocation
+    if invocation.resultTruncated:
+        yield {
+            "type": "tool_result_truncated",
+            "requestId": request_id,
+            "toolId": tool_call.tool_id,
+            "invocationId": invocation.id,
+        }
+    yield {
+        "type": "tool_completed",
+        "requestId": request_id,
+        "toolId": tool_call.tool_id,
+        "invocation": invocation.model_dump(mode="json"),
+    }
+    outcome.follow_up_prompt = (
+        render_result_for_model(tool_call.tool_id, invocation.result or {}, truncated=invocation.resultTruncated)
+        + "\n\nAnswer the user's original question using this result, in plain prose. "
+        "Do not request another tool."
+    )
+
+
+async def _propose_tool_call(
+    db: Session,
+    *,
+    project_id: str,
+    scene_id: Optional[str],
+    request_id: str,
+    tool_call: ToolCallRequest,
+    outcome: _StructuredOutcome,
+) -> AsyncIterator[dict[str, Any]]:
+    """Turn a mutating tool request into a durable proposal. Nothing is applied."""
+
+    yield {
+        "type": "tool_requested",
+        "requestId": request_id,
+        "toolId": tool_call.tool_id,
+        "kind": "mutating",
+    }
+    try:
+        proposal = await ToolExecutionService.propose(
+            db,
+            project_id=project_id,
+            tool_id=tool_call.tool_id,
+            arguments=tool_call.arguments,
+            scene_id=scene_id,
+            request_id=request_id,
+            created_by="assistant",
+        )
+    except CoDirectorError as err:
+        outcome.errors.append(err)
+        if _capability_error(err):
+            yield {
+                "type": "capability_blocked",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "capability": err.details.get("capability"),
+                "error": err.to_dict(),
+            }
+        else:
+            yield {
+                "type": "tool_failed",
+                "requestId": request_id,
+                "toolId": tool_call.tool_id,
+                "error": err.to_dict(),
+            }
+        return
+
+    outcome.tool_proposal = proposal
+    yield {
+        "type": "tool_proposal_created",
+        "requestId": request_id,
+        "toolId": tool_call.tool_id,
+        "proposal": proposal.model_dump(mode="json"),
+    }
+
+
+async def _interpret_reply(
+    db: Session,
+    *,
+    project_id: Optional[str],
+    scene_id: Optional[str],
+    request_id: str,
+    reply: str,
+    tools_used: int,
+    outcome: _StructuredOutcome,
+) -> AsyncIterator[dict[str, Any]]:
+    """Classify a reply and act on it, yielding any SSE events the action produces.
+
+    Mutates `outcome` in place — the caller needs the display text and any proposal regardless of
+    which branch ran, and an async generator can't return a value.
     """
 
-    extraction = extract_proposal_block(reply)
-    if extraction is None:
-        return reply, None, None
-    display = strip_proposal_blocks(reply)
-    if extraction.error or extraction.mutations is None:
-        return display, None, CoDirectorError(
-            STRUCTURED_OUTPUT_INVALID,
-            extraction.error or "Co-Director's proposal could not be understood.",
-            details={"requestId": request_id},
+    structured = parse_structured_reply(reply)
+    outcome.display = structured.display or reply
+    outcome.response_type = structured.response_type
+
+    if structured.error:
+        outcome.errors.append(
+            CoDirectorError(
+                STRUCTURED_OUTPUT_INVALID,
+                structured.error,
+                details={"requestId": request_id},
+                recoverable=True,
+                recommended_action="retry",
+            )
+        )
+        return
+
+    if structured.tool_call is None:
+        if structured.bible_proposal is not None and project_id:
+            extraction = structured.bible_proposal
+            outcome.bible_proposal = ProposalService.create_proposal(
+                db,
+                project_id=project_id,
+                proposal_type=extraction.proposal_type,
+                title=extraction.title,
+                summary=extraction.summary,
+                payload=extraction.mutations,  # type: ignore[arg-type]
+                request_id=request_id,
+                created_by="assistant",
+            )
+        return
+
+    if not project_id:
+        outcome.errors.append(
+            CoDirectorError(
+                STRUCTURED_OUTPUT_INVALID,
+                "Co-Director asked to use a project tool, but no project is open.",
+                details={"requestId": request_id, "toolId": structured.tool_call.tool_id},
+                recoverable=True,
+                recommended_action="none",
+            )
+        )
+        return
+
+    if structured.response_type == "mutation_proposal":
+        async for event in _propose_tool_call(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            request_id=request_id,
+            tool_call=structured.tool_call,
+            outcome=outcome,
+        ):
+            yield event
+        return
+
+    # read_tool_call
+    if tools_used >= TOOL_LOOP_LIMIT:
+        err = CoDirectorError(
+            TOOL_LOOP_LIMIT_REACHED,
+            "Co-Director tried to look something else up after already using a tool this turn.",
+            details={"requestId": request_id, "toolId": structured.tool_call.tool_id, "limit": TOOL_LOOP_LIMIT},
             recoverable=True,
             recommended_action="retry",
         )
-    if not project_id:
-        return display, None, None
-    proposal = ProposalService.create_proposal(
+        outcome.errors.append(err)
+        return
+
+    tool_outcome = _ToolTurnOutcome()
+    async for event in _run_read_tool(
         db,
         project_id=project_id,
-        proposal_type=extraction.proposal_type,
-        title=extraction.title,
-        summary=extraction.summary,
-        payload=extraction.mutations,
+        scene_id=scene_id,
         request_id=request_id,
-        created_by="assistant",
+        tool_call=structured.tool_call,
+        outcome=tool_outcome,
+    ):
+        yield event
+    if tool_outcome.invocation is not None:
+        outcome.invocations.append(tool_outcome.invocation)
+    if tool_outcome.error is not None:
+        outcome.errors.append(tool_outcome.error)
+    outcome.follow_up_prompt = tool_outcome.follow_up_prompt
+
+
+def _follow_up_request(base: ChatRequest, *, assistant_reply: str, tool_prompt: str) -> ChatRequest:
+    """Build the single permitted follow-up turn: same system context, tool result appended."""
+
+    messages = [
+        *base.messages,
+        {"role": "assistant", "content": assistant_reply or "(requesting a lookup)"},
+        {"role": "user", "content": tool_prompt},
+    ]
+    return ChatRequest(
+        request_id=base.request_id,
+        messages=messages,
+        model_id=base.model_id,
+        project_context=base.project_context,
+        temperature=base.temperature,
+        mode=base.mode,
     )
-    return display, proposal, None
 
 
 async def chat_for_project(
@@ -407,7 +704,14 @@ async def chat_for_project(
     model: str | None,
     provider_id: str | None = None,
     request_id: str | None = None,
-) -> tuple[ChatResult, SceneSetupProposal | None, str | None, ProposalOut | None, ContextManifest]:
+) -> tuple[
+    ChatResult,
+    SceneSetupProposal | None,
+    str | None,
+    ProposalOut | None,
+    ContextManifest,
+    list[ToolInvocationOut],
+]:
     provider, chat_request, manifest = await _prepare_chat_request(
         db,
         messages=messages,
@@ -419,16 +723,53 @@ async def chat_for_project(
         request_id=request_id,
     )
     result = await run_cancellable(chat_request.request_id, provider.generate(chat_request))
-    setup = assistant_module.extract_scene_setup(result.reply)
-    display = assistant_module.strip_scene_setup_blocks(result.reply) if setup else result.reply
-    suggested = None if setup else assistant_module.extract_suggested_prompt(result.reply)
-    display, proposal, structured_error = _create_proposal_from_reply(
-        db, project_id=project_id, request_id=chat_request.request_id, reply=display or result.reply
-    )
-    if structured_error is not None:
-        raise structured_error
-    result.reply = display or result.reply
-    return result, setup, suggested, proposal, manifest
+
+    invocations: list[ToolInvocationOut] = []
+    proposal: ProposalOut | None = None
+    fatal_error: CoDirectorError | None = None
+    tools_used = 0
+
+    for _ in range(TOOL_LOOP_LIMIT + 1):
+        setup = assistant_module.extract_scene_setup(result.reply)
+        display = assistant_module.strip_scene_setup_blocks(result.reply) if setup else result.reply
+        suggested = None if setup else assistant_module.extract_suggested_prompt(result.reply)
+
+        outcome = _StructuredOutcome()
+        async for _event in _interpret_reply(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            request_id=chat_request.request_id,
+            reply=display or result.reply,
+            tools_used=tools_used,
+            outcome=outcome,
+        ):
+            pass  # the non-streaming path has no channel for lifecycle events
+
+        invocations.extend(outcome.invocations)
+        proposal = outcome.bible_proposal or outcome.tool_proposal or proposal
+        # Only a structured-output failure is fatal on the non-streaming path, matching M2.1: a
+        # tool that couldn't run is reported through the follow-up reply, not as an HTTP error.
+        fatal_error = next(
+            (e for e in outcome.errors if e.code in (STRUCTURED_OUTPUT_INVALID, TOOL_LOOP_LIMIT_REACHED)),
+            None,
+        )
+        result.reply = outcome.display or result.reply
+
+        if outcome.follow_up_prompt is None:
+            if fatal_error is not None:
+                raise fatal_error
+            return result, setup, suggested, proposal, manifest, invocations
+
+        tools_used += 1
+        follow_up = _follow_up_request(
+            chat_request, assistant_reply=outcome.display, tool_prompt=outcome.follow_up_prompt
+        )
+        result = await run_cancellable(follow_up.request_id, provider.generate(follow_up))
+
+    if fatal_error is not None:
+        raise fatal_error
+    return result, None, None, proposal, manifest, invocations
 
 
 async def stream_for_project(
@@ -455,36 +796,66 @@ async def stream_for_project(
     if manifest.bibleVersionId:
         yield {"type": "context_manifest", "requestId": chat_request.request_id, "manifest": manifest.model_dump(mode="json")}
 
-    async for event in provider.stream(chat_request):
-        if event.get("type") == "completed":
+    active_request = chat_request
+    tools_used = 0
+
+    while True:
+        follow_up_prompt: Optional[str] = None
+        follow_up_reply = ""
+
+        async for event in provider.stream(active_request):
+            if event.get("type") != "completed":
+                yield event
+                continue
+
             content = str(event.get("content") or "")
             setup = assistant_module.extract_scene_setup(content)
             display = assistant_module.strip_scene_setup_blocks(content) if setup else content
             suggested = None if setup else assistant_module.extract_suggested_prompt(content)
-            display, proposal, structured_error = _create_proposal_from_reply(
-                db, project_id=project_id, request_id=chat_request.request_id, reply=display or content
-            )
-            event = {
+
+            outcome = _StructuredOutcome()
+            async for tool_event in _interpret_reply(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                request_id=chat_request.request_id,
+                reply=display or content,
+                tools_used=tools_used,
+                outcome=outcome,
+            ):
+                yield tool_event
+
+            if outcome.follow_up_prompt is not None:
+                # The reply was a tool request, not an answer. Its `completed` is withheld so the
+                # transcript only ever shows the answer that follows; the FE has already cleared
+                # the in-flight bubble on `tool_requested`. Any error here was already reported as
+                # `tool_failed` / `capability_blocked`, so it is not repeated as a generic `error`
+                # — the client would read that as a failed turn when the turn is still going.
+                follow_up_prompt = outcome.follow_up_prompt
+                follow_up_reply = outcome.display
+                continue
+
+            yield {
                 **event,
-                "content": display or content,
+                "content": outcome.display or content,
                 "sceneSetup": setup.model_dump() if setup else None,
                 "suggestedPrompt": suggested,
             }
-            yield event
-            if proposal is not None:
+            if outcome.bible_proposal is not None:
                 yield {
                     "type": "proposal_created",
                     "requestId": chat_request.request_id,
-                    "proposal": proposal.model_dump(mode="json"),
+                    "proposal": outcome.bible_proposal.model_dump(mode="json"),
                 }
-            if structured_error is not None:
-                yield {
-                    "type": "error",
-                    "requestId": chat_request.request_id,
-                    "error": structured_error.to_dict(),
-                }
-            continue
-        yield event
+            for err in outcome.errors:
+                yield {"type": "error", "requestId": chat_request.request_id, "error": err.to_dict()}
+
+        if follow_up_prompt is None:
+            return
+        tools_used += 1
+        active_request = _follow_up_request(
+            active_request, assistant_reply=follow_up_reply, tool_prompt=follow_up_prompt
+        )
 
 
 # --------------------------------------------------------------------------

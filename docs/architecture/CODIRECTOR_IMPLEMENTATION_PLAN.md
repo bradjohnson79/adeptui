@@ -229,6 +229,13 @@ directly into the transcript.
   `context_manifest`/`proposal_created` SSE events extended the open union without touching FE
   parsing logic, and proposal execution failures reuse the same `CoDirectorError` /
   `classifyCoDirectorError` taxonomy as every other error path.
-- Still open: orchestrator/task graph, general tool calling (M2.1 has exactly one "tool" — propose
-  a Bible mutation, not a registry), prompt compilers, asset lineage, continuity engine. See
+- ~~General tool calling~~ — **implemented in Milestone 2.2** as a *bounded* registry: 15 read
+  tools that run inline and 4 mutating tools that must go through the M2.1 approval system as a new
+  `tool_call` proposal type. See `CODIRECTOR_TOOL_REGISTRY.md` and `CODIRECTOR_TOOL_SECURITY.md`.
+  M1/M2.1 architecture again held: the read loop hangs off the same `_prepare_chat_request` /
+  `_interpret_reply` path, the seven new tool SSE events extended the open union additively, and
+  `ProposalService.approve()` gained exactly one branch rather than a second lifecycle. The
+  registry is closed by construction — no shell, filesystem, SQL, or dynamically registered tools.
+- Still open: orchestrator/task graph, autonomous multi-step chains (M2.2 caps a turn at one read
+  tool plus one follow-up), prompt compilers, asset lineage, continuity engine. See
   `CODIRECTOR_PRODUCTION_BRAIN.md`.

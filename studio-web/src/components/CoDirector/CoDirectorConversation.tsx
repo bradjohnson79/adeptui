@@ -4,6 +4,7 @@ import { CoDirectorMessage } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorTaskStatus } from "./CoDirectorTaskStatus";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
+import { CoDirectorToolStatus } from "./CoDirectorToolStatus";
 import { summarizeSetup } from "./types";
 
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
@@ -21,6 +22,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     dismissSuggestedPrompt,
     proposals,
     proposalActingId,
+    toolActivity,
     approveProposal,
     rejectProposal,
     requestProposalRevision,
@@ -37,7 +39,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, plan, setup, suggestedPrompt, proposals]);
+  }, [messages, plan, setup, suggestedPrompt, proposals, toolActivity]);
 
   return (
     <div className="codirector-conversation" aria-live="polite">
@@ -57,6 +59,8 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
           />
         ))}
       </div>
+
+      {toolActivity && <CoDirectorToolStatus activity={toolActivity} />}
 
       {sendError && (
         <div className="codirector-cta-card codirector-error-card" role="alert">

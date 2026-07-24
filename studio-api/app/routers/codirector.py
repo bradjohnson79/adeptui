@@ -24,6 +24,9 @@ from ..codirector.bible.schemas import (
     ImportPreviewRequest,
 )
 from ..codirector.errors import CoDirectorError, status_code_for_error
+from ..codirector.tools import registry as tool_registry
+from ..codirector.tools.definitions import TOOL_SCHEMA_VERSION, ToolProposalRequest, ToolReadRequest
+from ..codirector.tools.execution import ToolExecutionService
 from ..db import SessionLocal, get_db
 
 router = APIRouter(prefix="/codirector", tags=["codirector"])
@@ -139,7 +142,14 @@ async def provider_models(provider_id: str) -> dict[str, Any]:
 @router.post("/chat")
 async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
-        result, scene_setup, suggested, proposal, manifest = await codirector_service.chat_for_project(
+        (
+            result,
+            scene_setup,
+            suggested,
+            proposal,
+            manifest,
+            invocations,
+        ) = await codirector_service.chat_for_project(
             db,
             messages=[m.model_dump() for m in body.messages],
             project_id=body.project_id,
@@ -160,6 +170,7 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
         "sceneSetup": scene_setup.model_dump() if scene_setup else None,
         "proposal": proposal.model_dump(mode="json") if proposal else None,
         "contextManifest": manifest.model_dump(mode="json") if manifest.bibleVersionId else None,
+        "toolInvocations": [i.model_dump(mode="json") for i in invocations],
     }
 
 
@@ -417,3 +428,91 @@ async def get_proposal_receipt(project_id: str, proposal_id: str, db: Session = 
     except CoDirectorError as err:
         raise _http_error(err) from err
     return receipt.model_dump(mode="json")
+
+
+# --------------------------------------------------------------------------
+# M2.2: bounded tool registry. Read tools execute here; mutating tools only ever produce a
+# proposal, and are approved/rejected through the proposal endpoints above — there is
+# deliberately no "execute tool" endpoint.
+# --------------------------------------------------------------------------
+
+
+@router.get("/tools")
+async def list_tools() -> dict[str, Any]:
+    """The tool catalog, independent of any project. No capability probes run here."""
+
+    return {"toolSchemaVersion": TOOL_SCHEMA_VERSION, "tools": tool_registry.catalog()}
+
+
+@router.get("/projects/{project_id}/tools")
+async def list_project_tools(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        availability, capabilities = await ToolExecutionService.availability(db, project_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return {
+        "projectId": project_id,
+        "toolSchemaVersion": TOOL_SCHEMA_VERSION,
+        "tools": tool_registry.catalog(),
+        "availability": [a.model_dump(mode="json") for a in availability],
+        "capabilities": capabilities,
+    }
+
+
+@router.get("/projects/{project_id}/tools/availability")
+async def get_tool_availability(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        availability, capabilities = await ToolExecutionService.availability(db, project_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return {
+        "projectId": project_id,
+        "availability": [a.model_dump(mode="json") for a in availability],
+        "capabilities": capabilities,
+    }
+
+
+@router.post("/projects/{project_id}/tools/read")
+async def run_read_tool(project_id: str, body: ToolReadRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Run a read tool now. Rejects mutating tools with `TOOL_KIND_MISMATCH`."""
+
+    try:
+        invocation = await ToolExecutionService.execute_read(
+            db,
+            project_id=project_id,
+            tool_id=body.toolId,
+            arguments=body.arguments,
+            scene_id=body.sceneId,
+            request_id=body.requestId,
+            created_by="user",
+        )
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return invocation.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/tools/proposals")
+async def propose_tool_call(project_id: str, body: ToolProposalRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Create a `tool_call` proposal for a mutating tool. Nothing is applied until approval."""
+
+    try:
+        proposal = await ToolExecutionService.propose(
+            db,
+            project_id=project_id,
+            tool_id=body.toolId,
+            arguments=body.arguments,
+            scene_id=body.sceneId,
+            request_id=body.requestId,
+            created_by=body.createdBy,
+        )
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return proposal.model_dump(mode="json")
+
+
+@router.get("/projects/{project_id}/tool-invocations")
+async def list_tool_invocations(
+    project_id: str, tool_id: Optional[str] = None, limit: int = 50, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    invocations = ToolExecutionService.list_invocations(db, project_id, tool_id=tool_id, limit=limit)
+    return {"projectId": project_id, "invocations": [i.model_dump(mode="json") for i in invocations]}

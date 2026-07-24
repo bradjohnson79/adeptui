@@ -29,6 +29,7 @@ from ..codirector.errors import CoDirectorError, status_code_for_error
 from ..comfy_client import comfy
 from ..config import settings
 from ..db import Asset, Job, Project, Scene, get_db
+from .. import project_service, scene_service
 from ..queue_worker import job_queue
 from ..references import resolve_prompt
 from ..schemas import (
@@ -78,20 +79,13 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
     with_output = sum(1 for s in scenes if getattr(s, "output_path", None))
     render_pct = int(100 * with_output / max(1, len(scenes))) if scenes else 0
     cover = next((a for a in assets if a.kind == "image"), None)
-    # Status heuristic for library filters
-    active_jobs = (
-        db.query(Job)
-        .filter(Job.project_id == project.id, Job.status.in_(["queued", "running", "pending"]))
-        .count()
+    # Status heuristic for library filters — shared with Co-Director's get_project_status tool.
+    status_label = project_service.status_label(
+        archived=bool(getattr(project, "archived", 0)),
+        active_jobs=project_service.active_job_count(db, project.id),
+        scene_count=len(scenes),
+        scenes_with_output=with_output,
     )
-    if getattr(project, "archived", 0):
-        status_label = "Archived"
-    elif active_jobs:
-        status_label = "Rendering"
-    elif scenes and with_output >= len(scenes):
-        status_label = "Complete"
-    else:
-        status_label = "Active"
     return ProjectOut(
         id=project.id,
         name=project.name,
@@ -580,12 +574,10 @@ def add_scene(project_id: str, body: SceneIn, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    count = db.query(Scene).filter(Scene.project_id == project_id).count()
-    scene = Scene(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        index=count,
-        name=body.name or f"Scene {count + 1}",
+    scene = scene_service.create_scene(
+        db,
+        project,
+        name=body.name,
         engine=body.engine,
         prompt=body.prompt,
         duration_sec=body.duration_sec,
@@ -593,16 +585,12 @@ def add_scene(project_id: str, body: SceneIn, db: Session = Depends(get_db)):
         middle_asset_id=body.middle_asset_id,
         end_asset_id=body.end_asset_id,
         audio_asset_id=body.audio_asset_id,
-        lipsync_enabled=1 if body.lipsync_enabled else 0,
+        lipsync_enabled=bool(body.lipsync_enabled),
         lipsync_audio_asset_id=body.lipsync_audio_asset_id,
         continuity_json=body.continuity_json or "",
         camera_note=body.camera_note,
         seed=body.seed,
     )
-    db.add(scene)
-    project.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(scene)
     return SceneOut.model_validate(scene)
 
 
@@ -1002,7 +990,7 @@ async def assistant_health():
 async def assistant_chat(body: AssistantChatRequest, db: Session = Depends(get_db)):
     """Thin alias over the Co-Director gateway (kept for existing FE call sites)."""
     try:
-        result, setup, suggested, _proposal, _manifest = await codirector_service.chat_for_project(
+        result, setup, suggested, _proposal, _manifest, _invocations = await codirector_service.chat_for_project(
             db,
             messages=[{"role": m.role, "content": m.content} for m in body.messages],
             project_id=body.project_id,
