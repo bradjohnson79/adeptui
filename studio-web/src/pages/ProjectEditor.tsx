@@ -32,6 +32,7 @@ import { SceneMasterSheetWorkspace } from "../components/SceneMasterSheetWorkspa
 import { AvatarStudioWorkspace } from "../components/AvatarStudioWorkspace";
 import { EditorWorkspace, readEditorialContext } from "../components/EditorWorkspace";
 import { AudioStudioWorkspace } from "../components/AudioStudioWorkspace";
+import { ProductionBibleWorkspace } from "../components/ProductionBibleWorkspace";
 import { StudioChrome as AppStudioChrome } from "../components/dashboard/StudioChrome";
 import { continuityLockedCount } from "../directorSelection";
 import {
@@ -404,6 +405,7 @@ export default function ProjectEditor() {
     else if (q.includes("director")) go("director");
     else if (q.includes("editor") || q.includes("assemble")) go("editor");
     else if (q.includes("audio")) go("audiostudio");
+    else if (q.includes("bible")) go("bible");
     else if (q.includes("library") || q.includes("asset")) go("library");
     else if (q.includes("master")) go("mastersheet");
     else if (q.includes("avatar")) go("avatar");
@@ -515,6 +517,9 @@ export default function ProjectEditor() {
                 <button type="button" role="menuitem" className={tab === "mastersheet" ? "primary" : ""} onClick={() => go("mastersheet")}>
                   Scene Master Sheet
                 </button>
+                <button type="button" role="menuitem" className={tab === "bible" ? "primary" : ""} onClick={() => go("bible")}>
+                  Production Bible
+                </button>
                 <div className="menu-sep" />
                 <div className="menu-group-label">Assets</div>
                 <button type="button" role="menuitem" className={tab === "profiles" ? "primary" : ""} onClick={() => go("profiles")}>
@@ -577,6 +582,8 @@ export default function ProjectEditor() {
         />
       ) : tab === "audiostudio" ? (
         <AudioStudioWorkspace project={project} onChange={refresh} onGo={go} />
+      ) : tab === "bible" ? (
+        <ProductionBibleWorkspace project={project} onChange={refresh} />
       ) : tab === "settings" ? (
         <ProjectSettings project={project} onChange={() => void refresh()} />
       ) : tab === "setup" ? (

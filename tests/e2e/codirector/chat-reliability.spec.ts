@@ -33,6 +33,10 @@ async function sendMessage(page: Page, text: string) {
  */
 test.describe("@critical @isolated codirector chat reliability", () => {
   test.beforeEach(async ({ request }) => {
+    // First spec file (alphabetically) to run in this directory — the API server may still
+    // be finishing startup when this hook fires, even though Playwright's own webServer
+    // readiness check (which only probes the frontend) has already passed.
+    await waitForAppReady(request);
     await setMockScenario(request, null);
   });
 

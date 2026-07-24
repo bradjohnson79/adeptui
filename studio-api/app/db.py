@@ -132,6 +132,106 @@ class CoDirectorConversation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# --------------------------------------------------------------------------
+# Co-Director M2.1: Production Bible + durable proposals/approvals.
+#
+# The model never writes these tables directly — every mutation flows through a
+# `codirector_proposals` row, an explicit `codirector_approvals` decision, and (on approval)
+# a new immutable `production_bible_versions` row plus a `codirector_execution_receipts`
+# row for idempotency. See docs/CODIRECTOR_PRODUCTION_BIBLE.md.
+# --------------------------------------------------------------------------
+
+
+class ProductionBible(Base):
+    __tablename__ = "production_bibles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), unique=True, index=True)
+    current_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionBibleVersion(Base):
+    """Immutable snapshot metadata. Content lives in entities/facts rows for this version."""
+
+    __tablename__ = "production_bible_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bible_id: Mapped[str] = mapped_column(ForeignKey("production_bibles.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    change_reason: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionBibleEntity(Base):
+    __tablename__ = "production_bible_entities"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bible_version_id: Mapped[str] = mapped_column(ForeignKey("production_bible_versions.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), index=True)
+    entity_key: Mapped[str] = mapped_column(String(160), index=True)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionBibleFact(Base):
+    __tablename__ = "production_bible_facts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    bible_version_id: Mapped[str] = mapped_column(ForeignKey("production_bible_versions.id"), index=True)
+    entity_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True, index=True)
+    fact_type: Mapped[str] = mapped_column(String(32), default="continuity")
+    statement: Mapped[str] = mapped_column(Text, default="")
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorProposal(Base):
+    __tablename__ = "codirector_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    bible_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    based_on_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    proposal_type: Mapped[str] = mapped_column(String(48), default="bible_update")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="assistant")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorApproval(Base):
+    __tablename__ = "codirector_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("codirector_proposals.id"), index=True)
+    decision: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str] = mapped_column(Text, default="")
+    decided_by: Mapped[str] = mapped_column(String(64), default="user")
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorExecutionReceipt(Base):
+    __tablename__ = "codirector_execution_receipts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("codirector_proposals.id"), index=True)
+    input_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="success")
+    resulting_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    error_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 

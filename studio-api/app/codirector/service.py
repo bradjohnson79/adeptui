@@ -22,15 +22,20 @@ from ..config import settings
 from ..db import CoDirectorConversation, Project, Scene
 from ..learning import learning_context_block, parse_learning
 from . import config_store
+from .bible.context import ProjectContextService
+from .bible.proposals import ProposalService
+from .bible.schemas import ContextManifest, ProposalOut
 from .errors import (
     PROJECT_NOT_FOUND,
     REQUEST_CANCELLED,
+    STRUCTURED_OUTPUT_INVALID,
     VALIDATION_ERROR,
     CoDirectorError,
 )
 from .providers.base import ChatRequest, ChatResult, CoDirectorProvider, ProviderHealthResult, ProviderModel
 from .providers.mock import MockCoDirectorProvider
 from .providers.ollama import OllamaProvider
+from .structured_output import extract_proposal_block, strip_proposal_blocks
 
 PROVIDER_IDS: list[str] = ["ollama", "mock"]
 
@@ -262,7 +267,7 @@ async def _prepare_chat_request(
     model: str | None,
     provider_id: str | None,
     request_id: str | None,
-) -> tuple[CoDirectorProvider, ChatRequest]:
+) -> tuple[CoDirectorProvider, ChatRequest, ContextManifest]:
     request_id = request_id or new_request_id()
     context = ""
     if project_id:
@@ -290,6 +295,12 @@ async def _prepare_chat_request(
         if block:
             context = (context or "") + "\n\n" + block
 
+    # Bible excerpt is additive and independently bounded — projects without a Bible (or
+    # without project_id at all) see byte-for-byte the same context as before M2.1.
+    bible_excerpt, context_manifest = ProjectContextService.build(db, project_id)
+    if bible_excerpt:
+        context = (context or "") + "\n\n" + bible_excerpt
+
     chat_messages = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
         for m in messages
@@ -313,7 +324,7 @@ async def _prepare_chat_request(
         project_context=context,
         mode=mode,
     )
-    return provider, chat_request
+    return provider, chat_request, context_manifest
 
 
 async def run_cancellable(request_id: str, coro: Any) -> Any:
@@ -350,6 +361,42 @@ def clear_cancelled(request_id: str) -> None:
     _cancelled.discard(request_id)
 
 
+def _create_proposal_from_reply(
+    db: Session, *, project_id: str | None, request_id: str, reply: str
+) -> tuple[str, ProposalOut | None, CoDirectorError | None]:
+    """Extract a ```proposal fence (if any) and persist it. Never mutates the Bible directly.
+
+    Returns `(display_text, proposal_or_none, structured_error_or_none)`. A malformed fence
+    yields a non-fatal `STRUCTURED_OUTPUT_INVALID` error — the chat turn still completes.
+    """
+
+    extraction = extract_proposal_block(reply)
+    if extraction is None:
+        return reply, None, None
+    display = strip_proposal_blocks(reply)
+    if extraction.error or extraction.mutations is None:
+        return display, None, CoDirectorError(
+            STRUCTURED_OUTPUT_INVALID,
+            extraction.error or "Co-Director's proposal could not be understood.",
+            details={"requestId": request_id},
+            recoverable=True,
+            recommended_action="retry",
+        )
+    if not project_id:
+        return display, None, None
+    proposal = ProposalService.create_proposal(
+        db,
+        project_id=project_id,
+        proposal_type=extraction.proposal_type,
+        title=extraction.title,
+        summary=extraction.summary,
+        payload=extraction.mutations,
+        request_id=request_id,
+        created_by="assistant",
+    )
+    return display, proposal, None
+
+
 async def chat_for_project(
     db: Session,
     *,
@@ -360,8 +407,8 @@ async def chat_for_project(
     model: str | None,
     provider_id: str | None = None,
     request_id: str | None = None,
-) -> tuple[ChatResult, SceneSetupProposal | None, str | None]:
-    provider, chat_request = await _prepare_chat_request(
+) -> tuple[ChatResult, SceneSetupProposal | None, str | None, ProposalOut | None, ContextManifest]:
+    provider, chat_request, manifest = await _prepare_chat_request(
         db,
         messages=messages,
         project_id=project_id,
@@ -375,8 +422,13 @@ async def chat_for_project(
     setup = assistant_module.extract_scene_setup(result.reply)
     display = assistant_module.strip_scene_setup_blocks(result.reply) if setup else result.reply
     suggested = None if setup else assistant_module.extract_suggested_prompt(result.reply)
+    display, proposal, structured_error = _create_proposal_from_reply(
+        db, project_id=project_id, request_id=chat_request.request_id, reply=display or result.reply
+    )
+    if structured_error is not None:
+        raise structured_error
     result.reply = display or result.reply
-    return result, setup, suggested
+    return result, setup, suggested, proposal, manifest
 
 
 async def stream_for_project(
@@ -390,7 +442,7 @@ async def stream_for_project(
     provider_id: str | None = None,
     request_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    provider, chat_request = await _prepare_chat_request(
+    provider, chat_request, manifest = await _prepare_chat_request(
         db,
         messages=messages,
         project_id=project_id,
@@ -400,18 +452,38 @@ async def stream_for_project(
         provider_id=provider_id,
         request_id=request_id,
     )
+    if manifest.bibleVersionId:
+        yield {"type": "context_manifest", "requestId": chat_request.request_id, "manifest": manifest.model_dump(mode="json")}
+
     async for event in provider.stream(chat_request):
         if event.get("type") == "completed":
             content = str(event.get("content") or "")
             setup = assistant_module.extract_scene_setup(content)
             display = assistant_module.strip_scene_setup_blocks(content) if setup else content
             suggested = None if setup else assistant_module.extract_suggested_prompt(content)
+            display, proposal, structured_error = _create_proposal_from_reply(
+                db, project_id=project_id, request_id=chat_request.request_id, reply=display or content
+            )
             event = {
                 **event,
                 "content": display or content,
                 "sceneSetup": setup.model_dump() if setup else None,
                 "suggestedPrompt": suggested,
             }
+            yield event
+            if proposal is not None:
+                yield {
+                    "type": "proposal_created",
+                    "requestId": chat_request.request_id,
+                    "proposal": proposal.model_dump(mode="json"),
+                }
+            if structured_error is not None:
+                yield {
+                    "type": "error",
+                    "requestId": chat_request.request_id,
+                    "error": structured_error.to_dict(),
+                }
+            continue
         yield event
 
 

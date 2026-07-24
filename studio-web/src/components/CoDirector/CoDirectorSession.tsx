@@ -15,6 +15,7 @@ import {
   classifyCoDirectorError,
   isAbortError,
   type ClassifiedError,
+  type CoDirectorProposal,
   type CoDirectorStreamEvent,
 } from "../../api";
 import {
@@ -75,6 +76,13 @@ type SessionValue = {
   suggestedPrompt: string | null;
   setup: SceneSetup | null;
   applyNote: string | null;
+  proposals: CoDirectorProposal[];
+  proposalActingId: string | null;
+  approveProposal: (proposalId: string) => Promise<void>;
+  rejectProposal: (proposalId: string, note?: string) => Promise<void>;
+  requestProposalRevision: (proposalId: string, note?: string) => Promise<void>;
+  cancelProposal: (proposalId: string) => Promise<void>;
+  refreshProposals: () => Promise<void>;
   plan: ActionPlan | null;
   selectedSteps: Record<string, boolean>;
   promptMode: PromptMode;
@@ -245,6 +253,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   }, []);
   const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
   const [setup, setSetup] = useState<SceneSetup | null>(null);
+  const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
+  const [proposalActingId, setProposalActingId] = useState<string | null>(null);
   const [applyNote, setApplyNote] = useState<string | null>(null);
   const [plan, setPlan] = useState<ActionPlan | null>(null);
   const [selectedSteps, setSelectedSteps] = useState<Record<string, boolean>>({});
@@ -348,6 +358,26 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       cancelled = true;
     };
   }, [uiContext.projectId]);
+
+  const NON_TERMINAL_PROPOSAL_STATUSES = new Set(["pending", "revision_requested", "stale", "executing"]);
+
+  const refreshProposals = useCallback(async () => {
+    const projectId = bindingsRef.current.projectId;
+    if (!projectId) {
+      setProposals([]);
+      return;
+    }
+    try {
+      const res = await api.listProposals(projectId);
+      setProposals(res.proposals.filter((p) => NON_TERMINAL_PROPOSAL_STATUSES.has(p.status)));
+    } catch {
+      /* Bible/proposals are best-effort UI — leave prior list on transient failure. */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProposals();
+  }, [refreshProposals, uiContext.projectId]);
 
   useEffect(() => {
     persistDraft(draft);
@@ -516,6 +546,12 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       let sceneSetupResult: SceneSetup | null = null;
       let suggestedPromptResult: string | null = null;
       let classifiedError: ClassifiedError | null = null;
+      // A `proposal_created`'s malformed sibling (STRUCTURED_OUTPUT_INVALID) arrives as an
+      // `error` event *after* `completed` — it's non-fatal for the turn itself (the model's
+      // reply still finished), so it must not discard the already-cleaned reply the way a
+      // fatal provider error (no prior `completed`) does. Tracked separately so the completed
+      // reply is finalized normally and the error is shown alongside it.
+      let postCompletionError: ClassifiedError | null = null;
 
       const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
 
@@ -552,9 +588,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           suggestedPromptResult = event.suggestedPrompt || null;
         } else if (event.type === "cancelled") {
           outcome = "cancelled";
+        } else if (event.type === "proposal_created") {
+          setProposals((prev) => [event.proposal, ...prev.filter((p) => p.id !== event.proposal.id)]);
         } else if (event.type === "error") {
-          outcome = "error";
-          classifiedError = classifyCoDirectorError(
+          const classified = classifyCoDirectorError(
             new ApiError(event.error.message || "Co-Director returned an error.", 0, {
               code: event.error.code,
               details: event.error.details,
@@ -562,6 +599,12 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               recommendedAction: event.error.recommendedAction,
             }),
           );
+          if (outcome === "completed") {
+            postCompletionError = classified;
+          } else {
+            outcome = "error";
+            classifiedError = classified;
+          }
         }
       };
 
@@ -622,6 +665,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
 
         if (outcome === "completed") {
           finalizeCompleted();
+          if (postCompletionError) setSendError(postCompletionError);
         } else if (outcome === "cancelled") {
           setMessages((prev) =>
             prev
@@ -903,6 +947,95 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     }
   }, [applying, setup]);
 
+  const approveProposal = useCallback(
+    async (proposalId: string) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId || proposalActingId) return;
+      setProposalActingId(proposalId);
+      try {
+        await api.approveProposal(projectId, proposalId);
+        setMessages((m) => [
+          ...m,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content: "Proposal approved and applied — a new Production Bible version was created.",
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } catch (err) {
+        const classified = classifyCoDirectorError(err);
+        setMessages((m) => [
+          ...m,
+          {
+            id: newMessageId(),
+            role: "assistant",
+            content:
+              classified.code === "PROPOSAL_STALE"
+                ? "That proposal is out of date because the Bible changed since it was created. Cancel it and ask again."
+                : `Couldn't approve that proposal: ${classified.message}`,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      } finally {
+        setProposalActingId(null);
+        await refreshProposals();
+      }
+    },
+    [proposalActingId, refreshProposals],
+  );
+
+  const rejectProposal = useCallback(
+    async (proposalId: string, note?: string) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId || proposalActingId) return;
+      setProposalActingId(proposalId);
+      try {
+        await api.rejectProposal(projectId, proposalId, { note });
+      } catch {
+        /* best-effort */
+      } finally {
+        setProposalActingId(null);
+        await refreshProposals();
+      }
+    },
+    [proposalActingId, refreshProposals],
+  );
+
+  const requestProposalRevision = useCallback(
+    async (proposalId: string, note?: string) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId || proposalActingId) return;
+      setProposalActingId(proposalId);
+      try {
+        await api.requestProposalRevision(projectId, proposalId, { note });
+      } catch {
+        /* best-effort */
+      } finally {
+        setProposalActingId(null);
+        await refreshProposals();
+      }
+    },
+    [proposalActingId, refreshProposals],
+  );
+
+  const cancelProposal = useCallback(
+    async (proposalId: string) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId || proposalActingId) return;
+      setProposalActingId(proposalId);
+      try {
+        await api.cancelProposal(projectId, proposalId);
+      } catch {
+        /* best-effort */
+      } finally {
+        setProposalActingId(null);
+        await refreshProposals();
+      }
+    },
+    [proposalActingId, refreshProposals],
+  );
+
   const compilePrompt = useCallback(async () => {
     setBusy(true);
     try {
@@ -1053,6 +1186,13 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       suggestedPrompt,
       setup,
       applyNote,
+      proposals,
+      proposalActingId,
+      approveProposal,
+      rejectProposal,
+      requestProposalRevision,
+      cancelProposal,
+      refreshProposals,
       plan,
       selectedSteps,
       promptMode,
@@ -1129,6 +1269,13 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       suggestedPrompt,
       setup,
       applyNote,
+      proposals,
+      proposalActingId,
+      approveProposal,
+      rejectProposal,
+      requestProposalRevision,
+      cancelProposal,
+      refreshProposals,
       plan,
       selectedSteps,
       promptMode,

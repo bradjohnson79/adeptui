@@ -29,6 +29,7 @@ async function sendMessage(page: Page, text: string) {
  */
 test.describe("@critical @isolated codirector streaming, cancel, retry, persistence", () => {
   test.beforeEach(async ({ request }) => {
+    await waitForAppReady(request);
     await setMockScenario(request, null);
   });
 

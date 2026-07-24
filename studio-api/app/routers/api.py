@@ -1002,7 +1002,7 @@ async def assistant_health():
 async def assistant_chat(body: AssistantChatRequest, db: Session = Depends(get_db)):
     """Thin alias over the Co-Director gateway (kept for existing FE call sites)."""
     try:
-        result, setup, suggested = await codirector_service.chat_for_project(
+        result, setup, suggested, _proposal, _manifest = await codirector_service.chat_for_project(
             db,
             messages=[{"role": m.role, "content": m.content} for m in body.messages],
             project_id=body.project_id,

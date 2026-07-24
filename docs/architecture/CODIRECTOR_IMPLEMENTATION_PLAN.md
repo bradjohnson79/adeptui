@@ -222,5 +222,13 @@ directly into the transcript.
   correct behavior, just not incrementally generated).
 - Cloud providers (`fal_*` etc.) — `PROVIDER_NOT_CONFIGURED` already fires cleanly for any
   provider id that isn't `ollama`/`mock`, so adding one later is additive.
-- Everything in `CODIRECTOR_PRODUCTION_BRAIN.md`: Production Bible, orchestrator/task graph,
-  tool calling + approvals, prompt compilers, asset lineage, continuity engine.
+- ~~Production Bible~~ and ~~a scoped slice of tool calling + approvals~~ — **implemented in
+  Milestone 2.1**, see `CODIRECTOR_PRODUCTION_BIBLE.md` and
+  `CODIRECTOR_PROPOSALS_AND_APPROVALS.md`. M1's design bets paid off unchanged: Bible injection
+  plugged into the single `_prepare_chat_request` context-building call site, the new
+  `context_manifest`/`proposal_created` SSE events extended the open union without touching FE
+  parsing logic, and proposal execution failures reuse the same `CoDirectorError` /
+  `classifyCoDirectorError` taxonomy as every other error path.
+- Still open: orchestrator/task graph, general tool calling (M2.1 has exactly one "tool" — propose
+  a Bible mutation, not a registry), prompt compilers, asset lineage, continuity engine. See
+  `CODIRECTOR_PRODUCTION_BRAIN.md`.

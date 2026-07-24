@@ -14,6 +14,15 @@ from sqlalchemy.orm import Session
 
 from ..codirector import config_store as codirector_config_store
 from ..codirector import service as codirector_service
+from ..codirector.bible import service as bible_service
+from ..codirector.bible.proposals import ProposalService
+from ..codirector.bible.schemas import (
+    ApprovalDecisionRequest,
+    BibleMutationSet,
+    CreateVersionRequest,
+    ImportConfirmRequest,
+    ImportPreviewRequest,
+)
 from ..codirector.errors import CoDirectorError, status_code_for_error
 from ..db import SessionLocal, get_db
 
@@ -130,7 +139,7 @@ async def provider_models(provider_id: str) -> dict[str, Any]:
 @router.post("/chat")
 async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
-        result, scene_setup, suggested = await codirector_service.chat_for_project(
+        result, scene_setup, suggested, proposal, manifest = await codirector_service.chat_for_project(
             db,
             messages=[m.model_dump() for m in body.messages],
             project_id=body.project_id,
@@ -149,6 +158,8 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
         "providerId": result.provider_id,
         "suggestedPrompt": suggested,
         "sceneSetup": scene_setup.model_dump() if scene_setup else None,
+        "proposal": proposal.model_dump(mode="json") if proposal else None,
+        "contextManifest": manifest.model_dump(mode="json") if manifest.bibleVersionId else None,
     }
 
 
@@ -220,3 +231,189 @@ async def save_conversation(
 async def delete_conversation(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     ok = codirector_service.delete_conversation(db, project_id)
     return {"ok": ok, "projectId": project_id}
+
+
+# --------------------------------------------------------------------------
+# M2.1: Production Bible (project-scoped, versioned). `project_id` in the path always wins
+# over any project id embedded in a request body.
+# --------------------------------------------------------------------------
+
+
+@router.get("/projects/{project_id}/bible")
+async def get_bible(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    out = bible_service.get_bible_out(db, project_id)
+    if out is None:
+        raise HTTPException(
+            status_code=404,
+            detail=CoDirectorError(
+                "BIBLE_NOT_FOUND",
+                "This project doesn't have a Production Bible yet. Create one first.",
+                details={"projectId": project_id},
+                recoverable=True,
+                recommended_action="create_bible",
+            ).to_dict(),
+        )
+    return out.model_dump(mode="json")
+
+
+@router.get("/projects/{project_id}/bible/versions")
+async def list_bible_versions(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        versions = bible_service.list_versions_out(db, project_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return {"projectId": project_id, "versions": [v.model_dump(mode="json") for v in versions]}
+
+
+@router.get("/projects/{project_id}/bible/versions/{version_number}")
+async def get_bible_version(project_id: str, version_number: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        version = bible_service.get_version_out(db, project_id, version_number)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return version.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/bible/import/preview")
+async def bible_import_preview(
+    project_id: str, body: ImportPreviewRequest = ImportPreviewRequest(), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        preview = bible_service.build_import_preview(
+            db, project_id, include_scenes=body.includeScenes, include_assets_as_props=body.includeAssetsAsProps
+        )
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return preview.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/bible/import/confirm")
+async def bible_import_confirm(project_id: str, body: ImportConfirmRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        out = bible_service.confirm_import(
+            db,
+            project_id,
+            entities=body.entities,
+            facts=body.facts,
+            summary=body.summary,
+            change_reason=body.changeReason,
+        )
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return out.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/bible/versions")
+async def create_bible_version(project_id: str, body: CreateVersionRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        version = bible_service.create_new_version(db, project_id, body.mutations, created_by=body.createdBy)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return version.model_dump(mode="json")
+
+
+# --------------------------------------------------------------------------
+# M2.1: Durable proposals + approvals + execution receipts.
+# --------------------------------------------------------------------------
+
+
+class CreateProposalBody(BaseModel):
+    proposal_type: str = "entity_update"
+    title: str
+    summary: str = ""
+    payload: BibleMutationSet
+    request_id: Optional[str] = None
+    created_by: str = "user"
+
+
+@router.get("/projects/{project_id}/proposals")
+async def list_proposals(project_id: str, status: Optional[str] = None, db: Session = Depends(get_db)) -> dict[str, Any]:
+    proposals = ProposalService.list(db, project_id, status=status)
+    return {"projectId": project_id, "proposals": [p.model_dump(mode="json") for p in proposals]}
+
+
+@router.post("/projects/{project_id}/proposals")
+async def create_proposal(project_id: str, body: CreateProposalBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Manual/testing entry point. The normal path is the model emitting a ```proposal fence
+    during chat, handled inside `codirector_service.stream_for_project` / `chat_for_project`."""
+    proposal = ProposalService.create_proposal(
+        db,
+        project_id=project_id,
+        proposal_type=body.proposal_type,
+        title=body.title,
+        summary=body.summary,
+        payload=body.payload,
+        request_id=body.request_id,
+        created_by=body.created_by,
+    )
+    return proposal.model_dump(mode="json")
+
+
+@router.get("/projects/{project_id}/proposals/{proposal_id}")
+async def get_proposal(project_id: str, proposal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        proposal = ProposalService.get(db, project_id, proposal_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return proposal.model_dump(mode="json")
+
+
+@router.get("/projects/{project_id}/proposals/{proposal_id}/preview")
+async def preview_proposal(project_id: str, proposal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        return ProposalService.preview(db, project_id, proposal_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+
+
+@router.post("/projects/{project_id}/proposals/{proposal_id}/approve")
+async def approve_proposal(
+    project_id: str, proposal_id: str, body: ApprovalDecisionRequest = ApprovalDecisionRequest(), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        receipt = ProposalService.approve(db, project_id, proposal_id, note=body.note, decided_by=body.decidedBy)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return receipt.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/proposals/{proposal_id}/reject")
+async def reject_proposal(
+    project_id: str, proposal_id: str, body: ApprovalDecisionRequest = ApprovalDecisionRequest(), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        proposal = ProposalService.reject(db, project_id, proposal_id, note=body.note, decided_by=body.decidedBy)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return proposal.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/proposals/{proposal_id}/request-revision")
+async def request_revision_proposal(
+    project_id: str, proposal_id: str, body: ApprovalDecisionRequest = ApprovalDecisionRequest(), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        proposal = ProposalService.request_revision(db, project_id, proposal_id, note=body.note, decided_by=body.decidedBy)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return proposal.model_dump(mode="json")
+
+
+@router.post("/projects/{project_id}/proposals/{proposal_id}/cancel")
+async def cancel_proposal(
+    project_id: str, proposal_id: str, body: ApprovalDecisionRequest = ApprovalDecisionRequest(), db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    try:
+        proposal = ProposalService.cancel(db, project_id, proposal_id, note=body.note, decided_by=body.decidedBy)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return proposal.model_dump(mode="json")
+
+
+@router.get("/projects/{project_id}/proposals/{proposal_id}/receipt")
+async def get_proposal_receipt(project_id: str, proposal_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        receipt = ProposalService.get_receipt(db, project_id, proposal_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return receipt.model_dump(mode="json")

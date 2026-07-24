@@ -60,7 +60,113 @@ export interface ClassifiedError {
   recoverable: boolean;
 }
 
-/** SSE events emitted by POST /api/codirector/chat/stream. */
+/** Bounded excerpt of the Production Bible injected into a chat turn's context (M2.1). */
+export interface CoDirectorContextManifest {
+  projectId: string;
+  bibleVersionId?: string | null;
+  bibleVersionNumber?: number | null;
+  includedEntityKeys: string[];
+  includedFactIds: string[];
+  tokenBudget: number;
+  estimatedTokens: number;
+  truncated: boolean;
+}
+
+export interface CoDirectorBibleEntity {
+  entityType: string;
+  entityKey: string;
+  displayName: string;
+  data: Record<string, unknown>;
+}
+
+export interface CoDirectorBibleFact {
+  entityKey?: string | null;
+  factType: string;
+  statement: string;
+  data: Record<string, unknown>;
+}
+
+export interface CoDirectorBibleMutationSet {
+  entityMutations: {
+    entityType: string;
+    entityKey: string;
+    displayName?: string | null;
+    data?: Record<string, unknown> | null;
+    remove?: boolean;
+  }[];
+  factMutations: {
+    factId?: string | null;
+    entityKey?: string | null;
+    factType: string;
+    statement: string;
+    data?: Record<string, unknown> | null;
+    remove?: boolean;
+  }[];
+  summary: string;
+  changeReason: string;
+}
+
+export type CoDirectorProposalStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "revision_requested"
+  | "executing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "stale";
+
+export interface CoDirectorProposal {
+  id: string;
+  projectId: string;
+  bibleId?: string | null;
+  basedOnVersionId?: string | null;
+  basedOnVersionNumber?: number | null;
+  proposalType: string;
+  title: string;
+  summary: string;
+  payload: CoDirectorBibleMutationSet;
+  status: CoDirectorProposalStatus;
+  requestId?: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  isStale: boolean;
+}
+
+export interface CoDirectorExecutionReceipt {
+  id: string;
+  proposalId: string;
+  inputHash: string;
+  status: string;
+  resultingVersionId?: string | null;
+  resultingVersionNumber?: number | null;
+  error?: Record<string, unknown> | null;
+  executedAt: string;
+}
+
+export interface CoDirectorBibleVersion {
+  id: string;
+  bibleId: string;
+  versionNumber: number;
+  parentVersionId?: string | null;
+  summary: string;
+  changeReason: string;
+  createdBy: string;
+  createdAt: string;
+  entities: CoDirectorBibleEntity[];
+  facts: CoDirectorBibleFact[];
+}
+
+export interface CoDirectorBible {
+  projectId: string;
+  currentVersion: CoDirectorBibleVersion | null;
+  versionCount: number;
+}
+
+/** SSE events emitted by POST /api/codirector/chat/stream. Additive union — new `type`
+ * values may appear over time; unknown types must be safely ignorable by callers. */
 export type CoDirectorStreamEvent =
   | { type: "request_started"; requestId: string }
   | { type: "provider_connected"; requestId: string; providerId: string }
@@ -75,7 +181,16 @@ export type CoDirectorStreamEvent =
       suggestedPrompt?: string | null;
     }
   | { type: "cancelled"; requestId: string }
-  | { type: "error"; requestId: string; error: ApiErrorDetailShape };
+  | { type: "error"; requestId: string; error: ApiErrorDetailShape }
+  | { type: "context_manifest"; requestId: string; manifest: CoDirectorContextManifest }
+  | { type: "proposal_created"; requestId: string; proposal: CoDirectorProposal }
+  | { type: "proposal_updated"; requestId: string; proposal: CoDirectorProposal }
+  | { type: "approval_required"; requestId: string; proposal: CoDirectorProposal }
+  | { type: "approval_recorded"; requestId: string; proposalId: string; decision: string }
+  | { type: "execution_started"; requestId: string; proposalId: string }
+  | { type: "execution_completed"; requestId: string; proposalId: string; receipt: CoDirectorExecutionReceipt }
+  | { type: "execution_failed"; requestId: string; proposalId: string; error: ApiErrorDetailShape }
+  | { type: "bible_version_created"; requestId: string; projectId: string; versionNumber: number };
 
 /**
  * Turn any thrown value from a Co-Director request into a structured, user-safe
@@ -1264,6 +1379,87 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  // --------------------------------------------------------------------
+  // M2.1: Production Bible + durable proposals/approvals/execution.
+  // --------------------------------------------------------------------
+  getBible: (projectId: string) =>
+    req<CoDirectorBible>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible`),
+  listBibleVersions: (projectId: string) =>
+    req<{ projectId: string; versions: CoDirectorBibleVersion[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/versions`,
+    ),
+  getBibleVersion: (projectId: string, versionNumber: number) =>
+    req<CoDirectorBibleVersion>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/versions/${versionNumber}`,
+    ),
+  previewBibleImport: (projectId: string, body: { includeScenes?: boolean; includeAssetsAsProps?: boolean } = {}) =>
+    req<{ projectId: string; entities: CoDirectorBibleEntity[]; facts: CoDirectorBibleFact[]; summary: string; warnings: string[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/import/preview`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  confirmBibleImport: (
+    projectId: string,
+    body: { entities: CoDirectorBibleEntity[]; facts: CoDirectorBibleFact[]; summary?: string; changeReason?: string },
+  ) =>
+    req<CoDirectorBible>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/import/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  createBibleVersion: (
+    projectId: string,
+    body: { mutations: CoDirectorBibleMutationSet; createdBy?: string },
+  ) =>
+    req<CoDirectorBibleVersion>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/versions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  listProposals: (projectId: string, status?: string) =>
+    req<{ projectId: string; proposals: CoDirectorProposal[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals${status ? `?status=${encodeURIComponent(status)}` : ""}`,
+    ),
+  getProposal: (projectId: string, proposalId: string) =>
+    req<CoDirectorProposal>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}`,
+    ),
+  previewProposal: (projectId: string, proposalId: string) =>
+    req<{
+      proposal: CoDirectorProposal;
+      currentVersionNumber: number | null;
+      wouldCreateVersionNumber: number | null;
+      entityDiff: Record<string, unknown>[];
+      factDiff: Record<string, unknown>[];
+      isStale: boolean;
+    }>(`/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/preview`),
+  approveProposal: (projectId: string, proposalId: string, body: { note?: string; decidedBy?: string } = {}) =>
+    req<CoDirectorExecutionReceipt>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/approve`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  rejectProposal: (projectId: string, proposalId: string, body: { note?: string; decidedBy?: string } = {}) =>
+    req<CoDirectorProposal>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/reject`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  requestProposalRevision: (projectId: string, proposalId: string, body: { note?: string; decidedBy?: string } = {}) =>
+    req<CoDirectorProposal>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/request-revision`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  cancelProposal: (projectId: string, proposalId: string, body: { note?: string; decidedBy?: string } = {}) =>
+    req<CoDirectorProposal>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/cancel`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  getProposalReceipt: (projectId: string, proposalId: string) =>
+    req<CoDirectorExecutionReceipt>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/receipt`,
+    ),
   mediaUrl: (absPath?: string | null) => {
     if (!absPath) return "";
     const normalized = absPath.replace(/\//g, "\\").toLowerCase();

@@ -24,7 +24,13 @@ get built now.
 
 ---
 
-## M2 candidate: Production Bible (project knowledge grounding)
+## M2 candidate: Production Bible (project knowledge grounding) — ✅ implemented in M2.1
+
+**Status update (2026-07-24):** implemented as described below, plus the approvals mechanism
+sketched in "Tool calling + approvals" further down (scoped to Bible mutations only, not a
+general tool registry). See `CODIRECTOR_PRODUCTION_BIBLE.md` and
+`CODIRECTOR_PROPOSALS_AND_APPROVALS.md` for the as-built design. The rest of this section is
+left as originally written for historical context.
 
 **Problem:** Co-Director currently only sees the literal chat transcript plus whatever
 `project_id`/`scene_id` context is passed in. It doesn't know the project's established
@@ -77,6 +83,11 @@ rather than a fixed enum.
 ---
 
 ## M2/M3 candidate: Tool calling + approvals
+
+**Status update (2026-07-24):** the *approvals* half of this is implemented in M2.1, scoped
+narrowly to Bible mutations (`CODIRECTOR_PROPOSALS_AND_APPROVALS.md`) — there is exactly one
+"tool" (propose a Bible mutation via a ```` ```proposal ```` fence), not the general registry
+described below. A general tool registry covering scene/render/asset actions remains future work.
 
 **Problem:** Co-Director can talk about scenes but can't *act* on the project (create a
 scene, attach a reference, queue a render) without the user manually doing it after reading

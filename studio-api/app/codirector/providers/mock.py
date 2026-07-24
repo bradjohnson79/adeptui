@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Any, AsyncIterator
 
@@ -164,6 +165,40 @@ class MockCoDirectorProvider:
             reply = (
                 "[mock] To write a script here: start a scene, define characters, "
                 "outline acts, then draft in screenplay format. Want me to start an outline?"
+            )
+
+        if scenario == "proposal_character_update":
+            reply = (
+                "[mock] Based on this scene, I'd like to update the character's established "
+                "appearance in the Production Bible. Review the proposal below before it's "
+                "applied — nothing changes until you approve it.\n\n"
+                "```proposal\n"
+                + json.dumps(
+                    {
+                        "proposalType": "entity_update",
+                        "title": "Update Ava's appearance",
+                        "summary": "Add a scar detail established in this scene to Ava's character entry.",
+                        "entityMutations": [
+                            {
+                                "entityType": "character",
+                                "entityKey": "ava",
+                                "displayName": "Ava",
+                                "data": {
+                                    "description": "Protagonist, mid-20s, short dark hair.",
+                                    "appearance": "Has a small scar above her left eyebrow, established in this scene.",
+                                },
+                            }
+                        ],
+                        "factMutations": [],
+                        "changeReason": "Continuity detail introduced in chat",
+                    }
+                )
+                + "\n```"
+            )
+        elif scenario == "malformed_proposal":
+            reply = (
+                "[mock] I want to propose a Bible update, but this response is intentionally "
+                "broken for testing.\n\n```proposal\n{ this is not valid json,,, \n```"
             )
 
         if scenario == "slow":

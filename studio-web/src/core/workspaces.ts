@@ -51,6 +51,7 @@ export const WORKSPACES = {
   marketplace: { label: "Marketplace", group: "additional", futureDestination: "resources", compatibilityAliases: ["resources"] },
   mastersheet: { label: "Scene Master Sheet", group: "create", futureDestination: "sceneSheets", compatibilityAliases: ["scene-sheets", "sceneSheets"] },
   avatar: { label: "Avatar Studio", group: "create", futureDestination: "generate", compatibilityAliases: ["avatar-studio"] },
+  bible: { label: "Production Bible", group: "organize", futureDestination: "story", compatibilityAliases: ["production-bible", "productionbible"] },
   editor: { label: "Editor", group: "finish", futureDestination: "editor", compatibilityAliases: [] },
   audiostudio: { label: "Audio Studio", group: "finish", futureDestination: "audio", compatibilityAliases: ["audio", "audio-studio"] },
 } as const satisfies Record<string, WorkspaceDefinition>;

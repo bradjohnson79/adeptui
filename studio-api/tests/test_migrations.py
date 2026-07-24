@@ -12,16 +12,16 @@ from app.migrations import (
 )
 
 
-def test_m001_is_idempotent(tmp_path) -> None:
+def test_default_registry_migrations_are_idempotent(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'migrations.db'}")
     runner = MigrationRunner(engine, DEFAULT_REGISTRY)
 
     first = runner.apply_pending()
     second = runner.apply_pending()
 
-    assert first.applied == ("M001",)
+    assert first.applied == ("M001", "M002")
     assert second.applied == ()
-    assert second.already_applied == ("M001",)
+    assert second.already_applied == ("M001", "M002")
 
 
 def test_sqlite_foreign_keys_are_enabled_before_apply(tmp_path) -> None:

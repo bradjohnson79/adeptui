@@ -1374,6 +1374,28 @@ button.linkish {
   overflow-wrap: anywhere;
   color: var(--ink);
 }
+.setup-pack-spec-unpublished code {
+  color: var(--muted);
+  font-style: italic;
+}
+.setup-pack-dependency-list {
+  list-style: disc;
+  margin: 0.5rem 0 0 1.1rem;
+  padding: 0;
+  display: block;
+}
+.setup-pack-dependency-list li {
+  margin: 0.2rem 0;
+  color: var(--ink);
+}
+.setup-pack-dependency-kind,
+.setup-pack-dependency-license {
+  color: var(--muted);
+}
+.setup-pack-dependency-note {
+  color: var(--muted);
+  font-style: italic;
+}
 .setup-diagnostic {
   display: grid;
   gap: 0.2rem;
@@ -2796,6 +2818,29 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .codirector-error-card {
   border-color: rgba(220, 90, 70, 0.45);
   background: rgba(220, 90, 70, 0.08);
+}
+.codirector-proposal-card {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.06);
+}
+.codirector-proposal-title {
+  font-weight: 600;
+  margin: 0.15rem 0;
+}
+.codirector-proposal-stale {
+  color: rgb(180, 83, 9);
+  font-size: 0.82rem;
+  margin: 0.4rem 0;
+}
+.codirector-proposal-note {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.8rem;
+  margin-top: 0.35rem;
+  font-family: inherit;
 }
 .codirector-task-head,
 .codirector-task-actions {

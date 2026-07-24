@@ -3,6 +3,7 @@ import { useCoDirectorSession } from "./CoDirectorSession";
 import { CoDirectorMessage } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorTaskStatus } from "./CoDirectorTaskStatus";
+import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { summarizeSetup } from "./types";
 
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
@@ -18,6 +19,12 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     dismissSetup,
     applySuggestedPrompt,
     dismissSuggestedPrompt,
+    proposals,
+    proposalActingId,
+    approveProposal,
+    rejectProposal,
+    requestProposalRevision,
+    cancelProposal,
     uiContext,
     send,
     busy,
@@ -30,7 +37,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, plan, setup, suggestedPrompt]);
+  }, [messages, plan, setup, suggestedPrompt, proposals]);
 
   return (
     <div className="codirector-conversation" aria-live="polite">
@@ -72,6 +79,18 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
       )}
 
       {plan && <CoDirectorTaskStatus />}
+
+      {proposals.map((proposal) => (
+        <CoDirectorProposalCard
+          key={proposal.id}
+          proposal={proposal}
+          busy={proposalActingId === proposal.id}
+          onApprove={() => void approveProposal(proposal.id)}
+          onReject={(note) => void rejectProposal(proposal.id, note)}
+          onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
+          onCancel={() => void cancelProposal(proposal.id)}
+        />
+      ))}
 
       {setup && (
         <div className="codirector-cta-card">
