@@ -114,6 +114,8 @@ def select_provider(source_input: SourceInput) -> SourceProvider:
 
 
 def overview_payload() -> dict[str, Any]:
+    from .downloads.queue import get_queue_manager
+    from .downloads.receipts import history_entries
     from .migration import ensure_migrated
     from .persistence import components_using_source, list_assignments, list_sources
 
@@ -131,25 +133,26 @@ def overview_payload() -> dict[str, Any]:
             }
         )
     saved.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    active = get_queue_manager().list({"active": True})
+    history = history_entries()[:50]
     return {
         "schemaVersion": 3,
         "providers": providers,
         "sources": saved,
         "assignments": assignments,
-        "activeDownloads": [],
-        "installHistory": [],
+        "activeDownloads": active,
+        "installHistory": history,
         "diagnostics": {
-            "phase": "1A",
-            "downloadQueue": "deferred",
+            "phase": "1B",
+            "downloadQueue": "active",
             "assetIntelligence": "deferred",
             "dependencyGraph": "deferred",
             "healthDashboard": "deferred",
         },
         "messages": {
             "intro": (
-                "Source Manager centralizes GitHub, Hugging Face, direct URLs, "
-                "local folders, and existing installs. Advanced download queue and "
-                "dependency intelligence arrive in later Phase 1 subphases."
+                "Source Manager centralizes providers, saved sources, the download queue, "
+                "and install history. Asset intelligence and dependency graphs arrive in later phases."
             ),
         },
     }

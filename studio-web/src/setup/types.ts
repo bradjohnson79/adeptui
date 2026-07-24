@@ -394,8 +394,75 @@ export interface SourceManagerOverview {
   providers: SourceManagerProvider[];
   sources: SourceRecord[];
   assignments?: Record<string, JsonValue>;
-  activeDownloads?: JsonValue[];
-  installHistory?: JsonValue[];
+  activeDownloads?: DownloadOperation[];
+  installHistory?: InstallHistoryEntry[];
   diagnostics?: Record<string, JsonValue>;
   messages?: { intro?: string };
+}
+
+export interface DownloadProgress {
+  bytesDownloaded?: number;
+  bytesTotal?: number | null;
+  percent?: number;
+  speedBytesPerSecond?: number | null;
+  etaSeconds?: number | null;
+  currentArtifact?: string | null;
+  artifactsCompleted?: number;
+  artifactsTotal?: number;
+}
+
+export interface DownloadOperation {
+  id: string;
+  componentId: string;
+  sourceId?: string | null;
+  installPlanId?: string;
+  providerId?: string;
+  phase: string;
+  priority?: number;
+  queuePosition?: number | null;
+  progress?: DownloadProgress;
+  capabilities?: {
+    canPause?: boolean;
+    canResume?: boolean;
+    canCancel?: boolean;
+    supportsRangeRequests?: boolean;
+    message?: string;
+  };
+  failure?: { category?: string; message?: string; recommendedAction?: string } | null;
+  paths?: { stagingDirectory?: string | null; finalDestination?: string | null };
+  createdAt?: string;
+  updatedAt?: string;
+  installId?: string;
+}
+
+export interface InstallHistoryEntry {
+  id: string;
+  componentId?: string;
+  version?: string | null;
+  providerId?: string | null;
+  sourceId?: string | null;
+  result?: string | null;
+  installedAt?: string;
+  destinationSummary?: string;
+  managed?: boolean;
+  kind?: string;
+  fileCount?: number;
+  totalSize?: number;
+  verificationState?: string | null;
+  rollbackAvailable?: boolean;
+}
+
+export interface InstallReceipt {
+  id: string;
+  componentId?: string;
+  managed?: boolean;
+  destinationRoot?: string;
+  artifacts?: Array<{
+    relativePath?: string;
+    size?: number | null;
+    checksum?: string | null;
+    ownership?: string;
+  }>;
+  warnings?: string[];
+  verification?: { status?: string; validatedAt?: string };
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { ActiveDownloadsPanel } from "../components/ActiveDownloadsPanel";
+import { InstallHistoryPanel } from "../components/InstallHistoryPanel";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
 import { DownloadSourcesPanel } from "../components/DownloadSourcesPanel";
 import type { SourceManagerOverview, SourceManagerProvider, SourceRecord } from "../setup/types";
@@ -203,16 +205,18 @@ export default function SourceManagerPage() {
           )}
         </section>
 
+        <ActiveDownloadsPanel onChanged={() => void refresh()} />
+        <InstallHistoryPanel />
+
         <section className="setup-component-section" aria-labelledby="sm-deferred-heading">
           <div className="setup-section-heading">
-            <h2 id="sm-deferred-heading">Coming in Phase 1</h2>
+            <h2 id="sm-deferred-heading">Coming next</h2>
           </div>
           <div className="setup-card-meta" data-testid="source-manager-deferred">
-            <span>Active Downloads — Phase 1B</span>
-            <span>Install History / Receipts — Phase 1B/1F</span>
             <span>Asset Intelligence — Phase 1C</span>
             <span>Dependency Overview — Phase 1D</span>
             <span>Health Dashboard — Phase 1E</span>
+            <span>Full Rollback — Phase 1F</span>
           </div>
           <p className="setup-message">
             <Link to="/">Return home</Link>

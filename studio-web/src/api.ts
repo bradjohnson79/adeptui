@@ -9,6 +9,9 @@ import type {
   SetupOperation,
   SetupStatusResponse,
   SetupUpdateDismissal,
+  DownloadOperation,
+  InstallHistoryEntry,
+  InstallReceipt,
   SourceManagerOverview,
   SourceVerificationResult,
   StudioPreparationPlan,
@@ -561,6 +564,49 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  listDownloads: (opts?: { active?: boolean; componentId?: string; signal?: AbortSignal }) => {
+    const params = new URLSearchParams();
+    if (opts?.active) params.set("active", "true");
+    if (opts?.componentId) params.set("componentId", opts.componentId);
+    const q = params.toString();
+    return req<{ operations: DownloadOperation[] }>(`/api/downloads${q ? `?${q}` : ""}`, {
+      signal: opts?.signal,
+    });
+  },
+  enqueueDownload: (body: Record<string, unknown>) =>
+    req<{ operation: DownloadOperation }>("/api/downloads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  getDownload: (operationId: string) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}`),
+  cancelDownload: (operationId: string) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}/cancel`, {
+      method: "POST",
+    }),
+  pauseDownload: (operationId: string) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}/pause`, {
+      method: "POST",
+    }),
+  resumeDownload: (operationId: string) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}/resume`, {
+      method: "POST",
+    }),
+  retryDownload: (operationId: string) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}/retry`, {
+      method: "POST",
+    }),
+  setDownloadPriority: (operationId: string, priority: number) =>
+    req<{ operation: DownloadOperation }>(`/api/downloads/${encodeURIComponent(operationId)}/priority`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority }),
+    }),
+  installHistory: () =>
+    req<{ entries: InstallHistoryEntry[]; count: number }>("/api/install-history"),
+  getInstallReceipt: (installId: string) =>
+    req<{ receipt: InstallReceipt }>(`/api/install-history/${encodeURIComponent(installId)}`),
   setupUpdateLater: (componentId: string) =>
     req<SetupUpdateDismissal>(`/api/setup/components/${encodeURIComponent(componentId)}/update/later`, {
       method: "POST",

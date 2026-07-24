@@ -110,6 +110,18 @@ async def lifespan(_: FastAPI):
         ensure_migrated()
     except Exception:
         logger.exception("Source Manager migration failed")
+    try:
+        from .source_manager.downloads.queue import get_queue_manager
+
+        recovery = get_queue_manager().recover_interrupted()
+        if recovery.get("interrupted"):
+            logger.warning(
+                "Download queue recovery interrupted=%s resumable=%s",
+                len(recovery.get("interrupted") or []),
+                len(recovery.get("resumable") or []),
+            )
+    except Exception:
+        logger.exception("Download queue recovery failed")
     job_queue.start()
     yield
 
@@ -135,6 +147,12 @@ try:
     app.include_router(source_manager_router, prefix="/api")
 except Exception:
     logger.exception("Source Manager router failed to load")
+try:
+    from .source_manager.downloads.api import router as downloads_router
+
+    app.include_router(downloads_router, prefix="/api")
+except Exception:
+    logger.exception("Downloads router failed to load")
 
 # Playwright / functional-audit control surface (disabled unless STUDIO_E2E=1).
 import os as _os

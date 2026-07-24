@@ -3,7 +3,7 @@
 **Date:** 2026-07-24  
 **Branch:** `phase1/source-manager-foundation`  
 **Baseline:** Phase 0.5 complete (17/17 critical E2E, 19 download-source unit tests)  
-**Status:** Planning complete — implementation proceeds in subphases 1A–1F
+**Status:** Phase 1A complete; Phase 1B download engine in progress (`phase1b/download-queue-install-receipts`). See `PHASE1B_DOWNLOAD_ENGINE_PLAN.md`.
 
 ---
 

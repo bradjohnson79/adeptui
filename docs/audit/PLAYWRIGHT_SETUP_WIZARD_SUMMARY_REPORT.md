@@ -1,11 +1,13 @@
 # Adept UI — Playwright & Setup Wizard Summary Report
 
 **Date:** 2026-07-24  
-**Working branch:** `phase1/source-manager-foundation` (from `audit/playwright-functional`)  
+**Working branch:** `phase1b/download-queue-install-receipts`  
 **Backup branch:** `audit/pre-playwright-functional-audit`  
-**Overall verdict:** PASS — Phase 0.5 baseline green; Phase 1A Source Manager foundation in progress  
+**Overall verdict:** PASS — Phase 0.5 + 1A preserved; Phase 1B download queue gated at **20/20** `@critical`  
 
-**Phase 1:** See `docs/architecture/SOURCE_MANAGER_PHASE1_PLAN.md`. Phase 1A adds normalized source records, provider registry, `/source-manager` UI, and dual-write migration from `source_overrides` without regressing Setup Wizard / Download Sources.
+**Phase 1:** See `docs/architecture/SOURCE_MANAGER_PHASE1_PLAN.md` and `PHASE1B_DOWNLOAD_ENGINE_PLAN.md`.  
+Phase 1A: source records + Source Manager route.  
+Phase 1B: persistent download queue, real progress/ETA, receipts, Active Downloads / Install History — report in `docs/audit/PHASE1B_DOWNLOAD_QUEUE_IMPLEMENTATION_REPORT.md`.
 
 ---
 
