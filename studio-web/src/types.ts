@@ -29,6 +29,8 @@ export interface Scene {
   project_id: string;
   index: number;
   name: string;
+  /** Short description of the scene, for humans and Co-Director. Not generation input. */
+  summary?: string;
   engine: EngineName;
   prompt: string;
   duration_sec: number;
@@ -128,6 +130,12 @@ export interface SpatialMap {
 export interface Health {
   ok: boolean;
   comfy_reachable: boolean;
+  missing_model_component_ids?: string[];
+  comfy_status?: string;
+  comfy_version?: string | null;
+  node_catalog_available?: boolean;
+  reason_code?: string | null;
+  recommended_action?: string | null;
   missing_models: string[];
   message: string;
 }

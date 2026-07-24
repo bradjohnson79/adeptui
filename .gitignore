@@ -12,6 +12,7 @@ studio-web/dist/
 *.log
 export_packs/
 artifacts/
+.tmp-smoke/
 test-results/
 playwright-report/
 blob-report/

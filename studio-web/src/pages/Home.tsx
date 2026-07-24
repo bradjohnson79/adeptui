@@ -5,6 +5,7 @@ import type { Project } from "../types";
 import { PROJECT_TEMPLATES, type ProductionType } from "../dashboardImages";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
 import { SystemStatusStrip } from "../components/dashboard/StudioChrome";
+import { CapabilityReadinessPanel } from "../components/CapabilityPanel";
 import { CinematicHero, CinematicEmptyState } from "../components/dashboard/CinematicHero";
 import { NewProductionCard, ProjectTemplateCard } from "../components/dashboard/NewProductionCard";
 import { ProjectCoverCard } from "../components/dashboard/ProjectCoverCard";
@@ -310,6 +311,8 @@ export default function Home() {
           <h2 className="section-heading">System Status</h2>
           <SystemStatusStrip />
         </div>
+
+        <CapabilityReadinessPanel />
 
         <CoDirectorComposer onSubmit={(text) => openCoDirector(text)} />
       </main>

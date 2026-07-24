@@ -1,3 +1,10 @@
+import type {
+  Capability,
+  CapabilitySnapshot,
+  ComfyHealth,
+  WorkflowDescriptor,
+  WorkflowReadiness,
+} from "./capabilities";
 import type { EngineName, Health, Job, Project, Scene, SceneSetup, SpatialMap } from "./types";
 import type {
   ComponentDiagnosticResult,
@@ -923,6 +930,38 @@ export const api = {
     req<{ ok: boolean }>(`/api/setup/components/${encodeURIComponent(componentId)}/source-override`, {
       method: "DELETE",
     }),
+  // --- capability registry ------------------------------------------------
+  // The truth source for "can this be used right now?". Read-only; `refreshCapabilities`
+  // re-probes the environment and never installs or downloads anything.
+  capabilities: (opts?: { projectId?: string; refresh?: boolean; signal?: AbortSignal }) => {
+    const params = new URLSearchParams();
+    if (opts?.projectId) params.set("projectId", opts.projectId);
+    if (opts?.refresh) params.set("refresh", "true");
+    const query = params.toString();
+    return req<CapabilitySnapshot>(`/api/capabilities${query ? `?${query}` : ""}`, {
+      signal: opts?.signal,
+    });
+  },
+  projectCapabilities: (projectId: string, opts?: { refresh?: boolean; signal?: AbortSignal }) =>
+    req<CapabilitySnapshot>(
+      `/api/projects/${encodeURIComponent(projectId)}/capabilities${opts?.refresh ? "?refresh=true" : ""}`,
+      { signal: opts?.signal },
+    ),
+  capability: (capabilityId: string, opts?: { projectId?: string }) =>
+    req<Capability>(
+      `/api/capabilities/${encodeURIComponent(capabilityId)}${
+        opts?.projectId ? `?projectId=${encodeURIComponent(opts.projectId)}` : ""
+      }`,
+    ),
+  refreshCapabilities: (projectId?: string) =>
+    req<CapabilitySnapshot>(
+      `/api/capabilities/refresh${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+      { method: "POST" },
+    ),
+  comfyHealth: () => req<ComfyHealth>("/api/comfy/health"),
+  listWorkflows: () => req<{ workflows: WorkflowDescriptor[] }>("/api/workflows"),
+  workflowReadiness: (workflowId: string) =>
+    req<WorkflowReadiness>(`/api/workflows/${encodeURIComponent(workflowId)}/readiness`),
   sourceManagerOverview: () => req<SourceManagerOverview>("/api/source-manager/overview"),
   sourceManagerProviders: () =>
     req<{ providers: SourceManagerOverview["providers"] }>("/api/source-manager/providers"),

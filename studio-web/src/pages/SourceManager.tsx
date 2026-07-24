@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { ActiveDownloadsPanel } from "../components/ActiveDownloadsPanel";
+import { CapabilityReadinessPanel } from "../components/CapabilityPanel";
 import { InstallHistoryPanel } from "../components/InstallHistoryPanel";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
 import { DownloadSourcesPanel } from "../components/DownloadSourcesPanel";
@@ -89,6 +90,22 @@ export default function SourceManagerPage() {
             {error}
           </p>
         )}
+
+        <section className="setup-component-section" aria-labelledby="sm-capabilities-heading">
+          <div className="setup-section-heading">
+            <h2 id="sm-capabilities-heading">What is blocked right now</h2>
+            <p>
+              Read from the capability registry, so this says the same thing as the Health surface
+              and the Setup Wizard. Actions here navigate — no download starts without your
+              explicit approval on a component card.
+            </p>
+          </div>
+          <CapabilityReadinessPanel
+            title="Blocked capabilities"
+            subsystems={["models", "extensions", "workflows", "comfyui", "generation", "source_manager", "downloads", "references"]}
+            limit={12}
+          />
+        </section>
 
         <section className="setup-component-section" aria-labelledby="sm-providers-heading">
           <div className="setup-section-heading">

@@ -57,7 +57,10 @@ async def get_project_capabilities(
     project_id: str,
     refresh: bool = Query(default=False),
 ) -> CapabilitySnapshotOut:
-    return await service.get_capabilities(project_id=project_id, force=refresh)
+    try:
+        return await service.get_project_capabilities(project_id, force=refresh)
+    except errors.CapabilityError as err:
+        raise _http_error(err) from err
 
 
 @router.get("/comfy/health")

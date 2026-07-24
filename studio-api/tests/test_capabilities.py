@@ -211,12 +211,30 @@ def test_refresh_reprobes_without_mutating_anything(client) -> None:
 
 
 def test_project_scope_reports_missing_project_as_blocked(client) -> None:
-    snapshot = _snapshot(client, "no-such-project")
-    capabilities = _by_id(snapshot)
+    # Asking the dashboard question ("what can this studio do, in this project's context?")
+    # still answers, and answers honestly: project-scoped entries are blocked.
+    res = client.get(
+        "/api/capabilities", params={"projectId": "no-such-project", "refresh": "true"}
+    )
+    assert res.status_code == 200
+    capabilities = _by_id(res.json())
     assert capabilities["project.scenes.read"]["status"] == "blocked"
     assert capabilities["project.scenes.read"]["reasonCode"] == "PROJECT_NOT_FOUND"
     # Global capabilities are unaffected by a bad project id.
     assert capabilities["storage.database"]["status"] == "locally_verified"
+
+
+def test_project_capability_route_404s_for_an_unknown_project(client) -> None:
+    """Asking for *one project's* capabilities by id is a lookup, not a dashboard read.
+
+    Returning a full snapshot of blockers for a typo'd id would make a healthy studio look
+    broken, so this route 404s instead.
+    """
+    res = client.get("/api/projects/no-such-project/capabilities")
+    assert res.status_code == 404
+    detail = res.json()["detail"]
+    assert detail["code"] == "PROJECT_NOT_FOUND"
+    assert detail["recommendedAction"] == "open_project"
 
 
 def test_project_scope_keeps_scene_capabilities_usable_for_a_real_project(client) -> None:

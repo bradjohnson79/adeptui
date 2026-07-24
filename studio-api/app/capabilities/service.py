@@ -873,6 +873,28 @@ async def get_capabilities(
     return _snapshot_out(snapshot)
 
 
+async def get_project_capabilities(
+    project_id: str, *, force: bool = False
+) -> CapabilitySnapshotOut:
+    """Project-scoped read that 404s on a missing project.
+
+    The global read reports project-scoped capabilities as `blocked` for an unknown project,
+    which is right for a dashboard. Asking for one project's capabilities by id is a different
+    question, and answering it with a full snapshot of blockers would let a typo'd id look like
+    a broken studio.
+    """
+    snapshot = await _get_snapshot(project_id=project_id, force=force)
+    if snapshot.project_exists is False:
+        raise errors.CapabilityError(
+            code=errors.PROJECT_NOT_FOUND,
+            message=f"Project {project_id} does not exist.",
+            details={"projectId": project_id},
+            recoverable=False,
+            recommended_action="open_project",
+        )
+    return _snapshot_out(snapshot)
+
+
 async def get_capability(capability_id: str, *, project_id: str | None = None) -> CapabilityOut:
     try:
         definition = get_definition(capability_id)
