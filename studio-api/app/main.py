@@ -15,6 +15,7 @@ from .config import settings
 from .db import init_db
 from .queue_worker import job_queue
 from .routers.api import router
+from .routers.codirector import router as codirector_router
 from .routers.extra import router as extra_router
 from .master_sheet import router as master_sheet_router, ensure_master_sheet_tables
 from .avatar_studio import router as avatar_studio_router, ensure_avatar_tables
@@ -135,6 +136,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix="/api")
+app.include_router(codirector_router, prefix="/api")
 app.include_router(extra_router, prefix="/api")
 app.include_router(master_sheet_router, prefix="/api")
 app.include_router(avatar_studio_router, prefix="/api")

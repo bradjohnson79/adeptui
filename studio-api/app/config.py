@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STUDIO_", env_file=".env", extra="ignore")
 
-    app_name: str = "Adept UI Video Studio"
+    app_name: str = "Adept UI Generation Studio"
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
     comfy_url: str = "http://127.0.0.1:8188"
     comfy_input_dir: Path = Path(
@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     zimage_steps: int = 8
     zimage_cfg: float = 1.0
     zimage_size: int = 1024
+    # ImageGen checkpoints (model-agnostic Comfy path; override via STUDIO_* env)
+    imagegen_flux_checkpoint: str = "flux1-dev-fp8.safetensors"
+    imagegen_hidream_checkpoint: str = "hidream_i1_dev_fp8.safetensors"
+    imagegen_sd35_checkpoint: str = "sd3.5_large.safetensors"
+    imagegen_custom_checkpoint: str = ""
+    imagegen_default_steps: int = 20
+    imagegen_default_cfg: float = 3.5
 
 
 settings = Settings()
@@ -41,3 +48,4 @@ settings.data_dir.mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "assets").mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "exports").mkdir(parents=True, exist_ok=True)
 (settings.data_dir / "projects").mkdir(parents=True, exist_ok=True)
+(settings.data_dir / "marketplace").mkdir(parents=True, exist_ok=True)

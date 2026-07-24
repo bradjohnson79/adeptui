@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -19,14 +20,12 @@ from ..mouth_tracker import Roi, overlay_track_preview, track_mouth_rois
 from ..assistant import (
     SceneSetupProposal,
     apply_scene_setup,
-    build_context_block,
     chat_ollama,
-    extract_scene_setup,
-    extract_suggested_prompt,
-    list_ollama_models,
     ollama_reachable,
     strip_scene_setup_blocks,
 )
+from ..codirector import service as codirector_service
+from ..codirector.errors import CoDirectorError, status_code_for_error
 from ..comfy_client import comfy
 from ..config import settings
 from ..db import Asset, Job, Project, Scene, get_db
@@ -40,6 +39,8 @@ from ..schemas import (
     AssistantChatResponse,
     AssistantHealth,
     EngineOptionOut,
+    EngineRecommendOut,
+    ExecutionPlanOut,
     FalKeyStatus,
     FalKeyUpdate,
     FalModelOut,
@@ -53,11 +54,16 @@ from ..schemas import (
     ProjectOut,
     ProjectUpdate,
     RenderRequest,
+    RenderSafetyFlags,
     SceneIn,
     SceneOut,
     SceneSetupOut,
     SpatialMap,
     TagResolveOut,
+    TimelineApplyRequest,
+    TimelineProposalOut,
+    TimelineProposeRequest,
+    TimelineSceneProposal,
     VramDetectOut,
     VramProfileOut,
 )
@@ -69,6 +75,23 @@ router = APIRouter()
 def _project_out(db: Session, project: Project) -> ProjectOut:
     scenes = db.query(Scene).filter(Scene.project_id == project.id).order_by(Scene.index).all()
     assets = db.query(Asset).filter(Asset.project_id == project.id).all()
+    with_output = sum(1 for s in scenes if getattr(s, "output_path", None))
+    render_pct = int(100 * with_output / max(1, len(scenes))) if scenes else 0
+    cover = next((a for a in assets if a.kind == "image"), None)
+    # Status heuristic for library filters
+    active_jobs = (
+        db.query(Job)
+        .filter(Job.project_id == project.id, Job.status.in_(["queued", "running", "pending"]))
+        .count()
+    )
+    if getattr(project, "archived", 0):
+        status_label = "Archived"
+    elif active_jobs:
+        status_label = "Rendering"
+    elif scenes and with_output >= len(scenes):
+        status_label = "Complete"
+    else:
+        status_label = "Active"
     return ProjectOut(
         id=project.id,
         name=project.name,
@@ -82,10 +105,27 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
         preset=project.preset,
         vram_gb=getattr(project, "vram_gb", 32) or 32,
         spatial_map_json=project.spatial_map_json or "{}",
+        render_safety_json=getattr(project, "render_safety_json", "") or "",
+        learning_json=getattr(project, "learning_json", "") or "",
+        learning_enabled_json=getattr(project, "learning_enabled_json", "") or "",
+        preview_settings_json=getattr(project, "preview_settings_json", "") or "",
+        description=getattr(project, "description", "") or "",
+        company=getattr(project, "company", "") or "",
+        director_name=getattr(project, "director_name", "") or "",
+        version=getattr(project, "version", "1.0") or "1.0",
+        tags_json=getattr(project, "tags_json", "[]") or "[]",
+        archived=int(getattr(project, "archived", 0) or 0),
+        defaults_json=getattr(project, "defaults_json", "") or "",
+        settings_json=getattr(project, "settings_json", "") or "",
         created_at=project.created_at,
         updated_at=project.updated_at,
         scenes=[SceneOut.model_validate(s) for s in scenes],
         assets=[AssetOut.model_validate(a) for a in assets],
+        scene_count=len(scenes),
+        asset_count=len(assets),
+        render_pct=render_pct,
+        cover_asset_id=cover.id if cover else None,
+        status_label=status_label,
     )
 
 
@@ -218,6 +258,8 @@ async def fal_usage(days: int = 30):
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
     projects = db.query(Project).order_by(Project.updated_at.desc()).all()
+    # Hide archived from default home list
+    projects = [p for p in projects if not getattr(p, "archived", 0)]
     return [_project_out(db, p) for p in projects]
 
 
@@ -264,6 +306,244 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(404, "Project not found")
     return _project_out(db, project)
+
+
+@router.get("/projects/{project_id}/execution-plan", response_model=ExecutionPlanOut)
+def get_execution_plan(
+    project_id: str, scene_id: str | None = None, db: Session = Depends(get_db)
+):
+    from ..aspect_fps import resolve_scene_dims, resolve_scene_fps, validate_engine_aspect
+    from ..preview_bus import preview_bus
+    from ..vram_profiles import resolve_render_plan
+    import json
+
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    plan = resolve_render_plan(project)
+    scene = db.get(Scene, scene_id) if scene_id else None
+    if scene and scene.project_id == project_id:
+        sw, sh = resolve_scene_dims(project, scene)
+        sfps = resolve_scene_fps(project, scene)
+        # Prefer scene dims but still respect VRAM clamp from plan
+        if plan.vram_gb < 32:
+            width, height = min(sw, plan.width), min(sh, plan.height)
+            fps = min(sfps, plan.fps)
+            clamped = width < sw or height < sh or fps < sfps or plan.clamped
+        else:
+            width, height, fps = sw, sh, sfps
+            clamped = plan.clamped
+        aspect = getattr(scene, "aspect_ratio", None) or "16:9"
+        fps_mode = getattr(scene, "fps_mode", None) or "auto"
+        eng_warn = validate_engine_aspect(scene.engine, aspect)
+        caps = preview_bus.capabilities_for(scene.engine if scene.engine != "auto" else "ltx")
+    else:
+        width, height, fps = plan.width, plan.height, plan.fps
+        clamped = plan.clamped
+        aspect = "16:9"
+        fps_mode = "auto"
+        eng_warn = []
+        caps = preview_bus.capabilities_for(project.engine_default)
+
+    safety_raw = getattr(project, "render_safety_json", "") or ""
+    try:
+        safety = RenderSafetyFlags.model_validate(json.loads(safety_raw) if safety_raw.strip() else {})
+    except Exception:
+        safety = RenderSafetyFlags()
+    chunk = (
+        f" Chunk assist: {plan.assist_chunk_frames} frames."
+        if plan.assist_chunk_frames
+        else ""
+    )
+    live = (
+        f"Live execution plan: {width}×{height} @{fps}fps · aspect {aspect} · fps_mode {fps_mode} · "
+        f"{plan.steps} steps · max {plan.max_frames} frames (~{plan.max_duration_sec}s) · "
+        f"{plan.label} VRAM."
+        f"{(' ' + plan.notes) if plan.notes else ''}"
+        f"{chunk}"
+    )
+    if eng_warn:
+        live += " " + " ".join(eng_warn)
+    if safety.unload_after_render:
+        live += " Unload models after render (config)."
+    if safety.vae_tiling:
+        live += " VAE tiling hint on (config)."
+    return ExecutionPlanOut(
+        vram_gb=plan.vram_gb,
+        label=plan.label,
+        width=width,
+        height=height,
+        fps=fps,
+        steps=plan.steps,
+        max_frames=plan.max_frames,
+        max_duration_sec=plan.max_duration_sec,
+        image_tool_size=plan.image_tool_size,
+        lipsync_size=plan.lipsync_size,
+        lipsync_steps=plan.lipsync_steps,
+        assist_chunk_frames=plan.assist_chunk_frames,
+        summary=plan.summary,
+        assists=plan.assists,
+        clamped=clamped,
+        notes=plan.notes,
+        live_text=live,
+        safety=safety,
+        aspect_ratio=aspect,
+        fps_mode=fps_mode,
+        engine_warnings=eng_warn,
+        preview_caps=caps,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/recommend-engine",
+    response_model=EngineRecommendOut,
+)
+def recommend_scene_engine(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    from ..engine_recommend import recommend_engine
+
+    project = db.get(Project, project_id)
+    scene = db.get(Scene, scene_id)
+    if not project or not scene or scene.project_id != project_id:
+        raise HTTPException(404, "Scene not found")
+    return EngineRecommendOut.model_validate(recommend_engine(project=project, scene=scene))
+
+
+@router.post("/projects/{project_id}/timeline/propose", response_model=TimelineProposalOut)
+async def propose_timeline(
+    project_id: str, body: TimelineProposeRequest, db: Session = Depends(get_db)
+):
+    """Ask Ollama for a scene list from a brief. Never mutates scenes."""
+    import json
+    import re
+
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    brief = (body.brief or "").strip()
+    if not brief:
+        raise HTTPException(400, "brief is required")
+
+    warnings: list[str] = []
+    scenes: list[TimelineSceneProposal] = []
+    summary = ""
+
+    system = (
+        "You are Adept UI Video Studio's timeline planner. "
+        "Given a short brief/script, propose 2–8 scenes for a video timeline. "
+        "Reply with a short prose summary, then a fenced JSON block:\n"
+        "```timeline_proposal\n"
+        '{"summary":"...","scenes":[{"name":"...","prompt":"...","duration_sec":5,'
+        '"engine":"ltx","camera_note":"..."}]}\n'
+        "```\n"
+        "Use engines: auto, ltx, wan, or fal_* only when cloud is appropriate. "
+        "Keep durations between 3 and 10 seconds."
+    )
+    user = f"Project: {project.name}\nGlobal look: {project.global_prompt or '(none)'}\n\nBrief:\n{brief}"
+
+    if await ollama_reachable():
+        try:
+            raw = await chat_ollama(
+                [{"role": "user", "content": user}],
+                model=body.model,
+                project_context=system,
+            )
+            summary = strip_scene_setup_blocks(raw).strip()
+            m = re.search(
+                r"```timeline_proposal\s*([\s\S]*?)```", raw, flags=re.IGNORECASE
+            ) or re.search(r"```json\s*([\s\S]*?)```", raw, flags=re.IGNORECASE)
+            if m:
+                data = json.loads(m.group(1).strip())
+                summary = data.get("summary") or summary
+                for item in data.get("scenes") or []:
+                    scenes.append(TimelineSceneProposal.model_validate(item))
+        except Exception as exc:
+            warnings.append(f"Ollama propose failed: {exc}")
+    else:
+        warnings.append("Ollama unreachable — used heuristic split")
+
+    if not scenes:
+        # Heuristic: split by blank lines or sentences into up to 6 beats
+        parts = [p.strip() for p in re.split(r"\n\s*\n|(?<=[.!?])\s+", brief) if p.strip()]
+        if len(parts) < 2:
+            parts = [brief]
+        parts = parts[:6]
+        for i, part in enumerate(parts):
+            scenes.append(
+                TimelineSceneProposal(
+                    name=f"Scene {i + 1}",
+                    prompt=part[:800],
+                    duration_sec=5.0,
+                    engine="auto",
+                    camera_note="",
+                )
+            )
+        if not summary:
+            summary = f"Proposed {len(scenes)} scenes from brief (review before Apply)."
+
+    return TimelineProposalOut(summary=summary[:2000], scenes=scenes, warnings=warnings)
+
+
+@router.post("/projects/{project_id}/timeline/apply")
+async def apply_timeline(
+    project_id: str, body: TimelineApplyRequest, db: Session = Depends(get_db)
+):
+    """Apply a reviewed scene list. Requires explicit call — never auto-overwrite."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    if not body.scenes:
+        raise HTTPException(400, "scenes required")
+
+    existing = db.query(Scene).filter(Scene.project_id == project_id).order_by(Scene.index).all()
+    if body.replace_existing:
+        for s in existing:
+            db.delete(s)
+        db.flush()
+        start_index = 0
+    else:
+        start_index = len(existing)
+
+    created: list[str] = []
+    for i, prop in enumerate(body.scenes):
+        scene = Scene(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            index=start_index + i,
+            name=prop.name or f"Scene {start_index + i + 1}",
+            engine=prop.engine or project.engine_default or "ltx",
+            prompt=prop.prompt or "",
+            duration_sec=float(prop.duration_sec or 5),
+            camera_note=prop.camera_note or "",
+            seed=project.seed,
+        )
+        db.add(scene)
+        created.append(scene.id)
+
+    project.updated_at = datetime.utcnow()
+    db.commit()
+
+    job_id = None
+    if body.enqueue_render:
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            scene_id=None,
+            kind="render_timeline",
+            status="queued",
+            progress=0.0,
+            message="Queued timeline render",
+        )
+        db.add(job)
+        db.commit()
+        await job_queue.enqueue(job.id)
+        job_id = job.id
+
+    return {
+        "ok": True,
+        "created_scene_ids": created,
+        "replaced": body.replace_existing,
+        "job_id": job_id,
+    }
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectOut)
@@ -315,6 +595,7 @@ def add_scene(project_id: str, body: SceneIn, db: Session = Depends(get_db)):
         audio_asset_id=body.audio_asset_id,
         lipsync_enabled=1 if body.lipsync_enabled else 0,
         lipsync_audio_asset_id=body.lipsync_audio_asset_id,
+        continuity_json=body.continuity_json or "",
         camera_note=body.camera_note,
         seed=body.seed,
     )
@@ -602,6 +883,17 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
     kind = "render_scene" if body.kind == "scene" else "render_timeline"
     if kind == "render_scene" and not body.scene_id:
         raise HTTPException(400, "scene_id required for scene render")
+    params: dict = {}
+    if body.reference_method:
+        params["reference_method"] = body.reference_method
+    if body.sheet_id:
+        params["sheet_id"] = body.sheet_id
+    if body.strength_preset:
+        params["strength_preset"] = body.strength_preset
+    if body.strength is not None:
+        params["strength"] = body.strength
+    if body.ingredients_ic_lora is not None:
+        params["ingredients_ic_lora"] = body.ingredients_ic_lora
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -609,6 +901,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         kind=kind,
         status="queued",
         message="Queued",
+        params_json=json.dumps(params) if params else "",
     )
     db.add(job)
     db.commit()
@@ -692,113 +985,37 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
-def _extract_suggested_prompt(reply: str) -> str | None:
-    """Pull a fenced prompt or a PROMPT: block if the assistant provided one."""
-    return extract_suggested_prompt(reply)
-
-
 @router.get("/assistant/health", response_model=AssistantHealth)
 async def assistant_health():
-    reachable = await ollama_reachable()
-    models: list[str] = []
-    if reachable:
-        try:
-            models = await list_ollama_models()
-        except Exception:
-            models = []
-    has_model = settings.ollama_model in models or any(
-        m.startswith(settings.ollama_model.split(":")[0]) for m in models
-    )
+    """Thin alias over the Co-Director gateway (kept for existing FE call sites)."""
+    health = await codirector_service.get_health()
     return AssistantHealth(
-        ok=reachable and (has_model or bool(models)),
-        ollama_reachable=reachable,
-        model=settings.ollama_model,
-        available_models=models,
-        message=(
-            "ready"
-            if reachable and models
-            else ("Ollama offline" if not reachable else "No models installed")
-        ),
+        ok=health.status == "Ready",
+        ollama_reachable=health.reachable,
+        model=health.selected_model or settings.ollama_model,
+        available_models=[m.id for m in health.models],
+        message=health.message,
     )
 
 
 @router.post("/assistant/chat", response_model=AssistantChatResponse)
 async def assistant_chat(body: AssistantChatRequest, db: Session = Depends(get_db)):
-    if not await ollama_reachable():
-        raise HTTPException(503, "Ollama is not reachable at " + settings.ollama_url)
-
-    project_payload = None
-    director_payload = None
-    if body.project_id:
-        project = db.get(Project, body.project_id)
-        if not project:
-            raise HTTPException(404, "Project not found")
-        project_payload = _project_out(db, project).model_dump(mode="json")
-        if body.scene_id:
-            scene = db.get(Scene, body.scene_id)
-            if scene and scene.project_id == body.project_id:
-                director_payload = _scene_director(scene).model_dump(mode="json")
-
-    context = build_context_block(project_payload, body.scene_id, director_payload)
-    messages = [{"role": m.role, "content": m.content} for m in body.messages if m.role != "system"]
-
-    # Mode nudges for better answers
-    if body.mode == "setup" and messages:
-        messages[-1]["content"] = (
-            "Build a complete SCENE_SETUP for the selected scene in Adept UI Video Studio. "
-            "Use only asset tags/ids listed in context. Fill engine, duration, media_mode, "
-            "global_prompt (look/feel), motion prompt or prompt_segments, and image_slots when "
-            "image assets exist. Place audio_ref/sfx only if audio assets exist. "
-            "Write a short plan for the user, then end with a ```scene_setup JSON fence.\n\n"
-            "User request:\n" + messages[-1]["content"]
-        )
-    elif body.mode == "prompt" and messages:
-        messages[-1]["content"] = (
-            "Write or improve a ready-to-paste video prompt for the selected scene. "
-            "Put the final prompt in a ```prompt fenced block. "
-            "Also give a 1-2 sentence tip.\n\nUser request:\n" + messages[-1]["content"]
-        )
-    elif body.mode == "guide" and messages:
-        messages[-1]["content"] = (
-            "Explain how to do this in Adept UI Video Studio with numbered UI steps.\n\n"
-            + messages[-1]["content"]
-        )
-    elif body.mode == "chat" and messages:
-        # Auto-promote scene-building requests to setup behavior
-        last = messages[-1]["content"].lower()
-        if any(
-            k in last
-            for k in (
-                "build the scene",
-                "build a scene",
-                "set up the scene",
-                "setup the scene",
-                "set up this scene",
-                "configure the scene",
-                "create the scene",
-                "fill the scene",
-                "assemble the scene",
-                "scene setup",
-            )
-        ):
-            messages[-1]["content"] = (
-                "Build a complete SCENE_SETUP for the selected scene. "
-                "Short plan + ```scene_setup JSON fence. Use only listed assets.\n\n"
-                "User request:\n" + messages[-1]["content"]
-            )
-
+    """Thin alias over the Co-Director gateway (kept for existing FE call sites)."""
     try:
-        reply = await chat_ollama(messages, model=body.model, project_context=context)
-    except Exception as exc:
-        raise HTTPException(502, str(exc)) from exc
-
-    setup = extract_scene_setup(reply)
-    display = strip_scene_setup_blocks(reply) if setup else reply
-    suggested = None if setup else _extract_suggested_prompt(reply)
+        result, setup, suggested = await codirector_service.chat_for_project(
+            db,
+            messages=[{"role": m.role, "content": m.content} for m in body.messages],
+            project_id=body.project_id,
+            scene_id=body.scene_id,
+            mode=body.mode,
+            model=body.model,
+        )
+    except CoDirectorError as err:
+        raise HTTPException(status_code=status_code_for_error(err.code), detail=err.to_dict()) from err
 
     return AssistantChatResponse(
-        reply=display or reply,
-        model=body.model or settings.ollama_model,
+        reply=result.reply,
+        model=result.model_id,
         suggested_prompt=suggested,
         scene_setup=SceneSetupOut.model_validate(setup.model_dump()) if setup else None,
     )

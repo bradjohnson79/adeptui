@@ -19,14 +19,73 @@ import type {
 
 const BASE = "";
 
+export interface ApiErrorDetailShape {
+  code?: string;
+  message?: string;
+  details?: Record<string, unknown>;
+  recoverable?: boolean;
+  recommendedAction?: string;
+}
+
 export class ApiError extends Error {
   status: number;
+  /** Structured error code from a Co-Director-style `{code,message,...}` detail payload, if present. */
+  code?: string;
+  details?: Record<string, unknown>;
+  recoverable?: boolean;
+  recommendedAction?: string;
 
-  constructor(message: string, status: number) {
+  constructor(
+    message: string,
+    status: number,
+    opts?: { code?: string; details?: Record<string, unknown>; recoverable?: boolean; recommendedAction?: string },
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = opts?.code;
+    this.details = opts?.details;
+    this.recoverable = opts?.recoverable;
+    this.recommendedAction = opts?.recommendedAction;
   }
+}
+
+/** Backend-agnostic "couldn't reach the service" code used when fetch itself throws. */
+export const BACKEND_UNAVAILABLE = "BACKEND_UNAVAILABLE";
+
+export interface ClassifiedError {
+  code: string;
+  message: string;
+  recommendedAction?: string;
+  recoverable: boolean;
+}
+
+/**
+ * Turn any thrown value from a Co-Director request into a structured, user-safe
+ * classification. Never surfaces a bare `TypeError: Failed to fetch`.
+ */
+export function classifyCoDirectorError(err: unknown): ClassifiedError {
+  if (err instanceof ApiError) {
+    return {
+      code: err.code || "UNKNOWN_PROVIDER_ERROR",
+      message: err.message || "The Co-Director backend returned an unexpected error.",
+      recommendedAction: err.recommendedAction,
+      recoverable: err.recoverable ?? true,
+    };
+  }
+  if (err instanceof TypeError && /failed to fetch|networkerror when attempting to fetch|load failed/i.test(err.message)) {
+    return {
+      code: BACKEND_UNAVAILABLE,
+      message: "Adept couldn't reach the backend service. Make sure the app/API is running, then retry.",
+      recommendedAction: "retry_or_check_service",
+      recoverable: true,
+    };
+  }
+  return {
+    code: "UNKNOWN_PROVIDER_ERROR",
+    message: err instanceof Error ? err.message : String(err),
+    recoverable: true,
+  };
 }
 
 /** True for intentional request cancellation (unmount / navigation). */
@@ -72,6 +131,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
       detail = payload.detail ?? payload.error;
     } catch {
       detail = undefined;
+    }
+    if (detail && typeof detail === "object") {
+      const d = detail as ApiErrorDetailShape;
+      throw new ApiError(d.message || text || res.statusText, res.status, {
+        code: d.code,
+        details: d.details,
+        recoverable: d.recoverable,
+        recommendedAction: d.recommendedAction,
+      });
     }
     if (typeof detail === "string" && detail.trim()) {
       throw new ApiError(detail, res.status);
@@ -422,10 +490,97 @@ export const api = {
       warnings: string[];
       scene_id: string;
       project_id: string;
-    }>("/api/assistant/apply-setup", {
+    }    >("/api/assistant/apply-setup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }),
+  codirectorProviders: () =>
+    req<{ providers: { id: string; displayName: string; active: boolean }[] }>("/api/codirector/providers"),
+  codirectorHealth: (providerId: string = "active") =>
+    req<{
+      providerId: string;
+      displayName: string;
+      status: string;
+      reachable: boolean;
+      endpoint: string;
+      selectedModel: string | null;
+      modelAvailable: boolean;
+      models: {
+        id: string;
+        name: string;
+        sizeBytes?: number | null;
+        modifiedAt?: string | null;
+        family?: string | null;
+        parameterSize?: string | null;
+        quantization?: string | null;
+      }[];
+      message: string;
+      code?: string | null;
+      recommendedAction?: string | null;
+      ok: boolean;
+    }>(`/api/codirector/providers/${encodeURIComponent(providerId)}/health`),
+  codirectorModels: (providerId: string = "active") =>
+    req<{ models: { id: string; name: string }[] }>(
+      `/api/codirector/providers/${encodeURIComponent(providerId)}/models`,
+    ),
+  codirectorChat: (
+    body: {
+      messages: { role: string; content: string }[];
+      project_id?: string;
+      scene_id?: string;
+      model?: string;
+      provider_id?: string;
+      mode?: "chat" | "prompt" | "guide" | "setup";
+      request_id?: string;
+    },
+    opts?: { signal?: AbortSignal },
+  ) =>
+    req<{
+      requestId: string;
+      reply: string;
+      model: string;
+      providerId: string;
+      suggestedPrompt?: string | null;
+      sceneSetup?: SceneSetup | null;
+    }>("/api/codirector/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: opts?.signal,
+    }),
+  codirectorCancel: (requestId: string) =>
+    req<{ requestId: string; cancelled: boolean; taskCancelled: boolean }>("/api/codirector/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: requestId }),
+    }),
+  codirectorGetConversation: (projectId: string) =>
+    req<{
+      projectId: string;
+      messages: { id?: string; role: string; content: string; created_at?: string }[];
+      model: string | null;
+      providerId: string | null;
+      updatedAt: string | null;
+    }>(`/api/codirector/conversations/${encodeURIComponent(projectId)}`),
+  codirectorSaveConversation: (
+    projectId: string,
+    body: { messages: { id?: string; role: string; content: string; created_at?: string }[]; model?: string | null; provider_id?: string | null },
+  ) =>
+    req<{
+      projectId: string;
+      messages: { id?: string; role: string; content: string; created_at?: string }[];
+      model: string | null;
+      providerId: string | null;
+      updatedAt: string | null;
+    }>(`/api/codirector/conversations/${encodeURIComponent(projectId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  codirectorDeleteConversation: (projectId: string) =>
+    req<{ ok: boolean; projectId: string }>(`/api/codirector/conversations/${encodeURIComponent(projectId)}`, {
+      method: "DELETE",
     }),
   setupDetect: () => req<SetupLegacyDetection>("/api/setup/detect"),
   setupState: () => req<SetupLegacyState>("/api/setup/state"),
