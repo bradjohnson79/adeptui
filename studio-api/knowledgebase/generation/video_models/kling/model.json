@@ -1,0 +1,21 @@
+{
+  "id": "kling",
+  "label": "Kling",
+  "provider": "fal",
+  "runtime": "cloud",
+  "knowledge_version": "2026.07.23-foundation",
+  "capabilities": {
+    "text_to_video": true,
+    "image_to_video": true,
+    "start_end_frames": false,
+    "audio": false,
+    "max_duration_sec": 10,
+    "local": false,
+    "fal_api": true,
+    "app_support": "Via fal API when key configured",
+    "avatarSuitability": "strong",
+    "talkingHeadQuality": "high",
+    "lipSyncCompatibility": "external",
+    "supportsNativeAudio": false
+  }
+}

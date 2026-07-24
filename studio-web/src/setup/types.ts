@@ -6,7 +6,8 @@ export type SetupComponentState =
   | "update_available"
   | "installing"
   | "error"
-  | "download_unavailable";
+  | "download_unavailable"
+  | "source_pending";
 
 export type SetupOperationPhase =
   | "installing"
@@ -44,7 +45,8 @@ export type DiagnosticRecommendation =
   | "manual_help"
   | "link_existing"
   | "choose_install_location"
-  | "refresh_source";
+  | "refresh_source"
+  | "add_source_url";
 
 export type SetupPrimaryActionKind =
   | "install"
@@ -184,6 +186,7 @@ export interface SetupComponentStatus {
   verifier?: string | null;
   source_valid?: boolean | null;
   source_available?: boolean | null;
+  source_state?: string | null;
   source_host?: string | null;
   source_type?: string | null;
   provider_id?: string | null;
@@ -192,6 +195,10 @@ export interface SetupComponentStatus {
   tag_name?: string | null;
   archive_asset_name?: string | null;
   install_disabled?: boolean | null;
+  distribution_status?: string | null;
+  distribution_label?: string | null;
+  component_kind?: string | null;
+  show_download_sizes?: boolean | null;
   secondary_action?: SetupPrimaryAction | null;
   tertiary_action?: SetupPrimaryAction | null;
   pack_actions?: SetupPrimaryAction[] | null;

@@ -3,7 +3,17 @@ import type { Job, Project } from "../types";
 import { api } from "../api";
 import { HelpTip, PanelHeading } from "./HelpTip";
 
-export function JobPanel({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+export function JobPanel({
+  projectId,
+  onDone,
+  onSelectJob,
+  onViewInDirector,
+}: {
+  projectId: string;
+  onDone: () => void;
+  onSelectJob?: (id: string) => void;
+  onViewInDirector?: (sceneId: string, jobId: string) => void;
+}) {
   const [jobs, setJobs] = useState<Job[]>([]);
 
   useEffect(() => {
@@ -34,7 +44,16 @@ export function JobPanel({ projectId, onDone }: { projectId: string; onDone: () 
       />
       {jobs.length === 0 && <div className="empty">No jobs yet</div>}
       {jobs.slice(0, 8).map((j) => (
-        <div className="job-item" key={j.id}>
+        <div
+          className="job-item"
+          key={j.id}
+          role={onSelectJob ? "button" : undefined}
+          tabIndex={onSelectJob ? 0 : undefined}
+          onClick={() => onSelectJob?.(j.id)}
+          onKeyDown={(e) => {
+            if (onSelectJob && (e.key === "Enter" || e.key === " ")) onSelectJob(j.id);
+          }}
+        >
           <div className="scene-head">
             <strong>{j.kind}</strong>
             <span className="scene-meta">{j.status}</span>
@@ -44,9 +63,53 @@ export function JobPanel({ projectId, onDone }: { projectId: string; onDone: () 
             <i style={{ width: `${Math.round((j.progress || 0) * 100)}%` }} />
           </div>
           {(j.status === "queued" || j.status === "running") && (
-            <button style={{ marginTop: 8 }} onClick={() => api.cancelJob(j.id)}>
+            <button
+              style={{ marginTop: 8 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                api.cancelJob(j.id);
+              }}
+            >
               Cancel
             </button>
+          )}
+          {j.scene_id && (j.status === "queued" || j.status === "running") && onViewInDirector && (
+            <button
+              style={{ marginTop: 8, marginLeft: 8 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onViewInDirector(j.scene_id!, j.id);
+              }}
+            >
+              View in Director
+            </button>
+          )}
+          {(j.stage || j.message) && (
+            <div className="scene-meta" style={{ marginTop: 4 }}>
+              {j.stage ? `Stage: ${j.stage}` : null}
+              {j.status === "running" && (j.message || "").toLowerCase().includes("preview")
+                ? " · Live preview available"
+                : ""}
+            </div>
+          )}
+          {j.history_json && (
+            <div className="scene-meta" style={{ marginTop: 4, opacity: 0.85 }}>
+              {(() => {
+                try {
+                  const h = JSON.parse(j.history_json);
+                  const bits = [
+                    h.model || h.checkpoint,
+                    h.seed != null ? `seed ${h.seed}` : null,
+                    h.aspect,
+                    h.width && h.height ? `${h.width}×${h.height}` : null,
+                    Array.isArray(h.loras) && h.loras.length ? `${h.loras.length} LoRA` : null,
+                  ].filter(Boolean);
+                  return bits.length ? `Meta: ${bits.join(" · ")}` : null;
+                } catch {
+                  return null;
+                }
+              })()}
+            </div>
           )}
         </div>
       ))}
@@ -202,6 +265,9 @@ export function AdvancedPanel({ project, onChange }: { project: Project; onChang
                 .then(onChange)
             }
           >
+            <optgroup label="Auto">
+              <option value="auto">Auto Select</option>
+            </optgroup>
             <optgroup label="Local (ComfyUI)">
               <option value="ltx">LTX 2.3</option>
               <option value="wan">WAN 2.2</option>

@@ -1,0 +1,292 @@
+{
+  "components": {
+    "comfyui": {
+      "id": "comfyui",
+      "action": "verify",
+      "path": "",
+      "approved": true,
+      "status": "installed",
+      "message": ""
+    },
+    "ffmpeg": {
+      "id": "ffmpeg",
+      "action": "verify",
+      "path": "",
+      "approved": true,
+      "status": "installed",
+      "message": ""
+    },
+    "python": {
+      "id": "python",
+      "action": "verify",
+      "path": "",
+      "approved": true,
+      "status": "installed",
+      "message": ""
+    },
+    "pack_essential_photoreal": {
+      "id": "pack_essential_photoreal",
+      "action": "remove",
+      "approved": true,
+      "status": "not_installed",
+      "message": "Marked removed (files not deleted automatically).",
+      "verified": false,
+      "verification": {
+        "checked_at": "2026-07-23T20:57:31.665286+00:00",
+        "issue_code": "path_not_configured",
+        "summary": "Essential Photoreal Pack has no configured path.",
+        "recommendation": "configure"
+      }
+    }
+  },
+  "model_locations": {
+    "pack_essential_photoreal": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal",
+    "pack_essential_anime": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_anime",
+    "pack_essential_cinematic": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_cinematic"
+  },
+  "schema_version": 2,
+  "status": {
+    "python": {
+      "status": "ready",
+      "installed_version": "Python 3.11.15",
+      "available_version": null,
+      "installation_path": "C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\.venv\\Scripts\\python.exe",
+      "last_verified_at": "2026-07-23T21:35:03.291869+00:00",
+      "diagnostic": null
+    },
+    "ffmpeg": {
+      "status": "ready",
+      "installed_version": "ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.2-full_build\\bin\\ffmpeg.EXE",
+      "last_verified_at": "2026-07-23T21:35:03.314969+00:00",
+      "diagnostic": null
+    },
+    "comfyui": {
+      "status": "ready",
+      "installed_version": "Python/3.13 aiohttp/3.13.5",
+      "available_version": null,
+      "installation_path": "http://127.0.0.1:8188",
+      "last_verified_at": "2026-07-23T21:35:03.350867+00:00",
+      "diagnostic": null
+    },
+    "ltx_checkpoint": {
+      "status": "ready",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\checkpoints\\ltx-2.3-22b-distilled-fp8.safetensors",
+      "last_verified_at": "2026-07-23T21:35:03.350867+00:00",
+      "diagnostic": null
+    },
+    "ollama": {
+      "status": "ready",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "http://127.0.0.1:11434",
+      "last_verified_at": "2026-07-23T21:35:03.380218+00:00",
+      "diagnostic": null
+    },
+    "wan_models": {
+      "status": "ready",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": null,
+      "last_verified_at": "2026-07-23T21:35:03.380742+00:00",
+      "diagnostic": null
+    },
+    "fal_key": {
+      "status": "not_installed",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": null,
+      "last_verified_at": null,
+      "diagnostic": {
+        "component_id": "fal_key",
+        "healthy": false,
+        "issue_code": "credential_missing",
+        "summary": "A fal.ai API key is not configured.",
+        "technical_details": [
+          "Available disk bytes: 3556376563712"
+        ],
+        "recommendation": "configure",
+        "recommended_action_label": "Configure",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:30:22.915460+00:00"
+      }
+    },
+    "pack_essential_photoreal": {
+      "status": "not_installed",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal",
+      "last_verified_at": "2026-07-23T20:57:09.385627+00:00",
+      "diagnostic": {
+        "component_id": "pack_essential_photoreal",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Photoreal Pack directory is empty.",
+        "technical_details": [
+          "Available disk bytes: 3556290838528",
+          "Readable path: True",
+          "Writable path: True"
+        ],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:34:49.341640+00:00"
+      }
+    },
+    "pack_essential_anime": {
+      "status": "not_installed",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_anime",
+      "last_verified_at": null,
+      "diagnostic": {
+        "component_id": "pack_essential_anime",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Anime Pack directory is empty.",
+        "technical_details": [
+          "Available disk bytes: 3556290420736",
+          "Readable path: True",
+          "Writable path: True"
+        ],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:35:00.956475+00:00"
+      }
+    },
+    "pack_essential_cinematic": {
+      "status": "not_installed",
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_cinematic",
+      "last_verified_at": null,
+      "diagnostic": {
+        "component_id": "pack_essential_cinematic",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Cinematic Pack directory is empty.",
+        "technical_details": [],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:33:45.793983+00:00"
+      }
+    }
+  },
+  "operations": {
+    "fac9f593-4af5-4174-acef-20850c2f7df6": {
+      "operation_id": "fac9f593-4af5-4174-acef-20850c2f7df6",
+      "kind": "component_action",
+      "component_ids": [
+        "pack_essential_photoreal"
+      ],
+      "status": "completed",
+      "phase": "verifying",
+      "progress": 1.0,
+      "stage": "Complete",
+      "result": {
+        "ready": true,
+        "overall_status": "ready",
+        "failures": []
+      },
+      "error": null,
+      "created_at": "2026-07-23T20:55:52.970006+00:00",
+      "updated_at": "2026-07-23T20:56:16.878710+00:00"
+    },
+    "28158fb2-43c2-47fe-b2da-d2d2f5db278c": {
+      "operation_id": "28158fb2-43c2-47fe-b2da-d2d2f5db278c",
+      "kind": "component_action",
+      "component_ids": [
+        "pack_essential_photoreal"
+      ],
+      "status": "completed",
+      "phase": "verifying",
+      "progress": 1.0,
+      "stage": "Complete",
+      "result": {
+        "ready": true,
+        "overall_status": "ready",
+        "failures": [
+          {
+            "component_id": "pack_essential_photoreal",
+            "issue_code": "required_files_missing",
+            "recommendation": "repair"
+          }
+        ]
+      },
+      "error": null,
+      "created_at": "2026-07-23T21:03:56.290287+00:00",
+      "updated_at": "2026-07-23T21:03:56.750866+00:00"
+    },
+    "870f6922-dc87-40ac-9dca-373994a3760b": {
+      "operation_id": "870f6922-dc87-40ac-9dca-373994a3760b",
+      "kind": "component_action",
+      "component_ids": [
+        "fal_key"
+      ],
+      "status": "cancelled",
+      "phase": "configuring",
+      "progress": 0.0,
+      "stage": "Cancelled",
+      "result": null,
+      "error": "Cancelled by user",
+      "created_at": "2026-07-23T21:30:22.917466+00:00",
+      "updated_at": "2026-07-23T21:30:48.078736+00:00"
+    },
+    "fd509d96-c879-4bb4-af32-9c0113891126": {
+      "operation_id": "fd509d96-c879-4bb4-af32-9c0113891126",
+      "kind": "component_action",
+      "component_ids": [
+        "pack_essential_photoreal"
+      ],
+      "status": "completed",
+      "phase": "verifying",
+      "progress": 1.0,
+      "stage": "Complete",
+      "result": {
+        "ready": true,
+        "overall_status": "ready",
+        "failures": [
+          {
+            "component_id": "pack_essential_photoreal",
+            "issue_code": "required_files_missing",
+            "recommendation": "repair"
+          }
+        ]
+      },
+      "error": null,
+      "created_at": "2026-07-23T21:34:47.434524+00:00",
+      "updated_at": "2026-07-23T21:34:49.455692+00:00"
+    },
+    "2a362b3a-0946-4b9b-8799-9690beee06ca": {
+      "operation_id": "2a362b3a-0946-4b9b-8799-9690beee06ca",
+      "kind": "component_action",
+      "component_ids": [
+        "pack_essential_anime"
+      ],
+      "status": "completed",
+      "phase": "verifying",
+      "progress": 1.0,
+      "stage": "Complete",
+      "result": {
+        "ready": true,
+        "overall_status": "ready",
+        "failures": [
+          {
+            "component_id": "pack_essential_anime",
+            "issue_code": "required_files_missing",
+            "recommendation": "repair"
+          }
+        ]
+      },
+      "error": null,
+      "created_at": "2026-07-23T21:34:59.283074+00:00",
+      "updated_at": "2026-07-23T21:35:01.039698+00:00"
+    }
+  },
+  "update_dismissals": {}
+}

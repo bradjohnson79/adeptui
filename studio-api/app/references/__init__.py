@@ -1,7 +1,11 @@
+"""Director Visual References / LTX Ingredients IC-LoRA (+ legacy prompt tag helpers)."""
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+
+from .models import REFERENCE_MODELS, STRENGTH_PRESETS, get_reference_model
 
 TAG_RE = re.compile(r"@([A-Za-z0-9_\-]+)")
 
@@ -19,10 +23,6 @@ def extract_tags(text: str) -> list[str]:
 
 
 def resolve_prompt(text: str, tag_to_asset: dict[str, tuple[str, str]]) -> ResolvedPrompt:
-    """
-    tag_to_asset maps tag -> (asset_id, description_or_path)
-    Leaves @tags in the prompt for readability but returns attached assets.
-    """
     tags = extract_tags(text)
     resolved: dict[str, str] = {}
     missing: list[str] = []
@@ -49,3 +49,23 @@ def inject_spatial_and_camera(prompt: str, camera_note: str = "", spatial_notes:
     if spatial_notes.strip():
         parts.append(f"Set continuity: {spatial_notes.strip()}")
     return " ".join(parts)
+
+
+def __getattr__(name: str):
+    if name == "router":
+        from .api import router
+
+        return router
+    raise AttributeError(name)
+
+
+__all__ = [
+    "router",
+    "REFERENCE_MODELS",
+    "STRENGTH_PRESETS",
+    "get_reference_model",
+    "ResolvedPrompt",
+    "extract_tags",
+    "resolve_prompt",
+    "inject_spatial_and_camera",
+]

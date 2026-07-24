@@ -29,6 +29,9 @@ class TimelineClip(BaseModel):
     length: float = 5.0
     trim_start: float = 0.0
     label: str = ""
+    volume: float = 1.0
+    fade_in: float = 0.0
+    fade_out: float = 0.0
 
 
 class ImageClip(TimelineClip):
@@ -40,19 +43,73 @@ class PromptSegment(BaseModel):
     start: float = 0.0
     length: float = 2.0
     text: str = ""
+    weight: float = 1.0
     region: Optional[RegionBox] = None  # if set, affects only highlighted area
+    # Prompt Timeline metadata (optional; old JSON remains valid)
+    audio_intent: list[str] = Field(default_factory=list)
+    script_segment_id: Optional[str] = None
+    storyboard_panel_id: Optional[str] = None
+    scene_state_id: Optional[str] = None
+    model_prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
+
+
+CameraMotionType = Literal[
+    "static",
+    "dolly_in",
+    "dolly_out",
+    "push",
+    "pull",
+    "pan",
+    "tilt",
+    "orbit",
+    "crane",
+    "rail",
+    "handheld",
+    "drone",
+]
+
+CameraRig = Literal[
+    "tripod",
+    "dolly",
+    "crane",
+    "steadicam",
+    "handheld",
+    "drone",
+    "rail",
+    "gimbal",
+    "virtual",
+]
+
+
+class CameraClip(BaseModel):
+    id: str = Field(default_factory=_nid)
+    start: float = 0.0
+    length: float = 2.0
+    motion_type: CameraMotionType = "static"
+    speed: float = 1.0
+    distance: float = 1.0
+    ease: str = "ease_in_out"
+    shake: float = 0.0
+    blend: float = 0.5
+    rig: CameraRig = "tripod"
+    label: str = ""
+    preset_id: Optional[str] = None
 
 
 class DirectorTimeline(BaseModel):
     """
-    Director multi-track timeline for one scene.
+    Director Prompt Timeline for one scene (shot / short sequence generation).
 
     Tracks:
       - media (image OR video mode)
-      - text prompt segments (optional region highlight)
+      - text prompt segments (optional region highlight + audio intent)
+      - camera motion
       - audio (music / dialogue bed)
       - sfx
       - lip sync 1 / lip sync 2 (via lipsync_tracks)
+
+    Director creates shots. Editor assembles the film.
     """
 
     media_mode: Literal["image", "video"] = "image"
@@ -60,6 +117,7 @@ class DirectorTimeline(BaseModel):
     image_clips: list[ImageClip] = Field(default_factory=list)
     video_clips: list[TimelineClip] = Field(default_factory=list)
     prompt_segments: list[PromptSegment] = Field(default_factory=list)
+    camera_clips: list[CameraClip] = Field(default_factory=list)
     audio_clips: list[TimelineClip] = Field(default_factory=list)
     sfx_clips: list[TimelineClip] = Field(default_factory=list)
     lipsync: LipSyncTracks = Field(default_factory=LipSyncTracks.default)
@@ -75,8 +133,23 @@ class DirectorTimeline(BaseModel):
             duration_sec=duration_sec,
             image_clips=[],
             prompt_segments=segs or [PromptSegment(start=0.0, length=duration_sec, text="")],
+            camera_clips=[
+                CameraClip(start=0.0, length=duration_sec, motion_type="static", rig="tripod", label="Static")
+            ],
             lipsync=LipSyncTracks.default(),
         )
+
+
+def camera_prompt_hint(clips: list[CameraClip]) -> str:
+    if not clips:
+        return ""
+    bits = []
+    for c in sorted(clips, key=lambda x: x.start):
+        bits.append(
+            f"{c.motion_type.replace('_', ' ')} on {c.rig} "
+            f"(speed {c.speed:.2f}, distance {c.distance:.2f}, ease {c.ease}, shake {c.shake:.2f})"
+        )
+    return "Camera: " + "; ".join(bits)
 
 
 def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, fallback_prompt: str = "") -> DirectorTimeline:

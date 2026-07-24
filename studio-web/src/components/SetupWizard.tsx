@@ -71,11 +71,18 @@ function DiagnosticResult({
 }) {
   const nextStep = (() => {
     if (diagnostic.healthy) return diagnostic.summary;
-    if (diagnostic.issue_code === "download_source_missing" || diagnostic.issue_code === "pack_provider_not_configured") {
-      return "Download source not configured. Set ADEPT_PACK_GITHUB_OWNER and ADEPT_PACK_GITHUB_REPOSITORY, then use Check Again. Link Existing Folder is only for folders that already contain this pack.";
+    if (diagnostic.issue_code === "source_not_published") {
+      return "No official distribution has been published for this pack yet. Use Add Source URL when you have a verified archive, or Link Existing Folder if the pack files are already on disk.";
+    }
+    if (
+      diagnostic.issue_code === "source_not_configured"
+      || diagnostic.issue_code === "download_source_missing"
+      || diagnostic.issue_code === "pack_provider_not_configured"
+    ) {
+      return "No official source has been assigned to this component. Add a Source URL or Link Existing Folder. A shared GitHub owner/repository environment variable is not used as a universal pack source.";
     }
     if (diagnostic.issue_code === "pack_release_not_found") {
-      return "No matching GitHub release/asset was found. Use Check Again after publishing a release. Link Existing Folder is optional if you already have the pack files.";
+      return "The configured repository exists, but no compatible published release was found. Use Check Again, Add Source URL, or Link Existing Folder.";
     }
     if (diagnostic.issue_code === "github_rate_limited") {
       return "Try again later, or configure ADEPT_PACK_GITHUB_TOKEN to raise API limits.";
@@ -134,11 +141,13 @@ function SetupComponentCard({
   const size = formatComponentSize(component);
   const isActive = component.status === "installing" || component.status === "checking" || Boolean(operation);
   // Never block Download/Install when a concrete source is available (retry after failure).
+  const isCredential = component.component_kind === "credential" || component.installer === "credentials";
   const installDisabled = component.source_available
     ? Boolean(component.status === "ready")
     : (
       Boolean(component.install_disabled)
       || component.status === "download_unavailable"
+      || component.status === "source_pending"
       || (
         component.source_valid === false
         && (action?.action === "install" || action?.kind === "install")
@@ -152,23 +161,30 @@ function SetupComponentCard({
       && component.issue_summary
       && component.diagnostic.summary.trim() === component.issue_summary.trim()
       && component.status !== "download_unavailable"
+      && component.status !== "source_pending"
       && component.issue_code !== "required_files_missing"
       && component.issue_code !== "download_source_missing"
+      && component.issue_code !== "source_not_published"
+      && component.issue_code !== "source_not_configured"
     );
 
   return (
     <article
-      className={`setup-component-card status-${component.status}`}
+      className={`setup-component-card status-${component.status}${component.status === "source_pending" ? " status-pending" : ""}`}
       aria-labelledby={`setup-${component.id}`}
       data-testid={`setup-card-${component.id}`}
       data-status={component.status}
+      data-kind={component.component_kind || component.installer || ""}
     >
       <header className="setup-card-header">
         <div>
           <h3 id={`setup-${component.id}`}>{component.name}</h3>
           <span className="setup-requirement">{component.required ? "Required" : "Optional"}</span>
         </div>
-        <span className="setup-status" data-state={component.status}>
+        <span
+          className="setup-status"
+          data-state={component.status === "source_pending" ? "source_pending" : component.status}
+        >
           <span className="setup-status-mark" aria-hidden="true" />
           {componentStateLabel(component)}
         </span>
@@ -185,7 +201,11 @@ function SetupComponentCard({
       </div>
 
       {showIssue && <p className="setup-issue"><strong>Issue</strong> {component.issue_summary}</p>}
-      {component.diagnostic && (showDiagnostic || component.status === "download_unavailable") && (
+      {component.diagnostic && (
+        showDiagnostic
+        || component.status === "download_unavailable"
+        || component.status === "source_pending"
+      ) && (
         <DiagnosticResult diagnostic={component.diagnostic} issueSummary={component.issue_summary} />
       )}
       {isActive && <SetupProgress operation={operation} component={component} />}
@@ -200,17 +220,25 @@ function SetupComponentCard({
         </details>
       )}
 
-      {(component.status === "download_unavailable" || component.provider_id === "github_releases") && (
+      {(
+        component.status === "download_unavailable"
+        || component.status === "source_pending"
+        || (component.provider_id === "github_releases" && component.source_available)
+      ) && (
         <details className="setup-ready-details">
-          <summary>View Details</summary>
-          <div><span>Provider</span><code>{component.provider_id === "github_releases" ? "GitHub Releases" : (component.source_type ?? "unknown")}</code></div>
+          <summary>View Pack Specification</summary>
+          <div><span>Distribution</span><code>{component.distribution_label || component.distribution_status || "unknown"}</code></div>
+          <div><span>Provider</span><code>{component.provider_id === "github_releases" ? "Per-component / pending" : (component.source_type ?? "unassigned")}</code></div>
           {component.repository && <div><span>Repository</span><code>{component.repository}</code></div>}
           {component.tag_name && <div><span>Release</span><code>{component.tag_name}</code></div>}
           {component.archive_asset_name && <div><span>Asset</span><code>{component.archive_asset_name}</code></div>}
+          {component.required_files?.length ? (
+            <div><span>Required</span><code>{component.required_files.join(", ")}</code></div>
+          ) : null}
           {!component.source_available && (
             <div>
               <span>Source</span>
-              <code>Automatic source discovery did not find a compatible download.</code>
+              <code>No official distribution published yet. Add Source URL or Link Existing Folder.</code>
             </div>
           )}
           {component.custom_source_active && (
@@ -225,6 +253,7 @@ function SetupComponentCard({
             type="button"
             className="primary"
             disabled={busy || installDisabled}
+            title={installDisabled ? "Download and Install requires a verified per-component source." : undefined}
             onClick={() => onPackAction(component, "install")}
           >
             Download and Install
@@ -274,6 +303,7 @@ function SetupComponentCard({
             type="button"
             className="primary"
             disabled={busy || action.disabled || (action.action === "install" && installDisabled)}
+            data-testid={isCredential ? `configure-credential-${component.id}` : undefined}
             onClick={() => onPrimaryAction({ ...component, primary_action: action })}
           >
             {action.label}

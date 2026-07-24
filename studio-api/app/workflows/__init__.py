@@ -9,6 +9,19 @@ from .image_tools import (
     customize_angle_prompts,
     views_for_tool,
 )
+from .registry import (
+    DEFAULT_WORKFLOW_REGISTRY,
+    WORKFLOW_INVENTORY,
+    RequiredInputValidator,
+    StaticWorkflowRegistry,
+    WorkflowCompatibility,
+    WorkflowInput,
+    WorkflowMetadata,
+    WorkflowRegistry,
+    WorkflowValidationIssue,
+    WorkflowValidationResult,
+    WorkflowValidator,
+)
 
 __all__ = [
     "build_ltx_scene_workflow",
@@ -21,4 +34,15 @@ __all__ = [
     "CAMERA_ANGLE_VIEWS",
     "customize_angle_prompts",
     "views_for_tool",
+    "DEFAULT_WORKFLOW_REGISTRY",
+    "WORKFLOW_INVENTORY",
+    "RequiredInputValidator",
+    "StaticWorkflowRegistry",
+    "WorkflowCompatibility",
+    "WorkflowInput",
+    "WorkflowMetadata",
+    "WorkflowRegistry",
+    "WorkflowValidationIssue",
+    "WorkflowValidationResult",
+    "WorkflowValidator",
 ]

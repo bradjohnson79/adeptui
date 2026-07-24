@@ -148,6 +148,47 @@ export function ImageToolsPanel({ project, onChange }: { project: Project; onCha
         </div>
       </div>
 
+      <div className="panel" style={{ marginTop: "1rem" }}>
+        <PanelHeading
+          title="Use in 1 / 3 Frame"
+          tip="Push the selected reference into the active scene’s Start (and clear Middle/End for 1 Frame)."
+        />
+        <div className="row-actions">
+          <button
+            type="button"
+            disabled={!sheetSource || !project.scenes[0]}
+            onClick={async () => {
+              const scene = project.scenes[0];
+              if (!scene || !sheetSource) return;
+              await api.updateScene(project.id, scene.id, {
+                ...scene,
+                start_asset_id: sheetSource,
+                middle_asset_id: null,
+                end_asset_id: null,
+              });
+              onChange();
+            }}
+          >
+            Sheet ref → 1 Frame Start
+          </button>
+          <button
+            type="button"
+            disabled={!angleSource || !project.scenes[0]}
+            onClick={async () => {
+              const scene = project.scenes[0];
+              if (!scene || !angleSource) return;
+              await api.updateScene(project.id, scene.id, {
+                ...scene,
+                start_asset_id: angleSource,
+              });
+              onChange();
+            }}
+          >
+            Angle source → 3 Frame Start
+          </button>
+        </div>
+      </div>
+
       <p className="scene-meta" style={{ marginTop: "1rem" }}>
         Tip: watch the Render queue while jobs run. New images appear in Assets automatically — use them as Start/Middle/End frames or @tags in prompts.
       </p>

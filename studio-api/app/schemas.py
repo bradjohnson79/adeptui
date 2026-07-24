@@ -6,10 +6,88 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
-EngineName = Literal["ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
+EngineName = Literal["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
 PresetName = Literal["draft", "quality"]
 JobKind = Literal["render_scene", "render_timeline", "lipsync", "stitch", "export"]
 JobStatus = Literal["queued", "running", "done", "failed", "cancelled"]
+ContinuityLock = Literal["locked", "unlocked", "inherit_project", "inherit_previous"]
+
+
+class ContinuityLocks(BaseModel):
+    identity: ContinuityLock = "inherit_project"
+    wardrobe: ContinuityLock = "inherit_project"
+    environment: ContinuityLock = "inherit_project"
+    lighting: ContinuityLock = "inherit_project"
+    camera: ContinuityLock = "inherit_project"
+    props: ContinuityLock = "inherit_project"
+    audio_bed: ContinuityLock = "inherit_project"
+    motion_style: ContinuityLock = "inherit_project"
+
+
+class RenderSafetyFlags(BaseModel):
+    unload_after_render: bool = False
+    vae_tiling: bool = False
+    notes: str = ""
+
+
+class ExecutionPlanOut(BaseModel):
+    vram_gb: int
+    label: str
+    width: int
+    height: int
+    fps: int
+    steps: int
+    max_frames: int
+    max_duration_sec: float
+    image_tool_size: int
+    lipsync_size: int
+    lipsync_steps: int
+    assist_chunk_frames: int
+    summary: str
+    assists: list[str] = Field(default_factory=list)
+    clamped: bool = False
+    notes: str = ""
+    live_text: str = ""
+    safety: RenderSafetyFlags = Field(default_factory=RenderSafetyFlags)
+    aspect_ratio: str = "16:9"
+    fps_mode: str = "auto"
+    engine_warnings: list[str] = Field(default_factory=list)
+    preview_caps: dict[str, Any] = Field(default_factory=dict)
+
+
+class EngineRecommendOut(BaseModel):
+    engineId: str
+    confidence: float
+    reasons: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    local: bool = True
+    vram_tier: int = 32
+    profile_engine: str = "ltx"
+
+
+class TimelineSceneProposal(BaseModel):
+    name: str = "Scene"
+    prompt: str = ""
+    duration_sec: float = 5.0
+    engine: Optional[EngineName] = None
+    camera_note: str = ""
+
+
+class TimelineProposalOut(BaseModel):
+    summary: str = ""
+    scenes: list[TimelineSceneProposal] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TimelineProposeRequest(BaseModel):
+    brief: str = ""
+    model: Optional[str] = None
+
+
+class TimelineApplyRequest(BaseModel):
+    scenes: list[TimelineSceneProposal] = Field(default_factory=list)
+    replace_existing: bool = True
+    enqueue_render: bool = False
 
 
 class AssetOut(BaseModel):
@@ -20,6 +98,11 @@ class AssetOut(BaseModel):
     filename: str
     path: str
     comfy_name: str
+    scope: str = "project"
+    shared_project_ids_json: str = "[]"
+    labels_json: str = "[]"
+    prompt_meta_json: str = "{}"
+    parent_asset_id: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -39,8 +122,14 @@ class SceneIn(BaseModel):
     lipsync_audio_asset_id: Optional[str] = None
     lipsync_tracks_json: Optional[str] = None
     director_json: Optional[str] = None
+    continuity_json: Optional[str] = None
     camera_note: str = ""
     seed: int = -1
+    aspect_ratio: str = "16:9"
+    width: int = 0
+    height: int = 0
+    fps_mode: str = "auto"
+    fps: int = 0
 
 
 class SceneOut(BaseModel):
@@ -59,8 +148,14 @@ class SceneOut(BaseModel):
     lipsync_audio_asset_id: Optional[str] = None
     lipsync_tracks_json: str = ""
     director_json: str = ""
+    continuity_json: str = ""
     camera_note: str = ""
     seed: int = -1
+    aspect_ratio: str = "16:9"
+    width: int = 0
+    height: int = 0
+    fps_mode: str = "auto"
+    fps: int = 0
     output_path: Optional[str] = None
     lipsync_output_path: Optional[str] = None
 
@@ -86,8 +181,14 @@ class SceneOut(BaseModel):
                 "lipsync_audio_asset_id": obj.lipsync_audio_asset_id,
                 "lipsync_tracks_json": getattr(obj, "lipsync_tracks_json", "") or "",
                 "director_json": getattr(obj, "director_json", "") or "",
+                "continuity_json": getattr(obj, "continuity_json", "") or "",
                 "camera_note": obj.camera_note,
                 "seed": obj.seed,
+                "aspect_ratio": getattr(obj, "aspect_ratio", None) or "16:9",
+                "width": int(getattr(obj, "width", 0) or 0),
+                "height": int(getattr(obj, "height", 0) or 0),
+                "fps_mode": getattr(obj, "fps_mode", None) or "auto",
+                "fps": int(getattr(obj, "fps", 0) or 0),
                 "output_path": obj.output_path,
                 "lipsync_output_path": obj.lipsync_output_path,
             }
@@ -120,6 +221,18 @@ class ProjectUpdate(BaseModel):
     preset: Optional[PresetName] = None
     vram_gb: Optional[int] = None
     spatial_map_json: Optional[str] = None
+    render_safety_json: Optional[str] = None
+    learning_json: Optional[str] = None
+    learning_enabled_json: Optional[str] = None
+    preview_settings_json: Optional[str] = None
+    description: Optional[str] = None
+    company: Optional[str] = None
+    director_name: Optional[str] = None
+    version: Optional[str] = None
+    tags_json: Optional[str] = None
+    archived: Optional[int] = None
+    defaults_json: Optional[str] = None
+    settings_json: Optional[str] = None
     apply_vram_profile: bool = False
 
 
@@ -136,14 +249,52 @@ class ProjectOut(BaseModel):
     preset: str
     vram_gb: int = 32
     spatial_map_json: str
+    render_safety_json: str = ""
+    learning_json: str = ""
+    learning_enabled_json: str = ""
+    preview_settings_json: str = ""
+    description: str = ""
+    company: str = ""
+    director_name: str = ""
+    version: str = "1.0"
+    tags_json: str = "[]"
+    archived: int = 0
+    defaults_json: str = ""
+    settings_json: str = ""
     created_at: datetime
     updated_at: datetime
     scenes: list[SceneOut] = Field(default_factory=list)
     assets: list[AssetOut] = Field(default_factory=list)
+    # Lightweight summary for home library cards (avoids N+1 dashboard calls)
+    scene_count: int = 0
+    asset_count: int = 0
+    render_pct: int = 0
+    cover_asset_id: Optional[str] = None
+    status_label: str = "Active"
 
     class Config:
         from_attributes = True
 
+
+class JobOut(BaseModel):
+    id: str
+    project_id: str
+    scene_id: Optional[str]
+    kind: str
+    status: str
+    progress: float
+    message: str
+    stage: str = ""
+    preview_json: str = ""
+    params_json: str = ""
+    history_json: str = ""
+    comfy_prompt_id: Optional[str]
+    output_path: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 class VramProfileOut(BaseModel):
     vram_gb: int
@@ -243,27 +394,15 @@ class EngineOptionOut(BaseModel):
     group: str
 
 
-class JobOut(BaseModel):
-    id: str
-    project_id: str
-    scene_id: Optional[str]
-    kind: str
-    status: str
-    progress: float
-    message: str
-    comfy_prompt_id: Optional[str]
-    output_path: Optional[str]
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
 class RenderRequest(BaseModel):
     scene_id: Optional[str] = None
     retake: bool = False
     kind: Literal["scene", "timeline"] = "timeline"
+    reference_method: Optional[str] = None
+    sheet_id: Optional[str] = None
+    strength_preset: Optional[str] = None
+    strength: Optional[float] = None
+    ingredients_ic_lora: Optional[bool] = None
 
 
 class LipSyncRequest(BaseModel):

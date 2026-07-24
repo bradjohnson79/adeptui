@@ -11,6 +11,7 @@ CANONICAL_STATUSES = {
     "unknown", "checking", "ready", "not_installed",
     "update_available", "installing", "error",
     "download_unavailable",
+    "source_pending",
 }
 
 _RECOMMENDATION_LABELS = {
@@ -19,13 +20,14 @@ _RECOMMENDATION_LABELS = {
     "repair": "Repair Installation",
     "reinstall": "Reinstall",
     "update": "Update Now",
-    "correct_path": "Correct Path",
+    "correct_path": "Locate Existing Files",
     "grant_permission": "Grant Permission",
-    "configure": "Configure",
+    "configure": "Configure API Key",
     "manual_help": "View Manual Help",
     "link_existing": "Link Existing Folder",
     "choose_install_location": "Choose Install Location",
     "refresh_source": "Check Again",
+    "add_source_url": "Add Source URL",
 }
 
 
@@ -118,20 +120,30 @@ def _primary_action(
     diagnostic: dict[str, Any] | None,
     *,
     source_valid: bool | None = None,
+    kind: str | None = None,
+    source_state: str | None = None,
 ) -> dict[str, Any] | None:
+    from .component_kinds import KIND_CREDENTIAL, primary_action_for_kind
+
+    if kind == KIND_CREDENTIAL:
+        return primary_action_for_kind(
+            kind, status=status, source_state=source_state, diagnostic=diagnostic
+        )
     if status == "ready" or status in ("checking", "installing"):
         return None
+    if status == "source_pending":
+        return {"action": "add_source_url", "label": "Add Source URL", "disabled": False}
     if status == "download_unavailable":
         return {
-            "action": "refresh_source",
-            "label": "Check Again",
+            "action": "add_source_url",
+            "label": "Add Source URL",
             "disabled": False,
         }
     if status == "not_installed":
         if source_valid is False:
             return {
-                "action": "refresh_source",
-                "label": "Check Again",
+                "action": "add_source_url",
+                "label": "Add Source URL",
                 "disabled": False,
             }
         return {"action": "install", "label": "Download and Install"}
@@ -139,10 +151,10 @@ def _primary_action(
         return {"action": "update", "label": "Update Now"}
     if diagnostic and diagnostic.get("recommendation") not in (None, "none"):
         recommendation = str(diagnostic["recommendation"])
-        if recommendation == "manual_help" and source_valid is False:
+        if recommendation in ("manual_help", "add_source_url") and source_valid is False:
             return {
-                "action": "refresh_source",
-                "label": "Check Again",
+                "action": "add_source_url",
+                "label": "Add Source URL",
                 "disabled": False,
             }
         labels = {
@@ -150,13 +162,14 @@ def _primary_action(
             "repair": "Repair Installation",
             "reinstall": "Reinstall",
             "update": "Update Now",
-            "correct_path": "Correct Path",
+            "correct_path": "Locate Existing Files",
             "grant_permission": "Grant Permission",
-            "configure": "Configure",
+            "configure": "Configure API Key",
             "manual_help": "View Details",
             "link_existing": "Link Existing Folder",
             "choose_install_location": "Choose Install Location",
             "refresh_source": "Check Again",
+            "add_source_url": "Add Source URL",
         }
         return {"action": recommendation, "label": labels.get(recommendation, "Run Diagnostics")}
     return {"action": "diagnostics", "label": "Run Diagnostics"}
@@ -165,26 +178,45 @@ def _primary_action(
 def _pack_source_fields(definition: ComponentDefinition) -> dict[str, Any]:
     if definition.installer != "asset_pack":
         return {}
+    from .component_kinds import (
+        SOURCE_INSTALLABLE_FROM_MANUAL,
+        SOURCE_NOT_CONFIGURED,
+        SOURCE_NOT_PUBLISHED,
+        SOURCE_READY_TO_DOWNLOAD,
+    )
     from .pack_manifests import get_pack_manifest, public_source_host
     from .pack_release_cache import get_cached_release
-    from .pack_settings import github_configured, pack_settings
+    from .pack_settings import pack_settings
 
     manifest = get_pack_manifest(definition.id)
     url = manifest.source_url()
     cached = get_cached_release(definition.id)
-    source_available = bool(url) or bool(cached)
-    cfg = pack_settings()
+    custom = _custom_source_active(definition.id)
+    source_available = bool(url) or bool(cached) or custom
+    # Never advertise a shared ADEPT_PACK_GITHUB_* repo as this pack's repository.
+    repository = (cached or {}).get("repository")
+    if not repository and manifest.source.owner and manifest.source.repository:
+        repository = f"{manifest.source.owner}/{manifest.source.repository}"
+    if source_available:
+        source_state = SOURCE_INSTALLABLE_FROM_MANUAL if custom and not cached else SOURCE_READY_TO_DOWNLOAD
+    elif not manifest.is_published():
+        source_state = SOURCE_NOT_PUBLISHED
+    else:
+        source_state = SOURCE_NOT_CONFIGURED
+    install_disabled = not source_available
     return {
         "pack_version": (cached or {}).get("version") or manifest.version,
         "source_type": manifest.source.type,
         "provider_id": manifest.source.provider_id,
         "source_valid": manifest.has_valid_source(),
         "source_available": source_available,
-        "source_host": public_source_host(url) or ("github.com" if github_configured() else None),
+        "source_state": source_state,
+        "distribution_status": manifest.distribution_status,
+        "distribution_label": manifest.distribution_label(),
+        "component_kind": manifest.kind or "downloadable_pack",
+        "source_host": public_source_host(url),
         "available_version": (cached or {}).get("version"),
-        "repository": (cached or {}).get("repository") or (
-            f"{cfg.github_owner}/{cfg.github_repository}" if github_configured() else None
-        ),
+        "repository": repository,
         "tag_name": (cached or {}).get("tag_name"),
         "archive_asset_name": (cached or {}).get("archive_asset_name"),
         "expected_download_bytes": (
@@ -207,13 +239,32 @@ def _pack_source_fields(definition: ComponentDefinition) -> dict[str, Any]:
             "label": "Choose Install Location",
         },
         "pack_actions": [
-            {"action": "install", "label": "Download and Install", "disabled": not source_available},
+            {
+                "action": "install",
+                "label": "Download and Install",
+                "disabled": install_disabled,
+                "disabled_reason": (
+                    None
+                    if source_available
+                    else "No official distribution has been published yet. Add a Source URL or Link Existing Folder."
+                ),
+            },
             {"action": "choose_install_location", "label": "Choose Install Location"},
             {"action": "link_existing", "label": "Link Existing Folder"},
             {"action": "add_source_url", "label": "Add Source URL"},
-            {"action": "refresh_source", "label": "Check Again"},
+            {
+                "action": "view_pack_spec",
+                "label": "View Pack Specification",
+                "disabled": False,
+            },
+            {
+                "action": "refresh_source",
+                "label": "Check Again",
+                "disabled": not manifest.is_published() and not source_available,
+            },
         ],
-        "custom_source_active": _custom_source_active(definition.id),
+        "custom_source_active": custom,
+        "provider": (pack_settings().provider or "").strip() or None,
     }
 
 
@@ -307,15 +358,25 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             elif verification.healthy:
                 canonical = "ready"
             elif verification.issue_code in (
+                "source_not_published",
+            ):
+                if pack_fields.get("source_available"):
+                    canonical = "not_installed"
+                else:
+                    canonical = "source_pending"
+            elif verification.issue_code in (
+                "source_not_configured",
                 "download_source_missing",
-                "pack_release_not_found",
                 "pack_provider_not_configured",
+                "pack_release_not_found",
             ):
                 # A cached / available source means Install can proceed even if files are absent.
                 if pack_fields.get("source_available"):
                     canonical = "not_installed"
-                else:
+                elif verification.issue_code == "pack_release_not_found":
                     canonical = "download_unavailable"
+                else:
+                    canonical = "source_pending"
             elif verification.issue_code in (
                 "pack_registry_unreachable",
                 "github_rate_limited",
@@ -340,6 +401,9 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         ):
             _record_pack_attempt_cleanup(state, definition.id)
 
+        from .component_kinds import KIND_CREDENTIAL, component_kind
+
+        kind = component_kind(definition)
         last_verified = utc_now() if verification.healthy else old.get("last_verified_at")
         path_selector = (
             path_selector_mode(definition.id)
@@ -350,6 +414,15 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         download_bytes = int(
             pack_fields.get("expected_download_bytes") or definition.download_bytes
         )
+        # Credentials are not downloadable software — never advertise download/install sizes.
+        if kind == KIND_CREDENTIAL:
+            download_bytes = 0
+            installed_bytes = 0
+            if verification.issue_code == "credential_missing":
+                canonical = "not_installed"
+            elif verification.issue_code == "credential_unverified":
+                canonical = "error"
+        source_state = pack_fields.get("source_state")
         item = {
             "component_id": definition.id,
             "id": definition.id,
@@ -372,25 +445,31 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "issue_code": diagnostic.get("issue_code") if diagnostic else None,
             "issue_summary": diagnostic.get("summary") if diagnostic else None,
             "primary_action": _primary_action(
-                canonical, diagnostic, source_valid=source_valid if isinstance(source_valid, bool) else None
+                canonical,
+                diagnostic,
+                source_valid=source_valid if isinstance(source_valid, bool) else None,
+                kind=kind,
+                source_state=str(source_state) if source_state else None,
             ),
             "download_bytes": download_bytes,
             "installed_bytes": installed_bytes,
-            "estimated_installed_bytes": definition.installed_bytes,
+            "estimated_installed_bytes": 0 if kind == KIND_CREDENTIAL else definition.installed_bytes,
             "disk_bytes": {
                 "download": download_bytes,
                 "installed": installed_bytes,
-                "estimated_installed": definition.installed_bytes,
+                "estimated_installed": 0 if kind == KIND_CREDENTIAL else definition.installed_bytes,
             },
             "dependencies": list(definition.dependencies),
             "installer": definition.installer,
             "install_kind": definition.installer,
+            "component_kind": kind,
             "path_selector": path_selector,
             "verifier": definition.verifier,
+            "show_download_sizes": kind != KIND_CREDENTIAL,
             **pack_fields,
         }
         # Install must stay disabled when no download source exists.
-        if canonical == "download_unavailable" and not pack_fields.get("source_available"):
+        if canonical in ("download_unavailable", "source_pending") and not pack_fields.get("source_available"):
             item["install_disabled"] = True
         elif pack_fields.get("source_available") and canonical in (
             "not_installed",
@@ -415,7 +494,10 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
     elif any(item["status"] in ("installing", "checking") for item in required):
         overall = "preparing"
         overall_label = "Preparing Studio"
-    elif any(item["status"] in ("unknown", "not_installed", "download_unavailable") for item in required):
+    elif any(
+        item["status"] in ("unknown", "not_installed", "download_unavailable", "source_pending")
+        for item in required
+    ):
         overall = "additional_setup_required"
         overall_label = "Additional Setup Required"
     else:

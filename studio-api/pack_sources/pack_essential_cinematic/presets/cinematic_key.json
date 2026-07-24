@@ -1,0 +1,7 @@
+{
+  "id": "cinematic_key",
+  "name": "Cinematic Key Light Starter",
+  "kind": "image_preset",
+  "prompt": "Cinematic key light, volumetric haze, widescreen framing",
+  "owned_by": "adept-ui-gen-studio"
+}

@@ -44,7 +44,15 @@ function fmtNum(v?: number | null, suffix = "") {
   return `${Math.round(v)}${suffix}`;
 }
 
-export function GpuVramPanel({ project, onChange }: { project: Project; onChange: () => void }) {
+export function GpuVramPanel({
+  project,
+  onChange,
+  compact,
+}: {
+  project: Project;
+  onChange: () => void;
+  compact?: boolean;
+}) {
   const [presets, setPresets] = useState<VramPreset[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -52,6 +60,8 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
   const [gpus, setGpus] = useState<GpuDevice[]>([]);
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [recommendedTier, setRecommendedTier] = useState<number | null>(null);
+  const [planText, setPlanText] = useState<string>("");
+  const [safety, setSafety] = useState({ unload_after_render: false, vae_tiling: false });
 
   const active = useMemo(
     () => presets.find((p) => p.vram_gb === (project.vram_gb || 32)) || null,
@@ -59,6 +69,19 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
   );
 
   const primary = gpus[primaryIndex] || gpus[0] || null;
+
+  const refreshPlan = async () => {
+    try {
+      const plan = await api.executionPlan(project.id);
+      setPlanText(plan.live_text || plan.summary);
+      setSafety({
+        unload_after_render: !!plan.safety?.unload_after_render,
+        vae_tiling: !!plan.safety?.vae_tiling,
+      });
+    } catch {
+      setPlanText("");
+    }
+  };
 
   const refreshStats = async () => {
     try {
@@ -80,9 +103,10 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
       .then(setPresets)
       .catch(() => setPresets([]));
     refreshStats();
+    refreshPlan();
     const id = setInterval(refreshStats, 4000);
     return () => clearInterval(id);
-  }, []);
+  }, [project.id, project.vram_gb, project.width, project.height, project.fps, project.preset]);
 
   const applyVram = async (tier: number) => {
     setBusy(true);
@@ -90,6 +114,7 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
     try {
       await api.updateProject(project.id, { vram_gb: tier, apply_vram_profile: true });
       await onChange();
+      await refreshPlan();
       setMsg(`Applied ${tier} GB VRAM profile`);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));
@@ -107,6 +132,7 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
       if (d.tier) {
         await api.updateProject(project.id, { vram_gb: d.tier, apply_vram_profile: true });
         await onChange();
+        await refreshPlan();
       }
       setMsg(d.message);
     } catch (err) {
@@ -116,18 +142,37 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
     }
   };
 
+  const saveSafety = async (patch: Partial<typeof safety>) => {
+    const next = { ...safety, ...patch };
+    setSafety(next);
+    await api.updateProject(project.id, {
+      render_safety_json: JSON.stringify({ ...next, notes: "" }),
+    });
+    await onChange();
+    await refreshPlan();
+  };
+
   return (
     <div className="panel gpu-vram-panel">
       <PanelHeading
         title="GPU & VRAM"
         tip="Live GPU stats from nvidia-smi plus a VRAM profile that tunes resolution, fps, frames, and steps for safe local renders."
       >
-        <button type="button" className="ghost" disabled={busy} onClick={refreshStats}>
+        <button type="button" className="ghost" disabled={busy} onClick={() => { refreshStats(); refreshPlan(); }}>
           Refresh
         </button>
       </PanelHeading>
 
-      {primary && statsOk ? (
+      {planText && (
+        <div className="execution-plan-card">
+          <div className="section-label">Live execution plan</div>
+          <p className="scene-meta" style={{ margin: 0 }}>
+            {planText}
+          </p>
+        </div>
+      )}
+
+      {!compact && primary && statsOk ? (
         <div className="gpu-live">
           <div className="gpu-live-name">{primary.name}</div>
           <div className="scene-meta">Driver {primary.driver_version || "—"}</div>
@@ -168,17 +213,24 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
             </div>
           )}
         </div>
-      ) : (
+      ) : !compact ? (
         <div className="empty" style={{ marginBottom: 8 }}>
           GPU not detected yet. Use Detect to read nvidia-smi.
         </div>
-      )}
+      ) : primary && statsOk ? (
+        <div className="scene-meta" style={{ marginBottom: 8 }}>
+          {primary.name}: {fmtMib(primary.memory_used_mib)} / {fmtMib(primary.memory_total_mib)} ·{" "}
+          {fmtNum(primary.utilization_gpu_pct, "%")} util
+        </div>
+      ) : null}
 
       <div className="field" style={{ marginTop: 10 }}>
         <label>VRAM profile</label>
-        <p className="scene-meta" style={{ marginTop: 0 }}>
-          Tunes resolution, fps, frame budget, steps, and assists for local generation.
-        </p>
+        {!compact && (
+          <p className="scene-meta" style={{ marginTop: 0 }}>
+            Tunes resolution, fps, frame budget, steps, and assists for local generation.
+          </p>
+        )}
         <select
           value={project.vram_gb || 32}
           disabled={busy}
@@ -201,7 +253,28 @@ export function GpuVramPanel({ project, onChange }: { project: Project; onChange
         )}
       </div>
 
-      {active && (
+      <div className="field">
+        <label className="scene-meta" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            type="checkbox"
+            checked={safety.unload_after_render}
+            onChange={(e) => saveSafety({ unload_after_render: e.target.checked })}
+            style={{ width: "auto" }}
+          />
+          Unload after render (config)
+        </label>
+        <label className="scene-meta" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+          <input
+            type="checkbox"
+            checked={safety.vae_tiling}
+            onChange={(e) => saveSafety({ vae_tiling: e.target.checked })}
+            style={{ width: "auto" }}
+          />
+          VAE tiling hint (config)
+        </label>
+      </div>
+
+      {active && !compact && (
         <div className="vram-profile-card">
           <strong>{active.label}</strong>
           <div className="scene-meta">{active.summary}</div>

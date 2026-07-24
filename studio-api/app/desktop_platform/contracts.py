@@ -1,0 +1,99 @@
+"""Desktop service contracts with no dependency on a UI runtime."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from enum import Enum
+from pathlib import Path
+from typing import Any, Mapping, Protocol
+
+
+class OperatingSystem(str, Enum):
+    WINDOWS = "windows"
+    MACOS = "macos"
+    LINUX = "linux"
+    OTHER = "other"
+
+
+class FileSystem(Protocol):
+    def exists(self, path: Path) -> bool: ...
+
+    def read_bytes(self, path: Path) -> bytes: ...
+
+    def write_bytes(self, path: Path, data: bytes) -> None: ...
+
+    def make_directory(self, path: Path, *, parents: bool = True) -> None: ...
+
+    def remove(self, path: Path) -> None: ...
+
+
+class SettingsStore(Protocol):
+    def get(self, key: str, default: Any = None) -> Any: ...
+
+    def set(self, key: str, value: Any) -> None: ...
+
+    def delete(self, key: str) -> bool: ...
+
+
+class SecretsStore(Protocol):
+    def get_secret(self, key: str) -> str | None: ...
+
+    def set_secret(self, key: str, value: str) -> None: ...
+
+    def delete_secret(self, key: str) -> bool: ...
+
+
+class WindowService(Protocol):
+    def focus(self) -> None: ...
+
+    def minimize(self) -> None: ...
+
+    def maximize(self) -> None: ...
+
+    def close(self) -> None: ...
+
+    def set_title(self, title: str) -> None: ...
+
+
+class NotificationService(Protocol):
+    def notify(self, title: str, message: str, *, level: str = "info") -> None: ...
+
+
+class DialogService(Protocol):
+    async def open_file(
+        self, *, title: str = "", extensions: Sequence[str] = ()
+    ) -> Path | None: ...
+
+    async def save_file(
+        self, *, title: str = "", suggested_name: str = ""
+    ) -> Path | None: ...
+
+    async def confirm(self, title: str, message: str) -> bool: ...
+
+
+class ClipboardService(Protocol):
+    def read_text(self) -> str: ...
+
+    def write_text(self, value: str) -> None: ...
+
+
+class TemporaryFileService(Protocol):
+    def create_file(self, *, suffix: str = "", prefix: str = "studio-") -> Path: ...
+
+    def create_directory(self, *, prefix: str = "studio-") -> Path: ...
+
+    def cleanup(self, path: Path) -> None: ...
+
+
+class OSIntegrationService(Protocol):
+    """Explicit host-OS operations; arbitrary command execution is excluded."""
+
+    def operating_system(self) -> OperatingSystem: ...
+
+    def system_metadata(self) -> Mapping[str, str]: ...
+
+    async def open_path(self, path: Path) -> bool: ...
+
+    async def reveal_in_file_manager(self, path: Path) -> bool: ...
+
+    def is_file_type_registered(self, extension: str) -> bool: ...

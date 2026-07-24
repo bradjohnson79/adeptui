@@ -1,0 +1,27 @@
+{
+  "create": {
+    "name": "Phase 0 Sample Project",
+    "engine_default": "ltx",
+    "global_prompt": "Warm natural light, restrained camera movement",
+    "negative_prompt": "blurry, low quality, watermark",
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "seed": 4242,
+    "preset": "quality",
+    "vram_gb": 32
+  },
+  "save": {
+    "name": "Phase 0 Sample Project Saved",
+    "description": "Deterministic baseline fixture",
+    "company": "Adept Film Works"
+  },
+  "scene": {
+    "name": "Baseline Scene",
+    "engine": "ltx",
+    "prompt": "A locked-off wide shot of a quiet studio stage",
+    "duration_sec": 4.0,
+    "camera_note": "Static wide",
+    "seed": 4242
+  }
+}

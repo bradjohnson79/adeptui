@@ -11,3 +11,8 @@ studio-api/.venv/
 studio-web/dist/
 *.log
 export_packs/
+artifacts/
+test-results/
+playwright-report/
+blob-report/
+.playwright/

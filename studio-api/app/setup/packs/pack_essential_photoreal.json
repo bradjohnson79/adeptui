@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "id": "pack_essential_photoreal",
+  "name": "Essential Photoreal Pack",
+  "kind": "downloadable_pack",
+  "version": "1.0.0",
+  "optional": true,
+  "distributionStatus": "not_published",
+  "sources": [],
+  "source": {
+    "type": "provider",
+    "providerId": "github_releases",
+    "channel": "stable"
+  },
+  "archive": {
+    "format": "zip",
+    "checksumAlgorithm": "sha256",
+    "expectedDownloadBytes": 419430400
+  },
+  "install": {
+    "recommendedPath": "creative_assets/essential_photoreal",
+    "requiredFiles": ["pack.json"],
+    "expectedInstalledBytes": 419430400
+  },
+  "verification": {
+    "requiredManifest": "pack.json",
+    "expectedPackId": "pack_essential_photoreal",
+    "requiredPaths": []
+  },
+  "specification": {
+    "required": ["pack.json"],
+    "optionalDirectories": ["workflows", "loras", "presets", "references", "lighting"]
+  },
+  "dependencies": []
+}

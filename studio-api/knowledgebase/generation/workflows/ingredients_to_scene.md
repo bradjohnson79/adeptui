@@ -1,0 +1,3 @@
+# Ingredients To Scene
+
+Foundation stub — expand with production-tested guidance.

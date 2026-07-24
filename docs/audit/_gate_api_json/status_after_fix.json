@@ -1,0 +1,422 @@
+{
+  "schema_version": 2,
+  "overall_status": "ready",
+  "overall_label": "Ready to Generate",
+  "counts": {
+    "ready": 6,
+    "not_installed": 4,
+    "needs_attention": 0,
+    "update_available": 0
+  },
+  "components": [
+    {
+      "component_id": "python",
+      "id": "python",
+      "name": "Python",
+      "description": "Runtime for studio-api and tooling.",
+      "required": true,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": "Python 3.11.15",
+      "available_version": null,
+      "installation_path": "C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\.venv\\Scripts\\python.exe",
+      "path": "C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\.venv\\Scripts\\python.exe",
+      "last_verified_at": "2026-07-23T21:35:03.291869+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 0,
+      "installed_bytes": 209715200,
+      "disk_bytes": {
+        "download": 0,
+        "installed": 209715200
+      },
+      "dependencies": [],
+      "installer": "detect_only",
+      "install_kind": "detect_only",
+      "path_selector": null,
+      "verifier": "python"
+    },
+    {
+      "component_id": "ffmpeg",
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "description": "Media mux, trim, and encode toolkit.",
+      "required": true,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": "ffmpeg version 8.1.2-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.2-full_build\\bin\\ffmpeg.EXE",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.2-full_build\\bin\\ffmpeg.EXE",
+      "last_verified_at": "2026-07-23T21:35:03.314969+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 83886080,
+      "installed_bytes": 104857600,
+      "disk_bytes": {
+        "download": 83886080,
+        "installed": 104857600
+      },
+      "dependencies": [
+        "python"
+      ],
+      "installer": "manual",
+      "install_kind": "manual",
+      "path_selector": null,
+      "verifier": "executable"
+    },
+    {
+      "component_id": "comfyui",
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "description": "Local node graph runtime for local video generation.",
+      "required": true,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": "Python/3.13 aiohttp/3.13.5",
+      "available_version": null,
+      "installation_path": "http://127.0.0.1:8188",
+      "path": "http://127.0.0.1:8188",
+      "last_verified_at": "2026-07-23T21:35:03.350867+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 0,
+      "installed_bytes": 524288000,
+      "disk_bytes": {
+        "download": 0,
+        "installed": 524288000
+      },
+      "dependencies": [
+        "python"
+      ],
+      "installer": "manual",
+      "install_kind": "manual",
+      "path_selector": null,
+      "verifier": "comfy_service"
+    },
+    {
+      "component_id": "ltx_checkpoint",
+      "id": "ltx_checkpoint",
+      "name": "LTX Video Checkpoint",
+      "description": "Primary local image-to-video model weights.",
+      "required": true,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\checkpoints\\ltx-2.3-22b-distilled-fp8.safetensors",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\checkpoints\\ltx-2.3-22b-distilled-fp8.safetensors",
+      "last_verified_at": "2026-07-23T21:35:03.350867+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 12582912000,
+      "installed_bytes": 12582912000,
+      "disk_bytes": {
+        "download": 12582912000,
+        "installed": 12582912000
+      },
+      "dependencies": [
+        "comfyui"
+      ],
+      "installer": "path_link",
+      "install_kind": "path_link",
+      "path_selector": "file",
+      "verifier": "ltx_file"
+    },
+    {
+      "component_id": "ollama",
+      "id": "ollama",
+      "name": "Ollama",
+      "description": "Local LLM host for the Adept assistant.",
+      "required": false,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "http://127.0.0.1:11434",
+      "path": "http://127.0.0.1:11434",
+      "last_verified_at": "2026-07-23T21:35:03.380218+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 0,
+      "installed_bytes": 4194304000,
+      "disk_bytes": {
+        "download": 0,
+        "installed": 4194304000
+      },
+      "dependencies": [],
+      "installer": "manual",
+      "install_kind": "manual",
+      "path_selector": null,
+      "verifier": "ollama_service"
+    },
+    {
+      "component_id": "wan_models",
+      "id": "wan_models",
+      "name": "WAN 2.2 Models",
+      "description": "High/low noise WAN diffusion pair and VAE.",
+      "required": false,
+      "status": "ready",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": null,
+      "path": null,
+      "last_verified_at": "2026-07-23T21:35:03.380742+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": null,
+      "issue_code": null,
+      "issue_summary": null,
+      "primary_action": null,
+      "download_bytes": 20971520000,
+      "installed_bytes": 20971520000,
+      "disk_bytes": {
+        "download": 20971520000,
+        "installed": 20971520000
+      },
+      "dependencies": [
+        "comfyui"
+      ],
+      "installer": "path_link",
+      "install_kind": "path_link",
+      "path_selector": "directory",
+      "verifier": "wan_files"
+    },
+    {
+      "component_id": "fal_key",
+      "id": "fal_key",
+      "name": "fal.ai API Key",
+      "description": "Cloud generation credentials stored encrypted locally.",
+      "required": false,
+      "status": "not_installed",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": null,
+      "path": null,
+      "last_verified_at": null,
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": {
+        "component_id": "fal_key",
+        "healthy": false,
+        "issue_code": "credential_missing",
+        "summary": "A fal.ai API key is not configured.",
+        "technical_details": [
+          "Available disk bytes: 3556376563712"
+        ],
+        "recommendation": "configure",
+        "recommended_action_label": "Configure",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:30:22.915460+00:00"
+      },
+      "issue_code": "credential_missing",
+      "issue_summary": "A fal.ai API key is not configured.",
+      "primary_action": {
+        "action": "install",
+        "label": "Install"
+      },
+      "download_bytes": 0,
+      "installed_bytes": 0,
+      "disk_bytes": {
+        "download": 0,
+        "installed": 0
+      },
+      "dependencies": [],
+      "installer": "credentials",
+      "install_kind": "credentials",
+      "path_selector": null,
+      "verifier": "fal_key"
+    },
+    {
+      "component_id": "pack_essential_photoreal",
+      "id": "pack_essential_photoreal",
+      "name": "Essential Photoreal Pack",
+      "description": "Creative Assets pack for photoreal faces and lighting.",
+      "required": false,
+      "status": "not_installed",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal",
+      "last_verified_at": "2026-07-23T20:57:09.385627+00:00",
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": {
+        "component_id": "pack_essential_photoreal",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Photoreal Pack directory is empty.",
+        "technical_details": [
+          "Available disk bytes: 3556290838528",
+          "Readable path: True",
+          "Writable path: True"
+        ],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:34:49.341640+00:00"
+      },
+      "issue_code": "required_files_missing",
+      "issue_summary": "The Essential Photoreal Pack directory is empty.",
+      "primary_action": {
+        "action": "install",
+        "label": "Install"
+      },
+      "download_bytes": 419430400,
+      "installed_bytes": 419430400,
+      "disk_bytes": {
+        "download": 419430400,
+        "installed": 419430400
+      },
+      "dependencies": [
+        "comfyui"
+      ],
+      "installer": "path_link",
+      "install_kind": "path_link",
+      "path_selector": "directory",
+      "verifier": "linked_files"
+    },
+    {
+      "component_id": "pack_essential_anime",
+      "id": "pack_essential_anime",
+      "name": "Essential Anime Pack",
+      "description": "Creative Assets pack for anime expressions.",
+      "required": false,
+      "status": "not_installed",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_anime",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_anime",
+      "last_verified_at": null,
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": {
+        "component_id": "pack_essential_anime",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Anime Pack directory is empty.",
+        "technical_details": [
+          "Available disk bytes: 3556290420736",
+          "Readable path: True",
+          "Writable path: True"
+        ],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:35:00.956475+00:00"
+      },
+      "issue_code": "required_files_missing",
+      "issue_summary": "The Essential Anime Pack directory is empty.",
+      "primary_action": {
+        "action": "install",
+        "label": "Install"
+      },
+      "download_bytes": 262144000,
+      "installed_bytes": 262144000,
+      "disk_bytes": {
+        "download": 262144000,
+        "installed": 262144000
+      },
+      "dependencies": [
+        "comfyui"
+      ],
+      "installer": "path_link",
+      "install_kind": "path_link",
+      "path_selector": "directory",
+      "verifier": "linked_files"
+    },
+    {
+      "component_id": "pack_essential_cinematic",
+      "id": "pack_essential_cinematic",
+      "name": "Essential Cinematic Pack",
+      "description": "Creative Assets pack for cinematic lighting.",
+      "required": false,
+      "status": "not_installed",
+      "operation_phase": null,
+      "operation_id": null,
+      "stage": null,
+      "installed_version": null,
+      "available_version": null,
+      "installation_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_cinematic",
+      "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_cinematic",
+      "last_verified_at": null,
+      "progress": null,
+      "estimated_remaining_seconds": null,
+      "diagnostic": {
+        "component_id": "pack_essential_cinematic",
+        "healthy": false,
+        "issue_code": "required_files_missing",
+        "summary": "The Essential Cinematic Pack directory is empty.",
+        "technical_details": [],
+        "recommendation": "repair",
+        "recommended_action_label": "Repair Installation",
+        "requires_user_interaction": true,
+        "checked_at": "2026-07-23T21:33:45.793983+00:00"
+      },
+      "issue_code": "required_files_missing",
+      "issue_summary": "The Essential Cinematic Pack directory is empty.",
+      "primary_action": {
+        "action": "install",
+        "label": "Install"
+      },
+      "download_bytes": 209715200,
+      "installed_bytes": 209715200,
+      "disk_bytes": {
+        "download": 209715200,
+        "installed": 209715200
+      },
+      "dependencies": [
+        "comfyui"
+      ],
+      "installer": "path_link",
+      "install_kind": "path_link",
+      "path_selector": "directory",
+      "verifier": "linked_files"
+    }
+  ],
+  "active_operation": null,
+  "primary_action": null,
+  "checked_at": "2026-07-23T21:35:03.382755+00:00"
+}

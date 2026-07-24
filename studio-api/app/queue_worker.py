@@ -33,6 +33,16 @@ from .workflows import (
     lipsync_available_hint,
     views_for_tool,
 )
+from .workflows.ltx_ingredients_compiler import (
+    compile_ingredients_workflow,
+    wants_ingredients_ic_lora,
+)
+from .references.models import (
+    ERR_REFERENCE_UPLOAD_FAILED,
+    INGREDIENTS_FILENAME,
+    IcLoraError,
+    ReferenceError,
+)
 
 
 class JobQueue:
@@ -74,6 +84,22 @@ class JobQueue:
             job.status = status
             job.progress = progress
             job.message = message[:4000]
+            # Infer coarse stage from message when not already set by callers
+            low = (message or "").lower()
+            if "prepar" in low or "load" in low:
+                job.stage = "preparing"
+            elif "assembl" in low or "stitch" in low:
+                job.stage = "assembling"
+            elif "lipsync" in low or "mix" in low or "post" in low:
+                job.stage = "post"
+            elif status == "running":
+                job.stage = job.stage or "processing"
+            elif status == "done":
+                job.stage = "complete"
+            elif status == "failed":
+                job.stage = "failed"
+            elif status == "cancelled":
+                job.stage = "cancelled"
             job.updated_at = datetime.utcnow()
             if output:
                 job.output_path = output
@@ -108,6 +134,10 @@ class JobQueue:
                 await self._image_tool(db, job, project)
             elif job.kind == "dual_lipsync":
                 await self._dual_lipsync(db, job, project)
+            elif job.kind == "txt2vid":
+                await self._txt2vid(db, job, project)
+            elif job.kind in ("imagegen", "imagegen_edit"):
+                await self._imagegen(db, job, project)
             else:
                 raise RuntimeError(f"Unknown job kind {job.kind}")
         finally:
@@ -168,9 +198,56 @@ class JobQueue:
     def _scene_prompt(self, project: Project, scene: Scene, db: Session) -> str:
         tag_map = self._asset_map(db, project.id)
         resolved = resolve_prompt(scene.prompt, tag_map)
-        spatial = parse_spatial_map(project.spatial_map_json)
-        notes = spatial_prompt_notes(spatial)
+        notes = ""
+        try:
+            from .spatial_prompt_builder import assemble_prompt_layers, flatten_layers, guidance_hint
+            from .spatial_scene import get_or_create_spatial, parse_spatial_doc
+
+            row = get_or_create_spatial(db, project.id, scene.id)
+            doc = parse_spatial_doc(row, project.spatial_map_json)
+            layers = assemble_prompt_layers(doc)
+            pos, _neg = flatten_layers(layers)
+            if pos.strip():
+                notes = f"{pos}\n{guidance_hint(doc.guidance)}"
+            else:
+                spatial = parse_spatial_map(project.spatial_map_json)
+                notes = spatial_prompt_notes(spatial)
+        except Exception:
+            spatial = parse_spatial_map(project.spatial_map_json)
+            notes = spatial_prompt_notes(spatial)
         combined = " ".join(x for x in [project.global_prompt, resolved.prompt] if x).strip()
+        # Director camera motion + motion-tag text hints (honest text adapters)
+        try:
+            from .director_timeline import camera_prompt_hint, parse_director_timeline
+
+            tl = parse_director_timeline(
+                getattr(scene, "director_json", "") or "",
+                fallback_duration=scene.duration_sec,
+                fallback_prompt=scene.prompt,
+            )
+            cam = camera_prompt_hint(tl.camera_clips or [])
+            if cam:
+                combined = f"{combined} {cam}".strip()
+            # Resolve #motion tags from profile library
+            import re
+
+            from .profiles import ProfileItem
+
+            tags = re.findall(r"#([A-Za-z0-9_-]+)", " ".join(s.text for s in tl.prompt_segments))
+            if tags:
+                rows = db.query(ProfileItem).filter(ProfileItem.kind == "motion").all()
+                known = {r.tag.lstrip("#").lower(): r for r in rows}
+                hints = []
+                for t in tags:
+                    row = known.get(t.lower())
+                    if row:
+                        hints.append(f"motion reference {row.name} ({row.tag})")
+                    else:
+                        hints.append(f"(undefined motion tag #{t})")
+                if hints:
+                    combined = f"{combined} Motion: {'; '.join(hints)}".strip()
+        except Exception:
+            pass
         return inject_spatial_and_camera(combined, scene.camera_note, notes)
 
     def _frames_for_scene(self, scene: Scene, fps: int) -> int:
@@ -183,64 +260,320 @@ class JobQueue:
         negative = project.negative_prompt
         seed = scene.seed if scene.seed >= 0 else project.seed
         plan = resolve_render_plan(project)
+        from .aspect_fps import resolve_scene_dims, resolve_scene_fps
 
-        if is_fal_engine(scene.engine):
-            return await self._build_and_run_fal_scene(db, project, scene, job, positive, negative, seed, plan)
+        sw, sh = resolve_scene_dims(project, scene)
+        sfps = resolve_scene_fps(project, scene)
+        if plan.vram_gb < 32:
+            plan_width, plan_height = min(sw, plan.width), min(sh, plan.height)
+            plan_fps = min(sfps, plan.fps)
+        else:
+            plan_width, plan_height, plan_fps = sw, sh, sfps
 
-        length = self._frames_for_scene(scene, plan.fps)
-        length, frame_clamped = clamp_frames(length, plan)
-        steps = plan.steps
-        width, height = plan.width, plan.height
+        from .engine_recommend import resolve_engine_id
 
-        if plan.notes or frame_clamped:
-            bits = [b for b in [plan.notes, f"Frames capped to {length} for {plan.label} VRAM" if frame_clamped else ""] if b]
-            if bits:
-                job.message = " · ".join(bits)
+        resolved_engine = resolve_engine_id(scene.engine, project, scene)
+        original_engine = scene.engine
+        scene.engine = resolved_engine
+        job.stage = "preparing"
+        job.message = f"Preparing {scene.name} · {resolved_engine}"
+        db.commit()
+        try:
+            if is_fal_engine(scene.engine):
+                return await self._build_and_run_fal_scene(
+                    db, project, scene, job, positive, negative, seed, plan
+                )
+
+            length = self._frames_for_scene(scene, plan_fps)
+            length, frame_clamped = clamp_frames(length, plan)
+            steps = plan.steps
+            width, height = plan_width, plan_height
+
+            if plan.notes or frame_clamped:
+                bits = [
+                    b
+                    for b in [
+                        plan.notes,
+                        f"Frames capped to {length} for {plan.label} VRAM" if frame_clamped else "",
+                    ]
+                    if b
+                ]
+                if bits:
+                    job.message = " · ".join(bits)
+                    db.commit()
+
+            start = await self._ensure_comfy_image(self._get_asset(db, scene.start_asset_id))
+            middle = await self._ensure_comfy_image(self._get_asset(db, scene.middle_asset_id))
+            end = await self._ensure_comfy_image(self._get_asset(db, scene.end_asset_id))
+            audio = await self._ensure_comfy_file(self._get_asset(db, scene.audio_asset_id))
+
+            prefix = f"studio/{project.id[:8]}_{scene.index}"
+            params = self._job_params(job)
+            use_ingredients = scene.engine != "wan" and wants_ingredients_ic_lora(
+                params, getattr(scene, "director_json", "") or ""
+            )
+
+            if use_ingredients:
+                dest, _provenance = await self._build_and_run_ingredients_scene(
+                    db,
+                    project,
+                    scene,
+                    job,
+                    positive=positive,
+                    negative=negative,
+                    seed=seed,
+                    width=width,
+                    height=height,
+                    length=length,
+                    fps=plan_fps,
+                    steps=steps,
+                    prefix=prefix,
+                    params=params,
+                )
+                scene.output_path = str(dest)
+                db.commit()
+                return dest
+
+            if scene.engine == "wan":
+                wf = build_wan_flf_workflow(
+                    high_noise=settings.wan_high_noise,
+                    low_noise=settings.wan_low_noise,
+                    vae_name=settings.wan_vae,
+                    text_encoder=settings.wan_text_encoder,
+                    positive=positive,
+                    negative=negative,
+                    width=width,
+                    height=height,
+                    length=length,
+                    fps=plan_fps,
+                    seed=seed,
+                    start_image=start,
+                    end_image=end or middle,
+                    steps_high=steps // 2 or 2,
+                    steps_low=steps // 2 or 2,
+                    filename_prefix=prefix,
+                )
+            else:
+                wf = build_ltx_scene_workflow(
+                    checkpoint=settings.ltx_checkpoint,
+                    positive=positive,
+                    negative=negative,
+                    width=width,
+                    height=height,
+                    length=length,
+                    fps=plan_fps,
+                    seed=seed,
+                    start_image=start,
+                    middle_image=middle,
+                    end_image=end,
+                    audio_file=audio,
+                    steps=steps,
+                    filename_prefix=prefix,
+                )
+
+            async def on_progress(p: float, msg: str) -> None:
+                job.progress = p
+                job.message = msg
+                job.updated_at = datetime.utcnow()
                 db.commit()
 
-        start = await self._ensure_comfy_image(self._get_asset(db, scene.start_asset_id))
-        middle = await self._ensure_comfy_image(self._get_asset(db, scene.middle_asset_id))
-        end = await self._ensure_comfy_image(self._get_asset(db, scene.end_asset_id))
-        audio = await self._ensure_comfy_file(self._get_asset(db, scene.audio_asset_id))
+            try:
+                prompt_id = await comfy.queue_prompt(wf)
+            except Exception as first_err:
+                # LTX Director fallback to simple I2V if we have a start frame
+                if scene.engine == "ltx" and start:
+                    job.message = f"Director submit failed, falling back to simple I2V: {first_err}"
+                    db.commit()
+                    wf = build_ltx_simple_i2v(
+                        checkpoint=settings.ltx_checkpoint,
+                        positive=positive,
+                        negative=negative,
+                        width=width,
+                        height=height,
+                        length=length,
+                        fps=plan_fps,
+                        seed=seed,
+                        start_image=start,
+                        steps=steps,
+                        filename_prefix=prefix,
+                    )
+                    prompt_id = await comfy.queue_prompt(wf)
+                else:
+                    raise
 
-        prefix = f"studio/{project.id[:8]}_{scene.index}"
+            job.comfy_prompt_id = prompt_id
+            db.commit()
+            history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
+            files = comfy.find_output_files(history)
+            if not files:
+                raise RuntimeError("ComfyUI finished but no output video was found")
 
-        if scene.engine == "wan":
-            wf = build_wan_flf_workflow(
-                high_noise=settings.wan_high_noise,
-                low_noise=settings.wan_low_noise,
-                vae_name=settings.wan_vae,
-                text_encoder=settings.wan_text_encoder,
-                positive=positive,
-                negative=negative,
-                width=width,
-                height=height,
-                length=length,
-                fps=plan.fps,
-                seed=seed,
-                start_image=start,
-                end_image=end or middle,
-                steps_high=steps // 2 or 2,
-                steps_low=steps // 2 or 2,
-                filename_prefix=prefix,
+            dest_dir = settings.data_dir / "projects" / project.id / "renders"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+            shutil.copy2(files[0], dest)
+
+            # Optional mux scene audio if not already in video
+            audio_asset = self._get_asset(db, scene.audio_asset_id)
+            if audio_asset and Path(audio_asset.path).exists() and dest.suffix.lower() in {".mp4", ".webm", ".mov"}:
+                muxed = dest.with_name(dest.stem + "_aud" + dest.suffix)
+                try:
+                    mux_audio(dest, Path(audio_asset.path), muxed)
+                    dest = muxed
+                except Exception:
+                    pass
+
+            scene.output_path = str(dest)
+            db.commit()
+            return dest
+        finally:
+            scene.engine = original_engine
+
+    def _ingredients_refs_from_params(
+        self, db: Session, project: Project, scene: Scene, params: dict
+    ) -> dict:
+        from .references import store as ref_store
+
+        sheet_id = params.get("sheet_id") or params.get("reference_sheet_id")
+        director = {}
+        raw = getattr(scene, "director_json", "") or ""
+        if isinstance(raw, str) and raw.strip():
+            try:
+                director = json.loads(raw)
+            except Exception:
+                director = {}
+        ref = director.get("reference") or director.get("ic_lora") or {}
+        if isinstance(ref, dict):
+            sheet_id = sheet_id or ref.get("sheet_id")
+        sheet = ref_store.get_sheet(project.id, sheet_id) if sheet_id else None
+        strength_preset = (
+            params.get("strength_preset")
+            or (ref.get("strength_preset") if isinstance(ref, dict) else None)
+            or (sheet or {}).get("strength_preset")
+            or "balanced"
+        )
+        source_ids = list(
+            params.get("source_asset_ids")
+            or [
+                r.get("asset_id")
+                for r in ((sheet or {}).get("source_references") or [])
+                if r.get("asset_id")
+            ]
+            or (sheet or {}).get("source_asset_ids")
+            or []
+        )
+        return {
+            "sheet": sheet,
+            "sheet_id": sheet_id,
+            "strength_preset": strength_preset,
+            "strength": params.get("strength")
+            or params.get("strength_value")
+            or (ref.get("strength") if isinstance(ref, dict) else None)
+            or (ref.get("strength_value") if isinstance(ref, dict) else None),
+            "source_asset_ids": source_ids,
+            "reference_prompt": params.get("reference_prompt")
+            or (sheet or {}).get("reference_prompt")
+            or "",
+            "image_path": (sheet or {}).get("composite_path") or (sheet or {}).get("image_path"),
+            "video_path": (sheet or {}).get("static_video_path") or (sheet or {}).get("video_path"),
+            "image_asset_id": (sheet or {}).get("composite_asset_id")
+            or (sheet or {}).get("image_asset_id"),
+            "video_asset_id": (sheet or {}).get("static_video_asset_id")
+            or (sheet or {}).get("video_asset_id"),
+        }
+
+    async def _build_and_run_ingredients_scene(
+        self,
+        db: Session,
+        project: Project,
+        scene: Scene,
+        job: Job,
+        *,
+        positive: str,
+        negative: str,
+        seed: int,
+        width: int,
+        height: int,
+        length: int,
+        fps: int,
+        steps: int,
+        prefix: str,
+        params: dict,
+    ) -> tuple[Path, dict]:
+        refs = self._ingredients_refs_from_params(db, project, scene, params)
+        image_path = Path(refs["image_path"]) if refs.get("image_path") else None
+        video_path = Path(refs["video_path"]) if refs.get("video_path") else None
+        if (not image_path or not image_path.exists()) and refs.get("image_asset_id"):
+            asset = self._get_asset(db, refs["image_asset_id"])
+            if asset and Path(asset.path).exists():
+                image_path = Path(asset.path)
+        if (not video_path or not video_path.exists()) and refs.get("video_asset_id"):
+            asset = self._get_asset(db, refs["video_asset_id"])
+            if asset and Path(asset.path).exists():
+                video_path = Path(asset.path)
+        if not image_path or not image_path.exists():
+            raise RuntimeError("Ingredients IC-LoRA requires a built reference sheet image")
+
+        job.stage = "preparing"
+        job.message = "Uploading Ingredients reference sheet to ComfyUI"
+        db.commit()
+        try:
+            comfy_image = await comfy.upload_image(image_path, filename=image_path.name)
+            comfy_video = None
+            if video_path and video_path.exists():
+                comfy_video = await comfy.upload_file_copy(video_path, filename=video_path.name)
+        except Exception as exc:
+            job.status = "failed"
+            job.stage = "failed"
+            job.message = f"{ERR_REFERENCE_UPLOAD_FAILED}: {exc}"[:4000]
+            job.history_json = json.dumps(
+                {"error_code": ERR_REFERENCE_UPLOAD_FAILED, "error": str(exc)[:500]}
             )
-        else:
-            wf = build_ltx_scene_workflow(
+            db.commit()
+            raise RuntimeError(f"{ERR_REFERENCE_UPLOAD_FAILED}: {exc}") from exc
+
+        object_info = await comfy.get_object_info()
+        try:
+            compiled = compile_ingredients_workflow(
+                object_info=object_info,
                 checkpoint=settings.ltx_checkpoint,
                 positive=positive,
                 negative=negative,
                 width=width,
                 height=height,
                 length=length,
-                fps=plan.fps,
+                fps=fps,
                 seed=seed,
-                start_image=start,
-                middle_image=middle,
-                end_image=end,
-                audio_file=audio,
+                reference_image=comfy_image,
+                reference_video=comfy_video,
+                lora_name=INGREDIENTS_FILENAME,
+                strength_preset=refs.get("strength_preset") or "balanced",
+                strength=refs.get("strength"),
                 steps=steps,
                 filename_prefix=prefix,
+                reference_prompt=refs.get("reference_prompt") or "",
+                source_labels=refs.get("source_asset_ids") or [],
             )
+        except (IcLoraError, ReferenceError) as exc:
+            job.status = "failed"
+            job.stage = "failed"
+            job.message = f"{exc.code}: {exc.message}"[:4000]
+            job.history_json = json.dumps(
+                exc.as_dict() if hasattr(exc, "as_dict") else {"code": exc.code, "message": exc.message}
+            )
+            db.commit()
+            raise
+
+        provenance = {
+            **compiled["provenance"],
+            "sheet_id": refs.get("sheet_id"),
+            "source_asset_ids": refs.get("source_asset_ids") or [],
+            "sanitized_debug": compiled.get("sanitized_debug"),
+        }
+        job.params_json = json.dumps({**params, "ic_lora_provenance": provenance})
+        job.history_json = json.dumps(provenance)
+        job.message = f"Ingredients IC-LoRA · {compiled['strategy']}"
+        db.commit()
 
         async def on_progress(p: float, msg: str) -> None:
             job.progress = p
@@ -248,55 +581,65 @@ class JobQueue:
             job.updated_at = datetime.utcnow()
             db.commit()
 
-        try:
-            prompt_id = await comfy.queue_prompt(wf)
-        except Exception as first_err:
-            # LTX Director fallback to simple I2V if we have a start frame
-            if scene.engine == "ltx" and start:
-                job.message = f"Director submit failed, falling back to simple I2V: {first_err}"
-                db.commit()
-                wf = build_ltx_simple_i2v(
-                    checkpoint=settings.ltx_checkpoint,
-                    positive=positive,
-                    negative=negative,
-                    width=width,
-                    height=height,
-                    length=length,
-                    fps=plan.fps,
-                    seed=seed,
-                    start_image=start,
-                    steps=steps,
-                    filename_prefix=prefix,
-                )
-                prompt_id = await comfy.queue_prompt(wf)
-            else:
-                raise
-
+        prompt_id = await comfy.queue_prompt(compiled["workflow"])
         job.comfy_prompt_id = prompt_id
+        provenance["comfy_prompt_id"] = prompt_id
+        job.history_json = json.dumps(provenance)
+        job.params_json = json.dumps({**params, "ic_lora_provenance": provenance})
         db.commit()
+
         history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
         files = comfy.find_output_files(history)
         if not files:
-            raise RuntimeError("ComfyUI finished but no output video was found")
+            raise RuntimeError("ComfyUI finished but no Ingredients IC-LoRA output was found")
 
         dest_dir = settings.data_dir / "projects" / project.id / "renders"
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+        dest = dest_dir / f"scene_{scene.index}_ingredients_{uuid.uuid4().hex[:8]}{files[0].suffix}"
         shutil.copy2(files[0], dest)
 
-        # Optional mux scene audio if not already in video
-        audio_asset = self._get_asset(db, scene.audio_asset_id)
-        if audio_asset and Path(audio_asset.path).exists() and dest.suffix.lower() in {".mp4", ".webm", ".mov"}:
-            muxed = dest.with_name(dest.stem + "_aud" + dest.suffix)
-            try:
-                mux_audio(dest, Path(audio_asset.path), muxed)
-                dest = muxed
-            except Exception:
-                pass
+        # Lineage: output → sheet / source refs
+        try:
+            from .asset_graph import add_edge
 
-        scene.output_path = str(dest)
-        db.commit()
-        return dest
+            out_asset = Asset(
+                id=str(uuid.uuid4()),
+                project_id=project.id,
+                tag="ingredients_render",
+                kind="video",
+                filename=dest.name,
+                path=str(dest),
+                comfy_name="",
+                scope="project",
+                prompt_meta_json=json.dumps(provenance),
+            )
+            db.add(out_asset)
+            db.flush()
+            sheet_asset_id = refs.get("image_asset_id")
+            if sheet_asset_id:
+                add_edge(
+                    db,
+                    out_asset.id,
+                    sheet_asset_id,
+                    "used_in_director",
+                    {"sheet_id": refs.get("sheet_id"), "kind": "ic_lora_sheet"},
+                )
+            for src_id in refs.get("source_asset_ids") or []:
+                add_edge(
+                    db,
+                    out_asset.id,
+                    src_id,
+                    "used_in_director",
+                    {"sheet_id": refs.get("sheet_id"), "kind": "ic_lora_source"},
+                )
+            provenance["output_asset_id"] = out_asset.id
+            job.params_json = json.dumps({**params, "ic_lora_provenance": provenance, "output_asset_id": out_asset.id})
+            job.history_json = json.dumps(provenance)
+            db.commit()
+        except Exception:
+            db.commit()
+
+        return dest, provenance
 
     async def _build_and_run_fal_scene(
         self,
@@ -690,6 +1033,311 @@ class JobQueue:
             f"Dual lip sync complete ({len(enabled)} track(s)) with sticky mouth ROIs",
             str(current_video),
         )
+
+    def _job_params(self, job: Job) -> dict:
+        try:
+            return json.loads(job.params_json or "{}") or {}
+        except Exception:
+            return {}
+
+    def _checkpoint_for_model(self, model_id: str, custom: str = "") -> str:
+        mid = (model_id or "auto").lower()
+        if mid == "custom" and custom:
+            return custom
+        if mid == "hidream":
+            return settings.imagegen_hidream_checkpoint
+        if mid in ("sd35", "sd3.5"):
+            return settings.imagegen_sd35_checkpoint
+        if mid == "custom":
+            return settings.imagegen_custom_checkpoint or settings.imagegen_flux_checkpoint
+        # auto + flux default to FLUX-class checkpoint
+        return settings.imagegen_flux_checkpoint
+
+    async def _txt2vid(self, db: Session, job: Job, project: Project) -> None:
+        """Text-to-video: prefer fal T2V; local I2V engines warn and fail clearly."""
+        params = self._job_params(job)
+        prompt = (params.get("prompt") or "").strip() or project.global_prompt
+        negative = params.get("negative") or project.negative_prompt
+        engine = params.get("engine") or "auto"
+        duration = float(params.get("duration_sec") or 5)
+        aspect = params.get("aspect") or "16:9"
+        seed = int(params.get("seed") if params.get("seed") is not None else project.seed)
+        width = int(params.get("width") or project.width)
+        height = int(params.get("height") or project.height)
+        style = params.get("style") or ""
+        if style:
+            prompt = f"{prompt}, {style} style".strip(", ")
+
+        from .engine_recommend import resolve_engine_id
+
+        # Temporary scene-like object for resolve
+        class _S:
+            pass
+
+        s = _S()
+        s.engine = engine
+        s.prompt = prompt
+        s.duration_sec = duration
+        s.start_asset_id = None
+        resolved = resolve_engine_id(engine, project, s) if engine == "auto" else engine
+
+        if not is_fal_engine(resolved) and resolved in ("ltx", "wan"):
+            raise RuntimeError(
+                f"Local engine '{resolved}' is image-to-video and needs a start frame. "
+                "Use ImageGen or 1 Frame first, or choose a fal T2V-capable engine / Auto."
+            )
+
+        # Force fal path for T2V when local
+        if not is_fal_engine(resolved):
+            resolved = "fal_seedance"
+
+        api_key = get_secret("fal_api_key")
+        if not api_key:
+            raise RuntimeError(
+                "fal.ai API key not configured. Open Project Settings → Integrations or Advanced → fal.ai API key."
+            )
+
+        async def on_progress(p: float, msg: str) -> None:
+            job.progress = min(0.95, max(0.05, p))
+            job.message = msg[:4000]
+            job.stage = "processing"
+            job.updated_at = datetime.utcnow()
+            db.commit()
+
+        await on_progress(0.1, f"Txt2Vid · {resolved}")
+        model_id, args = build_fal_arguments(
+            engine=resolved,
+            prompt=prompt,
+            negative=negative,
+            image_url=None,
+            end_image_url=None,
+            duration_sec=duration,
+            width=width,
+            height=height,
+            seed=seed,
+            generate_audio=True,
+        )
+        job.comfy_prompt_id = model_id[:64]
+        job.history_json = json.dumps(
+            {
+                "prompt": prompt,
+                "negative": negative,
+                "seed": seed,
+                "model": model_id,
+                "engine": resolved,
+                "aspect": aspect,
+                "width": width,
+                "height": height,
+                "duration_sec": duration,
+                "style": style,
+                "loras": params.get("loras") or [],
+            }
+        )
+        db.commit()
+        result = await run_fal_model(model_id, args, api_key, on_progress=on_progress)
+        video_url = extract_video_url(result)
+        dest_dir = settings.data_dir / "projects" / project.id / "renders"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"txt2vid_{uuid.uuid4().hex[:8]}_fal.mp4"
+        await download_url(video_url, dest)
+
+        # Auto-add to library
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project.id,
+            tag=params.get("tag") or "txt2vid",
+            kind="video",
+            filename=dest.name,
+            path=str(dest),
+            comfy_name="",
+            scope="project",
+            prompt_meta_json=job.history_json or "{}",
+        )
+        db.add(asset)
+        try:
+            from .asset_graph import add_version
+
+            add_version(
+                db,
+                asset_id=asset.id,
+                op="txt2vid",
+                path=str(dest),
+                seed=seed,
+                prompt={"prompt": prompt, "negative": negative},
+                model=model_id,
+            )
+        except Exception:
+            pass
+        db.commit()
+        job.params_json = json.dumps({**params, "output_asset_id": asset.id})
+        db.commit()
+        self._set_status(job.id, "done", 1.0, "Txt2Vid complete", str(dest))
+
+    async def _imagegen(self, db: Session, job: Job, project: Project) -> None:
+        params = self._job_params(job)
+        prompt = (params.get("prompt") or "").strip()
+        negative = params.get("negative") or project.negative_prompt
+        model = (params.get("model") or "auto").lower()
+        custom_ckpt = params.get("checkpoint") or ""
+        seed = int(params.get("seed") if params.get("seed") is not None else (project.seed if project.seed >= 0 else 0))
+        width = int(params.get("width") or 1024)
+        height = int(params.get("height") or 1024)
+        steps = int(params.get("steps") or settings.imagegen_default_steps)
+        cfg = float(params.get("cfg") or settings.imagegen_default_cfg)
+        style = params.get("style") or ""
+        edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
+        source_asset_id = params.get("source_asset_id")
+        denoise = float(params.get("denoise") or 0.45)
+        if style:
+            prompt = f"{prompt}, {style}".strip(", ")
+
+        # Soft Auto reasons
+        reasons = []
+        if model == "auto":
+            reasons.append("Defaulting to FLUX-family checkpoint (catalog order: Auto → FLUX → HiDream → SD3.5 → Custom)")
+            model = "flux"
+        ckpt = self._checkpoint_for_model(model, custom_ckpt)
+        job.stage = "preparing"
+        job.message = f"ImageGen · {model} · {ckpt}" + (f" · {'; '.join(reasons)}" if reasons else "")
+        db.commit()
+
+        from .imagegen_workflows import build_img2img_edit_stub, build_txt2img_workflow
+
+        prefix = f"studio/{project.id[:8]}_imagegen"
+        if job.kind == "imagegen_edit" and source_asset_id:
+            src = self._get_asset(db, source_asset_id)
+            image_name = await self._ensure_comfy_image(src)
+            if not image_name:
+                raise RuntimeError("Edit source image missing")
+            # Append edit op hint into prompt for honesty until specialized graphs exist
+            edit_prompt = f"{prompt}. Edit operation: {edit_op}".strip()
+            wf = build_img2img_edit_stub(
+                checkpoint=ckpt,
+                positive=edit_prompt,
+                negative=negative,
+                image_name=image_name,
+                denoise=denoise,
+                seed=seed,
+                steps=steps,
+                filename_prefix=prefix,
+            )
+        else:
+            wf = build_txt2img_workflow(
+                checkpoint=ckpt,
+                positive=prompt,
+                negative=negative,
+                width=width,
+                height=height,
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                filename_prefix=prefix,
+            )
+
+        async def on_progress(p: float, msg: str) -> None:
+            job.progress = p
+            job.message = msg
+            job.stage = "processing"
+            job.updated_at = datetime.utcnow()
+            db.commit()
+
+        prompt_id = await comfy.queue_prompt(wf)
+        job.comfy_prompt_id = prompt_id
+        job.history_json = json.dumps(
+            {
+                "prompt": prompt,
+                "negative": negative,
+                "seed": seed,
+                "model": model,
+                "checkpoint": ckpt,
+                "width": width,
+                "height": height,
+                "steps": steps,
+                "cfg": cfg,
+                "style": style,
+                "edit_op": edit_op,
+                "loras": params.get("loras") or [],
+                "aspect": params.get("aspect"),
+                "reasons": reasons,
+            }
+        )
+        db.commit()
+        history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
+        files = comfy.find_output_files(history)
+        if not files:
+            raise RuntimeError(
+                "ComfyUI finished but no image output found. Confirm checkpoint exists and ImageGen workflow nodes are available."
+            )
+
+        dest_dir = settings.data_dir / "projects" / project.id / "assets"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"imagegen_{edit_op}_{uuid.uuid4().hex[:8]}{Path(files[0]).suffix or '.png'}"
+        shutil.copy2(files[0], dest)
+
+        parent_id = source_asset_id if job.kind == "imagegen_edit" else None
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project.id,
+            tag=params.get("tag") or "imagegen",
+            kind="image",
+            filename=dest.name,
+            path=str(dest),
+            comfy_name="",
+            scope="project",
+            labels_json=json.dumps(params.get("labels") or []),
+            prompt_meta_json=job.history_json or "{}",
+            parent_asset_id=parent_id,
+        )
+        db.add(asset)
+        try:
+            from .asset_graph import add_edge, add_version
+
+            add_version(
+                db,
+                asset_id=asset.id,
+                op=edit_op,
+                path=str(dest),
+                seed=seed,
+                prompt={"prompt": prompt, "negative": negative},
+                model=ckpt,
+            )
+            if parent_id:
+                add_edge(db, parent_id, asset.id, "derived_from", {"op": edit_op})
+        except Exception:
+            pass
+        db.commit()
+        job.params_json = json.dumps({**params, "output_asset_id": asset.id})
+        db.commit()
+        # Link storyboard / spatial lineage when requested
+        try:
+            from .asset_graph import add_edge
+            from .script_storyboard import StoryboardPanelRow
+
+            panel_id = params.get("panel_id")
+            segment_id = params.get("segment_id")
+            if panel_id:
+                panel = db.get(StoryboardPanelRow, panel_id)
+                if panel:
+                    panel.asset_id = asset.id
+                    panel.status = "complete"
+                    panel.script_sync_status = "ok"
+                    panel.approval = panel.approval or "draft"
+                    db.commit()
+                    if segment_id:
+                        add_edge(db, segment_id, panel_id, "storyboard_of", {})
+                    add_edge(db, panel_id, asset.id, "derived_from", {"op": "storyboard"})
+            if params.get("spatial_scene_id"):
+                add_edge(
+                    db,
+                    params["spatial_scene_id"],
+                    asset.id,
+                    "spatial_of",
+                    {"state_id": params.get("spatial_state_id"), "camera_id": params.get("camera_avatar_id")},
+                )
+            db.commit()
+        except Exception:
+            pass
+        self._set_status(job.id, "done", 1.0, f"ImageGen ({edit_op}) complete", str(dest))
 
     async def _export(self, db: Session, job: Job, project: Project) -> None:
         scenes = db.query(Scene).filter(Scene.project_id == project.id).order_by(Scene.index).all()

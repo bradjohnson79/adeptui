@@ -16,12 +16,41 @@ class ComfyClient:
     def __init__(self, base_url: str | None = None):
         self.base_url = (base_url or settings.comfy_url).rstrip("/")
         self.client_id = str(uuid.uuid4())
+        self._object_info_cache: dict[str, Any] | None = None
+        self._object_info_cached_at: float = 0.0
 
     async def health(self) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(f"{self.base_url}/system_stats")
             r.raise_for_status()
             return r.json()
+
+    async def object_info(self, node_class: str | None = None) -> dict[str, Any]:
+        path = f"/object_info/{node_class}" if node_class else "/object_info"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(f"{self.base_url}{path}")
+            r.raise_for_status()
+            data = r.json()
+            return data if isinstance(data, dict) else {}
+
+    async def get_object_info(self, *, force: bool = False, ttl_sec: float = 60.0) -> dict[str, Any]:
+        """Fetch /object_info with a short in-memory cache."""
+        import time
+
+        now = time.monotonic()
+        if (
+            not force
+            and self._object_info_cache is not None
+            and (now - self._object_info_cached_at) < ttl_sec
+        ):
+            return self._object_info_cache
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.get(f"{self.base_url}/object_info")
+            r.raise_for_status()
+            data = r.json()
+        self._object_info_cache = data
+        self._object_info_cached_at = now
+        return data
 
     async def queue_prompt(self, workflow: dict[str, Any]) -> str:
         payload = {"prompt": workflow, "client_id": self.client_id}

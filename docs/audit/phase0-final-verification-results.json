@@ -1,0 +1,160 @@
+{
+  "date": "2026-07-23",
+  "branch": "feat/director-workspace",
+  "commit": "2c5f61d574f27aed8c4f4adc70e9c993bb862aa1",
+  "working_tree_dirty": true,
+  "runtime": {
+    "os": "win32 10.0.26200",
+    "python": "3.11.15",
+    "node": "22.23.1",
+    "npm": "10.9.8"
+  },
+  "commands": [
+    {
+      "name": "compileall",
+      "cwd": "studio-api",
+      "command": "python -m compileall app tests",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "pytest_setup_refactor_initial",
+      "cwd": "studio-api",
+      "command": "python -m pytest tests/test_setup_refactor.py -q --tb=short",
+      "exit_code": 0,
+      "collected": 19,
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5
+    },
+    {
+      "name": "pytest_full_initial",
+      "cwd": "studio-api",
+      "command": "python -m pytest -q --tb=short",
+      "exit_code": 0,
+      "collected": 28,
+      "passed": 28,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5
+    },
+    {
+      "name": "tsc",
+      "cwd": "studio-web",
+      "command": "npx tsc -b",
+      "exit_code": 0,
+      "diagnostics": 0,
+      "prior_baseline_diagnostics": 15,
+      "baseline_classification": "resolved"
+    },
+    {
+      "name": "lint_focused",
+      "cwd": "studio-web",
+      "command": "npm run lint -- src/components/SetupWizard.tsx src/App.tsx src/pages/ProjectEditor.tsx src/api.ts src/setup",
+      "exit_code": 0,
+      "eslint": "tooling_absent",
+      "oxlint": "used"
+    },
+    {
+      "name": "npm_build",
+      "cwd": "studio-web",
+      "command": "npm run build",
+      "exit_code": 0,
+      "passed": true
+    },
+    {
+      "name": "pytest_setup_refactor_after_fix",
+      "cwd": "studio-api",
+      "command": "python -m pytest tests/test_setup_refactor.py -q --tb=short",
+      "exit_code": 0,
+      "collected": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5
+    },
+    {
+      "name": "pytest_full_after_fix",
+      "cwd": "studio-api",
+      "command": "python -m pytest -q --tb=short",
+      "exit_code": 0,
+      "collected": 29,
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 5
+    }
+  ],
+  "api_probes": {
+    "live_prepare_invoked": false,
+    "native_browse_invoked": false,
+    "endpoints": {
+      "GET /api/health": { "http": 200 },
+      "GET /api/setup/status": {
+        "http": 200,
+        "overall_status": "ready",
+        "overall_label": "Ready to Generate",
+        "counts": {
+          "ready": 6,
+          "not_installed": 4,
+          "needs_attention": 0,
+          "update_available": 0
+        },
+        "pack_essential_photoreal_issue_after_fix": "required_files_missing"
+      },
+      "GET /api/setup/detect": { "http": 200 },
+      "GET /api/setup/state": { "http": 200, "secrets_observed": false },
+      "POST /api/setup/prepare/plan": {
+        "http": 200,
+        "required_actions": 0,
+        "can_run_unattended": true
+      },
+      "GET /api/setup/components/pack_essential_photoreal/suggested-path": {
+        "http": 200
+      },
+      "openapi browse-path registered": true
+    }
+  },
+  "baseline_exceptions": [],
+  "new_failures": [],
+  "fixes_applied": [
+    {
+      "id": "stale_diagnostic_honesty",
+      "files": [
+        "studio-api/app/setup/status.py",
+        "studio-api/tests/test_setup_refactor.py"
+      ],
+      "summary": "Reconcile cached component diagnostics against live verify_component so auto-bound paths cannot keep path_not_configured after a path exists.",
+      "blocking": true,
+      "regression_test": "test_status_refreshes_stale_path_not_configured_diagnostic"
+    }
+  ],
+  "scenario_classification": {
+    "backend_compile_and_tests": "automated and passed",
+    "frontend_tsc_lint_build": "automated and passed",
+    "readonly_setup_api": "automated and passed",
+    "readiness_honesty_optional_vs_required": "automated and passed",
+    "setup_wizard_hierarchy_and_ready_cards": "manually verified",
+    "path_chooser_escape_cancel_close": "manually verified",
+    "recommended_path_model_locations_persist": "automated and passed",
+    "native_browse_dialog": "deferred and non-blocking",
+    "update_available_needs_attention_live_ui": "statically inspected",
+    "live_prepare_installs": "deferred and non-blocking",
+    "failure_matrix_disk_permission": "deferred and non-blocking",
+    "a11y_200pct_zoom": "deferred and non-blocking"
+  },
+  "authorization_recommendation": "GRANTED WITH CONDITIONS",
+  "outcome": "B",
+  "decision_text": {
+    "Decision": "ACCEPTED WITH CONDITIONS",
+    "Setup Wizard refactor acceptance": "ACCEPTED WITH CONDITIONS",
+    "Phase 1 authorization": "GRANTED WITH CONDITIONS"
+  },
+  "remaining_conditions": [
+    "Native OS Browse dialog not interactively exercised",
+    "200% zoom a11y not re-captured after final server restart",
+    "Needs Attention / Update Available live UI states statically inspected only (machine overall ready)",
+    "No live prepare / real installs by hard gate constraint"
+  ]
+}

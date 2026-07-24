@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "pack_essential_cinematic",
+  "name": "Essential Cinematic Pack",
+  "version": "1.0.0",
+  "description": "Fixture-quality Gen Studio pack source for builder/publisher tests."
+}

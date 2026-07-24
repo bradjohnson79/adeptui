@@ -1,10 +1,17 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, EngineName, Project } from "../types";
 import { api } from "../api";
 import { PanelHeading } from "./HelpTip";
+import {
+  CONTINUITY_KEYS,
+  parseContinuity,
+  type ContinuityKey,
+  type ContinuityLock,
+} from "../directorSelection";
 
 export function AssetTray({ project, onChange }: { project: Project; onChange: () => void }) {
   const [tag, setTag] = useState("");
+  const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const upload = async (files: FileList | null, kind: string) => {
@@ -17,13 +24,15 @@ export function AssetTray({ project, onChange }: { project: Project; onChange: (
     onChange();
   };
 
+  const filtered = project.assets.filter((a) => filter === "all" || a.kind === filter);
+
   return (
     <div className="panel">
       <PanelHeading
         title="Assets"
-        tip="Upload images, audio, or video and tag them. Type @tag in prompts to lock identity, set, or sound references."
+        tip="Upload images, audio, or video and tag them. Drag onto Director tracks. Type @tag in prompts."
       />
-      <p className="scene-meta">Tag assets to reference them with @name in prompts.</p>
+      <p className="scene-meta">Tag assets to reference them with @name in prompts. Drag onto timeline tracks.</p>
       <div className="field">
         <label>Tag for next upload</label>
         <input placeholder="hero" value={tag} onChange={(e) => setTag(e.target.value)} />
@@ -63,11 +72,32 @@ export function AssetTray({ project, onChange }: { project: Project; onChange: (
         multiple
         onChange={(e) => upload(e.target.files, "image")}
       />
+      <div className="asset-filters">
+        {(["all", "image", "audio", "video"] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={filter === f ? "primary" : "ghost"}
+            onClick={() => setFilter(f)}
+          >
+            {f}
+          </button>
+        ))}
+      </div>
       <div className="section-label">Library</div>
       <div className="asset-list">
-        {project.assets.length === 0 && <div className="empty">No assets yet</div>}
-        {project.assets.map((a: Asset) => (
-          <div className="asset-item" key={a.id}>
+        {filtered.length === 0 && <div className="empty">No assets yet</div>}
+        {filtered.map((a: Asset) => (
+          <div
+            className="asset-item"
+            key={a.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/x-adept-asset", a.id);
+              e.dataTransfer.setData("application/x-adept-kind", a.kind);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+          >
             {a.kind === "image" ? (
               <img src={api.assetUrl(a.id)} alt={a.filename} />
             ) : (
@@ -89,14 +119,22 @@ export function PromptComposer({
   project,
   sceneId,
   onChange,
+  showContinuity,
 }: {
   project: Project;
   sceneId?: string;
   onChange: () => void;
+  showContinuity?: boolean;
 }) {
   const scene = project.scenes.find((s) => s.id === sceneId) || project.scenes[0];
   const [suggestOpen, setSuggestOpen] = useState(false);
+  const [rec, setRec] = useState<Awaited<ReturnType<typeof api.recommendEngine>> | null>(null);
   const tags = useMemo(() => project.assets.filter((a) => a.tag).map((a) => a.tag), [project.assets]);
+
+  useEffect(() => {
+    if (!scene || !showContinuity) return;
+    api.recommendEngine(project.id, scene.id).then(setRec).catch(() => setRec(null));
+  }, [project.id, scene?.id, scene?.engine, scene?.duration_sec, showContinuity]);
 
   if (!scene) return null;
 
@@ -119,15 +157,24 @@ export function PromptComposer({
     setSuggestOpen(false);
   };
 
+  const continuity = parseContinuity(scene.continuity_json);
+  const setLock = async (key: ContinuityKey, mode: ContinuityLock) => {
+    const next = { ...continuity, [key]: mode };
+    await update({ continuity_json: JSON.stringify(next) });
+  };
+
   return (
     <div className="panel">
       <PanelHeading
         title={scene.name}
-        tip="Per-scene engine, duration, and prompt. Use @tags from Assets. Director tracks hold the full multi-track timeline."
+        tip="Per-scene engine, duration, and prompt. Use @tags from Assets. Continuity locks are production instructions until adapters consume them."
       />
       <div className="field">
-        <label>Engine</label>
+        <label>Engine {scene.engine === "auto" ? <span className="pill">Auto</span> : null}</label>
         <select value={scene.engine} onChange={(e) => update({ engine: e.target.value as EngineName })}>
+          <optgroup label="Auto">
+            <option value="auto">Auto Select</option>
+          </optgroup>
           <optgroup label="Local (ComfyUI)">
             <option value="ltx">LTX 2.3</option>
             <option value="wan">WAN 2.2</option>
@@ -140,6 +187,19 @@ export function PromptComposer({
           </optgroup>
         </select>
       </div>
+      {rec && showContinuity && (
+        <div className="recommend-card">
+          <div className="scene-meta">
+            Recommends <strong>{rec.engineId}</strong> ({Math.round(rec.confidence * 100)}%)
+          </div>
+          <button
+            type="button"
+            onClick={() => update({ engine: rec.engineId as EngineName })}
+          >
+            Apply recommendation
+          </button>
+        </div>
+      )}
       <div className="field">
         <label>Duration (seconds)</label>
         <input
@@ -150,6 +210,62 @@ export function PromptComposer({
           value={scene.duration_sec}
           onChange={(e) => update({ duration_sec: Number(e.target.value) })}
         />
+      </div>
+      <div className="field">
+        <label>Aspect ratio</label>
+        <select
+          value={scene.aspect_ratio || "16:9"}
+          onChange={(e) => update({ aspect_ratio: e.target.value })}
+        >
+          {["1:1", "4:3", "3:2", "16:10", "16:9", "18:9", "21:9", "9:16", "2.39:1", "custom"].map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </div>
+      {(scene.aspect_ratio || "16:9") === "custom" && (
+        <div className="row-actions">
+          <label className="scene-meta">
+            W
+            <input
+              style={{ width: 80 }}
+              type="number"
+              value={scene.width || project.width}
+              onChange={(e) => update({ width: Number(e.target.value) })}
+            />
+          </label>
+          <label className="scene-meta">
+            H
+            <input
+              style={{ width: 80 }}
+              type="number"
+              value={scene.height || project.height}
+              onChange={(e) => update({ height: Number(e.target.value) })}
+            />
+          </label>
+        </div>
+      )}
+      <div className="field">
+        <label>Frame rate</label>
+        <select
+          value={scene.fps_mode || "auto"}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "auto") update({ fps_mode: "auto", fps: 0 });
+            else update({ fps_mode: v, fps: Number(v) });
+          }}
+        >
+          <option value="auto">Auto</option>
+          {[12, 16, 18, 24, 25, 30, 48, 50, 60].map((f) => (
+            <option key={f} value={String(f)}>
+              {f} fps
+            </option>
+          ))}
+        </select>
+        {(project.vram_gb || 32) < 32 && (scene.fps_mode || "auto") !== "auto" && (
+          <p className="scene-meta">Override on &lt;32 GB VRAM may be clamped by the execution plan.</p>
+        )}
       </div>
       <div className="field prompt-box">
         <label>Scene prompt (@tags supported)</label>
@@ -171,6 +287,10 @@ export function PromptComposer({
           onChange={(e) => update({ camera_note: e.target.value })}
           placeholder="slow push in from doorway"
         />
+      </div>
+      <div className="field">
+        <label>Seed</label>
+        <input type="number" value={scene.seed} onChange={(e) => update({ seed: Number(e.target.value) })} />
       </div>
       <div className="field">
         <label>
@@ -204,6 +324,28 @@ export function PromptComposer({
             ))}
         </select>
       </div>
+      {showContinuity && (
+        <>
+          <div className="section-label">Continuity locks</div>
+          <p className="scene-meta">Production instructions — not model guarantees.</p>
+          <div className="continuity-grid">
+            {CONTINUITY_KEYS.map((k) => (
+              <label key={k} className="continuity-row">
+                <span>{k.replace(/_/g, " ")}</span>
+                <select
+                  value={continuity[k]}
+                  onChange={(e) => setLock(k, e.target.value as ContinuityLock)}
+                >
+                  <option value="locked">locked</option>
+                  <option value="unlocked">unlocked</option>
+                  <option value="inherit_project">inherit project</option>
+                  <option value="inherit_previous">inherit previous</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
       <div className="row-actions">
         <button
           className="primary"

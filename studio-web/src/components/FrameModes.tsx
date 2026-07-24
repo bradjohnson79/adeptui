@@ -132,6 +132,59 @@ export function OneFramePanel({
         >
           {busy ? "Queuing…" : "Generate from 1 frame"}
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const director = await api.getDirector(project.id, scene.id);
+              const clips = [];
+              if (scene.start_asset_id) {
+                clips.push({
+                  id: Math.random().toString(36).slice(2, 10),
+                  start: 0,
+                  length: Math.min(2, scene.duration_sec),
+                  label: "From 1 Frame",
+                  role: "guide",
+                  asset_id: scene.start_asset_id,
+                });
+              }
+              await api.putDirector(project.id, scene.id, {
+                ...director,
+                media_mode: "image",
+                image_clips: clips.length ? clips : director.image_clips,
+                duration_sec: scene.duration_sec,
+                prompt_segments: director.prompt_segments?.length
+                  ? director.prompt_segments
+                  : [{ id: Math.random().toString(36).slice(2, 10), start: 0, length: scene.duration_sec, text: scene.prompt, weight: 1 }],
+              });
+              onChange();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Add to Director
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            await api.addScene(project.id, {
+              name: `${scene.name} copy`,
+              engine: scene.engine,
+              prompt: scene.prompt,
+              duration_sec: scene.duration_sec,
+              start_asset_id: scene.start_asset_id,
+              camera_note: scene.camera_note,
+              seed: scene.seed,
+            });
+            onChange();
+          }}
+        >
+          Save as Scene
+        </button>
       </div>
     </div>
   );
@@ -231,6 +284,66 @@ export function ThreeFramePanel({
           }}
         >
           {busy ? "Queuing…" : "Generate from 3 frames"}
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const director = await api.getDirector(project.id, scene.id);
+              const clips = [];
+              let t = 0;
+              const step = Math.max(1, scene.duration_sec / 3);
+              for (const [label, id] of [
+                ["Start", scene.start_asset_id],
+                ["Middle", scene.middle_asset_id],
+                ["End", scene.end_asset_id],
+              ] as const) {
+                if (!id) continue;
+                clips.push({
+                  id: Math.random().toString(36).slice(2, 10),
+                  start: t,
+                  length: Math.min(step, scene.duration_sec - t || step),
+                  label,
+                  role: "guide" as const,
+                  asset_id: id,
+                });
+                t += step;
+              }
+              await api.putDirector(project.id, scene.id, {
+                ...director,
+                media_mode: "image",
+                image_clips: clips.length ? clips : director.image_clips,
+                duration_sec: scene.duration_sec,
+              });
+              onChange();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Add to Director
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            await api.addScene(project.id, {
+              name: `${scene.name} copy`,
+              engine: scene.engine,
+              prompt: scene.prompt,
+              duration_sec: scene.duration_sec,
+              start_asset_id: scene.start_asset_id,
+              middle_asset_id: scene.middle_asset_id,
+              end_asset_id: scene.end_asset_id,
+              camera_note: scene.camera_note,
+              seed: scene.seed,
+            });
+            onChange();
+          }}
+        >
+          Save as Scene
         </button>
       </div>
     </div>

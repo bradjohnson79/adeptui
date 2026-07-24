@@ -1,6 +1,6 @@
-# Local AI Video Studio
+# Adept UI Generation Studio (Gen Studio)
 
-Standalone local video studio with a polished UI driving ComfyUI (LTX 2.3 + WAN 2.2).
+Standalone local studio with a polished UI driving ComfyUI (LTX 2.3 + WAN 2.2).
 
 ## Requirements
 - Windows, RTX 5090 (or similar)
@@ -10,23 +10,45 @@ Standalone local video studio with a polished UI driving ComfyUI (LTX 2.3 + WAN 
 
 ## Quick start
 
-### 1. API
+From the repo root (recommended — one command for API + web):
+
 ```bash
-cd studio-api
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8742
+npm run install:all
+npm run dev
 ```
 
-### 2. Web UI
+- API: http://127.0.0.1:8742 (`/api/health`)
+- Web: http://127.0.0.1:5173 (Vite proxies `/api` → API)
+
+### Dev server helpers (Windows)
+
+Stale uvicorn/vite processes are a common cause of mysterious 404s after code changes. Prefer these npm scripts:
+
+| Command | What it does |
+|---------|----------------|
+| `npm run dev` | Start API (`:8742`) + web (`:5173`) together via `concurrently` |
+| `npm run dev:stop` | Stop **this repo's** listeners on 8742/5173 only |
+| `npm run dev:restart` | Stop, then start fresh in a new window and wait for health |
+| `npm run dev:status` | Show what is listening on those ports |
+| `npm run api` / `npm run web` | Start one side alone |
+
+Equivalent PowerShell entrypoint: `.\scripts\dev.ps1 start|stop|restart|status`
+
+### Manual (two terminals)
+
 ```bash
+# API
+cd studio-api
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+# from repo root:
+npm run api
+
+# Web
 cd studio-web
 npm install
 npm run dev
 ```
-
-Open http://127.0.0.1:5173
 
 ## Features
 - Director timeline with start / middle / end keyframes

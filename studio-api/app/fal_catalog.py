@@ -5,10 +5,10 @@ from typing import Any, Literal
 
 FalEngine = Literal["fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
 LocalEngine = Literal["ltx", "wan"]
-EngineName = Literal["ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
+EngineName = Literal["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
 
 FAL_ENGINES: tuple[FalEngine, ...] = ("fal_seedance", "fal_kling", "fal_veo", "fal_runway")
-ALL_ENGINES: tuple[EngineName, ...] = ("ltx", "wan", *FAL_ENGINES)
+ALL_ENGINES: tuple[EngineName, ...] = ("auto", "ltx", "wan", *FAL_ENGINES)
 
 
 @dataclass(frozen=True)
@@ -93,6 +93,7 @@ def list_fal_models() -> list[dict[str, Any]]:
 
 def list_engines_for_ui() -> list[dict[str, str]]:
     return [
+        {"id": "auto", "label": "Auto Select (recommend)", "group": "auto"},
         {"id": "ltx", "label": "LTX 2.3 (local ComfyUI)", "group": "local"},
         {"id": "wan", "label": "WAN 2.2 (local ComfyUI)", "group": "local"},
         *[

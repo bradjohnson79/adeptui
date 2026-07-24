@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "pack_essential_photoreal",
+  "name": "Essential Photoreal Pack",
+  "version": "1.0.0",
+  "description": "Fixture-quality Gen Studio pack source for builder/publisher tests. Not a production LoRA marketplace dump."
+}

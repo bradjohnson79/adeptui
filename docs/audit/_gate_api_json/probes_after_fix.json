@@ -1,0 +1,56 @@
+{
+  "health": {
+    "http": 200
+  },
+  "status": {
+    "http": 200,
+    "overall": "ready",
+    "label": "Ready to Generate",
+    "counts": {
+      "ready": 6,
+      "not_installed": 4,
+      "needs_attention": 0,
+      "update_available": 0
+    },
+    "pack_issue": "required_files_missing",
+    "pack_summary": "The Essential Photoreal Pack directory is empty.",
+    "pack_path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal"
+  },
+  "detect": {
+    "http": 200
+  },
+  "state": {
+    "http": 200,
+    "has_secret_like": false,
+    "model_locations": {
+      "pack_essential_photoreal": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal",
+      "pack_essential_anime": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_anime",
+      "pack_essential_cinematic": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_cinematic"
+    }
+  },
+  "plan": {
+    "http": 200,
+    "keys": [
+      "required_actions",
+      "skipped_optional_component_ids",
+      "required_disk_bytes",
+      "available_disk_bytes",
+      "user_checkpoints",
+      "can_run_unattended"
+    ],
+    "snippet": {
+      "can_run_unattended": true,
+      "required_actions": []
+    }
+  },
+  "suggested": {
+    "http": 200,
+    "path": "C:\\Users\\bradj\\AppData\\Local\\Comfy-Desktop\\ComfyUI-Shared\\models\\creative_assets\\essential_photoreal"
+  },
+  "openapi": {
+    "http": 200,
+    "browse_path": true,
+    "prepare_plan": true,
+    "status": true
+  }
+}

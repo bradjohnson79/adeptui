@@ -1,0 +1,7 @@
+{
+  "id": "anime_expression",
+  "name": "Anime Expression Starter",
+  "kind": "image_preset",
+  "prompt": "Clean anime character portrait, expressive eyes",
+  "owned_by": "adept-ui-gen-studio"
+}

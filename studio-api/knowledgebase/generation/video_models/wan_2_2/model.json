@@ -1,0 +1,21 @@
+{
+  "id": "wan_2_2",
+  "label": "WAN 2.2",
+  "provider": "local_comfy",
+  "runtime": "local",
+  "knowledge_version": "2026.07.23-foundation",
+  "capabilities": {
+    "text_to_video": true,
+    "image_to_video": true,
+    "start_end_frames": true,
+    "audio": false,
+    "max_duration_sec": 5,
+    "local": true,
+    "fal_api": false,
+    "app_support": "Local engine in Adept UI (ComfyUI)",
+    "avatarSuitability": "good",
+    "talkingHeadQuality": "medium",
+    "lipSyncCompatibility": "external",
+    "supportsNativeAudio": false
+  }
+}

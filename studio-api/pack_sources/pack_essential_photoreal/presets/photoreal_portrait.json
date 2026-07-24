@@ -1,0 +1,8 @@
+{
+  "id": "photoreal_portrait",
+  "name": "Photoreal Portrait Starter",
+  "kind": "image_preset",
+  "prompt": "Natural light photoreal portrait, shallow depth of field",
+  "negative_prompt": "cartoon, anime, oversharpened",
+  "owned_by": "adept-ui-gen-studio"
+}
