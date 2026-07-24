@@ -9,7 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, classifyCoDirectorError, isAbortError, type ClassifiedError } from "../../api";
+import {
+  api,
+  ApiError,
+  classifyCoDirectorError,
+  isAbortError,
+  type ClassifiedError,
+  type CoDirectorStreamEvent,
+} from "../../api";
 import {
   loadAudit,
   loadPolicies,
@@ -23,10 +30,13 @@ import {
 import { executeStep, type ExecuteContext } from "../../codirector/execute";
 import type { Project, SceneSetup } from "../../types";
 import {
+  consumeAbandonedStreamingFlag,
   loadContextPanelOpen,
   loadDisplayMode,
   loadPersistedDraft,
   loadPersistedMessages,
+  markStreamingEnd,
+  markStreamingStart,
   newAttachmentId,
   newMessageId,
   persistContextPanelOpen,
@@ -100,6 +110,7 @@ type SessionValue = {
   unbindWorkspace: () => void;
   send: (text?: string, mode?: ChatMode) => Promise<void>;
   retryLastSend: () => void;
+  cancelSend: () => void;
   dismissSendError: () => void;
   openSettings: () => void;
   refreshProviderHealth: () => Promise<void>;
@@ -214,8 +225,24 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [providerHealth, setProviderHealth] = useState<ProviderHealth | null>(null);
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(null);
   const [sendError, setSendError] = useState<ClassifiedError | null>(null);
-  const lastFailedSendRef = useRef<{ text: string; mode: ChatMode } | null>(null);
+  // `messageId: null` means the failed attempt never got far enough to append a user
+  // message (preflight failure) — retry should go through `send()` again. Once a message
+  // *has* been appended, `messageId` points at it so retry resends the same transcript
+  // slice instead of appending a duplicate copy of the same user message.
+  const pendingRetryRef = useRef<{ text: string; mode: ChatMode; messageId: string | null } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const cancelledByUserRef = useRef(false);
+  const lastLoadedProjectIdRef = useRef<string | undefined>(undefined);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    // StrictMode double-invokes effects in dev (mount → cleanup → mount) — reset on each
+    // mount so the first synthetic cleanup doesn't permanently "unmount" this ref.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
   const [setup, setSetup] = useState<SceneSetup | null>(null);
   const [applyNote, setApplyNote] = useState<string | null>(null);
@@ -257,6 +284,70 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
 
   // Cancel any in-flight request when the panel unmounts (app close / hard navigation away).
   useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  const persistConversation = useCallback(
+    (msgs: CoDirectorMessage[], model?: string | null, providerId?: string | null) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId) return;
+      void api
+        .codirectorSaveConversation(projectId, {
+          messages: msgs.map((m) => ({ id: m.id, role: m.role, content: m.content, created_at: m.createdAt })),
+          model: model ?? null,
+          provider_id: providerId ?? null,
+        })
+        .catch(() => {
+          /* server persistence is authoritative when reachable; local draft cache still holds the turn */
+        });
+    },
+    [],
+  );
+
+  // The server is the source of truth for a project's conversation. Hydrate from it whenever
+  // the bound project changes, and surface a mid-stream reload as an interrupted turn instead
+  // of silently dropping the user's last message.
+  useEffect(() => {
+    const projectId = uiContext.projectId;
+    if (!projectId || projectId === lastLoadedProjectIdRef.current) return;
+    lastLoadedProjectIdRef.current = projectId;
+    let cancelled = false;
+    (async () => {
+      const abandoned = consumeAbandonedStreamingFlag(projectId);
+      try {
+        const convo = await api.codirectorGetConversation(projectId);
+        if (cancelled) return;
+        if (convo.messages && convo.messages.length) {
+          let loaded: CoDirectorMessage[] = convo.messages.map((m) => ({
+            id: m.id || newMessageId(),
+            role: m.role === "user" ? "user" : "assistant",
+            content: m.content,
+            createdAt: m.created_at || new Date().toISOString(),
+          }));
+          if (abandoned && loaded[loaded.length - 1]?.role === "user") {
+            loaded = [
+              ...loaded,
+              {
+                id: newMessageId(),
+                role: "assistant",
+                content: "The previous response was interrupted before it finished. You can retry.",
+                createdAt: new Date().toISOString(),
+                status: "interrupted",
+              },
+            ];
+          }
+          setMessages(loaded);
+          if (convo.model) setSelectedModelIdState((prev) => prev ?? convo.model);
+        } else {
+          const local = loadPersistedMessages();
+          setMessages(local && local.length ? local : [WELCOME_ASSISTANT]);
+        }
+      } catch {
+        /* server unreachable — keep whatever is currently rendered (local draft cache) */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uiContext.projectId]);
 
   useEffect(() => {
     persistDraft(draft);
@@ -360,6 +451,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   }, [navigate, setDisplayMode]);
 
   const clearConversation = useCallback(() => {
+    abortControllerRef.current?.abort();
     setMessages([WELCOME_ASSISTANT]);
     setPlan(null);
     setSuggestedPrompt(null);
@@ -368,9 +460,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setCompileExplain([]);
     setSelectedSteps({});
     setSendError(null);
-    lastFailedSendRef.current = null;
+    pendingRetryRef.current = null;
     const projectId = bindingsRef.current.projectId;
     if (projectId) {
+      markStreamingEnd(projectId);
       void api.codirectorDeleteConversation(projectId).catch(() => {});
     }
   }, []);
@@ -391,10 +484,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setSelectedModelIdState(modelId);
   }, []);
 
-  const send = useCallback(
-    async (text?: string, mode: ChatMode = "chat") => {
-      const trimmed = (text ?? draft).trim();
-      if ((!trimmed && !attachments.length) || busy) return;
+  /**
+   * Talk to the gateway for an already-built transcript (`transcriptForApi` includes the
+   * user's message as its last entry). Never appends a new user message itself — that's
+   * `send()`'s job — so `retryLastSend()` can call this directly to resend without
+   * duplicating the user's turn in the transcript.
+   */
+  const performSend = useCallback(
+    async (transcriptForApi: CoDirectorMessage[], mode: ChatMode) => {
       setSendError(null);
       setBusy(true);
       setSuggestedPrompt(null);
@@ -402,36 +499,213 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setApplyNote(null);
       setOverflowPanel((prev) => (prev === "provider" ? prev : "none"));
 
-      // Preflight: never let a bare `TypeError: Failed to fetch` reach the transcript.
-      // Block the send (keep draft/attachments intact) if the gateway or model isn't ready.
-      let health: ProviderHealth;
-      try {
-        health = await api.codirectorHealth("active");
-        setProviderHealth(health);
-        setProviderModel(health.selectedModel);
-        setProviderStatus(
-          health.status === "Ready" ? `${health.displayName} · ${health.selectedModel}` : health.status,
-        );
-      } catch (err) {
-        setSendError(classifyCoDirectorError(err));
-        lastFailedSendRef.current = { text: trimmed, mode };
-        setBusy(false);
-        return;
-      }
-      if (!health.reachable || !health.modelAvailable) {
-        setSendError({
-          code: health.code || (health.reachable ? "MODEL_NOT_SELECTED" : "PROVIDER_UNAVAILABLE"),
-          message:
-            health.message ||
-            "Co-Director's local model isn't ready yet. Open Options to pick a model, then retry.",
-          recommendedAction: health.recommendedAction || "select_model",
-          recoverable: true,
-        });
-        lastFailedSendRef.current = { text: trimmed, mode };
-        setBusy(false);
-        return;
-      }
+      const b = bindingsRef.current;
+      const requestId = newMessageId();
+      activeRequestIdRef.current = requestId;
+      cancelledByUserRef.current = false;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      if (b.projectId) markStreamingStart(b.projectId, requestId);
 
+      const assistantId = newMessageId();
+      let streamedText = "";
+      let sawToken = false;
+      let outcome: "completed" | "cancelled" | "error" | null = null;
+      let finalModel: string | undefined;
+      let finalProviderId: string | undefined;
+      let sceneSetupResult: SceneSetup | null = null;
+      let suggestedPromptResult: string | null = null;
+      let classifiedError: ClassifiedError | null = null;
+
+      const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
+
+      const onEvent = (event: CoDirectorStreamEvent) => {
+        if (!mountedRef.current || activeRequestIdRef.current !== requestId) return; // stale / unmounted
+        if (event.type === "token") {
+          sawToken = true;
+          streamedText += event.content;
+          const snapshot = streamedText;
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === assistantId);
+            if (idx === -1) {
+              return [
+                ...prev,
+                {
+                  id: assistantId,
+                  role: "assistant",
+                  content: snapshot,
+                  createdAt: new Date().toISOString(),
+                  status: "streaming",
+                },
+              ];
+            }
+            const next = [...prev];
+            next[idx] = { ...next[idx], content: snapshot };
+            return next;
+          });
+        } else if (event.type === "completed") {
+          outcome = "completed";
+          streamedText = event.content || streamedText;
+          finalModel = event.modelId;
+          finalProviderId = event.providerId;
+          sceneSetupResult = (event.sceneSetup as SceneSetup) || null;
+          suggestedPromptResult = event.suggestedPrompt || null;
+        } else if (event.type === "cancelled") {
+          outcome = "cancelled";
+        } else if (event.type === "error") {
+          outcome = "error";
+          classifiedError = classifyCoDirectorError(
+            new ApiError(event.error.message || "Co-Director returned an error.", 0, {
+              code: event.error.code,
+              details: event.error.details,
+              recoverable: event.error.recoverable,
+              recommendedAction: event.error.recommendedAction,
+            }),
+          );
+        }
+      };
+
+      const dropEmptyStreamingBubble = () => {
+        setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.status === "streaming" && !m.content)));
+      };
+
+      const finalizeCompleted = () => {
+        const finalText = streamedText;
+        setMessages((prev) => {
+          const idx = prev.findIndex((m) => m.id === assistantId);
+          const finished: CoDirectorMessage = {
+            id: assistantId,
+            role: "assistant",
+            content: finalText,
+            createdAt: new Date().toISOString(),
+          };
+          if (idx === -1) return [...prev, finished];
+          const next = [...prev];
+          next[idx] = finished;
+          return next;
+        });
+        if (sceneSetupResult) setSetup(sceneSetupResult);
+        else if (suggestedPromptResult) setSuggestedPrompt(suggestedPromptResult);
+        setProviderModel(finalModel ?? null);
+        pendingRetryRef.current = null;
+        persistConversation(
+          [...transcriptForApi, { id: assistantId, role: "assistant", content: finalText, createdAt: new Date().toISOString() }],
+          finalModel,
+          finalProviderId,
+        );
+      };
+
+      try {
+        await api.codirectorChatStream(
+          {
+            messages: apiMessages,
+            project_id: b.projectId,
+            scene_id: b.sceneId,
+            model: selectedModelId || undefined,
+            mode,
+            request_id: requestId,
+          },
+          { signal: controller.signal, onEvent },
+        );
+
+        if (!mountedRef.current) {
+          // Component unmounted mid-stream; still persist whatever finished so it isn't lost.
+          if (outcome === "completed") {
+            persistConversation(
+              [...transcriptForApi, { id: assistantId, role: "assistant", content: streamedText, createdAt: new Date().toISOString() }],
+              finalModel,
+              finalProviderId,
+            );
+          }
+          return;
+        }
+
+        if (outcome === "completed") {
+          finalizeCompleted();
+        } else if (outcome === "cancelled") {
+          setMessages((prev) =>
+            prev
+              .map((m) => (m.id === assistantId ? { ...m, status: "cancelled" as const } : m))
+              .filter((m) => !(m.id === assistantId && !m.content)),
+          );
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+        } else if (outcome === "error" && classifiedError) {
+          dropEmptyStreamingBubble();
+          setSendError(classifiedError);
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+        } else if (sawToken) {
+          // Stream ended without a terminal event but tokens arrived — preserve the partial
+          // reply instead of discarding it.
+          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "interrupted" as const } : m)));
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+        } else {
+          dropEmptyStreamingBubble();
+          setSendError(classifyCoDirectorError(new Error("The response ended unexpectedly.")));
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+        }
+      } catch (err) {
+        if (isAbortError(err)) {
+          const wasUserCancel = cancelledByUserRef.current;
+          if (!mountedRef.current) return;
+          setMessages((prev) =>
+            prev
+              .map((m) =>
+                m.id === assistantId ? { ...m, status: (wasUserCancel ? "cancelled" : "interrupted") as const } : m,
+              )
+              .filter((m) => !(m.id === assistantId && !m.content)),
+          );
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          return;
+        }
+
+        // The stream transport itself failed before completing (network error, non-2xx
+        // response, or a backend that doesn't support SSE) — fall back to the non-streaming
+        // endpoint once before surfacing a classified error.
+        if (!mountedRef.current) return;
+        dropEmptyStreamingBubble();
+        try {
+          const res = await api.codirectorChat(
+            { messages: apiMessages, project_id: b.projectId, scene_id: b.sceneId, model: selectedModelId || undefined, mode, request_id: requestId },
+            { signal: controller.signal },
+          );
+          const assistantMsg: CoDirectorMessage = {
+            id: newMessageId(),
+            role: "assistant",
+            content: res.reply,
+            createdAt: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          if (res.sceneSetup) setSetup(res.sceneSetup as SceneSetup);
+          else if (res.suggestedPrompt) setSuggestedPrompt(res.suggestedPrompt);
+          pendingRetryRef.current = null;
+          setProviderModel(res.model);
+          persistConversation([...transcriptForApi, assistantMsg], res.model, res.providerId);
+        } catch (err2) {
+          if (isAbortError(err2)) return;
+          const classified = classifyCoDirectorError(err2);
+          setSendError(classified);
+          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+        }
+      } finally {
+        setBusy(false);
+        if (activeRequestIdRef.current === requestId) activeRequestIdRef.current = null;
+        if (abortControllerRef.current === controller) abortControllerRef.current = null;
+        if (b.projectId) markStreamingEnd(b.projectId);
+        cancelledByUserRef.current = false;
+      }
+    },
+    [persistConversation, selectedModelId],
+  );
+
+  const send = useCallback(
+    async (text?: string, mode: ChatMode = "chat") => {
+      const trimmed = (text ?? draft).trim();
+      if ((!trimmed && !attachments.length) || busy) return;
+      setSendError(null);
+      setBusy(true);
+
+      // Append the user's message immediately — it must survive any downstream failure
+      // (provider down, no models, network error). Never silently drop it.
       const attachmentNote = attachments.length
         ? `\n\n[Attached: ${attachments.map((a) => a.name).join(", ")}]`
         : "";
@@ -453,6 +727,38 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         }
         return [];
       });
+      // Persist the user's turn immediately (before the reply arrives) so a reload mid-flight
+      // still shows the question, not just silence.
+      persistConversation(next, selectedModelId ?? undefined, undefined);
+      pendingRetryRef.current = { text: trimmed, mode, messageId: userMsg.id };
+
+      // Preflight: never let a bare `TypeError: Failed to fetch` reach the transcript.
+      // Block the send (message stays in the transcript) if the gateway or model isn't ready.
+      let health: ProviderHealth;
+      try {
+        health = await api.codirectorHealth("active");
+        setProviderHealth(health);
+        setProviderModel(health.selectedModel);
+        setProviderStatus(
+          health.status === "Ready" ? `${health.displayName} · ${health.selectedModel}` : health.status,
+        );
+      } catch (err) {
+        setSendError(classifyCoDirectorError(err));
+        setBusy(false);
+        return;
+      }
+      if (!health.reachable || !health.modelAvailable) {
+        setSendError({
+          code: health.code || (health.reachable ? "MODEL_NOT_SELECTED" : "PROVIDER_UNAVAILABLE"),
+          message:
+            health.message ||
+            "Co-Director's local model isn't ready yet. Open Options to pick a model, then retry.",
+          recommendedAction: health.recommendedAction || "select_model",
+          recoverable: true,
+        });
+        setBusy(false);
+        return;
+      }
 
       const wantsPlan =
         /build|create|prepare|plan|dialogue|storyboard|lip.?sync|master sheet|coverage|generate|workflow|assemble|editor|director sequence/i.test(
@@ -473,75 +779,39 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             createdAt: new Date().toISOString(),
           },
         ]);
+        pendingRetryRef.current = null;
         setBusy(false);
-        lastFailedSendRef.current = null;
         return;
       }
 
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      try {
-        const res = await api.codirectorChat(
-          {
-            messages: next.map((m) => ({ role: m.role, content: m.content })),
-            project_id: b.projectId,
-            scene_id: b.sceneId,
-            model: selectedModelId || undefined,
-            mode,
-          },
-          { signal: controller.signal },
-        );
-        const assistantMsg: CoDirectorMessage = {
-          id: newMessageId(),
-          role: "assistant",
-          content: res.reply,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages([...next, assistantMsg]);
-        if (res.sceneSetup) setSetup(res.sceneSetup as SceneSetup);
-        else if (res.suggestedPrompt) setSuggestedPrompt(res.suggestedPrompt);
-        lastFailedSendRef.current = null;
-        setProviderModel(res.model);
-        if (b.projectId) {
-          void api
-            .codirectorSaveConversation(b.projectId, {
-              messages: [...next, assistantMsg].map((m) => ({
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                created_at: m.createdAt,
-              })),
-              model: res.model,
-              provider_id: res.providerId,
-            })
-            .catch(() => {
-              /* best-effort persistence; local session storage remains source of truth */
-            });
-        }
-      } catch (err) {
-        if (isAbortError(err)) {
-          // Panel closed / navigated away mid-request — user's message stays, no error noise.
-          return;
-        }
-        // Never render the raw error inline — preserve the user message and surface a
-        // classified, actionable error (Retry / Open Settings) instead.
-        setSendError(classifyCoDirectorError(err));
-        lastFailedSendRef.current = { text: trimmed, mode };
-      } finally {
-        setBusy(false);
-        if (abortControllerRef.current === controller) abortControllerRef.current = null;
-      }
+      await performSend(next, mode);
     },
-    [attachments, busy, draft, messages, selectedModelId],
+    [attachments, busy, draft, messages, performSend, persistConversation, selectedModelId],
   );
 
   const retryLastSend = useCallback(() => {
-    const pending = lastFailedSendRef.current;
+    const pending = pendingRetryRef.current;
     if (!pending || busy) return;
     setSendError(null);
-    void send(pending.text, pending.mode);
-  }, [busy, send]);
+    if (!pending.messageId) {
+      // Never got far enough to append a user message (preflight failure) — safe to
+      // go through `send()` again, which will append it.
+      void send(pending.text, pending.mode);
+      return;
+    }
+    // The user's message is already in the transcript from the failed attempt — resend the
+    // same transcript slice instead of appending a second copy of it.
+    const idx = messages.findIndex((m) => m.id === pending.messageId);
+    const transcript = idx >= 0 ? messages.slice(0, idx + 1) : messages;
+    void performSend(transcript, pending.mode);
+  }, [busy, messages, performSend, send]);
+
+  const cancelSend = useCallback(() => {
+    const requestId = activeRequestIdRef.current;
+    cancelledByUserRef.current = true;
+    if (requestId) void api.codirectorCancel(requestId).catch(() => {});
+    abortControllerRef.current?.abort();
+  }, []);
 
   // Seed prompt send when openSession was called with prompt from launchers that expect auto-send.
   const seedSendRef = useRef<string | null>(null);
@@ -819,6 +1089,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       unbindWorkspace,
       send,
       retryLastSend,
+      cancelSend,
       dismissSendError,
       openSettings,
       refreshProviderHealth,
@@ -888,6 +1159,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       unbindWorkspace,
       send,
       retryLastSend,
+      cancelSend,
       dismissSendError,
       openSettings,
       refreshProviderHealth,

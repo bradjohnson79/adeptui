@@ -10,6 +10,7 @@ export function CoDirectorComposer() {
     setDraft,
     send,
     busy,
+    cancelSend,
     attachments,
     addFiles,
     setAssetPickerOpen,
@@ -97,23 +98,35 @@ export function CoDirectorComposer() {
               Options
             </button>
           </div>
-          <button
-            type="button"
-            className="codirector-send"
-            aria-label={busy ? "Sending" : "Send message"}
-            title="Send"
-            disabled={!canSend}
-            onClick={() => {
-              const mode = /build|set\s*up|setup|configure|assemble/i.test(draft)
-                ? "setup"
-                : /prompt|rewrite|write/i.test(draft)
-                  ? "prompt"
-                  : "chat";
-              void send(undefined, mode);
-            }}
-          >
-            <IconSend />
-          </button>
+          {busy ? (
+            <button
+              type="button"
+              className="codirector-send codirector-stop"
+              aria-label="Stop generating"
+              title="Stop generating"
+              onClick={() => cancelSend()}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="codirector-send"
+              aria-label="Send message"
+              title="Send"
+              disabled={!canSend}
+              onClick={() => {
+                const mode = /build|set\s*up|setup|configure|assemble/i.test(draft)
+                  ? "setup"
+                  : /prompt|rewrite|write/i.test(draft)
+                    ? "prompt"
+                    : "chat";
+                void send(undefined, mode);
+              }}
+            >
+              <IconSend />
+            </button>
+          )}
         </div>
       </div>
       <input

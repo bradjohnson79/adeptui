@@ -112,16 +112,16 @@ async def list_providers_info() -> list[dict[str, Any]]:
 
 async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
     pid = provider_id or active_provider_id()
-    provider = build_provider(pid)
     try:
+        provider = build_provider(pid)
         return await provider.health()
     except CoDirectorError as err:
         return ProviderHealthResult(
             provider_id=pid,
-            display_name=getattr(provider, "display_name", pid),
+            display_name=pid,
             status="Degraded",
             reachable=False,
-            endpoint=getattr(provider, "endpoint", ""),
+            endpoint="",
             selected_model=None,
             model_available=False,
             models=[],

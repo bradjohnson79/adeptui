@@ -21,12 +21,16 @@ export interface CoDirectorUIContext {
   activeGenerationId?: string;
 }
 
+export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted";
+
 export interface CoDirectorMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   attachmentIds?: string[];
   createdAt: string;
+  /** Present while a streamed reply is in flight, or after it ended abnormally. */
+  status?: CoDirectorMessageStatus;
 }
 
 export type AttachmentKind = "file" | "library";
@@ -157,6 +161,38 @@ export function persistContextPanelOpen(open: boolean) {
     localStorage.setItem(CONTEXT_PANEL_KEY, open ? "1" : "0");
   } catch {
     /* ignore */
+  }
+}
+
+// Session-scoped (survives reload, not tab close) marker so a stream abandoned mid-flight
+// by a hard reload/crash can be surfaced as "interrupted" instead of silently vanishing.
+const STREAMING_FLAG_PREFIX = "adept_codirector_streaming_";
+
+export function markStreamingStart(projectId: string, requestId: string) {
+  try {
+    sessionStorage.setItem(STREAMING_FLAG_PREFIX + projectId, requestId);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function markStreamingEnd(projectId: string) {
+  try {
+    sessionStorage.removeItem(STREAMING_FLAG_PREFIX + projectId);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Returns true (and clears the flag) if the last session ended mid-stream for this project. */
+export function consumeAbandonedStreamingFlag(projectId: string): boolean {
+  try {
+    const key = STREAMING_FLAG_PREFIX + projectId;
+    const had = sessionStorage.getItem(key) != null;
+    sessionStorage.removeItem(key);
+    return had;
+  } catch {
+    return false;
   }
 }
 

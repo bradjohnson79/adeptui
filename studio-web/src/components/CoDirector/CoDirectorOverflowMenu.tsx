@@ -94,7 +94,14 @@ export function CoDirectorOverflowMenu() {
             <button type="button" disabled={busy} onClick={() => void compilePrompt()}>
               Compile prompt
             </button>
-            <button type="button" onClick={() => clearConversation()}>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm("Clear this conversation? This cannot be undone.")) {
+                  clearConversation();
+                }
+              }}
+            >
               Clear conversation
             </button>
             {displayMode === "popup" && (

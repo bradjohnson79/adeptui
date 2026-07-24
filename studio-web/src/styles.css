@@ -1307,8 +1307,17 @@ button.linkish {
 .setup-status[data-state="error"] { color: var(--danger); }
 .setup-status[data-state="error"] .setup-status-mark { border-radius: 2px; }
 .setup-status[data-state="update_available"] { color: var(--warn); }
+.setup-status[data-state="source_pending"] { color: var(--muted, #6b7280); }
+.setup-status[data-state="source_pending"] .setup-status-mark {
+  background: currentColor;
+  opacity: 0.55;
+}
 .setup-status[data-state="checking"],
 .setup-status[data-state="installing"] { color: var(--accent); }
+.setup-component-card.status-source_pending,
+.setup-component-card.status-pending {
+  border-color: color-mix(in srgb, var(--muted, #6b7280) 35%, transparent);
+}
 .setup-status[data-state="checking"] .setup-status-mark,
 .setup-status[data-state="installing"] .setup-status-mark {
   border-right-color: transparent;
@@ -2784,6 +2793,10 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   background: rgba(255,255,255,0.8);
   box-shadow: 0 8px 20px rgba(15,70,78,0.06);
 }
+.codirector-error-card {
+  border-color: rgba(220, 90, 70, 0.45);
+  background: rgba(220, 90, 70, 0.08);
+}
 .codirector-task-head,
 .codirector-task-actions {
   display: flex;
@@ -2845,6 +2858,22 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .codirector-send:disabled {
   opacity: 0.45;
   box-shadow: none;
+}
+.codirector-stop {
+  width: auto;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #7a2b2b, #c04b4b);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.codirector-msg-status {
+  font-size: 0.72rem;
+  color: var(--muted, #8a8f98);
+  margin-left: 0.4rem;
+  font-style: italic;
 }
 .codirector-composer-error {
   margin: 0 0 0.45rem;

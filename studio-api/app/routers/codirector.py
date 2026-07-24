@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from ..codirector import config_store as codirector_config_store
 from ..codirector import service as codirector_service
 from ..codirector.errors import CoDirectorError, status_code_for_error
 from ..db import SessionLocal, get_db
@@ -51,6 +54,55 @@ class ConversationSaveBody(BaseModel):
     messages: list[ConversationMessageIn]
     model: Optional[str] = None
     provider_id: Optional[str] = None
+
+
+class CoDirectorConfigBody(BaseModel):
+    endpoint: Optional[str] = None
+    selectedModel: Optional[str] = None
+    timeoutSec: Optional[float] = None
+
+
+_HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9.-]+$")
+
+
+def _validate_endpoint(endpoint: Optional[str]) -> None:
+    if endpoint is None:
+        return
+    raw = endpoint.strip()
+    parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+    hostname = parsed.hostname or ""
+    if not hostname or not _HOSTNAME_RE.match(hostname):
+        raise HTTPException(
+            status_code=400,
+            detail=CoDirectorError(
+                "VALIDATION_ERROR",
+                f"'{endpoint}' is not a valid host:port or URL.",
+                details={"endpoint": endpoint},
+                recoverable=True,
+                recommended_action="none",
+            ).to_dict(),
+        )
+
+
+@router.get("/config")
+async def get_config() -> dict[str, Any]:
+    return codirector_config_store.load_config()
+
+
+@router.put("/config")
+async def update_config(body: CoDirectorConfigBody) -> dict[str, Any]:
+    _validate_endpoint(body.endpoint)
+    if body.timeoutSec is not None and body.timeoutSec <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=CoDirectorError(
+                "VALIDATION_ERROR",
+                "Timeout must be a positive number of seconds.",
+                recoverable=True,
+                recommended_action="none",
+            ).to_dict(),
+        )
+    return codirector_config_store.save_config(body.model_dump(exclude_unset=True))
 
 
 @router.get("/providers")

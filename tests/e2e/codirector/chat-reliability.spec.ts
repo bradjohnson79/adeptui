@@ -11,7 +11,9 @@ async function setMockScenario(request: APIRequestContext, scenario: string | nu
 
 async function openCoDirector(page: Page, projectId: string) {
   await page.goto(`/project/${projectId}`);
-  const fab = page.getByRole("button", { name: "Co-Director" });
+  // Scoped to the global FAB's own class — the page also has "Ask Co-Director" launcher
+  // buttons and a banner button whose accessible names contain "Co-Director" as a substring.
+  const fab = page.locator("button.codirector-fab");
   await expect(fab).toBeVisible({ timeout: 30_000 });
   await fab.click();
   await expect(page.getByLabel("Message Co-Director")).toBeVisible({ timeout: 15_000 });

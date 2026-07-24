@@ -60,6 +60,23 @@ export interface ClassifiedError {
   recoverable: boolean;
 }
 
+/** SSE events emitted by POST /api/codirector/chat/stream. */
+export type CoDirectorStreamEvent =
+  | { type: "request_started"; requestId: string }
+  | { type: "provider_connected"; requestId: string; providerId: string }
+  | { type: "token"; requestId: string; content: string }
+  | {
+      type: "completed";
+      requestId: string;
+      content: string;
+      modelId: string;
+      providerId: string;
+      sceneSetup?: SceneSetup | null;
+      suggestedPrompt?: string | null;
+    }
+  | { type: "cancelled"; requestId: string }
+  | { type: "error"; requestId: string; error: ApiErrorDetailShape };
+
 /**
  * Turn any thrown value from a Co-Director request into a structured, user-safe
  * classification. Never surfaces a bare `TypeError: Failed to fetch`.
@@ -549,11 +566,96 @@ export const api = {
       body: JSON.stringify(body),
       signal: opts?.signal,
     }),
+  codirectorChatStream: async (
+    body: {
+      messages: { role: string; content: string }[];
+      project_id?: string;
+      scene_id?: string;
+      model?: string;
+      provider_id?: string;
+      mode?: "chat" | "prompt" | "guide" | "setup";
+      request_id?: string;
+    },
+    opts: { signal?: AbortSignal; onEvent: (event: CoDirectorStreamEvent) => void },
+  ): Promise<void> => {
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}/api/codirector/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify(body),
+        signal: opts.signal,
+      });
+    } catch (error) {
+      if (isAbortError(error) || opts.signal?.aborted) {
+        throw error instanceof Error ? error : new DOMException("Aborted", "AbortError");
+      }
+      throw error;
+    }
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      let detail: unknown;
+      try {
+        const payload = JSON.parse(text) as { detail?: unknown; error?: unknown };
+        detail = payload.detail ?? payload.error;
+      } catch {
+        detail = undefined;
+      }
+      if (detail && typeof detail === "object") {
+        const d = detail as ApiErrorDetailShape;
+        throw new ApiError(d.message || text || res.statusText, res.status, {
+          code: d.code,
+          details: d.details,
+          recoverable: d.recoverable,
+          recommendedAction: d.recommendedAction,
+        });
+      }
+      throw new ApiError(text || res.statusText, res.status);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        // SSE frames are separated by a blank line.
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const rawEvent = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const dataLine = rawEvent.split("\n").find((line) => line.startsWith("data:"));
+          if (!dataLine) continue;
+          const jsonStr = dataLine.slice(5).trim();
+          if (!jsonStr) continue;
+          try {
+            opts.onEvent(JSON.parse(jsonStr) as CoDirectorStreamEvent);
+          } catch {
+            /* ignore malformed SSE frame */
+          }
+        }
+      }
+    } catch (error) {
+      if (isAbortError(error) || opts.signal?.aborted) {
+        throw error instanceof Error ? error : new DOMException("Aborted", "AbortError");
+      }
+      throw error;
+    }
+  },
   codirectorCancel: (requestId: string) =>
     req<{ requestId: string; cancelled: boolean; taskCancelled: boolean }>("/api/codirector/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request_id: requestId }),
+    }),
+  codirectorConfig: () =>
+    req<{ endpoint: string; selectedModel: string | null; timeoutSec: number }>("/api/codirector/config"),
+  codirectorUpdateConfig: (body: { endpoint?: string; selectedModel?: string | null; timeoutSec?: number }) =>
+    req<{ endpoint: string; selectedModel: string | null; timeoutSec: number }>("/api/codirector/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
   codirectorGetConversation: (projectId: string) =>
     req<{

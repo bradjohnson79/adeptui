@@ -1,7 +1,14 @@
 # Co-Director Provider Reliability — Completion Report
 
 **Branch:** `phase1b/codirector-provider-reliability`
-**Related:** `docs/audit/CODIRECTOR_PROVIDER_ROOT_CAUSE.md`
+**Related:** `docs/audit/CODIRECTOR_PROVIDER_ROOT_CAUSE.md`,
+`docs/architecture/CODIRECTOR_IMPLEMENTATION_PLAN.md`,
+`docs/architecture/CODIRECTOR_PRODUCTION_BRAIN.md`
+
+> **Update (this session):** streaming + Stop Generating, retry-without-duplicate, and
+> authoritative server-side conversation persistence — previously listed under "Known gaps"
+> below — are now implemented and covered by Playwright. See "Session 2 additions" and the
+> revised "Known gaps" section for what is genuinely still open for M2/M3.
 
 ## Summary
 
@@ -139,6 +146,56 @@ keeps working during migration.
   and a **Refresh / Test** button that re-runs the health preflight on demand.
 - `studio-web/src/styles.css` — `.codirector-error-card` styling.
 
+## Session 2 additions — streaming, cancel, retry-dedup, persistence
+
+- **Config endpoints** — `studio-api/app/codirector/config_store.py` (new) persists
+  endpoint/model/timeout overrides to `codirector_config.json` under the data dir;
+  `GET/PUT /api/codirector/config` in `routers/codirector.py` read/write it, with hostname
+  validation on `PUT`. `service.build_provider("ollama")` now reads this store (falling back
+  to `Settings` env defaults), and `list_provider_ids()`/`build_provider("mock")` reject the
+  mock provider outside `STUDIO_E2E`/e2e-enabled runs so a stray env var can never mask a
+  broken production setup. Secrets are redacted from Ollama HTTP error bodies
+  (`errors.redact_secrets`) before they reach a `CoDirectorError` detail.
+- **`api.ts: codirectorChatStream`** — a hand-rolled SSE client (`fetch` + `ReadableStream`
+  reader, no library) that parses `data: {...}\n\n` frames into typed `CoDirectorStreamEvent`s
+  (`request_started` / `provider_connected` / `token` / `completed` / `cancelled` / `error`),
+  classifies a non-2xx/no-body response into an `ApiError` the same way `req()` does, and
+  rethrows `AbortError` distinctly from transport failures.
+- **`CoDirectorSession.tsx` rewritten `send()` / new `performSend()` / `cancelSend()`**:
+  - The user's message is now appended to the transcript **before** the health preflight and
+    persisted immediately — a provider-down or no-models block no longer silently drops it
+    (previously the preflight ran first and returned before the message existed).
+  - `performSend()` prefers `codirectorChatStream`, rendering tokens incrementally into a
+    `status: "streaming"` message bubble; on `completed` it finalizes the bubble and persists
+    the full turn via `codirectorSaveConversation`. If the stream transport itself throws
+    (not a graceful `error` SSE event) it falls back once to non-streaming `codirectorChat`.
+  - `cancelSend()` (wired to a new "Stop generating" button in `CoDirectorComposer`, shown in
+    place of Send while `busy`) calls `api.codirectorCancel(requestId)` and aborts the local
+    `AbortController`; the resulting `AbortError` is marked `status: "cancelled"` (vs.
+    `"interrupted"` for a non-user-initiated abort, e.g. unmount) and any partial text is kept
+    rather than discarded.
+  - **Retry no longer duplicates the user's message.** `pendingRetryRef` now tracks the
+    already-appended message's id; `retryLastSend()` resends the existing transcript slice up
+    to and including that message via `performSend()` instead of calling `send(text)` again
+    (which previously appended a second copy).
+  - A `mountedRef` guards every post-await state update — note this **must** be reset to
+    `true` at the top of its own mount effect (not just cleared `false` on cleanup), because
+    `<StrictMode>` double-invokes effects in dev and a cleanup-only ref permanently "unmounts"
+    the session after the first synthetic cycle. (This exact bug caused every streamed reply
+    to silently vanish during manual verification — see "Verification status" below.)
+- **Authoritative persistence** — a new effect hydrates `messages` from
+  `codirectorGetConversation(projectId)` whenever the bound project changes, replacing the
+  `sessionStorage`-only load. A session-scoped flag (`markStreamingStart/End` /
+  `consumeAbandonedStreamingFlag` in `CoDirector/types.ts`, backed by `sessionStorage` so it
+  survives a reload but not a new tab) detects a stream that was still in flight when the
+  page was torn down and appends an `status: "interrupted"` assistant turn on the next load
+  instead of silently showing nothing. `sessionStorage` remains a draft cache (used when no
+  `projectId` is bound, or if the server is unreachable at load time).
+- **"Clear conversation"** now asks for confirmation (`window.confirm`) before calling
+  `clearConversation()` (which already called `codirectorDeleteConversation`).
+- `CoDirectorMessage.tsx` — renders a small "Stopped" / "Interrupted — you can retry" status
+  label under cancelled/interrupted bubbles.
+
 ## Tests
 
 - `studio-api/tests/test_codirector_provider.py` (new) — covers:
@@ -172,51 +229,87 @@ keeps working during migration.
      `code` / `reachable` / `modelAvailable` combination per scenario.
   - `tests/e2e/codirector/provider-states.spec.ts` (pre-existing) is unaffected and keeps
     passing against the same gateway via the `/api/assistant/health` alias.
+- `tests/e2e/codirector/streaming-cancel.spec.ts` (new, `@critical @isolated`) using the
+  `slow` mock scenario (0.35s pre-stream delay + 50ms/token) to get a reliable window for
+  interacting mid-stream:
+  1. **Incremental streaming** — a "Stop generating" control appears while busy, the
+     assistant bubble is non-empty before the turn completes, and the final bubble contains
+     the full `[mock]` reply.
+  2. **Cancel** — clicking "Stop generating" returns the composer to idle with no error card,
+     and the user's message stays in the transcript (a cancel is not a failure).
+  3. **Retry without duplication** — provider down → error card → fix provider → click
+     **Retry** on the error card (not the composer) → exactly one user bubble with the
+     original text, followed by a successful assistant reply.
+  4. **Reload persistence** — send a message, confirm it via a direct
+     `GET /api/codirector/conversations/{projectId}` call, `page.reload()`, reopen
+     Co-Director, and confirm both the user and assistant bubbles reappear from the server
+     (not from `sessionStorage`, since a hard reload clears in-memory React state but the
+     conversation is re-fetched by project id).
 
 ## Verification status
 
-**pytest and Playwright were not run for this change.** The sandboxed shell/execution
-backend for this session was completely unavailable for the entire session (every command,
-including a bare `echo`, returned "no exit status" / "Execution backend unavailable" both
-directly and via an isolated shell subagent) — this is an infrastructure outage, not a
-result of the code changes. All Python and TypeScript files were re-read end-to-end after
-writing and checked for import/reference correctness (e.g. the `Depends(get_db)` +
-`StreamingResponse` session-lifetime bug described above), and `ReadLints` reported no
-issues on every touched/created file, but nothing here has been exercised at runtime.
+**pytest and Playwright were both run this session and are green.**
 
-**Before merging, run:**
+```text
+studio-api/tests/test_codirector_provider.py -q   → 42 passed
+studio-api (full suite)                            → 155 passed, 8 failed
+  (all 8 failures are pre-existing, unrelated to Co-Director: pack-install / pack-providers-
+   github / phase0-baseline / setup-refactor schema-version and status-label assertions —
+   none of the touched Co-Director files are imported by those tests)
 
-```bash
-# Backend unit/integration tests
-cd studio-api
-.venv\Scripts\python.exe -m pytest tests/test_codirector_provider.py -v
-.venv\Scripts\python.exe -m pytest -v   # full regression, esp. setup/source-manager suites
-
-# Playwright critical suite (new + existing Co-Director specs, plus a broader smoke pass)
-npx playwright test tests/e2e/codirector --grep @critical
-npx playwright test --grep @critical
+npx playwright test tests/e2e/codirector --retries=0        → 9 passed
+  (chat-reliability.spec.ts ×4, provider-states.spec.ts ×1, streaming-cancel.spec.ts ×4)
+npx playwright test --grep "@critical" --retries=0           → 29 passed (full critical suite)
 ```
+
+Two real bugs were found and fixed while getting to green (not just test-harness issues):
+
+1. **`service.get_health()` didn't catch `build_provider()` exceptions** — only
+   `provider.health()` was wrapped in the `try/except CoDirectorError`, so requesting health
+   for an unknown/unconfigured provider (or `mock` outside E2E, added this session) raised
+   instead of returning a `Degraded` result. Fixed by moving `build_provider()` inside the
+   `try`.
+2. **`mountedRef` cleanup-only pattern silently broke all streaming** — `<StrictMode>`
+   (enabled in `main.tsx`) double-invokes effects in dev, so a `useEffect(() => () => {
+   mountedRef.current = false }, [])` with no corresponding "set true" on mount permanently
+   flips the ref after the first synthetic mount→cleanup→mount cycle, causing every
+   `performSend()` post-await state update to be silently skipped — replies streamed from the
+   backend (confirmed via direct `curl`/CDP `fetch` against the same endpoint) but never
+   reached the UI. Fixed by setting `mountedRef.current = true` at the top of the mount
+   effect, not just `false` in its cleanup. This was caught via manual browser reproduction
+   (CDP `Runtime.evaluate` replaying the exact fetch/SSE-parse logic) after the first
+   Playwright run for "ready mock provider completes a chat turn" timed out waiting for the
+   reply to appear.
+
+Also fixed: `tests/e2e/codirector/chat-reliability.spec.ts`'s `openCoDirector()` used
+`page.getByRole("button", { name: "Co-Director" })`, which is a substring match and now also
+matches "Ask Co-Director" launcher buttons and a banner button — 3/4 tests failed on a
+`strict mode violation` (4 matching elements) before ever exercising the gateway. Changed to
+`page.locator("button.codirector-fab")`, which uniquely targets the global FAB.
 
 ## Known gaps vs. the full 28-part spec
 
-- **True token streaming to the UI**: `POST /api/codirector/chat/stream` exists, is wired
-  to both providers' `stream()` implementations, and chunks tokens over SSE, but
-  `CoDirectorSession.tsx` still calls the non-streaming `/api/codirector/chat` endpoint.
-  Wiring the composer to consume the SSE stream (progressive token rendering) is not done.
-- **Real mid-request cancel button in the composer UI**: `retryLastSend` covers the failure
-  path, and the backend cancel registry/endpoint work end-to-end, but there is no visible
-  "Stop generating" button wired to `api.codirectorCancel()` while `busy` is true.
-- **Server-side conversation as source of truth**: conversations are saved to
-  `/api/codirector/conversations/{projectId}` after each turn (fire-and-forget) and cleared
-  on "Clear conversation", but the panel still loads/persists its transcript from
-  `sessionStorage` on mount rather than hydrating from the server — server persistence is
-  exercised but not yet authoritative.
+Streaming, Stop Generating, retry-without-duplicate, and authoritative server-side
+persistence (previously listed here) are now implemented — see "Session 2 additions" above.
+Remaining, genuinely out-of-M1-scope items:
+
 - **Cloud provider stubs**: the gateway's `PROVIDER_IDS` list and `PROVIDER_NOT_CONFIGURED`
   error path are ready for `fal_*`/cloud providers, but no cloud provider implementation
   was added (out of scope — mock/ollama only, per the constraints).
+- **True incremental network streaming from Ollama itself**: `OllamaProvider.stream()` still
+  calls `generate()` once and re-chunks the full reply into synthetic token events (same
+  approach as the mock provider) rather than consuming Ollama's own NDJSON stream — the FE
+  event schema (`request_started` / `provider_connected` / `token` / `completed`) already
+  supports true incremental delivery whenever that's added, no FE changes required.
+  Ollama-native NDJSON streaming was intentionally deferred; see the noted comment in
+  `providers/ollama.py`.
+- **Settings UI polish** (Detect / Test / Refresh / Change Endpoint / Diagnostics beyond the
+  existing status + model dropdown + Refresh button in `CoDirectorOverflowMenu`) was not
+  in scope for this session's M1 gap list and was left as-is.
 - **Full 28-part copy review**: error/status copy was written to match the root-cause doc's
   intent (never show "Failed to fetch"; classify connection/model/timeout distinctly), but
   it has not been checked line-by-line against a separate "PART 24" copy spec document,
   which was not present in the repo at the time of this change.
-- **Execution verification**: as noted above, pytest/Playwright could not be run in this
-  session due to an infrastructure outage; this report reflects static review only.
+- **Production Bible, orchestrator, tools/approvals, task graph, prompt compilers, asset
+  lineage, continuity engine**: explicitly out of scope for Milestone 1 per the task
+  constraints; see `docs/architecture/CODIRECTOR_PRODUCTION_BRAIN.md` for the M2/M3 vision.
