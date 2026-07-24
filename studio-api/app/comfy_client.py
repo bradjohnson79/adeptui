@@ -52,7 +52,27 @@ class ComfyClient:
         self._object_info_cached_at = now
         return data
 
-    async def queue_prompt(self, workflow: dict[str, Any]) -> str:
+    async def _known_node_types(self) -> set[str] | None:
+        """Live node type names, or None when the catalogue cannot be read."""
+        try:
+            catalogue = await self.get_object_info()
+        except Exception:  # noqa: BLE001 - unknown must not be treated as invalid
+            return None
+        if not isinstance(catalogue, dict) or not catalogue:
+            return None
+        return {str(key) for key in catalogue}
+
+    async def queue_prompt(self, workflow: dict[str, Any], *, validate: bool = True) -> str:
+        """Submit a graph. Refuses graphs whose required node types are provably absent.
+
+        Validation happens here so every producer is covered by one guard. It is skipped only
+        when a caller explicitly opts out (`validate=False`), and it never blocks on missing
+        evidence — an unreadable `/object_info` lets the submission through.
+        """
+        if validate:
+            from .workflows.readiness import assert_graph_runnable
+
+            assert_graph_runnable(workflow, await self._known_node_types())
         payload = {"prompt": workflow, "client_id": self.client_id}
         async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(f"{self.base_url}/prompt", json=payload)

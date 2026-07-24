@@ -1,0 +1,837 @@
+"""Static capability definitions.
+
+Baselines here are the result of reading the code, not of optimism:
+
+* `locally_verified` appears only where an automated test (pytest and/or Playwright in this
+  repo) drives the real slice — UI/API → service → SQLite/filesystem → reload.
+* `partially_wired` is used where both ends exist but nothing proves the round trip.
+* `not_implemented` is used for genuinely absent behaviour, so consumers never report an
+  absent feature as a failure.
+* Anything that depends on ComfyUI, a model file, or a local LLM keeps a code-level baseline
+  and is *downgraded* at runtime by `service.py` when the dependency is missing.
+
+`docs/audit/ADEPT_PRODUCTION_CAPABILITY_MATRIX.md` mirrors this table for humans and is kept
+in sync by `tests/test_capabilities.py`.
+"""
+
+from __future__ import annotations
+
+from .models import CapabilityDefinition, CapabilityStatus
+
+S = CapabilityStatus
+
+
+def _d(**kwargs) -> CapabilityDefinition:
+    return CapabilityDefinition(**kwargs)
+
+
+CAPABILITIES: tuple[CapabilityDefinition, ...] = (
+    # ---------------------------------------------------------------- project
+    _d(
+        id="project.create",
+        display_name="Create project",
+        subsystem="project",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Create a project row with VRAM-profiled defaults and a first scene.",
+        read_only=False,
+        requires_approval=False,
+        service_ref="app.routers.api:create_project",
+        http_ref="POST /api/projects",
+    ),
+    _d(
+        id="project.list",
+        display_name="List projects",
+        subsystem="project",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="List non-archived projects with scene/asset counts.",
+        service_ref="app.routers.api:list_projects",
+        http_ref="GET /api/projects",
+    ),
+    _d(
+        id="project.read",
+        display_name="Read project",
+        subsystem="project",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Read one project with its scenes and assets.",
+        service_ref="app.routers.api:get_project",
+        http_ref="GET /api/projects/{projectId}",
+        scope="project",
+    ),
+    _d(
+        id="project.update",
+        display_name="Update project",
+        subsystem="project",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Patch project fields; optionally re-apply the VRAM profile.",
+        read_only=False,
+        requires_approval=True,
+        service_ref="app.routers.api:update_project",
+        http_ref="PATCH /api/projects/{projectId}",
+        scope="project",
+    ),
+    _d(
+        id="project.delete",
+        display_name="Delete project",
+        subsystem="project",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Delete a project and its cascaded scenes/assets/jobs rows.",
+        read_only=False,
+        requires_approval=True,
+        service_ref="app.routers.api:delete_project",
+        http_ref="DELETE /api/projects/{projectId}",
+        scope="project",
+    ),
+    _d(
+        id="project.duplicate",
+        display_name="Duplicate project",
+        subsystem="project",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Clone project settings and scene rows (media files are not copied).",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/projects/{projectId}/duplicate",
+        baseline_reason="Route exists and is reachable from the UI, but no test proves the clone round trip.",
+        scope="project",
+    ),
+    _d(
+        id="project.archive",
+        display_name="Archive project",
+        subsystem="project",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Toggle the archived flag that hides a project from the home library.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/projects/{projectId}/archive",
+        baseline_reason="No automated coverage of archive + reload.",
+        scope="project",
+    ),
+    # ----------------------------------------------------------------- scenes
+    _d(
+        id="project.scenes.read",
+        display_name="Read scenes",
+        subsystem="scenes",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="List scenes for a project in index order, or read one scene.",
+        service_ref="app.services.scene_service:SceneService.list_for_project",
+        http_ref="GET /api/projects/{projectId}/scenes",
+        scope="project",
+    ),
+    _d(
+        id="project.scenes.create",
+        display_name="Create scene",
+        subsystem="scenes",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Append a scene to a project, assigning the next index.",
+        read_only=False,
+        requires_approval=True,
+        service_ref="app.services.scene_service:SceneService.create",
+        http_ref="POST /api/projects/{projectId}/scenes",
+        scope="project",
+    ),
+    _d(
+        id="project.scenes.update",
+        display_name="Update scene",
+        subsystem="scenes",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Update scene title, summary, prompt, timing, and slot assignments.",
+        read_only=False,
+        requires_approval=True,
+        service_ref="app.services.scene_service:SceneService.update",
+        http_ref="PATCH /api/projects/{projectId}/scenes/{sceneId}",
+        scope="project",
+    ),
+    _d(
+        id="project.scenes.delete",
+        display_name="Delete scene",
+        subsystem="scenes",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Delete a scene and re-pack remaining scene indices.",
+        read_only=False,
+        requires_approval=True,
+        service_ref="app.services.scene_service:SceneService.delete",
+        http_ref="DELETE /api/projects/{projectId}/scenes/{sceneId}",
+        scope="project",
+    ),
+    _d(
+        id="project.scenes.reorder",
+        display_name="Reorder scenes",
+        subsystem="scenes",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Persisted scene reordering.",
+        read_only=False,
+        baseline_reason=(
+            "No reorder route or service exists. Indices are assigned on create and re-packed "
+            "on delete only. Not invented here."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="project.scenes.active",
+        display_name="Active scene selection",
+        subsystem="scenes",
+        baseline_status=S.UI_ONLY,
+        summary="Which scene the Director workspace is focused on.",
+        read_only=False,
+        baseline_reason=(
+            "Selection lives in React state (studio-web/src/directorSelection.ts). There is no "
+            "active_scene_id column and no endpoint to set one, so it does not survive a reload "
+            "on another client."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="project.timeline.propose",
+        display_name="Propose scene timeline",
+        subsystem="scenes",
+        baseline_status=S.DEGRADED,
+        summary="Propose 2-8 scenes from a brief. Never mutates scenes.",
+        component_ids=("ollama",),
+        http_ref="POST /api/projects/{projectId}/timeline/propose",
+        baseline_reason=(
+            "Uses Ollama when reachable and falls back to a heuristic sentence split otherwise, "
+            "so the capability always answers but proposal quality varies with provider health. "
+            "Deliberately not declared as depending on codirector.chat: a missing provider "
+            "degrades quality, it does not block the call."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="project.timeline.apply",
+        display_name="Apply proposed timeline",
+        subsystem="scenes",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Replace or append scenes from a reviewed proposal.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/projects/{projectId}/timeline/apply",
+        baseline_reason="Destructive when replace_existing is true and not covered by an automated round trip.",
+        scope="project",
+    ),
+    # ----------------------------------------------------------------- assets
+    _d(
+        id="assets.upload",
+        display_name="Upload project asset",
+        subsystem="assets",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Store an uploaded file under the project asset root and register an Asset row.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("storage.project_data",),
+        service_ref="app.routers.api:upload_asset",
+        http_ref="POST /api/projects/{projectId}/assets",
+        scope="project",
+    ),
+    _d(
+        id="assets.read",
+        display_name="Read asset library",
+        subsystem="assets",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Search project or global assets for the library panel.",
+        http_ref="GET /api/projects/{projectId}/library",
+        scope="project",
+    ),
+    _d(
+        id="assets.tag",
+        display_name="Tag / retag asset",
+        subsystem="assets",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Set an @tag or metadata on an asset.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="PATCH /api/projects/{projectId}/assets/{assetId}",
+        baseline_reason="Reachable from the UI; no automated reload assertion.",
+        scope="project",
+    ),
+    _d(
+        id="assets.file",
+        display_name="Serve asset file",
+        subsystem="assets",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Stream a stored asset file for previews.",
+        http_ref="GET /api/assets/{assetId}/file",
+        scope="project",
+    ),
+    # ------------------------------------------------------------- references
+    _d(
+        id="references.upload",
+        display_name="Upload reference image",
+        subsystem="references",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="References reuse the project asset upload path; there is no second store.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("assets.upload", "storage.project_data"),
+        http_ref="POST /api/projects/{projectId}/assets",
+        scope="project",
+    ),
+    _d(
+        id="references.read",
+        display_name="List reference ingredients",
+        subsystem="references",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Read the project's reference ingredient list from durable JSON.",
+        http_ref="GET /api/projects/{projectId}/references/ingredients",
+        scope="project",
+    ),
+    _d(
+        id="references.attach.project",
+        display_name="Attach reference to project",
+        subsystem="references",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Upsert a reference ingredient (role, subject, priority, include) for the project.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("references.read",),
+        http_ref="POST /api/projects/{projectId}/references/ingredients",
+        scope="project",
+    ),
+    _d(
+        id="references.attach.scene",
+        display_name="Attach reference to a scene",
+        subsystem="references",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Scene-scoped reference ingredients.",
+        read_only=False,
+        baseline_reason=(
+            "Ingredients are stored once per project (data_dir/projects/{id}/references/"
+            "ingredients.json). Only sheet builds accept an optional scene_id; the ingredient "
+            "records themselves have no scene scope."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="references.remove",
+        display_name="Remove reference ingredient",
+        subsystem="references",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Hard removal of a reference ingredient.",
+        read_only=False,
+        baseline_reason=(
+            "There is no DELETE route. The closest supported behaviour is re-upserting the "
+            "ingredient with include=false, which excludes it from sheets but keeps the record."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="references.exclude",
+        display_name="Exclude reference from sheets",
+        subsystem="references",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Set include=false so an ingredient is skipped when building sheets.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/projects/{projectId}/references/ingredients",
+        scope="project",
+    ),
+    _d(
+        id="references.thumbnail",
+        display_name="Reference thumbnails",
+        subsystem="references",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Dedicated thumbnail generation for references.",
+        baseline_reason=(
+            "No thumbnail pipeline exists. Previews reuse the full-size file via "
+            "GET /api/assets/{assetId}/file."
+        ),
+        scope="project",
+    ),
+    _d(
+        id="references.sheet.build",
+        display_name="Build reference sheet",
+        subsystem="references",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Compose selected ingredients into a sheet PNG plus a static video.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("references.read", "storage.project_data"),
+        component_ids=("ffmpeg",),
+        http_ref="POST /api/projects/{projectId}/references/sheets/build",
+        baseline_reason="Static-video step requires a working FFmpeg; not proven end to end here.",
+        scope="project",
+    ),
+    _d(
+        id="references.ic_lora.ready",
+        display_name="Ingredients IC-LoRA readiness",
+        subsystem="references",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Whether the gated LTX 2.3 Ingredients IC-LoRA and its ComfyUI nodes are usable.",
+        dependencies=("comfyui.health",),
+        component_ids=("ltx23_ic_lora_ingredients", "comfyui"),
+        http_ref="GET /api/projects/{projectId}/references/capabilities",
+        baseline_reason="Probe-driven: reports blocked/not_configured until the model file and nodes exist.",
+        scope="project",
+    ),
+    # -------------------------------------------------- co-director / bible
+    _d(
+        id="codirector.chat",
+        display_name="Co-Director chat",
+        subsystem="codirector",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Streaming chat through the Co-Director gateway (M1).",
+        dependencies=("codirector.provider",),
+        component_ids=("ollama",),
+        http_ref="POST /api/codirector/chat/stream",
+        baseline_reason="Requires a reachable local model provider; downgraded by probe when absent.",
+        scope="project",
+    ),
+    _d(
+        id="codirector.provider",
+        display_name="Local model provider",
+        subsystem="codirector",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Ollama (or the E2E mock) reachability and selected model.",
+        component_ids=("ollama",),
+        http_ref="GET /api/codirector/health",
+        baseline_reason="Probe-driven; mock provider is reported as mock_verified, never as local truth.",
+    ),
+    _d(
+        id="codirector.bible.read",
+        display_name="Read Production Bible",
+        subsystem="codirector",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Read the current immutable Production Bible version for a project (M2.1).",
+        http_ref="GET /api/codirector/projects/{projectId}/bible",
+        scope="project",
+    ),
+    _d(
+        id="codirector.bible.propose",
+        display_name="Propose Bible update",
+        subsystem="codirector",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Create a durable proposal describing entity/fact mutations (M2.1).",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/codirector/projects/{projectId}/proposals",
+        scope="project",
+    ),
+    _d(
+        id="codirector.bible.approve",
+        display_name="Approve Bible proposal",
+        subsystem="codirector",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Record an approval decision and, on approve, execute into a new Bible version.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/codirector/proposals/{proposalId}/approval",
+        scope="project",
+    ),
+    _d(
+        id="codirector.tools",
+        display_name="Co-Director tool orchestration",
+        subsystem="codirector",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Autonomous tool registry / dispatch.",
+        read_only=False,
+        baseline_reason="Owned by Co-Director M2.2. This branch only publishes the capability truth source.",
+    ),
+    # ---------------------------------------------------------------- comfyui
+    _d(
+        id="comfyui.health",
+        display_name="ComfyUI reachability",
+        subsystem="comfyui",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Structured ComfyUI reachability, version, and device summary.",
+        component_ids=("comfyui",),
+        service_ref="app.capabilities.probes:probe_comfy",
+        http_ref="GET /api/comfy/health",
+        baseline_reason="Probe-driven; blocked when the local ComfyUI service is not reachable.",
+    ),
+    _d(
+        id="comfyui.queue",
+        display_name="Queue ComfyUI prompt",
+        subsystem="comfyui",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Submit a validated workflow graph to ComfyUI.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("comfyui.health", "workflows.validate"),
+        component_ids=("comfyui",),
+        baseline_reason="Only reachable through job kinds today; blocked without a reachable ComfyUI.",
+    ),
+    _d(
+        id="comfyui.cancel",
+        display_name="Cancel ComfyUI job",
+        subsystem="comfyui",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Cancel a queued/running job and interrupt ComfyUI.",
+        read_only=False,
+        requires_approval=False,
+        dependencies=("comfyui.health",),
+        component_ids=("comfyui",),
+        http_ref="POST /api/jobs/{jobId}/cancel",
+        baseline_reason="Cancel marks the job row even when the interrupt call fails; no E2E proof.",
+    ),
+    _d(
+        id="comfyui.outputs",
+        display_name="Ingest ComfyUI outputs",
+        subsystem="comfyui",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Locate ComfyUI output files for a finished prompt and ingest them.",
+        dependencies=("comfyui.health", "storage.project_data"),
+        component_ids=("comfyui",),
+        baseline_reason="Requires a real render to prove; not exercised by this branch.",
+    ),
+    # -------------------------------------------------------------- workflows
+    _d(
+        id="workflows.discover",
+        display_name="Discover workflows",
+        subsystem="workflows",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="List registered workflow builders with modality, capabilities, and requirements.",
+        service_ref="app.workflows.readiness:list_workflows",
+        http_ref="GET /api/workflows",
+    ),
+    _d(
+        id="workflows.validate",
+        display_name="Validate workflow readiness",
+        subsystem="workflows",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary=(
+            "Report missing ComfyUI node types and missing model components for one workflow, "
+            "with a recommended action. Never queues."
+        ),
+        dependencies=("workflows.discover",),
+        service_ref="app.workflows.readiness:workflow_readiness",
+        http_ref="GET /api/workflows/{workflowId}/readiness",
+    ),
+    _d(
+        id="workflows.ready",
+        display_name="Any workflow ready to run",
+        subsystem="workflows",
+        baseline_status=S.BACKEND_ONLY,
+        summary="At least one registered workflow has all required nodes and models present.",
+        dependencies=("workflows.validate", "comfyui.health"),
+        component_ids=("comfyui",),
+        baseline_reason="Probe-driven aggregate over workflow readiness.",
+    ),
+    _d(
+        id="workflows.image.ready",
+        display_name="Image workflow ready",
+        subsystem="workflows",
+        baseline_status=S.BACKEND_ONLY,
+        summary="An image-modality workflow has all required nodes and models present.",
+        dependencies=("workflows.validate", "comfyui.health"),
+        component_ids=("comfyui",),
+        baseline_reason="Probe-driven.",
+    ),
+    _d(
+        id="workflows.video.ready",
+        display_name="Video workflow ready",
+        subsystem="workflows",
+        baseline_status=S.BACKEND_ONLY,
+        summary="A video-modality workflow has all required nodes and models present.",
+        dependencies=("workflows.validate", "comfyui.health"),
+        component_ids=("comfyui", "ltx_checkpoint"),
+        baseline_reason="Probe-driven.",
+    ),
+    # ----------------------------------------------------------------- models
+    _d(
+        id="models.image.ready",
+        display_name="Image model installed",
+        subsystem="models",
+        baseline_status=S.BACKEND_ONLY,
+        summary="A verified local checkpoint usable for still generation.",
+        component_ids=("ltx_checkpoint",),
+        baseline_reason="Derived from Setup component verification; blocked when absent.",
+    ),
+    _d(
+        id="models.video.ready",
+        display_name="Video model installed",
+        subsystem="models",
+        baseline_status=S.BACKEND_ONLY,
+        summary="LTX (and optionally WAN) weights verified on disk.",
+        component_ids=("ltx_checkpoint", "wan_models"),
+        baseline_reason="Derived from Setup component verification; blocked when absent.",
+    ),
+    _d(
+        id="extensions.comfyui.ready",
+        display_name="ComfyUI extensions ready",
+        subsystem="extensions",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Required custom node types are present in the live ComfyUI object catalogue.",
+        dependencies=("comfyui.health",),
+        component_ids=("comfyui",),
+        baseline_reason="Probe-driven against /object_info.",
+    ),
+    # --------------------------------------------------------- source manager
+    _d(
+        id="source_manager.read",
+        display_name="Read Source Manager overview",
+        subsystem="source_manager",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Providers, saved sources, assignments, active downloads, install history.",
+        http_ref="GET /api/source-manager/overview",
+    ),
+    _d(
+        id="source_manager.refresh",
+        display_name="Refresh component source",
+        subsystem="source_manager",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Re-check the published release/source for one component without downloading.",
+        read_only=False,
+        requires_approval=False,
+        http_ref="POST /api/setup/components/{componentId}/refresh-source",
+    ),
+    _d(
+        id="source_manager.install",
+        display_name="Install component",
+        subsystem="source_manager",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Download and install a component through the queue engine.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("source_manager.read", "downloads.queue"),
+        http_ref="POST /api/setup/components/{componentId}/action",
+        baseline_reason=(
+            "Proven against the local fixture provider (mock_verified for packs); real archives "
+            "for the Essential Packs are not published, so install stays blocked for them."
+        ),
+    ),
+    _d(
+        id="source_manager.repair",
+        display_name="Repair component",
+        subsystem="source_manager",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Run the recommended diagnostic action for an unhealthy component.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="POST /api/setup/components/{componentId}/recommended-action",
+        baseline_reason="Diagnostics are covered by unit tests; repair outcomes are not asserted end to end.",
+    ),
+    _d(
+        id="downloads.read",
+        display_name="Read download queue",
+        subsystem="downloads",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Active downloads, phases, progress, and install receipts.",
+        http_ref="GET /api/downloads",
+    ),
+    _d(
+        id="downloads.queue",
+        display_name="Enqueue download",
+        subsystem="downloads",
+        baseline_status=S.MOCK_VERIFIED,
+        summary="Queue a component download with pause/resume/cancel.",
+        read_only=False,
+        requires_approval=True,
+        baseline_reason=(
+            "Exercised against the Playwright fixture HTTP provider only. No real multi-GB "
+            "download is performed by any test, and none is triggered from capability UI."
+        ),
+    ),
+    # ------------------------------------------------------------------ setup
+    _d(
+        id="setup.read",
+        display_name="Read setup status",
+        subsystem="setup",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Component states, diagnostics, and primary actions for the Setup Wizard.",
+        http_ref="GET /api/setup/status",
+    ),
+    _d(
+        id="setup.prepare",
+        display_name="Prepare studio",
+        subsystem="setup",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Run the guided preparation plan across required components.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("setup.read",),
+        http_ref="POST /api/setup/prepare",
+        baseline_reason="Orchestrator is unit-tested; a full prepare run needs real installers.",
+    ),
+    _d(
+        id="health.read",
+        display_name="Read system health",
+        subsystem="health",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Aggregate health for the dashboard, including structured ComfyUI state.",
+        http_ref="GET /api/health",
+    ),
+    _d(
+        id="capabilities.read",
+        display_name="Read capability registry",
+        subsystem="capabilities",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="This registry: machine-readable capability status for every audited subsystem.",
+        http_ref="GET /api/capabilities",
+    ),
+    # ------------------------------------------------------------- generation
+    _d(
+        id="generation.image.queue",
+        display_name="Queue image generation",
+        subsystem="generation",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Enqueue an ImageGen job for the local worker.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("comfyui.queue", "workflows.image.ready", "models.image.ready"),
+        component_ids=("comfyui", "ltx_checkpoint"),
+        http_ref="POST /api/projects/{projectId}/imagegen",
+        baseline_reason="No verified still generation in this environment; probe reports blocked when models are absent.",
+        scope="project",
+    ),
+    _d(
+        id="generation.video.queue",
+        display_name="Queue video generation",
+        subsystem="generation",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Enqueue a scene/timeline render or Txt2Vid job for the local worker.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("comfyui.queue", "workflows.video.ready", "models.video.ready"),
+        component_ids=("comfyui", "ltx_checkpoint", "wan_models"),
+        http_ref="POST /api/projects/{projectId}/render",
+        baseline_reason="No verified render in this environment; probe reports blocked when models are absent.",
+        scope="project",
+    ),
+    _d(
+        id="generation.lipsync.queue",
+        display_name="Queue lip sync",
+        subsystem="generation",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Enqueue a lip-sync pass over a rendered scene.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("comfyui.queue", "generation.video.queue"),
+        component_ids=("comfyui",),
+        http_ref="POST /api/projects/{projectId}/lipsync",
+        baseline_reason="Requires a rendered video plus the LatentSync nodes; unverified here.",
+        scope="project",
+    ),
+    _d(
+        id="generation.jobs.read",
+        display_name="Read job state",
+        subsystem="generation",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="Read queued/running/finished job rows for a project.",
+        http_ref="GET /api/projects/{projectId}/jobs",
+        scope="project",
+    ),
+    # ------------------------------------------------- creative workspaces
+    _d(
+        id="storyboard.read",
+        display_name="Read script & storyboard",
+        subsystem="storyboard",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Script document, segments, and storyboard panels for a project.",
+        http_ref="GET /api/projects/{projectId}/script",
+        baseline_reason="Durable tables exist and the UI reads them, but no automated round trip.",
+        scope="project",
+    ),
+    _d(
+        id="storyboard.generate",
+        display_name="Generate storyboard panel",
+        subsystem="storyboard",
+        baseline_status=S.BACKEND_ONLY,
+        summary="Queue an ImageGen job for one storyboard panel.",
+        read_only=False,
+        requires_approval=True,
+        dependencies=("generation.image.queue",),
+        http_ref="POST /api/projects/{projectId}/storyboard/generate",
+        baseline_reason="Inherits generation blockers.",
+        scope="project",
+    ),
+    _d(
+        id="director.timeline.read",
+        display_name="Read director timeline",
+        subsystem="director",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Per-scene director timeline document (tracks, clips, keyframes).",
+        http_ref="GET /api/projects/{projectId}/scenes/{sceneId}/director",
+        baseline_reason="Persisted as scene JSON and edited in the UI; no automated reload assertion.",
+        scope="project",
+    ),
+    _d(
+        id="director.timeline.update",
+        display_name="Update director timeline",
+        subsystem="director",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Replace a scene's director timeline and sync legacy scene fields.",
+        read_only=False,
+        requires_approval=True,
+        http_ref="PUT /api/projects/{projectId}/scenes/{sceneId}/director",
+        baseline_reason="Not covered by an automated round trip in this branch.",
+        scope="project",
+    ),
+    _d(
+        id="editor.sequences.read",
+        display_name="Read editor sequences",
+        subsystem="editor",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Editor sequence documents for assembly.",
+        baseline_reason="Tables are provisioned at startup; no automated coverage.",
+        scope="project",
+    ),
+    _d(
+        id="spatial.scene.read",
+        display_name="Read spatial scene",
+        subsystem="spatial",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="Spatial map / blocking document for a scene.",
+        http_ref="GET /api/projects/{projectId}/scenes/{sceneId}/spatial",
+        baseline_reason="Durable rows exist; not verified end to end here.",
+        scope="project",
+    ),
+    _d(
+        id="virtual_stage.render",
+        display_name="Virtual Stage",
+        subsystem="virtual_stage",
+        baseline_status=S.NOT_IMPLEMENTED,
+        summary="Virtual Stage previsualisation.",
+        baseline_reason=(
+            "Referenced in architecture docs only. No route, service, table, or component "
+            "implements it in this build."
+        ),
+    ),
+    # ---------------------------------------------------------------- storage
+    _d(
+        id="storage.project_data",
+        display_name="Project data storage writable",
+        subsystem="storage",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="The configured data directory accepts writes (assets, references, previews).",
+        service_ref="app.capabilities.probes:probe_storage",
+    ),
+    _d(
+        id="storage.database",
+        display_name="Project database available",
+        subsystem="storage",
+        baseline_status=S.LOCALLY_VERIFIED,
+        summary="SQLite database reachable with the expected core tables.",
+        service_ref="app.capabilities.probes:probe_database",
+    ),
+)
+
+BY_ID: dict[str, CapabilityDefinition] = {item.id: item for item in CAPABILITIES}
+
+SUBSYSTEMS: tuple[str, ...] = tuple(dict.fromkeys(item.subsystem for item in CAPABILITIES))
+
+
+def get_definition(capability_id: str) -> CapabilityDefinition:
+    try:
+        return BY_ID[capability_id]
+    except KeyError as exc:
+        raise KeyError(f"Unknown capability {capability_id}") from exc
+
+
+def list_definitions(*, subsystem: str | None = None) -> tuple[CapabilityDefinition, ...]:
+    if not subsystem:
+        return CAPABILITIES
+    return tuple(item for item in CAPABILITIES if item.subsystem == subsystem)
+
+
+def validate_registry() -> None:
+    """Fail fast on a malformed registry (duplicate ids, dangling dependencies)."""
+    seen: set[str] = set()
+    for item in CAPABILITIES:
+        if item.id in seen:
+            raise ValueError(f"Duplicate capability id {item.id}")
+        seen.add(item.id)
+    for item in CAPABILITIES:
+        for dependency in item.dependencies:
+            if dependency not in seen:
+                raise ValueError(f"Capability {item.id} depends on unknown capability {dependency}")
+
+
+validate_registry()

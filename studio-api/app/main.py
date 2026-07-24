@@ -8,9 +8,11 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .capabilities.errors import CapabilityError
+from .capabilities.errors import status_code_for_error as capability_status_code
 from .config import settings
 from .db import init_db
 from .queue_worker import job_queue
@@ -22,6 +24,7 @@ from .avatar_studio import router as avatar_studio_router, ensure_avatar_tables
 from .editor_sequences import router as editor_sequences_router, ensure_editor_tables
 from .knowledgebase_api import router as knowledgebase_router
 from .references.api import router as references_router
+from .capabilities.api import router as capabilities_router
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +138,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(CapabilityError)
+async def _capability_error_handler(_request, exc: CapabilityError):
+    """Translate a service-layer capability failure into the structured error envelope.
+
+    Same shape the Co-Director gateway already returns, so `studio-web/src/api.ts` surfaces
+    `code`, `message`, and `recommendedAction` without any per-route handling.
+    """
+    return JSONResponse(
+        status_code=capability_status_code(exc.code),
+        content={"detail": exc.to_dict()},
+    )
+
+
 app.include_router(router, prefix="/api")
 app.include_router(codirector_router, prefix="/api")
 app.include_router(extra_router, prefix="/api")
@@ -143,6 +161,7 @@ app.include_router(avatar_studio_router, prefix="/api")
 app.include_router(editor_sequences_router, prefix="/api")
 app.include_router(knowledgebase_router, prefix="/api")
 app.include_router(references_router, prefix="/api")
+app.include_router(capabilities_router, prefix="/api")
 try:
     from .source_manager.api import router as source_manager_router
 

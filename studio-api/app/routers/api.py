@@ -31,6 +31,7 @@ from ..config import settings
 from ..db import Asset, Job, Project, Scene, get_db
 from ..queue_worker import job_queue
 from ..references import resolve_prompt
+from ..services.scene_service import SceneService
 from ..schemas import (
     AssetOut,
     AssistantApplySetupRequest,
@@ -131,35 +132,42 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
 
 @router.get("/health", response_model=HealthOut)
 async def health():
-    missing: list[str] = []
-    comfy_data = {}
-    reachable = False
-    try:
-        comfy_data = await comfy.health()
-        reachable = True
-    except Exception as exc:
-        return HealthOut(ok=False, comfy_reachable=False, message=str(exc))
+    """Structured health.
 
-    # quick model presence checks via filesystem
-    models = Path(r"C:\Users\bradj\AppData\Local\Comfy-Desktop\ComfyUI-Shared\models")
-    checks = {
-        "LTX checkpoint": models / "checkpoints" / settings.ltx_checkpoint,
-        "WAN high noise": models / "diffusion_models" / settings.wan_high_noise,
-        "WAN low noise": models / "diffusion_models" / settings.wan_low_noise,
-    }
-    for label, path in checks.items():
-        if not path.exists():
-            # also check nested
-            found = list(models.rglob(path.name))
-            if not found:
-                missing.append(label)
+    The previous implementation probed one developer's hardcoded `%LOCALAPPDATA%` ComfyUI
+    model root for three filenames and returned a raw exception string when anything threw.
+    Model presence now comes from the same component verifiers the Setup Wizard and Source
+    Manager use, so a gap names a real component id that a blocker action can act on.
+    `missing_models` is retained as human-readable labels for existing consumers.
+    """
+    from ..comfy_health import comfy_health
+
+    payload = await comfy_health()
+    reachable = bool(payload.get("reachable"))
+    models = payload.get("models") or []
+    missing = [str(item.get("name") or item.get("componentId")) for item in models if not item.get("present")]
     return HealthOut(
-        ok=True,
+        ok=reachable,
         comfy_reachable=reachable,
-        comfy=comfy_data,
+        comfy=payload,
         missing_models=missing,
-        message="ready" if not missing else "ready with missing optional models",
+        missing_model_component_ids=list(payload.get("missingModelComponentIds") or []),
+        comfy_status=str(payload.get("status") or "unknown"),
+        comfy_version=payload.get("version"),
+        node_catalog_available=bool(payload.get("nodeCatalogAvailable")),
+        reason_code=payload.get("reasonCode"),
+        recommended_action=payload.get("recommendedAction"),
+        message=str(payload.get("message") or ""),
     )
+
+
+@router.get("/comfy/object-info-count")
+async def comfy_object_info_count():
+    """Small diagnostic: how many node types the live ComfyUI catalogue exposes."""
+    from ..comfy_health import node_types
+
+    names = await node_types()
+    return {"available": names is not None, "count": len(names or ())}
 
 
 @router.get("/vram-presets", response_model=list[VramProfileOut])
@@ -494,33 +502,23 @@ async def apply_timeline(
     if not body.scenes:
         raise HTTPException(400, "scenes required")
 
-    existing = db.query(Scene).filter(Scene.project_id == project_id).order_by(Scene.index).all()
-    if body.replace_existing:
-        for s in existing:
-            db.delete(s)
-        db.flush()
-        start_index = 0
-    else:
-        start_index = len(existing)
-
-    created: list[str] = []
-    for i, prop in enumerate(body.scenes):
-        scene = Scene(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
-            index=start_index + i,
-            name=prop.name or f"Scene {start_index + i + 1}",
-            engine=prop.engine or project.engine_default or "ltx",
-            prompt=prop.prompt or "",
-            duration_sec=float(prop.duration_sec or 5),
-            camera_note=prop.camera_note or "",
-            seed=project.seed,
-        )
-        db.add(scene)
-        created.append(scene.id)
-
-    project.updated_at = datetime.utcnow()
-    db.commit()
+    scenes = SceneService.create_many(
+        db,
+        project_id,
+        [
+            {
+                "name": prop.name or "",
+                "engine": prop.engine or project.engine_default or "ltx",
+                "prompt": prop.prompt or "",
+                "duration_sec": float(prop.duration_sec or 5),
+                "camera_note": prop.camera_note or "",
+                "seed": project.seed,
+            }
+            for prop in body.scenes
+        ],
+        replace_existing=body.replace_existing,
+    )
+    created = [scene.id for scene in scenes]
 
     job_id = None
     if body.enqueue_render:
@@ -575,54 +573,28 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/projects/{project_id}/scenes", response_model=list[SceneOut])
+def list_scenes(project_id: str, db: Session = Depends(get_db)):
+    """Scenes in timeline order. Cheaper than fetching the whole project payload."""
+    SceneService.require_project(db, project_id)
+    return [SceneOut.model_validate(scene) for scene in SceneService.list_for_project(db, project_id)]
+
+
+@router.get("/projects/{project_id}/scenes/{scene_id}", response_model=SceneOut)
+def get_scene(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    return SceneOut.model_validate(SceneService.get(db, project_id, scene_id))
+
+
 @router.post("/projects/{project_id}/scenes", response_model=SceneOut)
 def add_scene(project_id: str, body: SceneIn, db: Session = Depends(get_db)):
-    project = db.get(Project, project_id)
-    if not project:
-        raise HTTPException(404, "Project not found")
-    count = db.query(Scene).filter(Scene.project_id == project_id).count()
-    scene = Scene(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        index=count,
-        name=body.name or f"Scene {count + 1}",
-        engine=body.engine,
-        prompt=body.prompt,
-        duration_sec=body.duration_sec,
-        start_asset_id=body.start_asset_id,
-        middle_asset_id=body.middle_asset_id,
-        end_asset_id=body.end_asset_id,
-        audio_asset_id=body.audio_asset_id,
-        lipsync_enabled=1 if body.lipsync_enabled else 0,
-        lipsync_audio_asset_id=body.lipsync_audio_asset_id,
-        continuity_json=body.continuity_json or "",
-        camera_note=body.camera_note,
-        seed=body.seed,
-    )
-    db.add(scene)
-    project.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(scene)
+    scene = SceneService.create(db, project_id, body.model_dump(exclude_unset=True))
     return SceneOut.model_validate(scene)
 
 
 @router.patch("/projects/{project_id}/scenes/{scene_id}", response_model=SceneOut)
 def update_scene(project_id: str, scene_id: str, body: SceneIn, db: Session = Depends(get_db)):
-    scene = db.get(Scene, scene_id)
-    if not scene or scene.project_id != project_id:
-        raise HTTPException(404, "Scene not found")
-    data = body.model_dump()
-    data["lipsync_enabled"] = 1 if body.lipsync_enabled else 0
-    tracks_json = data.pop("lipsync_tracks_json", None)
-    director_json = data.pop("director_json", None)
-    for k, v in data.items():
-        setattr(scene, k, v)
-    if tracks_json is not None:
-        scene.lipsync_tracks_json = tracks_json
-    if director_json is not None:
-        scene.director_json = director_json
-    db.commit()
-    db.refresh(scene)
+    """Partial update: only the fields present in the request body are written."""
+    scene = SceneService.update(db, project_id, scene_id, body.model_dump(exclude_unset=True))
     return SceneOut.model_validate(scene)
 
 
@@ -768,15 +740,7 @@ async def apply_dual_lipsync(project_id: str, scene_id: str, db: Session = Depen
 
 @router.delete("/projects/{project_id}/scenes/{scene_id}")
 def delete_scene(project_id: str, scene_id: str, db: Session = Depends(get_db)):
-    scene = db.get(Scene, scene_id)
-    if not scene or scene.project_id != project_id:
-        raise HTTPException(404, "Scene not found")
-    db.delete(scene)
-    # reindex
-    scenes = db.query(Scene).filter(Scene.project_id == project_id).order_by(Scene.index).all()
-    for i, s in enumerate(scenes):
-        s.index = i
-    db.commit()
+    SceneService.delete(db, project_id, scene_id)
     return {"ok": True}
 
 
