@@ -1,16 +1,22 @@
-"""Durable queue worker — reloads from SQLite; recovers Running safely."""
+"""Durable queue worker — single-process, SQLite-backed; recovers Running safely.
+
+Honest single-process model: one daemon thread polls and runs sync handlers
+serially (max_concurrent=1). There is no distributed lease / multi-worker claim
+protocol — do not pretend otherwise.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from ...db import SessionLocal
+from ...db import ProductionJob, SessionLocal
 from .capability import sync_check_capabilities
 from .dependencies import refresh_waiting_jobs
 from .events import event_bus
@@ -21,13 +27,71 @@ from .store import JobStore
 
 logger = logging.getLogger(__name__)
 
+_CHAIN_KEYS = (
+    "panelId",
+    "imageJobId",
+    "assetId",
+    "proposalId",
+    "sessionId",
+    "reportId",
+    "score",
+    "passed",
+    "band",
+    "proposalApproved",
+)
+
+
+def _env_poll_interval(default: float = 0.25) -> float:
+    raw = os.environ.get("STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL", "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.05, float(raw))
+    except ValueError:
+        return default
+
+
+def _chain_results_to_dependents(db: Session, job_id: str, result: dict[str, Any]) -> None:
+    """Propagate closed-loop outputs into waiting dependent job payloads."""
+    if not result:
+        return
+    for dep_id in JobStore.list_dependents(db, job_id):
+        dep = db.get(ProductionJob, dep_id)
+        if not dep:
+            continue
+        try:
+            payload = json.loads(dep.payload_json or "{}")
+        except json.JSONDecodeError:
+            payload = {}
+        changed = False
+        for key in _CHAIN_KEYS:
+            if key in result and result[key] is not None:
+                if payload.get(key) != result[key]:
+                    payload[key] = result[key]
+                    changed = True
+        if changed:
+            dep.payload_json = json.dumps(payload, default=str)
+    db.commit()
+
 
 class ProductionJobWorker:
-    """Background poller that survives process restart via DB reload."""
+    """Background poller that survives process restart via DB reload.
 
-    def __init__(self, *, poll_interval: float = 0.25, max_concurrent: int = 2) -> None:
-        self.poll_interval = poll_interval
-        self.max_concurrent = max_concurrent
+    Sync handlers run on this thread. ``max_concurrent`` defaults to 1 because
+    handlers are synchronous — a higher value would be misleading without a
+    thread/async executor.
+    """
+
+    def __init__(
+        self,
+        *,
+        poll_interval: float | None = None,
+        max_concurrent: int = 1,
+    ) -> None:
+        self.poll_interval = (
+            _env_poll_interval() if poll_interval is None else max(0.05, float(poll_interval))
+        )
+        self.max_concurrent = max(1, int(max_concurrent))
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
@@ -86,6 +150,8 @@ class ProductionJobWorker:
             try:
                 db = SessionLocal()
                 try:
+                    # Sync handlers: process one job per outer tick. max_concurrent>1
+                    # is reserved for a future threaded executor and is not faked here.
                     while len(self._in_flight) < self.max_concurrent:
                         job_id = self._process_one(db)
                         if not job_id:
@@ -116,6 +182,8 @@ class ProductionJobWorker:
         snap = sync_check_capabilities(
             requirements=job.capabilityRequirements,
             mock_unavailable=mock_unavail,
+            db=db,
+            project_id=job.projectId,
         )
         if not snap["available"]:
             JobStore.transition(
@@ -151,9 +219,8 @@ class ProductionJobWorker:
             provider=job.provider or (job.payload or {}).get("provider") or "mock",
             capability_snapshot=snap,
         )
-        # Re-load job after attempt bump.
         job = JobStore.get_job(db, job_id) or job
-        handler = execute_job(job)
+        handler = execute_job(job, db)
 
         if handler.needs_review:
             JobStore.finish_attempt(
@@ -178,9 +245,7 @@ class ProductionJobWorker:
             )
             return job_id
 
-        if handler.status == "Blocked" or (
-            not handler.ok and handler.status == "Blocked"
-        ):
+        if handler.status == "Blocked" or (not handler.ok and handler.status == "Blocked"):
             JobStore.finish_attempt(
                 db,
                 attempt.id,
@@ -197,6 +262,25 @@ class ProductionJobWorker:
                 blocked_reason=handler.error,
                 result=handler.result,
             )
+            return job_id
+
+        if handler.status == "Cancelled" or (not handler.ok and handler.status == "Cancelled"):
+            JobStore.finish_attempt(
+                db,
+                attempt.id,
+                outcome="cancelled",
+                result=handler.result,
+                errors=[{"message": handler.error}] if handler.error else None,
+            )
+            JobStore.transition(
+                db,
+                job_id,
+                JobStatus.CANCELLED.value,
+                actor="worker",
+                reason=handler.error or "cancelled",
+                result=handler.result,
+            )
+            refresh_waiting_jobs(db, job_id)
             return job_id
 
         if not handler.ok:
@@ -231,11 +315,9 @@ class ProductionJobWorker:
         JobStore.finish_attempt(
             db, attempt.id, outcome="completed", result=handler.result
         )
-        # Merge handler result into payload for downstream approval flags when needed.
         merged = dict(job.payload or {})
-        if handler.result.get("proposalId"):
-            merged.setdefault("proposalId", handler.result["proposalId"])
-        row = db.get(__import__("app.db", fromlist=["ProductionJob"]).ProductionJob, job_id)
+        merged.update({k: v for k, v in (handler.result or {}).items() if v is not None})
+        row = db.get(ProductionJob, job_id)
         if row is not None:
             row.payload_json = json.dumps(merged, default=str)
             db.commit()
@@ -249,6 +331,7 @@ class ProductionJobWorker:
             result=handler.result,
             clear_blocked=True,
         )
+        _chain_results_to_dependents(db, job_id, handler.result or {})
         refresh_waiting_jobs(db, job_id)
         event_bus.publish(
             db,
