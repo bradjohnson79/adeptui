@@ -29,7 +29,7 @@ _TOOL_KEY_TO_PSR_IDS: dict[str, tuple[str, ...]] = {
     "bible": ("codirector.bible.read",),
     "provider": ("codirector.provider",),
     "comfyui": ("comfyui.health", "storyboard.generate"),
-    "references": ("references.ic_lora.ready",),
+    "references": ("references.timeline_bindings", "references.ic_lora.ready"),
     "source_manager": ("source_manager.read",),
     "preview_engine": ("comfyui.health", "workflows.video.ready"),
     "vision": ("codirector.vision.validate", "codirector.vision.review"),
@@ -37,6 +37,7 @@ _TOOL_KEY_TO_PSR_IDS: dict[str, tuple[str, ...]] = {
 
 # Capabilities that let a mutating tool create a durable proposal even when execution is blocked.
 _PROPOSAL_PATH_IDS: tuple[str, ...] = (
+    "references.timeline_bindings",
     "codirector.bible.propose",
     "project.scenes.update",
     "project.read",

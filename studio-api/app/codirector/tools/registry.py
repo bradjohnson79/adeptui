@@ -18,7 +18,7 @@ from .definitions import (
     ToolDefinition,
     ToolPreview,
 )
-from .handlers import bible_domain, bible_read, project, scenes, storyboard, system, vision
+from .handlers import bible_domain, bible_read, project, scenes, storyboard, system, timeline_references, vision
 
 ReadHandler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]
 PreviewFn = Callable[[ToolContext, dict[str, Any]], ToolPreview]
@@ -56,6 +56,12 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "get_engine_capabilities": system.get_engine_capabilities,
     "vision_validation_status": vision.vision_validation_status,
     "vision_validation_report": vision.vision_validation_report,
+    "get_timeline_image": timeline_references.get_timeline_image,
+    "list_timeline_images": timeline_references.list_timeline_images,
+    "get_reference_set": timeline_references.get_reference_set,
+    "list_reference_bindings": timeline_references.list_reference_bindings,
+    "build_generation_reference_package": timeline_references.build_generation_reference_package,
+    "suggest_reference_bindings": timeline_references.suggest_reference_bindings,
 }
 
 _MUTATION_HANDLERS: dict[str, MutationHandler] = {
@@ -97,6 +103,26 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     ),
     "record_vision_review": MutationHandler(
         vision.preview_record_vision_review, vision.apply_record_vision_review
+    ),
+    "create_reference_set_proposal": MutationHandler(
+        timeline_references.preview_create_reference_set_proposal,
+        timeline_references.apply_create_reference_set_proposal,
+    ),
+    "propose_add_reference_binding": MutationHandler(
+        timeline_references.preview_propose_add_reference_binding,
+        timeline_references.apply_propose_add_reference_binding,
+    ),
+    "propose_remove_reference_binding": MutationHandler(
+        timeline_references.preview_propose_remove_reference_binding,
+        timeline_references.apply_propose_remove_reference_binding,
+    ),
+    "propose_update_reference_binding": MutationHandler(
+        timeline_references.preview_propose_update_reference_binding,
+        timeline_references.apply_propose_update_reference_binding,
+    ),
+    "propose_apply_reference_preset": MutationHandler(
+        timeline_references.preview_propose_apply_reference_preset,
+        timeline_references.apply_propose_apply_reference_preset,
     ),
 }
 
