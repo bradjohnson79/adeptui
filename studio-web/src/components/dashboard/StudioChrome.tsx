@@ -78,6 +78,7 @@ export function SystemStatusStrip({
   const provider = op?.provider;
   const registry = op?.registry;
   const intelligenceOn = Boolean(op?.intelligenceEnabled);
+  const visionOn = Boolean(op?.visionValidationEnabled);
   const packBlockers = op?.packBlockers?.length ?? 0;
 
   return (
@@ -111,8 +112,12 @@ export function SystemStatusStrip({
       >
         Intelligence {intelligenceOn ? "On" : "Off"}
       </span>
-      <span className="status-badge warn" data-testid="status-visual-validation">
-        Visual validation pending (M2.5)
+      <span
+        className={`status-badge ${visionOn ? "ok" : "warn"}`}
+        data-testid="status-vision-validation"
+        title={op?.visualValidationPendingNote || ""}
+      >
+        Vision {visionOn ? "On" : "Off"}
       </span>
       <span className="status-badge ok" data-testid="status-specialists">
         {op?.specialistCount ?? "…"} Specialists
