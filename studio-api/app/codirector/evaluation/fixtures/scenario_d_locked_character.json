@@ -1,0 +1,7 @@
+{
+  "id": "scenario-d-locked-character",
+  "label": "D",
+  "userMessage": "Change locked eye color.",
+  "expectedIntent": "update_production_bible",
+  "requiresApproval": true
+}

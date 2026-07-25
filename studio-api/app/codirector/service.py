@@ -21,6 +21,7 @@ from .. import assistant as assistant_module
 from ..assistant import SceneSetupProposal
 from ..config import settings
 from ..db import CoDirectorConversation, Project, Scene
+from ..feature_flags import feature_flags
 from ..learning import learning_context_block, parse_learning
 from . import config_store
 from .bible.context import ProjectContextService
@@ -45,6 +46,13 @@ from .tools.capabilities import CapabilityAdapter
 from .tools.definitions import ToolInvocationOut
 from .tools.execution import ToolExecutionService
 from .tools.sanitize import render_result_for_model
+
+try:
+    from .intelligence.intent import classify_intent
+    from .intelligence.service import IntelligenceService
+except ImportError:  # pragma: no cover - defensive during partial installs
+    classify_intent = None  # type: ignore[assignment]
+    IntelligenceService = None  # type: ignore[assignment,misc]
 
 PROVIDER_IDS: list[str] = ["ollama", "mock"]
 
@@ -772,6 +780,35 @@ async def chat_for_project(
     return result, None, None, proposal, manifest, invocations
 
 
+def _last_user_message(messages: list[dict[str, str]]) -> str:
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return (message.get("content") or "").strip()
+    return ""
+
+
+def _intelligence_enabled_for_turn(
+    *,
+    project_id: str | None,
+    messages: list[dict[str, str]],
+    mode: str,
+) -> bool:
+    if not feature_flags.codirector_intelligence_v2:
+        return False
+    if not project_id or IntelligenceService is None or classify_intent is None:
+        return False
+    text = _last_user_message(messages)
+    if not text:
+        return False
+    intent = classify_intent(text, mode=mode)
+    service = IntelligenceService()
+    if intent.isSimpleQuestion and intent.primaryIntent == "answer_question":
+        return False
+    if intent.primaryIntent == "create_storyboard":
+        return True
+    return service.should_use_intelligence(intent)
+
+
 async def stream_for_project(
     db: Session,
     *,
@@ -795,6 +832,26 @@ async def stream_for_project(
     )
     if manifest.bibleVersionId:
         yield {"type": "context_manifest", "requestId": chat_request.request_id, "manifest": manifest.model_dump(mode="json")}
+
+    if _intelligence_enabled_for_turn(
+        project_id=project_id,
+        messages=messages,
+        mode=mode,
+    ):
+        assert IntelligenceService is not None
+        intelligence = IntelligenceService()
+        async for event in intelligence.stream_intelligence(
+            db,
+            project_id=project_id or "",
+            user_message=_last_user_message(messages),
+            scene_id=scene_id,
+            mode=mode,
+            provider=provider,
+            model_id=model,
+            request_id=chat_request.request_id,
+        ):
+            yield event
+        return
 
     active_request = chat_request
     tools_used = 0

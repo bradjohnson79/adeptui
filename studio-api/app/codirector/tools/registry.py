@@ -18,7 +18,7 @@ from .definitions import (
     ToolDefinition,
     ToolPreview,
 )
-from .handlers import bible_read, project, scenes, system
+from .handlers import bible_domain, bible_read, project, scenes, storyboard, system
 
 ReadHandler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]
 PreviewFn = Callable[[ToolContext, dict[str, Any]], ToolPreview]
@@ -41,6 +41,13 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "get_bible_entity": bible_read.get_bible_entity,
     "list_bible_entities": bible_read.list_bible_entities,
     "get_relevant_bible_context": bible_read.get_relevant_bible_context,
+    "get_production_bible_summary": bible_domain.get_production_bible_summary,
+    "get_scene_bible_context": bible_domain.get_scene_bible_context,
+    "get_character_bible_context": bible_domain.get_character_bible_context,
+    "get_location_bible_context": bible_domain.get_location_bible_context,
+    "list_canon_records": bible_domain.list_canon_records,
+    "list_continuity_warnings": bible_domain.list_continuity_warnings,
+    "get_generation_reference_package": bible_domain.get_generation_reference_package,
     "get_provider_health": system.get_provider_health,
     "get_selected_model": system.get_selected_model,
     "get_comfyui_health": system.get_comfyui_health,
@@ -55,6 +62,30 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "set_scene_prompt": MutationHandler(scenes.preview_set_scene_prompt, scenes.apply_set_scene_prompt),
     "record_director_decision": MutationHandler(
         bible_read.preview_record_director_decision, bible_read.apply_record_director_decision
+    ),
+    "propose_character_update": MutationHandler(
+        bible_domain.preview_propose_character_update, bible_domain.apply_propose_character_update
+    ),
+    "propose_canon_record": MutationHandler(
+        bible_domain.preview_propose_canon_record, bible_domain.apply_propose_canon_record
+    ),
+    "propose_canon_supersession": MutationHandler(
+        bible_domain.preview_propose_canon_supersession, bible_domain.apply_propose_canon_supersession
+    ),
+    "propose_continuity_update": MutationHandler(
+        bible_domain.preview_propose_continuity_update, bible_domain.apply_propose_continuity_update
+    ),
+    "propose_reference_link": MutationHandler(
+        bible_domain.preview_propose_reference_link, bible_domain.apply_propose_reference_link
+    ),
+    "propose_production_decision": MutationHandler(
+        bible_domain.preview_propose_production_decision, bible_domain.apply_propose_production_decision
+    ),
+    "propose_visual_language_update": MutationHandler(
+        bible_domain.preview_propose_visual_language_update, bible_domain.apply_propose_visual_language_update
+    ),
+    "propose_storyboard_generation": MutationHandler(
+        storyboard.preview_propose_storyboard_generation, storyboard.apply_propose_storyboard_generation
     ),
 }
 

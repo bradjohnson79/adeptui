@@ -5,6 +5,8 @@ import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorTaskStatus } from "./CoDirectorTaskStatus";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { CoDirectorToolStatus } from "./CoDirectorToolStatus";
+import { CoDirectorIntelligenceStatus } from "./CoDirectorIntelligenceStatus";
+import { CoDirectorProductionAnalysisPanel } from "./CoDirectorProductionAnalysis";
 import { summarizeSetup } from "./types";
 
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
@@ -23,6 +25,12 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     proposals,
     proposalActingId,
     toolActivity,
+    intelligenceProgress,
+    productionAnalysis,
+    productionAnalysisExpanded,
+    expertiseMode,
+    setExpertiseMode,
+    toggleProductionAnalysis,
     approveProposal,
     rejectProposal,
     requestProposalRevision,
@@ -39,11 +47,19 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, plan, setup, suggestedPrompt, proposals, toolActivity]);
+  }, [messages, plan, setup, suggestedPrompt, proposals, toolActivity, intelligenceProgress, productionAnalysis]);
 
   return (
     <div className="codirector-conversation" aria-live="polite">
       {!conversationStarted && <CoDirectorWelcome compact={compactWelcome} />}
+      {intelligenceProgress && <CoDirectorIntelligenceStatus progress={intelligenceProgress} />}
+      <CoDirectorProductionAnalysisPanel
+        analysis={productionAnalysis}
+        expanded={productionAnalysisExpanded}
+        onToggle={toggleProductionAnalysis}
+        expertiseMode={expertiseMode}
+        onExpertiseModeChange={setExpertiseMode}
+      />
       <div className="codirector-messages">
         {messages.map((message) => (
           <CoDirectorMessage

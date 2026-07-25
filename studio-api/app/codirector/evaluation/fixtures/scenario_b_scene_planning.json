@@ -1,0 +1,14 @@
+{
+  "id": "scenario-b-scene-planning",
+  "label": "B",
+  "userMessage": "Plan a tense corridor conversation.",
+  "expectedIntent": "plan_scene",
+  "expectedPlaybook": "plan-scene",
+  "expectedSpecialists": [
+    "director",
+    "screenwriter",
+    "producer",
+    "cinematographer",
+    "script-supervisor"
+  ]
+}

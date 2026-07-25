@@ -33,6 +33,8 @@ _TOOL_SCENARIOS = frozenset(
         "mutation_tool_execution_success",
         "mutation_tool_execution_failure",
         "tool_loop_limit",
+        "intelligence_storyboard",
+        "intelligence_simple_qa",
     }
 )
 
@@ -238,6 +240,16 @@ class MockCoDirectorProvider:
             reply = (
                 "[mock] I want to propose a Bible update, but this response is intentionally "
                 "broken for testing.\n\n```proposal\n{ this is not valid json,,, \n```"
+            )
+        elif scenario == "intelligence_simple_qa":
+            reply = (
+                "[mock-intelligence] A standard project uses scenes on the timeline, assets for "
+                "references, and the Production Bible for locked continuity."
+            )
+        elif scenario == "intelligence_storyboard":
+            reply = (
+                "[mock-intelligence] Use a locked medium two-shot with subtle movement. "
+                "Primary character references and corridor architecture should drive the frame."
             )
         else:
             reply = self._tool_scenario_reply(scenario, request) or reply

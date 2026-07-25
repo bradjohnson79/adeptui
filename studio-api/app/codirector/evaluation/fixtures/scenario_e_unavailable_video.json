@@ -1,0 +1,7 @@
+{
+  "id": "scenario-e-unavailable-video",
+  "label": "E",
+  "userMessage": "Prepare video generation for this scene.",
+  "expectedIntent": "prepare_video_generation",
+  "expectedPlaybook": "prepare-video-generation"
+}

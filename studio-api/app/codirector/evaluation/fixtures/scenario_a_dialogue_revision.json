@@ -1,0 +1,13 @@
+{
+  "id": "scenario-a-dialogue-revision",
+  "label": "A",
+  "userMessage": "Make dialogue more sarcastic.",
+  "expectedIntent": "revise_dialogue",
+  "expectedPlaybook": "revise-dialogue",
+  "expectedSpecialists": [
+    "screenwriter",
+    "story-editor",
+    "performance-director"
+  ],
+  "requiresApproval": false
+}

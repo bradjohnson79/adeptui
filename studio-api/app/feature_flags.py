@@ -31,6 +31,7 @@ class FeatureFlags:
     jobs: bool = False
     resources: bool = False
     future_rollout: bool = False
+    codirector_intelligence_v2: bool = False
 
     @classmethod
     def from_env(

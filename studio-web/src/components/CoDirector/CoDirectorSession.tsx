@@ -34,6 +34,7 @@ import {
   consumeAbandonedStreamingFlag,
   loadContextPanelOpen,
   loadDisplayMode,
+  loadExpertiseMode,
   loadPersistedDraft,
   loadPersistedMessages,
   markStreamingEnd,
@@ -43,12 +44,17 @@ import {
   persistContextPanelOpen,
   persistDisplayMode,
   persistDraft,
+  persistExpertiseMode,
   persistMessages,
   WELCOME_ASSISTANT,
   type ChatMode,
+  type CoDirectorAssistantMessageType,
   type CoDirectorAttachment,
   type CoDirectorDisplayMode,
+  type CoDirectorExpertiseMode,
+  type CoDirectorIntelligenceProgress,
   type CoDirectorMessage,
+  type CoDirectorProductionAnalysis,
   type CoDirectorToolActivity,
   type CoDirectorUIContext,
   type CoDirectorWorkspaceBindings,
@@ -80,6 +86,12 @@ type SessionValue = {
   proposals: CoDirectorProposal[];
   proposalActingId: string | null;
   toolActivity: CoDirectorToolActivity | null;
+  intelligenceProgress: CoDirectorIntelligenceProgress | null;
+  productionAnalysis: CoDirectorProductionAnalysis | null;
+  productionAnalysisExpanded: boolean;
+  expertiseMode: CoDirectorExpertiseMode;
+  setExpertiseMode: (mode: CoDirectorExpertiseMode) => void;
+  toggleProductionAnalysis: () => void;
   approveProposal: (proposalId: string) => Promise<void>;
   rejectProposal: (proposalId: string, note?: string) => Promise<void>;
   requestProposalRevision: (proposalId: string, note?: string) => Promise<void>;
@@ -258,6 +270,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<CoDirectorToolActivity | null>(null);
+  const [intelligenceProgress, setIntelligenceProgress] = useState<CoDirectorIntelligenceProgress | null>(null);
+  const [productionAnalysis, setProductionAnalysis] = useState<CoDirectorProductionAnalysis | null>(null);
+  const [productionAnalysisExpanded, setProductionAnalysisExpanded] = useState(false);
+  const [expertiseMode, setExpertiseModeState] = useState<CoDirectorExpertiseMode>(() => loadExpertiseMode());
   const [applyNote, setApplyNote] = useState<string | null>(null);
   const [plan, setPlan] = useState<ActionPlan | null>(null);
   const [selectedSteps, setSelectedSteps] = useState<Record<string, boolean>>({});
@@ -401,6 +417,15 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     persistContextPanelOpen(value);
   }, []);
 
+  const setExpertiseMode = useCallback((mode: CoDirectorExpertiseMode) => {
+    setExpertiseModeState(mode);
+    persistExpertiseMode(mode);
+  }, []);
+
+  const toggleProductionAnalysis = useCallback(() => {
+    setProductionAnalysisExpanded((prev) => !prev);
+  }, []);
+
   const bindWorkspace = useCallback((bindings: CoDirectorWorkspaceBindings) => {
     bindingsRef.current = bindings;
     setUiContext((prev) => {
@@ -530,6 +555,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setSuggestedPrompt(null);
       setSetup(null);
       setToolActivity(null);
+      setIntelligenceProgress(null);
+      setProductionAnalysis(null);
       setApplyNote(null);
       setOverflowPanel((prev) => (prev === "provider" ? prev : "none"));
 
@@ -558,6 +585,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       let postCompletionError: ClassifiedError | null = null;
 
       const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
+
+      let assistantMessageType: CoDirectorAssistantMessageType | undefined;
 
       const onEvent = (event: CoDirectorStreamEvent) => {
         if (!mountedRef.current || activeRequestIdRef.current !== requestId) return; // stale / unmounted
@@ -590,6 +619,62 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           finalProviderId = event.providerId;
           sceneSetupResult = (event.sceneSetup as SceneSetup) || null;
           suggestedPromptResult = event.suggestedPrompt || null;
+          if (event.responseType) {
+            assistantMessageType = event.responseType as CoDirectorAssistantMessageType;
+          }
+        } else if (event.type === "intelligence_progress") {
+          setIntelligenceProgress({ stage: event.stage, message: event.message || event.stage });
+          if (event.promptVersions) {
+            setProductionAnalysis((prev) => ({
+              specialists: event.specialists || prev?.specialists || [],
+              findingsSummaries: prev?.findingsSummaries || [],
+              bibleSources: prev?.bibleSources || [],
+              capabilities: prev?.capabilities || [],
+              promptVersions: event.promptVersions || prev?.promptVersions || {},
+              planSteps: prev?.planSteps || [],
+              recommendation: prev?.recommendation,
+            }));
+          }
+        } else if (event.type === "intelligence_result") {
+          const synthesis = event.synthesis as Record<string, unknown>;
+          const refs = (synthesis.productionBibleReferences as { entityType?: string; entityId?: string }[]) || [];
+          const specialistIds = (synthesis.specialistIdsUsed as string[]) || [];
+          setProductionAnalysis((prev) => ({
+            specialists: specialistIds.length ? specialistIds : prev?.specialists || [],
+            findingsSummaries: specialistIds.map((id) => ({
+              specialistId: id,
+              summary: String(synthesis.recommendation || "Contributed to the recommendation."),
+            })),
+            bibleSources: refs.map((r) => `${r.entityType || "entity"}:${r.entityId || "?"}`),
+            capabilities: prev?.capabilities || [],
+            promptVersions: event.promptVersions || prev?.promptVersions || {},
+            planSteps: prev?.planSteps || [],
+            recommendation: (synthesis.structuredRecommendation as Record<string, unknown>) || prev?.recommendation,
+          }));
+          if (typeof synthesis.responseType === "string") {
+            assistantMessageType = synthesis.responseType as CoDirectorAssistantMessageType;
+          }
+        } else if (event.type === "intelligence_plan") {
+          const planPayload = event.plan as { steps?: { title?: string; status?: string }[] };
+          const steps = (planPayload.steps || []).map((step) => ({
+            title: step.title || "Step",
+            status: step.status || "pending",
+          }));
+          setProductionAnalysis((prev) =>
+            prev
+              ? { ...prev, planSteps: steps }
+              : {
+                  specialists: [],
+                  findingsSummaries: [],
+                  bibleSources: [],
+                  capabilities: [],
+                  promptVersions: {},
+                  planSteps: steps,
+                },
+          );
+        } else if (event.type === "intelligence_proposal") {
+          setProposals((prev) => [event.proposal, ...prev.filter((p) => p.id !== event.proposal.id)]);
+          setIntelligenceProgress({ stage: "creating_proposals", message: "Ready for approval" });
         } else if (event.type === "cancelled") {
           outcome = "cancelled";
         } else if (event.type === "proposal_created" || event.type === "tool_proposal_created") {
@@ -653,6 +738,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             role: "assistant",
             content: finalText,
             createdAt: new Date().toISOString(),
+            messageType: assistantMessageType,
           };
           if (idx === -1) return [...prev, finished];
           const next = [...prev];
@@ -696,6 +782,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         }
 
         if (outcome === "completed") {
+          setIntelligenceProgress(null);
           finalizeCompleted();
           if (postCompletionError) setSendError(postCompletionError);
         } else if (outcome === "cancelled") {
@@ -1230,6 +1317,12 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       proposals,
       proposalActingId,
       toolActivity,
+      intelligenceProgress,
+      productionAnalysis,
+      productionAnalysisExpanded,
+      expertiseMode,
+      setExpertiseMode,
+      toggleProductionAnalysis,
       approveProposal,
       rejectProposal,
       requestProposalRevision,
@@ -1314,6 +1407,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       proposals,
       proposalActingId,
       toolActivity,
+      intelligenceProgress,
+      productionAnalysis,
+      productionAnalysisExpanded,
+      expertiseMode,
       approveProposal,
       rejectProposal,
       requestProposalRevision,

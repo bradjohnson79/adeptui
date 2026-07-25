@@ -92,6 +92,13 @@ EXPECTED_READ_TOOLS = {
     "get_bible_entity",
     "list_bible_entities",
     "get_relevant_bible_context",
+    "get_production_bible_summary",
+    "get_scene_bible_context",
+    "get_character_bible_context",
+    "get_location_bible_context",
+    "list_canon_records",
+    "list_continuity_warnings",
+    "get_generation_reference_package",
     "get_provider_health",
     "get_selected_model",
     "get_comfyui_health",
@@ -100,7 +107,20 @@ EXPECTED_READ_TOOLS = {
     "get_engine_capabilities",
 }
 
-EXPECTED_MUTATING_TOOLS = {"create_scene", "update_scene_title", "set_scene_prompt", "record_director_decision"}
+EXPECTED_MUTATING_TOOLS = {
+    "create_scene",
+    "update_scene_title",
+    "set_scene_prompt",
+    "record_director_decision",
+    "propose_character_update",
+    "propose_canon_record",
+    "propose_canon_supersession",
+    "propose_continuity_update",
+    "propose_reference_link",
+    "propose_production_decision",
+    "propose_visual_language_update",
+    "propose_storyboard_generation",
+}
 
 
 def test_registry_contains_exactly_the_declared_tools() -> None:

@@ -1,0 +1,6 @@
+{
+  "id": "scenario-g-expert-user",
+  "label": "G",
+  "userMessage": "Recommend a 35mm locked medium two-shot.",
+  "expectedIntent": "create_storyboard"
+}

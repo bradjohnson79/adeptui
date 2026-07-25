@@ -20,7 +20,10 @@
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",
     "test:e2e:critical": "playwright test --grep @critical",
-    "audit:functional": "node scripts/functional-audit.mjs"
+    "audit:functional": "node scripts/functional-audit.mjs",
+    "codirector:validate-prompts": "node scripts/run-codirector-cli.mjs validate-prompts",
+    "codirector:list-specialists": "node scripts/run-codirector-cli.mjs list-specialists",
+    "codirector:evaluate": "node scripts/run-codirector-cli.mjs evaluate"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",

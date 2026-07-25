@@ -1,0 +1,7 @@
+{
+  "id": "scenario-f-novice-user",
+  "label": "F",
+  "userMessage": "Make this scene look more cinematic.",
+  "expectedIntent": "plan_scene",
+  "maxSpecialists": 8
+}

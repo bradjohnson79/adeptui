@@ -1,0 +1,19 @@
+{
+  "id": "scenario-c-storyboard-shot",
+  "label": "C",
+  "userMessage": "Create the next storyboard shot.",
+  "expectedIntent": "create_storyboard",
+  "expectedPlaybook": "create-storyboard-shot",
+  "expectedSpecialists": [
+    "director",
+    "cinematographer",
+    "art-director",
+    "script-supervisor",
+    "continuity-analyst",
+    "prompt-architect",
+    "technical-director",
+    "vision-reviewer"
+  ],
+  "expectedTool": "propose_storyboard_generation",
+  "requiresApproval": true
+}

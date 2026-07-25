@@ -47,6 +47,8 @@ const env = {
   // assertions never depend on a real local Ollama install. Override with `ollama` to
   // exercise the real provider path locally.
   ADEPT_CODIRECTOR_PROVIDER: process.env.ADEPT_CODIRECTOR_PROVIDER || "mock",
+  STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2:
+    process.env.STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2 || "1",
 };
 
 fs.writeFileSync(

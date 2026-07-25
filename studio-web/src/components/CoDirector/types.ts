@@ -23,6 +23,35 @@ export interface CoDirectorUIContext {
 
 export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted";
 
+/** M2.4 assistant message kinds — user-safe labels, not internal agent names. */
+export type CoDirectorAssistantMessageType =
+  | "answer"
+  | "recommendation"
+  | "clarification"
+  | "warning"
+  | "proposal"
+  | "plan"
+  | "execution_status"
+  | "completion"
+  | "error";
+
+export type CoDirectorExpertiseMode = "guided" | "standard" | "expert";
+
+export interface CoDirectorIntelligenceProgress {
+  stage: string;
+  message: string;
+}
+
+export interface CoDirectorProductionAnalysis {
+  specialists: string[];
+  findingsSummaries: { specialistId: string; summary: string }[];
+  bibleSources: string[];
+  capabilities: string[];
+  promptVersions: Record<string, string>;
+  planSteps: { title: string; status: string }[];
+  recommendation?: Record<string, unknown> | null;
+}
+
 export interface CoDirectorMessage {
   id: string;
   role: "user" | "assistant";
@@ -31,6 +60,8 @@ export interface CoDirectorMessage {
   createdAt: string;
   /** Present while a streamed reply is in flight, or after it ended abnormally. */
   status?: CoDirectorMessageStatus;
+  /** M2.4 structured assistant message kind. */
+  messageType?: CoDirectorAssistantMessageType;
 }
 
 /**
@@ -110,6 +141,7 @@ const DRAFT_KEY = "adept_codirector_draft";
 const MESSAGES_KEY = "adept_codirector_messages";
 const MODE_KEY = "adept_codirector_display_mode";
 const CONTEXT_PANEL_KEY = "adept_codirector_context_panel";
+const EXPERTISE_MODE_KEY = "adept_codirector_expertise_mode";
 
 export function loadPersistedDraft(): string {
   try {
@@ -177,6 +209,39 @@ export function persistContextPanelOpen(open: boolean) {
   } catch {
     /* ignore */
   }
+}
+
+export function loadExpertiseMode(): CoDirectorExpertiseMode {
+  try {
+    const value = localStorage.getItem(EXPERTISE_MODE_KEY);
+    if (value === "guided" || value === "expert") return value;
+    return "standard";
+  } catch {
+    return "standard";
+  }
+}
+
+export function persistExpertiseMode(mode: CoDirectorExpertiseMode) {
+  try {
+    localStorage.setItem(EXPERTISE_MODE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** User-safe labels for intelligence progress stages (not specialist names). */
+export function intelligenceStageLabel(stage: string): string {
+  const labels: Record<string, string> = {
+    classifying_intent: "Understanding the scene",
+    compiling_context: "Reviewing project context",
+    selecting_specialists: "Reviewing project context",
+    running_specialists: "Preparing the shot",
+    synthesizing: "Preparing the shot",
+    building_plan: "Checking production requirements",
+    creating_proposals: "Ready for approval",
+    complete: "Complete",
+  };
+  return labels[stage] || "Working…";
 }
 
 // Session-scoped (survives reload, not tab close) marker so a stream abandoned mid-flight
