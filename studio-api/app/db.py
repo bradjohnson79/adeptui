@@ -176,6 +176,30 @@ class ProductionBibleEntity(Base):
     entity_key: Mapped[str] = mapped_column(String(160), index=True)
     display_name: Mapped[str] = mapped_column(String(200), default="")
     data_json: Mapped[str] = mapped_column(Text, default="{}")
+    stable_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    slug: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    lifecycle_status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    content_revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BibleAuditEvent(Base):
+    __tablename__ = "bible_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(48), index=True)
+    entity_stable_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    entity_key: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    bible_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    bible_version_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    proposal_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    receipt_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    actor: Mapped[str] = mapped_column(String(64), default="user")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    details_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -261,6 +285,56 @@ class CoDirectorToolInvocation(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[str] = mapped_column(String(64), default="assistant")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------
+# Co-Director M2.4: production intelligence persistence (findings, synthesis, plans).
+# --------------------------------------------------------------------------
+
+
+class CoDirectorSpecialistFinding(Base):
+    __tablename__ = "codirector_specialist_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    specialist_id: Mapped[str] = mapped_column(String(64), index=True)
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
+    model_id: Mapped[str] = mapped_column(String(128), default="")
+    context_hash: Mapped[str] = mapped_column(String(64), default="")
+    output_json: Mapped[str] = mapped_column(Text, default="{}")
+    validation_status: Mapped[str] = mapped_column(String(24), default="generated", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorSynthesisRecord(Base):
+    __tablename__ = "codirector_synthesis_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    specialist_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    synthesis_json: Mapped[str] = mapped_column(Text, default="{}")
+    prompt_versions_json: Mapped[str] = mapped_column(Text, default="{}")
+    plan_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    model_id: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorProductionPlan(Base):
+    __tablename__ = "codirector_production_plans"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    playbook_id: Mapped[str] = mapped_column(String(64), default="")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    plan_json: Mapped[str] = mapped_column(Text, default="{}")
+    visual_validation_pending: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)

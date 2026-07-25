@@ -77,6 +77,36 @@ export interface CoDirectorBibleEntity {
   entityKey: string;
   displayName: string;
   data: Record<string, unknown>;
+  stableId?: string | null;
+  slug?: string | null;
+  lifecycleStatus?: string;
+  contentRevision?: number;
+  updatedAt?: string | null;
+  readiness?: string;
+}
+
+export interface BibleDomainSummary {
+  projectId: string;
+  bibleVersionNumber?: number | null;
+  bibleVersionId?: string | null;
+  health?: {
+    entityCount: number;
+    byType: Record<string, number>;
+    readiness: Record<string, number>;
+    lockedCount: number;
+    incompleteCount: number;
+  };
+  conflictCount?: number;
+  conflicts?: Record<string, unknown>[];
+}
+
+export interface BibleAuditEvent {
+  id: string;
+  eventType: string;
+  entityStableId?: string | null;
+  entityKey?: string | null;
+  summary: string;
+  createdAt: string;
 }
 
 export interface CoDirectorBibleFact {
@@ -252,10 +282,12 @@ export type CoDirectorStreamEvent =
       type: "completed";
       requestId: string;
       content: string;
-      modelId: string;
-      providerId: string;
+      modelId?: string;
+      providerId?: string;
       sceneSetup?: SceneSetup | null;
       suggestedPrompt?: string | null;
+      responseType?: string;
+      structuredRecommendation?: Record<string, unknown> | null;
     }
   | { type: "cancelled"; requestId: string }
   | { type: "error"; requestId: string; error: ApiErrorDetailShape }
@@ -282,6 +314,32 @@ export type CoDirectorStreamEvent =
       toolId: string;
       capability?: string | null;
       error: ApiErrorDetailShape;
+    }
+  // M2.4 production intelligence progress and artifacts.
+  | {
+      type: "intelligence_progress";
+      requestId: string;
+      stage: string;
+      message?: string;
+      promptVersions?: Record<string, string>;
+      specialists?: string[];
+      intent?: Record<string, unknown>;
+    }
+  | {
+      type: "intelligence_result";
+      requestId: string;
+      synthesis: Record<string, unknown>;
+      promptVersions?: Record<string, string>;
+    }
+  | {
+      type: "intelligence_plan";
+      requestId: string;
+      plan: Record<string, unknown>;
+    }
+  | {
+      type: "intelligence_proposal";
+      requestId: string;
+      proposal: CoDirectorProposal;
     };
 
 /**
@@ -1510,6 +1568,70 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+    }),
+  // M2.3: Production Bible domain APIs
+  getBibleSummary: (projectId: string) =>
+    req<BibleDomainSummary>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/summary`),
+  getBibleHealth: (projectId: string) =>
+    req<BibleDomainSummary>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/health`),
+  exportBible: (projectId: string) =>
+    req<Record<string, unknown>>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/export`),
+  listBibleAudit: (projectId: string, limit = 100) =>
+    req<{ projectId: string; events: BibleAuditEvent[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/audit?limit=${limit}`,
+    ),
+  listBibleCharacters: (projectId: string) =>
+    req<{ projectId: string; characters: CoDirectorBibleEntity[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/characters`,
+    ),
+  createBibleCharacter: (
+    projectId: string,
+    body: { entityKey: string; displayName?: string; data?: Record<string, unknown> },
+  ) =>
+    req<CoDirectorBibleEntity>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/characters`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchBibleCharacter: (
+    projectId: string,
+    stableId: string,
+    body: { displayName?: string; data?: Record<string, unknown>; contentRevision?: number },
+  ) =>
+    req<CoDirectorBibleEntity>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/characters/${encodeURIComponent(stableId)}`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  approveBibleCharacter: (projectId: string, stableId: string) =>
+    req<CoDirectorBibleEntity>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/characters/${encodeURIComponent(stableId)}/approve`,
+      { method: "POST" },
+    ),
+  lockBibleCharacter: (projectId: string, stableId: string) =>
+    req<CoDirectorBibleEntity>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/characters/${encodeURIComponent(stableId)}/lock`,
+      { method: "POST" },
+    ),
+  listBibleLocations: (projectId: string) =>
+    req<{ projectId: string; locations: CoDirectorBibleEntity[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/locations`,
+    ),
+  listBibleRelationships: (projectId: string) =>
+    req<{ projectId: string; relationships: CoDirectorBibleEntity[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/relationships`,
+    ),
+  listBibleConflicts: (projectId: string) =>
+    req<{ projectId: string; conflicts: CoDirectorBibleEntity[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/conflicts`,
+    ),
+  syncBibleConflicts: (projectId: string) =>
+    req<{ projectId: string; conflicts: Record<string, unknown>[] }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/bible/conflicts/sync`,
+      { method: "POST" },
+    ),
+  seedDemoBible: (projectId: string) =>
+    req<{ seeded: boolean }>(`/api/codirector/projects/${encodeURIComponent(projectId)}/bible/seed-demo`, {
+      method: "POST",
     }),
   listProposals: (projectId: string, status?: string) =>
     req<{ projectId: string; proposals: CoDirectorProposal[] }>(

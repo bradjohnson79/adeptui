@@ -22,7 +22,49 @@ from ...db import (
     ProductionBibleFact,
     ProductionBibleVersion,
 )
+from .domain.schemas import validate_entity_data
 from .schemas import BibleEntity, BibleFact, BibleMutationSet, EntityMutation, FactMutation
+
+
+def normalize_entity_type(entity_type: str) -> str:
+    """Accept visual_style as alias of visual_language for storage."""
+
+    if entity_type == "visual_style":
+        return "visual_language"
+    return entity_type
+
+
+def _entity_meta_from_row(row: ProductionBibleEntity) -> dict:
+    return {
+        "stableId": row.stable_id,
+        "slug": row.slug,
+        "lifecycleStatus": row.lifecycle_status or "draft",
+        "contentRevision": row.content_revision or 1,
+        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def entity_row_to_schema(row: ProductionBibleEntity) -> BibleEntity:
+    try:
+        data = json.loads(row.data_json or "{}")
+    except Exception:
+        data = {}
+    meta = _entity_meta_from_row(row)
+    # Mirror lifecycle fields in data_json for API convenience when columns are authoritative.
+    for key, val in meta.items():
+        if val is not None and key not in data:
+            data[key] = val
+    return BibleEntity(
+        entityType=row.entity_type,  # type: ignore[arg-type]
+        entityKey=row.entity_key,
+        displayName=row.display_name or "",
+        data=data,
+        stableId=row.stable_id,
+        slug=row.slug,
+        lifecycleStatus=row.lifecycle_status or "draft",  # type: ignore[arg-type]
+        contentRevision=row.content_revision or 1,
+        updatedAt=row.updated_at.isoformat() if row.updated_at else None,
+    )
 
 
 def get_bible(db: Session, project_id: str) -> Optional[ProductionBible]:
@@ -77,20 +119,38 @@ def facts_for_version(db: Session, version_id: str) -> list[ProductionBibleFact]
     )
 
 
-def entity_row_to_schema(row: ProductionBibleEntity) -> BibleEntity:
-    try:
-        data = json.loads(row.data_json or "{}")
-    except Exception:
-        data = {}
-    return BibleEntity(entityType=row.entity_type, entityKey=row.entity_key, displayName=row.display_name or "", data=data)
-
-
 def fact_row_to_schema(row: ProductionBibleFact) -> BibleFact:
     try:
         data = json.loads(row.data_json or "{}")
     except Exception:
         data = {}
     return BibleFact(entityKey=row.entity_key, factType=row.fact_type, statement=row.statement or "", data=data)
+
+
+def _merge_entity_mutation(existing: Optional[BibleEntity], m: EntityMutation, now: datetime) -> BibleEntity:
+    entity_type = normalize_entity_type(m.entityType)
+    stable_id = m.stableId or (existing.stableId if existing else None) or str(uuid.uuid4())
+    slug = m.slug if m.slug is not None else (existing.slug if existing else m.entityKey)
+    lifecycle = m.lifecycleStatus if m.lifecycleStatus is not None else (existing.lifecycleStatus if existing else "draft")
+    if m.data is not None:
+        validated_data = validate_entity_data(entity_type, m.data)
+        content_revision = (existing.contentRevision + 1) if existing else 1
+    else:
+        validated_data = existing.data if existing else {}
+        content_revision = existing.contentRevision if existing else 1
+    if m.contentRevision is not None:
+        content_revision = m.contentRevision
+    return BibleEntity(
+        entityType=entity_type,  # type: ignore[arg-type]
+        entityKey=m.entityKey,
+        displayName=m.displayName if m.displayName is not None else (existing.displayName if existing else ""),
+        data=validated_data,
+        stableId=stable_id,
+        slug=slug,
+        lifecycleStatus=lifecycle,  # type: ignore[arg-type]
+        contentRevision=content_revision,
+        updatedAt=now.isoformat(),
+    )
 
 
 def create_bible_with_first_version(
@@ -163,12 +223,7 @@ def apply_mutation_set(
             entities_by_key.pop(m.entityKey, None)
             continue
         existing = entities_by_key.get(m.entityKey)
-        entities_by_key[m.entityKey] = BibleEntity(
-            entityType=m.entityType,
-            entityKey=m.entityKey,
-            displayName=m.displayName if m.displayName is not None else (existing.displayName if existing else ""),
-            data=m.data if m.data is not None else (existing.data if existing else {}),
-        )
+        entities_by_key[m.entityKey] = _merge_entity_mutation(existing, m, now)
 
     for fm in mutations.factMutations:
         if fm.remove:
@@ -219,14 +274,21 @@ def apply_mutation_set(
 def _write_entities(db: Session, version_id: str, entities: list[BibleEntity]) -> None:
     now = datetime.utcnow()
     for e in entities:
+        entity_type = normalize_entity_type(e.entityType)
+        validated = validate_entity_data(entity_type, e.data)
         db.add(
             ProductionBibleEntity(
                 id=str(uuid.uuid4()),
                 bible_version_id=version_id,
-                entity_type=e.entityType,
+                entity_type=entity_type,
                 entity_key=e.entityKey,
                 display_name=e.displayName,
-                data_json=json.dumps(e.data),
+                data_json=json.dumps(validated),
+                stable_id=e.stableId or str(uuid.uuid4()),
+                slug=e.slug or e.entityKey,
+                lifecycle_status=e.lifecycleStatus or "draft",
+                updated_at=now,
+                content_revision=e.contentRevision or 1,
                 created_at=now,
             )
         )

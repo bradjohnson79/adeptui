@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..codirector import config_store as codirector_config_store
 from ..codirector import service as codirector_service
 from ..codirector.bible import service as bible_service
+from ..codirector.bible.api_domain import router as bible_domain_router
 from ..codirector.bible.proposals import ProposalService
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
@@ -30,6 +31,7 @@ from ..codirector.tools.execution import ToolExecutionService
 from ..db import SessionLocal, get_db
 
 router = APIRouter(prefix="/codirector", tags=["codirector"])
+router.include_router(bible_domain_router)
 
 
 def _http_error(err: CoDirectorError) -> HTTPException:

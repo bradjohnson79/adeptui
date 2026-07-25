@@ -11,12 +11,25 @@ EntityType = Literal[
     "character",
     "location",
     "visual_style",
+    "visual_language",
     "production_rule",
     "continuity_rule",
     "narrative_thread",
     "scene_fact",
     "prop",
     "organization",
+    "relationship",
+    "wardrobe",
+    "appearance_state",
+    "production_object",
+    "canon_record",
+    "production_decision",
+    "story_arc",
+    "story_beat",
+    "timeline_entry",
+    "reference_link",
+    "continuity_state",
+    "conflict_record",
 ]
 
 ENTITY_TYPES: tuple[str, ...] = (
@@ -24,27 +37,75 @@ ENTITY_TYPES: tuple[str, ...] = (
     "character",
     "location",
     "visual_style",
+    "visual_language",
     "production_rule",
     "continuity_rule",
     "narrative_thread",
     "scene_fact",
     "prop",
     "organization",
+    "relationship",
+    "wardrobe",
+    "appearance_state",
+    "production_object",
+    "canon_record",
+    "production_decision",
+    "story_arc",
+    "story_beat",
+    "timeline_entry",
+    "reference_link",
+    "continuity_state",
+    "conflict_record",
 )
+
+LifecycleStatus = Literal[
+    "draft",
+    "in_review",
+    "approved",
+    "locked",
+    "superseded",
+    "deprecated",
+    "archived",
+]
+
+LIFECYCLE_STATUSES: tuple[str, ...] = (
+    "draft",
+    "in_review",
+    "approved",
+    "locked",
+    "superseded",
+    "deprecated",
+    "archived",
+)
+
+LOCKED_LIFECYCLE_STATUSES: frozenset[str] = frozenset({"locked", "superseded", "archived"})
 
 # Read-path priority: what gets included first when the token budget is tight. Project-level
 # identity/style facts ground every turn; scene_fact is the most granular/least universally
 # relevant, so it's trimmed first under pressure.
 ENTITY_TYPE_PRIORITY: tuple[str, ...] = (
     "project_profile",
+    "visual_language",
     "visual_style",
     "character",
     "location",
     "continuity_rule",
+    "continuity_state",
     "production_rule",
     "narrative_thread",
     "organization",
+    "relationship",
+    "wardrobe",
+    "appearance_state",
+    "production_object",
     "prop",
+    "canon_record",
+    "production_decision",
+    "reference_link",
+    "timeline_entry",
+    "story_arc",
+    "story_beat",
+    "conflict_record",
     "scene_fact",
 )
 
@@ -87,6 +148,11 @@ class BibleEntity(BaseModel):
     entityKey: str
     displayName: str = ""
     data: dict[str, Any] = Field(default_factory=dict)
+    stableId: Optional[str] = None
+    slug: Optional[str] = None
+    lifecycleStatus: LifecycleStatus = "draft"
+    contentRevision: int = 1
+    updatedAt: Optional[str] = None
 
 
 class BibleFact(BaseModel):
@@ -125,6 +191,10 @@ class EntityMutation(BaseModel):
     entityKey: str
     displayName: Optional[str] = None
     data: Optional[dict[str, Any]] = None
+    stableId: Optional[str] = None
+    slug: Optional[str] = None
+    lifecycleStatus: Optional[LifecycleStatus] = None
+    contentRevision: Optional[int] = None
     remove: bool = False
 
 

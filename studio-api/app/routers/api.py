@@ -564,6 +564,9 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
+    from ..codirector.bible.cleanup import delete_bible_for_project
+
+    delete_bible_for_project(db, project_id)
     db.delete(project)
     db.commit()
     return {"ok": True}

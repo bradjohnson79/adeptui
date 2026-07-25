@@ -601,6 +601,7 @@ def test_migration_and_create_all_produce_the_same_bible_tables(tmp_path) -> Non
         "codirector_proposals",
         "codirector_approvals",
         "codirector_execution_receipts",
+        "bible_audit_events",
     )
 
     migrated_engine = create_engine(f"sqlite:///{tmp_path / 'migrated.db'}")
@@ -615,3 +616,131 @@ def test_migration_and_create_all_produce_the_same_bible_tables(tmp_path) -> Non
         migrated_cols = {c["name"] for c in migrated_inspector.get_columns(table)}
         created_cols = {c["name"] for c in created_inspector.get_columns(table)}
         assert migrated_cols == created_cols, f"Column mismatch for {table}: {migrated_cols} vs {created_cols}"
+
+
+# --------------------------------------------------------------------------
+# M2.3: domain layer, lifecycle, export, cascade
+# --------------------------------------------------------------------------
+
+
+def test_m23_domain_create_character_has_stable_id(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    res = client.post(
+        f"/api/codirector/projects/{project_id}/bible/characters",
+        json={
+            "entityKey": "ava",
+            "displayName": "Ava",
+            "data": {
+                "description": "Protagonist",
+                "personality": "Bold",
+                "motivation": "Justice",
+                "appearanceSummary": "Red coat",
+            },
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["stableId"]
+    assert body["lifecycleStatus"] == "draft"
+    assert body["contentRevision"] >= 1
+
+
+def test_m23_bible_summary_and_health(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    summary = client.get(f"/api/codirector/projects/{project_id}/bible/summary")
+    assert summary.status_code == 200
+    data = summary.json()
+    assert data["projectId"] == project_id
+    assert data["health"]["entityCount"] >= 1
+
+
+def test_m23_lock_rejects_direct_patch(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    created = client.post(
+        f"/api/codirector/projects/{project_id}/bible/characters",
+        json={"entityKey": "nova", "displayName": "Nova", "data": {"description": "Lead"}},
+    ).json()
+    stable_id = created["stableId"]
+    client.post(f"/api/codirector/projects/{project_id}/bible/characters/{stable_id}/approve")
+    client.post(f"/api/codirector/projects/{project_id}/bible/characters/{stable_id}/lock")
+    patch = client.patch(
+        f"/api/codirector/projects/{project_id}/bible/characters/{stable_id}",
+        json={"data": {"description": "Changed"}, "contentRevision": created["contentRevision"]},
+    )
+    assert patch.status_code == 409
+    assert patch.json()["detail"]["code"] == "LOCKED_ENTITY_REQUIRES_APPROVAL"
+
+
+def test_m23_concurrent_modification_on_stale_revision(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    created = client.post(
+        f"/api/codirector/projects/{project_id}/bible/characters",
+        json={"entityKey": "kai", "displayName": "Kai", "data": {"description": "A"}},
+    ).json()
+    stable_id = created["stableId"]
+    first = client.patch(
+        f"/api/codirector/projects/{project_id}/bible/characters/{stable_id}",
+        json={"data": {"description": "B"}, "contentRevision": created["contentRevision"]},
+    )
+    assert first.status_code == 200
+    stale = client.patch(
+        f"/api/codirector/projects/{project_id}/bible/characters/{stable_id}",
+        json={"data": {"description": "C"}, "contentRevision": created["contentRevision"]},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "CONCURRENT_MODIFICATION"
+
+
+def test_m23_export_json(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    res = client.get(f"/api/codirector/projects/{project_id}/bible/export")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["schemaVersion"] == "m2.3"
+    assert "entities" in body
+    assert "health" in body
+
+
+def test_m23_project_delete_cascades_bible(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    deleted = client.delete(f"/api/projects/{project_id}")
+    assert deleted.status_code == 200
+    missing = client.get(f"/api/codirector/projects/{project_id}/bible")
+    assert missing.status_code == 404
+
+
+def test_m23_seed_demo_bible(client) -> None:
+    project_id = _create_project(client)
+    res = client.post(f"/api/codirector/projects/{project_id}/bible/seed-demo")
+    assert res.status_code == 200
+    assert res.json()["seeded"] is True
+    chars = client.get(f"/api/codirector/projects/{project_id}/bible/characters")
+    assert chars.status_code == 200
+    assert len(chars.json()["characters"]) >= 2
+
+
+def test_m23_context_character_package(client) -> None:
+    project_id = _create_project(client)
+    client.post(f"/api/codirector/projects/{project_id}/bible/seed-demo")
+    chars = client.get(f"/api/codirector/projects/{project_id}/bible/characters").json()["characters"]
+    stable_id = chars[0]["stableId"]
+    ctx = client.get(f"/api/codirector/projects/{project_id}/bible/context/character/{stable_id}")
+    assert ctx.status_code == 200
+    assert ctx.json()["found"] is True
+
+
+def test_m23_bible_domain_read_tool(client) -> None:
+    project_id = _create_project(client)
+    _create_bible(client, project_id)
+    res = client.post(
+        f"/api/codirector/projects/{project_id}/tools/read",
+        json={"toolId": "get_production_bible_summary", "arguments": {}},
+    )
+    assert res.status_code == 200
+    assert res.json()["result"]["projectId"] == project_id
