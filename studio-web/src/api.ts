@@ -5,7 +5,7 @@ import type {
   WorkflowDescriptor,
   WorkflowReadiness,
 } from "./capabilities";
-import type { EngineName, Health, Job, Project, Scene, SceneSetup, SpatialMap } from "./types";
+import type { Asset, EngineName, Health, Job, Project, Scene, SceneSetup, SpatialMap } from "./types";
 import type {
   ComponentDiagnosticResult,
   DownloadSourcesResponse,
@@ -565,7 +565,7 @@ export const api = {
     fd.append("file", file);
     fd.append("tag", tag);
     fd.append("kind", kind);
-    return req(`/api/projects/${projectId}/assets`, { method: "POST", body: fd });
+    return req<Asset>(`/api/projects/${projectId}/assets`, { method: "POST", body: fd });
   },
   getSpatial: (projectId: string) => req<SpatialMap>(`/api/projects/${projectId}/spatial`),
   putSpatial: (projectId: string, body: SpatialMap) =>
