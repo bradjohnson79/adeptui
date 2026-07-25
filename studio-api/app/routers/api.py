@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from ..director_references.tags import ensure_tags
 from ..director_timeline import (
     DirectorTimeline,
     dumps_director_timeline,
@@ -171,7 +172,6 @@ async def health():
         },
         "bibleStorage": "ready",
         "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
-        "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
         "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
         "specialistCount": specialist_count,
         "registry": {
@@ -181,12 +181,8 @@ async def health():
             "counts": dict(caps.counts),
         },
         "packBlockers": pack_blockers[:12],
-        "visualValidationPendingNote": (
-            "M2.5 vision validation enabled — review pending assets in Validation Workspace."
-            if feature_flags.vision_validation_v1
-            else "M2.5 — visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
-        ),
-    }
+        "visualValidationPendingNote": "M2.5 — visual validation remains pending; not implemented in M2.4.1.",
+        }
     return HealthOut(
         ok=reachable,
         comfy_reachable=reachable,
@@ -645,12 +641,13 @@ def update_scene(project_id: str, scene_id: str, body: SceneIn, db: Session = De
 
 def _scene_director(scene: Scene) -> DirectorTimeline:
     if scene.director_json and scene.director_json.strip():
-        return parse_director_timeline(
+        tl = parse_director_timeline(
             scene.director_json,
             fallback_duration=scene.duration_sec,
             fallback_prompt=scene.prompt,
         )
-    return migrate_scene_to_director(
+        return ensure_tags(tl)
+    return ensure_tags(migrate_scene_to_director(
         duration_sec=scene.duration_sec,
         prompt=scene.prompt,
         start_asset_id=scene.start_asset_id,
@@ -674,6 +671,7 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
+    body = ensure_tags(body)
     scene.director_json = dumps_director_timeline(body)
     legacy = sync_legacy_fields_from_director(body)
     for k, v in legacy.items():
