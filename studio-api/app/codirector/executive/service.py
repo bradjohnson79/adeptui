@@ -21,7 +21,7 @@ class ProductionExecutiveService:
     def create_job(db: Session, body: CreateJobRequest) -> JobOut:
         return JobStore.create_job(
             db,
-            job_type=body.type,
+            job_type=body.type.value if hasattr(body.type, "value") else body.type,
             project_id=body.projectId,
             owner=body.owner,
             scene_id=body.sceneId,
@@ -48,11 +48,20 @@ class ProductionExecutiveService:
     ) -> dict[str, Any]:
         """storyboard -> image -> validate -> create_proposal -> await_approval -> apply_canon."""
         if idempotency_key:
-            existing = JobStore.find_by_idempotency(db, project_id, idempotency_key)
+            # Per-step keys are "{key}:storyboard" etc.; reuse when the chain head exists.
+            existing = JobStore.find_by_idempotency(
+                db, project_id, f"{idempotency_key}:storyboard"
+            )
             if existing:
                 jobs = JobStore.list_jobs(db, project_id=project_id, scene_id=scene_id)
                 return {"jobs": [j.model_dump() for j in jobs], "reused": True}
 
+        # Mock provider / e2e: do not require live Comfy — mock ImageGen adapter covers Job+Asset.
+        mockish = provider == "mock"
+        sb_caps = [] if mockish else None
+        img_caps = [] if mockish else None
+
+        base = {"provider": provider, "sceneId": scene_id}
         sb = JobStore.create_job(
             db,
             job_type=JobType.STORYBOARD_GENERATE.value,
@@ -60,7 +69,8 @@ class ProductionExecutiveService:
             scene_id=scene_id,
             owner=owner,
             provider=provider,
-            payload={"provider": provider},
+            payload={**base},
+            capability_requirements=sb_caps,
             priority=10,
             idempotency_key=f"{idempotency_key}:storyboard" if idempotency_key else None,
         )
@@ -71,7 +81,8 @@ class ProductionExecutiveService:
             scene_id=scene_id,
             owner=owner,
             provider=provider,
-            payload={"provider": provider},
+            payload={**base},
+            capability_requirements=img_caps,
             depends_on_job_ids=[sb.id],
             priority=20,
             idempotency_key=f"{idempotency_key}:image" if idempotency_key else None,
@@ -83,7 +94,7 @@ class ProductionExecutiveService:
             scene_id=scene_id,
             owner=owner,
             provider=provider,
-            payload={"provider": provider, "score": 90},
+            payload={**base, "fixtureProfile": "pass"},
             depends_on_job_ids=[img.id],
             priority=30,
             idempotency_key=f"{idempotency_key}:validate" if idempotency_key else None,
@@ -94,7 +105,7 @@ class ProductionExecutiveService:
             project_id=project_id,
             scene_id=scene_id,
             owner=owner,
-            payload={"proposalId": f"prop-{scene_id}"},
+            payload={**base},
             depends_on_job_ids=[val.id],
             priority=40,
             idempotency_key=f"{idempotency_key}:proposal" if idempotency_key else None,
@@ -105,7 +116,7 @@ class ProductionExecutiveService:
             project_id=project_id,
             scene_id=scene_id,
             owner=owner,
-            payload={"proposalId": f"prop-{scene_id}"},
+            payload={**base, "proposalApproved": False},
             depends_on_job_ids=[prop.id],
             priority=50,
             idempotency_key=f"{idempotency_key}:await" if idempotency_key else None,
@@ -116,7 +127,7 @@ class ProductionExecutiveService:
             project_id=project_id,
             scene_id=scene_id,
             owner=owner,
-            payload={"proposalId": f"prop-{scene_id}", "proposalApproved": False},
+            payload={**base, "proposalApproved": False},
             depends_on_job_ids=[await_job.id],
             priority=60,
             idempotency_key=f"{idempotency_key}:apply" if idempotency_key else None,

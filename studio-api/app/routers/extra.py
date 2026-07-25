@@ -1564,72 +1564,21 @@ def patch_panel(project_id: str, panel_id: str, body: dict, db: Session = Depend
 @router.post("/projects/{project_id}/storyboard/generate")
 async def storyboard_generate(project_id: str, body: dict, db: Session = Depends(get_db)):
     from ..queue_worker import job_queue
-    from ..script_storyboard import ScriptSegmentRow, StoryboardPanelRow, storyboard_style_prompt
+    from ..storyboard_jobs import prepare_storyboard_generate
 
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    panel_id = body.get("panel_id")
-    segment_id = body.get("segment_id")
-    panel = db.get(StoryboardPanelRow, panel_id) if panel_id else None
-    if not panel and segment_id:
-        # create panel
-        from ..script_storyboard import get_or_create_script_doc
-
-        doc = get_or_create_script_doc(db, project_id)
-        count = db.query(StoryboardPanelRow).filter(StoryboardPanelRow.segment_id == segment_id).count()
-        panel = StoryboardPanelRow(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
-            doc_id=doc.id,
-            segment_id=segment_id,
-            panel_index=count,
-            label=body.get("label") or f"Panel {chr(65 + count)}",
-            style=body.get("style") or "Pencil storyboard",
-            status="generating",
-        )
-        db.add(panel)
-        db.commit()
-        db.refresh(panel)
-    if not panel:
-        raise HTTPException(400, "panel_id or segment_id required")
-    seg = db.get(ScriptSegmentRow, panel.segment_id)
-    body_text = ""
-    if seg:
-        body_text = " ".join(
-            x for x in [seg.action, seg.dialogue or seg.text, seg.speaker and f"Speaker: {seg.speaker}"] if x
-        )
-    style = body.get("style") or panel.style or "Pencil storyboard"
-    prompt = storyboard_style_prompt(style, body.get("prompt") or panel.prompt or body_text)
-    panel.status = "generating"
-    panel.style = style
-    panel.prompt = prompt
-    db.commit()
-    params = {
-        "prompt": prompt,
-        "negative": project.negative_prompt,
-        "style": style,
-        "model": body.get("model") or "auto",
-        "width": int(body.get("width") or 1280),
-        "height": int(body.get("height") or 720),
-        "tag": "storyboard",
-        "labels": ["storyboard"],
-        "panel_id": panel.id,
-        "segment_id": panel.segment_id,
+    try:
+        prepared = prepare_storyboard_generate(db, project_id, body or {})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await job_queue.enqueue(prepared["job_id"])
+    return {
+        "job_id": prepared["job_id"],
+        "panel_id": prepared["panel_id"],
+        "status": prepared["status"],
     }
-    job = Job(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        scene_id=seg.scene_id if seg else None,
-        kind="imagegen",
-        status="queued",
-        message="Queued storyboard ImageGen",
-        params_json=json.dumps(params),
-    )
-    db.add(job)
-    db.commit()
-    await job_queue.enqueue(job.id)
-    return {"job_id": job.id, "panel_id": panel.id, "status": "generating"}
 
 
 @router.post("/projects/{project_id}/storyboard/send-director")

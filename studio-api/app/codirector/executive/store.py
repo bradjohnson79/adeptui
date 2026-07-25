@@ -114,9 +114,10 @@ class JobStore:
             if existing:
                 return JobStore.job_from_row(db, existing)
 
-        caps = list(capability_requirements or [])
-        if not caps:
+        if capability_requirements is None:
             caps = list(JOB_TYPE_CAPABILITIES.get(job_type, []))
+        else:
+            caps = list(capability_requirements)
 
         deps = list(depends_on_job_ids or [])
         status = initial_status or (
