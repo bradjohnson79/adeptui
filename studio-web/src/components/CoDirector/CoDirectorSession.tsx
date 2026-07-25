@@ -135,6 +135,7 @@ type SessionValue = {
   cancelSend: () => void;
   dismissSendError: () => void;
   openSettings: () => void;
+  visionValidationEnabled: boolean;
   refreshProviderHealth: () => Promise<void>;
   setSelectedModelId: (modelId: string | null) => void;
   runSteps: (steps: PlannedStep[]) => Promise<void>;
@@ -655,14 +656,29 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             assistantMessageType = synthesis.responseType as CoDirectorAssistantMessageType;
           }
         } else if (event.type === "intelligence_plan") {
-          const planPayload = event.plan as { steps?: { title?: string; status?: string }[] };
+          const planPayload = event.plan as {
+            title?: string;
+            steps?: { title?: string; status?: string; id?: string }[];
+            visualValidationPending?: boolean;
+          };
           const steps = (planPayload.steps || []).map((step) => ({
             title: step.title || "Step",
             status: step.status || "pending",
           }));
+          // Backend plan is authoritative — never overwrite with planFromIntention.
+          setPlan(null);
+          setSelectedSteps({});
           setProductionAnalysis((prev) =>
             prev
-              ? { ...prev, planSteps: steps }
+              ? {
+                  ...prev,
+                  planSteps: steps,
+                  recommendation: {
+                    ...(prev.recommendation || {}),
+                    planTitle: planPayload.title || prev.recommendation?.planTitle,
+                    visualValidationPending: Boolean(planPayload.visualValidationPending),
+                  },
+                }
               : {
                   specialists: [],
                   findingsSummaries: [],
@@ -670,6 +686,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
                   capabilities: [],
                   promptVersions: {},
                   planSteps: steps,
+                  recommendation: {
+                    planTitle: planPayload.title,
+                    visualValidationPending: Boolean(planPayload.visualValidationPending),
+                  },
                 },
           );
         } else if (event.type === "intelligence_proposal") {
@@ -931,7 +951,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         ) && mode !== "setup";
 
       const b = bindingsRef.current;
-      if (wantsPlan) {
+      // Outcome B: backend M2.4 plans are authoritative when intelligence is enabled.
+      // planFromIntention is offline/mock fallback only when intelligence is disabled/unavailable.
+      const intelligenceOn = Boolean(health.intelligenceEnabled);
+      if (wantsPlan && !intelligenceOn) {
         const p = planFromIntention(trimmed, { projectId: b.projectId, sceneId: b.sceneId });
         setPlan(p);
         setSelectedSteps(Object.fromEntries(p.steps.map((s) => [s.id, true])));
@@ -947,6 +970,11 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         pendingRetryRef.current = null;
         setBusy(false);
         return;
+      }
+      // When intelligence is on, clear any stale local fallback plan so SSE intelligence_plan wins.
+      if (intelligenceOn) {
+        setPlan(null);
+        setSelectedSteps({});
       }
 
       await performSend(next, mode);
@@ -1367,6 +1395,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       cancelSend,
       dismissSendError,
       openSettings,
+      visionValidationEnabled: Boolean(providerHealth?.visionValidationEnabled),
       refreshProviderHealth,
       setSelectedModelId,
       runSteps,
@@ -1449,6 +1478,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       cancelSend,
       dismissSendError,
       openSettings,
+      providerHealth,
       refreshProviderHealth,
       setSelectedModelId,
       runSteps,

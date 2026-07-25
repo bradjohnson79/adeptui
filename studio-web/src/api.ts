@@ -1715,6 +1715,72 @@ export const api = {
     req<CoDirectorExecutionReceipt>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/proposals/${encodeURIComponent(proposalId)}/receipt`,
     ),
+  visionValidate: (body: {
+    projectId: string;
+    assetId?: string;
+    planId?: string;
+    sceneId?: string;
+    referenceAssetId?: string;
+    provider?: "mock" | "local";
+    fixtureProfile?: string;
+  }) =>
+    req<{ session: Record<string, unknown>; report: Record<string, unknown>; comparison: Record<string, unknown> }>(
+      "/api/codirector/vision/validate",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  visionValidationReport: (reportId: string, projectId?: string) =>
+    req<Record<string, unknown>>(
+      `/api/codirector/vision/report/${encodeURIComponent(reportId)}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  visionValidationSession: (sessionId: string, projectId?: string) =>
+    req<Record<string, unknown>>(
+      `/api/codirector/vision/session/${encodeURIComponent(sessionId)}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  visionApprove: (body: {
+    projectId: string;
+    sessionId: string;
+    reviewer?: string;
+    notes?: string;
+    override?: boolean;
+    linkToBible?: boolean;
+  }) =>
+    req<Record<string, unknown>>("/api/codirector/vision/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  visionReject: (body: {
+    projectId: string;
+    sessionId: string;
+    reviewer?: string;
+    notes?: string;
+    override?: boolean;
+  }) =>
+    req<Record<string, unknown>>("/api/codirector/vision/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  visionCorrection: (body: {
+    projectId: string;
+    sessionId: string;
+    findingValidatorIds?: string[];
+    notes?: string;
+    createdBy?: string;
+  }) =>
+    req<Record<string, unknown>>("/api/codirector/vision/correction", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  visionValidationComparison: (comparisonId: string, projectId?: string) =>
+    req<Record<string, unknown>>(
+      `/api/codirector/vision/comparison/${encodeURIComponent(comparisonId)}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`,
+    ),
+  visionValidationHistory: (projectId: string, limit: number = 50) =>
+    req<{ projectId: string; sessions: Record<string, unknown>[] }>(
+      `/api/codirector/vision/history?projectId=${encodeURIComponent(projectId)}&limit=${limit}`,
+    ),
   // M2.2 tools. There is no "execute tool" call by design: read tools run through
   // `runCoDirectorReadTool`, and mutating tools go through the proposal endpoints above.
   listCoDirectorTools: () =>

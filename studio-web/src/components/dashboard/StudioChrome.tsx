@@ -74,6 +74,13 @@ export function SystemStatusStrip({
         ? { label: "GPU Ready", cls: "ok" }
         : { label: "GPU Unavailable", cls: "warn" };
 
+  const op = health?.operator;
+  const provider = op?.provider;
+  const registry = op?.registry;
+  const intelligenceOn = Boolean(op?.intelligenceEnabled);
+  const visionOn = Boolean(op?.visionValidationEnabled);
+  const packBlockers = op?.packBlockers?.length ?? 0;
+
   return (
     <div
       className={`system-status-strip ${compact ? "compact" : ""}`}
@@ -81,8 +88,55 @@ export function SystemStatusStrip({
       aria-live="polite"
       data-testid="system-status-strip"
     >
+      <span className="status-badge ok" data-testid="status-api">
+        API {op?.api === "ok" ? "Ready" : "…"}
+      </span>
       <span className={`status-badge ${comfy.cls}`} data-testid="status-comfy">
         {comfy.label}
+      </span>
+      <span
+        className={`status-badge ${provider?.reachable ? "ok" : "warn"}`}
+        data-testid="status-provider"
+        title={provider?.selectedModel || provider?.status || "Provider"}
+      >
+        {provider?.reachable
+          ? `Provider ${provider.status || "Ready"}`
+          : "Provider Offline"}
+      </span>
+      <span className="status-badge ok" data-testid="status-bible">
+        Bible {op?.bibleStorage || "…"}
+      </span>
+      <span
+        className={`status-badge ${intelligenceOn ? "ok" : "warn"}`}
+        data-testid="status-intelligence"
+      >
+        Intelligence {intelligenceOn ? "On" : "Off"}
+      </span>
+      <span
+        className={`status-badge ${visionOn ? "ok" : "warn"}`}
+        data-testid="status-vision-validation"
+        title={op?.visualValidationPendingNote || ""}
+      >
+        Vision {visionOn ? "On" : "Off"}
+      </span>
+      <span className="status-badge ok" data-testid="status-specialists">
+        {op?.specialistCount ?? "…"} Specialists
+      </span>
+      <span
+        className={`status-badge ${(registry?.blocked || 0) > 0 ? "warn" : "ok"}`}
+        data-testid="status-registry"
+        title={op?.visualValidationPendingNote || ""}
+      >
+        Registry {registry?.callable ?? "…"}/{registry?.total ?? "…"}
+        {(registry?.blocked || 0) > 0 ? ` · ${registry?.blocked} blocked` : ""}
+      </span>
+      {packBlockers > 0 && (
+        <span className="status-badge warn" data-testid="status-pack-blockers">
+          {packBlockers} Pack Blocker{packBlockers === 1 ? "" : "s"}
+        </span>
+      )}
+      <span className="status-badge warn" data-testid="status-visual-validation">
+        Visual validation pending (M2.5)
       </span>
       <span className={`status-badge ${gpu.cls}`}>{gpu.label}</span>
       <CapabilityStatusBadge projectId={projectId} />

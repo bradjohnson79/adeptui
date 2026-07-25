@@ -7,6 +7,7 @@ import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { CoDirectorToolStatus } from "./CoDirectorToolStatus";
 import { CoDirectorIntelligenceStatus } from "./CoDirectorIntelligenceStatus";
 import { CoDirectorProductionAnalysisPanel } from "./CoDirectorProductionAnalysis";
+import { CoDirectorValidationWorkspace } from "./CoDirectorValidationWorkspace";
 import { summarizeSetup } from "./types";
 
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
@@ -42,7 +43,11 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     dismissSendError,
     retryLastSend,
     openSettings,
+    visionValidationEnabled,
   } = useCoDirectorSession();
+  const visualValidationPending = Boolean(
+    productionAnalysis?.recommendation?.visualValidationPending,
+  );
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,6 +58,15 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     <div className="codirector-conversation" aria-live="polite">
       {!conversationStarted && <CoDirectorWelcome compact={compactWelcome} />}
       {intelligenceProgress && <CoDirectorIntelligenceStatus progress={intelligenceProgress} />}
+
+      {uiContext.projectId && (
+        <CoDirectorValidationWorkspace
+          projectId={uiContext.projectId}
+          enabled={Boolean(visionValidationEnabled)}
+          pending={visualValidationPending}
+          sceneId={uiContext.sceneId}
+        />
+      )}
       <CoDirectorProductionAnalysisPanel
         analysis={productionAnalysis}
         expanded={productionAnalysisExpanded}

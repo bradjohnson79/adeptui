@@ -3200,3 +3200,19 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   font-size: 0.86rem;
 }
 
+
+
+.codirector-validation-workspace { margin-top: 0.75rem; }
+.codirector-validation-panel { display: grid; gap: 0.75rem; }
+.codirector-validation-header { display: flex; justify-content: space-between; align-items: center; }
+.codirector-validation-notes { display: grid; gap: 0.25rem; }
+.codirector-validation-notes textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 3rem;
+}
+.codirector-validation-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
