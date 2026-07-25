@@ -154,9 +154,12 @@ class ReferenceStore:
         self.db.add(ver_row)
         self.db.flush()
         for i, b in enumerate(bindings):
+            # Each COW version gets fresh binding row IDs (prior versions stay immutable).
+            new_id = _nid()
+            b.id = new_id
             self.db.add(
                 TimelineReferenceBinding(
-                    id=b.id or _nid(),
+                    id=new_id,
                     version_id=ver_row.id,
                     reference_asset_id=b.reference_asset_id,
                     role=b.role,

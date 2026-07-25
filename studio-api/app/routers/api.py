@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from ..director_references.tags import ensure_tags
 from ..director_timeline import (
     DirectorTimeline,
     dumps_director_timeline,
@@ -645,19 +646,22 @@ def update_scene(project_id: str, scene_id: str, body: SceneIn, db: Session = De
 
 def _scene_director(scene: Scene) -> DirectorTimeline:
     if scene.director_json and scene.director_json.strip():
-        return parse_director_timeline(
+        tl = parse_director_timeline(
             scene.director_json,
             fallback_duration=scene.duration_sec,
             fallback_prompt=scene.prompt,
         )
-    return migrate_scene_to_director(
-        duration_sec=scene.duration_sec,
-        prompt=scene.prompt,
-        start_asset_id=scene.start_asset_id,
-        middle_asset_id=scene.middle_asset_id,
-        end_asset_id=scene.end_asset_id,
-        audio_asset_id=scene.audio_asset_id,
-        lipsync_tracks_json=scene.lipsync_tracks_json,
+        return ensure_tags(tl)
+    return ensure_tags(
+        migrate_scene_to_director(
+            duration_sec=scene.duration_sec,
+            prompt=scene.prompt,
+            start_asset_id=scene.start_asset_id,
+            middle_asset_id=scene.middle_asset_id,
+            end_asset_id=scene.end_asset_id,
+            audio_asset_id=scene.audio_asset_id,
+            lipsync_tracks_json=scene.lipsync_tracks_json,
+        )
     )
 
 
@@ -674,6 +678,7 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
+    body = ensure_tags(body)
     scene.director_json = dumps_director_timeline(body)
     legacy = sync_legacy_fields_from_director(body)
     for k, v in legacy.items():
