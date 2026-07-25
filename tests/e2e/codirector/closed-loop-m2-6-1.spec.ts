@@ -42,6 +42,7 @@ async function ensureTwoClips(request: any, projectId: string) {
 
 test.describe("M2.6.1 closed-loop integration @critical @isolated", () => {
   test("Scenario 1 - app loads and flag UI honesty", async ({ page, request }) => {
+    await expect.poll(async () => (await request.get("/api/health")).ok(), { timeout: 60_000 }).toBeTruthy();
     const health = await request.get("/api/health");
     expect(health.ok()).toBeTruthy();
     const h = await health.json();
