@@ -52,6 +52,8 @@ class ValidatorFinding(BaseModel):
     issues: list[ValidationIssue] = Field(default_factory=list)
     summary: str = ""
     metrics: dict[str, Any] = Field(default_factory=dict)
+    bindingId: Optional[str] = None
+    role: Optional[str] = None
 
 
 class ValidationReport(BaseModel):
@@ -125,12 +127,26 @@ class CorrectionProposalLink(BaseModel):
     createdAt: str = ""
 
 
+class ReferenceSetBindingSpec(BaseModel):
+    bindingId: str
+    role: str
+    influence: str = "moderate"
+    assetId: str
+
+
+class ReferenceSetSpec(BaseModel):
+    id: str
+    version: int
+    bindings: list[ReferenceSetBindingSpec] = Field(default_factory=list)
+
+
 class ValidateRequest(BaseModel):
     projectId: str
     assetId: Optional[str] = None
     planId: Optional[str] = None
     sceneId: Optional[str] = None
     referenceAssetId: Optional[str] = None
+    referenceSet: Optional[ReferenceSetSpec] = None
     provider: Literal["mock", "local"] = "mock"
     fixtureProfile: Optional[str] = None
     validators: Optional[list[str]] = None

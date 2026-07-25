@@ -13,6 +13,7 @@ from .comparison import build_comparison
 from .config import DEFAULT_VISION_CONFIG
 from .providers import get_provider
 from .reports import compute_report
+from ...director_references.roles import ROLE_TO_VALIDATOR
 from .schemas import ValidateRequest, ValidationReport, ValidationSession, ValidatorFinding
 from .store import VisionStore
 from .validators import IMAGE_VALIDATOR_IDS, VALIDATOR_BY_ID, VIDEO_VALIDATOR_IDS
@@ -53,15 +54,27 @@ class VisionEngine:
         if request.fixtureProfile and "video" in request.fixtureProfile:
             media_kind = "video"
 
+        extra_req: dict[str, Any] = {}
+        if request.referenceSet is not None:
+            extra_req["referenceSet"] = request.referenceSet.model_dump(mode="json")
         requirements = self.build_requirements(
             db,
             project_id=request.projectId,
             scene_id=request.sceneId,
             media_kind=media_kind,
             fixture_profile=request.fixtureProfile,
+            extra=extra_req or None,
         )
 
         validator_ids = list(request.validators or (VIDEO_VALIDATOR_IDS if media_kind == "video" else IMAGE_VALIDATOR_IDS))
+        role_binding_map: list[tuple[str, str, str]] = []  # (validator_id, bindingId, role)
+        if request.referenceSet and request.referenceSet.bindings:
+            for b in request.referenceSet.bindings:
+                mapped = ROLE_TO_VALIDATOR.get(b.role)
+                if mapped:
+                    role_binding_map.append((mapped, b.bindingId, b.role))
+                    if mapped not in validator_ids:
+                        validator_ids.append(mapped)
         # Technical always first.
         if "technical" in validator_ids:
             validator_ids = ["technical"] + [v for v in validator_ids if v != "technical"]
@@ -103,6 +116,26 @@ class VisionEngine:
                 requirements=requirements,
                 provider_id=provider.provider_id,
             )
+            if role_binding_map:
+                by_validator: dict[str, list[tuple[str, str]]] = {}
+                for vid, bid, role in role_binding_map:
+                    by_validator.setdefault(vid, []).append((bid, role))
+                annotated: list = []
+                for finding in findings:
+                    pairs = by_validator.get(finding.validatorId) or []
+                    if not pairs:
+                        annotated.append(finding)
+                        continue
+                    # Attach first matching binding; duplicate finding per binding when multiple share a validator.
+                    for i, (bid, role) in enumerate(pairs):
+                        data = finding.model_dump()
+                        data["bindingId"] = bid
+                        data["role"] = role
+                        if i == 0:
+                            annotated.append(finding.model_copy(update={"bindingId": bid, "role": role}))
+                        else:
+                            annotated.append(type(finding)(**data))
+                findings = annotated
             report = compute_report(
                 session_id=session.sessionId,
                 project_id=request.projectId,
