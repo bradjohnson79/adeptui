@@ -1,0 +1,308 @@
+"""Co-Director M2.7 Production Executive orchestration tests."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.codirector.executive.models import JobStatus, JobType
+from app.codirector.executive.schemas import CreateJobRequest, MarkApprovalRequest
+from app.codirector.executive.service import ProductionExecutiveService
+from app.codirector.executive.store import JobStore
+from app.codirector.executive.worker import ProductionJobWorker
+from app.db import Project, SessionLocal, init_db
+from app.feature_flags import FeatureFlags
+from app.migrations import DEFAULT_REGISTRY, M008, MigrationRunner
+from sqlalchemy import create_engine
+
+
+@pytest.fixture()
+def db() -> Session:
+    init_db()
+    session = SessionLocal()
+    session.merge(Project(id="proj-exec-1", name="Executive Test"))
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture()
+def worker(monkeypatch: pytest.MonkeyPatch) -> ProductionJobWorker:
+    from app.codirector.executive import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod.production_worker, "start", lambda: None)
+    worker_mod.production_worker.stop()
+    w = ProductionJobWorker(poll_interval=0.05, max_concurrent=2)
+    yield w
+    w.stop()
+    worker_mod.production_worker.stop()
+
+
+def test_feature_flag_defaults_off() -> None:
+    flags = FeatureFlags.from_env({})
+    assert flags.production_executive_v1 is False
+
+
+def test_m008_registered_before_m010() -> None:
+    revs = [m.revision for m in DEFAULT_REGISTRY.all()]
+    assert "M008" in revs
+    assert M008.revision == "M008"
+    assert revs.index("M007") < revs.index("M008") < revs.index("M010")
+
+
+def test_m008_migration_creates_tables(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'm008.db'}")
+    result = MigrationRunner(engine, DEFAULT_REGISTRY).apply_pending()
+    assert "M008" in result.applied
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "production_jobs" in tables
+    assert "production_job_attempts" in tables
+    assert "production_job_dependencies" in tables
+    assert "production_job_events" in tables
+    assert "production_notifications" in tables
+    assert "production_job_audit" in tables
+
+
+def test_queue_order_by_priority(db: Session, worker: ProductionJobWorker) -> None:
+    low = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", priority=200, payload={"n": 2}
+    )
+    high = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", priority=10, payload={"n": 1}
+    )
+    first = worker.tick_once(db)
+    assert first == high.id
+    second = worker.tick_once(db)
+    assert second == low.id
+
+
+def test_dependencies_block_until_complete(db: Session, worker: ProductionJobWorker) -> None:
+    a = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", priority=10, payload={"step": "a"}
+    )
+    b = JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        priority=10,
+        payload={"step": "b"},
+        depends_on_job_ids=[a.id],
+    )
+    assert b.status == JobStatus.WAITING.value
+    worker.tick_once(db)
+    b2 = JobStore.get_job(db, b.id)
+    assert b2 is not None
+    assert b2.status in (JobStatus.WAITING.value, JobStatus.QUEUED.value, JobStatus.COMPLETED.value)
+    worker.drain(max_steps=10)
+    assert JobStore.get_job(db, a.id).status == JobStatus.COMPLETED.value
+    assert JobStore.get_job(db, b.id).status == JobStatus.COMPLETED.value
+
+
+def test_pause_resume_retry_cancel(db: Session, worker: ProductionJobWorker) -> None:
+    job = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", payload={"x": 1}
+    )
+    paused = ProductionExecutiveService.pause(db, job.id, reason="hold")
+    assert paused.status == JobStatus.PAUSED.value
+    assert worker.tick_once(db) is None
+    resumed = ProductionExecutiveService.resume(db, job.id)
+    assert resumed.status == JobStatus.QUEUED.value
+    worker.tick_once(db)
+    assert JobStore.get_job(db, job.id).status == JobStatus.COMPLETED.value
+
+    fail = JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        max_attempts=1,
+        payload={"forceFail": True},
+    )
+    worker.tick_once(db)
+    assert JobStore.get_job(db, fail.id).status == JobStatus.FAILED.value
+    retried = ProductionExecutiveService.retry(db, fail.id)
+    assert retried.status == JobStatus.RETRYING.value
+
+    c = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", payload={"y": 1}
+    )
+    cancelled = ProductionExecutiveService.cancel(db, c.id)
+    assert cancelled.status == JobStatus.CANCELLED.value
+
+
+def test_crash_restart_recovery_no_duplicate_attempts(db: Session, worker: ProductionJobWorker) -> None:
+    job = JobStore.create_job(
+        db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", payload={"z": 1}
+    )
+    JobStore.transition(db, job.id, JobStatus.RUNNING.value, actor="test", reason="simulate")
+    attempt = JobStore.begin_attempt(db, job.id, provider="mock", capability_snapshot={})
+    recovered = JobStore.recover_running_jobs(db)
+    assert any(r.id == job.id for r in recovered)
+    db.expire_all()
+    job2 = JobStore.get_job(db, job.id)
+    assert job2 is not None
+    assert job2.status == JobStatus.RETRYING.value
+    attempts = JobStore.list_attempts(db, job.id)
+    assert len(attempts) == 1
+    assert attempts[0].id == attempt.id
+    assert attempts[0].outcome == "interrupted"
+    # Fresh session path via drain (avoids identity-map stale claim)
+    steps = worker.drain(max_steps=5)
+    assert steps >= 1
+    attempts2 = JobStore.list_attempts(db, job.id)
+    assert len(attempts2) == 2
+    assert attempts2[0].outcome == "interrupted"
+    assert attempts2[1].attemptN == 2
+    assert JobStore.get_job(db, job.id).status == JobStatus.COMPLETED.value
+
+
+def test_provider_unavailable_blocks(db: Session, worker: ProductionJobWorker) -> None:
+    job = JobStore.create_job(
+        db,
+        job_type=JobType.IMAGE_GENERATE.value,
+        project_id="proj-exec-1",
+        capability_requirements=["comfyui.health"],
+        payload={"mockUnavailableCapabilities": ["comfyui.health"]},
+    )
+    db.expire_all()
+    assert worker.drain(max_steps=3) >= 1
+    out = JobStore.get_job(db, job.id)
+    assert out is not None
+    assert out.status == JobStatus.BLOCKED.value
+    assert out.blockedReason and "comfyui.health" in out.blockedReason
+
+
+def test_validation_approval_deps_mocked_no_auto_approve(db: Session, worker: ProductionJobWorker) -> None:
+    loop = ProductionExecutiveService.create_closed_loop(
+        db, project_id="proj-exec-1", scene_id="scene-1", provider="mock"
+    )
+    assert len(loop["jobs"]) == 6
+    worker.drain(max_steps=20)
+    jobs = {j["type"]: j for j in [JobStore.get_job(db, x["id"]).model_dump() for x in loop["jobs"]]}
+    assert jobs[JobType.STORYBOARD_GENERATE.value]["status"] == JobStatus.COMPLETED.value
+    assert jobs[JobType.IMAGE_GENERATE.value]["status"] == JobStatus.COMPLETED.value
+    assert jobs[JobType.VALIDATE.value]["status"] == JobStatus.COMPLETED.value
+    assert jobs[JobType.CREATE_PROPOSAL.value]["status"] == JobStatus.COMPLETED.value
+    await_job = jobs[JobType.AWAIT_APPROVAL.value]
+    assert await_job["status"] == JobStatus.NEEDS_REVIEW.value
+    apply_job = jobs[JobType.APPLY_CANON.value]
+    assert apply_job["status"] in (JobStatus.WAITING.value, JobStatus.QUEUED.value, JobStatus.BLOCKED.value)
+
+    marked = ProductionExecutiveService.mark_approval(
+        db,
+        await_job["id"],
+        MarkApprovalRequest(proposalId="prop-scene-1", approved=True, actor="reviewer"),
+    )
+    assert marked.status == JobStatus.QUEUED.value
+    worker.drain(max_steps=20)
+    assert JobStore.get_job(db, await_job["id"]).status == JobStatus.COMPLETED.value
+    apply_done = JobStore.get_job(db, apply_job["id"])
+    assert apply_done.status == JobStatus.COMPLETED.value
+    assert apply_done.result is not None
+    assert apply_done.result.get("applied") is False  # no silent canon mutation
+
+
+def test_idempotency_duplicate_create(db: Session) -> None:
+    a = JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        idempotency_key="idem-1",
+        payload={"v": 1},
+    )
+    b = JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        idempotency_key="idem-1",
+        payload={"v": 2},
+    )
+    assert a.id == b.id
+
+
+def test_concurrent_jobs_drain(db: Session, worker: ProductionJobWorker) -> None:
+    ids = [
+        JobStore.create_job(
+            db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", priority=i, payload={"i": i}
+        ).id
+        for i in range(5)
+    ]
+    worker.drain(max_steps=20)
+    for job_id in ids:
+        assert JobStore.get_job(db, job_id).status == JobStatus.COMPLETED.value
+
+
+def test_api_flag_off_404(client) -> None:
+    os.environ.pop("STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1", None)
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+    res = client.get("/api/codirector/jobs?projectId=proj-exec-1")
+    assert res.status_code == 404
+
+
+def test_api_flag_on_create_and_inspect(client, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.codirector.executive import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod.production_worker, "start", lambda: None)
+    os.environ["STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"] = "1"
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+    try:
+        res = client.post(
+            "/api/codirector/jobs",
+            json={
+                "type": "generic",
+                "projectId": "proj-exec-1",
+                "priority": 5,
+                "payload": {"hello": True},
+            },
+        )
+        assert res.status_code == 200, res.text
+        job_id = res.json()["job"]["id"]
+        got = client.get(f"/api/codirector/jobs/{job_id}?projectId=proj-exec-1")
+        assert got.status_code == 200
+        drain = client.post("/api/codirector/jobs/worker/drain", json={"maxSteps": 10})
+        assert drain.status_code == 200
+        hist = client.get(f"/api/codirector/jobs/{job_id}/history")
+        assert hist.status_code == 200
+        assert len(hist.json()["attempts"]) >= 1
+        audit = hist.json()["audit"]
+        assert any(a["toStatus"] == "Completed" for a in audit)
+    finally:
+        os.environ.pop("STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1", None)
+        ff.feature_flags = FeatureFlags.from_env(os.environ)
+
+
+def test_scene_progress_derived(db: Session, worker: ProductionJobWorker) -> None:
+    JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        scene_id="sc-1",
+        payload={},
+    )
+    JobStore.create_job(
+        db,
+        job_type=JobType.GENERIC.value,
+        project_id="proj-exec-1",
+        scene_id="sc-1",
+        payload={"forceFail": True},
+        max_attempts=1,
+    )
+    worker.drain(max_steps=10)
+    progress = JobStore.scene_progress(db, "proj-exec-1", "sc-1")
+    assert progress.derivedFromJobs is True
+    assert progress.totalJobs == 2
+    assert progress.completed == 1
+    assert progress.failed == 1
