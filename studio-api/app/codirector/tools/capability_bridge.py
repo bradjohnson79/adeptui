@@ -29,7 +29,7 @@ _TOOL_KEY_TO_PSR_IDS: dict[str, tuple[str, ...]] = {
     "bible": ("codirector.bible.read",),
     "provider": ("codirector.provider",),
     "comfyui": ("comfyui.health", "storyboard.generate"),
-    "references": ("references.timeline_bindings", "references.ic_lora.ready"),
+    "references": ("references.timeline_bindings",),
     "source_manager": ("source_manager.read",),
     "preview_engine": ("comfyui.health", "workflows.video.ready"),
     "vision": ("codirector.vision.validate", "codirector.vision.review"),

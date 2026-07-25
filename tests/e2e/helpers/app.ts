@@ -3,9 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
-export const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8742";
+export const API =
+  process.env.STUDIO_API_BASE ||
+  `http://127.0.0.1:${process.env.STUDIO_API_PORT || "8742"}`;
 export const FIXTURE =
-  process.env.ADEPT_PACK_FIXTURE_BASE_URL || "http://127.0.0.1:8765";
+  process.env.ADEPT_PACK_FIXTURE_BASE_URL ||
+  `http://127.0.0.1:${process.env.E2E_FIXTURE_PORT || "8765"}`;
 
 export async function waitForAppReady(request: APIRequestContext) {
   const okGet = async (url: string) => {

@@ -440,7 +440,8 @@ def test_capability_bridge_maps_references_and_vision():
 
     ref_ids = psr_ids_for_tool_key("references")
     assert "references.timeline_bindings" in ref_ids
-    assert "references.ic_lora.ready" in ref_ids
+    # IC-LoRA must not gate timeline reference tool readiness (honest probe lives in package builder).
+    assert "references.ic_lora.ready" not in ref_ids
     vision_ids = psr_ids_for_tool_key("vision")
     assert "codirector.vision.validate" in vision_ids
 
