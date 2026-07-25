@@ -49,6 +49,12 @@ const env = {
   ADEPT_CODIRECTOR_PROVIDER: process.env.ADEPT_CODIRECTOR_PROVIDER || "mock",
   STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2:
     process.env.STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2 || "1",
+  // M2.6.1 closed-loop: enable Vision + Timeline References in E2E by default.
+  // Override with "0"/"false" for flags-off regression runs.
+  STUDIO_FEATURE_VISION_VALIDATION_V1:
+    process.env.STUDIO_FEATURE_VISION_VALIDATION_V1 || "1",
+  STUDIO_FEATURE_TIMELINE_REFERENCES_V1:
+    process.env.STUDIO_FEATURE_TIMELINE_REFERENCES_V1 || "1",
 };
 
 fs.writeFileSync(

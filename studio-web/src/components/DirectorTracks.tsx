@@ -157,6 +157,35 @@ export function DirectorTracks({
     });
   }, [project.id, scene?.id]);
 
+  // Prefetch per-clip Refs counts so track chrome is honest before a clip is selected.
+  useEffect(() => {
+    if (!scene || !tl || !timelineRefsEnabled) return;
+    const clips = tl.image_clips || [];
+    if (!clips.length) {
+      setRefsCounts({});
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(
+      clips.map(async (clip) => {
+        try {
+          const data = await api.getTimelineReferences(project.id, scene.id, clip.id);
+          return [clip.id, Number(data?.count ?? (data?.bindings || []).length ?? 0)] as const;
+        } catch {
+          return [clip.id, 0] as const;
+        }
+      }),
+    ).then((pairs) => {
+      if (cancelled) return;
+      const next: Record<string, number> = {};
+      for (const [id, count] of pairs) next[id] = count;
+      setRefsCounts(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, scene?.id, tl, timelineRefsEnabled]);
+
   const assetsById = useMemo(() => {
     const m = new Map<string, Asset>();
     project.assets.forEach((a) => m.set(a.id, a));

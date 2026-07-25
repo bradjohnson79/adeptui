@@ -1,7 +1,12 @@
 """Backend feature flags for additive rollout boundaries.
 
 All flags default off and may be overridden with ``STUDIO_FEATURE_<NAME>``.
-Nothing in the current application reads these flags yet.
+
+Active Co-Director / Director gates include:
+
+* ``STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2``
+* ``STUDIO_FEATURE_VISION_VALIDATION_V1``
+* ``STUDIO_FEATURE_TIMELINE_REFERENCES_V1``
 """
 
 from __future__ import annotations

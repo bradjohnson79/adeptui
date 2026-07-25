@@ -47,12 +47,55 @@ type VisionComparison = {
   differences: Record<string, unknown>[];
 };
 
+function mapPackageReferenceSet(pkg: {
+  referenceSet?: {
+    id?: string;
+    version?: number;
+    bindings?: Array<{
+      bindingId?: string;
+      role?: string;
+      influence?: string;
+      referenceAssetId?: string;
+      assetId?: string;
+    }>;
+  } | null;
+}):
+  | {
+      id: string;
+      version: number;
+      bindings: Array<{
+        bindingId: string;
+        role: string;
+        influence?: string;
+        assetId: string;
+      }>;
+    }
+  | undefined {
+  const rs = pkg?.referenceSet;
+  if (!rs?.id || !Array.isArray(rs.bindings) || rs.bindings.length === 0) {
+    return undefined;
+  }
+  return {
+    id: String(rs.id),
+    version: Number(rs.version || 1),
+    bindings: rs.bindings
+      .map((b) => ({
+        bindingId: String(b.bindingId || ""),
+        role: String(b.role || "other"),
+        influence: b.influence ? String(b.influence) : "moderate",
+        assetId: String(b.referenceAssetId || b.assetId || ""),
+      }))
+      .filter((b) => b.bindingId && b.assetId),
+  };
+}
+
 export function CoDirectorValidationWorkspace({
   projectId,
   enabled,
   pending,
   planId,
   sceneId,
+  timelineItemId,
   onClose,
 }: {
   projectId: string;
@@ -60,6 +103,8 @@ export function CoDirectorValidationWorkspace({
   pending: boolean;
   planId?: string | null;
   sceneId?: string | null;
+  /** Optional Director clip id; when omitted, first image clip with refs (or first clip) is used. */
+  timelineItemId?: string | null;
   onClose?: () => void;
 }) {
   const [open, setOpen] = useState(pending);
@@ -130,14 +175,56 @@ export function CoDirectorValidationWorkspace({
 
   if (!enabled) return null;
 
+  async function resolveReferenceSet(): Promise<
+    | {
+        id: string;
+        version: number;
+        bindings: Array<{
+          bindingId: string;
+          role: string;
+          influence?: string;
+          assetId: string;
+        }>;
+      }
+    | undefined
+  > {
+    if (!sceneId) return undefined;
+    try {
+      let itemId = timelineItemId || undefined;
+      if (!itemId) {
+        const director = await api.getDirector(projectId, sceneId);
+        const clips = (director?.image_clips || []) as Array<{ id?: string }>;
+        if (!clips.length) return undefined;
+        // Prefer a clip that already has bindings so closed-loop validation is binding-aware.
+        for (const clip of clips) {
+          if (!clip.id) continue;
+          const refs = await api.getTimelineReferences(projectId, sceneId, clip.id);
+          if (Number(refs?.count || 0) > 0) {
+            itemId = clip.id;
+            break;
+          }
+        }
+        itemId = itemId || clips[0]?.id;
+      }
+      if (!itemId) return undefined;
+      const pkg = await api.getTimelineReferencePackage(projectId, sceneId, itemId);
+      return mapPackageReferenceSet(pkg);
+    } catch {
+      // References flag may be off — validate without referenceSet.
+      return undefined;
+    }
+  }
+
   async function runValidate() {
     setBusy(true);
     setError(null);
     try {
+      const referenceSet = await resolveReferenceSet();
       const result = await api.visionValidate({
         projectId,
         planId: planId || undefined,
         sceneId: sceneId || undefined,
+        referenceSet,
         provider: "mock",
         fixtureProfile: "warnings",
       });

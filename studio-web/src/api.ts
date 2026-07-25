@@ -1765,8 +1765,19 @@ export const api = {
     planId?: string;
     sceneId?: string;
     referenceAssetId?: string;
+    referenceSet?: {
+      id: string;
+      version: number;
+      bindings: Array<{
+        bindingId: string;
+        role: string;
+        influence?: string;
+        assetId: string;
+      }>;
+    } | null;
     provider?: "mock" | "local";
     fixtureProfile?: string;
+    validators?: string[];
   }) =>
     req<{ session: Record<string, unknown>; report: Record<string, unknown>; comparison: Record<string, unknown> }>(
       "/api/codirector/vision/validate",

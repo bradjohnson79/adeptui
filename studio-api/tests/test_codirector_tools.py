@@ -107,6 +107,13 @@ EXPECTED_READ_TOOLS = {
     "get_engine_capabilities",
     "vision_validation_status",
     "vision_validation_report",
+    # M2.6 timeline reference reads
+    "get_timeline_image",
+    "list_timeline_images",
+    "get_reference_set",
+    "list_reference_bindings",
+    "build_generation_reference_package",
+    "suggest_reference_bindings",
 }
 
 EXPECTED_MUTATING_TOOLS = {
@@ -125,6 +132,12 @@ EXPECTED_MUTATING_TOOLS = {
     "propose_vision_correction",
     "propose_asset_bible_link",
     "record_vision_review",
+    # M2.6 timeline reference proposals (mutation only after approval)
+    "create_reference_set_proposal",
+    "propose_add_reference_binding",
+    "propose_remove_reference_binding",
+    "propose_update_reference_binding",
+    "propose_apply_reference_preset",
 }
 
 
