@@ -24,6 +24,7 @@ from .avatar_studio import router as avatar_studio_router, ensure_avatar_tables
 from .editor_sequences import router as editor_sequences_router, ensure_editor_tables
 from .knowledgebase_api import router as knowledgebase_router
 from .references.api import router as references_router
+from .director_references.api import router as director_references_router
 from .capabilities.api import router as capabilities_router
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,7 @@ app.include_router(avatar_studio_router, prefix="/api")
 app.include_router(editor_sequences_router, prefix="/api")
 app.include_router(knowledgebase_router, prefix="/api")
 app.include_router(references_router, prefix="/api")
+app.include_router(director_references_router, prefix="/api")
 app.include_router(capabilities_router, prefix="/api")
 try:
     from .source_manager.api import router as source_manager_router

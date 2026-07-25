@@ -560,3 +560,70 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+class TimelineReferenceSet(Base):
+    __tablename__ = "timeline_reference_sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    scene_id: Mapped[str] = mapped_column(String(36), index=True)
+    timeline_item_id: Mapped[str] = mapped_column(String(64))
+    active_version: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class TimelineReferenceSetVersion(Base):
+    __tablename__ = "timeline_reference_set_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    set_id: Mapped[str] = mapped_column(String(36), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class TimelineReferenceBinding(Base):
+    __tablename__ = "timeline_reference_bindings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    version_id: Mapped[str] = mapped_column(String(36), index=True)
+    reference_asset_id: Mapped[str] = mapped_column(String(36), index=True)
+    role: Mapped[str] = mapped_column(String(64))
+    influence: Mapped[str] = mapped_column(String(32), default="moderate")
+    source: Mapped[str] = mapped_column(String(64), default="project_asset")
+    bible_entity_stable_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    bible_version_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_timeline_item_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ReferencePreset(Base):
+    __tablename__ = "reference_presets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class ReferencePresetBinding(Base):
+    __tablename__ = "reference_preset_bindings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    preset_id: Mapped[str] = mapped_column(String(36), index=True)
+    reference_asset_id: Mapped[str] = mapped_column(String(36))
+    role: Mapped[str] = mapped_column(String(64))
+    influence: Mapped[str] = mapped_column(String(32), default="moderate")
+    source: Mapped[str] = mapped_column(String(64), default="project_asset")
+    bible_entity_stable_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    bible_version_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    label: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
