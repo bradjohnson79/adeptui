@@ -15,6 +15,8 @@ export type TimelineClip = {
   trim_start?: number;
   label?: string;
   role?: "start" | "middle" | "end" | "guide";
+  /** Stable timeline tag e.g. @Image1 — never renumbered on delete/move. */
+  display_tag?: string | null;
   volume?: number;
   fade_in?: number;
   fade_out?: number;
@@ -59,6 +61,8 @@ export type DirectorTimeline = {
   sfx_clips: TimelineClip[];
   lipsync: { tracks: any[] };
   playhead: number;
+  /** Monotonic allocator for @ImageN tags (per scene timeline). */
+  next_image_tag_number?: number;
 };
 
 function nid() {
@@ -78,15 +82,24 @@ function snapTime(t: number, snap: boolean, step = 0.25) {
   return Math.max(0, Math.round(t / step) * step);
 }
 
-/** Normalize legacy start/middle/end roles into free guide clips for Director 2.0. */
+/** Normalize legacy start/middle/end roles into free guide clips for Director 2.0.
+ * Preserves stable display_tag; never overwrites tags with index-based Image N.
+ */
 function freeImageClips(tl: DirectorTimeline): TimelineClip[] {
   const clips = tl.image_clips || [];
   if (!clips.length) return [];
-  return clips.map((c, i) => ({
-    ...c,
-    role: "guide" as const,
-    label: c.label && !["Start", "Middle", "End"].includes(c.label) ? c.label : `Image ${i + 1}`,
-  }));
+  return clips.map((c, i) => {
+    const resolvedLabel = c.display_tag
+      ? c.display_tag
+      : c.label && !["Start", "Middle", "End"].includes(c.label)
+        ? c.label
+        : `Image ${i + 1}`;
+    return {
+      ...c,
+      role: "guide" as const,
+      label: resolvedLabel,
+    };
+  });
 }
 
 export function DirectorTracks({
@@ -230,6 +243,7 @@ export function DirectorTracks({
         length: Math.min(2, duration),
         label: `Image ${imageClips.length + 1}`,
         role: "guide",
+        display_tag: null,
         asset_id: asset.id,
       };
       next.image_clips = [...imageClips, clip];
@@ -278,6 +292,7 @@ export function DirectorTracks({
       length: Math.min(2, duration),
       label: `Image ${imageClips.length + 1}`,
       role: "guide",
+      display_tag: null,
       asset_id: assetId,
     };
     await save({ ...tl, media_mode: "image", image_clips: [...imageClips, clip] });
@@ -658,7 +673,7 @@ export function DirectorTracks({
                           style={pct(clip.start, clip.length, duration)}
                           onClick={() => selectClip("imageClip", clip.id)}
                         >
-                          <strong>{clip.label || "Image"}</strong>
+                          <strong>{clip.display_tag || clip.label || "Image"}</strong>
                           <span>{asset ? `@${asset.tag || asset.filename}` : "empty"}</span>
                           <select
                             value={clip.asset_id || ""}

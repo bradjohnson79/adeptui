@@ -36,6 +36,7 @@ class TimelineClip(BaseModel):
 
 class ImageClip(TimelineClip):
     role: Literal["start", "middle", "end", "guide"] = "guide"
+    display_tag: Optional[str] = None
 
 
 class PromptSegment(BaseModel):
@@ -122,6 +123,7 @@ class DirectorTimeline(BaseModel):
     sfx_clips: list[TimelineClip] = Field(default_factory=list)
     lipsync: LipSyncTracks = Field(default_factory=LipSyncTracks.default)
     playhead: float = 0.0
+    next_image_tag_number: int = 1
 
     @classmethod
     def default(cls, duration_sec: float = 5.0, prompt: str = "") -> "DirectorTimeline":
