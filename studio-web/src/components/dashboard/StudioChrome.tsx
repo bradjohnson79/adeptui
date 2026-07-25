@@ -79,6 +79,7 @@ export function SystemStatusStrip({
   const registry = op?.registry;
   const intelligenceOn = Boolean(op?.intelligenceEnabled);
   const visionOn = Boolean(op?.visionValidationEnabled);
+  const executiveOn = Boolean(op?.productionExecutiveEnabled);
   const packBlockers = op?.packBlockers?.length ?? 0;
 
   return (
@@ -118,6 +119,13 @@ export function SystemStatusStrip({
         title={op?.visualValidationPendingNote || ""}
       >
         Vision {visionOn ? "On" : "Off"}
+      </span>
+      <span
+        className={`status-badge ${executiveOn ? "ok" : "warn"}`}
+        data-testid="status-production-executive"
+        title="STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"
+      >
+        Exec {executiveOn ? "On" : "Off"}
       </span>
       <span className="status-badge ok" data-testid="status-specialists">
         {op?.specialistCount ?? "…"} Specialists

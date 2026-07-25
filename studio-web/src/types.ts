@@ -151,6 +151,7 @@ export interface Health {
     bibleStorage?: string;
     intelligenceEnabled?: boolean;
     visionValidationEnabled?: boolean;
+    productionExecutiveEnabled?: boolean;
   timelineReferencesEnabled?: boolean;
     specialistCount?: number;
     registry?: { callable?: number; blocked?: number; total?: number; counts?: Record<string, number> };
