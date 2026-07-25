@@ -33,6 +33,7 @@ class FeatureFlags:
     future_rollout: bool = False
     codirector_intelligence_v2: bool = False
     vision_validation_v1: bool = False
+    timeline_references_v1: bool = False
 
     @classmethod
     def from_env(

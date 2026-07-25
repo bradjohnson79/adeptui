@@ -797,6 +797,7 @@ export const api = {
       modelAvailable: boolean;
       intelligenceEnabled?: boolean;
       visionValidationEnabled?: boolean;
+  timelineReferencesEnabled?: boolean;
       models: {
         id: string;
         name: string;

@@ -172,6 +172,7 @@ async def health():
         "bibleStorage": "ready",
         "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
         "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
+        "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
         "specialistCount": specialist_count,
         "registry": {
             "callable": len(caps.callable),

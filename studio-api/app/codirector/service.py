@@ -157,6 +157,7 @@ async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
         )
     health.intelligence_enabled = bool(feature_flags.codirector_intelligence_v2)
     health.vision_validation_enabled = bool(feature_flags.vision_validation_v1)
+    health.timeline_references_enabled = bool(feature_flags.timeline_references_v1)
     return health
 
 
