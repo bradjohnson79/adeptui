@@ -7,15 +7,28 @@ import os
 import pytest
 from sqlalchemy.orm import Session
 
+from app.codirector.bible.proposals import ProposalService
+from app.codirector.bible.schemas import BibleMutationSet, EntityMutation
+from app.codirector.executive.contracts import validate_job_input
 from app.codirector.executive.models import JobStatus, JobType
-from app.codirector.executive.schemas import CreateJobRequest, MarkApprovalRequest
+from app.codirector.executive.schemas import MarkApprovalRequest
 from app.codirector.executive.service import ProductionExecutiveService
 from app.codirector.executive.store import JobStore
 from app.codirector.executive.worker import ProductionJobWorker
-from app.db import Project, SessionLocal, init_db
+from app.db import Asset, CoDirectorExecutionReceipt, Job, Project, SessionLocal, init_db
 from app.feature_flags import FeatureFlags
 from app.migrations import DEFAULT_REGISTRY, M008, MigrationRunner
 from sqlalchemy import create_engine
+
+
+@pytest.fixture(autouse=True)
+def _executive_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock ImageGen adapter + vision validate capability for in-process closed-loop tests."""
+    monkeypatch.setenv("ADEPT_MOCK_IMAGEGEN", "1")
+    monkeypatch.setenv("STUDIO_FEATURE_VISION_VALIDATION_V1", "1")
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
 
 
 @pytest.fixture()
@@ -40,6 +53,23 @@ def worker(monkeypatch: pytest.MonkeyPatch) -> ProductionJobWorker:
     yield w
     w.stop()
     worker_mod.production_worker.stop()
+
+
+def _closed_loop_jobs(db: Session, loop: dict) -> dict[str, object]:
+    return {
+        j["type"]: JobStore.get_job(db, j["id"])
+        for j in loop["jobs"]
+    }
+
+
+def _proposal_id_from_loop(db: Session, loop: dict) -> str:
+    jobs = _closed_loop_jobs(db, loop)
+    prop_job = jobs[JobType.CREATE_PROPOSAL.value]
+    assert prop_job is not None
+    assert prop_job.result is not None
+    proposal_id = prop_job.result.get("proposalId")
+    assert proposal_id
+    return str(proposal_id)
 
 
 def test_feature_flag_defaults_off() -> None:
@@ -155,7 +185,6 @@ def test_crash_restart_recovery_no_duplicate_attempts(db: Session, worker: Produ
     assert len(attempts) == 1
     assert attempts[0].id == attempt.id
     assert attempts[0].outcome == "interrupted"
-    # Fresh session path via drain (avoids identity-map stale claim)
     steps = worker.drain(max_steps=5)
     assert steps >= 1
     attempts2 = JobStore.list_attempts(db, job.id)
@@ -181,34 +210,205 @@ def test_provider_unavailable_blocks(db: Session, worker: ProductionJobWorker) -
     assert out.blockedReason and "comfyui.health" in out.blockedReason
 
 
-def test_validation_approval_deps_mocked_no_auto_approve(db: Session, worker: ProductionJobWorker) -> None:
+def test_closed_loop_real_wiring_no_auto_approve(db: Session, worker: ProductionJobWorker) -> None:
     loop = ProductionExecutiveService.create_closed_loop(
         db, project_id="proj-exec-1", scene_id="scene-1", provider="mock"
     )
     assert len(loop["jobs"]) == 6
     worker.drain(max_steps=20)
-    jobs = {j["type"]: j for j in [JobStore.get_job(db, x["id"]).model_dump() for x in loop["jobs"]]}
-    assert jobs[JobType.STORYBOARD_GENERATE.value]["status"] == JobStatus.COMPLETED.value
-    assert jobs[JobType.IMAGE_GENERATE.value]["status"] == JobStatus.COMPLETED.value
-    assert jobs[JobType.VALIDATE.value]["status"] == JobStatus.COMPLETED.value
-    assert jobs[JobType.CREATE_PROPOSAL.value]["status"] == JobStatus.COMPLETED.value
+    jobs = _closed_loop_jobs(db, loop)
+    assert jobs[JobType.STORYBOARD_GENERATE.value].status == JobStatus.COMPLETED.value
+    assert jobs[JobType.IMAGE_GENERATE.value].status == JobStatus.COMPLETED.value
+    assert jobs[JobType.VALIDATE.value].status == JobStatus.COMPLETED.value
+    assert jobs[JobType.CREATE_PROPOSAL.value].status == JobStatus.COMPLETED.value
     await_job = jobs[JobType.AWAIT_APPROVAL.value]
-    assert await_job["status"] == JobStatus.NEEDS_REVIEW.value
+    assert await_job.status == JobStatus.NEEDS_REVIEW.value
     apply_job = jobs[JobType.APPLY_CANON.value]
-    assert apply_job["status"] in (JobStatus.WAITING.value, JobStatus.QUEUED.value, JobStatus.BLOCKED.value)
+    assert apply_job.status in (JobStatus.WAITING.value, JobStatus.QUEUED.value, JobStatus.BLOCKED.value)
+
+    proposal_id = _proposal_id_from_loop(db, loop)
+    prop_before = ProposalService.get(db, "proj-exec-1", proposal_id)
+    assert prop_before.status == "pending"
+    receipts_before = (
+        db.query(CoDirectorExecutionReceipt)
+        .filter(CoDirectorExecutionReceipt.proposal_id == proposal_id)
+        .count()
+    )
+    assert receipts_before == 0
+    assert apply_job.status != JobStatus.COMPLETED.value
 
     marked = ProductionExecutiveService.mark_approval(
         db,
-        await_job["id"],
-        MarkApprovalRequest(proposalId="prop-scene-1", approved=True, actor="reviewer"),
+        await_job.id,
+        MarkApprovalRequest(proposalId=proposal_id, approved=True, actor="reviewer"),
     )
     assert marked.status == JobStatus.QUEUED.value
     worker.drain(max_steps=20)
-    assert JobStore.get_job(db, await_job["id"]).status == JobStatus.COMPLETED.value
-    apply_done = JobStore.get_job(db, apply_job["id"])
+    assert JobStore.get_job(db, await_job.id).status == JobStatus.COMPLETED.value
+    apply_done = JobStore.get_job(db, apply_job.id)
     assert apply_done.status == JobStatus.COMPLETED.value
     assert apply_done.result is not None
-    assert apply_done.result.get("applied") is False  # no silent canon mutation
+    assert apply_done.result.get("applied") is True
+    assert apply_done.result.get("receiptId")
+    prop_after = ProposalService.get(db, "proj-exec-1", proposal_id)
+    assert prop_after.status == "completed"
+
+
+def test_contracts_validate_closed_loop_inputs() -> None:
+    project_id = "proj-exec-1"
+    cases = {
+        JobType.STORYBOARD_GENERATE.value: {"sceneId": "scene-1", "provider": "mock"},
+        JobType.IMAGE_GENERATE.value: {"sceneId": "scene-1", "provider": "mock"},
+        JobType.VALIDATE.value: {"assetId": "asset-1", "provider": "mock", "fixtureProfile": "pass"},
+        JobType.CREATE_PROPOSAL.value: {"sceneId": "scene-1", "assetId": "asset-1", "sessionId": "sess-1"},
+        JobType.AWAIT_APPROVAL.value: {"proposalId": "prop-1", "proposalApproved": False},
+        JobType.APPLY_CANON.value: {"proposalId": "prop-1", "proposalApproved": False},
+    }
+    for job_type, payload in cases.items():
+        model = validate_job_input(job_type, payload, project_id=project_id)
+        assert model is not None
+
+
+def test_image_generate_uses_job_asset_lifecycle(db: Session, worker: ProductionJobWorker) -> None:
+    job = JobStore.create_job(
+        db,
+        job_type=JobType.IMAGE_GENERATE.value,
+        project_id="proj-exec-1",
+        scene_id="scene-img-1",
+        provider="mock",
+        payload={"projectId": "proj-exec-1", "sceneId": "scene-img-1", "provider": "mock"},
+        capability_requirements=[],
+    )
+    worker.drain(max_steps=10)
+    done = JobStore.get_job(db, job.id)
+    assert done is not None
+    assert done.status == JobStatus.COMPLETED.value
+    assert done.result is not None
+    asset_id = done.result.get("assetId")
+    assert asset_id
+    asset = db.get(Asset, asset_id)
+    assert asset is not None
+    assert asset.project_id == "proj-exec-1"
+    image_job_id = done.result.get("imageJobId")
+    assert image_job_id
+    studio_job = db.get(Job, image_job_id)
+    assert studio_job is not None
+    assert studio_job.status == "done"
+
+
+def test_await_approval_stays_needs_review_without_signal(
+    db: Session, worker: ProductionJobWorker
+) -> None:
+    loop = ProductionExecutiveService.create_closed_loop(
+        db, project_id="proj-exec-1", scene_id="scene-await", provider="mock"
+    )
+    worker.drain(max_steps=20)
+    jobs = _closed_loop_jobs(db, loop)
+    await_job = jobs[JobType.AWAIT_APPROVAL.value]
+    apply_job = jobs[JobType.APPLY_CANON.value]
+    assert await_job.status == JobStatus.NEEDS_REVIEW.value
+    assert apply_job.status != JobStatus.COMPLETED.value
+    proposal_id = _proposal_id_from_loop(db, loop)
+    prop = ProposalService.get(db, "proj-exec-1", proposal_id)
+    assert prop.status == "pending"
+
+
+def test_apply_canon_blocked_without_approval(db: Session, worker: ProductionJobWorker) -> None:
+    prop = ProposalService.create_proposal(
+        db,
+        project_id="proj-exec-1",
+        proposal_type="entity_create",
+        title="t",
+        summary="s",
+        payload=BibleMutationSet(
+            entityMutations=[
+                EntityMutation(
+                    entityType="production_decision",
+                    entityKey="k",
+                    displayName="d",
+                    data={"decision": "hold", "rationale": "test"},
+                )
+            ]
+        ),
+    )
+    job = JobStore.create_job(
+        db,
+        job_type=JobType.APPLY_CANON.value,
+        project_id="proj-exec-1",
+        payload={
+            "proposalId": prop.id,
+            "proposalApproved": False,
+            "projectId": "proj-exec-1",
+        },
+    )
+    worker.tick_once(db)
+    assert JobStore.get_job(db, job.id).status == JobStatus.BLOCKED.value
+
+
+def test_mark_approval_auto_approved_false_api(client, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.codirector.executive import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod.production_worker, "start", lambda: None)
+    os.environ["STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"] = "1"
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+    try:
+        loop = client.post(
+            "/api/codirector/jobs/closed-loop",
+            json={
+                "projectId": "proj-exec-1",
+                "sceneId": "scene-api-1",
+                "provider": "mock",
+            },
+        )
+        assert loop.status_code == 200, loop.text
+        loop_body = loop.json()
+        await_job = next(j for j in loop_body["jobs"] if j["type"] == JobType.AWAIT_APPROVAL.value)
+        drain = client.post("/api/codirector/jobs/worker/drain", json={"maxSteps": 40})
+        assert drain.status_code == 200
+        prop_job = next(j for j in loop_body["jobs"] if j["type"] == JobType.CREATE_PROPOSAL.value)
+        prop_inspect = client.get(f"/api/codirector/jobs/{prop_job['id']}")
+        assert prop_inspect.status_code == 200
+        proposal_id = prop_inspect.json()["job"]["result"]["proposalId"]
+        approve = client.post(
+            f"/api/codirector/jobs/{await_job['id']}/mark-approval",
+            json={"proposalId": proposal_id, "approved": True, "actor": "pytest"},
+        )
+        assert approve.status_code == 200
+        body = approve.json()
+        assert body.get("autoApproved") is False
+    finally:
+        os.environ.pop("STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1", None)
+        ff.feature_flags = FeatureFlags.from_env(os.environ)
+
+
+def test_worker_poll_interval_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL", "0.5")
+    w = ProductionJobWorker()
+    assert w.poll_interval == 0.5
+
+
+def test_chain_propagates_asset_and_proposal_ids(db: Session, worker: ProductionJobWorker) -> None:
+    loop = ProductionExecutiveService.create_closed_loop(
+        db, project_id="proj-exec-1", scene_id="scene-chain", provider="mock"
+    )
+    worker.drain(max_steps=20)
+    jobs = _closed_loop_jobs(db, loop)
+    image = jobs[JobType.IMAGE_GENERATE.value]
+    validate = jobs[JobType.VALIDATE.value]
+    prop = jobs[JobType.CREATE_PROPOSAL.value]
+    await_job = jobs[JobType.AWAIT_APPROVAL.value]
+
+    assert image.result is not None
+    asset_id = image.result.get("assetId")
+    assert asset_id
+
+    assert validate.payload.get("assetId") == asset_id or validate.result.get("assetId") == asset_id
+    assert prop.result is not None
+    proposal_id = prop.result.get("proposalId")
+    assert proposal_id
+    assert await_job.payload.get("proposalId") == proposal_id
 
 
 def test_idempotency_duplicate_create(db: Session) -> None:
