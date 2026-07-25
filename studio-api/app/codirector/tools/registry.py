@@ -18,7 +18,7 @@ from .definitions import (
     ToolDefinition,
     ToolPreview,
 )
-from .handlers import bible_domain, bible_read, project, scenes, storyboard, system
+from .handlers import bible_domain, bible_read, project, scenes, storyboard, system, vision
 
 ReadHandler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]
 PreviewFn = Callable[[ToolContext, dict[str, Any]], ToolPreview]
@@ -54,6 +54,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "get_source_manager_status": system.get_source_manager_status,
     "get_reference_capabilities": system.get_reference_capabilities,
     "get_engine_capabilities": system.get_engine_capabilities,
+    "vision_validation_status": vision.vision_validation_status,
+    "vision_validation_report": vision.vision_validation_report,
 }
 
 _MUTATION_HANDLERS: dict[str, MutationHandler] = {
@@ -86,6 +88,15 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     ),
     "propose_storyboard_generation": MutationHandler(
         storyboard.preview_propose_storyboard_generation, storyboard.apply_propose_storyboard_generation
+    ),
+    "propose_vision_correction": MutationHandler(
+        vision.preview_propose_vision_correction, vision.apply_propose_vision_correction
+    ),
+    "propose_asset_bible_link": MutationHandler(
+        vision.preview_propose_asset_bible_link, vision.apply_propose_asset_bible_link
+    ),
+    "record_vision_review": MutationHandler(
+        vision.preview_record_vision_review, vision.apply_record_vision_review
     ),
 }
 

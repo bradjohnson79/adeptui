@@ -138,6 +138,24 @@ export interface Health {
   recommended_action?: string | null;
   missing_models: string[];
   message: string;
+  operator?: {
+    api?: string;
+    comfy?: string;
+    provider?: {
+      id?: string;
+      status?: string;
+      reachable?: boolean;
+      modelAvailable?: boolean;
+      selectedModel?: string | null;
+    };
+    bibleStorage?: string;
+    intelligenceEnabled?: boolean;
+    visionValidationEnabled?: boolean;
+    specialistCount?: number;
+    registry?: { callable?: number; blocked?: number; total?: number; counts?: Record<string, number> };
+    packBlockers?: { capabilityId: string; message: string; recommendedAction?: string | null; componentIds?: string[] }[];
+    visualValidationPendingNote?: string;
+  };
 }
 
 export interface SceneSetup {

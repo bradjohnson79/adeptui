@@ -108,6 +108,16 @@ def _baseline(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> Capa
             message=definition.baseline_reason or "A UI affordance exists with no durable backend.",
             recommended_action="none",
         )
+    if status == S.NOT_CONFIGURED:
+        return CapabilityEvaluation(
+            status=status,
+            available=False,
+            configured=False,
+            healthy=True,
+            reason_code=errors.DEPENDENCY_NOT_CONFIGURED,
+            message=definition.baseline_reason or definition.summary,
+            recommended_action="enable_feature_flag",
+        )
     if status in (S.PARTIALLY_WIRED, S.BACKEND_ONLY, S.MOCK_VERIFIED, S.UNKNOWN):
         return CapabilityEvaluation(
             status=status,
@@ -596,6 +606,36 @@ def _eval_references_ic_lora(definition: CapabilityDefinition, snapshot: ProbeSn
     )
 
 
+def _eval_vision(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    """Flag-gated vision validation: mock path is honest when enabled; never fake Comfy/ML pass."""
+
+    try:
+        from ..feature_flags import feature_flags
+    except Exception:  # noqa: BLE001
+        feature_flags = None
+    enabled = bool(getattr(feature_flags, "vision_validation_v1", False)) if feature_flags else False
+    if not enabled:
+        return CapabilityEvaluation(
+            status=S.NOT_CONFIGURED,
+            available=False,
+            configured=False,
+            healthy=True,
+            reason_code=errors.DEPENDENCY_NOT_CONFIGURED,
+            message="Vision validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1).",
+            recommended_action="enable_feature_flag",
+        )
+    return CapabilityEvaluation(
+        status=S.MOCK_VERIFIED,
+        available=True,
+        configured=True,
+        healthy=True,
+        reason_code=None,
+        message="Vision validation mock provider is ready; local ML adapters remain inconclusive stubs.",
+        recommended_action="none",
+        details={"provider": "mock", "localMl": "stub_inconclusive"},
+    )
+
+
 def _eval_generation_queue(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     """Generation is only callable when Comfy, a workflow, and the weights all line up."""
     comfy = snapshot.comfy
@@ -681,6 +721,8 @@ EVALUATORS: dict[str, Evaluator] = {
     "downloads.read": _eval_source_manager_read,
     "generation.image.queue": _eval_generation_queue,
     "generation.video.queue": _eval_generation_queue,
+    "codirector.vision.validate": _eval_vision,
+    "codirector.vision.review": _eval_vision,
 }
 
 

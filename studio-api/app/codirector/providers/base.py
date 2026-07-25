@@ -41,6 +41,8 @@ class ProviderHealthResult:
     message: str = ""
     code: str | None = None
     recommended_action: str | None = None
+    intelligence_enabled: bool = False
+    vision_validation_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +57,8 @@ class ProviderHealthResult:
             "message": self.message,
             "code": self.code,
             "recommendedAction": self.recommended_action,
+            "intelligenceEnabled": self.intelligence_enabled,
+            "visionValidationEnabled": self.vision_validation_enabled,
             "ok": self.status == "Ready",
         }
 

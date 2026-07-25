@@ -795,6 +795,8 @@ export const api = {
       endpoint: string;
       selectedModel: string | null;
       modelAvailable: boolean;
+      intelligenceEnabled?: boolean;
+      visionValidationEnabled?: boolean;
       models: {
         id: string;
         name: string;

@@ -29,6 +29,7 @@ CAPABILITY_KEYS: tuple[str, ...] = (
     "references",
     "source_manager",
     "preview_engine",
+    "vision",
 )
 
 # Hard ceiling on a serialized tool result, in characters. Individual tools may ask for less.
@@ -350,6 +351,28 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         capability="preview_engine",
         parameters=(ToolParameter("engine", "string", choices=_ENGINE_CHOICES),),
     ),
+    ToolDefinition(
+        tool_id="vision_validation_status",
+        kind="read",
+        title="Vision validation status",
+        description="Read vision validation session status for this project (M2.5).",
+        capability="vision",
+        parameters=(
+            ToolParameter("sessionId", "string", max_length=64),
+            ToolParameter("limit", "integer", minimum=1, maximum=100),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="vision_validation_report",
+        kind="read",
+        title="Vision validation report",
+        description="Read a persisted vision validation report by reportId or sessionId (M2.5).",
+        capability="vision",
+        parameters=(
+            ToolParameter("reportId", "string", max_length=64),
+            ToolParameter("sessionId", "string", max_length=64),
+        ),
+    ),
 )
 
 MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
@@ -496,6 +519,51 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("prompt", "string", max_length=4000),
             ToolParameter("workflow", "string", max_length=120),
             ToolParameter("referencesReady", "boolean"),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="propose_vision_correction",
+        kind="mutating",
+        title="Propose vision correction",
+        description="Propose prompt/package corrections from a vision validation report (no auto-regenerate).",
+        capability="vision",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("sessionId", "string", required=True, max_length=64),
+            ToolParameter("notes", "string", max_length=2000),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="propose_asset_bible_link",
+        kind="mutating",
+        title="Propose asset Bible link",
+        description="Propose linking a validated asset into the Production Bible (approval required).",
+        capability="bible",
+        pinned_resources=("bible",),
+        parameters=(
+            ToolParameter("sessionId", "string", required=True, max_length=64),
+            ToolParameter("assetId", "string", max_length=64),
+            ToolParameter("reportId", "string", max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="record_vision_review",
+        kind="mutating",
+        title="Record vision review",
+        description="Record a human approve/reject decision for a vision validation session.",
+        capability="vision",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("sessionId", "string", required=True, max_length=64),
+            ToolParameter(
+                "decision",
+                "string",
+                required=True,
+                choices=("approved", "rejected", "override_approve", "override_reject"),
+            ),
+            ToolParameter("notes", "string", max_length=2000),
+            ToolParameter("linkToBible", "boolean"),
+            ToolParameter("reviewer", "string", max_length=64),
         ),
     ),
 )

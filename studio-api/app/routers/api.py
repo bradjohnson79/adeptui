@@ -140,6 +140,52 @@ async def health():
     reachable = bool(payload.get("reachable"))
     models = payload.get("models") or []
     missing = [str(item.get("name") or item.get("componentId")) for item in models if not item.get("present")]
+
+    from ..capabilities import service as capability_service
+    from ..codirector import service as codirector_service
+    from ..codirector.intelligence.specialist_registry import SpecialistRegistry
+    from ..feature_flags import feature_flags
+
+    caps = await capability_service.get_capabilities(force=False)
+    provider = await codirector_service.get_health()
+    specialist_count = len(SpecialistRegistry().all())
+    pack_blockers = [
+        {
+            "capabilityId": b.capabilityId,
+            "message": b.message,
+            "recommendedAction": b.recommendedAction,
+            "componentIds": list(b.componentIds),
+        }
+        for b in caps.blockers
+        if b.subsystem in ("source_manager", "models", "workflows", "comfyui")
+    ]
+    operator = {
+        "api": "ok",
+        "comfy": "reachable" if reachable else "down",
+        "provider": {
+            "id": provider.provider_id,
+            "status": provider.status,
+            "reachable": provider.reachable,
+            "modelAvailable": provider.model_available,
+            "selectedModel": provider.selected_model,
+        },
+        "bibleStorage": "ready",
+        "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
+        "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
+        "specialistCount": specialist_count,
+        "registry": {
+            "callable": len(caps.callable),
+            "blocked": len(caps.blockers),
+            "total": len(caps.capabilities),
+            "counts": dict(caps.counts),
+        },
+        "packBlockers": pack_blockers[:12],
+        "visualValidationPendingNote": (
+            "M2.5 vision validation enabled — review pending assets in Validation Workspace."
+            if feature_flags.vision_validation_v1
+            else "M2.5 — visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
+        ),
+    }
     return HealthOut(
         ok=reachable,
         comfy_reachable=reachable,
@@ -152,6 +198,7 @@ async def health():
         reason_code=payload.get("reasonCode"),
         recommended_action=payload.get("recommendedAction"),
         message=str(payload.get("message") or ""),
+        operator=operator,
     )
 
 

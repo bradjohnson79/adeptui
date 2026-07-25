@@ -140,9 +140,9 @@ async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
     pid = provider_id or active_provider_id()
     try:
         provider = build_provider(pid)
-        return await provider.health()
+        health = await provider.health()
     except CoDirectorError as err:
-        return ProviderHealthResult(
+        health = ProviderHealthResult(
             provider_id=pid,
             display_name=pid,
             status="Degraded",
@@ -155,6 +155,9 @@ async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
             code=err.code,
             recommended_action=err.recommended_action,
         )
+    health.intelligence_enabled = bool(feature_flags.codirector_intelligence_v2)
+    health.vision_validation_enabled = bool(feature_flags.vision_validation_v1)
+    return health
 
 
 async def list_models(provider_id: str | None = None) -> list[ProviderModel]:

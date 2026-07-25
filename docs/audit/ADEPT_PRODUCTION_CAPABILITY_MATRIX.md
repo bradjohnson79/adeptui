@@ -87,6 +87,8 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `codirector.bible.read` | codirector | `locally_verified` | read | no | - | `GET /api/codirector/projects/{projectId}/bible` |
 | `codirector.bible.propose` | codirector | `locally_verified` | write | yes | - | `POST /api/codirector/projects/{projectId}/proposals` |
 | `codirector.bible.approve` | codirector | `locally_verified` | write | yes | - | `POST /api/codirector/proposals/{proposalId}/approval` |
+| `codirector.vision.validate` | codirector | `not_configured` | write | no | - | `POST /api/codirector/vision/validate` |
+| `codirector.vision.review` | codirector | `not_configured` | write | yes | `codirector.vision.validate` | `POST /api/codirector/vision/approve` |
 | `codirector.tools` | codirector | `not_implemented` | write | no | - | `-` |
 | `comfyui.health` | comfyui | `backend_only` | read | no | - | `GET /api/comfy/health` |
 | `comfyui.queue` | comfyui | `backend_only` | write | yes | `comfyui.health`, `workflows.validate` | `-` |
