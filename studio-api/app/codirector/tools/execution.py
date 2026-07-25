@@ -158,16 +158,28 @@ class ToolExecutionService:
         states = await adapter.snapshot()
         out: list[ToolAvailability] = []
         for definition in tool_registry.all_definitions():
+            readiness = await adapter.readiness_for_tool(definition.tool_id)
             state = states.get(definition.capability)
-            available = bool(state and state.available)
+            available = bool(readiness.get("callable"))
+            status = str(readiness.get("status") or (state.status if state else "unknown"))
+            reason = None
+            if not available:
+                if readiness.get("proposalReady"):
+                    missing = ", ".join(readiness.get("missingCapabilities") or [])
+                    reason = f"Proposal may be created, but execution is blocked: {missing}"
+                else:
+                    reason = state.reason if state else "Unknown capability."
+            # Read tools require callable. Mutating tools may still be offered when
+            # proposalReady even if execution dependencies are blocked.
+            offered = available or (definition.kind == "mutating" and bool(readiness.get("proposalReady")))
             out.append(
                 ToolAvailability(
                     toolId=definition.tool_id,
-                    available=available,
+                    available=offered,
                     capability=definition.capability,
-                    capabilityStatus=state.status if state else "unknown",
-                    reason=None if available else (state.reason if state else "Unknown capability."),
-                    errorCode=None if available else (state.error_code() if state else None),
+                    capabilityStatus=status,
+                    reason=reason,
+                    errorCode=None if offered else (state.error_code() if state else None),
                 )
             )
         return out, {k: v.to_dict() for k, v in states.items()}
@@ -288,7 +300,9 @@ class ToolExecutionService:
         doesn't invalidate a pending scene rename (and vice versa).
         """
 
-        from ... import project_service, scene_service
+        from ... import project_service, scene_service as scene_helpers
+        from ...services.scene_service import SceneService
+        from ...capabilities.errors import CapabilityError
         from ..bible import operations as ops
 
         versions: dict[str, Optional[str]] = {}
@@ -302,8 +316,13 @@ class ToolExecutionService:
                 )
             elif resource == "scene":
                 scene_id = str(arguments.get("sceneId") or "")
-                scene = scene_service.get_scene(db, project_id, scene_id) if scene_id else None
-                versions[f"scene:{scene_id}"] = scene_service.scene_fingerprint(scene) if scene else None
+                scene = None
+                if scene_id:
+                    try:
+                        scene = SceneService.get(db, project_id, scene_id)
+                    except CapabilityError:
+                        scene = None
+                versions[f"scene:{scene_id}"] = scene_helpers.scene_fingerprint(scene) if scene else None
         return versions
 
     @staticmethod
@@ -327,7 +346,10 @@ class ToolExecutionService:
         adapter = adapter or CapabilityAdapter(db, project_id)
 
         state = await adapter.state_for(definition.capability)
-        if not state.available:
+        readiness = await adapter.readiness_for_tool(definition.tool_id)
+        # Mutating tools may still create a proposal when execution dependencies are down
+        # (proposal_ready). Hard-block only when neither callable nor proposal-ready.
+        if not state.available and not readiness.get("proposalReady"):
             error = state.as_error(definition.tool_id)
             _log_invocation(
                 db,
@@ -354,11 +376,17 @@ class ToolExecutionService:
         base_versions = ToolExecutionService.base_resource_versions(
             db, project_id=project_id, definition=definition, arguments=clean_args
         )
+        capability_snapshot = {
+            definition.capability: {
+                **state.to_dict(),
+                "toolReadiness": readiness,
+            }
+        }
         payload = ToolCallPayload(
             toolId=definition.tool_id,
             toolSchemaVersion=definition.schema_version,
             arguments=clean_args,
-            capabilitySnapshot={definition.capability: state.to_dict()},
+            capabilitySnapshot=capability_snapshot,
             preview=preview,
             inputHash=sanitize.compute_input_hash(
                 tool_id=definition.tool_id,

@@ -195,6 +195,14 @@ def root():
     return {"name": settings.app_name, "docs": "/docs", "health": "/api/health"}
 
 
+@app.get("/health")
+async def root_health():
+    """Operator alias for `/api/health` (no secrets)."""
+    from .routers.api import health as api_health
+
+    return await api_health()
+
+
 @app.get("/api/assets/{asset_id}/file")
 def get_asset_file(asset_id: str):
     from .db import SessionLocal, Asset

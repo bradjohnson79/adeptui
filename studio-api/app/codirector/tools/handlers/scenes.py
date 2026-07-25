@@ -3,14 +3,19 @@
 `apply_*` functions are the only place in the tool registry that writes to `scenes`, and they
 are called exclusively by `ToolExecutionService.execute_approved_proposal` after a human has
 approved the recorded arguments. Nothing in a chat turn can reach them.
+
+CRUD goes through PSR `SceneService` (patch-only-present-fields). Compact tool-facing summaries
+and proposal fingerprints remain in `app.scene_service` helpers.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .... import scene_service
+from .... import scene_service as scene_helpers
+from ....capabilities.errors import CapabilityError
 from ....db import Project, Scene
+from ....services.scene_service import SceneService
 from ...errors import TOOL_TARGET_NOT_FOUND, CoDirectorError
 from ..definitions import ToolContext, ToolPreview
 
@@ -18,51 +23,47 @@ DEFAULT_SCENE_LIMIT = 40
 
 
 def _require_project(ctx: ToolContext) -> Project:
-    project = ctx.db.get(Project, ctx.project_id)
-    if not project:
+    try:
+        return SceneService.require_project(ctx.db, ctx.project_id)
+    except CapabilityError as exc:
         raise CoDirectorError(
             TOOL_TARGET_NOT_FOUND,
             "Project not found.",
             details={"projectId": ctx.project_id},
             recoverable=False,
             recommended_action="none",
-        )
-    return project
+        ) from exc
 
 
 def _require_scene(ctx: ToolContext, scene_id: str) -> Scene:
-    scene = scene_service.get_scene(ctx.db, ctx.project_id, scene_id)
-    if not scene:
+    try:
+        return SceneService.get(ctx.db, ctx.project_id, scene_id)
+    except CapabilityError as exc:
         raise CoDirectorError(
             TOOL_TARGET_NOT_FOUND,
             "That scene isn't part of this project.",
             details={"projectId": ctx.project_id, "sceneId": scene_id},
             recoverable=False,
             recommended_action="none",
-        )
-    return scene
-
-
-# --------------------------------------------------------------------------
-# Read
-# --------------------------------------------------------------------------
+        ) from exc
 
 
 async def list_scenes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     limit = int(args.get("limit") or DEFAULT_SCENE_LIMIT)
-    scenes = scene_service.list_scenes(ctx.db, ctx.project_id)
+    scenes = SceneService.list_for_project(ctx.db, ctx.project_id)
     return {
         "projectId": ctx.project_id,
         "sceneCount": len(scenes),
         "returned": min(limit, len(scenes)),
-        "scenes": [scene_service.scene_summary(s) for s in scenes[:limit]],
+        "scenes": [scene_helpers.scene_summary(s) for s in scenes[:limit]],
     }
 
 
 async def get_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     scene = _require_scene(ctx, str(args["sceneId"]))
-    detail = scene_service.scene_summary(scene)
+    detail = scene_helpers.scene_summary(scene)
     detail["continuityNote"] = (scene.continuity_json or "")[:1000]
+    detail["summary"] = getattr(scene, "summary", "") or ""
     return detail
 
 
@@ -71,20 +72,16 @@ async def get_active_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
 
     if not ctx.scene_id:
         return {"projectId": ctx.project_id, "activeScene": None, "reason": "No scene is selected."}
-    scene = scene_service.get_scene(ctx.db, ctx.project_id, ctx.scene_id)
-    if not scene:
+    try:
+        scene = SceneService.get(ctx.db, ctx.project_id, ctx.scene_id)
+    except CapabilityError:
         return {"projectId": ctx.project_id, "activeScene": None, "reason": "The selected scene no longer exists."}
-    return {"projectId": ctx.project_id, "activeScene": scene_service.scene_summary(scene)}
-
-
-# --------------------------------------------------------------------------
-# Mutating: create_scene
-# --------------------------------------------------------------------------
+    return {"projectId": ctx.project_id, "activeScene": scene_helpers.scene_summary(scene)}
 
 
 def preview_create_scene(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     _require_project(ctx)
-    next_index = scene_service.scene_count(ctx.db, ctx.project_id)
+    next_index = SceneService.count_for_project(ctx.db, ctx.project_id)
     name = str(args.get("name") or f"Scene {next_index + 1}")
     engine = str(args.get("engine") or "")
     duration = args.get("durationSec")
@@ -106,20 +103,17 @@ def preview_create_scene(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
 
 def apply_create_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     project = _require_project(ctx)
-    scene = scene_service.create_scene(
+    scene = SceneService.create(
         ctx.db,
-        project,
-        name=str(args.get("name") or ""),
-        engine=str(args.get("engine") or project.engine_default or "ltx"),
-        prompt=str(args.get("prompt") or ""),
-        duration_sec=float(args.get("durationSec") or 5.0),
+        ctx.project_id,
+        {
+            "name": str(args.get("name") or ""),
+            "engine": str(args.get("engine") or project.engine_default or "ltx"),
+            "prompt": str(args.get("prompt") or ""),
+            "duration_sec": float(args.get("durationSec") or 5.0),
+        },
     )
-    return {"created": "scene", "scene": scene_service.scene_summary(scene)}
-
-
-# --------------------------------------------------------------------------
-# Mutating: update_scene_title
-# --------------------------------------------------------------------------
+    return {"created": "scene", "scene": scene_helpers.scene_summary(scene)}
 
 
 def preview_update_scene_title(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -137,13 +131,8 @@ def preview_update_scene_title(ctx: ToolContext, args: dict[str, Any]) -> ToolPr
 def apply_update_scene_title(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     scene = _require_scene(ctx, str(args["sceneId"]))
     previous = scene.name
-    scene = scene_service.update_scene_fields(ctx.db, scene, name=str(args["name"]))
-    return {"updated": "scene.name", "previous": previous, "scene": scene_service.scene_summary(scene)}
-
-
-# --------------------------------------------------------------------------
-# Mutating: set_scene_prompt
-# --------------------------------------------------------------------------
+    scene = SceneService.update(ctx.db, ctx.project_id, scene.id, {"name": str(args["name"])})
+    return {"updated": "scene.name", "previous": previous, "scene": scene_helpers.scene_summary(scene)}
 
 
 def preview_set_scene_prompt(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -165,9 +154,9 @@ def preview_set_scene_prompt(ctx: ToolContext, args: dict[str, Any]) -> ToolPrev
 def apply_set_scene_prompt(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     scene = _require_scene(ctx, str(args["sceneId"]))
     previous = scene.prompt or ""
-    scene = scene_service.update_scene_fields(ctx.db, scene, prompt=str(args["prompt"]))
+    scene = SceneService.update(ctx.db, ctx.project_id, scene.id, {"prompt": str(args["prompt"])})
     return {
         "updated": "scene.prompt",
         "previousLength": len(previous),
-        "scene": scene_service.scene_summary(scene),
+        "scene": scene_helpers.scene_summary(scene),
     }

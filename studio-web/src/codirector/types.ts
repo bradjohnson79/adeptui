@@ -55,6 +55,7 @@ export type PlannedStep = {
   reuseAssets?: { id: string; tag: string; kind: string }[];
 };
 
+/** @deprecated Prefer backend intelligence plans when enabled; retained as legacy/fallback. */
 export type ActionPlan = {
   id: string;
   title: string;
@@ -751,6 +752,14 @@ export const RECIPE_STUBS: RecipeStub[] = [
 ];
 
 /** Heuristic plan builder from free text */
+/**
+ * Legacy / offline planner (Outcome B fallback).
+ *
+ * When `STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2=1` and the backend intelligence
+ * path is available, the M2.4 production plan from SSE (`intelligence_plan`) is
+ * authoritative. Use this helper only when intelligence is disabled or unavailable.
+ * Do not delete — it remains the documented mock/offline fallback.
+ */
 export function planFromIntention(
   intention: string,
   ctx: { projectId?: string; sceneId?: string }

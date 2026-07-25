@@ -77,6 +77,9 @@ class SpecialistRegistry:
     def get(self, specialist_id: str) -> SpecialistDefinition | None:
         return self._definitions.get(specialist_id)
 
+    def all(self) -> list[SpecialistDefinition]:
+        return list(self._definitions.values())
+
     def require(self, specialist_id: str) -> SpecialistDefinition:
         definition = self.get(specialist_id)
         if definition is None:

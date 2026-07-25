@@ -20,7 +20,6 @@ from ...capabilities.models import (
     CapabilityStatus,
 )
 from .definitions import CAPABILITY_KEYS, ToolDefinition
-from . import registry as tool_registry_module
 
 
 # Tool-key ? PSR capability ids that must be callable for *execution*.
@@ -116,8 +115,65 @@ class CoDirectorCapabilityBridge:
     async def refresh(self) -> None:
         await self._ensure_snapshot(force=True)
 
+    def _domain_gate(self, tool_key: str) -> dict[str, Any] | None:
+        """Tool-key domain checks the PSR registry cannot answer alone.
+
+        `project` needs an open project id; `bible` needs a current Production Bible version.
+        These overlays still fail closed and never invent readiness beyond the registry.
+        """
+        if tool_key == "project":
+            if not self._project_id:
+                return {
+                    "key": tool_key,
+                    "available": False,
+                    "status": "not_configured",
+                    "configured": False,
+                    "reason": "No project is open.",
+                    "detail": {"requiredCapabilities": list(psr_ids_for_tool_key(tool_key))},
+                }
+            from ...db import Project
+
+            if self._db.get(Project, self._project_id) is None:
+                return {
+                    "key": tool_key,
+                    "available": False,
+                    "status": "not_configured",
+                    "configured": False,
+                    "reason": "Project not found.",
+                    "detail": {"requiredCapabilities": list(psr_ids_for_tool_key(tool_key))},
+                }
+            return None
+        if tool_key == "bible":
+            if not self._project_id:
+                return {
+                    "key": tool_key,
+                    "available": False,
+                    "status": "not_configured",
+                    "configured": False,
+                    "reason": "No project is open.",
+                    "detail": {"requiredCapabilities": list(psr_ids_for_tool_key(tool_key))},
+                }
+            from ..bible import operations as ops
+
+            bible = ops.get_bible(self._db, self._project_id)
+            if not bible or not bible.current_version_id:
+                return {
+                    "key": tool_key,
+                    "available": False,
+                    "status": "not_configured",
+                    "configured": False,
+                    "reason": "This project doesn't have a Production Bible yet.",
+                    "detail": {"requiredCapabilities": list(psr_ids_for_tool_key(tool_key))},
+                }
+            return None
+        return None
+
     async def readiness_for_tool_key(self, tool_key: str) -> dict[str, Any]:
         """Legacy-shaped state used by CapabilityAdapter (available / status / configured)."""
+
+        domain = self._domain_gate(tool_key)
+        if domain is not None:
+            return domain
 
         await self._ensure_snapshot()
         required = list(psr_ids_for_tool_key(tool_key))
@@ -167,6 +223,8 @@ class CoDirectorCapabilityBridge:
         }
 
     async def tool_readiness(self, tool_id: str) -> ToolReadiness:
+        from . import registry as tool_registry_module
+
         await self._ensure_snapshot()
         definition = tool_registry_module.find(tool_id)
         if definition is None:
@@ -182,6 +240,18 @@ class CoDirectorCapabilityBridge:
         return await self._readiness_for_definition(definition)
 
     async def _readiness_for_definition(self, definition: ToolDefinition) -> ToolReadiness:
+        domain = self._domain_gate(definition.capability)
+        if domain is not None:
+            return ToolReadiness(
+                tool=definition.tool_id,
+                status=str(domain["status"]),
+                callable=False,
+                missingCapabilities=list((domain.get("detail") or {}).get("missingCapabilities") or []),
+                proposalReady=False,
+                executionBlocked=True,
+                requiredCapabilities=list(psr_ids_for_tool_key(definition.capability)),
+                detail={"capabilityKey": definition.capability, "reason": domain.get("reason")},
+            )
         await self._ensure_snapshot()
         required = list(psr_ids_for_tool_key(definition.capability))
         missing = [cid for cid in required if not _is_usable(self._caps_by_id.get(cid))]
@@ -236,6 +306,8 @@ class CoDirectorCapabilityBridge:
         )
 
     async def snapshot_tool_readiness(self) -> list[dict[str, Any]]:
+        from . import registry as tool_registry_module
+
         await self._ensure_snapshot()
         out: list[dict[str, Any]] = []
         for definition in tool_registry_module.all_definitions():

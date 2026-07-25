@@ -446,6 +446,8 @@ class HealthOut(BaseModel):
     reason_code: Optional[str] = None
     recommended_action: Optional[str] = None
     message: str = ""
+    #: Operator visibility for M2.4.1 (no secrets).
+    operator: dict[str, Any] = Field(default_factory=dict)
 
 
 class TagResolveOut(BaseModel):
