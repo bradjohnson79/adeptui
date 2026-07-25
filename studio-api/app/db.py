@@ -449,6 +449,99 @@ class CoDirectorValidationComparison(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# --------------------------------------------------------------------------
+# Co-Director M2.7: Production Executive durable job orchestration.
+# --------------------------------------------------------------------------
+
+
+class ProductionJob(Base):
+    __tablename__ = "production_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    type: Mapped[str] = mapped_column(String(64), index=True)
+    owner: Mapped[str] = mapped_column(String(64), default="system")
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    scene_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    timeline_item_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    status: Mapped[str] = mapped_column(String(24), default="Queued", index=True)
+    capability_requirements_json: Mapped[str] = mapped_column(Text, default="[]")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    attempts_count: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    blocked_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class ProductionJobAttempt(Base):
+    __tablename__ = "production_job_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("production_jobs.id"), index=True)
+    attempt_n: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    errors_json: Mapped[str] = mapped_column(Text, default="[]")
+    capability_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    outcome: Mapped[str] = mapped_column(String(32), default="started")
+
+
+class ProductionJobDependency(Base):
+    __tablename__ = "production_job_dependencies"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("production_jobs.id"), index=True)
+    depends_on_job_id: Mapped[str] = mapped_column(ForeignKey("production_jobs.id"), index=True)
+
+
+class ProductionJobEvent(Base):
+    __tablename__ = "production_job_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("production_jobs.id"), nullable=True, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionNotification(Base):
+    __tablename__ = "production_notifications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    job_id: Mapped[Optional[str]] = mapped_column(ForeignKey("production_jobs.id"), nullable=True)
+    event_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    level: Mapped[str] = mapped_column(String(24), default="info")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    read_flag: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionJobAudit(Base):
+    __tablename__ = "production_job_audit"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("production_jobs.id"), index=True)
+    from_status: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(24))
+    actor: Mapped[str] = mapped_column(String(64), default="system")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
