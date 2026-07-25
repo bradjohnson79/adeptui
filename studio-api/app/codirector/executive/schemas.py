@@ -6,9 +6,11 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from .models import JobType
+
 
 class CreateJobRequest(BaseModel):
-    type: str
+    type: JobType  # pydantic will coerce string
     projectId: str
     owner: str = "user"
     sceneId: Optional[str] = None
