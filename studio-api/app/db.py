@@ -55,6 +55,9 @@ class Scene(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
     index: Mapped[int] = mapped_column(Integer, default=0)
     name: Mapped[str] = mapped_column(String(200), default="Scene")
+    #: Short description of what happens in the scene, for humans and for Co-Director.
+    #: Distinct from `prompt`, which is generation input.
+    summary: Mapped[str] = mapped_column(Text, default="")
     engine: Mapped[str] = mapped_column(String(16), default="ltx")
     prompt: Mapped[str] = mapped_column(Text, default="")
     duration_sec: Mapped[float] = mapped_column(Float, default=5.0)
@@ -382,6 +385,7 @@ def init_db() -> None:
         _add_col(conn, "scenes", "height", "height INTEGER DEFAULT 0", scene_cols)
         _add_col(conn, "scenes", "fps_mode", "fps_mode TEXT DEFAULT 'auto'", scene_cols)
         _add_col(conn, "scenes", "fps", "fps INTEGER DEFAULT 0", scene_cols)
+        _add_col(conn, "scenes", "summary", "summary TEXT DEFAULT ''", scene_cols)
 
         project_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(projects)").fetchall()}
         _add_col(conn, "projects", "vram_gb", "vram_gb INTEGER DEFAULT 32", project_cols)

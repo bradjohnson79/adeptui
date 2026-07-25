@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../api";
+import { CapabilityStatusBadge } from "../CapabilityPanel";
 import type { Health } from "../../types";
 
 export function SystemStatusStrip({
@@ -56,13 +57,14 @@ export function SystemStatusStrip({
     };
   }, [projectId, queuedJobs]);
 
+  const missingCount = health?.missing_model_component_ids?.length ?? health?.missing_models?.length ?? 0;
   const comfy =
     !health
       ? { label: "ComfyUI Checking…", cls: "warn" }
       : !health.comfy_reachable
         ? { label: "ComfyUI Offline", cls: "bad" }
-        : health.missing_models?.length
-          ? { label: `ComfyUI · ${health.missing_models.length} models missing`, cls: "warn" }
+        : missingCount
+          ? { label: `ComfyUI · ${missingCount} models missing`, cls: "warn" }
           : { label: "ComfyUI Connected", cls: "ok" };
 
   const gpu =
@@ -73,9 +75,17 @@ export function SystemStatusStrip({
         : { label: "GPU Unavailable", cls: "warn" };
 
   return (
-    <div className={`system-status-strip ${compact ? "compact" : ""}`} role="status" aria-live="polite">
-      <span className={`status-badge ${comfy.cls}`}>{comfy.label}</span>
+    <div
+      className={`system-status-strip ${compact ? "compact" : ""}`}
+      role="status"
+      aria-live="polite"
+      data-testid="system-status-strip"
+    >
+      <span className={`status-badge ${comfy.cls}`} data-testid="status-comfy">
+        {comfy.label}
+      </span>
       <span className={`status-badge ${gpu.cls}`}>{gpu.label}</span>
+      <CapabilityStatusBadge projectId={projectId} />
       {queued != null && (
         <span className={`status-badge ${queued ? "warn" : "ok"}`}>
           {queued} Job{queued === 1 ? "" : "s"} Queued

@@ -27,6 +27,7 @@ import type {
   StudioPreparationPlan,
 } from "../setup/types";
 import { AddSourceUrlDialog } from "./AddSourceUrlDialog";
+import { requiredBlockers, useCapabilities } from "./CapabilityPanel";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
 import { PanelHeading } from "./HelpTip";
 
@@ -172,6 +173,8 @@ function SetupComponentCard({
     <article
       className={`setup-component-card status-${component.status}${component.status === "source_pending" ? " status-pending" : ""}`}
       aria-labelledby={`setup-${component.id}`}
+      // Anchor target for capability blockers' "View required components" jump.
+      id={`setup-card-${component.id}`}
       data-testid={`setup-card-${component.id}`}
       data-status={component.status}
       data-kind={component.component_kind || component.installer || ""}
@@ -339,7 +342,16 @@ function SetupSummary({
   onPrepare: () => void;
 }) {
   const counts = status.counts ?? status.summary ?? summarizeComponents(status.components);
-  const overall = status.overall_status ?? overallStatus(status.components);
+  const componentOverall = status.overall_status ?? overallStatus(status.components);
+  const { snapshot } = useCapabilities({ pollMs: 30000 });
+  const blockers = requiredBlockers(snapshot);
+
+  // Component states alone can read "ready" while a capability that needs them is still
+  // blocked — a missing ComfyUI node type, or a pack with no published source. When the
+  // registry reports a required capability as blocked, the wizard must not claim readiness.
+  const overall = componentOverall === "ready" && blockers.length > 0
+    ? "additional_setup_required"
+    : componentOverall;
   const needsPreparation = overall !== "ready" && overall !== "preparing";
 
   return (
@@ -355,9 +367,40 @@ function SetupSummary({
         </div>
         <div className="setup-overall" role="status" aria-live="polite">
           <span>Overall Status</span>
-          <strong>{OVERALL_LABELS[preparing ? "preparing" : overall]}</strong>
+          <strong data-testid="setup-overall-status">
+            {OVERALL_LABELS[preparing ? "preparing" : overall]}
+          </strong>
         </div>
       </div>
+      {blockers.length > 0 && (
+        <div className="setup-capability-blockers" data-testid="setup-capability-blockers">
+          <p className="setup-issue">
+            {blockers.length} capability {blockers.length === 1 ? "blocker" : "blockers"} must be
+            cleared before generation can run:
+          </p>
+          <ul>
+            {blockers.map((blocker) => (
+              <li key={blocker.capabilityId} data-testid={`setup-blocker-${blocker.capabilityId}`}>
+                <strong>{blocker.displayName}</strong> — {blocker.message}
+                {blocker.componentIds.length > 0 && (
+                  <>
+                    {" "}
+                    <a
+                      href={`#setup-card-${blocker.componentIds[0]}`}
+                      data-testid={`setup-blocker-jump-${blocker.capabilityId}`}
+                    >
+                      View required components
+                    </a>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <Link to="/source-manager" data-testid="setup-blockers-open-source-manager">
+            Open Source Manager
+          </Link>
+        </div>
+      )}
       {needsPreparation && (
         <button type="button" className="primary setup-prepare-button" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Preparing Studio…" : "Prepare My Studio"}

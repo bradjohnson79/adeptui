@@ -111,6 +111,8 @@ class AssetOut(BaseModel):
 
 class SceneIn(BaseModel):
     name: str = "Scene"
+    #: Short description of the scene for humans and for Co-Director. Not generation input.
+    summary: str = ""
     engine: EngineName = "ltx"
     prompt: str = ""
     duration_sec: float = 5.0
@@ -137,6 +139,7 @@ class SceneOut(BaseModel):
     project_id: str
     index: int
     name: str = "Scene"
+    summary: str = ""
     engine: EngineName = "ltx"
     prompt: str = ""
     duration_sec: float = 5.0
@@ -170,6 +173,7 @@ class SceneOut(BaseModel):
                 "project_id": obj.project_id,
                 "index": obj.index,
                 "name": obj.name,
+                "summary": getattr(obj, "summary", "") or "",
                 "engine": obj.engine,
                 "prompt": obj.prompt,
                 "duration_sec": obj.duration_sec,
@@ -432,7 +436,15 @@ class HealthOut(BaseModel):
     ok: bool
     comfy_reachable: bool
     comfy: dict[str, Any] = Field(default_factory=dict)
+    #: Human-readable labels, kept for existing consumers.
     missing_models: list[str] = Field(default_factory=list)
+    #: Setup/Source Manager component ids for the same gaps, so a blocker action can act on them.
+    missing_model_component_ids: list[str] = Field(default_factory=list)
+    comfy_status: str = "unknown"
+    comfy_version: Optional[str] = None
+    node_catalog_available: bool = False
+    reason_code: Optional[str] = None
+    recommended_action: Optional[str] = None
     message: str = ""
 
 

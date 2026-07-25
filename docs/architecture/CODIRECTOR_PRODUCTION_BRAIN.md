@@ -108,6 +108,30 @@ cancellation semantics before it can sit behind a one-click approval.
 
 The rest of this section is left as originally written for historical context.
 
+**The capability API is the truth source for M2.2 (added 2026-07-24, Production Systems
+Readiness branch).** A tool registry needs to know which actions are actually safe to offer, and
+that question now has exactly one server-side answer: `GET /api/capabilities`. Do not re-derive it
+in the tool layer, and do not maintain a parallel list of "tools we think work."
+
+Read `docs/audit/ADEPT_PRODUCTION_CAPABILITY_CONTRACTS.md` before building the registry. Its
+§10 states the six binding rules; the short version:
+
+- Only expose a tool whose capability appears in `callable`. A capability that is `blocked` must
+  not be offered — the model should never propose an action that is guaranteed to fail.
+- Use `requiresApproval` to decide whether a human must confirm, not the HTTP verb.
+- Use `readOnly` to decide what may run without a proposal.
+- When refusing, surface `reasonCode` and `recommendedAction` verbatim. "I can't queue a render
+  because ComfyUI isn't running — start ComfyUI and refresh" is useful; "an error occurred" is not.
+- Re-read the snapshot every turn. ComfyUI can stop mid-session; cached readiness lies.
+- `serviceRef` names the existing application service or router function to call. The tool
+  registry must call paths that already exist rather than adding new write paths.
+
+As of that branch, 35 capabilities are callable, including the scene write set
+(`project.scenes.create` / `update` / `delete`, all `requiresApproval: true`) backed by
+`app/services/scene_service.py`. `codirector.tools` itself is registered as `not_implemented`, and
+implementing it is exactly the M2.2 scope. Full inventory and honest blockers:
+`docs/audit/ADEPT_PRODUCTION_SYSTEMS_READINESS_REPORT.md`.
+
 **Problem:** Co-Director can talk about scenes but can't *act* on the project (create a
 scene, attach a reference, queue a render) without the user manually doing it after reading
 the reply.
