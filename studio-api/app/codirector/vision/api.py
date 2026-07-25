@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ...db import get_db
-from ...feature_flags import feature_flags
+from ... import feature_flags as feature_flags_mod
 from .approval import record_decision
 from .corrections import create_correction_proposal
 from .engine import run_validation
@@ -20,7 +20,7 @@ router = APIRouter(prefix="/vision", tags=["codirector-vision"])
 
 
 def _require_flag() -> None:
-    if not feature_flags.vision_validation_v1:
+    if not feature_flags_mod.feature_flags.vision_validation_v1:
         raise HTTPException(status_code=404, detail="Vision validation is not enabled.")
 
 

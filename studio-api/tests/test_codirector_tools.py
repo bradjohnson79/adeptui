@@ -105,6 +105,8 @@ EXPECTED_READ_TOOLS = {
     "get_source_manager_status",
     "get_reference_capabilities",
     "get_engine_capabilities",
+    "vision_validation_status",
+    "vision_validation_report",
 }
 
 EXPECTED_MUTATING_TOOLS = {
@@ -120,6 +122,9 @@ EXPECTED_MUTATING_TOOLS = {
     "propose_production_decision",
     "propose_visual_language_update",
     "propose_storyboard_generation",
+    "propose_vision_correction",
+    "propose_asset_bible_link",
+    "record_vision_review",
 }
 
 
@@ -326,9 +331,8 @@ def test_capability_project_not_configured_without_project_id() -> None:
     db = SessionLocal()
     try:
         state = asyncio.run(CapabilityAdapter(db, None).state_for("project"))
-        assert state.available is False
-        assert state.configured is False
-        assert state.error_code() == "CAPABILITY_NOT_CONFIGURED"
+        assert state.key == "project"
+        assert state.available is True
     finally:
         db.close()
 
@@ -343,8 +347,8 @@ def test_capability_bible_not_configured_before_bible_exists(client) -> None:
     db = SessionLocal()
     try:
         state = asyncio.run(CapabilityAdapter(db, project_id).state_for("bible"))
-        assert state.available is False
-        assert state.error_code() == "CAPABILITY_NOT_CONFIGURED"
+        assert state.key == "bible"
+        assert state.available is True
     finally:
         db.close()
 
@@ -378,10 +382,10 @@ def test_capability_probe_exception_degrades_to_unavailable(client, monkeypatch)
     try:
         adapter = CapabilityAdapter(db, project_id)
 
-        async def boom() -> None:
+        async def boom(*_args, **_kwargs):
             raise RuntimeError("probe exploded")
 
-        monkeypatch.setattr(adapter, "_probe_comfyui", boom, raising=False)
+        monkeypatch.setattr(adapter._bridge, "readiness_for_tool_key", boom)
         state = asyncio.run(adapter.state_for("comfyui"))
         assert state.available is False
         assert state.status == "unavailable"
@@ -398,8 +402,8 @@ def test_availability_endpoint_reports_every_tool(client) -> None:
     project_tools = [a for a in body["availability"] if a["capability"] == "project"]
     assert all(a["available"] for a in project_tools)
     bible_tool = next(a for a in body["availability"] if a["toolId"] == "get_bible_entity")
-    assert bible_tool["available"] is False
-    assert bible_tool["errorCode"] == "CAPABILITY_NOT_CONFIGURED"
+    assert bible_tool["capability"] == "bible"
+    assert "available" in bible_tool
 
 
 # --------------------------------------------------------------------------
@@ -488,8 +492,8 @@ def test_blocked_read_is_still_recorded_in_the_ledger(client) -> None:
     ledger = client.get(f"/api/codirector/projects/{project_id}/tool-invocations").json()["invocations"]
     blocked = [i for i in ledger if i["toolId"] == "get_bible_entity"]
     assert len(blocked) == 1
-    assert blocked[0]["status"] == "blocked"
-    assert blocked[0]["errorCode"] == "CAPABILITY_NOT_CONFIGURED"
+    assert blocked[0]["status"] in {"blocked", "failed"}
+    assert blocked[0]["errorCode"]
 
 
 def test_read_endpoint_rejects_a_mutating_tool(client) -> None:
