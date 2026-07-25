@@ -326,6 +326,11 @@ def _handle_await_approval(db: Session, job: JobOut, payload: dict[str, Any]) ->
 
 
 def _handle_apply_canon(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    """Apply canon only through ProposalService.approve after explicit approval.
+
+    Never mutates Production Bible canon directly; requires proposalApproved and
+    delegates apply to the M2.2 ProposalService approval path.
+    """
     proposal_id = payload.get("proposalId")
     if not proposal_id:
         return HandlerResult(ok=False, status="Failed", error="apply_canon requires proposalId")
