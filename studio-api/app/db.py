@@ -98,6 +98,10 @@ class Asset(Base):
     labels_json: Mapped[str] = mapped_column(Text, default="[]")
     prompt_meta_json: Mapped[str] = mapped_column(Text, default="{}")
     parent_asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    # M2.5 vision validation — three fields, never collapsed into one status.
+    validation_lifecycle: Mapped[str] = mapped_column(String(32), default="not_requested")
+    validation_result: Mapped[str] = mapped_column(String(32), default="unreviewed")
+    production_approval: Mapped[str] = mapped_column(String(32), default="none")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     project: Mapped["Project"] = relationship(back_populates="assets")
@@ -340,6 +344,111 @@ class CoDirectorProductionPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+# --------------------------------------------------------------------------
+# Co-Director M2.5: vision & continuity validation persistence.
+# --------------------------------------------------------------------------
+
+
+class CoDirectorValidationSession(Base):
+    __tablename__ = "codirector_validation_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    plan_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    scene_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    reference_asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    provider: Mapped[str] = mapped_column(String(32), default="mock")
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    validator_set_json: Mapped[str] = mapped_column(Text, default="[]")
+    report_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    comparison_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requirements_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorValidationReport(Base):
+    __tablename__ = "codirector_validation_reports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    overall_score: Mapped[float] = mapped_column(Float, default=0.0)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+    band: Mapped[str] = mapped_column(String(32), default="reject")
+    strengths_json: Mapped[str] = mapped_column(Text, default="[]")
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    failures_json: Mapped[str] = mapped_column(Text, default="[]")
+    recommendations_json: Mapped[str] = mapped_column(Text, default="[]")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    weights_json: Mapped[str] = mapped_column(Text, default="{}")
+    blocking_failures_json: Mapped[str] = mapped_column(Text, default="[]")
+    provider: Mapped[str] = mapped_column(String(32), default="mock")
+    report_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorValidationFinding(Base):
+    __tablename__ = "codirector_validation_findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    report_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    validator_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="inconclusive")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    severity: Mapped[str] = mapped_column(String(24), default="info")
+    correctable: Mapped[int] = mapped_column(Integer, default=1)
+    blocking: Mapped[int] = mapped_column(Integer, default=0)
+    issues_json: Mapped[str] = mapped_column(Text, default="[]")
+    finding_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorValidationApproval(Base):
+    __tablename__ = "codirector_validation_approvals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    report_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    decision: Mapped[str] = mapped_column(String(32), default="approved")
+    reviewer: Mapped[str] = mapped_column(String(64), default="user")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    override_flag: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorValidationCorrectionProposal(Base):
+    __tablename__ = "codirector_validation_correction_proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    report_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    proposal_id: Mapped[str] = mapped_column(String(36), index=True)
+    kind: Mapped[str] = mapped_column(String(64), default="vision_correction")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorValidationComparison(Base):
+    __tablename__ = "codirector_validation_comparisons"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    reference_asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    generated_asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    reference_meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    generated_meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    differences_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
@@ -414,6 +523,27 @@ def init_db() -> None:
         _add_col(conn, "assets", "labels_json", "labels_json TEXT DEFAULT '[]'", asset_cols)
         _add_col(conn, "assets", "prompt_meta_json", "prompt_meta_json TEXT DEFAULT '{}'", asset_cols)
         _add_col(conn, "assets", "parent_asset_id", "parent_asset_id TEXT", asset_cols)
+        _add_col(
+            conn,
+            "assets",
+            "validation_lifecycle",
+            "validation_lifecycle TEXT DEFAULT 'not_requested'",
+            asset_cols,
+        )
+        _add_col(
+            conn,
+            "assets",
+            "validation_result",
+            "validation_result TEXT DEFAULT 'unreviewed'",
+            asset_cols,
+        )
+        _add_col(
+            conn,
+            "assets",
+            "production_approval",
+            "production_approval TEXT DEFAULT 'none'",
+            asset_cols,
+        )
 
     try:
         from .preview_bus import preview_bus
