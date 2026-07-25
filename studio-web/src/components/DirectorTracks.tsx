@@ -5,6 +5,7 @@ import { LipSyncTracksPanel } from "./LipSyncTracks";
 import { PanelHeading } from "./HelpTip";
 import { useDirectorSelectionOptional } from "./DirectorSelectionContext";
 import { VisualReferencesPanel } from "./VisualReferencesPanel";
+import { TimelineReferencesPanel } from "./TimelineReferencesPanel";
 
 export type RegionBox = { x: number; y: number; w: number; h: number };
 export type TimelineClip = {
@@ -119,6 +120,11 @@ export function DirectorTracks({
   const [tl, setTl] = useState<DirectorTimeline | null>(null);
   const [selectedSeg, setSelectedSeg] = useState<string>();
   const [selectedClip, setSelectedClip] = useState<string>();
+  const [timelineRefsEnabled, setTimelineRefsEnabled] = useState(false);
+  const [selectedClipKind, setSelectedClipKind] = useState<
+    "imageClip" | "videoClip" | "audio" | "sfx" | null
+  >(null);
+  const [refsCounts, setRefsCounts] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
   const [tagWarnings, setTagWarnings] = useState<string[]>([]);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
@@ -134,6 +140,13 @@ export function DirectorTracks({
   const fileVideoRef = useRef<HTMLInputElement>(null);
   const fileAudioRef = useRef<HTMLInputElement>(null);
   const fileSfxRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api
+      .health()
+      .then((h: any) => setTimelineRefsEnabled(Boolean(h?.operator?.timelineReferencesEnabled)))
+      .catch(() => setTimelineRefsEnabled(false));
+  }, []);
 
   useEffect(() => {
     if (!scene) return;
@@ -218,6 +231,10 @@ export function DirectorTracks({
   const videos = project.assets.filter((a) => a.kind === "video");
   const audios = project.assets.filter((a) => a.kind === "audio");
   const imageClips = freeImageClips(tl);
+  const selectedImageClip =
+    selectedClipKind === "imageClip"
+      ? imageClips.find((c) => c.id === selectedClip)
+      : undefined;
   const boardWidth = Math.max(480, duration * 90 * zoom);
 
   const selectSeg = (id: string) => {
@@ -226,6 +243,7 @@ export function DirectorTracks({
   };
   const selectClip = (kind: "imageClip" | "videoClip" | "audio" | "sfx", id: string) => {
     setSelectedClip(id);
+    setSelectedClipKind(kind);
     sel?.setSelection({ kind, id });
   };
 
@@ -419,6 +437,19 @@ export function DirectorTracks({
           scene={scene}
           assets={project.assets || []}
           onChange={onChange}
+        />
+      )}
+
+      {scene && timelineRefsEnabled && selectedImageClip && (
+        <TimelineReferencesPanel
+          project={project}
+          scene={scene}
+          clip={selectedImageClip}
+          timelineImages={imageClips}
+          enabled={timelineRefsEnabled}
+          onRefsCount={(itemId, count) =>
+            setRefsCounts((prev) => ({ ...prev, [itemId]: count }))
+          }
         />
       )}
 
@@ -675,6 +706,9 @@ export function DirectorTracks({
                         >
                           <strong>{clip.display_tag || clip.label || "Image"}</strong>
                           <span>{asset ? `@${asset.tag || asset.filename}` : "empty"}</span>
+                          {timelineRefsEnabled && (
+                            <span className="scene-meta">Refs: {refsCounts[clip.id] ?? 0}</span>
+                          )}
                           <select
                             value={clip.asset_id || ""}
                             onClick={(e) => e.stopPropagation()}

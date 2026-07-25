@@ -693,6 +693,49 @@ export const api = {
     req<Job>(`/api/projects/${projectId}/scenes/${sceneId}/lipsync-tracks/apply`, { method: "POST" }),
   getDirector: (projectId: string, sceneId: string) =>
     req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director`),
+  getTimelineReferences: (projectId: string, sceneId: string, itemId: string) =>
+    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references`),
+  addTimelineReference: (projectId: string, sceneId: string, itemId: string, body: Record<string, unknown>) =>
+    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  patchTimelineReference: (
+    projectId: string,
+    sceneId: string,
+    itemId: string,
+    bindingId: string,
+    body: Record<string, unknown>
+  ) =>
+    req<any>(
+      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/${bindingId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ),
+  deleteTimelineReference: (projectId: string, sceneId: string, itemId: string, bindingId: string) =>
+    req<any>(
+      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/${bindingId}`,
+      { method: "DELETE" }
+    ),
+  clearTimelineReferences: (projectId: string, sceneId: string, itemId: string) =>
+    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/clear`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+  getTimelineReferencePackage: (projectId: string, sceneId: string, itemId: string) =>
+    req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/reference-package`),
+  continuityPreviousReference: (projectId: string, sceneId: string, itemId: string) =>
+    req<any>(
+      `/api/projects/${projectId}/scenes/${sceneId}/director/items/${itemId}/references/continuity-previous`,
+      { method: "POST" }
+    ),
+  listTimelineReferencePresets: (projectId: string) =>
+    req<any[]>(`/api/projects/${projectId}/reference-presets`),
   putDirector: (projectId: string, sceneId: string, body: any) =>
     req<any>(`/api/projects/${projectId}/scenes/${sceneId}/director`, {
       method: "PUT",
