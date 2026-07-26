@@ -125,7 +125,7 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
       data: { projectId: project.id, notes: "assemble" },
     });
     expect(prop.ok()).toBeTruthy();
-    const proposalId = prop.json().id;
+    const proposalId = (await prop.json()).id;
     const applyBlocked = await request.post(`/api/codirector/m29/timeline/${proposalId}/apply`, {
       data: { actor: "user" },
     });
@@ -146,7 +146,8 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
       },
     });
     expect(ctrl.ok()).toBeTruthy();
-    expect(ctrl.json().steps.length).toBeGreaterThan(1);
+    const ctrlBody = await ctrl.json();
+    expect(ctrlBody.steps.length).toBeGreaterThan(1);
 
     await page.goto(`/production-suite?projectId=${project.id}`);
     await expect(page.getByTestId("m29-suite-page")).toBeVisible({ timeout: 20_000 });

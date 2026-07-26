@@ -121,7 +121,14 @@ def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerR
 
         out = ImageService.execute_job(db, payload, job.projectId)
         if out.get("assetId"):
-            return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+            closed = {
+                "assetId": out["assetId"],
+                "imageJobId": out.get("imageJobId") or payload.get("imageJobId") or job.id,
+                "panelId": out.get("panelId") or payload.get("panelId"),
+                "provider": out.get("provider") or job.provider or payload.get("provider") or "m29_fixture",
+                "mockAdapter": bool(out.get("mockAdapter", False)),
+            }
+            return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, closed))
         return HandlerResult(ok=True, status="Completed", result=out)
 
     if payload.get("assetId"):
