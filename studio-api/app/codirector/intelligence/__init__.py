@@ -1,5 +1,9 @@
 """Co-Director M2.4 production intelligence orchestration."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from .schemas import (
     ContextFact,
     ContextPackage,
@@ -9,7 +13,6 @@ from .schemas import (
     SpecialistFinding,
     SynthesisResult,
 )
-from .service import IntelligenceService
 
 __all__ = [
     "ContextFact",
@@ -21,3 +24,12 @@ __all__ = [
     "SpecialistFinding",
     "SynthesisResult",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    # Lazy export avoids circular imports (vision.store -> intelligence.schemas -> service -> tools -> vision).
+    if name == "IntelligenceService":
+        from .service import IntelligenceService
+
+        return IntelligenceService
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

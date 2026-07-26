@@ -91,7 +91,7 @@ def test_m007_registered_and_neighbors_untouched():
     assert "M006" in revs
     assert "M010" in revs
     assert M007.revision == "M007"
-    assert revs.index("M006") < revs.index("M007") < revs.index("M010")
+    assert revs.index("M006") < revs.index("M007") < revs.index("M008") < revs.index("M010")
 
 
 def test_stable_tags_allocate_and_never_renumber():

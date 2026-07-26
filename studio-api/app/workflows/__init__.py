@@ -6,6 +6,7 @@ from .image_tools import (
     CAMERA_ANGLE_VIEWS,
     CHARACTER_SHEET_VIEWS,
     build_zimage_ref_workflow,
+    build_zimage_txt2img_workflow,
     customize_angle_prompts,
     views_for_tool,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "build_latentsync_workflow",
     "lipsync_available_hint",
     "build_zimage_ref_workflow",
+    "build_zimage_txt2img_workflow",
     "CHARACTER_SHEET_VIEWS",
     "CAMERA_ANGLE_VIEWS",
     "customize_angle_prompts",

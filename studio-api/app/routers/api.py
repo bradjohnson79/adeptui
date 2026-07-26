@@ -174,6 +174,7 @@ async def health():
         "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
         "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
         "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
+        "productionExecutiveEnabled": bool(feature_flags.production_executive_v1),
         "specialistCount": specialist_count,
         "registry": {
             "callable": len(caps.callable),

@@ -51,6 +51,13 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         20000 * MB, 20000 * MB, ("comfyui",), "wan_files", "path_link",
     ),
     ComponentDefinition(
+        "zimage_models", "Z-Image Turbo Models",
+        "Local still-image stack: Z-Image Turbo UNET, Qwen text encoder, and AE VAE.",
+        False,
+        20000 * MB, 20000 * MB, ("comfyui",), "zimage_files", "path_link",
+        category="Still Image Models",
+    ),
+    ComponentDefinition(
         "fal_key", "fal.ai API Key", "Cloud generation credentials stored encrypted locally.", False,
         0, 0, (), "fal_key", "credentials",
     ),
