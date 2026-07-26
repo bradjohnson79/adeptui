@@ -1,0 +1,11 @@
+# GitGuardian configuration - false-positive controls for capability freeze artifacts.
+# Real secrets must never live under config/capabilities/; those files hold public
+# capability IDs, SHA-256 digests, and git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>" tips only.
+version: 2
+
+paths-ignore:
+  # Frozen capability / provider manifests: high-entropy hex is SHA-256 + commit tips,
+  # not API keys. GitGuardian entropy detectors commonly mislabel these as "apikey".
+  - "config/capabilities/**/*.json"
+  - "config/capabilities/**/*.sha256"
+  - "config/capabilities/**/*.schema.json"
