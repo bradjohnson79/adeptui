@@ -3,8 +3,12 @@ import { createTempProject } from "../helpers/app";
 
 /**
  * M2.9 Production Suite fixture-mode acceptance.
- * On-tests need ADEPT_M29_FIXTURE_MODE=1 and STUDIO_FEATURE_*_V1=1 for M2.9 flags.
+ * On-tests need ADEPT_M29_FIXTURE_MODE=1 and STUDIO_FEATURE_*_PRODUCTION_V1=1 for M2.9 flags.
  * Scenario 1 requires flags OFF (skipped when suite enables M2.9 flags).
+ *
+ * Recommended Run A (flags ON):
+ *   set all STUDIO_FEATURE_*_PRODUCTION_V1=1 (+ control) and ADEPT_M29_FIXTURE_MODE=1
+ * Recommended Run B (flags OFF): filter `-g "1 flags off"` with those flags =0
  */
 test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
   async function waitForHealth(request: import("@playwright/test").APIRequestContext) {
@@ -45,6 +49,17 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
       !on,
       "M2.9 feature flags not enabled - set STUDIO_FEATURE_*_PRODUCTION_V1=1 and ADEPT_M29_FIXTURE_MODE=1",
     );
+  }
+
+  async function expectOk(
+    response: import("@playwright/test").APIResponse,
+    label: string,
+  ) {
+    if (!response.ok()) {
+      const body = await response.text();
+      throw new Error(`${label} failed: ${response.status()} ${body}`);
+    }
+    return response.json();
   }
 
   test("1 flags off: production suite routes hidden", async ({ page, request }) => {
@@ -102,55 +117,168 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
     expect(text.toLowerCase()).toContain("fixture");
   });
 
-  test("4 integrated journey: image frames video timeline control", async ({ page, request }) => {
+  test("4 integrated journey: multi-section fixture handoffs", async ({ page, request }) => {
     await requireM29(request);
     const project = await createTempProject(request, `M29-4 ${Date.now()}`);
+    const pid = project.id;
 
-    const img = await request.post("/api/codirector/m29/image/generate", {
-      data: { projectId: project.id, prompt: "journey still" },
-    });
-    expect(img.ok()).toBeTruthy();
+    const img = await expectOk(
+      await request.post("/api/codirector/m29/image/generate", {
+        data: { projectId: pid, prompt: "journey still" },
+      }),
+      "image/generate",
+    );
+    expect(img.fixture === true || String(img.provider || "").toLowerCase().includes("fixture")).toBeTruthy();
+    const imageVersionId = img.versionId || img.id || img.assetVersionId;
 
-    const frames = await request.post("/api/codirector/m29/frames/generate", {
-      data: { projectId: project.id, count: 2, sequence: true, shotId: "shot-a" },
-    });
-    expect(frames.ok()).toBeTruthy();
+    const frames = await expectOk(
+      await request.post("/api/codirector/m29/frames/generate", {
+        data: { projectId: pid, count: 2, sequence: true, shotId: "shot-a", prompt: "first last" },
+      }),
+      "frames/generate",
+    );
+    expect(Array.isArray(frames.frames) ? frames.frames.length : 0).toBeGreaterThanOrEqual(2);
 
-    const video = await request.post("/api/codirector/m29/video/generate", {
-      data: { projectId: project.id, prompt: "slow dolly", mode: "text_to_video" },
-    });
-    expect(video.ok()).toBeTruthy();
+    const video = await expectOk(
+      await request.post("/api/codirector/m29/video/generate", {
+        data: { projectId: pid, prompt: "slow dolly", mode: "text_to_video" },
+      }),
+      "video/generate",
+    );
+    const videoAssetId = video.assetId || video.id;
 
-    const prop = await request.post("/api/codirector/m29/timeline/propose", {
-      data: { projectId: project.id, notes: "assemble" },
+    const audio = await expectOk(
+      await request.post("/api/codirector/m29/audio/generate", {
+        data: { projectId: pid, kind: "dialogue", prompt: "line one", durationSec: 1.5 },
+      }),
+      "audio/generate",
+    );
+    const audioAssetId = audio.assetId || audio.cueId || audio.id;
+
+    await expectOk(
+      await request.post("/api/codirector/m29/lipsync/mouth-rectangle", {
+        data: {
+          projectId: pid,
+          rectangles: [{ x: 0.4, y: 0.55, w: 0.2, h: 0.1, t: 0 }],
+        },
+      }),
+      "lipsync/mouth-rectangle",
+    );
+    await expectOk(
+      await request.post("/api/codirector/m29/lipsync/mouth-track", {
+        data: { projectId: pid, videoAssetId },
+      }),
+      "lipsync/mouth-track",
+    );
+    await expectOk(
+      await request.post("/api/codirector/m29/lipsync/generate", {
+        data: { projectId: pid, audioAssetId, videoAssetId },
+      }),
+      "lipsync/generate",
+    );
+
+    await expectOk(
+      await request.post("/api/codirector/m29/editing/sfx-cue", {
+        data: { projectId: pid, prompt: "door close", startSec: 0.2, durationSec: 0.5 },
+      }),
+      "editing/sfx-cue",
+    );
+    await expectOk(
+      await request.post("/api/codirector/m29/editing/music-cue", {
+        data: { projectId: pid, prompt: "soft bed", startSec: 0, durationSec: 2 },
+      }),
+      "editing/music-cue",
+    );
+
+    const editBlocked = await request.post("/api/codirector/m29/editing/apply", {
+      data: { projectId: pid, ops: [{ op: "trim", in: 0, out: 1 }], approved: false },
     });
-    expect(prop.ok()).toBeTruthy();
-    const proposalId = (await prop.json()).id;
+    expect(editBlocked.status()).toBe(403);
+    await expectOk(
+      await request.post("/api/codirector/m29/editing/apply", {
+        data: { projectId: pid, ops: [{ op: "trim", in: 0, out: 1 }], approved: true },
+      }),
+      "editing/apply",
+    );
+
+    const prop = await expectOk(
+      await request.post("/api/codirector/m29/timeline/propose", {
+        data: {
+          projectId: pid,
+          notes: "assemble journey",
+          clips: [
+            { assetId: videoAssetId || "vid", startSec: 0, durationSec: 2 },
+            { assetId: audioAssetId || "aud", startSec: 0, durationSec: 1.5 },
+          ],
+        },
+      }),
+      "timeline/propose",
+    );
+    const proposalId = prop.id;
     const applyBlocked = await request.post(`/api/codirector/m29/timeline/${proposalId}/apply`, {
       data: { actor: "user" },
     });
     expect(applyBlocked.status()).toBe(403);
-    await request.post(`/api/codirector/m29/timeline/${proposalId}/approve`, {
-      data: { actor: "user" },
-    });
-    const applied = await request.post(`/api/codirector/m29/timeline/${proposalId}/apply`, {
-      data: { actor: "user" },
-    });
-    expect(applied.ok()).toBeTruthy();
+    await expectOk(
+      await request.post(`/api/codirector/m29/timeline/${proposalId}/approve`, {
+        data: { actor: "user" },
+      }),
+      "timeline/approve",
+    );
+    await expectOk(
+      await request.post(`/api/codirector/m29/timeline/${proposalId}/apply`, {
+        data: { actor: "user" },
+      }),
+      "timeline/apply",
+    );
 
-    const ctrl = await request.post("/api/codirector/m29/control/decompose", {
-      data: {
-        projectId: project.id,
-        requestText: "generate image and video then render timeline",
-        enqueue: true,
-      },
-    });
-    expect(ctrl.ok()).toBeTruthy();
-    const ctrlBody = await ctrl.json();
-    expect(ctrlBody.steps.length).toBeGreaterThan(1);
+    const rend = await expectOk(
+      await request.post("/api/codirector/m29/render", {
+        data: { projectId: pid, kind: "scene_render" },
+      }),
+      "render",
+    );
+    const manifestId = rend.manifestId || rend.id;
+    if (manifestId) {
+      await expectOk(await request.get(`/api/codirector/m29/render/${manifestId}`), "render/get");
+    }
 
-    await page.goto(`/production-suite?projectId=${project.id}`);
+    const ctrl = await expectOk(
+      await request.post("/api/codirector/m29/control/decompose", {
+        data: {
+          projectId: pid,
+          requestText: "generate image and video then render timeline",
+          enqueue: true,
+        },
+      }),
+      "control/decompose",
+    );
+    expect(ctrl.steps.length).toBeGreaterThan(1);
+
+    if (imageVersionId) {
+      await expectOk(
+        await request.post(`/api/codirector/m29/image/${imageVersionId}/approve`, {
+          data: { actor: "user" },
+        }),
+        "image/approve",
+      );
+    }
+
+    await page.goto(`/production-suite?projectId=${pid}`);
     await expect(page.getByTestId("m29-suite-page")).toBeVisible({ timeout: 20_000 });
+    for (const section of [
+      "image",
+      "frames",
+      "video",
+      "timeline",
+      "lipsync",
+      "audio",
+      "edit",
+      "render",
+      "control",
+    ]) {
+      await expect(page.getByTestId(`m29-section-${section}`)).toBeVisible();
+    }
     await page.getByTestId("m29-section-control").click();
     await page.getByTestId("m29-run-btn").click();
     await expect(page.getByTestId("m29-msg")).toHaveText("OK", { timeout: 20_000 });
