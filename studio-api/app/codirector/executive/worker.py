@@ -211,6 +211,7 @@ class ProductionJobWorker:
                 title="Provider unavailable",
                 body="Missing capabilities: " + ", ".join(snap["missing"]),
             )
+            refresh_waiting_jobs(db, job_id)
             return job_id
 
         attempt = JobStore.begin_attempt(
@@ -262,6 +263,7 @@ class ProductionJobWorker:
                 blocked_reason=handler.error,
                 result=handler.result,
             )
+            refresh_waiting_jobs(db, job_id)
             return job_id
 
         if handler.status == "Cancelled" or (not handler.ok and handler.status == "Cancelled"):
@@ -310,6 +312,7 @@ class ProductionJobWorker:
                     title="Job failed",
                     body=handler.error or "max attempts exceeded",
                 )
+                refresh_waiting_jobs(db, job_id)
             return job_id
 
         JobStore.finish_attempt(

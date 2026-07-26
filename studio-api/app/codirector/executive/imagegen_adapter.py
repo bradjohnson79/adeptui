@@ -53,22 +53,46 @@ def should_use_mock_imagegen() -> bool:
 
 
 def schedule_job_queue_enqueue(job_id: str) -> None:
-    """Best-effort enqueue onto the studio job_queue from sync context."""
+    """Enqueue onto the studio job_queue from sync/worker thread.
+
+    Prefer ``run_coroutine_threadsafe`` against the job_queue worker's running
+    loop when available; otherwise fall back to create_task / asyncio.run.
+    Raises RuntimeError on failure so handlers can Blocked.
+    """
+    import asyncio
+
+    from ...queue_worker import job_queue
+
+    async def _put() -> None:
+        await job_queue.enqueue(job_id)
+
     try:
-        import asyncio
+        queue_loop = None
+        task = getattr(job_queue, "_task", None)
+        if task is not None and not task.done():
+            try:
+                queue_loop = task.get_loop()
+            except Exception:  # noqa: BLE001
+                queue_loop = None
 
-        from ...queue_worker import job_queue
-
-        async def _put() -> None:
-            await job_queue.enqueue(job_id)
+        if queue_loop is not None and queue_loop.is_running():
+            fut = asyncio.run_coroutine_threadsafe(_put(), queue_loop)
+            fut.result(timeout=30)
+            return
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_put())
         except RuntimeError:
             asyncio.run(_put())
-    except Exception:  # noqa: BLE001
-        logger.warning("Could not enqueue imagegen job %s onto job_queue", job_id, exc_info=True)
+        else:
+            loop.create_task(_put())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not enqueue imagegen job %s onto job_queue", job_id, exc_info=True
+        )
+        raise RuntimeError(
+            f"Failed to enqueue imagegen job {job_id} onto job_queue: {exc}"
+        ) from exc
 
 
 def poll_imagegen_job(

@@ -47,7 +47,7 @@ ACTIVE_QUEUE_STATUSES = frozenset(
 
 
 class JobType(str, Enum):
-    """Orchestration job kinds. Handlers mock providers; they never approve canon."""
+    """Orchestration job kinds. Handlers call real providers; they never approve canon."""
 
     STORYBOARD_GENERATE = "storyboard_generate"
     IMAGE_GENERATE = "image_generate"
@@ -60,7 +60,7 @@ class JobType(str, Enum):
 
 # Capability keys required per job type (honest block if unavailable).
 JOB_TYPE_CAPABILITIES: dict[str, list[str]] = {
-    JobType.STORYBOARD_GENERATE.value: ["comfyui.health", "storyboard.generate"],
+    JobType.STORYBOARD_GENERATE.value: ["comfyui.health"],
     JobType.IMAGE_GENERATE.value: ["comfyui.health"],
     JobType.VALIDATE.value: ["codirector.vision.validate"],
     JobType.CREATE_PROPOSAL.value: ["codirector.bible.propose"],
