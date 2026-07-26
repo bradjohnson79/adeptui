@@ -152,6 +152,12 @@ export interface Health {
     intelligenceEnabled?: boolean;
     visionValidationEnabled?: boolean;
     productionExecutiveEnabled?: boolean;
+    modelRadarEnabled?: boolean;
+    sandboxRuntimeEnabled?: boolean;
+    virtualStageEnabled?: boolean;
+    shotProfilesEnabled?: boolean;
+    productionRecipeEnabled?: boolean;
+    locationSpinEnabled?: boolean;
   timelineReferencesEnabled?: boolean;
     specialistCount?: number;
     registry?: { callable?: number; blocked?: number; total?: number; counts?: Record<string, number> };

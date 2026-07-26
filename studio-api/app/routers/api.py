@@ -175,6 +175,12 @@ async def health():
         "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
         "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
         "productionExecutiveEnabled": bool(feature_flags.production_executive_v1),
+        "modelRadarEnabled": bool(feature_flags.model_radar_v1),
+        "sandboxRuntimeEnabled": bool(feature_flags.sandbox_runtime_v1),
+        "virtualStageEnabled": bool(feature_flags.virtual_stage_v1),
+        "shotProfilesEnabled": bool(feature_flags.shot_profiles_v1),
+        "productionRecipeEnabled": bool(feature_flags.production_recipe_v1),
+        "locationSpinEnabled": bool(feature_flags.location_spin_v1),
         "specialistCount": specialist_count,
         "registry": {
             "callable": len(caps.callable),

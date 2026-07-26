@@ -841,6 +841,12 @@ export const api = {
       intelligenceEnabled?: boolean;
       visionValidationEnabled?: boolean;
       productionExecutiveEnabled?: boolean;
+      modelRadarEnabled?: boolean;
+      sandboxRuntimeEnabled?: boolean;
+      virtualStageEnabled?: boolean;
+      shotProfilesEnabled?: boolean;
+      productionRecipeEnabled?: boolean;
+      locationSpinEnabled?: boolean;
   timelineReferencesEnabled?: boolean;
       models: {
         id: string;
@@ -1987,4 +1993,144 @@ export const api = {
     return `/api/file?path=${encodeURIComponent(absPath)}`;
   },
   assetUrl: (assetId: string) => `/api/assets/${assetId}/file`,
+  m28Status: () => req<Record<string, boolean>>("/api/codirector/m28/status"),
+  m28RadarDiscover: (source: "huggingface" | "github") =>
+    req<any>("/api/codirector/m28/radar/discover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source }),
+    }),
+  m28RadarRegistry: () =>
+    req<{ entries: any[] }>("/api/codirector/m28/radar/registry"),
+  m28WatchlistAdd: (entryId: string, projectId?: string) =>
+    req<any>("/api/codirector/m28/radar/watchlist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryId, projectId }),
+    }),
+  m28CompatEvaluate: (entryId: string, env?: Record<string, unknown>) =>
+    req<any>("/api/codirector/m28/compat/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryId, env }),
+    }),
+  m28SandboxCreate: (name: string) =>
+    req<any>("/api/codirector/m28/sandbox", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+  m28SandboxPlan: (sandboxId: string, entryId: string) =>
+    req<any>("/api/codirector/m28/sandbox/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sandboxId, entryId }),
+    }),
+  m28SandboxPlanReject: (planId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/plan/${encodeURIComponent(planId)}/reject`, {
+      method: "POST",
+    }),
+  m28SandboxPlanApprove: (planId: string, projectId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/plan/${encodeURIComponent(planId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    }),
+  m28SandboxStart: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/start`, { method: "POST" }),
+  m28SandboxStop: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/stop`, { method: "POST" }),
+  m28SandboxRestart: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/restart`, { method: "POST" }),
+  m28SandboxHealth: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/health`),
+  m28SandboxDetect: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/detect`, { method: "POST" }),
+  m28SandboxValidate: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/validate`, { method: "POST" }),
+  m28SandboxRemove: (sandboxId: string) =>
+    req<any>(`/api/codirector/m28/sandbox/${encodeURIComponent(sandboxId)}/remove`, { method: "POST" }),
+  m28PromoteCreate: (sandboxId: string) =>
+    req<any>("/api/codirector/m28/promote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sandboxId }),
+    }),
+  m28PromoteReject: (manifestId: string) =>
+    req<any>(`/api/codirector/m28/promote/${encodeURIComponent(manifestId)}/reject`, { method: "POST" }),
+  m28PromoteApprove: (manifestId: string, projectId: string) =>
+    req<any>(`/api/codirector/m28/promote/${encodeURIComponent(manifestId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    }),
+  m28RoutingRecommend: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m28/routing/recommend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m28RecipeCreate: (projectId: string, name: string) =>
+    req<any>("/api/codirector/m28/recipes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, name }),
+    }),
+  m28RecipeRun: (recipeId: string, simulateFailureAt?: number) =>
+    req<any>(`/api/codirector/m28/recipes/${encodeURIComponent(recipeId)}/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ simulateFailureAt }),
+    }),
+  m28ShotProfileCreate: (projectId: string, name: string) =>
+    req<any>("/api/codirector/m28/shot-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, name }),
+    }),
+  m28ShotProfileSave: (profileId: string, payload: Record<string, unknown>, mode?: string) =>
+    req<any>(`/api/codirector/m28/shot-profiles/${encodeURIComponent(profileId)}/save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ payload, mode }),
+    }),
+  m28ShotProfileDepth: (profileId: string, suggestions: any[], acceptIds: string[]) =>
+    req<any>(`/api/codirector/m28/shot-profiles/${encodeURIComponent(profileId)}/cinematic-depth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suggestions, acceptIds }),
+    }),
+  m28ShotProfileAssociate: (profileId: string, storyboardShotId?: string, timelineItemId?: string) =>
+    req<any>(`/api/codirector/m28/shot-profiles/${encodeURIComponent(profileId)}/associate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ storyboardShotId, timelineItemId }),
+    }),
+  m28VirtualStageCreate: (projectId: string, sceneId?: string, name?: string) =>
+    req<any>("/api/codirector/m28/virtual-stage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, sceneId, name }),
+    }),
+  m28VirtualStageGet: (stageId: string) =>
+    req<any>(`/api/codirector/m28/virtual-stage/${encodeURIComponent(stageId)}`),
+  m28VirtualStageCamera: (stageId: string, camera: Record<string, unknown>) =>
+    req<any>(`/api/codirector/m28/virtual-stage/${encodeURIComponent(stageId)}/camera`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ camera }),
+    }),
+  m28LocationSpinPlan: (projectId: string, locationName?: string) =>
+    req<any>("/api/codirector/m28/location-spin/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, locationName }),
+    }),
+  m28LocationSpinCamera: (spinId: string, angles?: number[]) =>
+    req<any>(`/api/codirector/m28/location-spin/${encodeURIComponent(spinId)}/spin-camera`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ angles }),
+    }),
+
 };

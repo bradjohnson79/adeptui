@@ -19,6 +19,7 @@ from ..codirector.bible.api_domain import router as bible_domain_router
 from ..codirector.bible.proposals import ProposalService
 from ..codirector.vision.api import router as vision_router
 from ..codirector.executive.api import router as executive_router
+from ..codirector.m28.api import router as m28_router
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
     BibleMutationSet,
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/codirector", tags=["codirector"])
 router.include_router(bible_domain_router)
 router.include_router(vision_router)
 router.include_router(executive_router)
+router.include_router(m28_router)
 
 
 def _http_error(err: CoDirectorError) -> HTTPException:

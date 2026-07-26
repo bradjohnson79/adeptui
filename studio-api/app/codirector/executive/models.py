@@ -56,6 +56,14 @@ class JobType(str, Enum):
     AWAIT_APPROVAL = "await_approval"
     APPLY_CANON = "apply_canon"
     GENERIC = "generic"
+    MODEL_DISCOVER = "model_discover"
+    EVALUATE_COMPATIBILITY = "evaluate_compatibility"
+    SANDBOX_PLAN = "sandbox_plan"
+    SANDBOX_INSTALL = "sandbox_install"
+    SANDBOX_VALIDATE = "sandbox_validate"
+    SANDBOX_PROMOTE = "sandbox_promote"
+    RECIPE_STAGE = "recipe_stage"
+    APPLY_SHOT_PROFILE = "apply_shot_profile"
 
 
 # Capability keys required per job type (honest block if unavailable).
@@ -67,4 +75,12 @@ JOB_TYPE_CAPABILITIES: dict[str, list[str]] = {
     JobType.AWAIT_APPROVAL.value: ["codirector.bible.propose"],
     JobType.APPLY_CANON.value: ["codirector.bible.propose"],
     JobType.GENERIC.value: [],
+    JobType.MODEL_DISCOVER.value: ["m28.radar.discover"],
+    JobType.EVALUATE_COMPATIBILITY.value: ["m28.compat.evaluate"],
+    JobType.SANDBOX_PLAN.value: ["m28.sandbox.plan"],
+    JobType.SANDBOX_INSTALL.value: ["m28.sandbox.install"],
+    JobType.SANDBOX_VALIDATE.value: ["m28.sandbox.validate"],
+    JobType.SANDBOX_PROMOTE.value: ["m28.sandbox.promote"],
+    JobType.RECIPE_STAGE.value: ["m28.recipe.execute"],
+    JobType.APPLY_SHOT_PROFILE.value: ["m28.shot_profile.apply"],
 }

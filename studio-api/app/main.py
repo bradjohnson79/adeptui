@@ -90,6 +90,12 @@ async def lifespan(_: FastAPI):
     _install_exception_hooks()
     init_db()
     try:
+        from .codirector.m28.db import ensure_m28_tables
+
+        ensure_m28_tables()
+    except Exception:
+        logger.exception("M2.8 table ensure failed")
+    try:
         ensure_master_sheet_tables()
     except Exception:
         pass

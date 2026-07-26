@@ -157,6 +157,21 @@ export function SystemStatusStrip({
   );
 }
 
+
+function useM28NavFlags() {
+  const [flags, setFlags] = useState<{
+    modelRadarEnabled?: boolean;
+    virtualStageEnabled?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    api
+      .health()
+      .then((h) => setFlags(h?.operator || {}))
+      .catch(() => setFlags({}));
+  }, []);
+  return flags;
+}
+
 export function StudioChrome({
   variant = "home",
   projectName,
@@ -184,6 +199,7 @@ export function StudioChrome({
   projectId?: string;
   queuedJobs?: number | null;
 }) {
+  const healthFlags = useM28NavFlags();
   return (
     <header className="studio-chrome topbar">
       <div className="studio-chrome-left">
@@ -211,6 +227,16 @@ export function StudioChrome({
         <Link to="/source-manager" className="chrome-nav-link">
           Source Manager
         </Link>
+        {Boolean(healthFlags?.modelRadarEnabled) && (
+          <Link to="/model-radar" className="chrome-nav-link" data-testid="nav-model-radar">
+            Model Radar
+          </Link>
+        )}
+        {Boolean(healthFlags?.virtualStageEnabled) && (
+          <Link to="/virtual-stage" className="chrome-nav-link" data-testid="nav-virtual-stage">
+            Virtual Stage
+          </Link>
+        )}
         {onSearchChange && (
           <label className="chrome-search">
             <span className="chrome-search-icon" aria-hidden="true">

@@ -451,6 +451,127 @@ def _handle_apply_canon(db: Session, job: JobOut, payload: dict[str, Any]) -> Ha
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
 
 
+
+
+def _handle_model_discover(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.radar.service import RadarService
+
+    source = str(payload.get("source") or "huggingface")
+    out = RadarService.discover(db, source=source)
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_evaluate_compatibility(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.compat.service import CompatService
+
+    entry_id = payload.get("entryId")
+    if not entry_id:
+        return HandlerResult(ok=False, status="Failed", error="evaluate_compatibility requires entryId")
+    out = CompatService.evaluate(db, entry_id=str(entry_id), env_profile=payload.get("env"))
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_sandbox_plan(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.sandbox.service import SandboxService
+
+    sandbox_id = payload.get("sandboxId")
+    entry_id = payload.get("entryId")
+    if not sandbox_id or not entry_id:
+        return HandlerResult(ok=False, status="Failed", error="sandbox_plan requires sandboxId and entryId")
+    out = SandboxService.create_plan(db, sandbox_id=str(sandbox_id), entry_id=str(entry_id))
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_sandbox_install(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.sandbox.service import SandboxService
+
+    plan_id = payload.get("planId")
+    if not plan_id:
+        return HandlerResult(ok=False, status="Failed", error="sandbox_install requires planId")
+    if not payload.get("approved"):
+        return HandlerResult(
+            ok=False,
+            status="Blocked",
+            error="sandbox_install blocked: approval required (no silent install)",
+        )
+    try:
+        out = SandboxService.execute_approved_install(db, plan_id=str(plan_id))
+    except PermissionError as exc:
+        return HandlerResult(ok=False, status="Blocked", error=str(exc))
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_sandbox_validate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.sandbox.service import SandboxService
+
+    sandbox_id = payload.get("sandboxId")
+    if not sandbox_id:
+        return HandlerResult(ok=False, status="Failed", error="sandbox_validate requires sandboxId")
+    out = SandboxService.validate(db, str(sandbox_id))
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_sandbox_promote(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    if not payload.get("approved"):
+        return HandlerResult(
+            ok=False,
+            status="Blocked",
+            error="sandbox_promote blocked: approval required (no silent promote)",
+        )
+    manifest = payload.get("manifest") or {}
+    if not manifest.get("approval"):
+        return HandlerResult(
+            ok=False,
+            status="Blocked",
+            error="sandbox_promote blocked: missing approval on manifest",
+        )
+    out = {
+        "manifestId": payload.get("manifestId"),
+        "sandboxId": payload.get("sandboxId"),
+        "promoted": False,
+        "recorded": True,
+        "note": "Promotion recorded via M2.7 job; no silent production install",
+        "manifest": manifest,
+    }
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_recipe_stage(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.recipes.service import RecipeService
+
+    recipe_id = payload.get("recipeId")
+    stage_id = payload.get("stageId")
+    if not recipe_id or not stage_id:
+        return HandlerResult(ok=False, status="Failed", error="recipe_stage requires recipeId and stageId")
+    failed = bool(payload.get("simulateProviderFailure") or payload.get("forceFail"))
+    out = RecipeService.complete_stage(
+        db, recipe_id=str(recipe_id), stage_id=str(stage_id), failed=failed
+    )
+    if failed:
+        return HandlerResult(ok=False, status="Failed", error="simulated provider failure", result=out)
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
+def _handle_apply_shot_profile(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m28.shot_profiles.service import ShotProfileService
+
+    profile_id = payload.get("profileId")
+    if not profile_id:
+        return HandlerResult(ok=False, status="Failed", error="apply_shot_profile requires profileId")
+    profile = ShotProfileService.get(db, str(profile_id))
+    if not profile:
+        return HandlerResult(ok=False, status="Failed", error="shot profile not found")
+    out = {
+        "profileId": profile_id,
+        "versionId": profile.get("activeVersionId"),
+        "payload": profile.get("payload"),
+        "applied": True,
+        "provider": payload.get("provider") or "fixture",
+        "note": "Shot profile applied to generation payload via M2.7 job",
+    }
+    return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+
+
 def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
     """Run a single job attempt. Pass db for real service wiring; without db, generic only."""
     payload = dict(job.payload or {})
@@ -463,15 +584,25 @@ def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
 
     job_type = job.type
 
-    # Generic jobs remain lightweight (orchestration tests / drain).
-    if job_type == JobType.GENERIC.value or job_type not in {
+    known = {
         JobType.STORYBOARD_GENERATE.value,
         JobType.IMAGE_GENERATE.value,
         JobType.VALIDATE.value,
         JobType.CREATE_PROPOSAL.value,
         JobType.AWAIT_APPROVAL.value,
         JobType.APPLY_CANON.value,
-    }:
+        JobType.MODEL_DISCOVER.value,
+        JobType.EVALUATE_COMPATIBILITY.value,
+        JobType.SANDBOX_PLAN.value,
+        JobType.SANDBOX_INSTALL.value,
+        JobType.SANDBOX_VALIDATE.value,
+        JobType.SANDBOX_PROMOTE.value,
+        JobType.RECIPE_STAGE.value,
+        JobType.APPLY_SHOT_PROFILE.value,
+    }
+
+    # Generic jobs remain lightweight (orchestration tests / drain).
+    if job_type == JobType.GENERIC.value or job_type not in known:
         return HandlerResult(ok=True, status="Completed", result={"echo": payload, "type": job_type})
 
     if db is None:
@@ -481,10 +612,19 @@ def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
             error="executive handler requires in-process Session (no self-HTTP)",
         )
 
-    try:
-        validate_job_input(job_type, payload, project_id=job.projectId)
-    except ValueError as exc:
-        return HandlerResult(ok=False, status="Failed", error=str(exc))
+    # Closed-loop types enforce contracts; M2.8 types accept free-form payload dicts.
+    if job_type in {
+        JobType.STORYBOARD_GENERATE.value,
+        JobType.IMAGE_GENERATE.value,
+        JobType.VALIDATE.value,
+        JobType.CREATE_PROPOSAL.value,
+        JobType.AWAIT_APPROVAL.value,
+        JobType.APPLY_CANON.value,
+    }:
+        try:
+            validate_job_input(job_type, payload, project_id=job.projectId)
+        except ValueError as exc:
+            return HandlerResult(ok=False, status="Failed", error=str(exc))
 
     try:
         if job_type == JobType.STORYBOARD_GENERATE.value:
@@ -499,6 +639,22 @@ def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
             return _handle_await_approval(db, job, payload)
         if job_type == JobType.APPLY_CANON.value:
             return _handle_apply_canon(db, job, payload)
+        if job_type == JobType.MODEL_DISCOVER.value:
+            return _handle_model_discover(db, job, payload)
+        if job_type == JobType.EVALUATE_COMPATIBILITY.value:
+            return _handle_evaluate_compatibility(db, job, payload)
+        if job_type == JobType.SANDBOX_PLAN.value:
+            return _handle_sandbox_plan(db, job, payload)
+        if job_type == JobType.SANDBOX_INSTALL.value:
+            return _handle_sandbox_install(db, job, payload)
+        if job_type == JobType.SANDBOX_VALIDATE.value:
+            return _handle_sandbox_validate(db, job, payload)
+        if job_type == JobType.SANDBOX_PROMOTE.value:
+            return _handle_sandbox_promote(db, job, payload)
+        if job_type == JobType.RECIPE_STAGE.value:
+            return _handle_recipe_stage(db, job, payload)
+        if job_type == JobType.APPLY_SHOT_PROFILE.value:
+            return _handle_apply_shot_profile(db, job, payload)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Executive handler failed job=%s type=%s", job.id, job_type)
         return HandlerResult(ok=False, status="Failed", error=str(exc)[:500])
