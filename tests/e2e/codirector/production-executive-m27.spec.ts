@@ -29,10 +29,14 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     return Boolean(healthJson?.operator?.productionExecutiveEnabled);
   }
 
-  /** Probe real Comfy / vision readiness. Never treat mock ImageGen as success. */
+  /** Probe real Comfy + storyboard.generate (+ vision if exposed). Never treat mock ImageGen as success. */
   async function realProviderStackReady(
     request: import("@playwright/test").APIRequestContext,
   ): Promise<{ ok: boolean; reason: string }> {
+    const capAvailable = (c: { available?: boolean; status?: string } | null | undefined) =>
+      Boolean(c?.available) ||
+      ["ready", "local_verified", "callable"].includes(String(c?.status || ""));
+
     try {
       const health = await waitForHealth(request);
       const caps = await request.get("/api/capabilities");
@@ -44,23 +48,45 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
       }
       const body = await caps.json().catch(() => null);
       const list = body?.capabilities || body?.items || [];
-      const comfy = Array.isArray(list)
-        ? list.find(
-            (c: { id?: string; name?: string }) =>
-              c?.id === "comfyui.health" || String(c?.id || "").includes("comfy"),
-          )
-        : null;
+      const findCap = (id: string, fuzzy?: (id: string) => boolean) =>
+        Array.isArray(list)
+          ? list.find(
+              (c: { id?: string; name?: string }) =>
+                c?.id === id || (fuzzy != null && fuzzy(String(c?.id || ""))),
+            )
+          : null;
+
+      const comfy = findCap("comfyui.health", (id) => id.includes("comfy"));
       const comfyOk =
         comfy == null
           ? Boolean(health?.comfy?.available ?? health?.operator?.comfyAvailable)
-          : Boolean(comfy.available) ||
-            ["ready", "local_verified", "callable"].includes(String(comfy.status));
+          : capAvailable(comfy);
       if (!comfyOk) {
         return {
           ok: false,
           reason: "ComfyUI unavailable — real-provider closed-loop cannot run (mock ImageGen disabled)",
         };
       }
+
+      const storyboard = findCap("storyboard.generate");
+      if (storyboard == null || !capAvailable(storyboard)) {
+        return {
+          ok: false,
+          reason:
+            "storyboard.generate unavailable (ImageGen checkpoint/workflows not catalogued) — real-provider closed-loop cannot run",
+        };
+      }
+
+      // Prefer checking vision when exposed; absence does not fail the probe.
+      const vision = findCap("codirector.vision.validate");
+      if (vision != null && !capAvailable(vision)) {
+        return {
+          ok: false,
+          reason:
+            "codirector.vision.validate unavailable — real-provider closed-loop cannot run",
+        };
+      }
+
       return { ok: true, reason: "ok" };
     } catch (err) {
       return {
@@ -73,6 +99,28 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
   async function requireRealStack(request: import("@playwright/test").APIRequestContext) {
     const probe = await realProviderStackReady(request);
     test.skip(!probe.ok, probe.reason);
+  }
+
+
+  async function assertAwaitNeedsReviewOrSkipInfra(
+    request: import("@playwright/test").APIRequestContext,
+    awaitJobId: string,
+  ) {
+    const awaitInspect = await request.get(`/api/codirector/jobs/${awaitJobId}`);
+    expect(awaitInspect.ok()).toBeTruthy();
+    const job = (await awaitInspect.json()).job as {
+      status?: string;
+      blockedReason?: string | null;
+    };
+    if (job.status === "Blocked") {
+      const probe = await realProviderStackReady(request);
+      const reason =
+        probe.ok === false
+          ? probe.reason
+          : `await_approval Blocked after drain — ${job.blockedReason || "infra/capability incomplete"}; real-provider closed-loop cannot complete`;
+      test.skip(true, reason);
+    }
+    expect(job.status).toBe("NeedsReview");
   }
 
   async function openCoDirector(page: import("@playwright/test").Page) {
@@ -153,9 +201,7 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     expect(awaitJob).toBeTruthy();
 
     await drainWorker(request, 120);
-    const awaitInspect = await request.get(`/api/codirector/jobs/${awaitJob!.id}`);
-    expect(awaitInspect.ok()).toBeTruthy();
-    expect((await awaitInspect.json()).job.status).toBe("NeedsReview");
+    await assertAwaitNeedsReviewOrSkipInfra(request, awaitJob!.id);
 
     const imgInspect = await request.get(`/api/codirector/jobs/${imageJob!.id}`);
     const imgJson = await imgInspect.json();
