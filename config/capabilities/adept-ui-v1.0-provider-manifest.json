@@ -1,0 +1,1393 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "adept-ui-v1.0-provider-manifest",
+  "displayName": "Adept UI v1.0 Provider Manifest (frozen)",
+  "status": "frozen",
+  "freezeNote": "Frozen 2026-07-26 on branch phase2/codirector-m2-9-production-suite from real project state. Derived from native baseline sha256=630069ff4abe79348f5632236f12796da03e6e79cbb6209198f636f29ac42b57 and native snapshot sha256=7c37d8fb8aac551d29bb7909cc0d1812c99b97d7083aca1e88e3e1e72aa09ca7. Tip at freeze authoring recorded in frozenFromTip. Does not invent generative audio providers for deferred gaps. Does not authorize sandbox install or M2.10b.",
+  "source": "native_project_state",
+  "derivedFrom": [
+    "config/capabilities/adept-ui-v1.0-native.json",
+    "config/capabilities/adept-ui-v1.0-native-snapshot.json",
+    "studio-api/app/capabilities/registry.py",
+    "studio-api/app/workflows/registry.py",
+    "studio-api/app/providers/contracts.py",
+    "studio-api/app/adapters/comfy.py",
+    "studio-api/app/adapters/ffmpeg.py",
+    "studio-api/app/codirector/m29/providers.py"
+  ],
+  "frozenAt": "2026-07-26",
+  "frozenOnBranch": "phase2/codirector-m2-9-production-suite",
+  "frozenFromTip": "2c5d326bf510e38534e1075da5883f9d4ec05941",
+  "nativeBaselineSha256": "630069ff4abe79348f5632236f12796da03e6e79cbb6209198f636f29ac42b57",
+  "nativeSnapshotSha256": "7c37d8fb8aac551d29bb7909cc0d1812c99b97d7083aca1e88e3e1e72aa09ca7",
+  "milestoneContext": {
+    "m271": "Accepted",
+    "m28": "Accepted (criteria not weakened)",
+    "m29": "Accepted with documented native capability limitations",
+    "m210": "M2.10.1 authorized — provider manifest freeze + discovery/qualification (no install)",
+    "m210b": "BLOCKED until Product-approved sandbox shortlist",
+    "m30": "Not started"
+  },
+  "providerKinds": {
+    "builtInLocal": [
+      "comfy.local",
+      "vision.local"
+    ],
+    "externalApiApprovedOptional": [
+      "fal.api"
+    ],
+    "deterministicProcessor": [],
+    "addon": []
+  },
+  "providers": [
+    {
+      "providerId": "comfy.local",
+      "displayName": "Local ComfyUI",
+      "kind": "comfy",
+      "kindDetail": "native_local_comfy",
+      "sourceBucket": "builtInLocal",
+      "status": "registered",
+      "runtimeEvidence": [
+        "config/capabilities/adept-ui-v1.0-native.json#providerKinds.builtInLocal",
+        "studio-api/app/adapters/comfy.py",
+        "studio-api/app/workflows/registry.py"
+      ],
+      "capabilityIdsBound": [
+        "generation.image.queue",
+        "generation.lipsync.queue",
+        "generation.video.queue",
+        "storyboard.generate"
+      ],
+      "workflowAdapterIds": [
+        "ltx.scene",
+        "ltx.simple_i2v",
+        "ltx.ingredients_ic_lora",
+        "wan.first_last_frame",
+        "lipsync.latentsync",
+        "image.txt2img",
+        "image.img2img_edit",
+        "image.zimage_reference"
+      ],
+      "jobHandlerIds": [],
+      "licenseSummary": "runtime_environment_local",
+      "notes": "Primary native local generation backend for image/video/lipsync workflows."
+    },
+    {
+      "providerId": "vision.local",
+      "displayName": "Local Vision Validator (M2.5)",
+      "kind": "validator",
+      "kindDetail": "native_local_validator",
+      "sourceBucket": "builtInLocal",
+      "status": "registered",
+      "runtimeEvidence": [
+        "config/capabilities/adept-ui-v1.0-native.json#providerKinds.builtInLocal",
+        "studio-api/app/codirector/vision/providers/"
+      ],
+      "capabilityIdsBound": [
+        "codirector.vision.validate"
+      ],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "validate"
+      ],
+      "licenseSummary": "runtime_environment_local",
+      "notes": "M2.5 VisionEngine local validator provider."
+    },
+    {
+      "providerId": "fal.api",
+      "displayName": "fal.ai External API (optional)",
+      "kind": "api",
+      "kindDetail": "external_api_approved_optional",
+      "sourceBucket": "externalApiApprovedOptional",
+      "status": "registered_optional",
+      "runtimeEvidence": [
+        "config/capabilities/adept-ui-v1.0-native.json#providerKinds.externalApiApprovedOptional",
+        "studio-api/app/codirector/m29/providers.py"
+      ],
+      "capabilityIdsBound": [
+        "generation.video.queue"
+      ],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "licenseSummary": "third_party_api_terms",
+      "notes": "Optional approved external API provider; not a generative-audio fill."
+    }
+  ],
+  "workflows": [
+    {
+      "workflowAdapterId": "ltx.scene",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "ltx.simple_i2v",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "ltx.ingredients_ic_lora",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "wan.first_last_frame",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "lipsync.latentsync",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "image.txt2img",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "image.img2img_edit",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    },
+    {
+      "workflowAdapterId": "image.zimage_reference",
+      "kind": "workflow",
+      "supportedProviderKind": "local",
+      "engine": "comfyui",
+      "runtimeEvidence": "studio-api/app/workflows/registry.py"
+    }
+  ],
+  "processors": [
+    {
+      "processorId": "ffmpeg",
+      "kind": "processor",
+      "registryStatus": "missing_from_providerKinds.deterministicProcessor",
+      "runtimeEvidence": [
+        "studio-api/app/adapters/ffmpeg.py",
+        "studio-api/app/codirector/m29/providers.py",
+        "docs/codirector/M2.9_ACCEPTED_WITH_LIMITATIONS.md"
+      ],
+      "capabilityRoles": [
+        "audio process / loudnorm / cleanup (not generate)"
+      ],
+      "notes": "Used for CONNECTED audio process paths; NOT declared in baseline providerKinds.deterministicProcessor (empty array). Not a generative fill."
+    }
+  ],
+  "validators": [
+    {
+      "providerId": "vision.local",
+      "displayName": "Local Vision Validator (M2.5)",
+      "kind": "validator",
+      "kindDetail": "native_local_validator",
+      "sourceBucket": "builtInLocal",
+      "status": "registered",
+      "runtimeEvidence": [
+        "config/capabilities/adept-ui-v1.0-native.json#providerKinds.builtInLocal",
+        "studio-api/app/codirector/vision/providers/"
+      ],
+      "capabilityIdsBound": [
+        "codirector.vision.validate"
+      ],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "validate"
+      ],
+      "licenseSummary": "runtime_environment_local",
+      "notes": "M2.5 VisionEngine local validator provider."
+    }
+  ],
+  "missingSlots": [
+    {
+      "capabilityId": "audio.dialogue.generate",
+      "slotKind": "missing_provider",
+      "status": "PARTIAL",
+      "nativeProvider": [],
+      "baselineProviderIds": [],
+      "jobHandler": "audio_generate",
+      "featureFlag": "STUDIO_FEATURE_AUDIO_PRODUCTION_V1",
+      "fillIntent": "fills_missing",
+      "notes": "No registered generative provider in providerKinds or capability providerIds. Deferred M2.9 limitation; M2.10.1 priority fill target."
+    },
+    {
+      "capabilityId": "audio.sfx.generate",
+      "slotKind": "missing_provider",
+      "status": "PARTIAL",
+      "nativeProvider": [],
+      "baselineProviderIds": [],
+      "jobHandler": "audio_generate",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1",
+      "fillIntent": "fills_missing",
+      "notes": "No registered generative provider in providerKinds or capability providerIds. Deferred M2.9 limitation; M2.10.1 priority fill target."
+    },
+    {
+      "capabilityId": "audio.music.generate",
+      "slotKind": "missing_provider",
+      "status": "PARTIAL",
+      "nativeProvider": [],
+      "baselineProviderIds": [],
+      "jobHandler": "audio_generate",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1",
+      "fillIntent": "fills_missing",
+      "notes": "No registered generative provider in providerKinds or capability providerIds. Deferred M2.9 limitation; M2.10.1 priority fill target."
+    }
+  ],
+  "priorityFillTargets": [
+    "audio.dialogue.generate",
+    "audio.sfx.generate",
+    "audio.music.generate"
+  ],
+  "capabilityProviderBindings": [
+    {
+      "capabilityId": "storyboard.generate",
+      "providerIds": [
+        "comfy.local"
+      ],
+      "workflowAdapterIds": [
+        "image.zimage_reference",
+        "image.txt2img"
+      ],
+      "jobHandlerIds": [
+        "storyboard_generate"
+      ],
+      "baselineStatus": "accepted",
+      "bindingKind": "bound",
+      "featureFlag": "STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"
+    },
+    {
+      "capabilityId": "generation.image.queue",
+      "providerIds": [
+        "comfy.local"
+      ],
+      "workflowAdapterIds": [
+        "image.txt2img",
+        "image.img2img_edit",
+        "image.zimage_reference"
+      ],
+      "jobHandlerIds": [
+        "image_generate"
+      ],
+      "baselineStatus": "accepted",
+      "bindingKind": "bound",
+      "featureFlag": "STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"
+    },
+    {
+      "capabilityId": "codirector.vision.validate",
+      "providerIds": [
+        "vision.local"
+      ],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "validate"
+      ],
+      "baselineStatus": "accepted",
+      "bindingKind": "bound",
+      "featureFlag": "STUDIO_FEATURE_VISION_VALIDATION_V1"
+    },
+    {
+      "capabilityId": "codirector.bible.propose",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "create_proposal",
+        "await_approval",
+        "apply_canon"
+      ],
+      "baselineStatus": "accepted",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"
+    },
+    {
+      "capabilityId": "codirector.bible.approve",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "accepted",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "codirector.bible.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "accepted",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "generation.video.queue",
+      "providerIds": [
+        "fal.api",
+        "comfy.local"
+      ],
+      "workflowAdapterIds": [
+        "ltx.scene",
+        "ltx.simple_i2v",
+        "wan.first_last_frame"
+      ],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "bound",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "generation.lipsync.queue",
+      "providerIds": [
+        "comfy.local"
+      ],
+      "workflowAdapterIds": [
+        "lipsync.latentsync"
+      ],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "bound",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.timeline.propose",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.timeline.apply",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "director.timeline.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "director.timeline.update",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "editor.sequences.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "virtual_stage.render",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "unavailable",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "frame_generate"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_FRAME_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "audio.dialogue.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_AUDIO_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "audio.sfx.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "audio.music.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "mouth.rectangle.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "lipsync.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "lipsync_generate"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "scene.render",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [
+        "scene_render"
+      ],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": "STUDIO_FEATURE_RENDER_PRODUCTION_V1"
+    },
+    {
+      "capabilityId": "project.create",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.list",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.update",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.delete",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.duplicate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.archive",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.create",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.update",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.delete",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.reorder",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "project.scenes.active",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "assets.upload",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "assets.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "assets.tag",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "assets.file",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.upload",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.attach.project",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.attach.scene",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.remove",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.exclude",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.thumbnail",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.sheet.build",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.ic_lora.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.timeline_bindings",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.primary_frame",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.multiple_images",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.character_identity",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.style",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.start_frame",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.end_frame",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.motion",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "references.weighting",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "codirector.chat",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "codirector.provider",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "codirector.tools",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "comfyui.health",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "comfyui.queue",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "comfyui.cancel",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "comfyui.outputs",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "workflows.discover",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "workflows.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "workflows.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "workflows.image.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "workflows.video.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "models.image.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "models.video.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "extensions.comfyui.ready",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "source_manager.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "source_manager.refresh",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "source_manager.install",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "source_manager.repair",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "downloads.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "downloads.queue",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "setup.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "setup.prepare",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "health.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "capabilities.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "generation.jobs.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "storyboard.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "codirector.vision.review",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "spatial.scene.read",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.radar.discover",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.compat.evaluate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.sandbox.plan",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.sandbox.install",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.sandbox.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.sandbox.promote",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.recipe.execute",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "m28.shot_profile.apply",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.reference.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.image_to_image",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.inpaint",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.outpaint",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.variation",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.upscale",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.relight",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.approve",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "image.publish_reference",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.sequence.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.first.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.last.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.transition.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.replace",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.approve",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "frame.bind_to_shot",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "video.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "video.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "audio.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "mouth.track.generate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "lipsync.validate",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "timeline.render",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "storage.project_data",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    },
+    {
+      "capabilityId": "storage.database",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "baselineStatus": "conditional",
+      "bindingKind": "missing_slot",
+      "featureFlag": ""
+    }
+  ],
+  "limits": {
+    "addonProviders": [],
+    "deterministicProcessorRegistry": [],
+    "noInventedProvidersForDeferredGaps": true
+  },
+  "counts": {
+    "providersRegistered": 3,
+    "workflowsNative": 8,
+    "missingSlots": 3,
+    "capabilityBindings": 120,
+    "addonProviders": 0
+  }
+}

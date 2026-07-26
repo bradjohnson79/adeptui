@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adept-ui-v1.0-provider-manifest.schema.json",
+  "title": "Adept UI v1.0 Provider Manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "manifestId",
+    "status",
+    "source",
+    "providers",
+    "providerKinds",
+    "missingSlots",
+    "capabilityProviderBindings"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "manifestId": {
+      "type": "string"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "frozen"
+      ]
+    },
+    "freezeNote": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "derivedFrom": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "frozenAt": {
+      "type": "string"
+    },
+    "frozenOnBranch": {
+      "type": "string"
+    },
+    "frozenFromTip": {
+      "type": "string"
+    },
+    "nativeBaselineSha256": {
+      "type": "string"
+    },
+    "nativeSnapshotSha256": {
+      "type": "string"
+    },
+    "milestoneContext": {
+      "type": "object"
+    },
+    "providerKinds": {
+      "type": "object"
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "providerId",
+          "kind",
+          "sourceBucket",
+          "status",
+          "capabilityIdsBound"
+        ],
+        "properties": {
+          "providerId": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "native_local",
+              "comfy",
+              "api",
+              "processor",
+              "validator",
+              "workflow",
+              "missing_slot"
+            ]
+          },
+          "kindDetail": {
+            "type": "string"
+          },
+          "sourceBucket": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "runtimeEvidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilityIdsBound": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "workflowAdapterIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jobHandlerIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "licenseSummary": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "workflows": {
+      "type": "array"
+    },
+    "processors": {
+      "type": "array"
+    },
+    "validators": {
+      "type": "array"
+    },
+    "missingSlots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "capabilityId",
+          "slotKind",
+          "status",
+          "fillIntent"
+        ]
+      }
+    },
+    "priorityFillTargets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capabilityProviderBindings": {
+      "type": "array"
+    },
+    "limits": {
+      "type": "object"
+    },
+    "counts": {
+      "type": "object"
+    }
+  }
+}
