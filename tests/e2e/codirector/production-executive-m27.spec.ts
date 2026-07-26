@@ -170,10 +170,18 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
   ) {
     const propJob = loopBody.jobs.find((j) => j.type === "create_proposal");
     expect(propJob).toBeTruthy();
-    const propInspect = await request.get(`/api/codirector/jobs/${propJob!.id}`);
-    expect(propInspect.ok()).toBeTruthy();
-    const propJson = await propInspect.json();
-    return propJson.job.result.proposalId as string;
+    // Poll: create_proposal may briefly report Completed before result is readable.
+    let proposalId: string | undefined;
+    for (let i = 0; i < 40; i++) {
+      const propInspect = await request.get(`/api/codirector/jobs/${propJob!.id}`);
+      expect(propInspect.ok()).toBeTruthy();
+      const propJson = await propInspect.json();
+      proposalId = propJson?.job?.result?.proposalId as string | undefined;
+      if (proposalId) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(proposalId, "create_proposal job missing result.proposalId after drain").toBeTruthy();
+    return proposalId as string;
   }
 
   test("flag off shows Off and hides dashboard", async ({ page, request }) => {

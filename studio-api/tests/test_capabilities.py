@@ -438,11 +438,11 @@ def test_model_readiness_follows_component_verification(client, monkeypatch) -> 
 
     def _with_installed_models(snapshot) -> None:
         original(snapshot)
-        snapshot.setup_components["ltx_checkpoint"] = {
-            "component_id": "ltx_checkpoint",
-            "name": "LTX Video Checkpoint",
+        snapshot.setup_components["zimage_models"] = {
+            "component_id": "zimage_models",
+            "name": "Z-Image Turbo Models",
             "status": "ready",
-            "required": True,
+            "required": False,
         }
 
     monkeypatch.setattr(probes, "probe_setup", _with_installed_models)
@@ -456,18 +456,18 @@ def test_source_pending_components_are_not_configured_rather_than_broken(client,
 
     def _with_pending_pack(snapshot) -> None:
         original(snapshot)
-        snapshot.setup_components["ltx_checkpoint"] = {
-            "component_id": "ltx_checkpoint",
-            "name": "LTX Video Checkpoint",
+        snapshot.setup_components["zimage_models"] = {
+            "component_id": "zimage_models",
+            "name": "Z-Image Turbo Models",
             "status": "source_pending",
-            "required": True,
+            "required": False,
         }
 
     monkeypatch.setattr(probes, "probe_setup", _with_pending_pack)
     item = _by_id(_snapshot(client))["models.image.ready"]
     assert item["status"] == "not_configured"
     assert item["reasonCode"] == "MODEL_SOURCE_PENDING"
-    assert item["componentIds"] == ["ltx_checkpoint"]
+    assert item["componentIds"] == ["zimage_models"]
 
 
 def test_comfy_health_endpoint_is_structured_and_pathless(client) -> None:

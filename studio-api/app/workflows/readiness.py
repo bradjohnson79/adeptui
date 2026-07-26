@@ -30,9 +30,10 @@ WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
     "ltx.ingredients_ic_lora": ("ltx_checkpoint", "ltx23_ic_lora_ingredients"),
     "wan.first_last_frame": ("wan_models",),
     "lipsync.latentsync": (),
-    "image.txt2img": (),
-    "image.img2img_edit": (),
-    "image.zimage_reference": (),
+    # Still-image production path uses catalogued Z-Image Turbo weights (not FLUX name-only).
+    "image.txt2img": ("zimage_models",),
+    "image.img2img_edit": ("zimage_models",),
+    "image.zimage_reference": ("zimage_models",),
 }
 
 WORKFLOW_NOT_FOUND = "WORKFLOW_NOT_FOUND"

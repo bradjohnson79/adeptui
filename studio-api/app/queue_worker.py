@@ -1050,8 +1050,19 @@ class JobQueue:
             return settings.imagegen_sd35_checkpoint
         if mid == "custom":
             return settings.imagegen_custom_checkpoint or settings.imagegen_flux_checkpoint
-        # auto + flux default to FLUX-class checkpoint
+        if mid in ("zimage", "auto"):
+            return settings.zimage_unet
+        # Explicit flux request keeps the configured FLUX checkpoint name (may be absent).
         return settings.imagegen_flux_checkpoint
+
+    def _zimage_stack_ready(self) -> bool:
+        """True when catalogued Z-Image still-image weights verify on disk."""
+        try:
+            from .setup.diagnostics import verify_component
+
+            return bool(verify_component("zimage_models").healthy)
+        except Exception:
+            return False
 
     async def _txt2vid(self, db: Session, job: Job, project: Project) -> None:
         """Text-to-video: prefer fal T2V; local I2V engines warn and fail clearly."""
@@ -1191,17 +1202,39 @@ class JobQueue:
         if style:
             prompt = f"{prompt}, {style}".strip(", ")
 
-        # Soft Auto reasons
+        # Soft Auto reasons — prefer catalogued Z-Image when present; fail honestly otherwise.
         reasons = []
+        zimage_ready = self._zimage_stack_ready()
         if model == "auto":
-            reasons.append("Defaulting to FLUX-family checkpoint (catalog order: Auto → FLUX → HiDream → SD3.5 → Custom)")
-            model = "flux"
-        ckpt = self._checkpoint_for_model(model, custom_ckpt)
+            if zimage_ready:
+                reasons.append(
+                    "Auto selected catalogued Z-Image Turbo (UNET + Qwen + AE); "
+                    "FLUX/HiDream/SD3.5 remain opt-in when installed"
+                )
+                model = "zimage"
+            else:
+                raise RuntimeError(
+                    "ImageGen auto has no catalogued still-image provider. "
+                    "Install/verify zimage_models (Z-Image Turbo stack) in Source Manager, then retry."
+                )
+        use_zimage = model in ("zimage", "z-image", "z_image")
+        if use_zimage and not zimage_ready:
+            raise RuntimeError(
+                "Z-Image Turbo weights are not verified on disk (component zimage_models). "
+                "Open Source Manager, link the shared models root, then retry."
+            )
+        if use_zimage:
+            steps = int(params.get("steps") or settings.zimage_steps)
+            cfg = float(params.get("cfg") if params.get("cfg") is not None else settings.zimage_cfg)
+            ckpt = settings.zimage_unet
+        else:
+            ckpt = self._checkpoint_for_model(model, custom_ckpt)
         job.stage = "preparing"
         job.message = f"ImageGen · {model} · {ckpt}" + (f" · {'; '.join(reasons)}" if reasons else "")
         db.commit()
 
         from .imagegen_workflows import build_img2img_edit_stub, build_txt2img_workflow
+        from .workflows.image_tools import build_zimage_ref_workflow, build_zimage_txt2img_workflow
 
         prefix = f"studio/{project.id[:8]}_imagegen"
         if job.kind == "imagegen_edit" and source_asset_id:
@@ -1209,16 +1242,46 @@ class JobQueue:
             image_name = await self._ensure_comfy_image(src)
             if not image_name:
                 raise RuntimeError("Edit source image missing")
-            # Append edit op hint into prompt for honesty until specialized graphs exist
             edit_prompt = f"{prompt}. Edit operation: {edit_op}".strip()
-            wf = build_img2img_edit_stub(
-                checkpoint=ckpt,
-                positive=edit_prompt,
-                negative=negative,
-                image_name=image_name,
-                denoise=denoise,
+            if use_zimage:
+                wf = build_zimage_ref_workflow(
+                    unet_name=settings.zimage_unet,
+                    clip_name=settings.zimage_clip,
+                    vae_name=settings.zimage_vae,
+                    clip_vision_name=settings.zimage_clip_vision,
+                    reference_image=image_name,
+                    prompt=edit_prompt,
+                    negative=negative or "blurry, low quality",
+                    width=width,
+                    height=height,
+                    seed=seed,
+                    steps=steps,
+                    cfg=cfg,
+                    filename_prefix=prefix,
+                )
+            else:
+                wf = build_img2img_edit_stub(
+                    checkpoint=ckpt,
+                    positive=edit_prompt,
+                    negative=negative,
+                    image_name=image_name,
+                    denoise=denoise,
+                    seed=seed,
+                    steps=steps,
+                    filename_prefix=prefix,
+                )
+        elif use_zimage:
+            wf = build_zimage_txt2img_workflow(
+                unet_name=settings.zimage_unet,
+                clip_name=settings.zimage_clip,
+                vae_name=settings.zimage_vae,
+                positive=prompt,
+                negative=negative or "blurry, low quality, watermark",
+                width=width,
+                height=height,
                 seed=seed,
                 steps=steps,
+                cfg=cfg,
                 filename_prefix=prefix,
             )
         else:

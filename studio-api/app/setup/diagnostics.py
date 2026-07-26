@@ -186,6 +186,22 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
             recommendation="correct_path" if location else "install", requires_user_interaction=True,
         )
 
+    if component.verifier == "zimage_files":
+        names = (settings.zimage_unet, settings.zimage_clip, settings.zimage_vae)
+        extra_dirs = ("diffusion_models", "text_encoders", "vae", "clip", "clip_vision")
+        found = [_candidate_file(location, name, extra_dirs) for name in names]
+        missing = [name for name, path in zip(names, found) if path is None]
+        if not missing and all(path and os.access(path, os.R_OK) for path in found):
+            return Verification(
+                True, False, None, "Z-Image Turbo UNET, text encoder, and VAE are readable.", location
+            )
+        return Verification(
+            False, not any(found), "required_models_missing",
+            "One or more Z-Image still-image model files are missing.",
+            location, details=tuple(f"Missing: {name}" for name in missing),
+            recommendation="correct_path" if location else "install", requires_user_interaction=True,
+        )
+
     if component.verifier == "linked_files":
         if not location:
             return Verification(
