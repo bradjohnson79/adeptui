@@ -84,7 +84,10 @@ def test_qualification_gates_and_shortlist_limits():
         assert len(prop) <= 3
         for c in prop:
             assert c["qualificationStatus"] == "qualified"
-            assert c["approvalStatus"] == "not_product_approved"
+            assert c["approvalStatus"] in {
+                "not_product_approved",
+                "approved_for_sandbox_evaluation",
+            }
 
 
 def test_no_install_no_execution_guards():
@@ -92,22 +95,35 @@ def test_no_install_no_execution_guards():
     assert data["safety"]["noInstall"] is True
     assert data["safety"]["noExecution"] is True
     assert data["safety"]["noWeightDownload"] is True
-    assert data["safety"]["m210bStillBlocked"] is True
+    # After M2.10.2 Gate 6, Phase 0 may begin, but install remains gated.
+    assert data["safety"].get("m210bPhase0InstallStillGated", True) is True
     for c in data["candidates"]:
         assert c["sandboxStatus"] == "not_installed"
         assert c["validationStatus"] == "not_run"
         assert c["promotionStatus"] == "not_promoted"
-        assert c["approvalStatus"] == "not_product_approved"
+        assert c["approvalStatus"] in {
+            "not_product_approved",
+            "approved_for_sandbox_evaluation",
+        }
+        if c["approvalStatus"] == "approved_for_sandbox_evaluation":
+            assert c.get("sandboxApproved") is True
+            assert c.get("productionApproved") is False
+            assert c.get("installationAuthorized") is False
 
 
 def test_product_approval_separation():
     assert PROPOSED.is_file()
     text = PROPOSED.read_text(encoding="utf-8")
     assert "PROPOSAL ONLY" in text or "NOT PRODUCT APPROVED" in text
-    assert not APPROVED.exists()
+    # M2.10.2 creates the Product-approved shortlist; keep production promotion empty.
+    assert APPROVED.is_file()
+    approved_text = APPROVED.read_text(encoding="utf-8")
+    assert "PRODUCT APPROVED FOR SANDBOX EVALUATION ONLY" in approved_text
     data = _load(CANDIDATES)
     assert data["buckets"]["approved_v1_1_additions"] == []
-    assert "not_product_approved" in data["status"]
+    assert "sandbox_product_approved" in data["status"]
+    assert data.get("productApproval", {}).get("productionApproved") is False
+    assert data.get("productApproval", {}).get("installationAuthorized") is False
 
 
 def test_preflight_verdict_ready():
