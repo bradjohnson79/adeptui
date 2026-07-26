@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adept-ui-v1.1-addon-candidates.schema.json",
+  "title": "Adept UI v1.1 Add-on Candidates (M2.10.1)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "registryId",
+    "status",
+    "candidates",
+    "counts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "registryId": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "source",
+          "capabilityCategory",
+          "discoveredAt",
+          "recommendation",
+          "approvalStatus",
+          "sandboxStatus",
+          "qualificationStatus"
+        ]
+      }
+    },
+    "counts": {
+      "type": "object"
+    },
+    "limits": {
+      "type": "object"
+    },
+    "safety": {
+      "type": "object"
+    }
+  }
+}
