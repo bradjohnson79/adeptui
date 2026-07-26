@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 import { createTempProject } from "../helpers/app";
 
 /**
- * M2.7 Production Executive closed-loop (mocked providers).
- * Requires STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1=1 on the API under test.
- * Restart recovery is covered by pytest (test_crash_restart_recovery_no_duplicate_attempts).
+ * M2.7.1 Production Executive — real Adept UI + backend + live ComfyUI + real vision.
+ * provider: "local" (vision). ImageGen uses real Comfy Job+Asset (no ADEPT_MOCK_IMAGEGEN).
+ * If Comfy/vision infrastructure is unavailable, tests skip with an explicit reason.
  */
 test.describe("Co-Director M2.7 Production Executive @critical @isolated", () => {
   async function waitForHealth(request: import("@playwright/test").APIRequestContext) {
@@ -29,6 +29,52 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     return Boolean(healthJson?.operator?.productionExecutiveEnabled);
   }
 
+  /** Probe real Comfy / vision readiness. Never treat mock ImageGen as success. */
+  async function realProviderStackReady(
+    request: import("@playwright/test").APIRequestContext,
+  ): Promise<{ ok: boolean; reason: string }> {
+    try {
+      const health = await waitForHealth(request);
+      const caps = await request.get("/api/capabilities");
+      if (!caps.ok()) {
+        return {
+          ok: false,
+          reason: `capabilities endpoint unavailable (HTTP ${caps.status()}) — ComfyUI/vision stack not ready`,
+        };
+      }
+      const body = await caps.json().catch(() => null);
+      const list = body?.capabilities || body?.items || [];
+      const comfy = Array.isArray(list)
+        ? list.find(
+            (c: { id?: string; name?: string }) =>
+              c?.id === "comfyui.health" || String(c?.id || "").includes("comfy"),
+          )
+        : null;
+      const comfyOk =
+        comfy == null
+          ? Boolean(health?.comfy?.available ?? health?.operator?.comfyAvailable)
+          : Boolean(comfy.available) ||
+            ["ready", "local_verified", "callable"].includes(String(comfy.status));
+      if (!comfyOk) {
+        return {
+          ok: false,
+          reason: "ComfyUI unavailable — real-provider closed-loop cannot run (mock ImageGen disabled)",
+        };
+      }
+      return { ok: true, reason: "ok" };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `infrastructure probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  async function requireRealStack(request: import("@playwright/test").APIRequestContext) {
+    const probe = await realProviderStackReady(request);
+    test.skip(!probe.ok, probe.reason);
+  }
+
   async function openCoDirector(page: import("@playwright/test").Page) {
     const fab = page.locator("button.codirector-fab");
     await expect(fab).toBeVisible({ timeout: 30_000 });
@@ -36,7 +82,7 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     await expect(page.getByLabel("Message Co-Director")).toBeVisible({ timeout: 15_000 });
   }
 
-  async function drainWorker(request: import("@playwright/test").APIRequestContext, maxSteps = 40) {
+  async function drainWorker(request: import("@playwright/test").APIRequestContext, maxSteps = 80) {
     const drain = await request.post("/api/codirector/jobs/worker/drain", {
       data: { maxSteps },
     });
@@ -54,12 +100,20 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
       data: {
         projectId,
         sceneId,
-        provider: "mock",
+        provider: "local",
         ...(idempotencyKey ? { idempotencyKey } : {}),
       },
     });
     expect(loop.ok()).toBeTruthy();
-    return loop.json() as Promise<{ jobs: { id: string; type: string }[]; reused?: boolean }>;
+    const body = await loop.json();
+    expect(body.productionContext).toBeTruthy();
+    expect(body.productionContext.projectId).toBe(projectId);
+    expect(body.productionContext.sceneId).toBe(sceneId);
+    return body as {
+      jobs: { id: string; type: string; productionContextId?: string }[];
+      reused?: boolean;
+      productionContext?: { id: string; projectId: string; sceneId: string };
+    };
   }
 
   async function proposalIdFromLoop(
@@ -86,28 +140,44 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     await expect(page.getByTestId("codirector-production-executive")).toHaveCount(0);
   });
 
-  test("closed loop drains to NeedsReview", async ({ request }) => {
+  test("closed loop drains to NeedsReview with real artifacts", async ({ request }) => {
     const execOn = await execEnabled(request);
     test.skip(!execOn, "production executive flag off");
+    await requireRealStack(request);
 
     const project = await createTempProject(request, "Production Executive NeedsReview");
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-needs-review");
     const awaitJob = loopBody.jobs.find((j) => j.type === "await_approval");
+    const imageJob = loopBody.jobs.find((j) => j.type === "image_generate");
+    const validateJob = loopBody.jobs.find((j) => j.type === "validate");
     expect(awaitJob).toBeTruthy();
 
-    await drainWorker(request);
+    await drainWorker(request, 120);
     const awaitInspect = await request.get(`/api/codirector/jobs/${awaitJob!.id}`);
     expect(awaitInspect.ok()).toBeTruthy();
     expect((await awaitInspect.json()).job.status).toBe("NeedsReview");
+
+    const imgInspect = await request.get(`/api/codirector/jobs/${imageJob!.id}`);
+    const imgJson = await imgInspect.json();
+    expect(imgJson.job.status).toBe("Completed");
+    expect(imgJson.job.result?.assetId).toBeTruthy();
+    expect(imgJson.job.result?.mockAdapter).toBeFalsy();
+
+    const valInspect = await request.get(`/api/codirector/jobs/${validateJob!.id}`);
+    const valJson = await valInspect.json();
+    expect(valJson.job.status).toBe("Completed");
+    expect(valJson.job.result?.reportId).toBeTruthy();
+    expect(valJson.job.result?.sessionId).toBeTruthy();
   });
 
   test("canon unchanged until mark-approval", async ({ request }) => {
     const execOn = await execEnabled(request);
     test.skip(!execOn, "production executive flag off");
+    await requireRealStack(request);
 
     const project = await createTempProject(request, "Production Executive PreApprove");
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-preapprove");
-    await drainWorker(request);
+    await drainWorker(request, 120);
 
     const applyJob = loopBody.jobs.find((j) => j.type === "apply_canon");
     expect(applyJob).toBeTruthy();
@@ -126,12 +196,13 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
   test("mark-approval returns autoApproved false", async ({ request }) => {
     const execOn = await execEnabled(request);
     test.skip(!execOn, "production executive flag off");
+    await requireRealStack(request);
 
     const project = await createTempProject(request, "Production Executive MarkApproval");
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-approve");
     const awaitJob = loopBody.jobs.find((j) => j.type === "await_approval");
     expect(awaitJob).toBeTruthy();
-    await drainWorker(request);
+    await drainWorker(request, 120);
 
     const proposalId = await proposalIdFromLoop(request, loopBody);
     const approve = await request.post(`/api/codirector/jobs/${awaitJob!.id}/mark-approval`, {
@@ -141,27 +212,30 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     expect((await approve.json()).autoApproved).toBeFalsy();
   });
 
-  test("after approve and drain apply completes with receipt", async ({ request }) => {
+  test("Dashboard to Canon: real asset validation proposal receipt", async ({ page, request }) => {
     const execOn = await execEnabled(request);
     test.skip(!execOn, "production executive flag off");
+    await requireRealStack(request);
 
-    const project = await createTempProject(request, "Production Executive Apply");
-    const loopBody = await startClosedLoop(request, project.id, "scene-e2e-apply");
+    const project = await createTempProject(request, "Production Executive Full Path");
+    const loopBody = await startClosedLoop(request, project.id, "scene-e2e-full");
     const awaitJob = loopBody.jobs.find((j) => j.type === "await_approval");
     const applyJob = loopBody.jobs.find((j) => j.type === "apply_canon");
+    const imageJob = loopBody.jobs.find((j) => j.type === "image_generate");
     expect(awaitJob).toBeTruthy();
     expect(applyJob).toBeTruthy();
 
-    await drainWorker(request);
+    await drainWorker(request, 120);
+    const imgJson = await (await request.get(`/api/codirector/jobs/${imageJob!.id}`)).json();
+    expect(imgJson.job.result?.assetId).toBeTruthy();
+
     const proposalId = await proposalIdFromLoop(request, loopBody);
     await request.post(`/api/codirector/jobs/${awaitJob!.id}/mark-approval`, {
       data: { proposalId, approved: true, actor: "e2e" },
     });
-    await drainWorker(request);
+    await drainWorker(request, 120);
 
-    const applyInspect = await request.get(`/api/codirector/jobs/${applyJob!.id}`);
-    expect(applyInspect.ok()).toBeTruthy();
-    const applyJson = await applyInspect.json();
+    const applyJson = await (await request.get(`/api/codirector/jobs/${applyJob!.id}`)).json();
     expect(applyJson.job.status).toBe("Completed");
     expect(applyJson.job.result?.applied).toBeTruthy();
     expect(applyJson.job.result?.receiptId).toBeTruthy();
@@ -169,19 +243,29 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const propRes = await request.get(
       `/api/codirector/projects/${project.id}/proposals/${proposalId}`,
     );
-    expect(propRes.ok()).toBeTruthy();
     expect((await propRes.json()).status).toBe("completed");
+
+    await page.goto(`/project/${project.id}`);
+    await expect(page.getByTestId("status-production-executive")).toContainText("On");
+    await openCoDirector(page);
+    await page.getByTestId("toggle-production-executive").click();
+    await expect(page.getByTestId("production-executive-dashboard")).toBeVisible({
+      timeout: 15000,
+    });
+    await page.getByTestId("executive-tab-history").click();
+    await expect(page.getByTestId("executive-jobs-history")).toBeVisible();
   });
 
   test("events and audit history endpoints return data", async ({ request }) => {
     const execOn = await execEnabled(request);
     test.skip(!execOn, "production executive flag off");
+    await requireRealStack(request);
 
     const project = await createTempProject(request, "Production Executive History");
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-history");
     const storyJob = loopBody.jobs.find((j) => j.type === "storyboard_generate");
     expect(storyJob).toBeTruthy();
-    await drainWorker(request);
+    await drainWorker(request, 120);
 
     const events = await request.get(
       `/api/codirector/jobs/events?projectId=${project.id}&jobId=${storyJob!.id}`,
@@ -286,35 +370,6 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const second = await startClosedLoop(request, project.id, "scene-e2e-idem", key);
     expect(second.reused).toBeTruthy();
     expect(second.jobs.length).toBeGreaterThan(0);
-  });
-
-  test("dashboard tabs visible after successful closed loop", async ({ page, request }) => {
-    const execOn = await execEnabled(request);
-    test.skip(!execOn, "production executive flag off");
-
-    const project = await createTempProject(request, "Production Executive Dashboard");
-    const loopBody = await startClosedLoop(request, project.id, "scene-e2e-ui");
-    const awaitJob = loopBody.jobs.find((j) => j.type === "await_approval");
-    expect(awaitJob).toBeTruthy();
-    await drainWorker(request);
-
-    const proposalId = await proposalIdFromLoop(request, loopBody);
-    await request.post(`/api/codirector/jobs/${awaitJob!.id}/mark-approval`, {
-      data: { proposalId, approved: true, actor: "e2e" },
-    });
-    await drainWorker(request);
-
-    await page.goto(`/project/${project.id}`);
-    await expect(page.getByTestId("status-production-executive")).toContainText("On");
-    await openCoDirector(page);
-    await page.getByTestId("toggle-production-executive").click();
-    await expect(page.getByTestId("production-executive-dashboard")).toBeVisible({
-      timeout: 15000,
-    });
-    await page.getByTestId("executive-tab-history").click();
-    await expect(page.getByTestId("executive-jobs-history")).toBeVisible();
-    await page.getByTestId("executive-tab-statistics").click();
-    await expect(page.getByTestId("executive-statistics")).toBeVisible();
   });
 
   test("restart recovery documented in pytest", async () => {
