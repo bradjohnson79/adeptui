@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "registryId": "adept-ui-v1.1-addon-candidates",
   "displayName": "Adept UI v1.1 Add-on Candidate Registry (M2.10.1 discovery)",
-  "status": "discovery_complete_not_product_approved",
+  "status": "discovery_complete_sandbox_product_approved",
   "createdAt": "2026-07-26",
   "branch": "phase2/codirector-m2-9-production-suite",
-  "tipShaAtAuthoring": "34998923186f4909fc0aa9c44bdae84dcafc0199",
+  "tipShaAtAuthoring": "aed4d4db9af11c1457eae5b40989017305374de1",
   "derivedFromDiscovery": [
     "docs/codirector/m2.10.1-github-discovery.md",
     "docs/codirector/m2.10.1-huggingface-discovery.md",
@@ -28,7 +28,8 @@
     "noExecution": true,
     "noWeightDownload": true,
     "noProductApprovedShortlistInvented": true,
-    "m210bStillBlocked": true
+    "m210bStillBlocked": false,
+    "m210bPhase0InstallStillGated": true
   },
   "buckets": {
     "native_v1_0": [
@@ -167,7 +168,7 @@
         "Fill missing audio.dialogue.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -184,7 +185,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-dialogue-002",
@@ -211,7 +232,7 @@
         "Fill missing audio.dialogue.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -228,7 +249,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-dialogue-003",
@@ -255,7 +296,7 @@
         "Fill missing audio.dialogue.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -272,7 +313,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-dialogue-004",
@@ -1069,7 +1130,7 @@
         "Fill missing audio.sfx.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -1086,7 +1147,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-sfx-022",
@@ -1483,7 +1564,7 @@
         "Fill missing audio.sfx.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -1500,7 +1581,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-sfx-031",
@@ -1527,7 +1628,7 @@
         "Fill missing audio.sfx.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -1544,7 +1645,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-sfx-032",
@@ -2159,7 +2280,7 @@
         "Fill missing audio.music.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -2176,7 +2297,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-music-046",
@@ -2293,7 +2434,7 @@
         "Fill missing audio.music.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -2310,7 +2451,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-music-049",
@@ -2337,7 +2498,7 @@
         "Fill missing audio.music.generate"
       ],
       "recommendation": "approve_sandbox_evaluation_proposed",
-      "approvalStatus": "not_product_approved",
+      "approvalStatus": "approved_for_sandbox_evaluation",
       "sandboxStatus": "not_installed",
       "validationStatus": "not_run",
       "promotionStatus": "not_promoted",
@@ -2354,7 +2515,27 @@
       "noExecution": true,
       "noWeightDownload": true,
       "qualificationStatus": "qualified",
-      "proposedSandbox": true
+      "proposedSandbox": true,
+      "productDecision": {
+        "productDecision": "APPROVED_FOR_SANDBOX_EVALUATION",
+        "productDecisionDate": "2026-07-26",
+        "sandboxApproved": true,
+        "productionApproved": false,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+        "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+        "approvalScope": "sandbox_evaluation_only",
+        "taskId": "M2.10.2"
+      },
+      "productDecisionDate": "2026-07-26",
+      "sandboxApproved": true,
+      "productionApproved": false,
+      "installationAuthorized": false,
+      "executionAuthorized": false,
+      "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+      "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json"
     },
     {
       "id": "m2101-music-050",
@@ -2852,5 +3033,14 @@
       "qualificationStatus": "qualified",
       "proposedSandbox": false
     }
-  ]
+  ],
+  "productApproval": {
+    "taskId": "M2.10.2",
+    "date": "2026-07-26",
+    "sandboxApprovedCount": 9,
+    "approvalArtifact": "docs/codirector/M2.10_PRODUCT_APPROVED_SANDBOX_SHORTLIST.md",
+    "lockArtifact": "config/capabilities/adept-ui-v1.1-product-approved-sandbox-lock.json",
+    "productionApproved": false,
+    "installationAuthorized": false
+  }
 }
