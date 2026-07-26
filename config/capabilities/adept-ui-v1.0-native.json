@@ -5,24 +5,24 @@
   "sourceOfTruthNote": "Runtime evaluation remains studio-api/app/capabilities/registry.py. This JSON is the versioned native baseline for M2.10 add-on comparison.",
   "milestoneContext": {
     "m271": "Accepted",
-    "m28": "CONDITIONALLY ACCEPTED",
-    "m29": "NOT ACCEPTED (PARTIAL / FIXTURE_ONLY)",
-    "m210": "Not started",
+    "m28": "Accepted (criteria not weakened)",
+    "m29": "Accepted with documented native capability limitations",
+    "m210": "Not started \u2014 awaiting Product authorization (discovery not authorized)",
     "m30": "Not started"
   },
   "sectionAuditClassification": {
-    "Image Production": "PARTIALLY CONNECTED",
-    "Frame Production": "MOCK ONLY",
-    "Text-to-Video and Image-to-Video": "MOCK ONLY",
-    "Director Timeline Generation": "PARTIALLY CONNECTED",
-    "Lip Sync Timeline": "MOCK ONLY",
-    "Mouth Rectangle Control": "MOCK ONLY",
-    "Audio Production": "MOCK ONLY",
-    "Editing and Post-Production": "PARTIALLY CONNECTED",
-    "SFX": "MOCK ONLY",
-    "Music": "MOCK ONLY",
-    "Rendering": "MOCK ONLY",
-    "Co-Director Production Control": "MOCK ONLY"
+    "Image Production": "CONNECTED",
+    "Frame Production": "CONNECTED",
+    "Text-to-Video and Image-to-Video": "CONNECTED",
+    "Director Timeline Generation": "CONNECTED",
+    "Lip Sync Timeline": "CONNECTED",
+    "Mouth Rectangle Control": "CONNECTED",
+    "Audio Production": "PARTIAL",
+    "Editing and Post-Production": "CONNECTED",
+    "SFX": "PARTIAL",
+    "Music": "PARTIAL",
+    "Rendering": "CONNECTED",
+    "Co-Director Production Control": "CONNECTED"
   },
   "executiveJobHandlers": [
     "storyboard_generate",
@@ -430,8 +430,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -454,8 +454,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -478,8 +478,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -502,8 +502,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -524,8 +524,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -548,8 +548,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {
@@ -572,8 +572,8 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
-        "Do not mark accepted until real provider path is proven"
+        "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+        "Do not mark accepted/CONNECTED until real generative provider proven"
       ]
     },
     {

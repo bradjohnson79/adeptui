@@ -12,6 +12,7 @@ BASELINE = ROOT / "config/capabilities/adept-ui-v1.0-native.json"
 ENV_DOC = ROOT / "docs/codirector/m2.10-native-environment-baseline.md"
 CLOSURE = ROOT / "docs/codirector/m2.9-closure-and-m2.10-readiness.md"
 CHECKPOINT3 = ROOT / "docs/codirector/m2.10-preflight-checkpoint-3.md"
+CHECKPOINT4 = ROOT / "docs/codirector/m2.10-preflight-checkpoint-4.md"
 FLAGS = ROOT / "studio-api/app/feature_flags.py"
 
 
@@ -77,7 +78,7 @@ def test_env_baseline_excludes_secret_values() -> None:
     )
 
 
-def test_feature_flags_gate_exposure_default_off() -> None:
+def test_feature_flags_gated_exposure_default_off() -> None:
     flags = FLAGS.read_text(encoding="utf-8")
     for name in (
         "image_production_v1",
@@ -99,21 +100,38 @@ def test_feature_flags_gate_exposure_default_off() -> None:
 def test_milestone_context_honest(baseline: dict) -> None:
     ctx = baseline["milestoneContext"]
     assert "Accepted" in ctx["m271"]
-    assert "CONDITIONALLY" in ctx["m28"].upper()
-    assert "NOT ACCEPTED" in ctx["m29"].upper()
+    assert "Accepted" in ctx["m28"]
+    assert "Accepted" in ctx["m29"]
     assert "not started" in ctx["m210"].lower()
     assert "not started" in ctx["m30"].lower()
 
 
-def test_section_audit_has_no_false_connected_claims(baseline: dict) -> None:
+def test_section_audit_matches_new_dod(baseline: dict) -> None:
     sections = baseline["sectionAuditClassification"]
-    for name, klass in sections.items():
-        assert klass != "CONNECTED", name
+    connected_expected = {
+        "Image Production",
+        "Frame Production",
+        "Text-to-Video and Image-to-Video",
+        "Director Timeline Generation",
+        "Lip Sync Timeline",
+        "Mouth Rectangle Control",
+        "Editing and Post-Production",
+        "Rendering",
+        "Co-Director Production Control",
+    }
+    partial_expected = {"Audio Production", "SFX", "Music"}
+    for name in connected_expected:
+        assert sections[name] == "CONNECTED", name
+    for name in partial_expected:
+        assert sections[name] == "PARTIAL", name
 
 
-def test_closure_and_checkpoint3_exist_and_not_ready() -> None:
+def test_closure_ready_and_checkpoints() -> None:
     closure = CLOSURE.read_text(encoding="utf-8")
     cp3 = CHECKPOINT3.read_text(encoding="utf-8")
-    assert "NOT READY FOR M2.10" in closure
-    assert "NOT READY FOR M2.10" in cp3
+    cp4 = CHECKPOINT4.read_text(encoding="utf-8")
+    assert "READY FOR M2.10" in closure
+    assert "NOT READY FOR M2.10" in cp3  # historical immutable
+    assert "READY FOR M2.10" in cp4
     assert "does not start m2.10 discovery" in closure.lower()
+    assert "does not authorize discovery" in cp4.lower()

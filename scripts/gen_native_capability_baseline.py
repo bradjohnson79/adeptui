@@ -10,19 +10,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SECTION_STATUS = {
-    # Honest M2.9 audit: fixture-only ≠ CONNECTED production.
-    "Image Production": "PARTIALLY CONNECTED",
-    "Frame Production": "MOCK ONLY",
-    "Text-to-Video and Image-to-Video": "MOCK ONLY",
-    "Director Timeline Generation": "PARTIALLY CONNECTED",
-    "Lip Sync Timeline": "MOCK ONLY",
-    "Mouth Rectangle Control": "MOCK ONLY",
-    "Audio Production": "MOCK ONLY",
-    "Editing and Post-Production": "PARTIALLY CONNECTED",
-    "SFX": "MOCK ONLY",
-    "Music": "MOCK ONLY",
-    "Rendering": "MOCK ONLY",
-    "Co-Director Production Control": "MOCK ONLY",
+    # M2.10 re-audit (2026-07-26) under redefined M2.9 DoD.
+    # CONNECTED = wired to currently available native capability (not fixture-as-production).
+    # PARTIAL = available native placement/process wired; generative generate deferred to M2.10.
+    "Image Production": "CONNECTED",
+    "Frame Production": "CONNECTED",
+    "Text-to-Video and Image-to-Video": "CONNECTED",
+    "Director Timeline Generation": "CONNECTED",
+    "Lip Sync Timeline": "CONNECTED",
+    "Mouth Rectangle Control": "CONNECTED",
+    "Audio Production": "PARTIAL",
+    "Editing and Post-Production": "CONNECTED",
+    "SFX": "PARTIAL",
+    "Music": "PARTIAL",
+    "Rendering": "CONNECTED",
+    "Co-Director Production Control": "CONNECTED",
 }
 
 
@@ -274,8 +276,8 @@ def build() -> dict:
                 jobs=jobs,
                 flag=flag,
                 limitations=[
-                    "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only — not Accepted production",
-                    "Do not mark accepted until real provider path is proven",
+                    "M2.9 Accepted-with-limitations: generative path deferred to M2.10 fill target",
+                    "Do not mark accepted/CONNECTED until real generative provider proven",
                 ],
             )
         )
@@ -320,9 +322,9 @@ def build() -> dict:
         ),
         "milestoneContext": {
             "m271": "Accepted",
-            "m28": "CONDITIONALLY ACCEPTED",
-            "m29": "NOT ACCEPTED (PARTIAL / FIXTURE_ONLY)",
-            "m210": "Not started",
+            "m28": "Accepted (criteria not weakened)",
+            "m29": "Accepted with documented native capability limitations",
+            "m210": "Not started — awaiting Product authorization (discovery not authorized)",
             "m30": "Not started",
         },
         "sectionAuditClassification": SECTION_STATUS,
