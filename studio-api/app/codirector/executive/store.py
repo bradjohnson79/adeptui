@@ -52,6 +52,16 @@ class JobStore:
             .filter(ProductionJobDependency.job_id == row.id)
             .all()
         )
+        ctx_id = getattr(row, "production_context_id", None)
+        ctx_dict = None
+        if ctx_id:
+            try:
+                from .production_context import load_production_context
+
+                loaded = load_production_context(db, ctx_id)
+                ctx_dict = loaded.to_dict() if loaded else None
+            except Exception:  # noqa: BLE001
+                ctx_dict = None
         return JobOut(
             id=row.id,
             type=row.type,
@@ -71,6 +81,8 @@ class JobStore:
             provider=row.provider,
             blockedReason=row.blocked_reason,
             dependsOnJobIds=[d.depends_on_job_id for d in deps],
+            productionContextId=ctx_id,
+            productionContext=ctx_dict,
             createdAt=_iso(row.created_at) or "",
             updatedAt=_iso(row.updated_at) or "",
             startedAt=_iso(row.started_at),
@@ -106,6 +118,7 @@ class JobStore:
         idempotency_key: str | None = None,
         max_attempts: int = 3,
         provider: str | None = None,
+        production_context_id: str | None = None,
         initial_status: str | None = None,
         actor: str = "user",
     ) -> JobOut:
@@ -140,6 +153,7 @@ class JobStore:
             attempts_count=0,
             max_attempts=max_attempts,
             provider=provider,
+            production_context_id=production_context_id,
             created_at=now,
             updated_at=now,
         )

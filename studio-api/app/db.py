@@ -478,6 +478,34 @@ class ProductionJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    production_context_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+
+
+class ProductionContextRow(Base):
+    """Immutable Production Context row (M011 / M2.7.1)."""
+
+    __tablename__ = "production_contexts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    scene_id: Mapped[str] = mapped_column(String(36), index=True)
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    initiated_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductionContextExtension(Base):
+    """Append-only Production Context extension (never mutates the context row)."""
+
+    __tablename__ = "production_context_extensions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    context_id: Mapped[str] = mapped_column(ForeignKey("production_contexts.id"), index=True)
+    extension_type: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    actor: Mapped[str] = mapped_column(String(64), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ProductionJobAttempt(Base):

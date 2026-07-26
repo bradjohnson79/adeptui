@@ -57,6 +57,8 @@ class JobOut(BaseModel):
     provider: Optional[str] = None
     blockedReason: Optional[str] = None
     dependsOnJobIds: list[str] = Field(default_factory=list)
+    productionContextId: Optional[str] = None
+    productionContext: Optional[dict[str, Any]] = None
     createdAt: str
     updatedAt: str
     startedAt: Optional[str] = None

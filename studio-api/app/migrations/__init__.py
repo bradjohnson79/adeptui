@@ -9,10 +9,11 @@ from .m006_codirector_vision import MIGRATION as M006
 from .m007_timeline_reference_bindings import MIGRATION as M007
 from .m008_production_executive import MIGRATION as M008
 from .m010_scene_summary import MIGRATION as M010
+from .m011_production_context import MIGRATION as M011
 from .registry import Migration, MigrationRegistry
 from .runner import ChecksumMismatchError, MigrationRun, MigrationRunner
 
-DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010))
+DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011))
 
 __all__ = [
     "ChecksumMismatchError",
@@ -26,6 +27,7 @@ __all__ = [
     "M007",
     "M008",
     "M010",
+    "M011",
     "Migration",
     "MigrationRegistry",
     "MigrationRun",

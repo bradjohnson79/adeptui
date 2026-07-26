@@ -44,7 +44,7 @@ class ProductionExecutiveService:
         scene_id: str,
         owner: str = "user",
         idempotency_key: str | None = None,
-        provider: str = "mock",
+        provider: str = "local",
     ) -> dict[str, Any]:
         """storyboard -> image -> validate -> create_proposal -> await_approval -> apply_canon."""
         if idempotency_key:
@@ -54,87 +54,100 @@ class ProductionExecutiveService:
             )
             if existing:
                 jobs = JobStore.list_jobs(db, project_id=project_id, scene_id=scene_id)
-                return {"jobs": [j.model_dump() for j in jobs], "reused": True}
+                ctx_snap = None
+                ctx_id = getattr(existing, "production_context_id", None) or getattr(existing, "productionContextId", None)
+                if ctx_id:
+                    from .production_context import load_production_context
 
-        # Mock provider / e2e: do not require live Comfy — mock ImageGen adapter covers Job+Asset.
-        mockish = provider == "mock"
-        sb_caps = [] if mockish else None
-        img_caps = [] if mockish else None
+                    loaded = load_production_context(db, ctx_id)
+                    ctx_snap = loaded.to_dict() if loaded else None
+                return {
+                    "jobs": [j.model_dump() for j in jobs],
+                    "reused": True,
+                    "productionContext": ctx_snap,
+                }
 
-        base = {"provider": provider, "sceneId": scene_id}
+        from .production_context import create_production_context
+
+        # Vision/validate provider defaults to local; image gen uses real Comfy Job+Asset path.
+        ctx = create_production_context(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            initiated_by=owner,
+        )
+        ctx_snap = ctx.to_dict()
+        base = {
+            "provider": provider,
+            "sceneId": scene_id,
+            "productionContext": ctx_snap,
+        }
+        job_kwargs = {
+            "project_id": project_id,
+            "scene_id": scene_id,
+            "owner": owner,
+            "production_context_id": ctx.id,
+        }
         sb = JobStore.create_job(
             db,
             job_type=JobType.STORYBOARD_GENERATE.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             provider=provider,
             payload={**base},
-            capability_requirements=sb_caps,
             priority=10,
             idempotency_key=f"{idempotency_key}:storyboard" if idempotency_key else None,
+            **job_kwargs,
         )
         img = JobStore.create_job(
             db,
             job_type=JobType.IMAGE_GENERATE.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             provider=provider,
             payload={**base},
-            capability_requirements=img_caps,
             depends_on_job_ids=[sb.id],
             priority=20,
             idempotency_key=f"{idempotency_key}:image" if idempotency_key else None,
+            **job_kwargs,
         )
         val = JobStore.create_job(
             db,
             job_type=JobType.VALIDATE.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             provider=provider,
-            payload={**base, "fixtureProfile": "pass"},
+            payload={**base},
             depends_on_job_ids=[img.id],
             priority=30,
             idempotency_key=f"{idempotency_key}:validate" if idempotency_key else None,
+            **job_kwargs,
         )
         prop = JobStore.create_job(
             db,
             job_type=JobType.CREATE_PROPOSAL.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             payload={**base},
             depends_on_job_ids=[val.id],
             priority=40,
             idempotency_key=f"{idempotency_key}:proposal" if idempotency_key else None,
+            **job_kwargs,
         )
         await_job = JobStore.create_job(
             db,
             job_type=JobType.AWAIT_APPROVAL.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             payload={**base, "proposalApproved": False},
             depends_on_job_ids=[prop.id],
             priority=50,
             idempotency_key=f"{idempotency_key}:await" if idempotency_key else None,
+            **job_kwargs,
         )
         apply = JobStore.create_job(
             db,
             job_type=JobType.APPLY_CANON.value,
-            project_id=project_id,
-            scene_id=scene_id,
-            owner=owner,
             payload={**base, "proposalApproved": False},
             depends_on_job_ids=[await_job.id],
             priority=60,
             idempotency_key=f"{idempotency_key}:apply" if idempotency_key else None,
+            **job_kwargs,
         )
         return {
             "jobs": [j.model_dump() for j in (sb, img, val, prop, await_job, apply)],
             "reused": False,
+            "productionContext": ctx_snap,
             "note": "Await/apply never auto-approve; call mark-approval after M2.2 decision.",
         }
 
