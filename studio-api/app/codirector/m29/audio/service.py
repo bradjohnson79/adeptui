@@ -99,7 +99,71 @@ class AudioService:
             )
             return result
 
-        # No generative audio provider on native platform — enqueue job that will Block honestly.
+        # M2.10b sandbox: sync generate via registry when flag + registryId authorize.
+        registry_id = payload.get("registryId") or payload.get("providerKey")
+        if registry_id:
+            try:
+                from ...m210b.flags import m210b_audio_sandbox_enabled
+                from ...m210b.registry import get_adapter
+            except ImportError:
+                pass
+            else:
+                if m210b_audio_sandbox_enabled() and get_adapter(str(registry_id)) is not None:
+                    job = enqueue_executive_job(
+                        db,
+                        project_id=project_id,
+                        job_type=JobType.AUDIO_GENERATE,
+                        payload={**payload, "sceneId": scene_id},
+                        scene_id=scene_id,
+                        owner=owner,
+                    )
+                    result = AudioService.execute_job(
+                        db, {**payload, "sceneId": scene_id}, project_id
+                    )
+                    cue_id = uuid.uuid4().hex
+                    asset_id = result.get("assetId")
+                    db.execute(
+                        text(
+                            "INSERT INTO m29_audio_cues "
+                            "(id, project_id, scene_id, cue_kind, status, asset_id, start_sec, duration_sec, "
+                            "metadata_json, created_at) "
+                            "VALUES (:id, :pid, :sid, :kind, :status, :aid, :start, :dur, :meta, :c)"
+                        ),
+                        {
+                            "id": cue_id,
+                            "pid": project_id,
+                            "sid": scene_id,
+                            "kind": kind,
+                            "status": "generated",
+                            "aid": asset_id,
+                            "start": start_sec,
+                            "dur": float(result.get("durationSec") or duration_sec),
+                            "meta": json.dumps(
+                                {
+                                    "prompt": prompt,
+                                    "m210b": True,
+                                    "sandboxOnly": True,
+                                    "productionApproved": False,
+                                    "registryId": str(registry_id),
+                                    "assetPath": result.get("assetPath"),
+                                    "sha256": result.get("sha256"),
+                                }
+                            ),
+                            "c": _now(),
+                        },
+                    )
+                    db.commit()
+                    result.update(
+                        {
+                            "jobId": job.id,
+                            "cueId": cue_id,
+                            "projectId": project_id,
+                            "providerMissing": False,
+                        }
+                    )
+                    return result
+
+        # No generative audio provider on native platform - enqueue job that will Block honestly.
         job = enqueue_executive_job(
             db,
             project_id=project_id,
@@ -183,6 +247,82 @@ class AudioService:
 
         if wants_fixture(payload):
             return fixture_audio_result(payload)
+
+        # M2.10b sandbox audio: try registry adapter when flag + execution lock authorize.
+        registry_id = payload.get("registryId") or payload.get("providerKey")
+        if registry_id:
+            try:
+                from ...m210b.flags import m210b_audio_sandbox_enabled
+                from ...m210b.registry import get_adapter
+                from ...m210b.schemas import AudioGenerateRequest
+            except ImportError:
+                registry_id = None
+            else:
+                if m210b_audio_sandbox_enabled():
+                    adapter = get_adapter(str(registry_id))
+                    if adapter is not None:
+                        kind = str(payload.get("kind") or "dialogue")
+                        cap_map = {
+                            "dialogue": "audio.dialogue.generate",
+                            "sfx": "audio.sfx.generate",
+                            "ambience": "audio.sfx.generate",
+                            "music": "audio.music.generate",
+                        }
+                        req = AudioGenerateRequest(
+                            capabilityId=str(
+                                payload.get("capabilityId") or cap_map.get(kind, "audio.dialogue.generate")
+                            ),
+                            projectId=project_id,
+                            sceneId=payload.get("sceneId"),
+                            prompt=str(payload.get("prompt") or ""),
+                            durationSec=float(payload.get("durationSec") or 2.0),
+                            seed=payload.get("seed"),
+                            timelineIntent=payload.get("timelineIntent"),
+                            providerKey=payload.get("providerKey"),
+                            registryId=str(registry_id),
+                            negativePrompt=payload.get("negativePrompt"),
+                            sampleRate=int(payload.get("sampleRate") or 48000),
+                            channels=int(payload.get("channels") or 1),
+                            format=str(payload.get("format") or "wav"),
+                            kind=kind,
+                        )
+                        result = adapter.generate(req)
+                        asset_id = result.assetId or f"m210b-{registry_id}-{uuid.uuid4().hex[:10]}"
+                        ver = create_asset_version(
+                            db,
+                            project_id=project_id,
+                            department="audio",
+                            status="generated",
+                            asset_id=asset_id,
+                            metadata={
+                                "kind": kind,
+                                "sandboxOnly": True,
+                                "productionApproved": False,
+                                "m210b": True,
+                                "registryId": registry_id,
+                                "assetPath": result.assetPath,
+                                "sha256": result.sha256,
+                                "provenance": result.provenance,
+                                "fixture": bool(result.fixture),
+                                "prompt": req.prompt,
+                            },
+                        )
+                        return {
+                            "assetId": asset_id,
+                            "versionId": ver["id"],
+                            "kind": kind,
+                            "status": "generated",
+                            "fixture": bool(result.fixture),
+                            "sandboxOnly": True,
+                            "productionApproved": False,
+                            "registryId": registry_id,
+                            "assetPath": result.assetPath,
+                            "sha256": result.sha256,
+                            "durationSec": result.durationSec,
+                            "sampleRate": result.sampleRate,
+                            "provenance": result.provenance,
+                            "projectId": project_id,
+                        }
 
         # Honest: no dialogue/sfx/music generative provider on native platform.
         raise ProviderUnavailable(

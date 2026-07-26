@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     poll_interval_sec: float = 1.5
     job_timeout_sec: float = 3600.0
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "gemma4:12b"
+    ollama_model: str = "gemma4:31b-it-qat"
     ollama_timeout_sec: float = 180.0
     zimage_unet: str = "z_image_turbo_bf16.safetensors"
     zimage_clip: str = "qwen_3_4b.safetensors"

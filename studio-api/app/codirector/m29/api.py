@@ -79,12 +79,14 @@ class VideoGenerateBody(BaseModel):
 
 class AudioGenerateBody(BaseModel):
     projectId: str
-    kind: str = Field(default="dialogue", pattern="^(dialogue|sfx|music)$")
+    kind: str = Field(default="dialogue", pattern="^(dialogue|sfx|music|ambience)$")
     prompt: str = "M2.9 audio"
     sceneId: Optional[str] = None
     owner: str = "user"
     startSec: float = 0.0
     durationSec: float = 2.0
+    registryId: Optional[str] = None
+    providerKey: Optional[str] = None
 
 
 class AudioProcessBody(BaseModel):
@@ -303,6 +305,11 @@ def video_generate(body: VideoGenerateBody, db: Session = Depends(get_db)) -> di
 @router.post("/audio/generate")
 def audio_generate(body: AudioGenerateBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("audio_production_v1")
+    extra = {}
+    if body.registryId:
+        extra["registryId"] = body.registryId
+    if body.providerKey:
+        extra["providerKey"] = body.providerKey
     return AudioService.generate(
         db,
         project_id=body.projectId,
@@ -312,6 +319,7 @@ def audio_generate(body: AudioGenerateBody, db: Session = Depends(get_db)) -> di
         owner=body.owner,
         start_sec=body.startSec,
         duration_sec=body.durationSec,
+        **extra,
     )
 
 
@@ -327,6 +335,35 @@ def audio_process(body: AudioProcessBody, db: Session = Depends(get_db)) -> dict
         owner=body.owner,
     )
 
+
+
+
+class AudioPlanProposeBody(BaseModel):
+    projectId: str
+    sceneId: Optional[str] = None
+    dialogue: list[dict[str, Any]] = Field(default_factory=list)
+    sfx: list[dict[str, Any]] = Field(default_factory=list)
+    ambience: list[dict[str, Any]] = Field(default_factory=list)
+    music: list[dict[str, Any]] = Field(default_factory=list)
+    notes: str = ""
+
+
+@router.post("/audio/plan/propose")
+def audio_plan_propose(body: AudioPlanProposeBody) -> dict[str, Any]:
+    """Thin M2.10b helper: propose + validate an AudioPlan (no execution)."""
+    _require("audio_production_v1", "m210b_audio_sandbox_v1")
+    from ..m210b.scene_audio import propose_audio_plan, validate_audio_plan
+
+    plan = propose_audio_plan(
+        project_id=body.projectId,
+        scene_id=body.sceneId,
+        dialogue=body.dialogue,
+        sfx=body.sfx,
+        ambience=body.ambience,
+        music=body.music,
+        notes=body.notes,
+    )
+    return validate_audio_plan(plan)
 
 @router.post("/audio/place-cue")
 def audio_place_cue(body: AudioPlaceCueBody, db: Session = Depends(get_db)) -> dict[str, Any]:
