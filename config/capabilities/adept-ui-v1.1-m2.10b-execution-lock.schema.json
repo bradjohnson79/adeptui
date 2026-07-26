@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adept-ui-v1.1-m2.10b-execution-lock.schema.json",
+  "title": "Adept UI v1.1 M2.10b Execution Lock",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "lockId",
+    "approvalStatus",
+    "approvalScope",
+    "approvalDate",
+    "sourceProductLockPath",
+    "providerManifestPath",
+    "providerManifestSha256",
+    "candidatesByCapability",
+    "productionAuthorized",
+    "installationAuthorized",
+    "executionAuthorized",
+    "weightDownloadAuthorized",
+    "notes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "lockId": {
+      "type": "string",
+      "const": "adept-ui-v1.1-m2.10b-execution-lock"
+    },
+    "approvalStatus": {
+      "type": "string"
+    },
+    "approvalScope": {
+      "type": "string",
+      "const": "sandbox_evaluation_only"
+    },
+    "approvalDate": {
+      "type": "string"
+    },
+    "sourceProductLockPath": {
+      "type": "string"
+    },
+    "providerManifestPath": {
+      "type": "string"
+    },
+    "providerManifestSha256": {
+      "type": "string"
+    },
+    "candidatesByCapability": {
+      "type": "object",
+      "required": [
+        "audio.dialogue.generate",
+        "audio.sfx.generate",
+        "audio.music.generate"
+      ]
+    },
+    "productionAuthorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "installationAuthorized": {
+      "type": "boolean",
+      "const": true
+    },
+    "executionAuthorized": {
+      "type": "boolean",
+      "const": true
+    },
+    "weightDownloadAuthorized": {
+      "type": "boolean",
+      "const": true
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

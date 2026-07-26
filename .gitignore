@@ -28,3 +28,7 @@ _*.hex
 _scratch.*
 scratch_*.py
 scratch_*.txt
+
+# M2.10b sandbox runtimes / weights (do not commit)
+data/m210b-sandbox/
+data/m210b-kvenv/
