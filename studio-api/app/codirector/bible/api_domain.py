@@ -406,3 +406,22 @@ async def generation_package(
         return ContextRetrievalService.generation_package(db, project_id, scene_id=sceneId)
     except CoDirectorError as err:
         raise _http_error(err) from err
+
+
+@router.get("/conflicts")
+async def list_conflicts(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        BibleDomainService.sync_conflicts(db, project_id)
+        conflicts = BibleDomainService.list_by_type(db, project_id, "conflict_record")
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return {"projectId": project_id, "conflicts": conflicts, "count": len(conflicts)}
+
+
+@router.post("/conflicts/sync")
+async def sync_conflicts(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    try:
+        conflicts = BibleDomainService.sync_conflicts(db, project_id)
+    except CoDirectorError as err:
+        raise _http_error(err) from err
+    return {"projectId": project_id, "conflicts": conflicts, "count": len(conflicts)}

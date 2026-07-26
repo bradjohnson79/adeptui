@@ -45,6 +45,7 @@ class ProviderHealthResult:
     vision_validation_enabled: bool = False
     timeline_references_enabled: bool = False
     production_executive_enabled: bool = False
+    production_intelligence_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -63,6 +64,7 @@ class ProviderHealthResult:
             "visionValidationEnabled": self.vision_validation_enabled,
             "timelineReferencesEnabled": self.timeline_references_enabled,
             "productionExecutiveEnabled": self.production_executive_enabled,
+            "productionIntelligenceEnabled": self.production_intelligence_enabled,
             "ok": self.status == "Ready",
         }
 
