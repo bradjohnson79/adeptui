@@ -5,24 +5,24 @@
   "sourceOfTruthNote": "Runtime evaluation remains studio-api/app/capabilities/registry.py. This JSON is the versioned native baseline for M2.10 add-on comparison.",
   "milestoneContext": {
     "m271": "Accepted",
-    "m28": "Planning only \u2014 not Accepted",
-    "m29": "Planning only \u2014 not Accepted",
+    "m28": "CONDITIONALLY ACCEPTED",
+    "m29": "NOT ACCEPTED (PARTIAL / FIXTURE_ONLY)",
     "m210": "Not started",
     "m30": "Not started"
   },
   "sectionAuditClassification": {
-    "Image Production": "CONNECTED",
-    "Frame Production": "PARTIALLY CONNECTED",
-    "Text-to-Video and Image-to-Video": "PARTIALLY CONNECTED",
+    "Image Production": "PARTIALLY CONNECTED",
+    "Frame Production": "MOCK ONLY",
+    "Text-to-Video and Image-to-Video": "MOCK ONLY",
     "Director Timeline Generation": "PARTIALLY CONNECTED",
-    "Lip Sync Timeline": "PARTIALLY CONNECTED",
-    "Mouth Rectangle Control": "PARTIALLY CONNECTED",
-    "Audio Production": "UI ONLY",
+    "Lip Sync Timeline": "MOCK ONLY",
+    "Mouth Rectangle Control": "MOCK ONLY",
+    "Audio Production": "MOCK ONLY",
     "Editing and Post-Production": "PARTIALLY CONNECTED",
-    "SFX": "UI ONLY",
-    "Music": "UI ONLY",
-    "Rendering": "PARTIALLY CONNECTED",
-    "Co-Director Production Control": "CONNECTED"
+    "SFX": "MOCK ONLY",
+    "Music": "MOCK ONLY",
+    "Rendering": "MOCK ONLY",
+    "Co-Director Production Control": "MOCK ONLY"
   },
   "executiveJobHandlers": [
     "storyboard_generate",
@@ -31,7 +31,17 @@
     "create_proposal",
     "await_approval",
     "apply_canon",
-    "generic"
+    "generic",
+    "frame_generate",
+    "frame_sequence",
+    "video_generate",
+    "lipsync_generate",
+    "mouth_track_generate",
+    "audio_generate",
+    "audio_process",
+    "timeline_render",
+    "scene_render",
+    "edit_apply"
   ],
   "workflowAdaptersNative": [
     "ltx.scene",
@@ -86,7 +96,7 @@
         "docs/codirector/m2.7.1-storyboard-generate-live-validation.md"
       ],
       "knownLimitations": [
-        "Requires ComfyUI + Z-Image stack; M2.9 section flags not implemented"
+        "Requires ComfyUI + Z-Image stack; M2.9 image_production_v1 is separate flag-gated suite path"
       ]
     },
     {
@@ -273,7 +283,7 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "No M2.7 lipsync job; mouth.* capabilities not registered"
+        "M2.9 lipsync/mouth jobs exist under fixture mode; production provider path not Accepted"
       ]
     },
     {
@@ -397,98 +407,110 @@
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared; M2.8 Virtual Stage not implemented/accepted"
+        "M2.8 Virtual Stage ships under CONDITIONALLY ACCEPTED; full Accepted / product review still open"
       ]
     },
     {
       "capabilityId": "frame.generate",
       "displayName": "Frame Generate",
       "department": "Frames",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "frame_generate"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_FRAME_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "audio.dialogue.generate",
       "displayName": "Audio Dialogue Generate",
       "department": "Audio",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_AUDIO_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "audio.sfx.generate",
       "displayName": "SFX Generate",
       "department": "SFX",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "audio.music.generate",
       "displayName": "Music Generate",
       "department": "Music",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "audio_generate"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_EDITING_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "mouth.rectangle.generate",
       "displayName": "Mouth Rectangle Generate",
       "department": "LipSync",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
@@ -498,53 +520,60 @@
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "lipsync.generate",
       "displayName": "Lip Sync Generate",
       "department": "LipSync",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "lipsync_generate"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
       "capabilityId": "scene.render",
       "displayName": "Scene Render",
       "department": "Rendering",
-      "status": "unavailable",
+      "status": "conditional",
       "source": "native",
       "providerIds": [],
       "workflowAdapterIds": [],
-      "jobHandlerIds": [],
+      "jobHandlerIds": [
+        "scene_render"
+      ],
       "assetTypes": [],
       "validationMode": "",
       "approvalRequired": true,
       "timelineCompatible": false,
       "productionBibleCompatible": false,
-      "featureFlag": "",
+      "featureFlag": "STUDIO_FEATURE_RENDER_PRODUCTION_V1",
       "version": "1.0.0-native-baseline",
       "acceptanceEvidence": [],
       "knownLimitations": [
-        "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+        "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only \u2014 not Accepted production",
+        "Do not mark accepted until real provider path is proven"
       ]
     },
     {
@@ -1892,6 +1921,699 @@
       ]
     },
     {
+      "capabilityId": "m28.radar.discover",
+      "displayName": "m28.radar.discover",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.compat.evaluate",
+      "displayName": "m28.compat.evaluate",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.plan",
+      "displayName": "m28.sandbox.plan",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.install",
+      "displayName": "m28.sandbox.install",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.validate",
+      "displayName": "m28.sandbox.validate",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.promote",
+      "displayName": "m28.sandbox.promote",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.recipe.execute",
+      "displayName": "m28.recipe.execute",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "m28.shot_profile.apply",
+      "displayName": "m28.shot_profile.apply",
+      "department": "m28",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.generate",
+      "displayName": "image.generate",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.reference.generate",
+      "displayName": "image.reference.generate",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.image_to_image",
+      "displayName": "image.image_to_image",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.inpaint",
+      "displayName": "image.inpaint",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.outpaint",
+      "displayName": "image.outpaint",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.variation",
+      "displayName": "image.variation",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.upscale",
+      "displayName": "image.upscale",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.relight",
+      "displayName": "image.relight",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.validate",
+      "displayName": "image.validate",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.approve",
+      "displayName": "image.approve",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "image.publish_reference",
+      "displayName": "image.publish_reference",
+      "department": "image",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.sequence.generate",
+      "displayName": "frame.sequence.generate",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.first.generate",
+      "displayName": "frame.first.generate",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.last.generate",
+      "displayName": "frame.last.generate",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.transition.generate",
+      "displayName": "frame.transition.generate",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.replace",
+      "displayName": "frame.replace",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.validate",
+      "displayName": "frame.validate",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.approve",
+      "displayName": "frame.approve",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "frame.bind_to_shot",
+      "displayName": "frame.bind_to_shot",
+      "department": "frame",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "video.generate",
+      "displayName": "video.generate",
+      "department": "video",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "video.validate",
+      "displayName": "video.validate",
+      "department": "video",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "audio.validate",
+      "displayName": "audio.validate",
+      "department": "audio",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "mouth.track.generate",
+      "displayName": "mouth.track.generate",
+      "department": "mouth",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "lipsync.validate",
+      "displayName": "lipsync.validate",
+      "department": "lipsync",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
+      "capabilityId": "timeline.render",
+      "displayName": "timeline.render",
+      "department": "timeline",
+      "status": "conditional",
+      "source": "native",
+      "providerIds": [],
+      "workflowAdapterIds": [],
+      "jobHandlerIds": [],
+      "assetTypes": [],
+      "validationMode": "unknown",
+      "approvalRequired": true,
+      "timelineCompatible": false,
+      "productionBibleCompatible": false,
+      "featureFlag": "",
+      "version": "1.0.0-native-baseline",
+      "acceptanceEvidence": [],
+      "knownLimitations": [
+        "Exported from runtime registry; section-level M2.9 acceptance not completed"
+      ]
+    },
+    {
       "capabilityId": "storage.project_data",
       "displayName": "storage.project_data",
       "department": "storage",
@@ -1935,10 +2657,10 @@
     }
   ],
   "counts": {
-    "capabilities": 87,
+    "capabilities": 120,
     "accepted": 6,
-    "conditional": 73,
-    "unavailable": 8,
-    "registryIdsExported": 80
+    "conditional": 113,
+    "unavailable": 1,
+    "registryIdsExported": 120
   }
 }

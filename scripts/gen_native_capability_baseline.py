@@ -10,18 +10,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SECTION_STATUS = {
-    "Image Production": "CONNECTED",
-    "Frame Production": "PARTIALLY CONNECTED",
-    "Text-to-Video and Image-to-Video": "PARTIALLY CONNECTED",
+    # Honest M2.9 audit: fixture-only ≠ CONNECTED production.
+    "Image Production": "PARTIALLY CONNECTED",
+    "Frame Production": "MOCK ONLY",
+    "Text-to-Video and Image-to-Video": "MOCK ONLY",
     "Director Timeline Generation": "PARTIALLY CONNECTED",
-    "Lip Sync Timeline": "PARTIALLY CONNECTED",
-    "Mouth Rectangle Control": "PARTIALLY CONNECTED",
-    "Audio Production": "UI ONLY",
+    "Lip Sync Timeline": "MOCK ONLY",
+    "Mouth Rectangle Control": "MOCK ONLY",
+    "Audio Production": "MOCK ONLY",
     "Editing and Post-Production": "PARTIALLY CONNECTED",
-    "SFX": "UI ONLY",
-    "Music": "UI ONLY",
-    "Rendering": "PARTIALLY CONNECTED",
-    "Co-Director Production Control": "CONNECTED",
+    "SFX": "MOCK ONLY",
+    "Music": "MOCK ONLY",
+    "Rendering": "MOCK ONLY",
+    "Co-Director Production Control": "MOCK ONLY",
 }
 
 
@@ -98,7 +99,7 @@ def build() -> dict:
                     "docs/codirector/m2.7.1-storyboard-generate-live-validation.md",
                 ],
                 limitations=[
-                    "Requires ComfyUI + Z-Image stack; M2.9 section flags not implemented"
+                    "Requires ComfyUI + Z-Image stack; M2.9 image_production_v1 is separate flag-gated suite path"
                 ],
             ),
             _cap(
@@ -167,6 +168,7 @@ def build() -> dict:
                 validation="n/a",
                 approval=False,
                 bible=True,
+                evidence=["docs/codirector/M2.7.1_ACCEPTANCE_REPORT.md"],
             ),
             _cap(
                 "generation.video.queue",
@@ -193,7 +195,7 @@ def build() -> dict:
                 validation="not_in_executive_closed_loop",
                 timeline=True,
                 limitations=[
-                    "No M2.7 lipsync job; mouth.* capabilities not registered"
+                    "M2.9 lipsync/mouth jobs exist under fixture mode; production provider path not Accepted"
                 ],
             ),
             _cap(
@@ -248,29 +250,32 @@ def build() -> dict:
                 "VirtualStage",
                 "unavailable",
                 limitations=[
-                    "Declared; M2.8 Virtual Stage not implemented/accepted"
+                    "M2.8 Virtual Stage ships under CONDITIONALLY ACCEPTED; full Accepted / product review still open"
                 ],
             ),
         ]
     )
 
-    for capability_id, name, dept in [
-        ("frame.generate", "Frame Generate", "Frames"),
-        ("audio.dialogue.generate", "Audio Dialogue Generate", "Audio"),
-        ("audio.sfx.generate", "SFX Generate", "SFX"),
-        ("audio.music.generate", "Music Generate", "Music"),
-        ("mouth.rectangle.generate", "Mouth Rectangle Generate", "LipSync"),
-        ("lipsync.generate", "Lip Sync Generate", "LipSync"),
-        ("scene.render", "Scene Render", "Rendering"),
+    for capability_id, name, dept, flag, jobs in [
+        ("frame.generate", "Frame Generate", "Frames", "STUDIO_FEATURE_FRAME_PRODUCTION_V1", ["frame_generate"]),
+        ("audio.dialogue.generate", "Audio Dialogue Generate", "Audio", "STUDIO_FEATURE_AUDIO_PRODUCTION_V1", ["audio_generate"]),
+        ("audio.sfx.generate", "SFX Generate", "SFX", "STUDIO_FEATURE_EDITING_PRODUCTION_V1", ["audio_generate"]),
+        ("audio.music.generate", "Music Generate", "Music", "STUDIO_FEATURE_EDITING_PRODUCTION_V1", ["audio_generate"]),
+        ("mouth.rectangle.generate", "Mouth Rectangle Generate", "LipSync", "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1", []),
+        ("lipsync.generate", "Lip Sync Generate", "LipSync", "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1", ["lipsync_generate"]),
+        ("scene.render", "Scene Render", "Rendering", "STUDIO_FEATURE_RENDER_PRODUCTION_V1", ["scene_render"]),
     ]:
         native.append(
             _cap(
                 capability_id,
                 name,
                 dept,
-                "unavailable",
+                "conditional",
+                jobs=jobs,
+                flag=flag,
                 limitations=[
-                    "Declared in M2.9 planning prompt only; not registered in runtime capability registry"
+                    "M2.9 registered; suite path is ADEPT_M29_FIXTURE_MODE / mock-only — not Accepted production",
+                    "Do not mark accepted until real provider path is proven",
                 ],
             )
         )
@@ -315,8 +320,8 @@ def build() -> dict:
         ),
         "milestoneContext": {
             "m271": "Accepted",
-            "m28": "Planning only — not Accepted",
-            "m29": "Planning only — not Accepted",
+            "m28": "CONDITIONALLY ACCEPTED",
+            "m29": "NOT ACCEPTED (PARTIAL / FIXTURE_ONLY)",
             "m210": "Not started",
             "m30": "Not started",
         },
@@ -329,6 +334,16 @@ def build() -> dict:
             "await_approval",
             "apply_canon",
             "generic",
+            "frame_generate",
+            "frame_sequence",
+            "video_generate",
+            "lipsync_generate",
+            "mouth_track_generate",
+            "audio_generate",
+            "audio_process",
+            "timeline_render",
+            "scene_render",
+            "edit_apply",
         ],
         "workflowAdaptersNative": [
             "ltx.scene",
