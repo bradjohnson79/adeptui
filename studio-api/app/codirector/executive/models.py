@@ -64,6 +64,16 @@ class JobType(str, Enum):
     SANDBOX_PROMOTE = "sandbox_promote"
     RECIPE_STAGE = "recipe_stage"
     APPLY_SHOT_PROFILE = "apply_shot_profile"
+    FRAME_GENERATE = "frame_generate"
+    FRAME_SEQUENCE = "frame_sequence"
+    VIDEO_GENERATE = "video_generate"
+    LIPSYNC_GENERATE = "lipsync_generate"
+    MOUTH_TRACK_GENERATE = "mouth_track_generate"
+    AUDIO_GENERATE = "audio_generate"
+    AUDIO_PROCESS = "audio_process"
+    TIMELINE_RENDER = "timeline_render"
+    SCENE_RENDER = "scene_render"
+    EDIT_APPLY = "edit_apply"
 
 
 # Capability keys required per job type (honest block if unavailable).
@@ -83,4 +93,15 @@ JOB_TYPE_CAPABILITIES: dict[str, list[str]] = {
     JobType.SANDBOX_PROMOTE.value: ["m28.sandbox.promote"],
     JobType.RECIPE_STAGE.value: ["m28.recipe.execute"],
     JobType.APPLY_SHOT_PROFILE.value: ["m28.shot_profile.apply"],
+    JobType.FRAME_GENERATE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.FRAME_SEQUENCE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.VIDEO_GENERATE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.LIPSYNC_GENERATE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.MOUTH_TRACK_GENERATE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.AUDIO_GENERATE.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.AUDIO_PROCESS.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.TIMELINE_RENDER.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.SCENE_RENDER.value: [],  # registry IDs honest; not blocking until locally_verified
+    JobType.EDIT_APPLY.value: [],  # registry IDs honest; not blocking until locally_verified
 }
+

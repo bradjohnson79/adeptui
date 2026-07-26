@@ -116,6 +116,14 @@ def _handle_storyboard(db: Session, job: JobOut, payload: dict[str, Any]) -> Han
 
 
 def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    if payload.get("m29") or payload.get("fixtureComplete"):
+        from ..m29.image.service import ImageService
+
+        out = ImageService.execute_job(db, payload, job.projectId)
+        if out.get("assetId"):
+            return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
+        return HandlerResult(ok=True, status="Completed", result=out)
+
     if payload.get("assetId"):
         out = {
             "assetId": payload["assetId"],
@@ -572,6 +580,72 @@ def _handle_apply_shot_profile(db: Session, job: JobOut, payload: dict[str, Any]
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
 
 
+
+
+def _handle_frame_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.frames.service import FramesService
+
+    out = FramesService.execute_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_frame_sequence(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    return _handle_frame_generate(db, job, payload)
+
+
+def _handle_video_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.video.service import VideoService
+
+    out = VideoService.execute_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_lipsync_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.lipsync.service import LipsyncService
+
+    out = LipsyncService.execute_lipsync_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_mouth_track_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.lipsync.service import LipsyncService
+
+    out = LipsyncService.execute_mouth_track_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_audio_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.audio.service import AudioService
+
+    out = AudioService.execute_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_audio_process(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    return _handle_audio_generate(db, job, payload)
+
+
+def _handle_timeline_render(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.render.service import RenderService
+
+    out = RenderService.execute_job(db, payload, job.projectId)
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
+def _handle_scene_render(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    return _handle_timeline_render(db, job, payload)
+
+
+def _handle_edit_apply(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.editing.service import EditingService
+
+    try:
+        out = EditingService.execute_job(db, payload, job.projectId)
+    except PermissionError as exc:
+        return HandlerResult(ok=False, status="Blocked", error=str(exc))
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
 def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
     """Run a single job attempt. Pass db for real service wiring; without db, generic only."""
     payload = dict(job.payload or {})
@@ -599,6 +673,16 @@ def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
         JobType.SANDBOX_PROMOTE.value,
         JobType.RECIPE_STAGE.value,
         JobType.APPLY_SHOT_PROFILE.value,
+        JobType.FRAME_GENERATE.value,
+        JobType.FRAME_SEQUENCE.value,
+        JobType.VIDEO_GENERATE.value,
+        JobType.LIPSYNC_GENERATE.value,
+        JobType.MOUTH_TRACK_GENERATE.value,
+        JobType.AUDIO_GENERATE.value,
+        JobType.AUDIO_PROCESS.value,
+        JobType.TIMELINE_RENDER.value,
+        JobType.SCENE_RENDER.value,
+        JobType.EDIT_APPLY.value,
     }
 
     # Generic jobs remain lightweight (orchestration tests / drain).
@@ -655,6 +739,26 @@ def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
             return _handle_recipe_stage(db, job, payload)
         if job_type == JobType.APPLY_SHOT_PROFILE.value:
             return _handle_apply_shot_profile(db, job, payload)
+        if job_type == JobType.FRAME_GENERATE.value:
+            return _handle_frame_generate(db, job, payload)
+        if job_type == JobType.FRAME_SEQUENCE.value:
+            return _handle_frame_sequence(db, job, payload)
+        if job_type == JobType.VIDEO_GENERATE.value:
+            return _handle_video_generate(db, job, payload)
+        if job_type == JobType.LIPSYNC_GENERATE.value:
+            return _handle_lipsync_generate(db, job, payload)
+        if job_type == JobType.MOUTH_TRACK_GENERATE.value:
+            return _handle_mouth_track_generate(db, job, payload)
+        if job_type == JobType.AUDIO_GENERATE.value:
+            return _handle_audio_generate(db, job, payload)
+        if job_type == JobType.AUDIO_PROCESS.value:
+            return _handle_audio_process(db, job, payload)
+        if job_type == JobType.TIMELINE_RENDER.value:
+            return _handle_timeline_render(db, job, payload)
+        if job_type == JobType.SCENE_RENDER.value:
+            return _handle_scene_render(db, job, payload)
+        if job_type == JobType.EDIT_APPLY.value:
+            return _handle_edit_apply(db, job, payload)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Executive handler failed job=%s type=%s", job.id, job_type)
         return HandlerResult(ok=False, status="Failed", error=str(exc)[:500])

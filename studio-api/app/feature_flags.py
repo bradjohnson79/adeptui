@@ -14,6 +14,15 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_SHOT_PROFILES_V1`` (M2.8)
 * ``STUDIO_FEATURE_PRODUCTION_RECIPE_V1`` (M2.8)
 * ``STUDIO_FEATURE_LOCATION_SPIN_V1`` (M2.8)
+* ``STUDIO_FEATURE_IMAGE_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_FRAME_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_VIDEO_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_DIRECTOR_TIMELINE_V1`` (M2.9)
+* ``STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_AUDIO_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_EDITING_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_RENDER_PRODUCTION_V1`` (M2.9)
+* ``STUDIO_FEATURE_CODIRECTOR_PRODUCTION_CONTROL_V1`` (M2.9)
 """
 
 from __future__ import annotations
@@ -53,6 +62,15 @@ class FeatureFlags:
     shot_profiles_v1: bool = False
     production_recipe_v1: bool = False
     location_spin_v1: bool = False
+    image_production_v1: bool = False
+    frame_production_v1: bool = False
+    video_production_v1: bool = False
+    director_timeline_v1: bool = False
+    lipsync_production_v1: bool = False
+    audio_production_v1: bool = False
+    editing_production_v1: bool = False
+    render_production_v1: bool = False
+    codirector_production_control_v1: bool = False
 
     @classmethod
     def from_env(
