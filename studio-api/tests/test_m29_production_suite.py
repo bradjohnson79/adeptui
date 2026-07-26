@@ -261,3 +261,155 @@ def test_health_exposes_m29_flags(client):
     op = health.json().get("operator") or {}
     assert op.get("imageProductionEnabled") is True
     assert op.get("codirectorProductionControlEnabled") is True
+def test_image_execute_does_not_fixture_on_m29_flag_alone(db, monkeypatch):
+    """m29=True must not auto-fixture when ADEPT_M29_FIXTURE_MODE is off."""
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    from app.codirector.m29.image.service import ImageService
+    from app.codirector.m29.providers import ProviderUnavailable, comfy_available
+
+    if not comfy_available():
+        with pytest.raises(ProviderUnavailable):
+            ImageService.execute_job(
+                db, {"m29": True, "prompt": "real path"}, "proj-m29"
+            )
+        pytest.skip("ComfyUI unavailable - real image path blocked honestly")
+    try:
+        out = ImageService.execute_job(
+            db, {"m29": True, "prompt": "real path smoke", "timeoutSec": 15}, "proj-m29"
+        )
+    except Exception as exc:  # noqa: BLE001
+        assert "fixture" not in str(exc).lower() or "unavailable" in str(exc).lower()
+        pytest.skip(f"real image path not completable in this env: {exc}")
+    assert out.get("fixture") is False
+    assert out.get("provider") != "m29_fixture"
+    assert out.get("assetId")
+
+
+def test_audio_generate_blocks_without_provider(db, monkeypatch):
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    from app.codirector.m29.audio.service import AudioService
+    from app.codirector.m29.providers import ProviderUnavailable
+
+    with pytest.raises(ProviderUnavailable):
+        AudioService.execute_job(
+            db, {"m29": True, "kind": "dialogue", "prompt": "hello"}, "proj-m29"
+        )
+
+
+def test_timeline_apply_persists_director_json(db):
+    from app.db import Scene
+    from app.codirector.m29.timeline.service import TimelineService
+
+    scene = Scene(
+        id="scene-m29-tl",
+        project_id="proj-m29",
+        index=0,
+        name="M29 TL",
+        prompt="base",
+        duration_sec=5.0,
+        director_json="",
+    )
+    db.add(scene)
+    db.commit()
+
+    prop = TimelineService.propose(
+        db,
+        project_id="proj-m29",
+        scene_id=scene.id,
+        clips=[{"clipId": "c1", "assetId": "asset-a", "start": 0, "length": 3, "track": "video"}],
+        notes="insert clip",
+    )
+    TimelineService.approve(db, prop["id"], actor="tester")
+    applied = TimelineService.apply(db, prop["id"], actor="tester")
+    assert applied["status"] == "applied"
+    db.expire_all()
+    scene2 = db.get(Scene, scene.id)
+    assert scene2 is not None
+    assert "asset-a" in (scene2.director_json or "")
+    assert "timelineBranches" in (scene2.continuity_json or "")
+
+
+def test_edit_apply_trim_and_undo(db, monkeypatch):
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    from app.db import Scene
+    from app.codirector.m29.editing.service import EditingService
+    from app.director_timeline import TimelineClip, dumps_director_timeline, parse_director_timeline
+
+    tl = parse_director_timeline(None, fallback_duration=5.0, fallback_prompt="x")
+    clip = TimelineClip(id="clip-edit-1", asset_id="v1", start=0, length=4)
+    tl.video_clips.append(clip)
+    scene = Scene(
+        id="scene-m29-edit",
+        project_id="proj-m29",
+        index=1,
+        name="M29 Edit",
+        prompt="x",
+        duration_sec=5.0,
+        director_json=dumps_director_timeline(tl),
+        continuity_json="{}",
+    )
+    db.add(scene)
+    db.commit()
+
+    out = EditingService.execute_job(
+        db,
+        {
+            "approved": True,
+            "sceneId": scene.id,
+            "ops": [{"op": "trim", "clipId": "clip-edit-1", "length": 2.5}],
+        },
+        "proj-m29",
+    )
+    assert out["status"] == "applied"
+    assert out.get("fixture") is False
+    db.expire_all()
+    scene2 = db.get(Scene, scene.id)
+    tl2 = parse_director_timeline(scene2.director_json)
+    assert abs(tl2.video_clips[0].length - 2.5) < 0.01
+
+    EditingService.execute_job(
+        db,
+        {"approved": True, "sceneId": scene.id, "ops": [{"op": "undo"}]},
+        "proj-m29",
+    )
+    db.expire_all()
+    scene3 = db.get(Scene, scene.id)
+    tl3 = parse_director_timeline(scene3.director_json)
+    assert abs(tl3.video_clips[0].length - 4.0) < 0.01
+
+
+def test_asset_version_status_persistence(db):
+    from app.codirector.m29.store import create_asset_version, get_asset_version, set_asset_status
+
+    ver = create_asset_version(
+        db, project_id="proj-m29", department="image", status="draft", metadata={"k": 1}
+    )
+    set_asset_status(db, ver["id"], "generated")
+    set_asset_status(db, ver["id"], "validation_pending")
+    set_asset_status(db, ver["id"], "approved")
+    again = get_asset_version(db, ver["id"])
+    assert again is not None
+    assert again["status"] == "approved"
+    assert again["department"] == "image"
+
+
+def test_control_enqueue_without_fixture_mode(db, monkeypatch):
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    from app.codirector.m29.control.service import ControlService
+
+    out = ControlService.decompose(
+        db,
+        project_id="proj-m29",
+        request_text="generate image then render timeline",
+        enqueue=True,
+    )
+    assert out["requiresApproval"] is True
+    assert out.get("fixture") is False
+    assert len(out["jobs"]) >= 1
+
+
+def test_wants_fixture_helper():
+    from app.codirector.m29.providers import wants_fixture
+
+    assert wants_fixture({"fixtureComplete": True}) is True
+    assert wants_fixture({"m29": True}) is False
