@@ -266,6 +266,39 @@ def test_crash_restart_recovery_no_duplicate_attempts(db: Session, worker: Produ
     assert JobStore.get_job(db, job.id).status == JobStatus.COMPLETED.value
 
 
+
+def test_blocked_dependency_cascades_waiting_chain(db: Session, worker: ProductionJobWorker) -> None:
+    """Failed/Blocked upstream must Block the full Waiting chain (not leave await Waiting)."""
+    loop = ProductionExecutiveService.create_closed_loop(
+        db, project_id="proj-exec-1", scene_id="scene-cascade-block", provider="local"
+    )
+    jobs = _closed_loop_jobs(db, loop)
+    sb = jobs[JobType.STORYBOARD_GENERATE.value]
+    # Force storyboard Blocked via capability override so drain never needs Comfy/job_queue.
+    from app.db import ProductionJob
+    import json
+
+    row = db.get(ProductionJob, sb.id)
+    assert row is not None
+    payload = json.loads(row.payload_json or "{}")
+    payload["mockUnavailableCapabilities"] = ["comfyui.health"]
+    row.payload_json = json.dumps(payload)
+    db.commit()
+
+    worker.drain(max_steps=20)
+    jobs = _closed_loop_jobs(db, loop)
+    assert jobs[JobType.STORYBOARD_GENERATE.value].status == JobStatus.BLOCKED.value
+    for jt in (
+        JobType.IMAGE_GENERATE,
+        JobType.VALIDATE,
+        JobType.CREATE_PROPOSAL,
+        JobType.AWAIT_APPROVAL,
+        JobType.APPLY_CANON,
+    ):
+        j = jobs[jt.value]
+        assert j.status == JobStatus.BLOCKED.value, f"{jt.value} expected Blocked got {j.status}"
+
+
 def test_provider_unavailable_blocks(db: Session, worker: ProductionJobWorker) -> None:
     job = JobStore.create_job(
         db,

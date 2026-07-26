@@ -151,12 +151,40 @@ def poll_imagegen_job(
 
         time.sleep(poll_interval)
 
+    db.expire_all()
+    job = db.get(Job, job_id)
+    status = job.status if job else "missing"
+    msg = (job.message if job else "") or ""
+
+    # Prefer Blocked (not Failed) for infra/queue gaps so dependents cascade cleanly.
+    if status in ("queued", "running"):
+        from ...queue_worker import job_queue
+
+        queue_task = getattr(job_queue, "_task", None)
+        queue_alive = queue_task is not None and not queue_task.done()
+        if not queue_alive and status == "queued":
+            raise RuntimeError(
+                f"ImageGen job {job_id} remained queued: studio job_queue worker is not running "
+                f"(unavailable). Start the API job_queue or ensure Comfy ImageGen packs/workflows "
+                f"are installed."
+            )
+        if not comfy_available():
+            raise RuntimeError(
+                f"ComfyUI unavailable; imagegen job {job_id} did not complete "
+                f"(mock ImageGen completion is disabled)"
+            )
+        raise RuntimeError(
+            f"ImageGen job {job_id} stuck in {status} after {timeout_sec}s "
+            f"(unavailable for closed-loop). Studio message: {msg or 'none'}. "
+            f"Check Comfy checkpoint/workflow packs (storyboard.generate / workflows.image.ready)."
+        )
+
     if not comfy_available():
         raise RuntimeError(
             f"ComfyUI unavailable; imagegen job {job_id} did not complete "
             f"(mock ImageGen completion is disabled)"
         )
-    raise TimeoutError(f"imagegen job {job_id} timed out after {timeout_sec}s")
+    raise TimeoutError(f"imagegen job {job_id} timed out after {timeout_sec}s (status={status})")
 
 
 def read_job_asset_id(db: Session, job_id: str) -> Optional[str]:

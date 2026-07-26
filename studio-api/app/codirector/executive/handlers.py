@@ -154,7 +154,18 @@ def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerR
         )
     except Exception as exc:  # noqa: BLE001
         err = str(exc)
-        status = "Blocked" if "ComfyUI unavailable" in err or "unavailable" in err.lower() else "Failed"
+        low = err.lower()
+        status = (
+            "Blocked"
+            if (
+                "ComfyUI unavailable" in err
+                or "unavailable" in low
+                or "job_queue" in low
+                or "checkpoint" in low
+                or "workflow" in low
+            )
+            else "Failed"
+        )
         return HandlerResult(ok=False, status=status, error=err)
 
     out = {

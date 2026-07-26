@@ -60,8 +60,8 @@ class JobType(str, Enum):
 
 # Capability keys required per job type (honest block if unavailable).
 JOB_TYPE_CAPABILITIES: dict[str, list[str]] = {
-    JobType.STORYBOARD_GENERATE.value: ["comfyui.health"],
-    JobType.IMAGE_GENERATE.value: ["comfyui.health"],
+    JobType.STORYBOARD_GENERATE.value: ["comfyui.health", "storyboard.generate"],
+    JobType.IMAGE_GENERATE.value: ["comfyui.health", "storyboard.generate"],
     JobType.VALIDATE.value: ["codirector.vision.validate"],
     JobType.CREATE_PROPOSAL.value: ["codirector.bible.propose"],
     JobType.AWAIT_APPROVAL.value: ["codirector.bible.propose"],
