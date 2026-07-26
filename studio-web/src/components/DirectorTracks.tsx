@@ -83,7 +83,7 @@ function snapTime(t: number, snap: boolean, step = 0.25) {
   return Math.max(0, Math.round(t / step) * step);
 }
 
-/** Normalize legacy start/middle/end roles into free guide clips for Director 2.0.
+/** Normalize legacy start/middle/end roles into free guide clips for Director Timeline Generation.
  * Preserves stable display_tag; never overwrites tags with index-based Image N.
  */
 function freeImageClips(tl: DirectorTimeline): TimelineClip[] {

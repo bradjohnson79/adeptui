@@ -158,6 +158,15 @@ export interface Health {
     shotProfilesEnabled?: boolean;
     productionRecipeEnabled?: boolean;
     locationSpinEnabled?: boolean;
+    imageProductionEnabled?: boolean;
+    frameProductionEnabled?: boolean;
+    videoProductionEnabled?: boolean;
+    directorTimelineEnabled?: boolean;
+    lipsyncProductionEnabled?: boolean;
+    audioProductionEnabled?: boolean;
+    editingProductionEnabled?: boolean;
+    renderProductionEnabled?: boolean;
+    codirectorProductionControlEnabled?: boolean;
   timelineReferencesEnabled?: boolean;
     specialistCount?: number;
     registry?: { callable?: number; blocked?: number; total?: number; counts?: Record<string, number> };

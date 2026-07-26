@@ -162,6 +162,15 @@ function useM28NavFlags() {
   const [flags, setFlags] = useState<{
     modelRadarEnabled?: boolean;
     virtualStageEnabled?: boolean;
+    imageProductionEnabled?: boolean;
+    frameProductionEnabled?: boolean;
+    videoProductionEnabled?: boolean;
+    directorTimelineEnabled?: boolean;
+    lipsyncProductionEnabled?: boolean;
+    audioProductionEnabled?: boolean;
+    editingProductionEnabled?: boolean;
+    renderProductionEnabled?: boolean;
+    codirectorProductionControlEnabled?: boolean;
   } | null>(null);
   useEffect(() => {
     api
@@ -235,6 +244,21 @@ export function StudioChrome({
         {Boolean(healthFlags?.virtualStageEnabled) && (
           <Link to="/virtual-stage" className="chrome-nav-link" data-testid="nav-virtual-stage">
             Virtual Stage
+          </Link>
+        )}
+        {Boolean(
+          healthFlags?.imageProductionEnabled ||
+            healthFlags?.frameProductionEnabled ||
+            healthFlags?.videoProductionEnabled ||
+            healthFlags?.directorTimelineEnabled ||
+            healthFlags?.lipsyncProductionEnabled ||
+            healthFlags?.audioProductionEnabled ||
+            healthFlags?.editingProductionEnabled ||
+            healthFlags?.renderProductionEnabled ||
+            healthFlags?.codirectorProductionControlEnabled,
+        ) && (
+          <Link to="/production-suite" className="chrome-nav-link" data-testid="nav-production-suite">
+            Production Suite
           </Link>
         )}
         {onSearchChange && (

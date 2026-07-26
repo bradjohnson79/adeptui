@@ -2133,4 +2133,107 @@ export const api = {
       body: JSON.stringify({ angles }),
     }),
 
+  m29Status: () => req<Record<string, boolean>>("/api/codirector/m29/status"),
+  m29ImageGenerate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/image/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29ImageApprove: (versionId: string, actor = "user") =>
+    req<any>(`/api/codirector/m29/image/${encodeURIComponent(versionId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor }),
+    }),
+  m29FramesGenerate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/frames/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29FramesList: (projectId: string, shotId?: string) =>
+    req<{ frames: any[] }>(
+      `/api/codirector/m29/frames?projectId=${encodeURIComponent(projectId)}${
+        shotId ? `&shotId=${encodeURIComponent(shotId)}` : ""
+      }`,
+    ),
+  m29VideoGenerate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/video/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29AudioGenerate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/audio/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29AudioProcess: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/audio/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29LipsyncGenerate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/lipsync/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29MouthTrack: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/lipsync/mouth-track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29MouthRectangle: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/lipsync/mouth-rectangle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29TimelinePropose: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/timeline/propose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29TimelineApprove: (proposalId: string, actor = "user") =>
+    req<any>(`/api/codirector/m29/timeline/${encodeURIComponent(proposalId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor }),
+    }),
+  m29TimelineApply: (proposalId: string, actor = "user") =>
+    req<any>(`/api/codirector/m29/timeline/${encodeURIComponent(proposalId)}/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor }),
+    }),
+  m29EditingPropose: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/editing/propose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29EditingApply: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/editing/apply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29Render: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m29ControlDecompose: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m29/control/decompose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 };
