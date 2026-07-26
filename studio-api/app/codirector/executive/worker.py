@@ -216,7 +216,7 @@ class ProductionJobWorker:
         attempt = JobStore.begin_attempt(
             db,
             job_id,
-            provider=job.provider or (job.payload or {}).get("provider") or "mock",
+            provider=job.provider or (job.payload or {}).get("provider") or "local",
             capability_snapshot=snap,
         )
         job = JobStore.get_job(db, job_id) or job

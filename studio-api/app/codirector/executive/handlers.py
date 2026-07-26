@@ -23,7 +23,6 @@ from .imagegen_adapter import (
     poll_imagegen_job,
     read_job_asset_id,
     schedule_job_queue_enqueue,
-    should_use_mock_imagegen,
 )
 from .models import JobType
 from .schemas import JobOut
@@ -104,14 +103,13 @@ def _handle_storyboard(db: Session, job: JobOut, payload: dict[str, Any]) -> Han
         "style": payload.get("style"),
     }
     prepared = prepare_storyboard_generate(db, job.projectId, body)
-    if not should_use_mock_imagegen():
-        schedule_job_queue_enqueue(prepared["job_id"])
+    schedule_job_queue_enqueue(prepared["job_id"])
     out = {
         "panelId": prepared["panel_id"],
         "imageJobId": prepared["job_id"],
         "segmentId": prepared.get("segment_id"),
         "status": prepared["status"],
-        "provider": job.provider or payload.get("provider") or "mock",
+        "provider": job.provider or payload.get("provider") or "comfy",
         "audit": audit_metadata(job.type, job_id=job.id),
     }
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
@@ -121,9 +119,9 @@ def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerR
     if payload.get("assetId"):
         out = {
             "assetId": payload["assetId"],
-            "imageJobId": payload.get("imageJobId") or (D+D),
+            "imageJobId": payload.get("imageJobId") or "",
             "panelId": payload.get("panelId"),
-            "provider": job.provider or payload.get("provider") or "mock",
+            "provider": job.provider or payload.get("provider") or "comfy",
             "mockAdapter": False,
         }
         return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
@@ -144,22 +142,27 @@ def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerR
             db, job.projectId, body, scene_id=job.sceneId or payload.get("sceneId")
         )
         image_job_id = studio_job.id
-        if not should_use_mock_imagegen():
-            schedule_job_queue_enqueue(image_job_id)
+        schedule_job_queue_enqueue(image_job_id)
 
-    asset_id, used_mock = poll_imagegen_job(
-        db,
-        image_job_id,
-        project_id=job.projectId,
-        timeout_sec=float(payload.get("timeoutSec") or 120),
-        allow_mock=True,
-    )
+    try:
+        asset_id, _used_mock = poll_imagegen_job(
+            db,
+            image_job_id,
+            project_id=job.projectId,
+            timeout_sec=float(payload.get("timeoutSec") or 120),
+            allow_mock=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        err = str(exc)
+        status = "Blocked" if "ComfyUI unavailable" in err or "unavailable" in err.lower() else "Failed"
+        return HandlerResult(ok=False, status=status, error=err)
+
     out = {
         "assetId": asset_id,
         "imageJobId": image_job_id,
         "panelId": panel_id,
-        "provider": "mock" if used_mock else (job.provider or payload.get("provider") or "comfy"),
-        "mockAdapter": used_mock,
+        "provider": job.provider or payload.get("provider") or "comfy",
+        "mockAdapter": False,
     }
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
 
@@ -169,10 +172,22 @@ def _handle_validate(db: Session, job: JobOut, payload: dict[str, Any]) -> Handl
     if not asset_id:
         return HandlerResult(ok=False, status="Failed", error="validate requires assetId from image_generate")
 
-    provider = payload.get("provider") or job.provider or "mock"
-    if provider not in ("mock", "local"):
-        provider = "mock"
-    fixture = payload.get("fixtureProfile") or ("pass" if provider == "mock" else None)
+    provider = payload.get("provider") or job.provider or "local"
+    if provider == "mock":
+        return HandlerResult(
+            ok=False,
+            status="Failed",
+            error="provider 'mock' is not allowed in runtime closed-loop path; use local",
+        )
+    if provider not in ("local", "cloud"):
+        return HandlerResult(
+            ok=False,
+            status="Failed",
+            error=f"unsupported validate provider '{provider}'; use local",
+        )
+    # Vision ValidateRequest currently accepts local (cloud reserved); map cloud->local until supported.
+    vision_provider = "local" if provider in ("local", "cloud") else provider
+    fixture = payload.get("fixtureProfile")  # do not default to "pass"
 
     reference_set = None
     timeline_item_id = job.timelineItemId or payload.get("timelineItemId")
@@ -196,18 +211,26 @@ def _handle_validate(db: Session, job: JobOut, payload: dict[str, Any]) -> Handl
         sceneId=scene_id,
         referenceAssetId=payload.get("referenceAssetId"),
         referenceSet=reference_set,
-        provider=provider,  # type: ignore[arg-type]
+        provider=vision_provider,  # type: ignore[arg-type]
         fixtureProfile=fixture,
     )
     result = run_validation(db, request)
     session = result.get("session") or {}
     report = result.get("report") or {}
+    session_id = session.get("sessionId") or session.get("id")
+    report_id = report.get("reportId") or report.get("id")
+    if not session_id or not report_id:
+        return HandlerResult(
+            ok=False,
+            status="Failed",
+            error="validation missing sessionId/reportId from real vision path",
+        )
     score = float(report.get("score") if report.get("score") is not None else payload.get("score") or 0)
     passed = bool(report.get("passed")) if "passed" in report else score >= 80
     band = "approve" if passed else str(report.get("band") or "correction-required")
     out = {
-        "sessionId": session.get("sessionId") or session.get("id") or (D+D),
-        "reportId": report.get("reportId") or report.get("id") or (D+D),
+        "sessionId": session_id,
+        "reportId": report_id,
         "score": score,
         "passed": passed,
         "band": band,
@@ -288,7 +311,7 @@ def _handle_await_approval(db: Session, job: JobOut, payload: dict[str, Any]) ->
         prop = ProposalService.get(db, job.projectId, proposal_id)
         proposal_status = prop.status
     except CoDirectorError as exc:
-        if exc.code != "PROPOSAL_NOT_FOUND" and "not found" not in (exc.message or (D+D)).lower():
+        if exc.code != "PROPOSAL_NOT_FOUND" and "not found" not in (exc.message or "").lower():
             return HandlerResult(ok=False, status="Failed", error=str(exc.message))
 
     if proposal_status in ("rejected", "cancelled"):

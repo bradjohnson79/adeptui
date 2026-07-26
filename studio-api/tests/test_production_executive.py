@@ -17,14 +17,45 @@ from app.codirector.executive.store import JobStore
 from app.codirector.executive.worker import ProductionJobWorker
 from app.db import Asset, CoDirectorExecutionReceipt, Job, Project, SessionLocal, init_db
 from app.feature_flags import FeatureFlags
-from app.migrations import DEFAULT_REGISTRY, M008, MigrationRunner
+from app.migrations import DEFAULT_REGISTRY, M008, M011, MigrationRunner
 from sqlalchemy import create_engine
+
+
+_TRUE = frozenset({"1", "true", "TRUE", "yes", "YES", "on", "ON"})
+
+
+def _real_imagegen_stack_available() -> bool:
+    """Honest probe for full closed-loop image path.
+
+    Requires ADEPT_REQUIRE_REAL_IMAGEGEN=1 (opt-in) and live Comfy /system_stats.
+    In-process pytest does not start the studio job_queue worker; do not claim pass
+    without an explicit real-provider run. Never treat ADEPT_MOCK_IMAGEGEN as success.
+    """
+    if os.environ.get("ADEPT_REQUIRE_REAL_IMAGEGEN", "").strip() not in _TRUE:
+        return False
+    try:
+        from app.codirector.executive.imagegen_adapter import comfy_available, should_use_mock_imagegen
+
+        if should_use_mock_imagegen():
+            return False
+        return bool(comfy_available())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+requires_real_imagegen = pytest.mark.skipif(
+    not _real_imagegen_stack_available(),
+    reason=(
+        "ComfyUI/vision stack unavailable or ADEPT_REQUIRE_REAL_IMAGEGEN not set — "
+        "closed-loop/image tests require real providers (no mock)"
+    ),
+)
 
 
 @pytest.fixture(autouse=True)
 def _executive_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock ImageGen adapter + vision validate capability for in-process closed-loop tests."""
-    monkeypatch.setenv("ADEPT_MOCK_IMAGEGEN", "1")
+    """Enable vision validation for executive tests. Do not enable mock ImageGen."""
+    monkeypatch.delenv("ADEPT_MOCK_IMAGEGEN", raising=False)
     monkeypatch.setenv("STUDIO_FEATURE_VISION_VALIDATION_V1", "1")
     import app.feature_flags as ff
 
@@ -82,6 +113,47 @@ def test_m008_registered_before_m010() -> None:
     assert "M008" in revs
     assert M008.revision == "M008"
     assert revs.index("M007") < revs.index("M008") < revs.index("M010")
+    assert "M011" in revs
+    assert M011.revision == "M011"
+    assert revs.index("M010") < revs.index("M011")
+
+
+def test_production_context_immutable_and_sparse() -> None:
+    from app.codirector.executive.production_context import ProductionContext
+
+    ctx = ProductionContext(
+        id="ctx-1",
+        projectId="proj-1",
+        sceneId="scene-1",
+        createdAt="2026-07-25T00:00:00Z",
+        initiatedBy="user",
+    )
+    d = ctx.to_dict()
+    assert "shotId" not in d
+    assert d["projectId"] == "proj-1"
+    assert d["initiatedBy"] == "user"
+    with pytest.raises(Exception):
+        ctx.projectId = "other"  # type: ignore[misc]
+
+
+def test_m011_migration_creates_context_tables(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'm011.db'}")
+    result = MigrationRunner(engine, DEFAULT_REGISTRY).apply_pending()
+    assert "M011" in result.applied
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        cols = {
+            row[1]
+            for row in conn.exec_driver_sql("PRAGMA table_info(production_jobs)").fetchall()
+        }
+    assert "production_contexts" in tables
+    assert "production_context_extensions" in tables
+    assert "production_context_id" in cols
 
 
 def test_m008_migration_creates_tables(tmp_path) -> None:
@@ -174,7 +246,7 @@ def test_crash_restart_recovery_no_duplicate_attempts(db: Session, worker: Produ
         db, job_type=JobType.GENERIC.value, project_id="proj-exec-1", payload={"z": 1}
     )
     JobStore.transition(db, job.id, JobStatus.RUNNING.value, actor="test", reason="simulate")
-    attempt = JobStore.begin_attempt(db, job.id, provider="mock", capability_snapshot={})
+    attempt = JobStore.begin_attempt(db, job.id, provider="local", capability_snapshot={})
     recovered = JobStore.recover_running_jobs(db)
     assert any(r.id == job.id for r in recovered)
     db.expire_all()
@@ -210,9 +282,10 @@ def test_provider_unavailable_blocks(db: Session, worker: ProductionJobWorker) -
     assert out.blockedReason and "comfyui.health" in out.blockedReason
 
 
+@requires_real_imagegen
 def test_closed_loop_real_wiring_no_auto_approve(db: Session, worker: ProductionJobWorker) -> None:
     loop = ProductionExecutiveService.create_closed_loop(
-        db, project_id="proj-exec-1", scene_id="scene-1", provider="mock"
+        db, project_id="proj-exec-1", scene_id="scene-1", provider="local"
     )
     assert len(loop["jobs"]) == 6
     worker.drain(max_steps=20)
@@ -257,9 +330,9 @@ def test_closed_loop_real_wiring_no_auto_approve(db: Session, worker: Production
 def test_contracts_validate_closed_loop_inputs() -> None:
     project_id = "proj-exec-1"
     cases = {
-        JobType.STORYBOARD_GENERATE.value: {"sceneId": "scene-1", "provider": "mock"},
-        JobType.IMAGE_GENERATE.value: {"sceneId": "scene-1", "provider": "mock"},
-        JobType.VALIDATE.value: {"assetId": "asset-1", "provider": "mock", "fixtureProfile": "pass"},
+        JobType.STORYBOARD_GENERATE.value: {"sceneId": "scene-1", "provider": "local"},
+        JobType.IMAGE_GENERATE.value: {"sceneId": "scene-1", "provider": "local"},
+        JobType.VALIDATE.value: {"assetId": "asset-1", "provider": "local"},
         JobType.CREATE_PROPOSAL.value: {"sceneId": "scene-1", "assetId": "asset-1", "sessionId": "sess-1"},
         JobType.AWAIT_APPROVAL.value: {"proposalId": "prop-1", "proposalApproved": False},
         JobType.APPLY_CANON.value: {"proposalId": "prop-1", "proposalApproved": False},
@@ -269,15 +342,15 @@ def test_contracts_validate_closed_loop_inputs() -> None:
         assert model is not None
 
 
+@requires_real_imagegen
 def test_image_generate_uses_job_asset_lifecycle(db: Session, worker: ProductionJobWorker) -> None:
     job = JobStore.create_job(
         db,
         job_type=JobType.IMAGE_GENERATE.value,
         project_id="proj-exec-1",
         scene_id="scene-img-1",
-        provider="mock",
-        payload={"projectId": "proj-exec-1", "sceneId": "scene-img-1", "provider": "mock"},
-        capability_requirements=[],
+        provider="local",
+        payload={"projectId": "proj-exec-1", "sceneId": "scene-img-1", "provider": "local"},
     )
     worker.drain(max_steps=10)
     done = JobStore.get_job(db, job.id)
@@ -296,11 +369,12 @@ def test_image_generate_uses_job_asset_lifecycle(db: Session, worker: Production
     assert studio_job.status == "done"
 
 
+@requires_real_imagegen
 def test_await_approval_stays_needs_review_without_signal(
     db: Session, worker: ProductionJobWorker
 ) -> None:
     loop = ProductionExecutiveService.create_closed_loop(
-        db, project_id="proj-exec-1", scene_id="scene-await", provider="mock"
+        db, project_id="proj-exec-1", scene_id="scene-await", provider="local"
     )
     worker.drain(max_steps=20)
     jobs = _closed_loop_jobs(db, loop)
@@ -345,6 +419,7 @@ def test_apply_canon_blocked_without_approval(db: Session, worker: ProductionJob
     assert JobStore.get_job(db, job.id).status == JobStatus.BLOCKED.value
 
 
+@requires_real_imagegen
 def test_mark_approval_auto_approved_false_api(client, db: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.codirector.executive import worker as worker_mod
 
@@ -359,7 +434,7 @@ def test_mark_approval_auto_approved_false_api(client, db: Session, monkeypatch:
             json={
                 "projectId": "proj-exec-1",
                 "sceneId": "scene-api-1",
-                "provider": "mock",
+                "provider": "local",
             },
         )
         assert loop.status_code == 200, loop.text
@@ -389,9 +464,10 @@ def test_worker_poll_interval_configurable(monkeypatch: pytest.MonkeyPatch) -> N
     assert w.poll_interval == 0.5
 
 
+@requires_real_imagegen
 def test_chain_propagates_asset_and_proposal_ids(db: Session, worker: ProductionJobWorker) -> None:
     loop = ProductionExecutiveService.create_closed_loop(
-        db, project_id="proj-exec-1", scene_id="scene-chain", provider="mock"
+        db, project_id="proj-exec-1", scene_id="scene-chain", provider="local"
     )
     worker.drain(max_steps=20)
     jobs = _closed_loop_jobs(db, loop)
@@ -506,3 +582,35 @@ def test_scene_progress_derived(db: Session, worker: ProductionJobWorker) -> Non
     assert progress.totalJobs == 2
     assert progress.completed == 1
     assert progress.failed == 1
+
+def test_closed_loop_creates_production_context(db: Session) -> None:
+    loop = ProductionExecutiveService.create_closed_loop(
+        db, project_id="proj-exec-1", scene_id="scene-ctx", provider="local", owner="tester"
+    )
+    assert loop.get("productionContext")
+    assert loop["productionContext"]["projectId"] == "proj-exec-1"
+    assert loop["productionContext"]["sceneId"] == "scene-ctx"
+    assert loop["productionContext"]["initiatedBy"] == "tester"
+    assert "shotId" not in loop["productionContext"]
+    jobs = loop["jobs"]
+    assert len(jobs) == 6
+    ctx_id = loop["productionContext"]["id"]
+    for j in jobs:
+        assert j.get("productionContextId") == ctx_id
+        assert j["payload"].get("productionContext", {}).get("id") == ctx_id
+    # Immutability: frozen dataclass round-trip
+    from app.codirector.executive.production_context import (
+        append_context_extension,
+        load_production_context,
+    )
+
+    loaded = load_production_context(db, ctx_id)
+    assert loaded is not None
+    snap_before = loaded.to_dict()
+    append_context_extension(
+        db, ctx_id, extension_type="fact", payload={"k": "v"}, actor="tester"
+    )
+    loaded2 = load_production_context(db, ctx_id)
+    assert loaded2 is not None
+    assert loaded2.to_dict() == snap_before
+

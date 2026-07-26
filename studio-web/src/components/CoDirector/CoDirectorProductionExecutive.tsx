@@ -137,7 +137,7 @@ export function CoDirectorProductionExecutive({
       await api.productionClosedLoop({
         projectId,
         sceneId,
-        provider: "mock",
+        provider: "local",
         idempotencyKey: `ui-loop-${sceneId}`,
       });
       await api.productionWorkerDrain(80);
@@ -211,7 +211,7 @@ export function CoDirectorProductionExecutive({
               disabled={busy || !sceneId}
               onClick={() => void startClosedLoop()}
             >
-              Queue closed loop (mock)
+              Queue closed loop
             </button>
           </div>
 

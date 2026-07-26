@@ -68,23 +68,13 @@ def sync_check_capabilities(
     """Synchronous capability check used by the worker loop.
 
     Prefer the real Capability Bridge when a Session is available. Mock-unavailable
-    overrides still force Blocked. When ADEPT_MOCK_IMAGEGEN/STUDIO_E2E is set,
-    treat comfyui.health as available so closed-loop e2e can proceed through the
-    mock ImageGen Job+Asset adapter.
+    overrides still force Blocked. Never fakes comfyui.health for ADEPT_MOCK_IMAGEGEN/STUDIO_E2E.
     """
-    import os
-
     forced = set(mock_unavailable or [])
-    _TRUE = frozenset({"1", "true", "TRUE", "yes", "YES", "on", "ON"})
-    mock_img = (
-        os.environ.get("STUDIO_E2E", "").strip() in _TRUE
-        or os.environ.get("ADEPT_MOCK_IMAGEGEN", "").strip() in _TRUE
-    )
 
     missing: list[str] = []
     details: dict[str, Any] = {}
 
-    # Fast path: forced unavailable
     for req in requirements:
         if req in forced:
             missing.append(req)
@@ -104,7 +94,6 @@ def sync_check_capabilities(
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    # Cannot nest; fall through to permissive mock rules
                     raise RuntimeError("loop running")
                 snap = loop.run_until_complete(_run())
             except RuntimeError:
@@ -112,39 +101,21 @@ def sync_check_capabilities(
 
             for req in remaining:
                 info = (snap.get("details") or {}).get(req) or {}
-                avail = bool(info.get("available", True)) if info else bool(snap.get("available", True))
-                # When mock imagegen is on, don't block on comfyui.health
-                if req == "comfyui.health" and mock_img:
-                    details[req] = {"available": True, "reason": "mock_imagegen_adapter"}
-                    continue
                 if req in (snap.get("missing") or []):
-                    if req == "comfyui.health" and mock_img:
-                        details[req] = {"available": True, "reason": "mock_imagegen_adapter"}
-                    else:
-                        missing.append(req)
-                        details[req] = info or {"available": False, "reason": "bridge_unavailable"}
+                    missing.append(req)
+                    details[req] = info or {"available": False, "reason": "bridge_unavailable"}
                 else:
                     details[req] = info or {"available": True, "reason": "bridge_ok"}
-            # Prefer snap missing list when present
             for req in snap.get("missing") or []:
-                if req not in missing and not (req == "comfyui.health" and mock_img):
-                    if req in remaining:
-                        missing.append(req)
+                if req not in missing and req in remaining:
+                    missing.append(req)
         except Exception as exc:  # noqa: BLE001
             for req in remaining:
-                if req == "comfyui.health" and mock_img:
-                    details[req] = {"available": True, "reason": "mock_imagegen_adapter"}
-                    continue
-                # Unmapped / bridge error: do not falsely block unknown keys; block known failures only
                 details[req] = {"available": True, "reason": f"bridge_error:{exc}"}
     else:
         for req in remaining:
-            if req == "comfyui.health" and mock_img:
-                details[req] = {"available": True, "reason": "mock_imagegen_adapter"}
-            else:
-                details[req] = {"available": True, "reason": "sync_assumed"}
+            details[req] = {"available": True, "reason": "sync_assumed"}
 
-    # de-dupe missing
     missing = list(dict.fromkeys(missing))
     return {
         "available": not missing,

@@ -60,7 +60,6 @@ const env = {
   STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1:
     process.env.STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1 || "1",
   // Deterministic ImageGen via Job+Asset mock adapter (not fake-only inside executive).
-  ADEPT_MOCK_IMAGEGEN: process.env.ADEPT_MOCK_IMAGEGEN || "1",
 };
 
 fs.writeFileSync(

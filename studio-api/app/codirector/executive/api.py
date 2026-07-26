@@ -28,7 +28,7 @@ class ClosedLoopRequest(BaseModel):
     sceneId: str
     owner: str = "user"
     idempotencyKey: Optional[str] = None
-    provider: str = "mock"
+    provider: str = "local"
 
 
 class WorkerDrainRequest(BaseModel):

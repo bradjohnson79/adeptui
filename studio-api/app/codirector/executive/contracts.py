@@ -75,7 +75,7 @@ class ImageGenerateOutput(BaseModel):
     assetId: str
     imageJobId: str
     panelId: Optional[str] = None
-    provider: str = "mock"
+    provider: str = "comfy"
     mockAdapter: bool = False
 
 
@@ -85,8 +85,8 @@ class ValidateInput(BaseModel):
     sceneId: Optional[str] = None
     planId: Optional[str] = None
     timelineItemId: Optional[str] = None
-    provider: str = "mock"
-    fixtureProfile: Optional[str] = "pass"
+    provider: str = "local"
+    fixtureProfile: Optional[str] = None
     referenceAssetId: Optional[str] = None
 
 
@@ -96,7 +96,7 @@ class ValidateOutput(BaseModel):
     score: float = 0.0
     passed: bool = False
     band: str = "correction-required"
-    provider: str = "mock"
+    provider: str = "local"
     # visualValidationPending is cleared only by M2.5 VisionEngine when planId is set.
     visualValidationPendingCleared: bool = False
 
