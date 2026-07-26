@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adept-ui-v1.1-product-approved-sandbox-lock.schema.json",
+  "title": "Adept UI v1.1 Product-Approved Sandbox Lock (M2.10.2)",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "lockId",
+    "approvalStatus",
+    "approvalScope",
+    "approvalDate",
+    "sourceProposalPath",
+    "sourceCandidateRegistryPath",
+    "sourceCandidateRegistrySha256",
+    "providerManifestPath",
+    "providerManifestSha256",
+    "candidatesByCapability",
+    "productionApproved",
+    "installationAuthorized",
+    "executionAuthorized",
+    "weightDownloadAuthorized",
+    "decisionProvenance",
+    "rejectionList",
+    "notes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "lockId": {
+      "type": "string"
+    },
+    "approvalStatus": {
+      "type": "string"
+    },
+    "approvalScope": {
+      "type": "string"
+    },
+    "approvalDate": {
+      "type": "string"
+    },
+    "sourceProposalPath": {
+      "type": "string"
+    },
+    "sourceCandidateRegistryPath": {
+      "type": "string"
+    },
+    "sourceCandidateRegistrySha256": {
+      "type": "string"
+    },
+    "providerManifestPath": {
+      "type": "string"
+    },
+    "providerManifestSha256": {
+      "type": "string"
+    },
+    "productApprovedShortlistPath": {
+      "type": "string"
+    },
+    "productApprovedShortlistSha256": {
+      "type": "string"
+    },
+    "candidatesByCapability": {
+      "type": "object",
+      "required": [
+        "audio.dialogue.generate",
+        "audio.sfx.generate",
+        "audio.music.generate"
+      ]
+    },
+    "productionApproved": {
+      "type": "boolean",
+      "const": false
+    },
+    "installationAuthorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "executionAuthorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "weightDownloadAuthorized": {
+      "type": "boolean",
+      "const": false
+    },
+    "decisionProvenance": {
+      "type": "object"
+    },
+    "rejectionList": {
+      "type": "array"
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}
