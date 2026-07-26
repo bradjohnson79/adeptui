@@ -355,6 +355,7 @@ Before claiming a capability is production-ready:
 ---
 
 ## Related docs
+- [m2.10-addon-integration-contracts.md](./m2.10-addon-integration-contracts.md) -- Add-on category contract readiness
 
 - [M2.8_ACCEPTANCE_REPORT.md](./M2.8_ACCEPTANCE_REPORT.md)
 - [M2.8_PHASE1_TASK_REPORT.md](./M2.8_PHASE1_TASK_REPORT.md)
