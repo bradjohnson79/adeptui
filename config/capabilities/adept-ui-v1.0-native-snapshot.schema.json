@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adept-ui-v1.0-native-snapshot.schema.json",
+  "title": "Adept UI v1.0 Native Capability Snapshot",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "snapshotId",
+    "status",
+    "source",
+    "capabilities"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "snapshotId": {
+      "type": "string"
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "spec_template_not_frozen",
+        "frozen"
+      ]
+    },
+    "freezeNote": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "const": "native"
+    },
+    "derivedFrom": {
+      "type": "string"
+    },
+    "milestoneContext": {
+      "type": "object"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "capabilityId",
+          "nativeProvider",
+          "version",
+          "supportedModels",
+          "jobHandler",
+          "validationOwner",
+          "approvalOwner",
+          "status",
+          "featureFlag",
+          "source"
+        ],
+        "properties": {
+          "capabilityId": {
+            "type": "string"
+          },
+          "nativeProvider": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "version": {
+            "type": "string"
+          },
+          "supportedModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "jobHandler": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "validationOwner": {
+            "type": "string"
+          },
+          "approvalOwner": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CONNECTED",
+              "PARTIAL"
+            ]
+          },
+          "performanceMetrics": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "featureFlag": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "const": "native"
+          },
+          "department": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

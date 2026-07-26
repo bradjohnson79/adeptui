@@ -1,6 +1,6 @@
 # Capability Contract Reference
 
-**Status:** Architecture specification — binding guidance for M2.9 native suite and M2.10 add-on registration.  
+**Status:** Architecture specification — binding guidance for M2.9 native suite (Accepted with limitations) and M2.10 Capability Expansion.  
 **Branch context:** Written after M2.8 Capability Intelligence (conditionally accepted).  
 **Runtime source of truth:** `studio-api/app/capabilities/registry.py` + live evaluation in `service.py`.  
 **Versioned native baseline (comparison):** `config/capabilities/adept-ui-v1.0-native.json`
@@ -105,7 +105,7 @@ Wire shape: `CapabilityOut` (camelCase) via `GET /api/capabilities` — see audi
 
 ### 2.5 Versioned native baseline record
 
-For M2.10 comparison, each native capability should also appear (or be intentionally absent) in `config/capabilities/adept-ui-v1.0-native.json` with:
+For M2.10 Capability Expansion comparison, freeze the Native Capability Snapshot ([m2.10-native-capability-snapshot.md](./m2.10-native-capability-snapshot.md)) after READY FOR M2.10. Until then, each native capability should also appear (or be intentionally absent) in `config/capabilities/adept-ui-v1.0-native.json` with:
 
 ```text
 capabilityId, displayName, department, status (accepted|conditional|unavailable),
@@ -361,4 +361,6 @@ Before claiming a capability is production-ready:
 - [M2.8_PHASE1_TASK_REPORT.md](./M2.8_PHASE1_TASK_REPORT.md)
 - [m2.9-prompt.md](./m2.9-prompt.md)
 - [m2.10-prompt.md](./m2.10-prompt.md)
+- [m2.10-native-capability-snapshot.md](./m2.10-native-capability-snapshot.md) — pre-discovery frozen inventory (spec/template until READY)
+- [M2.9_ACCEPTED_WITH_LIMITATIONS.md](./M2.9_ACCEPTED_WITH_LIMITATIONS.md)
 - [m2.9-readiness-remediation.md](./m2.9-readiness-remediation.md)
