@@ -152,6 +152,7 @@ export interface Health {
     intelligenceEnabled?: boolean;
     visionValidationEnabled?: boolean;
     productionExecutiveEnabled?: boolean;
+    productionIntelligenceEnabled?: boolean;
     modelRadarEnabled?: boolean;
     sandboxRuntimeEnabled?: boolean;
     virtualStageEnabled?: boolean;

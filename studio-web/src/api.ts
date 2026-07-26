@@ -841,6 +841,7 @@ export const api = {
       intelligenceEnabled?: boolean;
       visionValidationEnabled?: boolean;
       productionExecutiveEnabled?: boolean;
+      productionIntelligenceEnabled?: boolean;
       modelRadarEnabled?: boolean;
       sandboxRuntimeEnabled?: boolean;
       virtualStageEnabled?: boolean;
@@ -2236,4 +2237,24 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+  m211Status: () => req<Record<string, unknown>>("/api/codirector/m211/status"),
+  m211Dashboard: (projectId: string) =>
+    req<any>(`/api/codirector/m211/dashboard?projectId=${encodeURIComponent(projectId)}`),
+  m211Orchestrate: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m211/orchestrate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  m211MemoryList: (projectId: string, sceneId?: string) =>
+    req<{ items: any[]; count: number }>(
+      `/api/codirector/m211/memory?projectId=${encodeURIComponent(projectId)}` +
+      (sceneId ? `&sceneId=${encodeURIComponent(sceneId)}` : ""),
+    ),
+  m211Traces: (projectId: string, limit = 50) =>
+    req<{ traces: any[]; count: number }>(
+      `/api/codirector/m211/traces?projectId=${encodeURIComponent(projectId)}&limit=${limit}`,
+    ),
+  m211Specialists: () => req<{ count: number; specialists: any[] }>("/api/codirector/m211/specialists"),
+
 };
