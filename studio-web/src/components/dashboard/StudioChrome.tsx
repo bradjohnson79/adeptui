@@ -79,6 +79,7 @@ export function SystemStatusStrip({
   const registry = op?.registry;
   const intelligenceOn = Boolean(op?.intelligenceEnabled);
   const visionOn = Boolean(op?.visionValidationEnabled);
+  const executiveOn = Boolean(op?.productionExecutiveEnabled);
   const packBlockers = op?.packBlockers?.length ?? 0;
 
   return (
@@ -119,6 +120,13 @@ export function SystemStatusStrip({
       >
         Vision {visionOn ? "On" : "Off"}
       </span>
+      <span
+        className={`status-badge ${executiveOn ? "ok" : "warn"}`}
+        data-testid="status-production-executive"
+        title="STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1"
+      >
+        Exec {executiveOn ? "On" : "Off"}
+      </span>
       <span className="status-badge ok" data-testid="status-specialists">
         {op?.specialistCount ?? "…"} Specialists
       </span>
@@ -149,6 +157,21 @@ export function SystemStatusStrip({
   );
 }
 
+
+function useM28NavFlags() {
+  const [flags, setFlags] = useState<{
+    modelRadarEnabled?: boolean;
+    virtualStageEnabled?: boolean;
+  } | null>(null);
+  useEffect(() => {
+    api
+      .health()
+      .then((h) => setFlags(h?.operator || {}))
+      .catch(() => setFlags({}));
+  }, []);
+  return flags;
+}
+
 export function StudioChrome({
   variant = "home",
   projectName,
@@ -176,6 +199,7 @@ export function StudioChrome({
   projectId?: string;
   queuedJobs?: number | null;
 }) {
+  const healthFlags = useM28NavFlags();
   return (
     <header className="studio-chrome topbar">
       <div className="studio-chrome-left">
@@ -203,6 +227,16 @@ export function StudioChrome({
         <Link to="/source-manager" className="chrome-nav-link">
           Source Manager
         </Link>
+        {Boolean(healthFlags?.modelRadarEnabled) && (
+          <Link to="/model-radar" className="chrome-nav-link" data-testid="nav-model-radar">
+            Model Radar
+          </Link>
+        )}
+        {Boolean(healthFlags?.virtualStageEnabled) && (
+          <Link to="/virtual-stage" className="chrome-nav-link" data-testid="nav-virtual-stage">
+            Virtual Stage
+          </Link>
+        )}
         {onSearchChange && (
           <label className="chrome-search">
             <span className="chrome-search-icon" aria-hidden="true">

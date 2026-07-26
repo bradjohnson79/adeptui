@@ -90,6 +90,12 @@ async def lifespan(_: FastAPI):
     _install_exception_hooks()
     init_db()
     try:
+        from .codirector.m28.db import ensure_m28_tables
+
+        ensure_m28_tables()
+    except Exception:
+        logger.exception("M2.8 table ensure failed")
+    try:
         ensure_master_sheet_tables()
     except Exception:
         pass
@@ -128,7 +134,33 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.exception("Download queue recovery failed")
     job_queue.start()
+
+    exec_worker_started = False
+    try:
+        from .feature_flags import FeatureFlags
+        from .codirector.executive.worker import production_worker
+
+        flags = FeatureFlags.from_env()
+        if flags.production_executive_v1:
+            # Configurable poll via STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL
+            production_worker.poll_interval = float(
+                __import__("os").environ.get("STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL", production_worker.poll_interval)
+                or production_worker.poll_interval
+            )
+            production_worker.start()  # recover_running_jobs inside start
+            exec_worker_started = True
+            logger.info("Production Executive worker started (single-process)")
+    except Exception:
+        logger.exception("Production Executive worker failed to start")
+
     yield
+
+    if exec_worker_started:
+        try:
+            from .codirector.executive.worker import production_worker
+            production_worker.stop()
+        except Exception:
+            logger.exception("Production Executive worker stop failed")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

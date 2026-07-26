@@ -6,9 +6,8 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ..imagegen_workflows import build_img2img_edit_stub, build_txt2img_workflow
 from ..providers import ProviderKind
-from .image_tools import build_zimage_ref_workflow
+from .image_tools import build_zimage_ref_workflow, build_zimage_txt2img_workflow
 from .lipsync_builder import build_latentsync_workflow
 from .ltx_builder import build_ltx_scene_workflow, build_ltx_simple_i2v
 from .ltx_ingredients_compiler import compile_ingredients_workflow
@@ -214,23 +213,35 @@ WORKFLOW_INVENTORY = (
     ),
     _entry(
         key="image.txt2img",
-        family="imagegen",
+        family="zimage",
         modality="image",
-        builder=build_txt2img_workflow,
-        builder_path="app.imagegen_workflows:build_txt2img_workflow",
+        builder=build_zimage_txt2img_workflow,
+        builder_path="app.workflows.image_tools:build_zimage_txt2img_workflow",
         capabilities=("text_to_image",),
-        required_inputs=("checkpoint", "positive", "negative", "width", "height", "seed"),
-        required_node_types=("CheckpointLoaderSimple", "KSampler", "SaveImage"),
+        required_inputs=(
+            "unet_name", "clip_name", "vae_name", "positive", "negative", "width", "height", "seed",
+        ),
+        required_node_types=(
+            "UNETLoader",
+            "CLIPLoader",
+            "VAELoader",
+            "ModelSamplingAuraFlow",
+            "TextEncodeZImageOmni",
+            "KSampler",
+            "SaveImage",
+        ),
     ),
     _entry(
         key="image.img2img_edit",
-        family="imagegen",
+        family="zimage",
         modality="image",
-        builder=build_img2img_edit_stub,
-        builder_path="app.imagegen_workflows:build_img2img_edit_stub",
-        capabilities=("image_to_image", "editing"),
-        required_inputs=("checkpoint", "positive", "negative", "image_name"),
-        required_node_types=("LoadImage", "VAEEncode", "KSampler", "SaveImage"),
+        builder=build_zimage_ref_workflow,
+        builder_path="app.workflows.image_tools:build_zimage_ref_workflow",
+        capabilities=("image_to_image", "editing", "reference_image"),
+        required_inputs=(
+            "unet_name", "clip_name", "vae_name", "clip_vision_name", "reference_image", "prompt",
+        ),
+        required_node_types=("TextEncodeZImageOmni", "LoadImage", "KSampler", "SaveImage"),
     ),
     _entry(
         key="image.zimage_reference",

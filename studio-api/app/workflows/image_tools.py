@@ -97,6 +97,88 @@ CAMERA_ANGLE_VIEWS: list[dict[str, str]] = [
 ]
 
 
+def build_zimage_txt2img_workflow(
+    *,
+    unet_name: str,
+    clip_name: str,
+    vae_name: str,
+    positive: str,
+    negative: str = "blurry, deformed, watermark, text, logo, extra limbs",
+    width: int = 1024,
+    height: int = 1024,
+    seed: int = 42,
+    steps: int = 8,
+    cfg: float = 1.0,
+    filename_prefix: str = "studio/zimg_txt2img",
+) -> dict[str, Any]:
+    """
+    Production Z-Image Turbo text-to-image graph.
+
+    Uses UNETLoader + CLIPLoader(lumina2) + TextEncodeZImageOmni — never
+    CheckpointLoaderSimple (diffusion-only UNET is not a full checkpoint).
+    """
+    return {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": clip_name, "type": "lumina2"},
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": vae_name},
+        },
+        "4": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["1", 0], "shift": 3.0},
+        },
+        "5": {
+            "class_type": "TextEncodeZImageOmni",
+            "inputs": {
+                "clip": ["2", 0],
+                "prompt": positive,
+                "auto_resize_images": True,
+            },
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {
+                "text": negative or "blurry, low quality, watermark",
+                "clip": ["2", 0],
+            },
+        },
+        "7": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {"width": width, "height": height, "batch_size": 1},
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["4", 0],
+                "seed": seed if seed >= 0 else 42,
+                "steps": max(4, steps),
+                "cfg": cfg,
+                "sampler_name": "euler",
+                "scheduler": "simple",
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["7", 0],
+                "denoise": 1.0,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+        },
+        "10": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["9", 0], "filename_prefix": filename_prefix},
+        },
+    }
+
+
 def build_zimage_ref_workflow(
     *,
     unet_name: str,

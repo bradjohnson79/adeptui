@@ -111,7 +111,9 @@ def _reported_installed_bytes(
             return 0
         return _filesystem_bytes(verification.path)
     if not verification.healthy:
-        return 0 if definition.verifier in ("ltx_file", "wan_files", "ic_lora_file") else definition.installed_bytes
+        return 0 if definition.verifier in (
+            "ltx_file", "wan_files", "zimage_files", "ic_lora_file"
+        ) else definition.installed_bytes
     return definition.installed_bytes
 
 
