@@ -18,7 +18,13 @@ def dependencies_satisfied(db: Session, job_id: str) -> bool:
 def dependencies_failed(db: Session, job_id: str) -> bool:
     deps = JobStore.dependency_statuses(db, job_id)
     return any(
-        d["status"] in (JobStatus.FAILED.value, JobStatus.CANCELLED.value) for d in deps
+        d["status"]
+        in (
+            JobStatus.FAILED.value,
+            JobStatus.CANCELLED.value,
+            JobStatus.BLOCKED.value,
+        )
+        for d in deps
     )
 
 
