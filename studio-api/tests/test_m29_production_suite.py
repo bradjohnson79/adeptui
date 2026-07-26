@@ -1,0 +1,263 @@
+"""M2.9 production suite unit/API tests (fixture mode)."""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+
+from app.db import Project, SessionLocal, init_db
+from app.feature_flags import FeatureFlags
+from app.migrations import DEFAULT_REGISTRY, M013, MigrationRunner
+
+
+M29_FLAGS = [
+    "STUDIO_FEATURE_IMAGE_PRODUCTION_V1",
+    "STUDIO_FEATURE_FRAME_PRODUCTION_V1",
+    "STUDIO_FEATURE_VIDEO_PRODUCTION_V1",
+    "STUDIO_FEATURE_DIRECTOR_TIMELINE_V1",
+    "STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1",
+    "STUDIO_FEATURE_AUDIO_PRODUCTION_V1",
+    "STUDIO_FEATURE_EDITING_PRODUCTION_V1",
+    "STUDIO_FEATURE_RENDER_PRODUCTION_V1",
+    "STUDIO_FEATURE_CODIRECTOR_PRODUCTION_CONTROL_V1",
+]
+
+
+@pytest.fixture()
+def enable_m29(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ADEPT_M29_FIXTURE_MODE", "1")
+    monkeypatch.setenv("STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1", "1")
+    for flag in M29_FLAGS:
+        monkeypatch.setenv(flag, "1")
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+    yield
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+
+
+@pytest.fixture()
+def db(enable_m29):
+    init_db()
+    from app.codirector.m29.db import ensure_m29_tables
+
+    ensure_m29_tables()
+    session = SessionLocal()
+    session.merge(Project(id="proj-m29", name="M29 Test"))
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture()
+def client(enable_m29):
+    from app.main import app
+
+    init_db()
+    from app.codirector.m29.db import ensure_m29_tables
+
+    ensure_m29_tables()
+    session = SessionLocal()
+    session.merge(Project(id="proj-m29", name="M29 Test"))
+    session.commit()
+    session.close()
+    return TestClient(app)
+
+
+def test_m29_flags_default_off():
+    flags = FeatureFlags.from_env({})
+    assert flags.image_production_v1 is False
+    assert flags.frame_production_v1 is False
+    assert flags.video_production_v1 is False
+    assert flags.director_timeline_v1 is False
+    assert flags.lipsync_production_v1 is False
+    assert flags.audio_production_v1 is False
+    assert flags.editing_production_v1 is False
+    assert flags.render_production_v1 is False
+    assert flags.codirector_production_control_v1 is False
+
+
+def test_m013_registered_after_m012():
+    revs = [m.revision for m in DEFAULT_REGISTRY.all()]
+    assert "M013" in revs
+    assert M013.revision == "M013"
+    assert revs.index("M012") < revs.index("M013")
+
+
+def test_m013_creates_tables(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'm013.db'}")
+    result = MigrationRunner(engine, DEFAULT_REGISTRY).apply_pending()
+    assert "M013" in result.applied
+    with engine.connect() as conn:
+        tables = {
+            row[0]
+            for row in conn.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "m29_asset_versions" in tables
+    assert "m29_frame_records" in tables
+    assert "m29_render_manifests" in tables
+    assert "m29_audio_cues" in tables
+
+
+def test_registry_m29_ids_unique():
+    from app.capabilities.registry import CAPABILITIES
+
+    ids = [c.id for c in CAPABILITIES]
+    assert len(ids) == len(set(ids))
+    required = {
+        "image.generate",
+        "image.reference.generate",
+        "image.image_to_image",
+        "image.inpaint",
+        "image.outpaint",
+        "image.variation",
+        "image.upscale",
+        "image.relight",
+        "image.validate",
+        "image.approve",
+        "image.publish_reference",
+        "frame.generate",
+        "frame.sequence.generate",
+        "frame.first.generate",
+        "frame.last.generate",
+        "frame.transition.generate",
+        "frame.replace",
+        "frame.validate",
+        "frame.approve",
+        "frame.bind_to_shot",
+        "video.generate",
+        "video.validate",
+        "audio.dialogue.generate",
+        "audio.sfx.generate",
+        "audio.music.generate",
+        "audio.validate",
+        "mouth.rectangle.generate",
+        "mouth.track.generate",
+        "lipsync.generate",
+        "lipsync.validate",
+        "scene.render",
+        "timeline.render",
+    }
+    present = set(ids)
+    missing = required - present
+    assert not missing, missing
+    for c in CAPABILITIES:
+        if c.id in required:
+            assert c.baseline_status.value != "production_ready"
+
+
+def test_flags_off_api_404(monkeypatch):
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    for flag in M29_FLAGS:
+        monkeypatch.setenv(flag, "0")
+    import app.feature_flags as ff
+
+    ff.feature_flags = FeatureFlags.from_env(os.environ)
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/codirector/m29/image/generate",
+        json={"projectId": "proj-m29", "prompt": "x"},
+    )
+    assert res.status_code == 404
+
+
+def test_image_fixture_generate_and_approve(db):
+    from app.codirector.m29.image.service import ImageService
+
+    out = ImageService.generate(db, project_id="proj-m29", prompt="fixture still")
+    assert out.get("fixture") is True
+    assert out.get("assetId")
+    assert out.get("versionId")
+    approved = ImageService.approve(db, out["versionId"], actor="tester")
+    assert approved["status"] == "approved"
+
+
+def test_timeline_approval_boundary(db):
+    from app.codirector.m29.timeline.service import TimelineService
+
+    prop = TimelineService.propose(db, project_id="proj-m29", notes="place clips")
+    assert prop["status"] == "pending"
+    with pytest.raises(PermissionError):
+        TimelineService.apply(db, prop["id"])
+    TimelineService.approve(db, prop["id"], actor="tester")
+    applied = TimelineService.apply(db, prop["id"], actor="tester")
+    assert applied["status"] == "applied"
+
+
+def test_edit_apply_requires_approval(db):
+    from app.codirector.m29.editing.service import EditingService
+
+    with pytest.raises(PermissionError):
+        EditingService.apply_edit(
+            db, project_id="proj-m29", ops=[{"op": "trim"}], approved=False
+        )
+
+
+def test_fixture_jobs_via_api(client):
+    img = client.post(
+        "/api/codirector/m29/image/generate",
+        json={"projectId": "proj-m29", "prompt": "api still"},
+    )
+    assert img.status_code == 200, img.text
+    assert img.json()["fixture"] is True
+
+    frames = client.post(
+        "/api/codirector/m29/frames/generate",
+        json={"projectId": "proj-m29", "count": 2, "sequence": True, "shotId": "s1"},
+    )
+    assert frames.status_code == 200
+    assert len(frames.json()["frames"]) == 2
+
+    video = client.post(
+        "/api/codirector/m29/video/generate",
+        json={"projectId": "proj-m29", "prompt": "dolly", "mode": "text_to_video"},
+    )
+    assert video.status_code == 200
+
+    audio = client.post(
+        "/api/codirector/m29/audio/generate",
+        json={"projectId": "proj-m29", "kind": "sfx", "prompt": "door"},
+    )
+    assert audio.status_code == 200
+
+    lips = client.post(
+        "/api/codirector/m29/lipsync/generate",
+        json={"projectId": "proj-m29"},
+    )
+    assert lips.status_code == 200
+
+    rend = client.post(
+        "/api/codirector/m29/render",
+        json={"projectId": "proj-m29", "kind": "timeline_render"},
+    )
+    assert rend.status_code == 200
+
+    ctrl = client.post(
+        "/api/codirector/m29/control/decompose",
+        json={
+            "projectId": "proj-m29",
+            "requestText": "generate image and video then render timeline",
+            "enqueue": True,
+        },
+    )
+    assert ctrl.status_code == 200
+    body = ctrl.json()
+    assert body["requiresApproval"] is True
+    assert len(body["steps"]) >= 2
+
+
+def test_health_exposes_m29_flags(client):
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    op = health.json().get("operator") or {}
+    assert op.get("imageProductionEnabled") is True
+    assert op.get("codirectorProductionControlEnabled") is True
