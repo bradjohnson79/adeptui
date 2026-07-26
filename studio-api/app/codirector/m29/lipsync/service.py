@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..fixtures import fixture_lipsync_result, fixture_mouth_track_result
-from ..store import create_asset_version, enqueue_executive_job
+from ..providers import run_lipsync, run_mouth_track, wants_fixture
+from ..store import create_asset_version, enqueue_executive_job, set_asset_status
 
 
 class LipsyncService:
@@ -58,7 +59,21 @@ class LipsyncService:
             scene_id=scene_id,
             owner=owner,
         )
-        return {"jobId": job.id, "fixture": False, "projectId": project_id, "status": "queued"}
+        ver = create_asset_version(
+            db,
+            project_id=project_id,
+            department="lipsync",
+            status="draft",
+            job_id=job.id,
+            metadata={"audioAssetId": audio_asset_id, "videoAssetId": video_asset_id},
+        )
+        return {
+            "jobId": job.id,
+            "versionId": ver["id"],
+            "fixture": False,
+            "projectId": project_id,
+            "status": "queued",
+        }
 
     @staticmethod
     def mouth_track(
@@ -95,25 +110,42 @@ class LipsyncService:
 
     @staticmethod
     def mouth_rectangle(db: Session, *, project_id: str, **params: Any) -> dict[str, Any]:
-        result = (
-            fixture_lipsync_result(params)
-            if fixture_mode_enabled()
-            else {
-                "rectangles": params.get("rectangles")
-                or [{"t": 0.0, "x": 0.4, "y": 0.55, "w": 0.2, "h": 0.12}],
-                "provider": "m29_local",
-                "fixture": False,
-                "status": "generated",
-            }
+        if fixture_mode_enabled():
+            result = fixture_lipsync_result(params)
+            result["projectId"] = project_id
+            result["capability"] = "mouth.rectangle.generate"
+            return result
+        # Deterministic local edit/persist of rectangles (no generative provider required).
+        rects = params.get("rectangles") or [{"t": 0.0, "x": 0.4, "y": 0.55, "w": 0.2, "h": 0.12}]
+        ver = create_asset_version(
+            db,
+            project_id=project_id,
+            department="mouth",
+            status="generated",
+            metadata={"rectangles": rects, "provider": "m29_local"},
         )
-        result["projectId"] = project_id
-        result["capability"] = "mouth.rectangle.generate"
-        return result
+        return {
+            "rectangles": rects,
+            "provider": "m29_local",
+            "fixture": False,
+            "status": "generated",
+            "projectId": project_id,
+            "versionId": ver["id"],
+            "capability": "mouth.rectangle.generate",
+        }
 
     @staticmethod
     def execute_lipsync_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        return fixture_lipsync_result(payload)
+        if wants_fixture(payload):
+            return fixture_lipsync_result(payload)
+        result = run_lipsync(db, project_id=project_id, payload=payload)
+        if payload.get("versionId"):
+            set_asset_status(db, payload["versionId"], "generated")
+            result["versionId"] = payload["versionId"]
+        return result
 
     @staticmethod
     def execute_mouth_track_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        return fixture_mouth_track_result(payload)
+        if wants_fixture(payload):
+            return fixture_mouth_track_result(payload)
+        return run_mouth_track(db, project_id=project_id, payload=payload)

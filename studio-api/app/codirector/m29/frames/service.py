@@ -1,8 +1,9 @@
-"""M2.9 frame production service."""
+"""M2.9 frame production service — reuses image provider for still frames."""
 
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,7 @@ from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..db import ensure_m29_tables
 from ..fixtures import fixture_frame_result
+from ..providers import run_imagegen, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job
 
 
@@ -100,9 +102,77 @@ class FramesService:
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        if payload.get("frames"):
-            return {"frames": payload["frames"], "fixture": True, "status": "generated"}
-        return fixture_frame_result(payload)
+        ensure_m29_tables()
+        if wants_fixture(payload):
+            if payload.get("frames"):
+                return {"frames": payload["frames"], "fixture": True, "status": "generated"}
+            return fixture_frame_result(payload)
+
+        count = int(payload.get("count") or 1)
+        frame_type = payload.get("frameType") or "production_frame"
+        shot_id = payload.get("shotId")
+        prompt = payload.get("prompt") or f"M2.9 {frame_type}"
+        records: list[dict[str, Any]] = []
+        for i in range(count):
+            img = run_imagegen(
+                db,
+                project_id=project_id,
+                payload={
+                    "prompt": f"{prompt} (frame {i + 1}/{count})",
+                    "operation": "generate",
+                    "tag": "m29_frame",
+                    "labels": ["m29", "frame", frame_type],
+                    "width": payload.get("width") or 1280,
+                    "height": payload.get("height") or 720,
+                    "timeoutSec": payload.get("timeoutSec"),
+                },
+                scene_id=payload.get("sceneId"),
+            )
+            ver = create_asset_version(
+                db,
+                project_id=project_id,
+                department="frame",
+                status="generated",
+                asset_id=img["assetId"],
+                metadata={"frameType": frame_type, "provider": "comfy", "order": i},
+            )
+            fid = f"frame-{uuid.uuid4().hex[:10]}"
+            db.execute(
+                text(
+                    "INSERT INTO m29_frame_records "
+                    "(id, project_id, shot_id, frame_type, order_index, asset_id, version_id, "
+                    "metadata_json, created_at) "
+                    "VALUES (:id, :pid, :sid, :ft, :ord, :aid, :vid, :meta, :c)"
+                ),
+                {
+                    "id": fid,
+                    "pid": project_id,
+                    "sid": shot_id,
+                    "ft": frame_type,
+                    "ord": i,
+                    "aid": img["assetId"],
+                    "vid": ver["id"],
+                    "meta": json.dumps({"provider": "comfy"}),
+                    "c": _now(),
+                },
+            )
+            records.append(
+                {
+                    "frameId": fid,
+                    "assetId": img["assetId"],
+                    "versionId": ver["id"],
+                    "frameType": frame_type,
+                    "order": i,
+                    "shotId": shot_id,
+                }
+            )
+        db.commit()
+        return {
+            "frames": records,
+            "provider": "comfy",
+            "fixture": False,
+            "status": "generated",
+        }
 
     @staticmethod
     def list_frames(db: Session, project_id: str, shot_id: str | None = None) -> list[dict[str, Any]]:

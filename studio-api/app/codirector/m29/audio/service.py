@@ -1,4 +1,8 @@
-"""M2.9 audio production service."""
+"""M2.9 audio production service.
+
+Generate (dialogue/sfx/music): no native TTS/SFX generator on platform — fixture CI only.
+Process (normalize/cleanup): real ffmpeg path when asset files exist.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..db import ensure_m29_tables
 from ..fixtures import fixture_audio_result
+from ..providers import ProviderUnavailable, process_audio_ffmpeg, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job
 
 
@@ -80,12 +85,21 @@ class AudioService:
                 db,
                 project_id=project_id,
                 job_type=JobType.AUDIO_GENERATE,
-                payload={**payload, "assetId": result["assetId"], "cueId": cue_id, "fixtureComplete": True},
+                payload={
+                    **payload,
+                    "assetId": result["assetId"],
+                    "cueId": cue_id,
+                    "fixtureComplete": True,
+                },
                 scene_id=scene_id,
                 owner=owner,
             )
-            result.update({"jobId": job.id, "cueId": cue_id, "versionId": ver["id"], "projectId": project_id})
+            result.update(
+                {"jobId": job.id, "cueId": cue_id, "versionId": ver["id"], "projectId": project_id}
+            )
             return result
+
+        # No generative audio provider on native platform — enqueue job that will Block honestly.
         job = enqueue_executive_job(
             db,
             project_id=project_id,
@@ -94,7 +108,36 @@ class AudioService:
             scene_id=scene_id,
             owner=owner,
         )
-        return {"jobId": job.id, "kind": kind, "fixture": False, "projectId": project_id, "status": "queued"}
+        cue_id = uuid.uuid4().hex
+        db.execute(
+            text(
+                "INSERT INTO m29_audio_cues "
+                "(id, project_id, scene_id, cue_kind, status, asset_id, start_sec, duration_sec, "
+                "metadata_json, created_at) "
+                "VALUES (:id, :pid, :sid, :kind, :status, NULL, :start, :dur, :meta, :c)"
+            ),
+            {
+                "id": cue_id,
+                "pid": project_id,
+                "sid": scene_id,
+                "kind": kind,
+                "status": "draft",
+                "start": start_sec,
+                "dur": duration_sec,
+                "meta": json.dumps({"prompt": prompt, "awaitingProvider": True}),
+                "c": _now(),
+            },
+        )
+        db.commit()
+        return {
+            "jobId": job.id,
+            "cueId": cue_id,
+            "kind": kind,
+            "fixture": False,
+            "projectId": project_id,
+            "status": "queued",
+            "providerMissing": True,
+        }
 
     @staticmethod
     def process(
@@ -107,6 +150,8 @@ class AudioService:
         owner: str = "user",
     ) -> dict[str, Any]:
         payload = {"assetId": asset_id, "ops": ops or [], "m29": True, "process": True}
+        if fixture_mode_enabled():
+            payload["fixtureComplete"] = True
         job = enqueue_executive_job(
             db,
             project_id=project_id,
@@ -127,13 +172,24 @@ class AudioService:
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
         if payload.get("process"):
-            return {
-                "assetId": payload.get("assetId"),
-                "ops": payload.get("ops") or [],
-                "fixture": fixture_mode_enabled(),
-                "status": "processed",
-            }
-        return fixture_audio_result(payload)
+            if wants_fixture(payload):
+                return {
+                    "assetId": payload.get("assetId"),
+                    "ops": payload.get("ops") or [],
+                    "fixture": True,
+                    "status": "processed",
+                }
+            return process_audio_ffmpeg(db, project_id=project_id, payload=payload)
+
+        if wants_fixture(payload):
+            return fixture_audio_result(payload)
+
+        # Honest: no dialogue/sfx/music generative provider on native platform.
+        raise ProviderUnavailable(
+            "No native generative audio provider (TTS/SFX/music) is installed; "
+            "audio.generate remains unavailable outside ADEPT_M29_FIXTURE_MODE. "
+            "Use audio_process (ffmpeg) for normalize/cleanup, or upload stems."
+        )
 
     @staticmethod
     def list_cues(db: Session, project_id: str) -> list[dict[str, Any]]:
@@ -160,3 +216,79 @@ class AudioService:
             }
             for r in rows
         ]
+
+    @staticmethod
+    def place_cue(
+        db: Session,
+        *,
+        project_id: str,
+        kind: str,
+        asset_id: str,
+        start_sec: float = 0.0,
+        duration_sec: float = 2.0,
+        scene_id: str | None = None,
+        volume: float = 1.0,
+        ducking: bool = False,
+    ) -> dict[str, Any]:
+        """Deterministic cue placement onto m29_audio_cues (+ optional director timeline)."""
+        ensure_m29_tables()
+        cue_id = uuid.uuid4().hex
+        db.execute(
+            text(
+                "INSERT INTO m29_audio_cues "
+                "(id, project_id, scene_id, cue_kind, status, asset_id, start_sec, duration_sec, "
+                "metadata_json, created_at) "
+                "VALUES (:id, :pid, :sid, :kind, :status, :aid, :start, :dur, :meta, :c)"
+            ),
+            {
+                "id": cue_id,
+                "pid": project_id,
+                "sid": scene_id,
+                "kind": kind,
+                "status": "placed",
+                "aid": asset_id,
+                "start": start_sec,
+                "dur": duration_sec,
+                "meta": json.dumps({"volume": volume, "ducking": ducking, "fixture": False}),
+                "c": _now(),
+            },
+        )
+        db.commit()
+        if scene_id:
+            from ....db import Scene
+            from ....director_timeline import (
+                TimelineClip,
+                dumps_director_timeline,
+                parse_director_timeline,
+            )
+
+            scene = db.get(Scene, scene_id)
+            if scene and scene.project_id == project_id:
+                tl = parse_director_timeline(
+                    scene.director_json,
+                    fallback_duration=float(scene.duration_sec or 5),
+                    fallback_prompt=scene.prompt or "",
+                )
+                clip = TimelineClip(
+                    asset_id=asset_id,
+                    start=start_sec,
+                    length=duration_sec,
+                    volume=volume,
+                    label=kind,
+                )
+                if kind == "sfx":
+                    tl.sfx_clips.append(clip)
+                else:
+                    tl.audio_clips.append(clip)
+                scene.director_json = dumps_director_timeline(tl)
+                db.commit()
+        return {
+            "cueId": cue_id,
+            "kind": kind,
+            "assetId": asset_id,
+            "startSec": start_sec,
+            "durationSec": duration_sec,
+            "status": "placed",
+            "fixture": False,
+            "projectId": project_id,
+        }

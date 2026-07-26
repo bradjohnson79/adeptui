@@ -49,7 +49,11 @@ class ControlService:
     ) -> dict[str, Any]:
         ensure_m29_tables()
         plan = fixture_control_plan(request_text)
-        plan_id = plan["planId"]
+        # Mark plan provenance: deterministic planner (not LLM discovery).
+        plan["planner"] = "m29_deterministic"
+        plan["fixture"] = fixture_mode_enabled()
+        plan_id = plan.get("planId") or uuid.uuid4().hex
+        plan["planId"] = plan_id
         db.execute(
             text(
                 "INSERT INTO m29_control_plans "
@@ -67,15 +71,15 @@ class ControlService:
         )
         db.commit()
         jobs: list[dict[str, Any]] = []
-        if enqueue and fixture_mode_enabled():
-            # Deterministic enqueue of proposed steps (still approval-aware for edit/timeline).
+        if enqueue:
             for step in plan["steps"]:
                 jt = _JOB_TYPE_MAP.get(step["jobType"])
                 if jt is None:
                     continue
                 payload = dict(step.get("payload") or {})
                 payload["m29"] = True
-                payload["fixtureComplete"] = True
+                if fixture_mode_enabled():
+                    payload["fixtureComplete"] = True
                 if jt == JobType.EDIT_APPLY:
                     payload["approved"] = False  # never silent apply
                 job = enqueue_executive_job(
@@ -86,7 +90,18 @@ class ControlService:
                     scene_id=scene_id,
                     owner=owner,
                 )
-                jobs.append({"jobId": job.id, "jobType": step["jobType"], "capability": step["capability"]})
+                jobs.append(
+                    {
+                        "jobId": job.id,
+                        "jobType": step["jobType"],
+                        "capability": step["capability"],
+                    }
+                )
+            db.execute(
+                text("UPDATE m29_control_plans SET status = :s WHERE id = :id"),
+                {"s": "enqueued", "id": plan_id},
+            )
+            db.commit()
         return {
             "planId": plan_id,
             "projectId": project_id,
@@ -95,7 +110,7 @@ class ControlService:
             "jobs": jobs,
             "requiresApproval": True,
             "fixture": fixture_mode_enabled(),
-            "status": "proposed",
+            "status": "enqueued" if jobs else "proposed",
         }
 
     @staticmethod
@@ -120,3 +135,17 @@ class ControlService:
             "createdAt": row["created_at"],
             "requiresApproval": True,
         }
+
+    @staticmethod
+    def resume(db: Session, plan_id: str, *, owner: str = "user") -> dict[str, Any]:
+        """Resume a proposed/enqueued plan by enqueueing remaining non-gated steps."""
+        plan = ControlService.get_plan(db, plan_id)
+        if not plan:
+            raise KeyError(plan_id)
+        return ControlService.decompose(
+            db,
+            project_id=plan["projectId"],
+            request_text=plan["requestText"],
+            enqueue=True,
+            owner=owner,
+        )

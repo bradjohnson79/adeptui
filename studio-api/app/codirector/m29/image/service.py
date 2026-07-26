@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..fixtures import fixture_image_result
+from ..providers import run_imagegen, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job, set_asset_status, _now
 
 
@@ -41,7 +42,12 @@ class ImageService:
                 db,
                 project_id=project_id,
                 job_type=JobType.IMAGE_GENERATE,
-                payload={**payload, "assetId": result["assetId"], "versionId": ver["id"], "fixtureComplete": True},
+                payload={
+                    **payload,
+                    "assetId": result["assetId"],
+                    "versionId": ver["id"],
+                    "fixtureComplete": True,
+                },
                 scene_id=scene_id,
                 owner=owner,
             )
@@ -76,7 +82,8 @@ class ImageService:
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        if payload.get("fixtureComplete") or fixture_mode_enabled() or payload.get("m29"):
+        # CI fixture path only — never treat m29=True alone as fixture.
+        if wants_fixture(payload):
             if payload.get("assetId") and payload.get("fixtureComplete"):
                 result = fixture_image_result(payload)
                 if payload.get("versionId"):
@@ -97,14 +104,30 @@ class ImageService:
                 )
                 result["versionId"] = ver["id"]
             return result
-        return {
-            "assetId": payload.get("assetId"),
-            "operation": payload.get("operation") or "generate",
-            "provider": payload.get("provider") or "comfy",
-            "fixture": False,
-            "status": "generated" if payload.get("assetId") else "draft",
-            "delegated": True,
-        }
+
+        result = run_imagegen(db, project_id=project_id, payload=payload)
+        if payload.get("versionId"):
+            set_asset_status(db, payload["versionId"], "generated")
+            # Bind real asset id onto the version row (no silent overwrite of other versions).
+            db.execute(
+                text(
+                    "UPDATE m29_asset_versions SET asset_id = :aid, updated_at = :u WHERE id = :id"
+                ),
+                {"aid": result["assetId"], "u": _now(), "id": payload["versionId"]},
+            )
+            db.commit()
+            result["versionId"] = payload["versionId"]
+        else:
+            ver = create_asset_version(
+                db,
+                project_id=project_id,
+                department="image",
+                status="generated",
+                asset_id=result["assetId"],
+                metadata={"provider": result.get("provider"), **payload},
+            )
+            result["versionId"] = ver["id"]
+        return result
 
     @staticmethod
     def approve(db: Session, version_id: str, *, actor: str = "user") -> dict[str, Any]:

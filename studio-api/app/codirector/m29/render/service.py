@@ -14,7 +14,8 @@ from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..db import ensure_m29_tables
 from ..fixtures import fixture_render_result
-from ..store import create_asset_version, enqueue_executive_job
+from ..providers import run_render, wants_fixture
+from ..store import create_asset_version, enqueue_executive_job, set_asset_status
 
 
 def _now() -> str:
@@ -114,7 +115,14 @@ class RenderService:
                 },
             )
             db.commit()
-            result.update({"jobId": job.id, "manifestId": manifest_id, "versionId": ver["id"], "projectId": project_id})
+            result.update(
+                {
+                    "jobId": job.id,
+                    "manifestId": manifest_id,
+                    "versionId": ver["id"],
+                    "projectId": project_id,
+                }
+            )
             return result
         job = enqueue_executive_job(
             db,
@@ -142,7 +150,38 @@ class RenderService:
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        return fixture_render_result(payload)
+        if wants_fixture(payload):
+            return fixture_render_result(payload)
+        result = run_render(db, project_id=project_id, payload=payload)
+        manifest_id = payload.get("manifestId")
+        if manifest_id:
+            db.execute(
+                text(
+                    "UPDATE m29_render_manifests SET status = :s, asset_id = :a, updated_at = :u "
+                    "WHERE id = :id"
+                ),
+                {
+                    "s": "generated",
+                    "a": result["assetId"],
+                    "u": _now(),
+                    "id": manifest_id,
+                },
+            )
+            db.commit()
+        if payload.get("versionId"):
+            set_asset_status(db, payload["versionId"], "generated")
+            result["versionId"] = payload["versionId"]
+        else:
+            ver = create_asset_version(
+                db,
+                project_id=project_id,
+                department="render",
+                status="generated",
+                asset_id=result["assetId"],
+                metadata={"kind": payload.get("kind"), "provider": result.get("provider")},
+            )
+            result["versionId"] = ver["id"]
+        return result
 
     @staticmethod
     def get_manifest(db: Session, manifest_id: str) -> dict[str, Any] | None:

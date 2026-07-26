@@ -120,6 +120,19 @@ class TimelineProposeBody(BaseModel):
     sceneId: Optional[str] = None
     clips: Optional[list[dict[str, Any]]] = None
     notes: str = ""
+    bibleMutations: Optional[dict[str, Any]] = None
+    branch: Optional[str] = None
+
+
+class AudioPlaceCueBody(BaseModel):
+    projectId: str
+    kind: str = "sfx"
+    assetId: str
+    startSec: float = 0.0
+    durationSec: float = 2.0
+    sceneId: Optional[str] = None
+    volume: float = 1.0
+    ducking: bool = False
 
 
 class ActorBody(BaseModel):
@@ -315,6 +328,22 @@ def audio_process(body: AudioProcessBody, db: Session = Depends(get_db)) -> dict
     )
 
 
+@router.post("/audio/place-cue")
+def audio_place_cue(body: AudioPlaceCueBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require("audio_production_v1")
+    return AudioService.place_cue(
+        db,
+        project_id=body.projectId,
+        kind=body.kind,
+        asset_id=body.assetId,
+        start_sec=body.startSec,
+        duration_sec=body.durationSec,
+        scene_id=body.sceneId,
+        volume=body.volume,
+        ducking=body.ducking,
+    )
+
+
 @router.get("/audio/cues")
 def audio_cues(projectId: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("audio_production_v1")
@@ -363,6 +392,8 @@ def timeline_propose(body: TimelineProposeBody, db: Session = Depends(get_db)) -
         scene_id=body.sceneId,
         clips=body.clips,
         notes=body.notes,
+        bible_mutations=body.bibleMutations,
+        branch=body.branch,
     )
 
 
@@ -490,3 +521,13 @@ def control_get(plan_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     if not out:
         raise HTTPException(status_code=404, detail="plan not found")
     return out
+
+
+@router.post("/control/plans/{plan_id}/resume")
+def control_resume(plan_id: str, body: Optional[ActorBody] = None, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require("codirector_production_control_v1")
+    actor = body.actor if body else "user"
+    try:
+        return ControlService.resume(db, plan_id, owner=actor)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="plan not found") from None

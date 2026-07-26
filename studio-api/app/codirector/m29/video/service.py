@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..fixtures import fixture_video_result
+from ..providers import run_video, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job, set_asset_status
 
 
@@ -39,7 +40,12 @@ class VideoService:
                 db,
                 project_id=project_id,
                 job_type=JobType.VIDEO_GENERATE,
-                payload={**payload, "assetId": result["assetId"], "versionId": ver["id"], "fixtureComplete": True},
+                payload={
+                    **payload,
+                    "assetId": result["assetId"],
+                    "versionId": ver["id"],
+                    "fixtureComplete": True,
+                },
                 scene_id=scene_id,
                 owner=owner,
             )
@@ -73,11 +79,28 @@ class VideoService:
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:
-        result = fixture_video_result(payload)
+        if wants_fixture(payload):
+            result = fixture_video_result(payload)
+            if payload.get("versionId"):
+                try:
+                    set_asset_status(db, payload["versionId"], "generated")
+                except Exception:  # noqa: BLE001
+                    pass
+                result["versionId"] = payload["versionId"]
+            return result
+
+        result = run_video(db, project_id=project_id, payload=payload)
         if payload.get("versionId"):
-            try:
-                set_asset_status(db, payload["versionId"], "generated")
-            except Exception:
-                pass
+            set_asset_status(db, payload["versionId"], "generated")
             result["versionId"] = payload["versionId"]
+        else:
+            ver = create_asset_version(
+                db,
+                project_id=project_id,
+                department="video",
+                status="generated",
+                asset_id=result["assetId"],
+                metadata={"provider": result.get("provider"), **payload},
+            )
+            result["versionId"] = ver["id"]
         return result

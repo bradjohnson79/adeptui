@@ -992,7 +992,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         read_only=False,
         dependencies=("generation.image.queue",),
         http_ref="POST /api/codirector/m29/image/generate",
-        baseline_reason="Flag-gated; ADEPT_M29_FIXTURE_MODE for CI; not production_ready.",
+        baseline_reason="Flag-gated; real Comfy path via m29 providers; fixture CI fallback; not production_ready.",
     ),
     _d(
         id="image.reference.generate",
@@ -1103,7 +1103,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         summary="Dedicated frame production records + executive jobs.",
         read_only=False,
         http_ref="POST /api/codirector/m29/frames/generate",
-        baseline_reason="Flag-gated; fixture path for CI.",
+        baseline_reason="Flag-gated; frame path reuses Comfy imagegen; fixture CI fallback; not production_ready.",
     ),
     _d(
         id="frame.sequence.generate",
@@ -1192,7 +1192,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         summary="Text/image-to-video via m29 (mode param covers t2v/i2v).",
         read_only=False,
         http_ref="POST /api/codirector/m29/video/generate",
-        baseline_reason="Flag-gated; fixture path for CI; not production_ready.",
+        baseline_reason="Flag-gated; real studio video queue when available; fixture CI fallback; not production_ready.",
     ),
     _d(
         id="video.validate",

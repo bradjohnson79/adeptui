@@ -116,16 +116,22 @@ def _handle_storyboard(db: Session, job: JobOut, payload: dict[str, Any]) -> Han
 
 
 def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    # M2.9 path: fixture only when fixtureComplete / ADEPT_M29_FIXTURE_MODE; else real Comfy.
     if payload.get("m29") or payload.get("fixtureComplete"):
         from ..m29.image.service import ImageService
+        from ..m29.providers import ProviderError, ProviderUnavailable, handler_status_for_exc
 
-        out = ImageService.execute_job(db, payload, job.projectId)
+        try:
+            out = ImageService.execute_job(db, payload, job.projectId)
+        except (ProviderUnavailable, ProviderError, Exception) as exc:  # noqa: BLE001
+            status = handler_status_for_exc(exc)
+            return HandlerResult(ok=False, status=status, error=str(exc))
         if out.get("assetId"):
             closed = {
                 "assetId": out["assetId"],
                 "imageJobId": out.get("imageJobId") or payload.get("imageJobId") or job.id,
                 "panelId": out.get("panelId") or payload.get("panelId"),
-                "provider": out.get("provider") or job.provider or payload.get("provider") or "m29_fixture",
+                "provider": out.get("provider") or job.provider or payload.get("provider") or "comfy",
                 "mockAdapter": bool(out.get("mockAdapter", False)),
             }
             return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, closed))
@@ -589,11 +595,22 @@ def _handle_apply_shot_profile(db: Session, job: JobOut, payload: dict[str, Any]
 
 
 
+def _m29_run(fn, db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
+    from ..m29.providers import ProviderError, ProviderUnavailable, handler_status_for_exc
+
+    try:
+        out = fn(db, payload, job.projectId)
+    except (ProviderUnavailable, ProviderError, PermissionError, ValueError, KeyError) as exc:
+        return HandlerResult(ok=False, status=handler_status_for_exc(exc), error=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        return HandlerResult(ok=False, status="Failed", error=str(exc))
+    return HandlerResult(ok=True, status="Completed", result=out)
+
+
 def _handle_frame_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.frames.service import FramesService
 
-    out = FramesService.execute_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(FramesService.execute_job, db, job, payload)
 
 
 def _handle_frame_sequence(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
@@ -603,29 +620,25 @@ def _handle_frame_sequence(db: Session, job: JobOut, payload: dict[str, Any]) ->
 def _handle_video_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.video.service import VideoService
 
-    out = VideoService.execute_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(VideoService.execute_job, db, job, payload)
 
 
 def _handle_lipsync_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.lipsync.service import LipsyncService
 
-    out = LipsyncService.execute_lipsync_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(LipsyncService.execute_lipsync_job, db, job, payload)
 
 
 def _handle_mouth_track_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.lipsync.service import LipsyncService
 
-    out = LipsyncService.execute_mouth_track_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(LipsyncService.execute_mouth_track_job, db, job, payload)
 
 
 def _handle_audio_generate(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.audio.service import AudioService
 
-    out = AudioService.execute_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(AudioService.execute_job, db, job, payload)
 
 
 def _handle_audio_process(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
@@ -635,8 +648,7 @@ def _handle_audio_process(db: Session, job: JobOut, payload: dict[str, Any]) -> 
 def _handle_timeline_render(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.render.service import RenderService
 
-    out = RenderService.execute_job(db, payload, job.projectId)
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(RenderService.execute_job, db, job, payload)
 
 
 def _handle_scene_render(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
@@ -646,11 +658,7 @@ def _handle_scene_render(db: Session, job: JobOut, payload: dict[str, Any]) -> H
 def _handle_edit_apply(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
     from ..m29.editing.service import EditingService
 
-    try:
-        out = EditingService.execute_job(db, payload, job.projectId)
-    except PermissionError as exc:
-        return HandlerResult(ok=False, status="Blocked", error=str(exc))
-    return HandlerResult(ok=True, status="Completed", result=out)
+    return _m29_run(EditingService.execute_job, db, job, payload)
 
 
 def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
