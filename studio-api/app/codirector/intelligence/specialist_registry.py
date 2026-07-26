@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from ..prompts.loader import PromptLibrary, get_prompt_library
 from ..prompts.types import PromptRecord
+from .contracts import CONTRACTS, SpecialistContract, get_contract, resolve_role
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class SpecialistDefinition:
     max_retries: int = 0
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "promptId": self.prompt_id,
             "displayName": self.display_name,
@@ -41,6 +42,13 @@ class SpecialistDefinition:
             "timeoutMs": self.timeout_ms,
             "maxRetries": self.max_retries,
         }
+        contract = get_contract(self.id)
+        if contract is not None:
+            payload["contract"] = contract.to_dict()
+            payload["productRole"] = contract.product_role
+            payload["approvalRequired"] = contract.approval_required
+            payload["escalationPath"] = contract.escalation_path
+        return payload
 
 
 class SpecialistRegistry:
@@ -97,3 +105,19 @@ class SpecialistRegistry:
     def validate_ids(self, specialist_ids: Iterable[str]) -> list[str]:
         unknown = [sid for sid in specialist_ids if sid not in self._definitions]
         return unknown
+
+    def contract(self, specialist_id: str) -> SpecialistContract | None:
+        return get_contract(specialist_id)
+
+    def resolve(self, role_or_id: str) -> SpecialistDefinition | None:
+        sid = resolve_role(role_or_id) or role_or_id
+        return self.get(sid)
+
+    def inventory(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for definition in self.all_enabled():
+            row = definition.to_dict()
+            if "contract" not in row and definition.id in CONTRACTS:
+                row["contract"] = CONTRACTS[definition.id].to_dict()
+            rows.append(row)
+        return rows

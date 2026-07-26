@@ -35,6 +35,35 @@ _INTENT_RULES: tuple[tuple[re.Pattern[str], IntentKind, str], ...] = (
     (re.compile(r"\b(update|change).*\b(bible|canon|character)\b", re.I), "update_production_bible", "bible"),
     (re.compile(r"\b(assemble|sequence|edit)\b", re.I), "assemble_sequence", "edit"),
     (re.compile(r"\b(cinematic|look more cinematic)\b", re.I), "plan_scene", "cinematic"),
+    (
+        re.compile(
+            r"\b(sound design|sfx|foley|ambience|audio cues?)\b",
+            re.I,
+        ),
+        "plan_audio",
+        "sound",
+    ),
+    (
+        re.compile(r"\b(music cue|score|soundtrack|music supervisor)\b", re.I),
+        "plan_audio",
+        "music",
+    ),
+    (
+        re.compile(
+            r"\b(production intelligence|co-?director pipeline|orchestrat(e|ion)|full production plan)\b",
+            re.I,
+        ),
+        "production_intelligence",
+        "m211",
+    ),
+    (
+        re.compile(
+            r"\b(create a .*(scene|laboratory|scientists)|suspenseful .*scene)\b",
+            re.I,
+        ),
+        "production_intelligence",
+        "scene brief",
+    ),
 )
 
 
@@ -87,11 +116,20 @@ def classify_intent(
         playbook_id = "prepare-video-generation"
     elif primary == "review_asset":
         playbook_id = "review-visual-result"
+    elif primary == "production_intelligence":
+        playbook_id = "plan-scene"
+    elif primary == "plan_audio":
+        playbook_id = "plan-scene"
 
     complexity: str = "standard"
     if primary == "answer_question":
         complexity = "simple"
-    elif primary in ("create_storyboard", "prepare_video_generation", "assemble_sequence"):
+    elif primary in (
+        "create_storyboard",
+        "prepare_video_generation",
+        "assemble_sequence",
+        "production_intelligence",
+    ):
         complexity = "complex"
 
     requires_approval = primary in {

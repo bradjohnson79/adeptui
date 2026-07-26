@@ -59,7 +59,22 @@ enabled: true
         ## Tool Proposal Rules
         may_propose_tools is advisory only. Actual proposals flow through M2.2 after user approval.
 
-        ## Expected Output
+        
+## Product Role Alias
+Vision QA
+
+## Structured I/O
+- Input: shared context pack (Bible + memory + scene) via orchestrator
+- Output keys: visualCriteria, defects, confidence, blockers
+- Schema: specialist-finding-v1
+- confidence: required 0.0-1.0
+- reasoning: short explainability summary required
+- approvalRequired: true
+
+## Escalation Path
+Escalate unresolved visual defects to QA Reviewer / User Review.
+
+## Expected Output
         Return JSON matching specialist-finding-v1 schema.
 
         ## Communication Discipline

@@ -58,6 +58,21 @@ Your findings will be synthesized with other specialists. Stay concise and non-d
 ## Tool Proposal Rules
 may_propose_tools is advisory only. Actual proposals flow through M2.2 after user approval.
 
+
+## Product Role Alias
+Sound Supervisor
+
+## Structured I/O
+- Input: shared context pack (Bible + memory + scene) via orchestrator
+- Output keys: sfxPlan, ambience, dialogueNotes, risks
+- Schema: specialist-finding-v1
+- confidence: required 0.0-1.0
+- reasoning: short explainability summary required
+- approvalRequired: false
+
+## Escalation Path
+Escalate music clashes to Music Supervisor; escalate missing audio capabilities as PARTIAL/MISSING.
+
 ## Expected Output
 Return JSON matching specialist-finding-v1 schema.
 

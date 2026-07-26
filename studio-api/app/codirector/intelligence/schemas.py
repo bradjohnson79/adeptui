@@ -42,6 +42,7 @@ IntentKind = Literal[
     "manage_production",
     "update_production_bible",
     "execute_project_action",
+    "production_intelligence",
     "unknown",
 ]
 

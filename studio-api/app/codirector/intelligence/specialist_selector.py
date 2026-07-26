@@ -11,42 +11,98 @@ from .specialist_registry import SpecialistRegistry
 MAX_SPECIALISTS = 8
 
 _INTENT_SPECIALISTS: dict[str, tuple[str, ...]] = {
-    "revise_dialogue": ("screenwriter", "story-editor", "performance-director"),
-    "plan_scene": ("director", "screenwriter", "producer", "cinematographer", "script-supervisor"),
-    "design_location": ("production-designer", "art-director", "cinematographer", "technical-director"),
+    "revise_dialogue": ("screenwriter", "story-editor", "performance-director", "sound-designer"),
+    "plan_scene": (
+        "story-analyst",
+        "director",
+        "screenwriter",
+        "producer",
+        "cinematographer",
+        "sound-designer",
+        "music-supervisor",
+        "editor",
+    ),
+    "design_location": (
+        "production-designer",
+        "art-director",
+        "cinematographer",
+        "lighting-supervisor",
+        "technical-director",
+    ),
     "create_storyboard": (
         "director",
         "cinematographer",
         "art-director",
         "script-supervisor",
         "continuity-analyst",
-        "prompt-architect",
-        "technical-director",
+        "sound-designer",
+        "editor",
         "vision-reviewer",
     ),
     "prepare_video_generation": (
         "director",
         "cinematographer",
-        "choreographer",
+        "sound-designer",
+        "music-supervisor",
         "continuity-analyst",
         "editor",
         "prompt-architect",
-        "technical-director",
         "vision-reviewer",
     ),
-    "review_asset": ("art-director", "continuity-analyst", "vision-reviewer", "technical-director"),
+    "review_asset": (
+        "art-director",
+        "continuity-analyst",
+        "asset-manager",
+        "qa-reviewer",
+        "vision-reviewer",
+        "technical-director",
+    ),
     "prepare_image_generation": (
         "director",
         "art-director",
+        "lighting-supervisor",
         "prompt-architect",
-        "technical-director",
+        "asset-manager",
         "vision-reviewer",
     ),
-    "answer_question": ("producer",),
-    "unknown": ("director", "producer"),
+    "answer_question": ("producer", "pipeline-manager"),
+    "unknown": ("director", "producer", "story-analyst"),
 }
 
-_CONTINUITY_INTENTS = frozenset({"revise_dialogue", "plan_scene", "create_storyboard", "prepare_video_generation"})
+# First-class audio/editorial / M2.11 production intelligence intents
+_INTENT_SPECIALISTS.update(
+    {
+        "plan_audio": ("sound-designer", "music-supervisor", "editor", "director"),
+        "assemble_sequence": (
+            "editor",
+            "sound-designer",
+            "music-supervisor",
+            "continuity-analyst",
+            "director",
+        ),
+        "production_intelligence": (
+            "story-analyst",
+            "bible-manager",
+            "continuity-analyst",
+            "director",
+            "cinematographer",
+            "sound-designer",
+            "music-supervisor",
+            "editor",
+        ),
+    }
+)
+
+_CONTINUITY_INTENTS = frozenset(
+    {
+        "revise_dialogue",
+        "plan_scene",
+        "create_storyboard",
+        "prepare_video_generation",
+        "assemble_sequence",
+        "production_intelligence",
+    }
+)
 
 
 @dataclass

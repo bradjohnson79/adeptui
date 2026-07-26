@@ -27,6 +27,7 @@ _INTENT_STAGE: dict[IntentKind, ProductionStage] = {
     "manage_production": "project_management",
     "update_production_bible": "project_management",
     "execute_project_action": "production",
+    "production_intelligence": "preproduction",
     "unknown": "project_management",
 }
 
