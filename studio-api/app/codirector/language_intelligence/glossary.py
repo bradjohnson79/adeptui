@@ -109,10 +109,15 @@ def apply_glossary_protection(text: str, glossary: list[dict[str, Any]]) -> tupl
 # Platform-default protected Adept terms
 PLATFORM_PROTECTED_TERMS = [
     "Dreamweaver",
+    "Starcaster",
+    "Starcasters",
+    "Anadriya",
+    "Korri",
     "Chroma",
     "Life Vital",
-    "Starcasters",
+    "Shadow Law",
     "Handari",
     "Co-Director",
     "Production Bible",
+    "Adept UI Studio",
 ]

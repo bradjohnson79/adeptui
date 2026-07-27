@@ -78,7 +78,16 @@ def test_error_to_dict_never_leaks_extra_keys() -> None:
 
     err = CoDirectorError("MODEL_NOT_FOUND", "missing model", details={"model": "x"})
     payload = err.to_dict()
-    assert set(payload.keys()) == {"code", "message", "details", "recoverable", "recommendedAction"}
+    # M3.0f+: messageKey enables localized UI mapping without parsing prose.
+    assert set(payload.keys()) == {
+        "code",
+        "message",
+        "messageKey",
+        "details",
+        "recoverable",
+        "recommendedAction",
+    }
+    assert payload["messageKey"] == "errors.code.MODEL_NOT_FOUND"
 
 
 # --------------------------------------------------------------------------

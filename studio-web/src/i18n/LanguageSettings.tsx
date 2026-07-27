@@ -107,6 +107,10 @@ export function LanguageSettings() {
 
       <p className="muted">{t("settings:rtlNote")}</p>
       <p className="muted">{t("settings:portugueseNote")}</p>
+      <p className="muted" data-testid="linguistic-review-disclosure">
+        English UI strings are human-approved. Other active locales ship as MACHINE_DRAFT machine
+        translations and are not professional linguistic certifications.
+      </p>
     </section>
   );
 }

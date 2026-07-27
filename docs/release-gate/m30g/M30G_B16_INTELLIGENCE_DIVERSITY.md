@@ -1,0 +1,22 @@
+# M30G B16 Intelligence Diversity
+
+| Field | Value |
+|-------|-------|
+| Branch | `phase2/codirector-m2-9-production-suite` |
+| Starting SHA | `77c664c77a5a3caf6347ea32080f8b6a346a35cd` |
+| Implementation SHA | `PLACEHOLDER_IMPL_SHA` |
+| Documentation SHA | `PLACEHOLDER_DOCS_SHA` |
+| Provider Manifest SHA | `cf99d7e5a91d192891495dbbb6f24feead24e6a9aec3ad236258ab39a4bba7bc` |
+| Date | 2026-07-27 |
+
+
+```text
+B16 outcome: CLAIM NARROWED
+Removed claim:
+Live multi-specialist intelligence diversity is production-certified.
+Retained claim:
+Specialist orchestration paths exist and produce persisted,
+domain-labelled outputs, pending full creative scenario validation in M3.0h.
+```
+
+M3.0g does not run complete filmmaker productions (M3.0h).
