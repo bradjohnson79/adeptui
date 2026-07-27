@@ -26,6 +26,8 @@ class VideoService:
         **params: Any,
     ) -> dict[str, Any]:
         payload = {"prompt": prompt, "mode": mode, "m29": True, **params}
+        if scene_id:
+            payload["sceneId"] = scene_id
         if fixture_mode_enabled():
             result = fixture_video_result(payload)
             ver = create_asset_version(

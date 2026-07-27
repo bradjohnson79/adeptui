@@ -375,7 +375,10 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
                 # A cached / available source means Install can proceed even if files are absent.
                 if pack_fields.get("source_available"):
                     canonical = "not_installed"
-                elif verification.issue_code == "pack_release_not_found":
+                elif verification.issue_code in (
+                    "pack_provider_not_configured",
+                    "pack_release_not_found",
+                ):
                     canonical = "download_unavailable"
                 else:
                     canonical = "source_pending"

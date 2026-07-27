@@ -102,6 +102,16 @@ export function TimelineReferencesPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, project.id, scene.id, clip.id]);
 
+  const byRole = useMemo(() => {
+    const map = new Map<string, Binding[]>();
+    for (const b of bindings) {
+      const list = map.get(b.role) || [];
+      list.push(b);
+      map.set(b.role, list);
+    }
+    return [...map.entries()];
+  }, [bindings]);
+
   if (!enabled) return null;
 
   const primaryAsset = clip.asset_id
@@ -183,16 +193,6 @@ export function TimelineReferencesPanel({
       setBusy(false);
     }
   };
-
-  const byRole = useMemo(() => {
-    const map = new Map<string, Binding[]>();
-    for (const b of bindings) {
-      const list = map.get(b.role) || [];
-      list.push(b);
-      map.set(b.role, list);
-    }
-    return [...map.entries()];
-  }, [bindings]);
 
   return (
     <div className="panel" style={{ marginTop: 8, padding: "0.75rem 0.9rem" }}>

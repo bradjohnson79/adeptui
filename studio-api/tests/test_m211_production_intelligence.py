@@ -141,36 +141,55 @@ def test_dag_order():
     from app.codirector.m211.dag import DEFAULT_PIPELINE, default_stage_order
 
     expected_stages = [
+        "storyteller",
         "story",
         "bible",
         "continuity",
         "director",
         "camera",
+        "sound_producer",
         "sound",
         "music",
         "editor",
+        "vpc",
         "qa",
         "user_review",
     ]
     assert default_stage_order() == expected_stages
     expected_specialists = [
+        "storyteller",
         "story-analyst",
         "bible-manager",
         "continuity-analyst",
         "director",
         "cinematographer",
+        "sound-producer",
         "sound-designer",
         "music-supervisor",
         "editor",
+        "virtual-production-coordinator",
         "qa-reviewer",
         "qa-reviewer",
     ]
     assert [n.specialist_id for n in DEFAULT_PIPELINE] == expected_specialists
     labels = " → ".join(n.label for n in DEFAULT_PIPELINE)
+    assert "Storyteller" in labels
     assert "Story Analyst" in labels
+    assert "Sound Producer" in labels
+    assert "Virtual Production Coordinator" in labels
     assert "Director" in labels
     assert "Editor" in labels
     assert "User Review" in labels
+
+
+def test_heuristic_enrichment_does_not_invent_lab_assets_for_unrelated_brief():
+    from app.codirector.m211.orchestrator import _heuristic_enrichment
+
+    enrichment = _heuristic_enrichment("A quiet seaside conversation at dawn.")
+
+    assert enrichment["missingAssets"] == []
+    assert "corridor" not in str(enrichment).lower()
+    assert enrichment["briefExcerpt"].startswith("A quiet seaside")
 
 
 def test_memory_upsert_search(db):

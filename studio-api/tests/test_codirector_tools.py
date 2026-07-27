@@ -346,7 +346,9 @@ def test_capability_project_not_configured_without_project_id() -> None:
     try:
         state = asyncio.run(CapabilityAdapter(db, None).state_for("project"))
         assert state.key == "project"
-        assert state.available is True
+        assert state.available is False
+        assert state.status == "not_configured"
+        assert state.execution_blocked is True
     finally:
         db.close()
 
@@ -362,7 +364,9 @@ def test_capability_bible_not_configured_before_bible_exists(client) -> None:
     try:
         state = asyncio.run(CapabilityAdapter(db, project_id).state_for("bible"))
         assert state.key == "bible"
-        assert state.available is True
+        assert state.available is False
+        assert state.status == "not_configured"
+        assert state.execution_blocked is True
     finally:
         db.close()
 

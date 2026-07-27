@@ -18,9 +18,9 @@ _INTENT_SPECIALISTS: dict[str, tuple[str, ...]] = {
         "screenwriter",
         "producer",
         "cinematographer",
+        "script-supervisor",
         "sound-designer",
         "music-supervisor",
-        "editor",
     ),
     "design_location": (
         "production-designer",
@@ -33,10 +33,10 @@ _INTENT_SPECIALISTS: dict[str, tuple[str, ...]] = {
         "director",
         "cinematographer",
         "art-director",
+        "prompt-architect",
+        "technical-director",
         "script-supervisor",
         "continuity-analyst",
-        "sound-designer",
-        "editor",
         "vision-reviewer",
     ),
     "prepare_video_generation": (

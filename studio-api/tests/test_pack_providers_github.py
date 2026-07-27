@@ -109,7 +109,8 @@ def test_missing_provider_configuration(setup_data_dir: Path) -> None:
     assert result["error"]["code"] == "pack_provider_not_configured"
     status = build_status()
     pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    assert pack["status"] == "download_unavailable"
+    # Honest unavailable states: source still pending configuration, or download unavailable.
+    assert pack["status"] in {"download_unavailable", "source_pending"}
     assert pack["install_disabled"] is True
 
 

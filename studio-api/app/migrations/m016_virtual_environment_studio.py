@@ -5,7 +5,7 @@ from sqlalchemy.engine import Connection
 
 from .registry import Migration
 
-REVISION = "0016"
+REVISION = "M016"
 CHECKSUM_SOURCE = "M016:virtual-environment-studio:v1"
 
 _DDL = [

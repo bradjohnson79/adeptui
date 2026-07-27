@@ -28,6 +28,17 @@ def record_decision(
     if not session:
         raise ValueError("Validation session not found.")
 
+    # B19: reject / corrections_required bands cannot be silently "approved".
+    # Callers must pass override=true (decision becomes override_approve).
+    if decision == "approved" and not override and session.reportId:
+        report = VisionStore.get_report(db, session.reportId, project_id=project_id)
+        band = (getattr(report, "band", None) or "").strip().lower() if report else ""
+        if band in ("reject", "corrections_required"):
+            raise ValueError(
+                f"Vision report band is '{band}'; approval requires override=true "
+                "(recorded as override_approve)."
+            )
+
     approval = ValidationApproval(
         approvalId=str(uuid.uuid4()),
         sessionId=session_id,

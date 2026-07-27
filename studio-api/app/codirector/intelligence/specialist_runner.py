@@ -18,6 +18,83 @@ from .specialist_registry import SpecialistDefinition, SpecialistRegistry
 
 _SPECIALIST_JSON_RE = re.compile(r"```json\s*([\s\S]*?)```", re.IGNORECASE)
 DEFAULT_TIMEOUT_SEC = 25.0
+_WRAPPER_KEYS = {
+    "specialist-finding-v1",
+    "specialist_finding_v1",
+    "specialistfindingv1",
+    "finding",
+    "result",
+    "output",
+    "response",
+    "payload",
+    "data",
+}
+_FIELD_ALIASES = {
+    "summary": (
+        "summary",
+        "synopsis",
+        "overview",
+        "assessment",
+        "analysis",
+        "finding",
+        "findingSummary",
+        "finding_summary",
+        "sceneIntention",
+        "scene_intention",
+        "headline",
+    ),
+    "recommendation": (
+        "recommendation",
+        "recommendations",
+        "advice",
+        "guidance",
+        "proposedAction",
+        "proposed_action",
+        "nextStep",
+        "next_step",
+        "conclusion",
+        "strategy",
+        "rationale",
+    ),
+    "requirements": (
+        "requirements",
+        "required",
+        "needs",
+        "dependencies",
+        "prerequisites",
+        "missingAssets",
+        "missing_assets",
+        "requiredAssets",
+        "required_assets",
+    ),
+    "risks": (
+        "risks",
+        "risk",
+        "concerns",
+        "threats",
+        "continuityRisks",
+        "continuity_risks",
+        "techRisks",
+        "tech_risks",
+        "capabilityGaps",
+        "capability_gaps",
+    ),
+    "blockingIssues": (
+        "blockingIssues",
+        "blocking_issues",
+        "blockers",
+        "blocking",
+        "conflicts",
+        "issues",
+    ),
+    "optionalImprovements": (
+        "optionalImprovements",
+        "optional_improvements",
+        "improvements",
+        "enhancements",
+    ),
+    "assumptions": ("assumptions", "assumption", "caveats", "constraints"),
+}
 
 LIMITED_ANALYSIS_MODE = "limited-analysis"
 PROVIDER_ANALYSIS_MODE = "provider"
@@ -204,11 +281,13 @@ class SpecialistRunner:
     def _validate_or_repair(
         self, definition: SpecialistDefinition, raw: dict[str, Any]
     ) -> SpecialistFinding:
-        raw.setdefault("specialistId", definition.id)
+        normalized = self._normalize_provider_payload(raw)
+        normalized.setdefault("specialistId", definition.id)
         try:
-            return SpecialistFinding.model_validate(raw)
+            return SpecialistFinding.model_validate(normalized)
         except ValidationError:
-            repaired = dict(raw)
+            repaired = dict(normalized)
+            content_dropped = not self._has_substantive_content(normalized)
             repaired["summary"] = str(repaired.get("summary") or definition.display_name)
             repaired["recommendation"] = str(repaired.get("recommendation") or repaired["summary"])
             repaired["requirements"] = list(repaired.get("requirements") or [])
@@ -218,7 +297,80 @@ class SpecialistRunner:
             repaired["assumptions"] = list(repaired.get("assumptions") or [])
             repaired["proposedToolActions"] = list(repaired.get("proposedToolActions") or [])
             repaired["productionBibleReferences"] = list(repaired.get("productionBibleReferences") or [])
+            repaired["contentDropped"] = content_dropped
             return SpecialistFinding.model_validate(repaired)
+
+    @staticmethod
+    def _unwrap_provider_payload(raw: Any) -> dict[str, Any]:
+        """Remove provider/schema wrappers while retaining the actual finding."""
+        payload = raw
+        for _ in range(8):
+            if not isinstance(payload, dict):
+                return {}
+            if len(payload) == 1:
+                key, value = next(iter(payload.items()))
+                key_norm = str(key).strip().lower().replace("_", "-")
+                if isinstance(value, dict) and (
+                    key_norm in _WRAPPER_KEYS or key_norm.endswith("-finding-v1") or len(payload) == 1
+                ):
+                    payload = value
+                    continue
+            return payload
+        return payload if isinstance(payload, dict) else {}
+
+    @classmethod
+    def _normalize_provider_payload(cls, raw: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(cls._unwrap_provider_payload(raw))
+        normalized = dict(payload)
+        lowered = {str(key).lower().replace("_", "").replace("-", ""): key for key in payload}
+        for target, aliases in _FIELD_ALIASES.items():
+            if normalized.get(target):
+                continue
+            for alias in aliases:
+                source = payload.get(alias)
+                if source is None:
+                    source = payload.get(lowered.get(alias.lower().replace("_", "").replace("-", ""), ""))
+                if source is not None:
+                    normalized[target] = cls._coerce_list(source) if target not in {"summary", "recommendation"} else cls._coerce_text(source)
+                    break
+        if not normalized.get("summary") or not normalized.get("recommendation"):
+            text_values = [
+                cls._coerce_text(value)
+                for key, value in payload.items()
+                if key not in {"specialistId", "status", "confidence"} and isinstance(value, (str, int, float))
+            ]
+            if text_values:
+                normalized.setdefault("summary", text_values[0])
+                if len(text_values) > 1:
+                    normalized.setdefault("recommendation", text_values[1])
+        return normalized
+
+    @staticmethod
+    def _coerce_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (list, tuple)):
+            return "; ".join(str(item).strip() for item in value if str(item).strip())
+        if isinstance(value, dict):
+            return "; ".join(f"{key}: {text}" for key, item in value.items() if (text := str(item).strip()))
+        return str(value).strip() if value is not None else ""
+
+    @classmethod
+    def _coerce_list(cls, value: Any) -> list[str]:
+        if isinstance(value, (list, tuple, set)):
+            return [cls._coerce_text(item) for item in value if cls._coerce_text(item)]
+        text = cls._coerce_text(value)
+        return [text] if text else []
+
+    @classmethod
+    def _has_substantive_content(cls, payload: dict[str, Any]) -> bool:
+        for key in ("summary", "recommendation", "requirements", "risks", "blockingIssues", "optionalImprovements", "assumptions"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return True
+            if isinstance(value, (list, tuple, dict)) and value:
+                return True
+        return False
 
     def _heuristic_finding(
         self,

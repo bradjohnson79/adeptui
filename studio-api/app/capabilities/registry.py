@@ -22,6 +22,22 @@ S = CapabilityStatus
 
 
 def _d(**kwargs) -> CapabilityDefinition:
+    # Every non-proven baseline must explain why it is not callable.  Keep this
+    # invariant at construction time so newly added registry rows cannot become
+    # undocumented bare claims.
+    status = kwargs.get("baseline_status")
+    if status in {
+        CapabilityStatus.NOT_IMPLEMENTED,
+        CapabilityStatus.UI_ONLY,
+        CapabilityStatus.BACKEND_ONLY,
+        CapabilityStatus.PARTIALLY_WIRED,
+        CapabilityStatus.MOCK_VERIFIED,
+        CapabilityStatus.UNKNOWN,
+    }:
+        kwargs.setdefault(
+            "baseline_reason",
+            f"Baseline is {status.value}; the end-to-end contract is not yet proven.",
+        )
     return CapabilityDefinition(**kwargs)
 
 

@@ -84,6 +84,7 @@ class SpecialistFinding(BaseModel):
     specialistId: str
     summary: str
     recommendation: str
+    contentDropped: bool = False
     requirements: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     blockingIssues: list[str] = Field(default_factory=list)

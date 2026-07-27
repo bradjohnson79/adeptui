@@ -870,12 +870,39 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
         from .pack_release_cache import get_cached_release
 
         manifest = get_pack_manifest(component_id)
-        if action in ("install", "none", "manual_help") and not manifest.has_valid_source():
+        # Fail closed for install-like and missing-source recommendations — never queue
+        # a download/install that cannot succeed and must not create destination folders.
+        source_missing_for_action = not manifest.has_valid_source()
+        if (
+            action == "refresh_source"
+            and manifest.uses_provider()
+            and not get_cached_release(component_id)
+            and not manifest.source_url()
+            and not manifest.has_explicit_remote_source()
+        ):
+            # A status refresh must not be misrouted into an install worker when
+            # provider discovery has not produced a usable release yet.
+            source_missing_for_action = True
+        if action in (
+            "install",
+            "none",
+            "manual_help",
+            "add_source_url",
+            "refresh_source",
+        ) and source_missing_for_action:
             code = (
                 "source_not_published"
                 if not manifest.is_published()
-                else "source_not_configured"
+                else (
+                    "pack_release_not_found"
+                    if action == "refresh_source" and manifest.uses_provider()
+                    else "pack_provider_not_configured"
+                    if action in ("add_source_url", "refresh_source")
+                    else "source_not_configured"
+                )
             )
+            if action == "refresh_source" and not manifest.is_published():
+                code = "source_not_published"
             message = (
                 "No official distribution has been published for this pack yet."
                 if code == "source_not_published"

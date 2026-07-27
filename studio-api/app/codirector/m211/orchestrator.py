@@ -46,6 +46,27 @@ def _heuristic_enrichment(brief: str) -> dict[str, Any]:
     alien = "alien" in lowered or "artifact" in lowered
     scientists = "scientist" in lowered or "scientists" in lowered
 
+    if not (lab or alien or scientists):
+        return {
+            "story": [{"beat": 1, "label": "Brief", "description": text[:240]}],
+            "shotPlan": [],
+            "camera": {},
+            "music": {},
+            "sfx": [],
+            "editingBeats": [],
+            "continuity": [],
+            "missingAssets": [],
+            "checklist": ["Validate story beats and required assets against the supplied brief"],
+            "source": "limited-analysis-heuristic",
+            "briefExcerpt": text[:240],
+            "honesty": "limited",
+            "analysisMode": LIMITED_ANALYSIS_MODE,
+            "note": (
+                "Limited-analysis enrichment was not specialized because the brief "
+                "did not match the available scaffold."
+            ),
+        }
+
     story = [
         {"beat": 1, "label": "Entry", "description": "Talent enters sealed space / door opens."},
         {"beat": 2, "label": "Discovery", "description": "Hazard or anomaly is revealed in frame."},
@@ -455,15 +476,23 @@ class ProductionIntelligenceOrchestrator:
             else:
                 story_out = []
 
-        honesty = "provider" if analysis_mode != LIMITED_ANALYSIS_MODE else "limited"
-        honesty_notes = (
-            []
-            if honesty == "provider"
-            else [
+        content_dropped = any(getattr(finding, "contentDropped", False) for finding in findings)
+        honesty = (
+            "unavailable"
+            if content_dropped
+            else ("provider" if analysis_mode != LIMITED_ANALYSIS_MODE else "limited")
+        )
+        if content_dropped:
+            honesty_notes = [
+                "Provider output was repaired after substantive content was discarded; honesty is unavailable."
+            ]
+        elif honesty == "provider":
+            honesty_notes = []
+        else:
+            honesty_notes = [
                 "Limited-analysis / heuristic path — Co-Director provider unavailable or "
                 "STUDIO_E2E is set. Specialist digests are not live model reasoning.",
             ]
-        )
 
         return {
             "story": story_out,

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .comfy_client import comfy
@@ -1543,6 +1544,35 @@ class JobQueue:
     async def _export(self, db: Session, job: Job, project: Project) -> None:
         scenes = db.query(Scene).filter(Scene.project_id == project.id).order_by(Scene.index).all()
         assets = db.query(Asset).filter(Asset.project_id == project.id).all()
+        cue_placements: list[dict] = []
+        try:
+            cue_rows = db.execute(
+                text(
+                    "SELECT id, scene_id, cue_kind, status, asset_id, start_sec, "
+                    "duration_sec, metadata_json FROM m29_audio_cues "
+                    "WHERE project_id = :project_id ORDER BY start_sec, id"
+                ),
+                {"project_id": project.id},
+            ).mappings()
+            for row in cue_rows:
+                try:
+                    metadata = json.loads(row["metadata_json"] or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    metadata = {}
+                cue_placements.append(
+                    {
+                        "id": row["id"],
+                        "scene_id": row["scene_id"],
+                        "kind": row["cue_kind"],
+                        "status": row["status"],
+                        "asset_id": row["asset_id"],
+                        "start_sec": row["start_sec"],
+                        "duration_sec": row["duration_sec"],
+                        "metadata": metadata,
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("M2.9 cue table unavailable while exporting %s", project.id, exc_info=True)
         payload = {
             "id": project.id,
             "name": project.name,
@@ -1563,10 +1593,13 @@ class JobQueue:
                     "duration_sec": s.duration_sec,
                     "output_path": s.output_path,
                     "lipsync_output_path": s.lipsync_output_path,
+                    # B18: approved Director timeline must survive pack re-import.
+                    "director_json": getattr(s, "director_json", "") or "",
                 }
                 for s in scenes
             ],
             "assets": [{"id": a.id, "tag": a.tag, "kind": a.kind, "filename": a.filename} for a in assets],
+            "cue_placements": cue_placements,
         }
         out_dir = settings.data_dir / "exports" / f"{project.name.replace(' ', '_')}_{project.id[:8]}"
         videos = []

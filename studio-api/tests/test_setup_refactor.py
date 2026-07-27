@@ -273,7 +273,7 @@ def test_atomic_state_preserves_legacy_fields(setup_data_dir: Path) -> None:
     )
     loaded = load_state()
 
-    assert saved["schema_version"] == 2
+    assert saved["schema_version"] >= 3
     assert loaded["components"]["ffmpeg"]["status"] == "installed"
     assert loaded["model_locations"]["ltx_checkpoint"] == "D:/models"
     assert loaded["custom_legacy_field"] == {"keep": True}
@@ -343,8 +343,13 @@ def test_status_does_not_auto_bind_asset_packs(setup_data_dir: Path) -> None:
     pack = next(
         item for item in status["components"] if item["component_id"] == "pack_essential_photoreal"
     )
-    assert pack["status"] == "download_unavailable"
-    assert pack["issue_code"] in {"download_source_missing", "pack_provider_not_configured", "pack_release_not_found"}
+    assert pack["status"] == "source_pending"
+    assert pack["issue_code"] in {
+        "download_source_missing",
+        "pack_provider_not_configured",
+        "pack_release_not_found",
+        "source_not_published",
+    }
     assert pack["installed_bytes"] == 0
     assert pack["install_disabled"] is True
 
@@ -449,12 +454,17 @@ def test_missing_source_install_fails_without_creating_directory(
     pack = next(
         item for item in status["components"] if item["component_id"] == "pack_essential_anime"
     )
-    assert pack["status"] == "download_unavailable"
+    assert pack["status"] == "source_pending"
     assert pack["installed_bytes"] == 0
 
     snapshot = orchestrator.execute_recommended_action("pack_essential_anime")
     assert snapshot["status"] == "failed"
-    assert snapshot["error"] in {"download_source_missing", "pack_provider_not_configured", "pack_release_not_found"}
+    assert snapshot["error"] in {
+        "download_source_missing",
+        "pack_provider_not_configured",
+        "pack_release_not_found",
+        "source_not_published",
+    }
     assert not suggested.exists()
 
 

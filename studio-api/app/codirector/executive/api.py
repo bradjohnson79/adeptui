@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
-from ...db import get_db
+from ...db import Job, get_db
+from ...schemas import JobOut as StudioJobOut
+from ..unified_jobs import sanitized_json_text, to_unified_dto
 from .schemas import CreateJobRequest, JobActionRequest, MarkApprovalRequest
 from .service import ProductionExecutiveService
 from .store import JobStore
@@ -130,9 +132,27 @@ def inspect_job(
 ) -> dict[str, Any]:
     _require_flag()
     job = JobStore.get_job(db, job_id, project_id=projectId)
-    if not job:
+    if job:
+        return {
+            "job": to_unified_dto("executive", job),
+            "source": "executive",
+            "executive": job.model_dump(),
+            "studio": None,
+        }
+    studio = db.get(Job, job_id)
+    if studio and (projectId is None or studio.project_id == projectId):
+        studio_dump = StudioJobOut.model_validate(studio).model_dump()
+        studio_dump["params_json"] = sanitized_json_text(studio.params_json)
+        studio_dump["history_json"] = sanitized_json_text(studio.history_json)
+        return {
+            "job": to_unified_dto("studio", studio),
+            "source": "studio",
+            "executive": None,
+            "studio": studio_dump,
+        }
+    if not studio:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return {"job": job.model_dump()}
+    raise HTTPException(status_code=404, detail="Job not found.")
 
 
 @router.get("/{job_id}/dependencies")
@@ -152,17 +172,31 @@ def job_dependencies(job_id: str, db: Session = Depends(get_db)) -> dict[str, An
 def job_history(job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require_flag()
     job = JobStore.get_job(db, job_id)
-    if not job:
+    if job:
+        return {
+            "jobId": job_id,
+            "attempts": [a.model_dump() for a in JobStore.list_attempts(db, job_id)],
+            "audit": [a.model_dump() for a in JobStore.list_audit(db, job_id)],
+            "events": [
+                e.model_dump()
+                for e in JobStore.list_events(db, project_id=job.projectId, job_id=job_id)
+            ],
+        }
+    studio = db.get(Job, job_id)
+    if studio:
+        import json
+
+        try:
+            history = json.loads(studio.history_json or "{}")
+        except json.JSONDecodeError:
+            history = {"raw": studio.history_json}
+        events = history if isinstance(history, list) else [
+            {"eventType": key, "payload": value} for key, value in history.items()
+        ] if isinstance(history, dict) else []
+        return {"jobId": job_id, "attempts": [], "audit": [], "events": events}
+    if not studio:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return {
-        "jobId": job_id,
-        "attempts": [a.model_dump() for a in JobStore.list_attempts(db, job_id)],
-        "audit": [a.model_dump() for a in JobStore.list_audit(db, job_id)],
-        "events": [
-            e.model_dump()
-            for e in JobStore.list_events(db, project_id=job.projectId, job_id=job_id)
-        ],
-    }
+    raise HTTPException(status_code=404, detail="Job not found.")
 
 
 @router.post("/{job_id}/pause")

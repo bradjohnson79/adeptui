@@ -85,7 +85,10 @@ def approve_validation(body: ApproveRejectRequest, db: Session = Depends(get_db)
             link_to_bible=body.linkToBible,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        message = str(exc)
+        # Not-found stays 404; band/override policy is a client error.
+        status = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status, detail=message) from exc
 
 
 @router.post("/reject")

@@ -19,9 +19,10 @@ def test_default_registry_migrations_are_idempotent(tmp_path) -> None:
     first = runner.apply_pending()
     second = runner.apply_pending()
 
-    assert first.applied == ("M001", "M002", "M003", "M004", "M005", "M006", "M007", "M008", "M010", "M011", "M012")
+    expected = tuple(m.revision for m in DEFAULT_REGISTRY.all())
+    assert first.applied == expected
     assert second.applied == ()
-    assert second.already_applied == ("M001", "M002", "M003", "M004", "M005", "M006", "M007", "M008", "M010", "M011", "M012")
+    assert second.already_applied == expected
 
 
 def test_sqlite_foreign_keys_are_enabled_before_apply(tmp_path) -> None:

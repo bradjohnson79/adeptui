@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy import text
 
 from app.db import Project, SessionLocal, init_db
 from app.feature_flags import FeatureFlags
@@ -275,6 +278,85 @@ def test_fixture_jobs_via_api(client):
     body = ctrl.json()
     assert body["requiresApproval"] is True
     assert len(body["steps"]) >= 2
+
+
+def test_video_scene_id_survives_executive_payload_to_run_video(db, monkeypatch):
+    """B17: a scene id must reach the provider after durable job serialization."""
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    from app.codirector.m29.video import service as video_service
+    from app.codirector.executive.service import ProductionExecutiveService
+    from app.codirector.m29.video.service import VideoService
+    from app.db import ProductionJob
+
+    monkeypatch.setattr(ProductionExecutiveService, "ensure_worker", lambda: None)
+    monkeypatch.setattr(video_service, "video_provider_available", lambda _db: False)
+    out = VideoService.generate(
+        db,
+        project_id="proj-m29",
+        mode="image_to_video",
+        scene_id="scene-b17",
+        firstFrameAssetId="frame-1",
+    )
+    row = db.get(ProductionJob, out["jobId"])
+    assert row is not None
+    payload = json.loads(row.payload_json)
+    assert payload["sceneId"] == "scene-b17"
+
+    seen: dict = {}
+
+    def fake_run_video(_db, *, project_id, payload):
+        seen.update(payload)
+        return {"assetId": "video-b17", "provider": "test"}
+
+    monkeypatch.setattr(video_service, "run_video", fake_run_video)
+    VideoService.execute_job(db, payload, "proj-m29")
+    assert seen["sceneId"] == "scene-b17"
+
+
+def test_export_pack_includes_director_timeline_and_cue_placements(db, monkeypatch, tmp_path):
+    """B18: export must preserve the approved timeline and its cue rows."""
+    from app.db import Job, Scene
+    from app import queue_worker
+
+    scene = Scene(
+        id="scene-b18",
+        project_id="proj-m29",
+        index=0,
+        name="B18",
+        prompt="timeline",
+        duration_sec=5.0,
+        director_json='{"audio_clips":[{"asset_id":"audio-1","start":1.5}]}',
+    )
+    db.add(scene)
+    db.commit()
+    db.execute(
+        text(
+            "INSERT INTO m29_audio_cues "
+            "(id, project_id, scene_id, cue_kind, status, asset_id, start_sec, duration_sec, "
+            "metadata_json, created_at) VALUES "
+            "('cue-b18', 'proj-m29', 'scene-b18', 'sfx', 'placed', 'audio-1', "
+            "1.5, 0.75, '{\"volume\": 0.8}', CURRENT_TIMESTAMP)"
+        )
+    )
+    db.commit()
+    job = Job(id="job-b18", project_id="proj-m29", kind="export", status="queued")
+    db.add(job)
+    db.commit()
+
+    captured: dict = {}
+
+    def capture_pack(payload, _assets, _videos, _out_dir):
+        captured.update(payload)
+
+    monkeypatch.setattr(queue_worker, "export_pack", capture_pack)
+    monkeypatch.setattr(queue_worker.settings, "data_dir", tmp_path)
+    asyncio.run(queue_worker.JobQueue()._export(db, job, db.get(Project, "proj-m29")))
+
+    exported_scene = captured["scenes"][0]
+    assert exported_scene["director_json"] == scene.director_json
+    cue = next(item for item in captured["cue_placements"] if item["id"] == "cue-b18")
+    assert cue["metadata"]["volume"] == 0.8
 
 
 def test_health_exposes_m29_flags(client):

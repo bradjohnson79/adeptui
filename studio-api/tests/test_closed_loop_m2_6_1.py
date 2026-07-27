@@ -393,7 +393,7 @@ def test_migration_clean_install_has_m006_m007(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'clean.db'}")
     runner = MigrationRunner(engine, DEFAULT_REGISTRY)
     result = runner.apply_pending()
-    assert result.applied == ("M001", "M002", "M003", "M004", "M005", "M006", "M007", "M008", "M010", "M011")
+    assert result.applied == tuple(m.revision for m in DEFAULT_REGISTRY.all())
     with engine.connect() as conn:
         tables = {
             r[0]

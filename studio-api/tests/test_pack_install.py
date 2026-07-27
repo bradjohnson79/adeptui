@@ -64,13 +64,19 @@ def test_empty_download_url_prevents_installation(setup_data_dir: Path) -> None:
     suggested = Path(suggested_install_path("pack_essential_photoreal"))
     status = build_status()
     pack = next(c for c in status["components"] if c["id"] == "pack_essential_photoreal")
-    assert pack["status"] == "download_unavailable"
+    assert pack["status"] == "source_pending"
     assert pack["installed_bytes"] == 0
-    assert pack["primary_action"]["action"] == "refresh_source"
+    assert pack["primary_action"]["action"] == "add_source_url"
 
     result = execute_recommended_action("pack_essential_photoreal")
     assert result["status"] == "failed"
-    assert result["error"] in {"download_source_missing", "pack_provider_not_configured", "pack_release_not_found"}
+    assert result["error"] in {
+        "download_source_missing",
+        "pack_provider_not_configured",
+        "pack_release_not_found",
+        "source_not_published",
+        "add_source_url_required",
+    }
     assert not suggested.exists()
 
 

@@ -342,7 +342,7 @@ def run_video(
             db,
             project_id=project_id,
             kind="render_scene",
-            params={"m29": True, "mode": mode},
+            params={"m29": True, "mode": mode, "sceneId": sid},
             scene_id=sid,
             message="Queued M2.9 scene I2V",
         )

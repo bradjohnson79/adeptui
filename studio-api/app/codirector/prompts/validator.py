@@ -39,6 +39,11 @@ KNOWN_CONTEXT_KEYS: frozenset[str] = frozenset(
         "next_shot",
         "audio",
         "vfx",
+        "production_plan",
+        # M2.14 Storyteller / Sound Producer context keys
+        "tone",
+        "music",
+        "dialogue",
     }
 )
 _REQUIRED_FIELDS: tuple[str, ...] = (

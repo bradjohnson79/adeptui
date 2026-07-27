@@ -66,6 +66,26 @@ def _executive_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def db() -> Session:
     init_db()
     session = SessionLocal()
+    # The session-scoped SQLite database is intentional, but queue tests must
+    # not consume runnable jobs left by an earlier test.
+    from app.db import (
+        ProductionJob,
+        ProductionJobAttempt,
+        ProductionJobAudit,
+        ProductionJobDependency,
+        ProductionJobEvent,
+        ProductionNotification,
+    )
+
+    # Clear dependent rows before production_jobs to avoid FK IntegrityError in SQLite.
+    session.query(Job).delete()
+    session.query(ProductionJobDependency).delete()
+    session.query(ProductionJobAttempt).delete()
+    session.query(ProductionJobEvent).delete()
+    session.query(ProductionJobAudit).delete()
+    session.query(ProductionNotification).delete()
+    session.query(ProductionJob).delete()
+    session.commit()
     session.merge(Project(id="proj-exec-1", name="Executive Test"))
     session.commit()
     try:

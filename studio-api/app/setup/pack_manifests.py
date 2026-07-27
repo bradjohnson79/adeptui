@@ -139,8 +139,17 @@ class AssetPackManifest:
         if active == "fixture_http":
             return bool(os.environ.get("ADEPT_PACK_FIXTURE_BASE_URL", "").strip())
 
-        # Unpublished / planned packs must not become "valid" via global env alone.
+        # Unpublished packs must not validate from a shared global GitHub env alone.
+        # Explicit per-pack remotes and fixture_http were already handled above.
+        # A concrete cached release (after Check Again / refresh) may unlock install.
         if not self.is_published():
+            try:
+                from .pack_release_cache import get_cached_release
+
+                if get_cached_release(self.id):
+                    return True
+            except Exception:  # noqa: BLE001
+                pass
             return False
 
         if self.uses_provider():
@@ -547,7 +556,28 @@ def refresh_pack_source(pack_id: str, *, force_refresh: bool = True) -> dict[str
         })
         return base
 
-    if not manifest.is_published() and not manifest.has_explicit_remote_source() and not manifest.source_url():
+    if (
+        manifest.uses_provider()
+        and manifest.source.provider_id == "github_releases"
+        and not github_configured()
+        and not manifest.has_explicit_remote_source()
+    ):
+        base["error"] = {
+            "code": "pack_provider_not_configured",
+            "message": (
+                "GitHub pack provider is not configured. "
+                "Set ADEPT_PACK_GITHUB_OWNER and ADEPT_PACK_GITHUB_REPOSITORY."
+            ),
+        }
+        base["selection_reason"] = "GitHub provider configuration is missing."
+        return base
+
+    if (
+        not manifest.is_published()
+        and not manifest.has_explicit_remote_source()
+        and not manifest.source_url()
+        and active_provider != "github_releases"
+    ):
         # Skip generic GitHub env resolution for unpublished catalog packs.
         if active_provider != "fixture_http":
             base["error"] = {

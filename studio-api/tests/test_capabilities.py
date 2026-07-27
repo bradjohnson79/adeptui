@@ -263,7 +263,6 @@ def test_absent_features_are_reported_as_not_implemented(client) -> None:
         "project.scenes.reorder",
         "references.remove",
         "references.attach.scene",
-        "virtual_stage.render",
         "codirector.tools",
     ):
         item = capabilities[capability_id]

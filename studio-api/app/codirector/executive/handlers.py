@@ -606,7 +606,12 @@ def _m29_run(fn, db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerRe
     from ..m29.providers import ProviderError, ProviderUnavailable, handler_status_for_exc
 
     try:
-        out = fn(db, payload, job.projectId)
+        # The durable executive row carries sceneId separately from payload_json.  M2.9
+        # providers receive only the latter, so restore the row value at this boundary.
+        provider_payload = dict(payload)
+        if job.sceneId and not provider_payload.get("sceneId"):
+            provider_payload["sceneId"] = job.sceneId
+        out = fn(db, provider_payload, job.projectId)
     except (ProviderUnavailable, ProviderError, PermissionError, ValueError, KeyError) as exc:
         return HandlerResult(ok=False, status=handler_status_for_exc(exc), error=str(exc))
     except Exception as exc:  # noqa: BLE001

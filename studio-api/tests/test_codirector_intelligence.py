@@ -89,6 +89,42 @@ def test_specialist_selector_bounded_and_mappings():
     assert "performance-director" in dialogue_selection.all_selected
 
 
+def test_specialist_runner_unwraps_finding_wrapper_and_preserves_content():
+    from app.codirector.intelligence.specialist_runner import SpecialistRunner
+    from app.codirector.intelligence.specialist_registry import SpecialistRegistry
+
+    runner = SpecialistRunner()
+    definition = SpecialistRegistry().require("director")
+    finding = runner._validate_or_repair(
+        definition,
+        {
+            "specialist-finding-v1": {
+                "findingSummary": "The scene needs a restrained reveal.",
+                "advice": "Hold the two-shot, then cut to the artifact insert.",
+                "requirements": ["Approved artifact reference"],
+            }
+        },
+    )
+
+    assert finding.summary == "The scene needs a restrained reveal."
+    assert finding.recommendation == "Hold the two-shot, then cut to the artifact insert."
+    assert finding.requirements == ["Approved artifact reference"]
+    assert finding.contentDropped is False
+
+
+def test_specialist_runner_marks_empty_repair_content_dropped():
+    from app.codirector.intelligence.specialist_runner import SpecialistRunner
+    from app.codirector.intelligence.specialist_registry import SpecialistRegistry
+
+    finding = SpecialistRunner()._validate_or_repair(
+        SpecialistRegistry().require("director"),
+        {"specialist-finding-v1": {"status": "validated"}},
+    )
+
+    assert finding.contentDropped is True
+    assert finding.summary != ""
+
+
 def test_context_compiler_budget_and_delimiters(db: Session):
     import asyncio
 

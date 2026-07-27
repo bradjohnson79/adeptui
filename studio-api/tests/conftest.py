@@ -31,6 +31,17 @@ def isolated_data_dir() -> Path:
     return _TEST_DATA_DIR
 
 
+@pytest.fixture(autouse=True)
+def restore_process_data_dir(monkeypatch: pytest.MonkeyPatch):
+    """Prevent tests that mutate global Settings from leaking into later tests."""
+    from app.config import settings
+
+    settings.data_dir = _TEST_DATA_DIR
+    monkeypatch.setenv("STUDIO_DATA_DIR", str(_TEST_DATA_DIR))
+    yield
+    settings.data_dir = _TEST_DATA_DIR
+
+
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch):
     from fastapi.testclient import TestClient
