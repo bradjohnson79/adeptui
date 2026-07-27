@@ -246,6 +246,8 @@ class ProductionIntelligenceOrchestrator:
     ) -> dict[str, Any]:
         brief_text = (brief or "").strip() or SMOKE_BRIEF
         context_pack = build_context_pack(db, project_id, scene_id, brief_text)
+        strategy_pack = context_pack.get("strategyPack")
+        active_lessons = context_pack.get("activeLessons") or []
         graph = specialist_graph()
         stage_order = default_stage_order()
 
@@ -462,6 +464,8 @@ class ProductionIntelligenceOrchestrator:
             "trace": updated_trace,
             "reviewLoop": loop_state.to_dict() if loop_state else None,
             "contextPack": context_pack,
+            "strategyPack": strategy_pack,
+            "activeLessons": active_lessons,
             "stageOrder": stage_order,
             "pendingApprovals": pending_approvals,
             "explainability": explainability,

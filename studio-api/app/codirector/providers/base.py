@@ -46,6 +46,7 @@ class ProviderHealthResult:
     timeline_references_enabled: bool = False
     production_executive_enabled: bool = False
     production_intelligence_enabled: bool = False
+    adaptive_learning_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -65,6 +66,7 @@ class ProviderHealthResult:
             "timelineReferencesEnabled": self.timeline_references_enabled,
             "productionExecutiveEnabled": self.production_executive_enabled,
             "productionIntelligenceEnabled": self.production_intelligence_enabled,
+            "adaptiveLearningEnabled": self.adaptive_learning_enabled,
             "ok": self.status == "Ready",
         }
 

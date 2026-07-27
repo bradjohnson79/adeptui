@@ -135,3 +135,25 @@ def continuity_suggestions(scenes: list[Any], dismissed: list[str]) -> list[dict
         except Exception:
             pass
     return out[:20]
+
+
+def adaptive_lessons_block(lessons: list[dict] | None) -> str:
+    """Format active M2.12 lessons for injection alongside project prefs."""
+
+    if not lessons:
+        return ""
+    lines = []
+    for item in lessons:
+        if not isinstance(item, dict):
+            continue
+        if item.get("status") and item.get("status") != "active":
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        layer = item.get("layer") or "project"
+        cls = item.get("mistakeClass") or "general"
+        lines.append(f"- [{layer}/{cls}] {text}")
+    if not lines:
+        return ""
+    return "Active adaptive lessons (approved):\n" + "\n".join(lines)

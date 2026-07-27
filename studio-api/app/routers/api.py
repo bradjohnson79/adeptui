@@ -191,6 +191,7 @@ async def health():
         "renderProductionEnabled": bool(feature_flags.render_production_v1),
         "codirectorProductionControlEnabled": bool(feature_flags.codirector_production_control_v1),
         "productionIntelligenceEnabled": bool(feature_flags.codirector_production_intelligence_v1),
+        "adaptiveLearningEnabled": bool(feature_flags.codirector_adaptive_learning_v1),
         "specialistCount": specialist_count,
         "registry": {
             "callable": len(caps.callable),

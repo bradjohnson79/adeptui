@@ -10,6 +10,17 @@ from ..bible import service as bible_service
 from ..bible.context_retrieval import ContextRetrievalService
 from .memory import ProductionMemoryStore
 
+try:
+    from ..m212.flags import adaptive_learning_enabled
+    from ..m212.lessons import LessonStore
+    from ..m212.bridge import active_lessons_as_learning_block
+    from ..m212 import strategy as m212_strategy
+except Exception:  # pragma: no cover
+    adaptive_learning_enabled = lambda: False  # type: ignore
+    LessonStore = None  # type: ignore
+    active_lessons_as_learning_block = None  # type: ignore
+    m212_strategy = None  # type: ignore
+
 
 def build_context_pack(
     db: Session,
@@ -50,6 +61,21 @@ def build_context_pack(
                 "error": str(exc)[:200],
             }
 
+    active_lessons: list = []
+    strategy_pack = None
+    lessons_block = ""
+    if adaptive_learning_enabled() and LessonStore is not None:
+        try:
+            active_lessons = LessonStore.list_active_for_context(
+                db, project_id=project_id, limit=40
+            )
+            if active_lessons_as_learning_block is not None:
+                lessons_block = active_lessons_as_learning_block(active_lessons)
+            if m212_strategy is not None:
+                strategy_pack = m212_strategy.get_active_pack(db)
+        except Exception as exc:  # noqa: BLE001
+            active_lessons = [{"error": str(exc)[:200]}]
+
     return {
         "projectId": project_id,
         "sceneId": scene_id,
@@ -57,6 +83,9 @@ def build_context_pack(
         "bible": bible_payload,
         "memory": memory_items,
         "scene": scene_payload,
+        "activeLessons": active_lessons,
+        "activeLessonsBlock": lessons_block,
+        "strategyPack": strategy_pack,
         "mutationPolicy": {
             "mode": "advise-only",
             "mayMutateBible": False,

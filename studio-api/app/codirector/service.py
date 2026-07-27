@@ -22,7 +22,7 @@ from ..assistant import SceneSetupProposal
 from ..config import settings
 from ..db import CoDirectorConversation, Project, Scene
 from ..feature_flags import feature_flags
-from ..learning import learning_context_block, parse_learning
+from ..learning import adaptive_lessons_block, learning_context_block, parse_learning
 from . import config_store
 from .bible.context import ProjectContextService
 from .bible.proposals import ProposalService
@@ -160,6 +160,7 @@ async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
     health.timeline_references_enabled = bool(feature_flags.timeline_references_v1)
     health.production_executive_enabled = bool(feature_flags.production_executive_v1)
     health.production_intelligence_enabled = bool(feature_flags.codirector_production_intelligence_v1)
+    health.adaptive_learning_enabled = bool(feature_flags.codirector_adaptive_learning_v1)
     return health
 
 
@@ -356,6 +357,16 @@ async def _prepare_chat_request(
         block = learning_context_block(learn)
         if block:
             context = (context or "") + "\n\n" + block
+        if feature_flags.codirector_adaptive_learning_v1:
+            try:
+                from .m212.lessons import LessonStore
+
+                active = LessonStore.list_active_for_context(db, project_id=project_id, limit=40)
+                a_block = adaptive_lessons_block(active)
+                if a_block:
+                    context = (context or "") + "\n\n" + a_block
+            except Exception:
+                pass
 
     # Bible excerpt is additive and independently bounded — projects without a Bible (or
     # without project_id at all) see byte-for-byte the same context as before M2.1.
