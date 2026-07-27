@@ -156,6 +156,7 @@ export interface Health {
     modelRadarEnabled?: boolean;
     sandboxRuntimeEnabled?: boolean;
     virtualStageEnabled?: boolean;
+    virtualEnvironmentStudioEnabled?: boolean;
     shotProfilesEnabled?: boolean;
     productionRecipeEnabled?: boolean;
     locationSpinEnabled?: boolean;

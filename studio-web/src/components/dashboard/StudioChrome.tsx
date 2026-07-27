@@ -162,6 +162,7 @@ function useM28NavFlags() {
   const [flags, setFlags] = useState<{
     modelRadarEnabled?: boolean;
     virtualStageEnabled?: boolean;
+    virtualEnvironmentStudioEnabled?: boolean;
     imageProductionEnabled?: boolean;
     frameProductionEnabled?: boolean;
     videoProductionEnabled?: boolean;
@@ -244,6 +245,11 @@ export function StudioChrome({
         {Boolean(healthFlags?.virtualStageEnabled) && (
           <Link to="/virtual-stage" className="chrome-nav-link" data-testid="nav-virtual-stage">
             Virtual Stage
+          </Link>
+        )}
+        {Boolean(healthFlags?.virtualEnvironmentStudioEnabled) && (
+          <Link to="/environment-studio" className="chrome-nav-link" data-testid="nav-environment-studio">
+            3D & Virtual Environment Studio
           </Link>
         )}
         {Boolean(

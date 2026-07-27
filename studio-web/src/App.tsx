@@ -5,6 +5,7 @@ import CoDirectorPage from "./pages/CoDirectorPage";
 import SourceManagerPage from "./pages/SourceManager";
 import ModelRadarWorkspace from "./components/ModelRadarWorkspace";
 import VirtualStageWorkspace from "./components/VirtualStageWorkspace";
+import EnvironmentStudioWorkspace from "./components/EnvironmentStudioWorkspace";
 import ProductionSuiteWorkspace from "./components/ProductionSuiteWorkspace";
 import { CoDirectorHost, CoDirectorSessionProvider } from "./components/CoDirector";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/source-manager" element={<SourceManagerPage />} />
             <Route path="/model-radar" element={<ModelRadarWorkspace />} />
             <Route path="/virtual-stage" element={<VirtualStageWorkspace />} />
+            <Route path="/environment-studio" element={<EnvironmentStudioWorkspace />} />
             <Route path="/production-suite" element={<ProductionSuiteWorkspace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
