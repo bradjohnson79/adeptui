@@ -61,7 +61,7 @@ Values: YES / INDIRECT / PARTIAL / NO.
 | lighting | NO | NO | NO | NO | NO | NO | NO | YES |
 | storyboard | YES | YES | INDIRECT | PARTIAL | YES | NO | YES | YES |
 | screenplay | PARTIAL | PARTIAL | N/A | N/A | YES | NO | NO | YES |
-| sound | NO | NO | NO | NO | NO | NO | NO | YES |
+| sound | PARTIAL | NO | NO | NO | NO | NO | PARTIAL | YES |
 | timeline | PARTIAL | PARTIAL | N/A | N/A | YES | NO | PARTIAL | YES |
 | edit | NO | NO | NO | NO | NO | NO | NO | YES |
 | color | NO | NO | NO | NO | NO | NO | NO | NO |
@@ -149,3 +149,30 @@ audio import-to-timeline, and a working Bible approval path.
 
 Remaining gaps include per-job Co-Director inspection, direct generation proposals, M2.13/M2.8
 state reads, proposal revision, and all declared M2.11 specialist execution.
+
+---
+
+## 7. Post-fix update (M3.0 completion, 2026-07-27)
+
+Evidence: `docs/m3.0-completion/SITUATION_RERUN_RESULTS.md`. The authorized-range table in
+section 1 is unchanged - the model still cannot approve, still cannot enqueue generation
+directly, and still receives no credentials.
+
+What the situation rerun changes about coverage claims:
+
+| Platform / system | Update |
+| --- | --- |
+| image | Production path now yields a real ComfyUI artifact, Asset row, version approve, publish-reference, and Director timeline placement. Monitor remains PARTIAL (no per-job tool). |
+| sound | Import + `place-cue` reaches the Director timeline (B4 closed for import). Generate remains `providerMissing`. Coverage moves from NO/NO to PARTIAL on Read/Publish for the import path only. |
+| video | Still no successful generation. Handoff of a pre-existing fal asset onto the video track through the approval gate works. Invoke stays INDIRECT and unproven for generation. |
+| timeline | Propose / approve / apply held 12/12 (403 before approve). Publish of image + audio + reused video clips proven. |
+| vision validation | Local provider measured real OpenCV metrics on 12/12 generated PNGs. Approve path exists but does not require override on `reject` band (B19). |
+| Production Bible | Publish-reference from an approved image version works. Browser Bible-apply (B10) not re-proven in this API-only rerun. |
+| Cloud render (fal.ai) | No new job. Existing Seedance artifact re-registered into five projects; `get_cloud_render_status` redaction rules unchanged. |
+
+Gaps that the rerun made sharper rather than smaller:
+
+- Specialist findings labelled `honesty: provider` after the model response was discarded (B15).
+- M2.14 specialists remain unbound; `default_honesty()` is `unavailable` outside E2E.
+- Export does not publish the timeline the model and human just approved (B18).
+

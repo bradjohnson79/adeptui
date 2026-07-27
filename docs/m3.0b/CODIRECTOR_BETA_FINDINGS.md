@@ -284,3 +284,38 @@ The situation tally remains **0 EXECUTED / 12 PARTIAL / 0 FAILED / 0 NOT_RUN**. 
 TTS, lipsync, broad provider coverage, M2.14 UI reachability, declared-but-unrun specialists,
 contradictory orchestration fields, beat sync, vision/validation failures, and cancellation race
 remain open. The reused fal Asset has no Studio Job row. No fal job was resubmitted.
+
+---
+
+## 8. M3.0 completion rerun (2026-07-27)
+
+Fixtures-off rerun of all twelve situations against ComfyUI Z-Image and Ollama
+`gemma4:31b-it-qat`. Full narrative: `docs/m3.0-completion/SITUATION_RERUN_RESULTS.md`.
+
+### What changed
+
+- **Asset creation is no longer Absent for stills.** 12/12 situations produced a real PNG via
+  ComfyUI, persisted it, vision-validated it, approved the version, published it as a
+  reference, and placed it on the Director timeline.
+- **B4 holds under load for the import path.** Real WAVs land on the Director timeline in
+  12/12 projects. Generated audio is still `providerMissing: true`.
+- **The provider path runs, and the analysis is discarded.** Direct Ollama capture shows real
+  story analysis. `_validate_or_repair` throws it away and substitutes the specialist display
+  name, then labels the result `honesty: "provider"`. Filed as B15. Of 112 specialist runs,
+  one retained any substantive recommendation text.
+- **Enrichment is wrong-film.** Sparse findings trigger a hard-coded lab-corridor scaffold
+  (B16). Every brief was told it was missing a containment cylinder.
+- **Motion is the EXECUTED blocker.** M2.9 `image_to_video` fails 12/12 because `sceneId` is
+  dropped (B17). Native LTX and WAN renders fail inside their workflows with models present
+  (B20). Fal was reused, not resubmitted.
+- **Export omits the timeline** (B18). Capstone pack has the three real assets and no
+  `director_json`.
+- **Vision approve ignores reject band** (B19). Situation 12 banded `reject` and was approved
+  with `override: false`.
+
+### Updated judgement
+
+The skeleton is still sound and the still-image department is now real. Manual User Beta is
+still blocked: a user cannot get a moving image for any of the twelve situations, and the
+intelligence surface actively mislabels discarded analysis as provider-backed.
+

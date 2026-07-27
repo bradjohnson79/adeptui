@@ -219,7 +219,7 @@ that produces a proposal. There is no approve tool, no job-enqueue tool, and no 
 register a tool at runtime - the registry refuses to import if a declared tool has no binding.
 Detail in `CODIRECTOR_CAPABILITY_COVERAGE.md`.
 
-### 4.4 Generative artifacts are unproven
+### 4.4 Generative artifacts are unproven (updated 2026-07-27 for stills)
 
 Eight of the eighteen platforms have a NOT_TESTED or PARTIAL in their PROV or ART column:
 image, video, 3D, blocking, camera, storyboard, sound and delivery. That is the honest
@@ -263,3 +263,45 @@ Counted directly from the section 2 grid (18 platforms x 12 links = 216 cells).
 Queue recovery is implemented and test-covered. The matrix does not infer a complete situation
 from a component PASS. The completion tally remains 0 EXECUTED / 12 PARTIAL / 0 FAILED / 0 NOT_RUN.
 No paid fal job was resubmitted.
+
+---
+
+## 6. Post-fix update (M3.0 completion, 2026-07-27)
+
+Evidence: `docs/m3.0-completion/SITUATION_RERUN_RESULTS.md`, `artifacts/m30-situations/`.
+
+### Wiring that is now proven end to end (fixtures OFF)
+
+| Chain | Result |
+| --- | --- |
+| M2.9 image generate → Production Executive → ComfyUI Z-Image → Asset + file → version approve → publish-reference → Director timeline | 12/12 |
+| Audio import → `place-cue` → Director timeline `audio_clips` / `sfx_clips` | 12/12 (B4 closed for import) |
+| Timeline propose → apply-before-approve 403 → approve → apply | 12/12 |
+| M2.5 vision validate (local/OpenCV) → vision approve on real PNG | 12/12 |
+| Fal Seedance artifact register (no resubmit) → timeline propose/approve/apply on video track | 5/5 targeted situations |
+| Export pack of real assets | 12/12 packs; timeline omitted (B18) |
+
+### Wiring that remains broken or unproven
+
+| Chain | Result |
+| --- | --- |
+| M2.9 video generate `image_to_video` | 0/12 - `sceneId` dropped (B17) |
+| Native LTX / WAN scene render | Failed with models present (B20) |
+| Audio / music / ambience / SFX generate | `providerMissing: true` |
+| M2.11 specialist → user-visible finding | Model runs; finding discarded (B15) |
+| M2.14 Storyteller / Sound Producer → provider | Structurally unbound (`honesty: unavailable`) |
+| Export → approved timeline in pack | Pack omits `director_json` (B18) |
+
+### Section 4.1 note
+
+RST = FAIL for the studio job queue was fixed in M3.0b (R1) and is not re-opened by this
+rerun. The generative-artifact claim in §4.4 is narrowed: still images are proven; video and
+generated audio are not.
+
+### Tallies after the rerun
+
+Native production platforms with at least one fixtures-off real-artifact success: **image,
+timeline (placement), vision validation, export (assets only), fal reuse handoff**.
+Platforms still without a real generative success: **video, animation, lipsync, generated
+audio/music/SFX/ambience**.
+

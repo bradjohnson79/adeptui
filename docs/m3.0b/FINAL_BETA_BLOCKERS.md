@@ -504,3 +504,116 @@ restart browser assertion.
 
 The gate remains **NOT READY FOR UNRESTRICTED MANUAL USER BETA**. Tally:
 **0 EXECUTED / 12 PARTIAL / 0 FAILED / 0 NOT_RUN**. No paid fal job was resubmitted.
+
+---
+
+## M3.0 completion rerun - B4 closed under load; B15-B21 opened (2026-07-27)
+
+| Field | Value |
+| --- | --- |
+| Date | 2026-07-27 |
+| Evidence | `docs/m3.0-completion/SITUATION_RERUN_RESULTS.md`, `artifacts/m30-situations/` |
+| Commits made | None |
+| fal jobs submitted | None |
+
+### Status changes
+
+| ID | Change |
+| --- | --- |
+| B1 | Remains FIXED in the working tree. Production image jobs now return `assetId: null` until completion, then a real Asset. |
+| B2 | Remains FIXED in the working tree (flag serialisation). Browser confirmation still owed. |
+| B3 | Remains FIXED in the working tree. |
+| B4 | **CLOSED for the import path**, held across 12/12 situation projects. Generated-audio → timeline join is still open (no audio provider). |
+| B5 | **Partially closed.** Local still-image provider works. Audio, video and dialogue have none that succeed end to end. |
+| B6 | Partially eased by local image. Fal I2V still not re-run (no resubmit). Wired fal engines remain I2V; T2V reuse path proven. |
+| B7 | Provider path now runs; user-visible analysis still Absent because of B15. M2.14 remains unbound. |
+| B8 | Unchanged. 36 KeyError failures across 12 runs. |
+| B10 | Not re-tested at browser level in this API-only rerun. |
+| B13 | Sharpened: `syncEvent` accepted/validated by `plan/propose`, absent from `place-cue`. |
+
+### New blockers
+
+### B15. Real specialist analysis is discarded and mislabelled
+
+**Severity: BLOCKER.**
+
+Ollama returns structured story analysis nested under `specialist-finding-v1`.
+`SpecialistRunner._validate_or_repair` fails Pydantic validation, substitutes the specialist
+display name for both `summary` and `recommendation`, stamps `status: "validated"`, and the
+orchestrator reports `honesty: "provider"`. Of 112 specialist runs in the rerun, one retained
+any substantive recommendation. Direct evidence: `artifacts/functional-audit/m30-ollama-raw.json`.
+
+**Fix:** unwrap `specialist-finding-v1` before validate; map free-form analysis fields into
+`summary`/`recommendation`; if repair still discards content, set `honesty: "unavailable"` and
+record that a model response was dropped.
+
+### B16. Heuristic enrichment injects a wrong-film scaffold
+
+**Severity: MAJOR.**
+
+`_heuristic_enrichment` branches on `lab`/`alien`/`scientist` and otherwise returns a
+hard-coded lab-corridor missing-asset list. All twelve situation briefs received containment
+cylinder / emergency strobe requirements.
+
+**Fix:** derive enrichment from the brief, or omit `missingAssets` when the scaffold cannot
+speak for the brief.
+
+### B17. `sceneId` is dropped on the M2.9 video path
+
+**Severity: BLOCKER for motion.**
+
+Every `image_to_video` job failed with `image_to_video requires sceneId with frame assets`
+despite the caller supplying `sceneId`. The executive payload does not carry it to
+`run_video`.
+
+**Fix:** pass `sceneId` through the job payload; add a regression test that fails if it is
+absent at `run_video`.
+
+### B18. Export pack omits the approved timeline
+
+**Severity: MAJOR.**
+
+`QueueWorker._export` writes scene metadata without `director_json`. Capstone re-export
+carried three real assets and `project.json` with no placements. Re-importing the pack loses
+the edit.
+
+**Fix:** serialise director timeline (and cue placements) into the pack, or stop claiming the
+pack is the deliverable of an approved edit session.
+
+### B19. Vision approve ignores reject band without override
+
+**Severity: MAJOR.**
+
+Situation 12 banded `reject` (soft frame). `POST /api/codirector/vision/approve` with
+`override: false` recorded `decision: "approved"`.
+
+**Fix:** require `override: true` (and record `override_approve`) when the report band is
+`reject` or `corrections_required`.
+
+### B20. Native LTX and WAN renders fail with models present
+
+**Severity: MAJOR.**
+
+Situation 1 probed both engines via `POST /api/projects/{id}/render`. LTX failed with a null
+CLIP input (`NoneType.encode_from_tokens_scheduled`). WAN failed because the VAE name uses
+`/` path separators that do not match the Windows model catalog. ComfyUI reports both model
+sets present and readable.
+
+### B21. Specialist timeouts silently shrink the roster
+
+**Severity: MINOR.**
+
+Timeouts at the 50s cap reduced some runs to 7-9 specialists. Analysis was backfilled by the
+same enrichment scaffold, so a caller cannot tell a 7-specialist run from a 10-specialist one
+by looking at the analysis payload.
+
+### Gate verdict after the rerun
+
+Still **NOT READY FOR MANUAL USER BETA**. Minimum bar additions:
+
+1. B15 - provider-labelled analysis must be real analysis, or honesty must say otherwise.
+2. B17 - at least one moving-image path must complete for one situation.
+3. B4 remains closed for import; generated audio still needs a provider before the sound path
+   is complete.
+4. B10 - Bible-apply green at the browser level, still owed.
+

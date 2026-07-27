@@ -103,3 +103,15 @@ change:
 
 `GET /api/fal/models` and the Co-Director read tool both surface `media_type`, so an image
 family added later becomes visible everywhere without further plumbing.
+
+---
+
+## M3.0c cross-reference appendix
+
+The M3.0c image certification is maintained in
+`docs/m3.0c/FAL_IMAGE_ENDPOINT_CERTIFICATION.md`. It classifies Seedream, Nano Banana
+Pro, and GPT Image as **PRODUCT_APPROVAL_REQUIRED** and intentionally records no endpoint
+IDs.
+
+**Manifest status:** unchanged. `FAL_IMAGE_MODELS` remains empty; this appendix does not
+rewrite or retroactively change the M3.0a catalogue history.
