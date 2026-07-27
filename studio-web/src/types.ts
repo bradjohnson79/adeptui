@@ -157,6 +157,7 @@ export interface Health {
     sandboxRuntimeEnabled?: boolean;
     virtualStageEnabled?: boolean;
     virtualEnvironmentStudioEnabled?: boolean;
+    unifiedExperienceEnabled?: boolean;
     shotProfilesEnabled?: boolean;
     productionRecipeEnabled?: boolean;
     locationSpinEnabled?: boolean;

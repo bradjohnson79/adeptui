@@ -138,6 +138,7 @@ type SessionValue = {
   visionValidationEnabled: boolean;
   productionExecutiveEnabled: boolean;
   productionIntelligenceEnabled: boolean;
+  unifiedExperienceEnabled: boolean;
   refreshProviderHealth: () => Promise<void>;
   setSelectedModelId: (modelId: string | null) => void;
   runSteps: (steps: PlannedStep[]) => Promise<void>;
@@ -1400,6 +1401,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       visionValidationEnabled: Boolean(providerHealth?.visionValidationEnabled),
       productionExecutiveEnabled: Boolean(providerHealth?.productionExecutiveEnabled),
       productionIntelligenceEnabled: Boolean(providerHealth?.productionIntelligenceEnabled),
+      unifiedExperienceEnabled: Boolean(providerHealth?.unifiedExperienceEnabled),
       refreshProviderHealth,
       setSelectedModelId,
       runSteps,

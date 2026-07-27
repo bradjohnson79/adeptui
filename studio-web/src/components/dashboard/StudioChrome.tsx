@@ -163,6 +163,7 @@ function useM28NavFlags() {
     modelRadarEnabled?: boolean;
     virtualStageEnabled?: boolean;
     virtualEnvironmentStudioEnabled?: boolean;
+    unifiedExperienceEnabled?: boolean;
     imageProductionEnabled?: boolean;
     frameProductionEnabled?: boolean;
     videoProductionEnabled?: boolean;

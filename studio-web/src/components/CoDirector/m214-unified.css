@@ -1,0 +1,57 @@
+/* M2.14 Unified Experience — additive styles */
+.m214-workspace {
+  display: grid;
+  grid-template-columns: minmax(160px, 200px) 1fr minmax(220px, 280px);
+  gap: 0.75rem;
+  min-height: 420px;
+  padding: 0.75rem;
+  background: linear-gradient(160deg, #1a1f24 0%, #243038 55%, #1c252b 100%);
+  color: #e8eef2;
+  border-radius: 8px;
+}
+.m214-nav ul { list-style: none; padding: 0; margin: 0; }
+.m214-nav button {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+}
+.m214-nav button.active { background: rgba(255,255,255,0.08); font-weight: 600; }
+.m214-center { min-width: 0; }
+.m214-primary-action { font-weight: 600; }
+.m214-conversation { list-style: none; padding: 0; }
+.m214-card {
+  margin: 0.4rem 0;
+  padding: 0.6rem 0.75rem;
+  background: rgba(0,0,0,0.2);
+  border-left: 3px solid #6fa8c4;
+}
+.m214-media-rail { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.m214-media-card {
+  width: 140px;
+  padding: 0.5rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.m214-honesty-mocked { color: #e6c07b; }
+.m214-honesty-fixture { color: #8ec7a0; }
+.m214-honesty-real { color: #9fd0ff; }
+.m214-inspector { border-left: 1px solid rgba(255,255,255,0.1); padding-left: 0.75rem; }
+.m214-media-modal {
+  position: fixed;
+  inset: 10% 15%;
+  background: #141a1f;
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 1rem;
+  z-index: 40;
+}
+.m214-status-pending::before { content: "● "; color: #e6c07b; }
+.m214-status-none::before { content: "○ "; color: #8899a6; }
+.m214-status-current::before { content: "▶ "; }
+.m214-error { color: #f0a0a0; }
+@media (max-width: 900px) {
+  .m214-workspace { grid-template-columns: 1fr; }
+}

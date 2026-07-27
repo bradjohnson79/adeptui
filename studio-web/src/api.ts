@@ -846,6 +846,7 @@ export const api = {
       sandboxRuntimeEnabled?: boolean;
       virtualStageEnabled?: boolean;
       virtualEnvironmentStudioEnabled?: boolean;
+      unifiedExperienceEnabled?: boolean;
       shotProfilesEnabled?: boolean;
       productionRecipeEnabled?: boolean;
       locationSpinEnabled?: boolean;
@@ -2286,6 +2287,19 @@ export const api = {
   m212Retrospective: (body: Record<string, unknown>) =>
     req<any>("/api/codirector/m212/retrospectives", { method: "POST", body: JSON.stringify(body) }),
   m213Status: () => req<Record<string, unknown>>("/api/codirector/m213/status"),
+  m214Status: () => req<Record<string, unknown>>("/api/codirector/m214/status"),
+  m214Idea: (body: { projectId: string; idea: string; preferredFormat?: string }) =>
+    req<Record<string, any>>("/api/codirector/m214/idea", { method: "POST", body: JSON.stringify(body) }),
+  m214Stage: (body: { projectId: string; stage: string }) =>
+    req<Record<string, any>>("/api/codirector/m214/stage", { method: "POST", body: JSON.stringify(body) }),
+  m214Media: (projectId: string) =>
+    req<{ items: any[]; groups: Record<string, any[]> }>(`/api/codirector/m214/media/${projectId}`),
+  m214HitchhikerSmoke: (body: { projectId: string }) =>
+    req<{ cards: any[] }>("/api/codirector/m214/hitchhiker/smoke", { method: "POST", body: JSON.stringify(body) }),
+  m214Approvals: (body: { projectId: string; pending?: Record<string, unknown> }) =>
+    req<Record<string, any>>("/api/codirector/m214/approvals", { method: "POST", body: JSON.stringify(body) }),
+  m214Plan: (projectId: string) => req<Record<string, any>>(`/api/codirector/m214/plan/${projectId}`),
+  m214Session: (projectId: string) => req<Record<string, any>>(`/api/codirector/m214/session/${projectId}`),
   m213Import: (body: Record<string, unknown>) =>
     req<any>("/api/codirector/m213/import", { method: "POST", body: JSON.stringify(body) }),
   m213CameraSpin: (body: Record<string, unknown>) =>

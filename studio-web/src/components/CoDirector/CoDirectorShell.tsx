@@ -5,6 +5,8 @@ import { CoDirectorOverflowMenu } from "./CoDirectorOverflowMenu";
 import { CoDirectorAssetPicker } from "./CoDirectorAssetPicker";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorDisplayMode } from "./types";
+import { UnifiedExperienceWorkspace } from "./UnifiedExperienceWorkspace";
+import "./m214-unified.css";
 
 export function CoDirectorShell({
   mode,
@@ -15,7 +17,7 @@ export function CoDirectorShell({
   onClose: () => void;
   showContextPanel?: boolean;
 }) {
-  const { contextPanelOpen, uiContext, plan, attachments } = useCoDirectorSession();
+  const { contextPanelOpen, uiContext, plan, attachments, unifiedExperienceEnabled } = useCoDirectorSession();
 
   return (
     <div className={`codirector-shell mode-${mode}`}>
@@ -23,8 +25,17 @@ export function CoDirectorShell({
       <CoDirectorOverflowMenu />
       <div className={`codirector-body ${showContextPanel && contextPanelOpen ? "with-context" : ""}`}>
         <div className="codirector-main">
-          <CoDirectorConversation compactWelcome={mode === "popup"} />
-          <CoDirectorComposer />
+          {unifiedExperienceEnabled ? (
+            <UnifiedExperienceWorkspace
+              projectId={uiContext.projectId || uiContext.projectName || "default"}
+              enabled={Boolean(unifiedExperienceEnabled)}
+            />
+          ) : (
+            <>
+              <CoDirectorConversation compactWelcome={mode === "popup"} />
+              <CoDirectorComposer />
+            </>
+          )}
         </div>
         {showContextPanel && contextPanelOpen && (
           <aside className="codirector-context-panel" aria-label="Co-Director context">
