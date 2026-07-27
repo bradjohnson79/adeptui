@@ -33,6 +33,7 @@ def propose_timeline_ops(plan: AudioPlan) -> dict[str, Any]:
                 "volume": p.volume,
                 "ducking": p.ducking,
                 "sceneId": plan.sceneId,
+                "syncEvent": p.syncEvent,
             }
         )
     return {
@@ -85,6 +86,7 @@ def apply_timeline_ops(db: Session, proposal: dict[str, Any]) -> dict[str, Any]:
             scene_id=op.get("sceneId") or proposal.get("sceneId"),
             volume=float(op.get("volume") or 1.0),
             ducking=bool(op.get("ducking") or False),
+            sync_event=op.get("syncEvent"),
         )
         results.append({"opId": op.get("opId"), "result": placed})
     out = dict(proposal)

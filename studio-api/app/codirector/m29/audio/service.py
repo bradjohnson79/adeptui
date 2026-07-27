@@ -76,6 +76,37 @@ def resolve_real_audio_path(db: Session, asset_id: str | None) -> Path | None:
     return None
 
 
+def _resolve_sync_start(
+    *,
+    start_sec: float,
+    sync_event: str | None,
+    beat_map: dict[str, float] | None = None,
+) -> tuple[float, str | None]:
+    """Resolve a syncEvent to a timeline start when a beat map is available.
+
+    Unknown events keep the caller-supplied startSec and still persist the label
+    so placement remains inspectable (B13 Option A).
+    """
+    label = (sync_event or "").strip() or None
+    if not label:
+        return start_sec, None
+    mapping = beat_map or {}
+    if label in mapping:
+        try:
+            return float(mapping[label]), label
+        except (TypeError, ValueError):
+            return start_sec, label
+    # Convention: bar-N → (N-1) * 2.0 seconds when no explicit map.
+    if label.lower().startswith("bar-"):
+        try:
+            bar = int(label.split("-", 1)[1])
+            if bar >= 1:
+                return float((bar - 1) * 2.0), label
+        except ValueError:
+            pass
+    return start_sec, label
+
+
 def _write_scene_clip(
     db: Session,
     *,
@@ -86,6 +117,7 @@ def _write_scene_clip(
     start_sec: float,
     duration_sec: float,
     volume: float,
+    sync_event: str | None = None,
 ) -> bool:
     """Upsert one cue onto the scene's DirectorTimeline. False when the scene is unusable."""
 
@@ -105,10 +137,13 @@ def _write_scene_clip(
         fallback_prompt=scene.prompt or "",
     )
     track = tl.sfx_clips if kind == "sfx" else tl.audio_clips
+    clip_label = f"sync:{sync_event}" if sync_event else ""
     for existing in track:
         if existing.asset_id == asset_id and abs(float(existing.start) - start_sec) < 1e-6:
             existing.length = duration_sec
             existing.volume = volume
+            if clip_label:
+                existing.label = clip_label
             break
     else:
         track.append(
@@ -117,7 +152,7 @@ def _write_scene_clip(
                 start=start_sec,
                 length=duration_sec,
                 volume=volume,
-                label=kind,
+                label=clip_label or kind,
             )
         )
     scene.director_json = dumps_director_timeline(tl)
@@ -551,10 +586,23 @@ class AudioService:
         scene_id: str | None = None,
         volume: float = 1.0,
         ducking: bool = False,
+        sync_event: str | None = None,
+        beat_map: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         """Deterministic cue placement onto m29_audio_cues (+ optional director timeline)."""
         ensure_m29_tables()
+        resolved_start, sync_label = _resolve_sync_start(
+            start_sec=start_sec, sync_event=sync_event, beat_map=beat_map
+        )
         cue_id = uuid.uuid4().hex
+        meta = {
+            "volume": volume,
+            "ducking": ducking,
+            "fixture": False,
+            "syncEvent": sync_label,
+            "requestedStartSec": start_sec,
+            "resolvedFromSync": bool(sync_label and abs(resolved_start - start_sec) > 1e-9),
+        }
         db.execute(
             text(
                 "INSERT INTO m29_audio_cues "
@@ -569,9 +617,9 @@ class AudioService:
                 "kind": kind,
                 "status": "placed",
                 "aid": asset_id,
-                "start": start_sec,
+                "start": resolved_start,
                 "dur": duration_sec,
-                "meta": json.dumps({"volume": volume, "ducking": ducking, "fixture": False}),
+                "meta": json.dumps(meta),
                 "c": _now(),
             },
         )
@@ -584,21 +632,24 @@ class AudioService:
                 scene_id=scene_id,
                 kind=kind,
                 asset_id=asset_id,
-                start_sec=start_sec,
+                start_sec=resolved_start,
                 duration_sec=duration_sec,
                 volume=volume,
+                sync_event=sync_label,
             )
         return {
             "cueId": cue_id,
             "kind": kind,
             "assetId": asset_id,
-            "startSec": start_sec,
+            "startSec": resolved_start,
             "durationSec": duration_sec,
             "status": "placed",
             "fixture": False,
             "projectId": project_id,
             "sceneId": scene_id,
             "timelinePlaced": placed,
+            "syncEvent": sync_label,
+            "requestedStartSec": start_sec,
         }
 
     @staticmethod

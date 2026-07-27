@@ -158,6 +158,8 @@ class ApproveRejectRequest(BaseModel):
     reviewer: str = "user"
     notes: str = ""
     override: bool = False
+    # B19 / M3.0d: required when override=true for reject-band approvals.
+    overrideReason: str = ""
     linkToBible: bool = True
 
 

@@ -22,6 +22,7 @@ def record_decision(
     reviewer: str = "user",
     notes: str = "",
     override: bool = False,
+    override_reason: str = "",
     link_to_bible: bool = False,
 ) -> dict[str, Any]:
     session = VisionStore.get_session(db, session_id, project_id=project_id)
@@ -30,14 +31,32 @@ def record_decision(
 
     # B19: reject / corrections_required bands cannot be silently "approved".
     # Callers must pass override=true (decision becomes override_approve).
-    if decision == "approved" and not override and session.reportId:
+    report = None
+    band = ""
+    if session.reportId:
         report = VisionStore.get_report(db, session.reportId, project_id=project_id)
         band = (getattr(report, "band", None) or "").strip().lower() if report else ""
-        if band in ("reject", "corrections_required"):
-            raise ValueError(
-                f"Vision report band is '{band}'; approval requires override=true "
-                "(recorded as override_approve)."
-            )
+
+    if decision == "approved" and not override and band in ("reject", "corrections_required"):
+        raise ValueError(
+            f"Vision report band is '{band}'; approval requires override=true "
+            "(recorded as override_approve)."
+        )
+
+    # M3.0d: override of a reject-band result requires an explicit reason.
+    reason = (override_reason or notes or "").strip()
+    if override and band in ("reject", "corrections_required") and not reason:
+        raise ValueError(
+            f"Vision report band is '{band}'; override requires a non-empty overrideReason."
+        )
+
+    approval_notes = notes
+    if override and reason:
+        approval_notes = (
+            f"[overrideReason] {reason}"
+            if not notes
+            else f"{notes}\n[overrideReason] {reason}"
+        )
 
     approval = ValidationApproval(
         approvalId=str(uuid.uuid4()),
@@ -46,7 +65,7 @@ def record_decision(
         projectId=project_id,
         decision=decision,  # type: ignore[arg-type]
         reviewer=reviewer,
-        notes=notes,
+        notes=approval_notes,
         override=override,
         createdAt=datetime.utcnow().isoformat() + "Z",
     )

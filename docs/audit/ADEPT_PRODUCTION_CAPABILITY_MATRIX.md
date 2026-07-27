@@ -178,3 +178,27 @@ reachable, a ready workflow, and verified weights, the best status this branch w
 `partially_wired` with the action `run_verification_render`, because no real render was
 performed in the verified environment. `production_ready` is reserved for a claim backed by an
 actual end-to-end run.
+
+
+## Registry additions
+
+The following capability rows were added after the original prose matrix. They are listed here
+explicitly so the document remains a complete index while their detailed verification notes are
+developed:
+
+`m28.radar.discover`, `m28.compat.evaluate`, `m28.sandbox.plan`, `m28.sandbox.install`, `m28.sandbox.validate`, `m28.sandbox.promote`,
+`m28.recipe.execute`, `m28.shot_profile.apply`, `image.generate`, `image.reference.generate`, `image.image_to_image`, `image.inpaint`,
+`image.outpaint`, `image.variation`, `image.upscale`, `image.relight`, `image.validate`, `image.approve`,
+`image.publish_reference`, `frame.generate`, `frame.sequence.generate`, `frame.first.generate`, `frame.last.generate`, `frame.transition.generate`,
+`frame.replace`, `frame.validate`, `frame.approve`, `frame.bind_to_shot`, `video.generate`, `video.validate`,
+`audio.dialogue.generate`, `audio.sfx.generate`, `audio.music.generate`, `audio.validate`, `mouth.rectangle.generate`, `mouth.track.generate`,
+`lipsync.generate`, `lipsync.validate`, `scene.render`, `timeline.render`, `ve.import.validate`, `ve.import.convert`,
+`ve.environment.imported`, `ve.environment.camera_spin`, `ve.environment.reconstruct`, `ve.theme.translate`, `ve.blocking.canvas`, `ve.camera.state`,
+`ve.lighting.state`, `ve.concept.generate`, `ve.timeline.publish`, `ve.scene_production.plan`, `ve.vpc.coordinate`, `codirector.attachment.classify`,
+`codirector.attachment.interpret`, `codirector.attachment.confirm`, `codirector.project.propose`, `codirector.project.resume`, `codirector.media.list`, `codirector.media.select`,
+`codirector.media.compare`, `codirector.media.review`, `codirector.media.approve`, `codirector.media.reject`, `codirector.media.request_revision`, `storyteller.scene.analyze`,
+`storyteller.scene.identify_unknowns`, `storyteller.scene.ask_questions`, `storyteller.scene.propose_direction`, `storyteller.scene.generate_variations`, `storyteller.scene.define_emotional_arc`, `storyteller.scene.define_subtext`,
+`storyteller.character.interpret`, `storyteller.environment.interpret`, `storyteller.media.review`, `storyteller.handoff.create`, `sound_producer.concept.create`, `sound_producer.score_brief.create`,
+`sound_producer.ambience.plan`, `sound_producer.cue.plan`, `sound_producer.dialogue.plan`, `sound_producer.mix_intent.create`, `production_team.message.send`, `production_team.message.respond`,
+`production_team.handoff.create`, `production_team.meeting.convene`, `production_team.meeting.synthesize`, `production_team.conflict.detect`, `production_team.conflict.resolve`, `production_team.decision.propagate`,
+`production_team.impact.calculate`, `production_team.state.revalidate`, `production_team.brief.update`, `production_team.readiness.evaluate`, `production_team.final_review`

@@ -302,6 +302,7 @@ class ProductionIntelligenceOrchestrator:
         explainability: list[dict[str, Any]] = []
         stage_rows: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        timeouts: list[dict[str, Any]] = []
         retries: list[dict[str, Any]] = []
         approvals: list[dict[str, Any]] = []
         durations: dict[str, Any] = {}
@@ -312,6 +313,7 @@ class ProductionIntelligenceOrchestrator:
             t0 = time.perf_counter()
             finding: SpecialistFinding | None = None
             last_error: str | None = None
+            timed_out = False
             for attempt in (1, 2):
                 try:
                     batch, errors = await self.runner.run_all(
@@ -327,6 +329,9 @@ class ProductionIntelligenceOrchestrator:
                     if errors and not batch:
                         err0 = errors[0]
                         msg = getattr(err0, "message", None) or str(err0)
+                        code = getattr(err0, "code", None) or ""
+                        if "timeout" in str(msg).lower() or "TIMEOUT" in str(code):
+                            timed_out = True
                         raise RuntimeError(msg)
                     finding = batch[0] if batch else None
                     if finding is None:
@@ -334,6 +339,8 @@ class ProductionIntelligenceOrchestrator:
                     break
                 except Exception as exc:  # noqa: BLE001
                     last_error = str(exc)[:300]
+                    if "timeout" in last_error.lower():
+                        timed_out = True
                     if attempt == 1:
                         retries.append(
                             {
@@ -341,16 +348,19 @@ class ProductionIntelligenceOrchestrator:
                                 "specialistId": node.specialist_id,
                                 "attempt": attempt,
                                 "error": last_error,
+                                "timeoutState": timed_out,
                             }
                         )
                     else:
-                        failures.append(
-                            {
-                                "stageId": node.stage_id,
-                                "specialistId": node.specialist_id,
-                                "error": last_error,
-                            }
-                        )
+                        entry = {
+                            "stageId": node.stage_id,
+                            "specialistId": node.specialist_id,
+                            "error": last_error,
+                            "timeoutState": timed_out,
+                        }
+                        failures.append(entry)
+                        if timed_out:
+                            timeouts.append(entry)
 
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
             durations[node.stage_id] = elapsed_ms
@@ -360,9 +370,11 @@ class ProductionIntelligenceOrchestrator:
                     {
                         "stageId": node.stage_id,
                         "specialistId": node.specialist_id,
-                        "status": "failed",
+                        "status": "timeout" if timed_out else "failed",
                         "durationMs": elapsed_ms,
                         "error": last_error,
+                        "timeoutState": timed_out,
+                        "fallbackState": "none",
                     }
                 )
                 continue
@@ -452,7 +464,14 @@ class ProductionIntelligenceOrchestrator:
         bible_finding = next((f for f in findings if f.specialistId == "bible-manager"), None)
         story_finding = next((f for f in findings if f.specialistId == "story-analyst"), None)
 
-        status = "completed" if not failures else ("completed_with_errors" if findings else "failed")
+        if failures and not findings:
+            status = "failed"
+        elif failures or timeouts:
+            status = "completed_with_warnings"
+        elif pending_approvals:
+            status = "pending_approval"
+        else:
+            status = "completed"
         updated_trace = ExecutionTraceStore.update(
             db,
             project_id,
@@ -494,7 +513,9 @@ class ProductionIntelligenceOrchestrator:
                 "STUDIO_E2E is set. Specialist digests are not live model reasoning.",
             ]
 
-        return {
+        from .honesty import normalize_orchestration_response
+
+        raw = {
             "story": story_out,
             "bible": {
                 "context": context_pack.get("bible"),
@@ -520,11 +541,23 @@ class ProductionIntelligenceOrchestrator:
             "stageOrder": stage_order,
             "pendingApprovals": pending_approvals,
             "explainability": explainability,
-            "modelUsed": model_used,
+            "modelUsed": model_used if use_provider else (model_used if findings else None),
+            "providerUsed": "codirector" if use_provider else None,
             "status": status,
+            "failures": failures,
+            "timeouts": timeouts,
+            "errors": [],
+            "warnings": (
+                ["Specialist roster incomplete due to timeouts; full production team did not complete."]
+                if timeouts
+                else []
+            ),
             "enriched": bool(enrichment),
             "analysisMode": analysis_mode,
             "honesty": honesty,
             "honestyNotes": honesty_notes,
             "useProvider": use_provider,
+            "artifacts": [],
+            "jobs": [],
         }
+        return normalize_orchestration_response(raw)

@@ -28,6 +28,14 @@ _*.hex
 _scratch.*
 scratch_*.py
 scratch_*.txt
+.tmp-*
+.tmp*.txt
+.tmp*.py
+.tmp*.json
+
+# Quarantined one-off emit/patch helpers (never commit)
+scripts/_*
+scripts/_payloads/
 
 # M2.10b sandbox runtimes / weights (do not commit)
 data/m210b-sandbox/

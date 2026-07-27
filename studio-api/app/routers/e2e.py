@@ -196,3 +196,56 @@ def e2e_cli_mock(body: dict[str, Any] | None = None) -> dict[str, Any]:
         return {"cleared": True}
     os.environ["ADEPT_CLI_MOCK_JSON"] = json.dumps(payload)
     return {"ok": True, "mock": payload}
+
+
+@router.post("/seed-running-job")
+def e2e_seed_running_job(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Insert a running Studio Job so restart recovery can be asserted (M3.0d B14)."""
+    if not e2e_enabled():
+        raise HTTPException(404, "E2E controls disabled")
+    import uuid
+    from datetime import datetime
+
+    from ..db import Job, Project, SessionLocal, init_db
+
+    payload = body or {}
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(payload.get("project_id") or "").strip()
+        if not project_id:
+            project = Project(id=str(uuid.uuid4()), name="E2E recovery project")
+            db.add(project)
+            db.commit()
+            project_id = project.id
+        elif not db.get(Project, project_id):
+            raise HTTPException(404, "project not found")
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            kind=str(payload.get("kind") or "render_scene"),
+            status="running",
+            progress=0.4,
+            message="In flight for restart recovery",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        return {"project_id": project_id, "job_id": job.id, "status": job.status}
+    finally:
+        db.close()
+
+
+@router.post("/recover-jobs")
+def e2e_recover_jobs() -> dict[str, Any]:
+    """Run Studio JobQueue.recover_interrupted without restarting the API process."""
+    if not e2e_enabled():
+        raise HTTPException(404, "E2E controls disabled")
+    import asyncio
+
+    from ..queue_worker import job_queue
+
+    # Sync FastAPI handlers run in a worker thread with no event loop.
+    result = asyncio.run(job_queue.recover_interrupted())
+    return {"recovered": result}

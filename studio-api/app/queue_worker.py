@@ -1573,6 +1573,46 @@ class JobQueue:
                 )
         except Exception:  # noqa: BLE001
             logger.debug("M2.9 cue table unavailable while exporting %s", project.id, exc_info=True)
+
+        # M3.0d export enrichment: editor sequence + job provenance (best-effort).
+        editor_sequence: dict = {}
+        try:
+            from .editor_sequences import EditorProjectRow, _row_to_editor
+
+            ed_row = (
+                db.query(EditorProjectRow)
+                .filter(EditorProjectRow.project_id == project.id)
+                .first()
+            )
+            if ed_row:
+                editor_sequence = _row_to_editor(ed_row)
+        except Exception:  # noqa: BLE001
+            logger.debug("Editor sequence unavailable while exporting %s", project.id, exc_info=True)
+
+        generation_jobs: list[dict] = []
+        try:
+            job_rows = (
+                db.query(Job)
+                .filter(Job.project_id == project.id)
+                .order_by(Job.created_at.desc())
+                .limit(50)
+                .all()
+            )
+            for jr in job_rows:
+                generation_jobs.append(
+                    {
+                        "jobId": jr.id,
+                        "kind": jr.kind,
+                        "status": jr.status,
+                        "sceneId": getattr(jr, "scene_id", None),
+                        "outputPath": jr.output_path,
+                        "comfyPromptId": getattr(jr, "comfy_prompt_id", None),
+                        "errorMessage": jr.message if jr.status in ("failed", "cancelled") else None,
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("Job provenance unavailable while exporting %s", project.id, exc_info=True)
+
         payload = {
             "id": project.id,
             "name": project.name,
@@ -1595,11 +1635,16 @@ class JobQueue:
                     "lipsync_output_path": s.lipsync_output_path,
                     # B18: approved Director timeline must survive pack re-import.
                     "director_json": getattr(s, "director_json", "") or "",
+                    "shot_id": getattr(s, "id", None),
                 }
                 for s in scenes
             ],
             "assets": [{"id": a.id, "tag": a.tag, "kind": a.kind, "filename": a.filename} for a in assets],
             "cue_placements": cue_placements,
+            "editor_sequence_json": editor_sequence,
+            "generation_jobs": generation_jobs,
+            "export_contract": "m30d-canonical-timeline-v1",
+            "sync_model": "director_plan_transformed_into_editor_sequence",
         }
         out_dir = settings.data_dir / "exports" / f"{project.name.replace(' ', '_')}_{project.id[:8]}"
         videos = []

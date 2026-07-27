@@ -82,6 +82,7 @@ def approve_validation(body: ApproveRejectRequest, db: Session = Depends(get_db)
             reviewer=body.reviewer,
             notes=body.notes,
             override=body.override,
+            override_reason=body.overrideReason,
             link_to_bible=body.linkToBible,
         )
     except ValueError as exc:
@@ -104,6 +105,7 @@ def reject_validation(body: ApproveRejectRequest, db: Session = Depends(get_db))
             reviewer=body.reviewer,
             notes=body.notes,
             override=body.override,
+            override_reason=body.overrideReason,
             link_to_bible=False,
         )
     except ValueError as exc:

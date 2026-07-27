@@ -143,6 +143,8 @@ class AudioPlaceCueBody(BaseModel):
     sceneId: Optional[str] = None
     volume: float = 1.0
     ducking: bool = False
+    # B13: beat/sync label consumed by place_cue (persisted on cue + timeline clip).
+    syncEvent: Optional[str] = None
 
 
 class AudioImportBody(BaseModel):
@@ -413,6 +415,7 @@ def audio_place_cue(body: AudioPlaceCueBody, db: Session = Depends(get_db)) -> d
         scene_id=body.sceneId,
         volume=body.volume,
         ducking=body.ducking,
+        sync_event=body.syncEvent,
     )
 
 

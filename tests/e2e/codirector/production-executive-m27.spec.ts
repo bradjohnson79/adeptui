@@ -483,7 +483,23 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     expect(second.jobs.length).toBeGreaterThan(0);
   });
 
-  test("restart recovery documented in pytest", async () => {
-    test.skip(true, "Restart recovery covered by pytest crash recovery test");
+  test("restart recovery closes running Studio jobs as interrupted", async ({ request }) => {
+    const seed = await request.post("/api/e2e/seed-running-job", {
+      data: { kind: "render_scene" },
+    });
+    test.skip(!seed.ok(), `E2E job seed unavailable (${seed.status()})`);
+    const seeded = await seed.json();
+    expect(seeded.job_id).toBeTruthy();
+
+    const recovered = await request.post("/api/e2e/recover-jobs");
+    expect(recovered.ok()).toBeTruthy();
+    const body = await recovered.json();
+    expect(body.recovered?.interrupted || []).toContain(seeded.job_id);
+
+    const jobRes = await request.get(`/api/jobs/${seeded.job_id}`);
+    expect(jobRes.ok()).toBeTruthy();
+    const job = await jobRes.json();
+    expect(job.status).toBe("failed");
+    expect(String(job.message || "").toLowerCase()).toMatch(/interrupt|restart|recover/);
   });
 });
