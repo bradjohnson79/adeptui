@@ -379,16 +379,52 @@ class SpecialistRunner:
         user_message: str,
     ) -> SpecialistFinding:
         lowered = user_message.lower()
-        recommendation = f"{definition.display_name} recommends proceeding with bounded Production Bible context."
-        requirements: list[str] = []
+        brief_anchor = " ".join(user_message.strip().split()[:12]) or "unspecified brief"
+        domain_note = {
+            "storyteller": "narrative beats and character stakes",
+            "story-analyst": "structure and conflict arcs",
+            "production-bible": "canon locks and protected terms",
+            "continuity-analyst": "wardrobe/geography continuity",
+            "director": "shot order and pacing",
+            "cinematographer": "lens, framing, and camera language",
+            "sound-producer": "dialogue, ambience, and music policy",
+            "sound-designer": "SFX and spatial cues",
+            "music-supervisor": "temp/score placement honesty",
+            "editor": "cut rhythm and transitions",
+            "virtual-production-coordinator": "stage logistics and asset readiness",
+            "qa": "preflight and delivery risks",
+        }.get(definition.id, "bounded Production Bible context")
+        recommendation = (
+            f"{definition.display_name} for brief «{brief_anchor}»: focus on {domain_note}."
+        )
+        requirements: list[str] = [f"Honor filmmaker brief: {brief_anchor}"]
         risks: list[str] = []
         blockers: list[str] = []
         tool_actions: list[ProposedToolAction] = []
 
+        if "no music" in lowered or "sin música" in lowered or "pas de musique" in lowered:
+            if definition.id in ("sound-producer", "music-supervisor", "sound-designer"):
+                recommendation = (
+                    f"{definition.display_name}: music prohibited for «{brief_anchor}»; "
+                    "plan ambience/SFX only; do not schedule generative score."
+                )
+                requirements.append("generate_audio=false / music=prohibited")
+        if "dialogue" in lowered and ("no dialogue" in lowered or "without dialogue" in lowered):
+            if definition.id in ("storyteller", "sound-producer", "director"):
+                requirements.append("Dialogue-free picture; ambient sound only")
+        if "electric vehicle" in lowered or "commercial" in lowered:
+            if definition.id in ("storyteller", "director", "cinematographer"):
+                requirements.append("30s commercial pacing and product-hero beats")
+        if "sister" in lowered or "estranged" in lowered:
+            if definition.id in ("storyteller", "continuity-analyst", "sound-producer"):
+                requirements.append("Two-character emotional continuity and dialogue coverage")
+        if "music video" in lowered:
+            if definition.id in ("editor", "music-supervisor", "director"):
+                requirements.append("Imported audio timing; do not claim generative music")
         if "storyboard" in lowered and definition.id in ("director", "cinematographer", "prompt-architect"):
             recommendation = (
-                "Use a locked medium two-shot with subtle movement, preserving corridor practicals "
-                "and readable facial exposure."
+                f"For «{brief_anchor}»: locked medium two-shot with subtle movement, "
+                "preserving practicals and readable facial exposure."
             )
             requirements.extend(["Approved character references", "Location architecture reference"])
         if definition.id == "technical-director":
@@ -414,7 +450,10 @@ class SpecialistRunner:
 
         return SpecialistFinding(
             specialistId=definition.id,
-            summary=f"{definition.display_name} reviewed the request (limited-analysis).",
+            summary=(
+                f"{definition.display_name} reviewed «{brief_anchor}» "
+                f"({domain_note}; limited-analysis)."
+            ),
             recommendation=recommendation,
             requirements=requirements,
             risks=risks,
