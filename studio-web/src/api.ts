@@ -2257,4 +2257,33 @@ export const api = {
     ),
   m211Specialists: () => req<{ count: number; specialists: any[] }>("/api/codirector/m211/specialists"),
 
+  m212Status: () => req<Record<string, unknown>>("/api/codirector/m212/status"),
+  m212Dashboard: (projectId: string) =>
+    req<any>(`/api/codirector/m212/dashboard?projectId=${encodeURIComponent(projectId)}`),
+  m212ListLessons: (projectId: string, status?: string) =>
+    req<any>(
+      `/api/codirector/m212/lessons?projectId=${encodeURIComponent(projectId)}` +
+        (status ? `&status=${encodeURIComponent(status)}` : "")
+    ),
+  m212RunRegression: (lessonId: string) =>
+    req<any>(`/api/codirector/m212/lessons/${encodeURIComponent(lessonId)}/regression`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  m212PromoteLesson: (lessonId: string, body: Record<string, unknown>) =>
+    req<any>(`/api/codirector/m212/lessons/${encodeURIComponent(lessonId)}/promote`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  m212RollbackLesson: (lessonId: string, body: Record<string, unknown>) =>
+    req<any>(`/api/codirector/m212/lessons/${encodeURIComponent(lessonId)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  m212Critique: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m212/critique", { method: "POST", body: JSON.stringify(body) }),
+  m212Retrospective: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m212/retrospectives", { method: "POST", body: JSON.stringify(body) }),
+
+
 };

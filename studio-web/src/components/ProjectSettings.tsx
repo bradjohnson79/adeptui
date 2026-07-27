@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { Project } from "../types";
 import { LearningPanel } from "./LearningPanel";
+import { LearningEvolutionPanel } from "./LearningEvolutionPanel";
 import { ASPECT_PRESETS, FPS_OPTIONS } from "../workspacePrefs";
 
 const TABS = [
@@ -116,7 +117,12 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         </div>
       )}
 
-      {tab === "learning" && <LearningPanel project={project} onChange={onChange} />}
+      {tab === "learning" && (
+        <>
+          <LearningPanel project={project} onChange={onChange} />
+          <LearningEvolutionPanel project={project} enabled />
+        </>
+      )}
 
       {tab === "defaults" && (
         <div className="settings-panel">

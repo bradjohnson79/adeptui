@@ -29,6 +29,7 @@ export function CoDirectorProductionIntelligenceDashboard({
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [m212Pending, setM212Pending] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     if (!enabled || !projectId) return;
@@ -37,6 +38,12 @@ export function CoDirectorProductionIntelligenceDashboard({
     try {
       const res = (await api.m211Dashboard(projectId)) as DashboardPayload;
       setData(res);
+      try {
+        const m212 = await api.m212Dashboard(projectId);
+        setM212Pending(Array.isArray(m212?.pendingApprovals) ? m212.pendingApprovals.length : 0);
+      } catch {
+        setM212Pending(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load Production Intelligence");
     } finally {
@@ -102,6 +109,12 @@ export function CoDirectorProductionIntelligenceDashboard({
                 <p>{data.stage || "idle"}</p>
               </section>
               <section data-testid="m211-pending-approvals">
+                {m212Pending != null && (
+                  <p className="scene-meta" data-testid="m212-pending-hook">
+                    Learning Evolution pending: {m212Pending}
+                  </p>
+                )}
+
                 <p className="scene-meta">Pending approvals</p>
                 <p>{pending.length}</p>
               </section>
