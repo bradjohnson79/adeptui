@@ -162,3 +162,24 @@ class SpecialistSelector:
 
     def validate_selection(self, specialist_ids: Iterable[str]) -> list[str]:
         return self.registry.validate_ids(specialist_ids)
+
+_INTENT_SPECIALISTS.update(
+    {
+        "virtual_production": (
+            "virtual-production-coordinator",
+            "production-designer",
+            "cinematographer",
+            "lighting-supervisor",
+            "continuity-analyst",
+            "technical-director",
+        ),
+        "environment_studio": (
+            "virtual-production-coordinator",
+            "production-designer",
+            "art-director",
+            "cinematographer",
+            "lighting-supervisor",
+        ),
+    }
+)
+

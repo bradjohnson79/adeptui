@@ -305,6 +305,25 @@ PRODUCT_ROLE_MAP: dict[str, str] = {
     "Music Supervisor": "music-supervisor",
     "Editor": "editor",
     "Cinematographer": "cinematographer",
+
+    "virtual-production-coordinator": SpecialistContract(
+        specialist_id="virtual-production-coordinator",
+        product_role="Virtual Production Coordinator",
+        responsibilities=(
+            "Coordinate A-Z scene production plans",
+            "Track readiness GO/NO-GO, blockers, and dependencies",
+            "Enforce persisted approval gates across VE pipelines",
+            "Label fixture/mock vs real generation honestly",
+        ),
+        input_keys=("sceneProductionPlan", "virtualEnvironment", "approvals", "blockers"),
+        output_keys=("stageAdvice", "readiness", "blockers", "dependencyRegister", "dashboardCategories", "honestyNotes"),
+        confidence_required=True,
+        reasoning_required=True,
+        approval_required=True,
+        escalation_path="continuity-analyst",
+        aliases=("vpc", "virtual_production_coordinator"),
+    ),
+
 }
 
 

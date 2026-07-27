@@ -36,6 +36,7 @@ DEFAULT_PIPELINE: tuple[DagNode, ...] = (
     DagNode("sound", "sound-designer", "Sound Supervisor"),
     DagNode("music", "music-supervisor", "Music Supervisor"),
     DagNode("editor", "editor", "Editor"),
+    DagNode("vpc", "virtual-production-coordinator", "Virtual Production Coordinator", approval_boundary=True, optional=True),
     DagNode("qa", "qa-reviewer", "QA Reviewer", approval_boundary=True),
     DagNode("user_review", "qa-reviewer", "User Review", approval_boundary=True),
 )
