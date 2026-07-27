@@ -28,11 +28,13 @@ class DagNode:
 # Story Analyst → Bible Manager → Continuity → Director → Cinematographer
 # → Sound → Music → Editor → QA → User Review
 DEFAULT_PIPELINE: tuple[DagNode, ...] = (
-    DagNode("story", "story-analyst", "Story Analyst"),
+    DagNode("storyteller", "storyteller", "Storyteller"),
+    DagNode("story", "story-analyst", "Story Analyst", optional=True),
     DagNode("bible", "bible-manager", "Production Bible Manager", approval_boundary=True),
     DagNode("continuity", "continuity-analyst", "Continuity Supervisor", approval_boundary=True),
     DagNode("director", "director", "Director"),
     DagNode("camera", "cinematographer", "Camera Supervisor"),
+    DagNode("sound_producer", "sound-producer", "Sound Producer"),
     DagNode("sound", "sound-designer", "Sound Supervisor"),
     DagNode("music", "music-supervisor", "Music Supervisor"),
     DagNode("editor", "editor", "Editor"),

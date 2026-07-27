@@ -15,10 +15,11 @@ from .m013_production_suite import MIGRATION as M013
 from .m014_production_intelligence import MIGRATION as M014
 from .m015_adaptive_learning import MIGRATION as M015
 from .m016_virtual_environment_studio import MIGRATION as M016
+from .m017_codirector_unified_experience import MIGRATION as M017
 from .registry import Migration, MigrationRegistry
 from .runner import ChecksumMismatchError, MigrationRun, MigrationRunner
 
-DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016))
+DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016, M017))
 
 __all__ = [
     "ChecksumMismatchError",
@@ -38,6 +39,7 @@ __all__ = [
     "M014",
     "M015",
     "M016",
+    "M017",
     "Migration",
     "MigrationRegistry",
     "MigrationRun",

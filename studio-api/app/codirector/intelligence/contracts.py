@@ -284,28 +284,6 @@ CONTRACTS: dict[str, SpecialistContract] = {
         output_keys=("castingNotes", "identityRefs", "risks"),
         escalation_path="Missing identity refs → Asset Manager",
     ),
-}
-
-
-# Product role → specialist id (aliases resolve to canonical ids)
-PRODUCT_ROLE_MAP: dict[str, str] = {
-    "Story Analyst": "story-analyst",
-    "Production Bible Manager": "bible-manager",
-    "Continuity Supervisor": "continuity-analyst",
-    "Camera Supervisor": "cinematographer",
-    "Animation Supervisor": "animation-supervisor",
-    "Compositing Supervisor": "compositing-supervisor",
-    "Lighting Supervisor": "lighting-supervisor",
-    "Asset Manager": "asset-manager",
-    "QA Reviewer": "qa-reviewer",
-    "Pipeline Manager": "pipeline-manager",
-    "Code Director": "code-director",
-    "Director": "director",
-    "Sound Supervisor": "sound-designer",
-    "Music Supervisor": "music-supervisor",
-    "Editor": "editor",
-    "Cinematographer": "cinematographer",
-
     "virtual-production-coordinator": SpecialistContract(
         specialist_id="virtual-production-coordinator",
         product_role="Virtual Production Coordinator",
@@ -323,6 +301,57 @@ PRODUCT_ROLE_MAP: dict[str, str] = {
         escalation_path="continuity-analyst",
         aliases=("vpc", "virtual_production_coordinator"),
     ),
+    "storyteller": SpecialistContract(
+        specialist_id="storyteller",
+        product_role="Storyteller",
+        responsibilities=(
+            "Idea-first discovery with 2-4 high-impact questions",
+            "EmotionalSceneProfile (arc, subtext, tone, stakes)",
+            "Approval-aware StorytellerProductionHandoff",
+            "Format guidance and progressive depth by stage",
+        ),
+        input_keys=("idea", "attachmentInterpretation", "scene", "mode"),
+        output_keys=("emotionalSceneProfile", "questions", "handoff", "formatGuidance", "honestyNotes"),
+        aliases=("story_teller", "emotional-storyteller"),
+    ),
+    "sound-producer": SpecialistContract(
+        specialist_id="sound-producer",
+        product_role="Sound Producer",
+        responsibilities=(
+            "SonicConcept and score/ambience/cue/dialogue/mix intent",
+            "Coordinate Music Supervisor and Sound Designer (no new providers)",
+            "Guided / Creative / Variation sonic modes",
+            "Required exchanges with Storyteller, Camera, Editor, VPC, Continuity",
+        ),
+        input_keys=("emotionalSceneProfile", "unifiedSceneBrief", "mode"),
+        output_keys=("sonicConcept", "scoreBrief", "ambience", "cues", "mixIntent", "honestyNotes"),
+        aliases=("sound_producer", "sonic-producer"),
+    ),
+}
+
+
+# Product role → specialist id (aliases resolve to canonical ids)
+PRODUCT_ROLE_MAP: dict[str, str] = {
+    "Story Analyst": "story-analyst",
+    "Storyteller": "storyteller",
+    "Sound Producer": "sound-producer",
+    "Production Bible Manager": "bible-manager",
+    "Continuity Supervisor": "continuity-analyst",
+    "Camera Supervisor": "cinematographer",
+    "Animation Supervisor": "animation-supervisor",
+    "Compositing Supervisor": "compositing-supervisor",
+    "Lighting Supervisor": "lighting-supervisor",
+    "Asset Manager": "asset-manager",
+    "QA Reviewer": "qa-reviewer",
+    "Pipeline Manager": "pipeline-manager",
+    "Code Director": "code-director",
+    "Director": "director",
+    "Sound Supervisor": "sound-designer",
+    "Music Supervisor": "music-supervisor",
+    "Editor": "editor",
+    "Cinematographer": "cinematographer",
+
+
 
 }
 

@@ -193,6 +193,7 @@ async def health():
         "productionIntelligenceEnabled": bool(feature_flags.codirector_production_intelligence_v1),
         "adaptiveLearningEnabled": bool(feature_flags.codirector_adaptive_learning_v1),
         "virtualEnvironmentStudioEnabled": bool(feature_flags.virtual_environment_studio_v1),
+        "unifiedExperienceEnabled": bool(feature_flags.codirector_unified_experience_v1),
         "specialistCount": specialist_count,
         "registry": {
             "callable": len(caps.callable),

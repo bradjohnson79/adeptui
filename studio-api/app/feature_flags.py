@@ -28,6 +28,7 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_CODIRECTOR_PRODUCTION_INTELLIGENCE_V1`` (M2.11)
 * ``STUDIO_FEATURE_CODIRECTOR_ADAPTIVE_LEARNING_V1`` (M2.12)
 * ``STUDIO_FEATURE_VIRTUAL_ENVIRONMENT_STUDIO_V1`` (M2.13)
+* ``STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1`` (M2.14)
 """
 
 from __future__ import annotations
@@ -81,6 +82,7 @@ class FeatureFlags:
     codirector_production_intelligence_v1: bool = False
     codirector_adaptive_learning_v1: bool = False
     virtual_environment_studio_v1: bool = False
+    codirector_unified_experience_v1: bool = False
 
     @classmethod
     def from_env(

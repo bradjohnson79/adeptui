@@ -183,3 +183,31 @@ _INTENT_SPECIALISTS.update(
     }
 )
 
+_INTENT_SPECIALISTS.update(
+    {
+        "storyteller_discovery": (
+            "storyteller",
+            "sound-producer",
+            "director",
+            "cinematographer",
+            "continuity-analyst",
+        ),
+        "sound_production": (
+            "sound-producer",
+            "music-supervisor",
+            "sound-designer",
+            "storyteller",
+            "editor",
+        ),
+        "unified_experience": (
+            "storyteller",
+            "sound-producer",
+            "cinematographer",
+            "editor",
+            "virtual-production-coordinator",
+            "continuity-analyst",
+            "director",
+        ),
+    }
+)
+_CONTINUITY_INTENTS = frozenset(set(_CONTINUITY_INTENTS) | {"storyteller_discovery", "unified_experience", "sound_production"})
