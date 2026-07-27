@@ -12,6 +12,8 @@
 | Date | 2026-07-27 |
 
 
+Consolidated narrative report: [`docs/M3.0G_PRODUCTION_CERTIFICATION_REPORT.md`](../../M3.0G_PRODUCTION_CERTIFICATION_REPORT.md)
+
 Consolidated task report: `docs/M3.0G_PRODUCTION_CERTIFICATION_TASK_REPORT.md`.
 
 Product name: **Adept UI Studio**.
