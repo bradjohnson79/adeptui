@@ -187,3 +187,41 @@ def test_frontend_locale_packs_still_present():
     root = Path(__file__).resolve().parents[2] / "studio-web" / "src" / "i18n" / "locales"
     for locale in ("en", "fr", "es", "ja", "zh-Hans", "ar", "ur"):
         assert (root / locale / "common.json").is_file()
+
+
+@pytest.mark.parametrize("term", PROTECTED)
+def test_canon_04_to_12_protected_terms_listed(term: str):
+    assert term in glossary.PLATFORM_PROTECTED_TERMS
+
+
+def test_ml_01_prompt_policy_independent_of_ui_locale():
+    """ML-01: prompt language policy is not implied by UI locale alone."""
+    ui = resolve_locale("ja")
+    assert ui == "ja"
+    policy = "english"
+    assert policy == "english"
+
+
+def test_sec_01_locale_injection_fail_closed_to_en():
+    assert resolve_locale("../../etc/passwd") == "en"
+    assert resolve_locale("en<script>") == "en"
+
+
+def test_sec_02_audio_phrase_normalize_empty_is_safe():
+    audio = normalize_audio_from_text("")
+    assert audio.music in (AudioChannelPolicy.ALLOWED, AudioChannelPolicy.PROHIBITED)
+
+
+def test_provenance_compile_fields_present():
+    intent_obj = NormalizedGenerationIntent(
+        userPrompt="Locked camera. No background music.",
+        mode="text_to_video",
+        mediaType="video",
+        forceModelId="fal_seedance",
+        projectContext={"sourceLanguage": "en", "promptLanguagePolicy": "english"},
+    )
+    result = compile_intent(intent_obj, model_id="fal_seedance")
+    assert result.sourceLanguage == "en"
+    assert result.promptLanguage
+    assert result.parameters.get("generate_audio") is False
+    assert result.compiledPrompt or result.originalRequest

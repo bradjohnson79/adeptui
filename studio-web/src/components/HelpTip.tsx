@@ -3,9 +3,9 @@ import type { ReactNode } from "react";
 /** Circular (?) help tip — shows a short description on hover (≤30 words). */
 export function HelpTip({ text }: { text: string }) {
   return (
-    <span
+    <button
+      type="button"
       className="help-tip"
-      tabIndex={0}
       aria-label={text}
       onClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.stopPropagation()}
@@ -16,7 +16,7 @@ export function HelpTip({ text }: { text: string }) {
       <span className="help-tip-bubble" role="tooltip">
         {text}
       </span>
-    </span>
+    </button>
   );
 }
 

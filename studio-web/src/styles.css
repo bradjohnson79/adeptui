@@ -345,6 +345,13 @@ textarea { min-height: 90px; resize: vertical; }
   flex-shrink: 0;
   outline: none;
   z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: help;
 }
 .help-tip:hover,
 .help-tip:focus,

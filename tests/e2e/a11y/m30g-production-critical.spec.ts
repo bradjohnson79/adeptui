@@ -10,6 +10,8 @@ const WORKSPACES = [
   { qs: "workspace=director", label: "director" },
   { qs: "workspace=editor", label: "editor" },
   { qs: "workspace=bible", label: "bible" },
+  { qs: "workspace=jobs", label: "jobs" },
+  { qs: "workspace=export", label: "export" },
 ] as const;
 
 const OUT_DIR = path.join("artifacts", "m30g", "accessibility");
