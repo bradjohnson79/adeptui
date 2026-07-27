@@ -34,3 +34,21 @@ Historical packs preserved (not overwritten):
 ## Scenario ID families
 
 A11Y-01..20 · MI-LIVE-01..05 · LI-01..20 · RTL-01..12 · CANON-01..12 · ML-01..10 · E2E-01..08 · SMOKE-01..25 · REC-01..08 · SEC-01..15 · EN-REG · LOC-ISO · B16
+
+## M3.0g dispositions (exit)
+
+| ID | Disposition | Evidence |
+|----|-------------|---------|
+| A11Y | PARTIAL / NOT GREEN | axe archive 0 critical; HelpTip button fix; keyboard A11Y-01..06; SR spot-check NOT GREEN |
+| B16 | CLAIM NARROWED | Exact removed/retained claims in `M30G_B16_INTELLIGENCE_DIVERSITY.md` |
+| PW-S4/S5 | DOCUMENTED env-gated | Prior M3.0d; not re-opened |
+| PW-S6 | SUPERSEDED by MI-LIVE | Music-off live path |
+| MI-LIVE | NOT GREEN | `BLOCKED_NO_LIVE_GENERATE` / `INCONCLUSIVE` |
+| LTX-AUDIO | DISCLOSED | `BEST_EFFORT_EXTERNAL_AUDIO` |
+| LI-LING | DISCLOSED | Dual verdict MACHINE_DRAFT non-en |
+| LI-TECH | GREEN | Automated + UI packs |
+| RTL | PARTIAL | Playwright ar/ur + screenshots |
+| CANON | VERIFIED | `test_m30g_integration_certification.py` |
+| ML / LOC-ISO | VERIFIED | API + Playwright LOC-ISO |
+| EN-REG | VERIFIED | Compile shape + E2E-01 |
+| SEC | VERIFIED (core) | Locale fail-closed + translate safety |
