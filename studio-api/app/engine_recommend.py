@@ -88,7 +88,46 @@ def recommend_engine(
         warnings.append("fal.ai key not configured — fell back to local")
         reasons.append(f"Local fallback: {engine}")
 
-    return {
+    # M3.0e: when filmmaker language implies audio policy / I2V, prefer MIL recommendation.
+    mil_meta: dict[str, Any] = {}
+    try:
+        from .codirector.model_intelligence.compiler import normalize_audio_from_text
+        from .codirector.model_intelligence.schemas import NormalizedGenerationIntent
+        from .codirector.model_intelligence.selector import recommend as mil_recommend
+        from .codirector.model_intelligence.registry import BINDINGS
+
+        audio = normalize_audio_from_text(text)
+        has_start = bool(getattr(scene, "start_asset_id", None))
+        mil_intent = NormalizedGenerationIntent(
+            userPrompt=text.strip(),
+            mode="image_to_video" if has_start else "text_to_video",
+            mediaType="video",
+            hasSourceImage=has_start,
+            durationSec=duration,
+            audioIntent=audio,
+        )
+        mil = mil_recommend(
+            mil_intent,
+            provider_health={"fal.api": 0.9 if fal_ok else 0.2, "comfy.local": 0.8},
+        )
+        binding = BINDINGS.get(mil.recommendedModel)
+        if binding and binding.engineId and binding.capabilityIds:
+            # Prefer MIL for fal motion when music policy is explicit and fal is available.
+            if fal_ok and not lipsync and binding.providerId == "fal.api":
+                if engine.startswith("fal_") or "no music" in text.lower() or "no background" in text.lower():
+                    engine = binding.engineId
+                    local = False
+                    confidence = max(confidence, float(mil.confidence))
+                    reasons.append(f"Model Intelligence recommends {mil.recommendedModel}")
+                    mil_meta = {
+                        "modelId": mil.recommendedModel,
+                        "explanation": mil.explanation,
+                        "confidence": mil.confidence,
+                    }
+    except Exception:
+        mil_meta = {}
+
+    out = {
         "engineId": engine,
         "confidence": round(confidence, 2),
         "reasons": reasons,
@@ -97,6 +136,9 @@ def recommend_engine(
         "vram_tier": vram,
         "profile_engine": profile.recommended_engine,
     }
+    if mil_meta:
+        out["modelIntelligence"] = mil_meta
+    return out
 
 
 def resolve_engine_id(engine: str | None, project: Any, scene: Any) -> str:

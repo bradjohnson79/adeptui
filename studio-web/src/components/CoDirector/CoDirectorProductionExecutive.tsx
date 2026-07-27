@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import { ModelIntelligencePanel } from "./ModelIntelligencePanel";
 
 type TabId = "queue" | "running" | "blocked" | "history" | "notifications" | "providers" | "statistics";
 
@@ -170,6 +171,7 @@ export function CoDirectorProductionExecutive({
 
       {open && (
         <div className="codirector-executive-body" data-testid="production-executive-dashboard">
+          <ModelIntelligencePanel projectId={projectId} />
           {progress && (
             <div className="codirector-executive-progress" data-testid="scene-progress-derived">
               <p className="scene-meta">Scene progress (derived from jobs)</p>

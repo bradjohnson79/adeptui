@@ -1,0 +1,9 @@
+capabilities:
+  image_to_video: SUPPORTED
+  text_to_video: SUPPORTED
+  embedded_audio: SUPPORTED
+  soundtrack_generation: PARTIAL
+  dialogue_generation: PARTIAL
+  reference_images: SUPPORTED
+  negative_prompt_support: PARTIAL
+  seed_support: SUPPORTED

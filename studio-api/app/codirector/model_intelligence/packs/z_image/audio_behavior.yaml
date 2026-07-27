@@ -1,0 +1,12 @@
+supportsNativeAudio: false
+generateAudioParam: null
+generateAudioOfficial: false
+musicSuppressionClassification: NOT_APPLICABLE
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  Local ComfyUI + zimage_models component required

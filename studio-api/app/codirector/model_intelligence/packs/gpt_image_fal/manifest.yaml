@@ -1,0 +1,26 @@
+schemaVersion: 1
+modelId: gpt_image_fal
+providerId: fal.api
+engineId: gpt_image_fal
+displayName: "GPT Image via fal"
+modelVersion: "unregistered"
+knowledgePackVersion: "1.0.0"
+status: QUARANTINED
+runtimeStatus: product_approval_required
+media:
+  - image
+modes:
+  - text_to_image
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.0
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

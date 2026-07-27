@@ -1,0 +1,26 @@
+schemaVersion: 1
+modelId: fal_runway
+providerId: fal.api
+engineId: fal_runway
+displayName: "Runway Gen-3 Turbo (fal.ai)"
+modelVersion: "gen3"
+knowledgePackVersion: "1.0.0"
+status: VERIFIED
+runtimeStatus: experimental
+media:
+  - video
+modes:
+  - image_to_video
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.65
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

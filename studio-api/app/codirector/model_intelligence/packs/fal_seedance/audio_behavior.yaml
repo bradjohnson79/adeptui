@@ -1,0 +1,12 @@
+supportsNativeAudio: true
+generateAudioParam: generate_audio
+generateAudioOfficial: true
+musicSuppressionClassification: PARAM_GENERATE_AUDIO
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  Native audio via generate_audio; set false when music/dialogue must not be synthesized.

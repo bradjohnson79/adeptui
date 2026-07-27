@@ -1,0 +1,8 @@
+claims:
+  - sourceType: VERIFIED_INTERNAL
+    sourceReference: studio-api/knowledgebase/generation/video_models
+    modelVersion: "2.2"
+    knowledgePackVersion: "1.0.0"
+    verifiedAt: "2026-07-27"
+    confidence: 0.55
+    notes: Elevated from foundation KB + runtime catalog; not a substitute for official docs.

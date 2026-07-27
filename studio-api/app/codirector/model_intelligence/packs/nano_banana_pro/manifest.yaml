@@ -1,0 +1,26 @@
+schemaVersion: 1
+modelId: nano_banana_pro
+providerId: fal.api
+engineId: nano_banana_pro
+displayName: "Nano Banana Pro (fal image)"
+modelVersion: "unregistered"
+knowledgePackVersion: "1.0.0"
+status: QUARANTINED
+runtimeStatus: product_approval_required
+media:
+  - image
+modes:
+  - text_to_image
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.0
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

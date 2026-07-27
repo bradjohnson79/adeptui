@@ -1,0 +1,11 @@
+capabilities:
+  text_to_video: EXPERIMENTAL
+  image_to_video: EXPERIMENTAL
+  reference_images: PARTIAL
+  camera_control: PARTIAL
+  motion_control: PARTIAL
+  embedded_audio: UNSUPPORTED
+  dialogue_generation: UNSUPPORTED
+  soundtrack_generation: UNSUPPORTED
+  negative_prompt_support: SUPPORTED
+  seed_support: SUPPORTED

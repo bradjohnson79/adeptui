@@ -1,0 +1,8 @@
+maxDurationSec: 10
+maxReferenceImages: 4
+allowedOverrides:
+  - seed
+  - durationSec
+  - aspectRatio
+  - preserveExactWording
+  - generate_audio

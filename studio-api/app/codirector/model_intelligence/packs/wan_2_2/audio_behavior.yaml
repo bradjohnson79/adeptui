@@ -1,0 +1,12 @@
+supportsNativeAudio: false
+generateAudioParam: null
+generateAudioOfficial: false
+musicSuppressionClassification: BEST_EFFORT_EXTERNAL_AUDIO
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  WAN local path NOT_PRODUCTION_READY; prefer fal for production motion

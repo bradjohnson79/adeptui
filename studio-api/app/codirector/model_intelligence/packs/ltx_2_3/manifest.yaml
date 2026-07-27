@@ -1,0 +1,27 @@
+schemaVersion: 1
+modelId: ltx_2_3
+providerId: comfy.local
+engineId: ltx
+displayName: "LTX 2.3"
+modelVersion: "2.3"
+knowledgePackVersion: "1.0.0"
+status: ACTIVE
+runtimeStatus: not_production_ready
+media:
+  - video
+modes:
+  - text_to_video
+  - image_to_video
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.7
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

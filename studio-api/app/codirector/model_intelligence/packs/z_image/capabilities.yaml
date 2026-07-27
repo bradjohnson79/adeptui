@@ -1,0 +1,8 @@
+capabilities:
+  text_to_image: SUPPORTED
+  image_to_image: SUPPORTED
+  reference_images: SUPPORTED
+  text_to_video: UNSUPPORTED
+  image_to_video: UNSUPPORTED
+  negative_prompt_support: SUPPORTED
+  seed_support: SUPPORTED

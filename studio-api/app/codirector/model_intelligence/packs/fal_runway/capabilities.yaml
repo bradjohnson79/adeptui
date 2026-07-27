@@ -1,0 +1,5 @@
+capabilities:
+  image_to_video: SUPPORTED
+  embedded_audio: UNKNOWN
+  negative_prompt_support: PARTIAL
+  seed_support: SUPPORTED

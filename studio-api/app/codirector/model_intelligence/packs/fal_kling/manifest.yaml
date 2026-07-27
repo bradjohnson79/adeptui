@@ -1,0 +1,26 @@
+schemaVersion: 1
+modelId: fal_kling
+providerId: fal.api
+engineId: fal_kling
+displayName: "Kling 2.5 Turbo Pro (fal.ai)"
+modelVersion: "2.5"
+knowledgePackVersion: "1.0.0"
+status: VERIFIED
+runtimeStatus: experimental
+media:
+  - video
+modes:
+  - image_to_video
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.65
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

@@ -1,0 +1,7 @@
+capabilities:
+  image_to_video: EXPERIMENTAL
+  text_to_video: UNSUPPORTED
+  embedded_audio: UNSUPPORTED
+  soundtrack_generation: UNSUPPORTED
+  negative_prompt_support: SUPPORTED
+  seed_support: SUPPORTED

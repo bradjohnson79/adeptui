@@ -1,0 +1,12 @@
+supportsNativeAudio: false
+generateAudioParam: null
+generateAudioOfficial: false
+musicSuppressionClassification: NOT_APPLICABLE
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  PRODUCT_APPROVAL_REQUIRED — not wired; FAL_IMAGE_MODELS empty; manifest locked

@@ -1,0 +1,26 @@
+schemaVersion: 1
+modelId: wan_2_2
+providerId: comfy.local
+engineId: wan
+displayName: "WAN 2.2"
+modelVersion: "2.2"
+knowledgePackVersion: "1.0.0"
+status: ACTIVE
+runtimeStatus: not_production_ready
+media:
+  - video
+modes:
+  - image_to_video
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.55
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

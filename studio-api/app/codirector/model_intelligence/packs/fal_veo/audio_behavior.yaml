@@ -1,0 +1,12 @@
+supportsNativeAudio: true
+generateAudioParam: generate_audio
+generateAudioOfficial: true
+musicSuppressionClassification: PARAM_GENERATE_AUDIO
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  Veo 3.1 (fal.ai) provisional pack from catalog metadata

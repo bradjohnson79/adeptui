@@ -1,0 +1,27 @@
+schemaVersion: 1
+modelId: fal_veo
+providerId: fal.api
+engineId: fal_veo
+displayName: "Veo 3.1 (fal.ai)"
+modelVersion: "3.1"
+knowledgePackVersion: "1.0.0"
+status: VERIFIED
+runtimeStatus: experimental
+media:
+  - video
+modes:
+  - image_to_video
+  - text_to_video
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.65
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

@@ -1,0 +1,12 @@
+supportsNativeAudio: false
+generateAudioParam: null
+generateAudioOfficial: false
+musicSuppressionClassification: UNKNOWN
+musicProhibitedNegative:
+  - background music
+  - musical score
+  - soundtrack
+  - theme song
+musicProhibitedPositive: []
+musicSuppressionDisclosure: >
+  Kling 2.5 Turbo Pro (fal.ai) provisional pack from catalog metadata

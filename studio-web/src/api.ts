@@ -2358,6 +2358,35 @@ export const api = {
   m213E2EGuided: (body: Record<string, unknown>) =>
     req<any>("/api/codirector/m213/e2e/guided", { method: "POST", body: JSON.stringify(body) }),
 
-
-
+  /** M3.0e Model Intelligence Layer */
+  milPacks: () => req<{ packs: any[]; validation: any }>("/api/codirector/model-intelligence/packs"),
+  milFilmmakerSummary: (userPrompt: string, modelId?: string) => {
+    const q = new URLSearchParams({ userPrompt });
+    if (modelId) q.set("modelId", modelId);
+    return req<{
+      recommendedModel: string;
+      why: string;
+      confidence: number;
+      audioPlan: string;
+      knownLimitations: string[];
+      preflight: string;
+      warnings: string[];
+      advanced: Record<string, unknown>;
+    }>(`/api/codirector/model-intelligence/filmmaker-summary?${q.toString()}`);
+  },
+  milCompile: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/model-intelligence/compile", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  milPreflight: (body: Record<string, unknown>, paidPath = false) =>
+    req<any>(`/api/codirector/model-intelligence/preflight?paidPath=${paidPath ? "true" : "false"}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  milRecommend: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/model-intelligence/recommend", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 };

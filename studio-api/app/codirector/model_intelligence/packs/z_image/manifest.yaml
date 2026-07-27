@@ -1,0 +1,28 @@
+schemaVersion: 1
+modelId: z_image
+providerId: comfy.local
+engineId: zimage
+displayName: "Z-Image Turbo"
+modelVersion: "turbo"
+knowledgePackVersion: "1.0.0"
+status: ACTIVE
+runtimeStatus: production
+media:
+  - image
+modes:
+  - text_to_image
+  - image_to_image
+  - reference_images
+documentation:
+  officialSources: []
+  releaseNotes: []
+  retrievedAt: null
+  reviewedAt: "2026-07-27"
+confidence:
+  overall: 0.82
+licensing:
+  summary: null
+  commercialUse: unknown
+  redistribution: unknown
+maintainers:
+  - adept-ui-m30e

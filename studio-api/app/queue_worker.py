@@ -804,17 +804,33 @@ class JobQueue:
         if end_asset and Path(end_asset.path).exists() and end_asset.id != (start_asset.id if start_asset else None):
             end_url = await upload_file_to_fal(Path(end_asset.path), api_key)
 
+        # M3.0e: honor Model Intelligence / job params for native audio (default True for compat).
+        job_params = self._job_params(job)
+        mil_params = job_params.get("modelIntelligence") or job_params.get("mil") or {}
+        if not isinstance(mil_params, dict):
+            mil_params = {}
+        if "generate_audio" in job_params:
+            generate_audio = bool(job_params.get("generate_audio"))
+        elif "generate_audio" in mil_params:
+            generate_audio = bool(mil_params.get("generate_audio"))
+        else:
+            generate_audio = True
+        mil_prompt = mil_params.get("compiledPrompt") or job_params.get("compiledPrompt")
+        mil_negative = mil_params.get("negativePrompt") or job_params.get("compiledNegativePrompt")
+        fal_positive = str(mil_prompt).strip() if mil_prompt else positive
+        fal_negative = str(mil_negative).strip() if mil_negative else negative
+
         model_id, args = build_fal_arguments(
             engine=scene.engine,
-            prompt=positive,
-            negative=negative,
+            prompt=fal_positive,
+            negative=fal_negative,
             image_url=image_url,
             end_image_url=end_url,
             duration_sec=scene.duration_sec,
             width=plan.width,
             height=plan.height,
             seed=seed,
-            generate_audio=True,
+            generate_audio=generate_audio,
         )
         job.message = f"fal.ai · {model_id}"
         job.comfy_prompt_id = model_id[:64]
@@ -1249,17 +1265,28 @@ class JobQueue:
             db.commit()
 
         await on_progress(0.1, f"Txt2Vid · {resolved}")
+        mil_params = params.get("modelIntelligence") or params.get("mil") or {}
+        if not isinstance(mil_params, dict):
+            mil_params = {}
+        if "generate_audio" in params:
+            generate_audio = bool(params.get("generate_audio"))
+        elif "generate_audio" in mil_params:
+            generate_audio = bool(mil_params.get("generate_audio"))
+        else:
+            generate_audio = True
+        fal_prompt = str(mil_params.get("compiledPrompt") or prompt)
+        fal_negative = str(mil_params.get("negativePrompt") or negative)
         model_id, args = build_fal_arguments(
             engine=resolved,
-            prompt=prompt,
-            negative=negative,
+            prompt=fal_prompt,
+            negative=fal_negative,
             image_url=None,
             end_image_url=None,
             duration_sec=duration,
             width=width,
             height=height,
             seed=seed,
-            generate_audio=True,
+            generate_audio=generate_audio,
         )
         job.comfy_prompt_id = model_id[:64]
         job.history_json = json.dumps(

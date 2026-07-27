@@ -1,0 +1,7 @@
+positiveAppend:
+  []
+negativeBase:
+  - "blurry"
+  - "low quality"
+  - "watermark"
+fallbacks: []
