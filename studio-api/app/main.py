@@ -108,6 +108,12 @@ async def lifespan(_: FastAPI):
     except Exception:
         logger.exception("M2.11 table ensure failed")
     try:
+        from .codirector.m212.db import ensure_m212_tables
+
+        ensure_m212_tables()
+    except Exception:
+        logger.exception("M2.12 table ensure failed")
+    try:
         ensure_master_sheet_tables()
     except Exception:
         pass

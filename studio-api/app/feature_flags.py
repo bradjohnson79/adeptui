@@ -26,6 +26,7 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_M210B_AUDIO_SANDBOX_V1`` (M2.10b)
 * ``STUDIO_FEATURE_M210B_CAMERA_METADATA_V1`` (M2.10b)
 * ``STUDIO_FEATURE_CODIRECTOR_PRODUCTION_INTELLIGENCE_V1`` (M2.11)
+* ``STUDIO_FEATURE_CODIRECTOR_ADAPTIVE_LEARNING_V1`` (M2.12)
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ class FeatureFlags:
     m210b_audio_sandbox_v1: bool = False
     m210b_camera_metadata_v1: bool = False
     codirector_production_intelligence_v1: bool = False
+    codirector_adaptive_learning_v1: bool = False
 
     @classmethod
     def from_env(
