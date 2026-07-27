@@ -6,9 +6,19 @@ import { TransformControls } from "three/examples/jsm/controls/TransformControls
 
 export type ViewportBookmark = { id: string; label: string; position: number[]; target: number[] };
 
+export type ViewportCharacter = {
+  id: string;
+  label?: string;
+  /** Normalized 0..1 placement mapped onto floor plane */
+  x?: number;
+  y?: number;
+  facing?: number;
+};
+
 type Props = {
   glbUrl?: string | null;
   fixture?: boolean;
+  characters?: ViewportCharacter[];
   onSelect?: (name: string | null) => void;
 };
 
@@ -18,7 +28,7 @@ const DEFAULT_BOOKMARKS: ViewportBookmark[] = [
   { id: "side", label: "Side", position: [5, 1.4, 0], target: [0, 1.2, 0] },
 ];
 
-export function EnvironmentViewport({ glbUrl, fixture = true, onSelect }: Props) {
+export function EnvironmentViewport({ glbUrl, fixture = true, characters = [], onSelect }: Props) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [bookmarks] = useState(DEFAULT_BOOKMARKS);
   const [selected, setSelected] = useState<string | null>(null);
@@ -66,6 +76,24 @@ export function EnvironmentViewport({ glbUrl, fixture = true, onSelect }: Props)
     proxy.position.y = 0.6;
     proxy.name = fixture ? "fixture-proxy" : "scene-root";
     scene.add(proxy);
+
+    // Visible character instances (composition surface — not photoreal AI render)
+    const characterRoot = new THREE.Group();
+    characterRoot.name = "character-layer";
+    scene.add(characterRoot);
+    for (const ch of characters) {
+      const body = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.22, 0.85, 4, 8),
+        new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.45, metalness: 0.1 }),
+      );
+      const nx = typeof ch.x === "number" ? ch.x : 0.5;
+      const nz = typeof ch.y === "number" ? ch.y : 0.5;
+      body.position.set((nx - 0.5) * 4, 0.75, (nz - 0.5) * 4);
+      body.rotation.y = ((ch.facing ?? 0) * Math.PI) / 180;
+      body.name = ch.id || ch.label || "character";
+      body.userData.characterId = ch.id;
+      characterRoot.add(body);
+    }
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
@@ -135,7 +163,7 @@ export function EnvironmentViewport({ glbUrl, fixture = true, onSelect }: Props)
       mount.removeChild(renderer.domElement);
       apiRef.current = null;
     };
-  }, [glbUrl, fixture, onSelect]);
+  }, [glbUrl, fixture, characters, onSelect]);
 
   const goBookmark = (b: ViewportBookmark) => {
     const api = apiRef.current;

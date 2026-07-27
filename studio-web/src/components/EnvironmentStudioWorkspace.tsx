@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import EnvironmentViewport from "./EnvironmentViewport";
+import EnvironmentViewport, { type ViewportCharacter } from "./EnvironmentViewport";
 
 type Dashboard = {
   categories?: Record<string, string>;
@@ -40,6 +40,7 @@ export default function EnvironmentStudioWorkspace() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [log, setLog] = useState("Ready.");
   const [busy, setBusy] = useState(false);
+  const [characters, setCharacters] = useState<ViewportCharacter[]>([]);
   const honesty = useMemo(() => {
     const adapters = (status?.adapters as Array<Record<string, unknown>> | undefined) || [];
     return adapters.map((a) => `${a.name}: available=${a.available} fixture=${a.fixture}`).join(" | ");
@@ -100,6 +101,37 @@ export default function EnvironmentStudioWorkspace() {
     }
   };
 
+  const placeCharacter = async () => {
+    const character: ViewportCharacter = {
+      id: "character-primary",
+      label: "Primary",
+      x: 0.35,
+      y: 0.55,
+      facing: 90,
+    };
+    setCharacters([character]);
+    if (environmentId) {
+      await run("blocking-place", () =>
+        api.m213SaveBlocking({
+          projectId,
+          environmentId,
+          characters: [{ id: character.id, x: character.x, y: character.y, facing: character.facing }],
+        }),
+      );
+    }
+    setLog((prev) => prev + `\n[place-character] visible instance ${character.id} on canvas`);
+  };
+
+  const nudgeCharacter = () => {
+    setCharacters((prev) =>
+      prev.map((c) => ({
+        ...c,
+        x: Math.min(0.9, (c.x ?? 0.35) + 0.05),
+        facing: (c.facing ?? 90) + 15,
+      })),
+    );
+  };
+
   return (
     <div className="m213-page" data-testid="environment-studio">
       <style>{css}</style>
@@ -119,7 +151,7 @@ export default function EnvironmentStudioWorkspace() {
       <div className="m213-grid">
         <section className="m213-panel">
           <h2>Viewport</h2>
-          <EnvironmentViewport fixture />
+          <EnvironmentViewport fixture characters={characters} />
           <div className="m213-row" style={{ marginTop: "0.75rem" }}>
             <label>
               Project{" "}
@@ -134,7 +166,26 @@ export default function EnvironmentStudioWorkspace() {
             <button type="button" disabled={!enabled || busy} onClick={runE2E}>
               Guided E2E (fixture)
             </button>
+            <button
+              type="button"
+              data-testid="m213-place-character"
+              disabled={busy}
+              onClick={placeCharacter}
+            >
+              Place character
+            </button>
+            <button
+              type="button"
+              data-testid="m213-nudge-character"
+              disabled={busy || characters.length === 0}
+              onClick={nudgeCharacter}
+            >
+              Nudge character
+            </button>
           </div>
+          <p data-testid="m213-character-count" style={{ fontSize: "0.85rem" }}>
+            Visible characters: {characters.length}
+          </p>
           <p style={{ fontSize: "0.85rem", opacity: 0.75 }}>
             Env: {environmentId || "—"} · Plan: {planId || "—"}
           </p>
