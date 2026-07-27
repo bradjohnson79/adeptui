@@ -2,6 +2,9 @@
 
 Release-gate documentation for the **Manual User Beta** production certification pass on branch `phase2/codirector-m2-9-production-suite`.
 
+**Full consolidated task report:** [../../M3.0D_UNIFIED_PRODUCTION_INTEGRATION_TASK_REPORT.md](../../M3.0D_UNIFIED_PRODUCTION_INTEGRATION_TASK_REPORT.md)  
+**PM verdict extract:** [../../M3.0D_MANUAL_BETA_GATE_PM_REPORT.md](../../M3.0D_MANUAL_BETA_GATE_PM_REPORT.md)
+
 | Field | Value |
 |-------|-------|
 | Certification phase | M3.0d â€” production gate closure |
