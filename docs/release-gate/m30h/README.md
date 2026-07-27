@@ -16,7 +16,9 @@ M3.0g platform certification dependency: REMAINS OPEN
 ```
 
 
-Consolidated report: [`docs/M3.0H_FILMMAKER_SCENARIO_FINALE_REPORT.md`](../../M3.0H_FILMMAKER_SCENARIO_FINALE_REPORT.md)
+Narrative report: [`docs/M3.0H_FILMMAKER_SCENARIO_REPORT.md`](../../M3.0H_FILMMAKER_SCENARIO_REPORT.md)
+
+Stamp / task report: [`docs/M3.0H_FILMMAKER_SCENARIO_FINALE_REPORT.md`](../../M3.0H_FILMMAKER_SCENARIO_FINALE_REPORT.md)
 
 ## Final verdict
 
