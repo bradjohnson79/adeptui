@@ -845,6 +845,7 @@ export const api = {
       modelRadarEnabled?: boolean;
       sandboxRuntimeEnabled?: boolean;
       virtualStageEnabled?: boolean;
+      virtualEnvironmentStudioEnabled?: boolean;
       shotProfilesEnabled?: boolean;
       productionRecipeEnabled?: boolean;
       locationSpinEnabled?: boolean;
@@ -2284,6 +2285,42 @@ export const api = {
     req<any>("/api/codirector/m212/critique", { method: "POST", body: JSON.stringify(body) }),
   m212Retrospective: (body: Record<string, unknown>) =>
     req<any>("/api/codirector/m212/retrospectives", { method: "POST", body: JSON.stringify(body) }),
+  m213Status: () => req<Record<string, unknown>>("/api/codirector/m213/status"),
+  m213Import: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/import", { method: "POST", body: JSON.stringify(body) }),
+  m213CameraSpin: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/camera-spin", { method: "POST", body: JSON.stringify(body) }),
+  m213Reconstruct: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/reconstruction", { method: "POST", body: JSON.stringify(body) }),
+  m213ApproveEnv: (environmentId: string, body: Record<string, unknown> = {}) =>
+    req<any>(`/api/codirector/m213/environments/${encodeURIComponent(environmentId)}/approve`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  m213ThemesRecommend: (style = "") =>
+    req<any>(`/api/codirector/m213/themes/recommend?style=${encodeURIComponent(style)}`),
+  m213CreateTheme: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/themes", { method: "POST", body: JSON.stringify(body) }),
+  m213SaveBlocking: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/blocking", { method: "POST", body: JSON.stringify(body) }),
+  m213SaveSceneState: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/scene-state", { method: "POST", body: JSON.stringify(body) }),
+  m213CreatePlan: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/plans", { method: "POST", body: JSON.stringify(body) }),
+  m213PlanDashboard: (planId: string) =>
+    req<any>(`/api/codirector/m213/plans/${encodeURIComponent(planId)}/dashboard`),
+  m213AdvancePlan: (planId: string, body: Record<string, unknown>) =>
+    req<any>(`/api/codirector/m213/plans/${encodeURIComponent(planId)}/advance`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  m213GenerateConcept: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/concepts", { method: "POST", body: JSON.stringify(body) }),
+  m213PublishTimeline: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/timeline/publish", { method: "POST", body: JSON.stringify(body) }),
+  m213E2EGuided: (body: Record<string, unknown>) =>
+    req<any>("/api/codirector/m213/e2e/guided", { method: "POST", body: JSON.stringify(body) }),
+
 
 
 };

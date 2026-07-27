@@ -23,6 +23,7 @@ from ..codirector.m28.api import router as m28_router
 from ..codirector.m29.api import router as m29_router
 from ..codirector.m211.api import router as m211_router
 from ..codirector.m212.api import router as m212_router
+from ..codirector.m213.api import router as m213_router
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
     BibleMutationSet,
@@ -44,6 +45,7 @@ router.include_router(m28_router)
 router.include_router(m29_router)
 router.include_router(m211_router)
 router.include_router(m212_router)
+router.include_router(m213_router)
 
 
 def _http_error(err: CoDirectorError) -> HTTPException:
