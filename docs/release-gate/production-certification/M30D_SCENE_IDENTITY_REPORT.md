@@ -1,4 +1,4 @@
-# M3.0d Scene Identity Report
+﻿# M3.0d Scene Identity Report
 
 | Field | Value |
 |-------|-------|
@@ -31,17 +31,17 @@ Job enqueue paths omitted `scene_id` in params; export serializer did not always
 
 Key surfaces:
 
-- `studio-api/app/codirector/m29/api.py` — scene_id on generation requests
-- `studio-api/app/queue_worker.py` — scene lookup and export scene keys
-- `studio-api/tests/test_m30d_closures.py::test_director_to_editor_preserves_scene_and_order` — handoff preserves `source_scene_id`
+- `studio-api/app/codirector/m29/api.py` â€” scene_id on generation requests
+- `studio-api/app/queue_worker.py` â€” scene lookup and export scene keys
+- `studio-api/tests/test_m30d_closures.py::test_director_to_editor_preserves_scene_and_order` â€” handoff preserves `source_scene_id`
 
 ## Test and artifact evidence
 
 | Evidence | Result |
 |----------|--------|
-| `phase18-final-validation.json` — all 12 exports | `sceneKeys` includes `id`, `director_json`, `engine`, `prompt`, etc. |
+| `phase18-final-validation.json` â€” all 12 exports | `sceneKeys` includes `id`, `director_json`, `engine`, `prompt`, etc. |
 | `directorJson: true` on every situation | PASSED |
-| Director→Editor API test | `source_scene_id` matches originating scene |
+| Directorâ†’Editor API test | `source_scene_id` matches originating scene |
 | Full pytest gate | 631/0/6 |
 
 Example scene keys from S01 export validation:

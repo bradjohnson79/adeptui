@@ -1,4 +1,4 @@
-# M3.0d Vision Approval Certification
+﻿# M3.0d Vision Approval Certification
 
 | Field | Value |
 |-------|-------|
@@ -7,7 +7,7 @@
 | Module | `studio-api/app/codirector/vision/approval.py` |
 | Implementation SHA | `43a5c0f0152a39327e87b10de11fd55e5b16ad90` |
 
-## B19 — overrideReason required (Closed)
+## B19 â€” overrideReason required (Closed)
 
 ### Problem
 
@@ -41,7 +41,7 @@ Approved notes append `[overrideReason] {reason}` for audit trail.
 | `test_b19_override_with_reason_records` | approved + reason in saved notes |
 | Full gate | 631/0/6 |
 
-## B11 — Vision Playwright (Closed — bounded)
+## B11 â€” Vision Playwright (Closed â€” bounded)
 
 ### Problem
 

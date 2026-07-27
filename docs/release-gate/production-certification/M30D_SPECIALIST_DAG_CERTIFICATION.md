@@ -1,4 +1,4 @@
-# M3.0d Specialist DAG Certification
+﻿# M3.0d Specialist DAG Certification
 
 | Field | Value |
 |-------|-------|
@@ -9,7 +9,7 @@
 
 ## Problem (B8)
 
-M3.0b reported that three declared M2.11 specialists — **storyteller**, **sound-producer**, and **virtual-production-coordinator (VPC)** — never ran in the default pipeline, producing KeyError failures across situation runs.
+M3.0b reported that three declared M2.11 specialists â€” **storyteller**, **sound-producer**, and **virtual-production-coordinator (VPC)** â€” never ran in the default pipeline, producing KeyError failures across situation runs.
 
 ## Expected state
 
@@ -34,21 +34,21 @@ DAG order test expectations and runtime wiring were out of sync. The pipeline de
 | Test | Result |
 |------|--------|
 | `test_m211_production_intelligence.py::test_dag_order` | PASSED (PY10 closure) |
-| `test_m214_unified_experience.py` — storyteller/sound-producer in specialists list | PASSED |
+| `test_m214_unified_experience.py` â€” storyteller/sound-producer in specialists list | PASSED |
 | Full gate `pytest -q` | 631 passed, 0 failed |
 
 Prior M3.0b evidence of 36 KeyError failures across 12 runs is superseded by M3.0c situation EXECUTED results and M3.0d backend gate.
 
 ## Artifact proof
 
-- `artifacts/m30-situations/phase18-final-validation.json` — all 12 situations completed intelligence + production phases with HTTP 200 director status.
-- `docs/m3.0c/PRODUCTION_SITUATION_CERTIFICATION_MATRIX.md` — S01–S12 EXECUTED.
+- `artifacts/m30-situations/phase18-final-validation.json` â€” all 12 situations completed intelligence + production phases with HTTP 200 director status.
+- `docs/m3.0c/PRODUCTION_SITUATION_CERTIFICATION_MATRIX.md` â€” S01â€“S12 EXECUTED.
 
 ## Status
 
 **B8: Closed** at commit `43a5c0f0152a39327e87b10de11fd55e5b16ad90`.
 
-## Residual (B15/B16 — related, not B8)
+## Residual (B15/B16 â€” related, not B8)
 
 | Item | Status | Note |
 |------|--------|------|

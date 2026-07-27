@@ -1,4 +1,4 @@
-# M3.0d Backend Failure Closure
+﻿# M3.0d Backend Failure Closure
 
 | Field | Value |
 |-------|-------|
@@ -16,7 +16,7 @@
 
 | Result | Count |
 |--------|------:|
-| Original PY01–PY20 (M3.0c) | 20 closed |
+| Original PY01â€“PY20 (M3.0c) | 20 closed |
 | Additional fixes before M3.0d gate | 2 (github env validation, queue priority isolation) |
 | M3.0d focused regressions added | 7 tests in `test_m30d_closures.py` |
 | **Remaining failed** | **0** |
@@ -30,7 +30,7 @@ EXIT:0
 
 Six skips are expected and documented (live provider gates, fixture-only paths). They are not gate failures.
 
-## PY01–PY20 disposition (carried forward from M3.0c)
+## PY01â€“PY20 disposition (carried forward from M3.0c)
 
 All twenty original failures are **Closed**. Dispositions unchanged from `docs/m3.0c/BACKEND_FAILURE_CLOSURE.md`:
 
@@ -69,7 +69,7 @@ All twenty original failures are **Closed**. Dispositions unchanged from `docs/m
 | `test_b13_place_cue_persists_sync_event` | B13 |
 | `test_b19_override_requires_reason` | B19 |
 | `test_b19_override_with_reason_records` | B19 |
-| `test_director_to_editor_preserves_scene_and_order` | Director→Editor |
+| `test_director_to_editor_preserves_scene_and_order` | Directorâ†’Editor |
 
 ## Files touched (M3.0c + M3.0d cumulative)
 
@@ -87,4 +87,4 @@ All twenty original failures are **Closed**. Dispositions unchanged from `docs/m
 
 ## Gate verdict
 
-**Backend final gate: PASS** — 631/0/6 satisfies the M3.0d entry requirement measured before documentation stamp.
+**Backend final gate: PASS** â€” 631/0/6 satisfies the M3.0d entry requirement measured before documentation stamp.

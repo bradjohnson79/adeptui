@@ -1,4 +1,4 @@
-# M3.0d Failure and Recovery Certification
+﻿# M3.0d Failure and Recovery Certification
 
 | Field | Value |
 |-------|-------|
@@ -16,18 +16,18 @@
 | fal interrupt reconcile | **Closed** | M3.0c fal proof (no re-submit) |
 | Full fault-injection matrix | **Partial** | Not every timeout/retry variant live-captured |
 
-## B14 / PW-S3 — Real Playwright restart recovery (Closed)
+## B14 / PW-S3 â€” Real Playwright restart recovery (Closed)
 
 ### Problem
 
-M3.0b carried a hard `test.skip(true, "restart recovery documented in pytest")` stub — no browser assertion.
+M3.0b carried a hard `test.skip(true, "restart recovery documented in pytest")` stub â€” no browser assertion.
 
 ### Fix
 
 E2E control endpoints (STUDIO_E2E=1):
 
-- `POST /api/e2e/seed-running-job` — inserts running Studio Job
-- `POST /api/e2e/recover-jobs` — runs `job_queue.recover_interrupted()`
+- `POST /api/e2e/seed-running-job` â€” inserts running Studio Job
+- `POST /api/e2e/recover-jobs` â€” runs `job_queue.recover_interrupted()`
 
 Implementation: `studio-api/app/routers/e2e.py`
 
@@ -58,17 +58,17 @@ PW-S3 is **Closed**. The skip stub is replaced by a real assertion.
 
 Pytest: `studio-api/tests/test_job_queue_recovery.py` (delegated coverage referenced from M3.0c Playwright report).
 
-## B12 — Cancel race (Closed)
+## B12 â€” Cancel race (Closed)
 
 Executive cancel and closed-loop idempotency specs pass in the captured Playwright run (111 passed). Cancel returns deterministic terminal status.
 
 ## M3.0c fal recovery (reused)
 
-Worker/API interrupt during fal poll → `recover_interrupted` marks job honestly → completed via `falRequestId` lookup without second paid submit. Documented in `M30D_FAL_MOTION_PROOF.md`.
+Worker/API interrupt during fal poll â†’ `recover_interrupted` marks job honestly â†’ completed via `falRequestId` lookup without second paid submit. Documented in `M30D_FAL_MOTION_PROOF.md`.
 
 ## Residual (honest)
 
-Not every Phase 13–14 fault-injection scenario (provider timeout exhaustion, worker SIGKILL mid-render, retry budget depletion) was re-captured in M3.0d with fresh artifacts. The **restart/interrupt contract** is proven; exhaustive chaos testing is out of scope for this gate pass.
+Not every Phase 13â€“14 fault-injection scenario (provider timeout exhaustion, worker SIGKILL mid-render, retry budget depletion) was re-captured in M3.0d with fresh artifacts. The **restart/interrupt contract** is proven; exhaustive chaos testing is out of scope for this gate pass.
 
 ## Status
 

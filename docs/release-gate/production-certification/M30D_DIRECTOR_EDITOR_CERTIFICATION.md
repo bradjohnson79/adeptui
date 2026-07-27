@@ -1,4 +1,4 @@
-# M3.0d Director → Editor Certification
+﻿# M3.0d Director â†’ Editor Certification
 
 | Field | Value |
 |-------|-------|
@@ -9,7 +9,7 @@
 
 ## Certification scope
 
-This document certifies the **bounded** Director→Editor handoff contract:
+This document certifies the **bounded** Directorâ†’Editor handoff contract:
 
 - A Director sequence with a known `scene_id` and `asset_id` can be sent to the Editor video track.
 - The resulting clip preserves source linkage and length.
@@ -27,7 +27,7 @@ Export and queue worker declare:
 
 Location: `studio-api/app/queue_worker.py` (export contract metadata).
 
-Semantic meaning: Director plan items are **transformed** into Editor sequence clips — not a lossless 1:1 structural clone of every Director track type. The transform preserves:
+Semantic meaning: Director plan items are **transformed** into Editor sequence clips â€” not a lossless 1:1 structural clone of every Director track type. The transform preserves:
 
 - `source_director_sequence_id`
 - `source_scene_id`
@@ -62,7 +62,7 @@ Included in 631/0/6 pytest gate.
 
 ## Situation evidence
 
-Production situations S01–S12 record approvals, handoffs, and timeline completion in `artifacts/m30-situations/situation-finish.json` (referenced from M3.0c matrix). Export packs validate durable timeline representation via `director_json` in each scene.
+Production situations S01â€“S12 record approvals, handoffs, and timeline completion in `artifacts/m30-situations/situation-finish.json` (referenced from M3.0c matrix). Export packs validate durable timeline representation via `director_json` in each scene.
 
 ## Related register items
 
@@ -73,6 +73,6 @@ Production situations S01–S12 record approvals, handoffs, and timeline complet
 
 ## Status
 
-Director→Editor handoff: **Closed (API-proven)** at `43a5c0f0152a39327e87b10de11fd55e5b16ad90`.
+Directorâ†’Editor handoff: **Closed (API-proven)** at `43a5c0f0152a39327e87b10de11fd55e5b16ad90`.
 
 Full browser UX certification of Editor workspace keyboard flows remains under accessibility (see `M30D_ACCESSIBILITY_CERTIFICATION.md`).

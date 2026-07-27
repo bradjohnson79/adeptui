@@ -1,4 +1,4 @@
-# M3.0d Unified Jobs Certification
+﻿# M3.0d Unified Jobs Certification
 
 | Field | Value |
 |-------|-------|
@@ -6,17 +6,17 @@
 | Branch | `phase2/codirector-m2-9-production-suite` |
 | Register items | UJ-1, UJ-2, UJ-3 |
 | Implementation SHA | `43a5c0f0152a39327e87b10de11fd55e5b16ad90` |
-| Documentation SHA | `PLACEHOLDER_DOCS_SHA` |
+| Documentation SHA | `2ce772516ab518795d2279e2f02cbfd7f96bbbb1` |
 
 ## Executive summary
 
 | ID | Item | Status | Evidence |
 |----|------|--------|----------|
 | UJ-1 | Co-Director inspect bridge for Studio jobs | **Closed** | `unified_jobs.py`, `test_m30c_unified_jobs.py` |
-| UJ-2 | fal motion through full Studio Job row | **Closed** | M3.0c fal proof reused — no new spend |
+| UJ-2 | fal motion through full Studio Job row | **Closed** | M3.0c fal proof reused â€” no new spend |
 | UJ-3 | fal image endpoint | **Closed (docs boundary)** | PRODUCT_APPROVAL_REQUIRED; manifest locked |
 
-## UJ-1 — Unified inspect (Closed)
+## UJ-1 â€” Unified inspect (Closed)
 
 ### Problem
 
@@ -48,7 +48,7 @@ Inspect bridge:
 
 Prior documentation: `docs/m3.0c/UNIFIED_JOB_SYSTEM_PROOF.md`
 
-## UJ-2 — fal queue job path (Closed)
+## UJ-2 â€” fal queue job path (Closed)
 
 ### Problem
 
@@ -56,7 +56,7 @@ Prior fal proofs could register an asset without a durable Studio Job row observ
 
 ### Fix + proof (reused)
 
-M3.0c Phase 4 executed one intentional Seedance T2V submit (≤$15 budget). M3.0d **does not re-submit** paid fal work.
+M3.0c Phase 4 executed one intentional Seedance T2V submit (â‰¤$15 budget). M3.0d **does not re-submit** paid fal work.
 
 Evidence chain:
 
@@ -64,7 +64,7 @@ Evidence chain:
 |------|-------|
 | Job created before provider submit | `queueSubmit.jobCreatedResponse: true` |
 | falRequestId stored | `019fa4f6-7a76-72c1-bfe3-ed8cb5200707` |
-| Interrupt recovered honestly | `recover_interrupted` — no silent re-submit |
+| Interrupt recovered honestly | `recover_interrupted` â€” no silent re-submit |
 | Asset linked | 852,802 byte MP4 |
 | Co-Director inspect | HTTP 200, `source=studio`, `status=completed` |
 
@@ -73,17 +73,17 @@ Primary artifacts:
 - `docs/m3.0c/FAL_UNIFIED_QUEUE_PROOF.md`
 - `artifacts/m30c-fal/unified_queue_proof.json`
 
-Situations S01–S12 reuse the reconciled Seedance MP4 for motion; see `M30D_PRODUCTION_SITUATIONS.md`.
+Situations S01â€“S12 reuse the reconciled Seedance MP4 for motion; see `M30D_PRODUCTION_SITUATIONS.md`.
 
-## UJ-3 — fal image (Closed — documentation boundary)
+## UJ-3 â€” fal image (Closed â€” documentation boundary)
 
-The provider manifest SHA `cf99d7e5…` locks `FAL_IMAGE_MODELS` empty. fal image generation is **not** a production capability. The product must disclose `PRODUCT_APPROVAL_REQUIRED` rather than implying fal stills.
+The provider manifest SHA `cf99d7e5â€¦` locks `FAL_IMAGE_MODELS` empty. fal image generation is **not** a production capability. The product must disclose `PRODUCT_APPROVAL_REQUIRED` rather than implying fal stills.
 
 This item is closed at the documentation/honesty layer only. No fal image endpoint was registered in M3.0d.
 
 ## Restart recovery (related)
 
-Studio `JobQueue.recover_interrupted` and Executive `recover_running_jobs` remain the restart paths. Interrupted Studio jobs are marked failed/`interrupted` rather than silently re-submitting paid work. B14/PW-S3 adds browser-visible proof — see `M30D_FAILURE_RECOVERY_CERTIFICATION.md`.
+Studio `JobQueue.recover_interrupted` and Executive `recover_running_jobs` remain the restart paths. Interrupted Studio jobs are marked failed/`interrupted` rather than silently re-submitting paid work. B14/PW-S3 adds browser-visible proof â€” see `M30D_FAILURE_RECOVERY_CERTIFICATION.md`.
 
 ## Residual
 

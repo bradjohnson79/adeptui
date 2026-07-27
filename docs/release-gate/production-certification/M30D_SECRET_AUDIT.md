@@ -6,7 +6,7 @@
 | Branch | `phase2/codirector-m2-9-production-suite` |
 | Prior audit | `docs/m3.0c/FINAL_SECRET_AND_PRODUCTION_SAFETY_AUDIT.md` |
 | Result | **CLEAN** |
-| Documentation SHA | `PLACEHOLDER_DOCS_SHA` |
+| Documentation SHA | `2ce772516ab518795d2279e2f02cbfd7f96bbbb1` |
 
 ## Command (M3.0d)
 

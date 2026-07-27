@@ -1,4 +1,4 @@
-# M3.0d Production Situations
+﻿# M3.0d Production Situations
 
 | Field | Value |
 |-------|-------|
@@ -45,7 +45,7 @@ For each situation n=1..12:
 | `export.projectJson` | true |
 | `export.directorJson` | true |
 | `export.mediaFiles` | Non-empty PNG, WAV, MP4 |
-| `export.sceneKeys` | Includes `director_json`, `id`, `engine`, `prompt`, … |
+| `export.sceneKeys` | Includes `director_json`, `id`, `engine`, `prompt`, â€¦ |
 
 Example S01 project: `f4069dcf-77f4-461b-8cfd-8615e611694f`, export job `b1527e15-bcac-4805-b8d1-f4dbe07c4716`.
 
@@ -62,10 +62,10 @@ Individual JSON traces under `artifacts/m30-situations/`:
 
 | ID | Status entering M3.0d | M3.0d status |
 |----|----------------------|--------------|
-| S01–S12 | EXECUTED (M3.0c) | **Closed** |
+| S01â€“S12 | EXECUTED (M3.0c) | **Closed** |
 
 ## Honest boundaries
 
-- Motion MP4 is **reused** from M3.0c fal proof — not twelve independent fal renders.
+- Motion MP4 is **reused** from M3.0c fal proof â€” not twelve independent fal renders.
 - Stills are **fresh local** Z-Image outputs per situation.
 - Intelligence phases used available provider/limited-analysis paths; four live brief diversity (B16) remains a separate gap.

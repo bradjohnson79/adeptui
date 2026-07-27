@@ -1,9 +1,9 @@
-# M3.0d Capstone Production Report
+﻿# M3.0d Capstone Production Report
 
 | Field | Value |
 |-------|-------|
 | Date | 2026-07-27 |
-| Capstone situation | **S12 — Full short-form capstone** |
+| Capstone situation | **S12 â€” Full short-form capstone** |
 | Script | `scripts/m30d_capstone_production.py` |
 | Validation | `artifacts/m30-situations/phase18-final-validation.json` (n=12) |
 | Implementation SHA | `43a5c0f0152a39327e87b10de11fd55e5b16ad90` |
@@ -38,11 +38,11 @@ From `phase18-final-validation.json` entry n=12:
 ## Capstone workflow proven
 
 ```text
-Brief → intelligence phases → production Director plan
-→ local still generation → imported music WAV
-→ reused Seedance motion → vision/timeline approvals
-→ Director→Editor handoff (sync_model: director_plan_transformed_into_editor_sequence)
-→ export job → pack with director_json + media
+Brief â†’ intelligence phases â†’ production Director plan
+â†’ local still generation â†’ imported music WAV
+â†’ reused Seedance motion â†’ vision/timeline approvals
+â†’ Directorâ†’Editor handoff (sync_model: director_plan_transformed_into_editor_sequence)
+â†’ export job â†’ pack with director_json + media
 ```
 
 ## Cross-register closure
@@ -58,8 +58,8 @@ Brief → intelligence phases → production Director plan
 
 - Capstone does not prove generative audio, fal image, or LTX/WAN native video.
 - Two video assets in Director reflect bounded multi-clip planning; motion file is reused fal MP4.
-- Accessibility and keyboard-only capstone journey not certified — see `M30D_ACCESSIBILITY_CERTIFICATION.md`.
+- Accessibility and keyboard-only capstone journey not certified â€” see `M30D_ACCESSIBILITY_CERTIFICATION.md`.
 
 ## Status
 
-**S12 capstone: EXECUTED / Closed** — affirmed at M3.0d documentation stamp.
+**S12 capstone: EXECUTED / Closed** â€” affirmed at M3.0d documentation stamp.

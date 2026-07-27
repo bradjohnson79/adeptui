@@ -1,4 +1,4 @@
-# M3.0d Native Platform Smoke Matrix
+﻿# M3.0d Native Platform Smoke Matrix
 
 | Field | Value |
 |-------|-------|
@@ -26,7 +26,7 @@ Evaluates 18 native platforms. **GREEN** = code and/or recorded test proves boun
 | screenplay | **GREEN** | Script segments, panels, import path present |
 | sound | **GREEN** | Import/place/gain/normalize/syncEvent proven; generative audio unavailable |
 | timeline | **GREEN** | Timeline UI/API; director_json in exports |
-| edit | **GREEN** | Editor workspace; Director→Editor handoff API proven |
+| edit | **GREEN** | Editor workspace; Directorâ†’Editor handoff API proven |
 | color | **UNSUPPORTED_BY_DESIGN** | No color-grade UI in inventory |
 | comp | **BLOCKED** | VFX/compositing specialists without native workspace |
 | subs | **UNSUPPORTED_BY_DESIGN** | No subtitle/SRT/VTT generation |
@@ -57,6 +57,6 @@ GREEN is limited to evidence named above. The matrix does not silently upgrade M
 
 ## Related documents
 
-- `M30D_FAL_MOTION_PROOF.md` — video GREEN evidence
-- `M30D_AUDIO_CAPABILITY_REPORT.md` — sound GREEN with generative boundary
-- `M30D_TIMELINE_EXPORT_CERTIFICATION.md` — timeline + delivery
+- `M30D_FAL_MOTION_PROOF.md` â€” video GREEN evidence
+- `M30D_AUDIO_CAPABILITY_REPORT.md` â€” sound GREEN with generative boundary
+- `M30D_TIMELINE_EXPORT_CERTIFICATION.md` â€” timeline + delivery

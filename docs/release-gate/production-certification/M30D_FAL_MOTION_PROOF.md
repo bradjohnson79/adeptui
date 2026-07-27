@@ -1,9 +1,9 @@
-# M3.0d fal Motion Proof
+﻿# M3.0d fal Motion Proof
 
 | Field | Value |
 |-------|-------|
 | Date | 2026-07-27 |
-| Status | **SUCCESS (reconciled — reused from M3.0c)** |
+| Status | **SUCCESS (reconciled â€” reused from M3.0c)** |
 | New paid fal spend in M3.0d | **None** |
 | Primary evidence | `docs/m3.0c/FAL_UNIFIED_QUEUE_PROOF.md` |
 | Machine evidence | `artifacts/m30c-fal/unified_queue_proof.json` |
@@ -16,15 +16,15 @@ Production motion for Manual User Beta is the **fal Seedance queue path** throug
 ## Workflow proven (M3.0c Phase 4)
 
 ```text
-POST /api/projects/{id}/txt2vid (fal_seedance, 4s, 854×480)
-→ Studio Job row created (status queued)
-→ Worker submitted fal Seedance T2V
-→ falRequestId stored in history_json
-→ API process died mid-poll (harness lifecycle)
-→ recover_interrupted marked job failed/interrupted honestly
-→ Provider lookup by request_id found COMPLETED
-→ MP4 downloaded (852,802 bytes) and Asset linked
-→ Job status done + Co-Director inspect source=studio
+POST /api/projects/{id}/txt2vid (fal_seedance, 4s, 854Ã—480)
+â†’ Studio Job row created (status queued)
+â†’ Worker submitted fal Seedance T2V
+â†’ falRequestId stored in history_json
+â†’ API process died mid-poll (harness lifecycle)
+â†’ recover_interrupted marked job failed/interrupted honestly
+â†’ Provider lookup by request_id found COMPLETED
+â†’ MP4 downloaded (852,802 bytes) and Asset linked
+â†’ Job status done + Co-Director inspect source=studio
 ```
 
 ## Identifiers (non-secret)
@@ -47,9 +47,9 @@ POST /api/projects/{id}/txt2vid (fal_seedance, 4s, 854×480)
 
 ## M3.0d reuse in production situations
 
-All twelve production situations (S01–S12) attach the reconciled Seedance MP4 as motion media. Stills are fresh local Z-Image ComfyUI outputs per situation. Audio is imported PCM WAV — generative audio is honestly unavailable.
+All twelve production situations (S01â€“S12) attach the reconciled Seedance MP4 as motion media. Stills are fresh local Z-Image ComfyUI outputs per situation. Audio is imported PCM WAV â€” generative audio is honestly unavailable.
 
-Validation: `artifacts/m30-situations/phase18-final-validation.json` — every pack contains non-empty PNG, WAV, and MP4.
+Validation: `artifacts/m30-situations/phase18-final-validation.json` â€” every pack contains non-empty PNG, WAV, and MP4.
 
 ## fal image boundary (UJ-3)
 
@@ -57,7 +57,7 @@ fal image models are not registered (`FAL_IMAGE_MODELS` empty under manifest loc
 
 ## Probe note (documented, not a product retry)
 
-An exploratory status-URL probe accidentally POSTed to a wrong path and returned a different `request_id` (`019fa507-…`). Cancel attempt returned HTTP 400. This was not an Adept product retry loop. Prefer GET on `https://queue.fal.run/bytedance/seedance-2.0/requests/{id}/status` for Seedance lookup.
+An exploratory status-URL probe accidentally POSTed to a wrong path and returned a different `request_id` (`019fa507-â€¦`). Cancel attempt returned HTTP 400. This was not an Adept product retry loop. Prefer GET on `https://queue.fal.run/bytedance/seedance-2.0/requests/{id}/status` for Seedance lookup.
 
 ## Operational guidance
 

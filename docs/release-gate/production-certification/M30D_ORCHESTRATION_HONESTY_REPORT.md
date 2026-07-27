@@ -1,4 +1,4 @@
-# M3.0d Orchestration Honesty Report
+﻿# M3.0d Orchestration Honesty Report
 
 | Field | Value |
 |-------|-------|
@@ -38,13 +38,13 @@ Integrated at orchestration response boundaries in M2.11 pipeline (orchestrator 
 
 | Test | Assertion |
 |------|-----------|
-| `test_b9_normalize_rejects_contradictory_success` | completed + failures → not success OR not completed |
-| `test_b9_pending_approval_is_not_success` | pendingApprovals → `pending_approval`, success false |
+| `test_b9_normalize_rejects_contradictory_success` | completed + failures â†’ not success OR not completed |
+| `test_b9_pending_approval_is_not_success` | pendingApprovals â†’ `pending_approval`, success false |
 | Full pytest gate | 631/0/6 |
 
 File: `studio-api/tests/test_m30d_closures.py`
 
-## B21 — timeout surfacing
+## B21 â€” timeout surfacing
 
 Specialist timeouts are no longer silent roster shrinkage. The normalizer appends `timeout:{specialistId}` entries to `warnings[]` and can downgrade status to `completed_with_warnings`.
 

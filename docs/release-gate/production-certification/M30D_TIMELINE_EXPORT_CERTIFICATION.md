@@ -1,4 +1,4 @@
-# M3.0d Timeline and Export Certification
+﻿# M3.0d Timeline and Export Certification
 
 | Field | Value |
 |-------|-------|
@@ -18,7 +18,7 @@ The native Director timeline and export path is **GREEN** for the bounded Manual
 
 Generative audio and LTX/WAN native video are **not** claimed.
 
-## B18 — Export includes director_json (Closed)
+## B18 â€” Export includes director_json (Closed)
 
 ### Problem
 
@@ -32,7 +32,7 @@ Export packs previously omitted `director_json`, losing Director plan state in d
 
 `artifacts/m30-situations/phase18-final-validation.json`:
 
-| Field | S01–S12 |
+| Field | S01â€“S12 |
 |-------|---------|
 | `export.jobStatus` | `done` (all 12) |
 | `export.exists` | `true` |
@@ -58,7 +58,7 @@ Export packs previously omitted `director_json`, losing Director plan state in d
 - `studio-api/app/codirector/m29/audio/service.py`
 - `studio-api/app/queue_worker.py`
 
-Prior M3.0c baseline: `docs/m3.0c/TIMELINE_AND_EDITOR_CERTIFICATION.md` — M3.0d elevates Director→Editor and export to **Closed** with situation artifacts.
+Prior M3.0c baseline: `docs/m3.0c/TIMELINE_AND_EDITOR_CERTIFICATION.md` â€” M3.0d elevates Directorâ†’Editor and export to **Closed** with situation artifacts.
 
 ## Status
 
