@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api";
 import type { FalKeyStatus } from "../api";
 import type { Project } from "../types";
 import { LearningPanel } from "./LearningPanel";
 import { LearningEvolutionPanel } from "./LearningEvolutionPanel";
+import { LanguageSettings } from "../i18n";
 import { ASPECT_PRESETS, FPS_OPTIONS } from "../workspacePrefs";
 
 const TABS = [
   ["general", "General"],
+  ["language", "Language"],
   ["learning", "AI Learning"],
   ["defaults", "Defaults"],
   ["library", "Library"],
@@ -34,6 +37,7 @@ function parseDefaults(raw?: string) {
 }
 
 export function ProjectSettings({ project, onChange }: { project: Project; onChange: () => void }) {
+  const { t } = useTranslation(["settings", "common", "navigation"]);
   const [tab, setTab] = useState<TabId>("general");
   const [defaults, setDefaults] = useState<Record<string, unknown>>(() => parseDefaults(project.defaults_json));
   const [falStatus, setFalStatus] = useState<FalKeyStatus | null>(null);
@@ -84,7 +88,7 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
 
   return (
     <div className="page project-settings">
-      <h1>Project Settings</h1>
+      <h1>{t("settings:title")}</h1>
       <div className="workspace-tabs" role="tablist">
         {TABS.map(([id, label]) => (
           <button
@@ -95,10 +99,16 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             className={tab === id ? "primary" : ""}
             onClick={() => setTab(id)}
           >
-            {label}
+            {id === "language" ? t("common:language") : label}
           </button>
         ))}
       </div>
+
+      {tab === "language" && (
+        <div className="settings-panel">
+          <LanguageSettings />
+        </div>
+      )}
 
       {tab === "general" && (
         <div className="settings-panel">

@@ -2,21 +2,21 @@ schemaVersion: 1
 modelId: fal_seedance
 providerId: fal.api
 engineId: fal_seedance
-displayName: "Seedance 2.0 (fal.ai)"
-modelVersion: "2.0"
-knowledgePackVersion: "1.0.0"
+displayName: Seedance 2.0 (fal.ai)
+modelVersion: '2.0'
+knowledgePackVersion: 1.0.0
 status: ACTIVE
 runtimeStatus: production
 media:
-  - video
+- video
 modes:
-  - image_to_video
-  - text_to_video
+- image_to_video
+- text_to_video
 documentation:
   officialSources: []
   releaseNotes: []
   retrievedAt: null
-  reviewedAt: "2026-07-27"
+  reviewedAt: '2026-07-27'
 confidence:
   overall: 0.88
 licensing:
@@ -24,4 +24,15 @@ licensing:
   commercialUse: unknown
   redistribution: unknown
 maintainers:
-  - adept-ui-m30e
+- adept-ui-m30e
+languageSupport:
+  documentedInputLanguages:
+  - en
+  preferredPromptLanguages:
+  - en
+  multilingualReliability: partial
+  languageNotes:
+  - 'M3.0F: prefer English prompts unless pack evidence expands'
+  translationRecommended: true
+  bilingualPromptRecommended: false
+  preserveUnicode: true

@@ -23,6 +23,8 @@ export type FutureWorkspace =
 
 export interface WorkspaceDefinition {
   label: string;
+  /** i18n key under navigation namespace (M3.0F) */
+  labelKey: string;
   group: WorkspaceGroup;
   futureDestination: FutureWorkspace;
   compatibilityAliases: readonly string[];
@@ -33,27 +35,27 @@ export interface WorkspaceDefinition {
  * Current IDs remain canonical until their future destinations have parity.
  */
 export const WORKSPACES = {
-  home: { label: "Project Home", group: "project", futureDestination: "home", compatibilityAliases: ["project", "dashboard"] },
-  setup: { label: "Setup", group: "additional", futureDestination: "setup", compatibilityAliases: [] },
-  settings: { label: "Settings", group: "additional", futureDestination: "settings", compatibilityAliases: [] },
-  imagegen: { label: "ImageGen", group: "create", futureDestination: "generate", compatibilityAliases: ["image", "image-gen"] },
-  one: { label: "1 Frame", group: "create", futureDestination: "generate", compatibilityAliases: ["one-frame"] },
-  txt2vid: { label: "Txt2Vid", group: "create", futureDestination: "generate", compatibilityAliases: ["text-to-video", "text2video"] },
-  three: { label: "3 Frame", group: "create", futureDestination: "generate", compatibilityAliases: ["three-frame"] },
-  director: { label: "Director", group: "create", futureDestination: "director", compatibilityAliases: [] },
-  profiles: { label: "Profiles", group: "organize", futureDestination: "profiles", compatibilityAliases: [] },
-  tools: { label: "Character / Angles", group: "legacy", futureDestination: "profiles", compatibilityAliases: ["image-tools"] },
-  spatial: { label: "Spatial Map", group: "legacy", futureDestination: "sceneSheets", compatibilityAliases: ["blocking"] },
-  script: { label: "Script / Storyboard", group: "create", futureDestination: "story", compatibilityAliases: ["story"] },
-  shotlist: { label: "Shot List", group: "legacy", futureDestination: "story", compatibilityAliases: ["shot-list"] },
-  generate: { label: "Generate Timeline", group: "legacy", futureDestination: "generate", compatibilityAliases: ["generate-timeline"] },
-  library: { label: "Library", group: "organize", futureDestination: "library", compatibilityAliases: ["libraries"] },
-  marketplace: { label: "Marketplace", group: "additional", futureDestination: "resources", compatibilityAliases: ["resources"] },
-  mastersheet: { label: "Scene Master Sheet", group: "create", futureDestination: "sceneSheets", compatibilityAliases: ["scene-sheets", "sceneSheets"] },
-  avatar: { label: "Avatar Studio", group: "create", futureDestination: "generate", compatibilityAliases: ["avatar-studio"] },
-  bible: { label: "Production Bible", group: "organize", futureDestination: "story", compatibilityAliases: ["production-bible", "productionbible"] },
-  editor: { label: "Editor", group: "finish", futureDestination: "editor", compatibilityAliases: [] },
-  audiostudio: { label: "Audio Studio", group: "finish", futureDestination: "audio", compatibilityAliases: ["audio", "audio-studio"] },
+  home: { label: "Project Home", labelKey: "projectHome", group: "project", futureDestination: "home", compatibilityAliases: ["project", "dashboard"] },
+  setup: { label: "Setup", labelKey: "setup", group: "additional", futureDestination: "setup", compatibilityAliases: [] },
+  settings: { label: "Settings", labelKey: "settings", group: "additional", futureDestination: "settings", compatibilityAliases: [] },
+  imagegen: { label: "ImageGen", labelKey: "imagegen", group: "create", futureDestination: "generate", compatibilityAliases: ["image", "image-gen"] },
+  one: { label: "1 Frame", labelKey: "generate", group: "create", futureDestination: "generate", compatibilityAliases: ["one-frame"] },
+  txt2vid: { label: "Txt2Vid", labelKey: "txt2vid", group: "create", futureDestination: "generate", compatibilityAliases: ["text-to-video", "text2video"] },
+  three: { label: "3 Frame", labelKey: "generate", group: "create", futureDestination: "generate", compatibilityAliases: ["three-frame"] },
+  director: { label: "Director", labelKey: "director", group: "create", futureDestination: "director", compatibilityAliases: [] },
+  profiles: { label: "Profiles", labelKey: "profiles", group: "organize", futureDestination: "profiles", compatibilityAliases: [] },
+  tools: { label: "Character / Angles", labelKey: "profiles", group: "legacy", futureDestination: "profiles", compatibilityAliases: ["image-tools"] },
+  spatial: { label: "Spatial Map", labelKey: "generate", group: "legacy", futureDestination: "sceneSheets", compatibilityAliases: ["blocking"] },
+  script: { label: "Script / Storyboard", labelKey: "script", group: "create", futureDestination: "story", compatibilityAliases: ["story"] },
+  shotlist: { label: "Shot List", labelKey: "shotlist", group: "legacy", futureDestination: "story", compatibilityAliases: ["shot-list"] },
+  generate: { label: "Generate Timeline", labelKey: "generate", group: "legacy", futureDestination: "generate", compatibilityAliases: ["generate-timeline"] },
+  library: { label: "Library", labelKey: "library", group: "organize", futureDestination: "library", compatibilityAliases: ["libraries"] },
+  marketplace: { label: "Marketplace", labelKey: "marketplace", group: "additional", futureDestination: "resources", compatibilityAliases: ["resources"] },
+  mastersheet: { label: "Scene Master Sheet", labelKey: "mastersheet", group: "create", futureDestination: "sceneSheets", compatibilityAliases: ["scene-sheets", "sceneSheets"] },
+  avatar: { label: "Avatar Studio", labelKey: "avatar", group: "create", futureDestination: "generate", compatibilityAliases: ["avatar-studio"] },
+  bible: { label: "Production Bible", labelKey: "bible", group: "organize", futureDestination: "story", compatibilityAliases: ["production-bible", "productionbible"] },
+  editor: { label: "Editor", labelKey: "editor", group: "finish", futureDestination: "editor", compatibilityAliases: [] },
+  audiostudio: { label: "Audio Studio", labelKey: "audioStudio", group: "finish", futureDestination: "audio", compatibilityAliases: ["audio", "audio-studio"] },
 } as const satisfies Record<string, WorkspaceDefinition>;
 
 export type EditorTab = keyof typeof WORKSPACES;

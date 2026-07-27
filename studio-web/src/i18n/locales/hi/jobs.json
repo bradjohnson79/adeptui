@@ -1,0 +1,12 @@
+{
+  "title": "जॉब्स",
+  "queued": "Queued",
+  "running": "चल रहा है",
+  "succeeded": "सफल",
+  "failed": "जॉब {{jobName}} विफल",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

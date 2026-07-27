@@ -1,0 +1,12 @@
+{
+  "title": "المهام",
+  "queued": "Queued",
+  "running": "قيد التشغيل",
+  "succeeded": "نجح",
+  "failed": "فشلت المهمة {{jobName}}",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

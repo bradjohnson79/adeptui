@@ -1,0 +1,11 @@
+{
+  "title": "Projects",
+  "newProject": "New project",
+  "openProject": "Open project",
+  "recentProjects": "Recent projects",
+  "projectName": "Project name",
+  "create": "Create project",
+  "empty": "No projects yet.",
+  "canonicalLanguage": "Project canonical language",
+  "primaryLanguage": "Project primary language"
+}

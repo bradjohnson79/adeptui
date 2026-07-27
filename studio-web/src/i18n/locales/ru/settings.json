@@ -1,0 +1,12 @@
+{
+  "title": "Настройки",
+  "interfaceLanguage": "Язык интерфейса",
+  "conversationLanguage": "Язык общения с сорежиссёром",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "Язык интерфейса не меняет канонический язык проекта.",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

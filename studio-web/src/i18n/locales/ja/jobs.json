@@ -1,0 +1,12 @@
+{
+  "title": "ジョブ",
+  "queued": "Queued",
+  "running": "実行中",
+  "succeeded": "成功",
+  "failed": "ジョブ {{jobName}} が失敗しました",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

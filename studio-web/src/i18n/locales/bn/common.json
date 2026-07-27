@@ -1,0 +1,23 @@
+{
+  "appName": "Adept UI",
+  "save": "সংরক্ষণ",
+  "cancel": "বাতিল",
+  "close": "বন্ধ",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "edit": "Edit",
+  "loading": "লোড হচ্ছে…",
+  "retry": "আবার চেষ্টা",
+  "back": "Back",
+  "next": "Next",
+  "search": "অনুসন্ধান",
+  "language": "ভাষা",
+  "settings": "সেটিংস",
+  "yes": "Yes",
+  "no": "No",
+  "unknown": "Unknown",
+  "copy": "Copy",
+  "export": "Export",
+  "import": "Import",
+  "refresh": "Refresh"
+}

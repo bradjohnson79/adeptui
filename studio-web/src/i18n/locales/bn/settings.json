@@ -1,0 +1,12 @@
+{
+  "title": "সেটিংস",
+  "interfaceLanguage": "ইন্টারফেস ভাষা",
+  "conversationLanguage": "সহ-পরিচালকের কথোপকথন ভাষা",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "ইন্টারফেস ভাষা প্রকল্পের সঠিক ভাষা পরিবর্তন করে না।",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

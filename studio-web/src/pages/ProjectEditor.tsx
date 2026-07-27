@@ -3,7 +3,9 @@ import { useLocation, useParams } from "react-router-dom";
 import { api, isAbortError, isNavigationFetchFailure } from "../api";
 import type { Project } from "../types";
 import { CoDirectorProvider } from "../core/CoDirectorContext";
-import { workspaceLabel } from "../core/workspaces";
+import { useTranslation } from "react-i18next";
+import { WORKSPACES, workspaceLabel } from "../core/workspaces";
+// WORKSPACES.labelKey used for i18n nav labels
 import { Timeline } from "../components/Timeline";
 import { AssetTray, PromptComposer } from "../components/AssetTray";
 import { AdvancedPanel, JobPanel } from "../components/JobPanel";
@@ -282,6 +284,7 @@ function onChangeSafe(refresh: () => Promise<void>) {
 export default function ProjectEditor() {
   const { id } = useParams();
   const { search: locationSearch } = useLocation();
+  const { t } = useTranslation("navigation");
   const [project, setProject] = useState<Project | null>(null);
   const [selectedScene, setSelectedScene] = useState<string>();
   const [tab, setTab] = useState<EditorTab>("home");
@@ -415,7 +418,7 @@ export default function ProjectEditor() {
     else go("library");
   };
 
-  const tabLabel = workspaceLabel(tab);
+  const tabLabel = t(WORKSPACES[tab].labelKey, { defaultValue: workspaceLabel(tab) });
   const selectedSceneObj = project.scenes.find((s) => s.id === selectedScene) || project.scenes[0];
 
   return (

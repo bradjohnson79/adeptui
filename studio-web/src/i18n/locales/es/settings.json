@@ -1,0 +1,12 @@
+{
+  "title": "Ajustes",
+  "interfaceLanguage": "Idioma de la interfaz",
+  "conversationLanguage": "Idioma de conversación del Co-Director",
+  "projectLanguage": "Idioma principal del proyecto",
+  "promptLanguagePolicy": "Política de idioma de prompts",
+  "exportLanguage": "Idioma de exportación",
+  "languageHelp": "El idioma de la interfaz no cambia el idioma canónico del proyecto.",
+  "followOs": "Usar el idioma del sistema si es compatible",
+  "rtlNote": "El árabe y el urdu usan diseño de derecha a izquierda.",
+  "portugueseNote": "El portugués usa convenciones brasileñas (pt-BR)."
+}

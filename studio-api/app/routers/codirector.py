@@ -26,6 +26,7 @@ from ..codirector.m212.api import router as m212_router
 from ..codirector.m213.api import router as m213_router
 from ..codirector.m214.api import router as m214_router
 from ..codirector.model_intelligence.api import router as model_intelligence_router
+from ..codirector.language_intelligence.api import router as language_intelligence_router
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
     BibleMutationSet,
@@ -50,6 +51,7 @@ router.include_router(m212_router)
 router.include_router(m213_router)
 router.include_router(m214_router)
 router.include_router(model_intelligence_router)
+router.include_router(language_intelligence_router)
 
 
 def _http_error(err: CoDirectorError) -> HTTPException:
@@ -69,6 +71,8 @@ class CoDirectorChatBody(BaseModel):
     provider_id: Optional[str] = None
     mode: Literal["chat", "prompt", "guide", "setup"] = "chat"
     request_id: Optional[str] = None
+    conversation_locale: Optional[str] = None
+    conversationLocale: Optional[str] = None
 
 
 class CoDirectorCancelBody(BaseModel):
@@ -178,6 +182,7 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
             model=body.model,
             provider_id=body.provider_id,
             request_id=body.request_id,
+            conversation_locale=body.conversation_locale or body.conversationLocale,
         )
     except CoDirectorError as err:
         raise _http_error(err) from err
@@ -214,6 +219,7 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
                 model=body.model,
                 provider_id=body.provider_id,
                 request_id=request_id,
+                conversation_locale=body.conversation_locale or body.conversationLocale,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
                 if codirector_service.is_cancelled(request_id):

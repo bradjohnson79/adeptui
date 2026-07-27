@@ -9,27 +9,30 @@ import EnvironmentStudioWorkspace from "./components/EnvironmentStudioWorkspace"
 import ProductionSuiteWorkspace from "./components/ProductionSuiteWorkspace";
 import { CoDirectorHost, CoDirectorSessionProvider } from "./components/CoDirector";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { LanguageProvider } from "./i18n";
 import "./styles.css";
 
 export default function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
-        <CoDirectorSessionProvider>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/project/:id" element={<ProjectEditor />} />
-            <Route path="/co-director" element={<CoDirectorPage />} />
-            <Route path="/source-manager" element={<SourceManagerPage />} />
-            <Route path="/model-radar" element={<ModelRadarWorkspace />} />
-            <Route path="/virtual-stage" element={<VirtualStageWorkspace />} />
-            <Route path="/environment-studio" element={<EnvironmentStudioWorkspace />} />
-            <Route path="/production-suite" element={<ProductionSuiteWorkspace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-          <CoDirectorHost />
-        </CoDirectorSessionProvider>
-      </BrowserRouter>
+      <LanguageProvider>
+        <BrowserRouter>
+          <CoDirectorSessionProvider>
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/project/:id" element={<ProjectEditor />} />
+              <Route path="/co-director" element={<CoDirectorPage />} />
+              <Route path="/source-manager" element={<SourceManagerPage />} />
+              <Route path="/model-radar" element={<ModelRadarWorkspace />} />
+              <Route path="/virtual-stage" element={<VirtualStageWorkspace />} />
+              <Route path="/environment-studio" element={<EnvironmentStudioWorkspace />} />
+              <Route path="/production-suite" element={<ProductionSuiteWorkspace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <CoDirectorHost />
+          </CoDirectorSessionProvider>
+        </BrowserRouter>
+      </LanguageProvider>
     </ErrorBoundary>
   );
 }

@@ -1,0 +1,12 @@
+{
+  "title": "Jobs",
+  "queued": "Queued",
+  "running": "Running",
+  "succeeded": "Succeeded",
+  "failed": "Job {{jobName}} failed",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

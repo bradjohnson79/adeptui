@@ -1,0 +1,19 @@
+{
+  "title": "सह-निर्देशक",
+  "placeholder": "अपना रचनात्मक आशय लिखें…",
+  "send": "भेजें",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "अनुशंसित मॉडल",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

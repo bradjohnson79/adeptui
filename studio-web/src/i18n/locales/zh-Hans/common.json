@@ -1,0 +1,23 @@
+{
+  "appName": "Adept UI",
+  "save": "保存",
+  "cancel": "取消",
+  "close": "关闭",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "edit": "Edit",
+  "loading": "加载中…",
+  "retry": "重试",
+  "back": "Back",
+  "next": "Next",
+  "search": "搜索",
+  "language": "语言",
+  "settings": "设置",
+  "yes": "Yes",
+  "no": "No",
+  "unknown": "Unknown",
+  "copy": "Copy",
+  "export": "Export",
+  "import": "Import",
+  "refresh": "Refresh"
+}

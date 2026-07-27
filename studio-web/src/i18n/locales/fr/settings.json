@@ -1,0 +1,12 @@
+{
+  "title": "Paramètres",
+  "interfaceLanguage": "Langue de l'interface",
+  "conversationLanguage": "Langue de conversation du Co-réalisateur",
+  "projectLanguage": "Langue principale du projet",
+  "promptLanguagePolicy": "Politique de langue des prompts",
+  "exportLanguage": "Langue d'export",
+  "languageHelp": "La langue de l'interface ne change pas la langue canonique du projet.",
+  "followOs": "Utiliser la langue du système si prise en charge",
+  "rtlNote": "L'arabe et l'ourdou utilisent une mise en page de droite à gauche.",
+  "portugueseNote": "Le portugais utilise les conventions brésiliennes (pt-BR)."
+}

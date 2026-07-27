@@ -1,0 +1,23 @@
+{
+  "appName": "Adept UI",
+  "save": "Guardar",
+  "cancel": "Cancelar",
+  "close": "Cerrar",
+  "confirm": "Confirmar",
+  "delete": "Eliminar",
+  "edit": "Editar",
+  "loading": "Cargando…",
+  "retry": "Reintentar",
+  "back": "Atrás",
+  "next": "Siguiente",
+  "search": "Buscar",
+  "language": "Idioma",
+  "settings": "Configuración",
+  "yes": "Sí",
+  "no": "No",
+  "unknown": "Desconocido",
+  "copy": "Copiar",
+  "export": "Exportar",
+  "import": "Importar",
+  "refresh": "Actualizar"
+}

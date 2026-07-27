@@ -1,0 +1,11 @@
+{
+  "generic": "कुछ गलत हो गया।",
+  "network": "Network error. Check your connection.",
+  "notFound": "Not found.",
+  "unauthorized": "Not authorized.",
+  "validation": "Validation failed.",
+  "modelKnowledgeUnavailable": "चयनित मॉडल का ज्ञान उपलब्ध नहीं है।",
+  "translationFailed": "अनुवाद विफल। मूल पाठ सुरक्षित रखा गया।",
+  "languagePackInvalid": "Language pack failed validation.",
+  "recoveryHint": "Try again or recover running jobs from Jobs."
+}

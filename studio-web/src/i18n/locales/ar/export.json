@@ -1,0 +1,10 @@
+{
+  "title": "Export",
+  "canonicalOnly": "Canonical language only",
+  "selectedOnly": "Selected language only",
+  "canonicalPlusSelected": "Canonical plus selected language",
+  "allLanguages": "All available languages",
+  "manifest": "Export manifest",
+  "success": "Export completed.",
+  "failed": "Export failed."
+}

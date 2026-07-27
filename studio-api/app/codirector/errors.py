@@ -39,9 +39,12 @@ class CoDirectorError(Exception):
         return self.message
 
     def to_dict(self) -> dict[str, Any]:
+        # M3.0F: stable code + messageKey for localized UI mapping (never parse prose).
+        explicit_key = self.details.get("messageKey") if isinstance(self.details, dict) else None
         return {
             "code": self.code,
             "message": self.message,
+            "messageKey": explicit_key or f"errors.code.{self.code}",
             "details": dict(self.details),
             "recoverable": self.recoverable,
             "recommendedAction": self.recommended_action,

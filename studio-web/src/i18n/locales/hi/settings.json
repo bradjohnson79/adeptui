@@ -1,0 +1,12 @@
+{
+  "title": "सेटिंग्स",
+  "interfaceLanguage": "इंटरफ़ेस भाषा",
+  "conversationLanguage": "सह-निर्देशक वार्तालाप भाषा",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "इंटरफ़ेस भाषा परियोजना की प्रामाणिक भाषा नहीं बदलती।",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

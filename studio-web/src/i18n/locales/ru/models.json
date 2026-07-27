@@ -1,0 +1,8 @@
+{
+  "title": "Models",
+  "select": "Select model",
+  "limitations": "Limitations",
+  "readiness": "Readiness",
+  "promptLanguage": "Prompt language",
+  "preferredPromptLanguage": "Preferred prompt language"
+}

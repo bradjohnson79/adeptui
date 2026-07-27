@@ -1,0 +1,12 @@
+{
+  "title": "Задачи",
+  "queued": "Queued",
+  "running": "Выполняется",
+  "succeeded": "Успешно",
+  "failed": "Задача {{jobName}} не выполнена",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

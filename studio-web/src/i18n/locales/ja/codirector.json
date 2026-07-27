@@ -1,0 +1,19 @@
+{
+  "title": "共同監督",
+  "placeholder": "創作意図を記述…",
+  "send": "送信",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "推奨モデル",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

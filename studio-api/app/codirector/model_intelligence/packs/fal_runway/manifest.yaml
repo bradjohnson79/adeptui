@@ -2,20 +2,20 @@ schemaVersion: 1
 modelId: fal_runway
 providerId: fal.api
 engineId: fal_runway
-displayName: "Runway Gen-3 Turbo (fal.ai)"
-modelVersion: "gen3"
-knowledgePackVersion: "1.0.0"
+displayName: Runway Gen-3 Turbo (fal.ai)
+modelVersion: gen3
+knowledgePackVersion: 1.0.0
 status: VERIFIED
 runtimeStatus: experimental
 media:
-  - video
+- video
 modes:
-  - image_to_video
+- image_to_video
 documentation:
   officialSources: []
   releaseNotes: []
   retrievedAt: null
-  reviewedAt: "2026-07-27"
+  reviewedAt: '2026-07-27'
 confidence:
   overall: 0.65
 licensing:
@@ -23,4 +23,15 @@ licensing:
   commercialUse: unknown
   redistribution: unknown
 maintainers:
-  - adept-ui-m30e
+- adept-ui-m30e
+languageSupport:
+  documentedInputLanguages:
+  - en
+  preferredPromptLanguages:
+  - en
+  multilingualReliability: partial
+  languageNotes:
+  - 'M3.0F: prefer English prompts unless pack evidence expands'
+  translationRecommended: true
+  bilingualPromptRecommended: false
+  preserveUnicode: true

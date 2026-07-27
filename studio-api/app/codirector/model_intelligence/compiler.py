@@ -30,6 +30,18 @@ _LAB_CONTAMINATION = re.compile(
 
 def normalize_audio_from_text(prompt: str, hint: Optional[AudioIntent] = None) -> AudioIntent:
     """Derive audio intent from filmmaker language when not explicitly provided."""
+    # M3.0F: multilingual phrase table seeds intent; English heuristics still refine
+    # stronger modes (e.g. "no generated audio" → AudioMode.NONE).
+    try:
+        from ..language_intelligence.audio_phrases import normalize_audio_from_multilingual_text
+
+        multi = normalize_audio_from_multilingual_text(prompt or "", hint)
+        if multi.audioMode == AudioMode.NONE:
+            return multi
+        hint = multi
+    except Exception:
+        pass
+
     base = hint or AudioIntent()
     text = (prompt or "").lower()
     music = base.music
@@ -372,6 +384,43 @@ def compile_intent(
     ):
         lim_list.append(f"runtimeStatus={manifest.runtimeStatus.value}")
 
+    lang_support = getattr(manifest, "languageSupport", None)
+    preferred = list(getattr(lang_support, "preferredPromptLanguages", None) or ["en"])
+    source_lang = str(
+        (intent.projectContext or {}).get("sourceLanguage")
+        or (intent.creativeIntent or {}).get("sourceLanguage")
+        or "en"
+    )
+    prompt_lang = preferred[0] if preferred else "en"
+    policy = str((intent.projectContext or {}).get("promptLanguagePolicy") or "auto")
+    translation_notes: list[str] = []
+    if policy == "no_translation":
+        prompt_lang = source_lang
+        translation_notes.append("User prohibited translation; prompt stays in source language")
+    elif policy == "english":
+        prompt_lang = "en"
+    elif policy == "user_language":
+        prompt_lang = source_lang
+    elif getattr(lang_support, "translationRecommended", True) and source_lang not in preferred:
+        translation_notes.append(
+            f"Model prefers prompt language(s) {preferred}; source was {source_lang}"
+        )
+        applied.append(
+            _rule(
+                "language.prompt_policy",
+                f"Selected prompt language {prompt_lang} from pack languageSupport",
+            )
+        )
+    protected_terms = [
+        str(t)
+        for t in (
+            (intent.projectContext or {}).get("protectedTerms")
+            or intent.mustInclude
+            or []
+        )
+        if t
+    ]
+
     return CompileResult(
         modelId=binding.modelId,
         providerId=binding.providerId,
@@ -390,4 +439,15 @@ def compile_intent(
         limitations=lim_list,
         status="ok",
         overrideDispositions=override_disp,
+        originalRequest=intent.userPrompt or "",
+        sourceLanguage=source_lang,
+        promptLanguage=prompt_lang,
+        translationNotes=translation_notes,
+        protectedTermsApplied=protected_terms,
+        normalizedIntent={
+            "subjects": intent.subjects,
+            "mustInclude": intent.mustInclude,
+            "mustAvoid": intent.mustAvoid,
+            "audioIntent": audio.model_dump(),
+        },
     )

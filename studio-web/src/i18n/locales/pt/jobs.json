@@ -1,0 +1,12 @@
+{
+  "title": "Tarefas",
+  "queued": "Queued",
+  "running": "Em execução",
+  "succeeded": "Concluído",
+  "failed": "A tarefa {{jobName}} falhou",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

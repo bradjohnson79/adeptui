@@ -1,0 +1,12 @@
+{
+  "title": "الإعدادات",
+  "interfaceLanguage": "لغة الواجهة",
+  "conversationLanguage": "لغة محادثة المخرج المشارك",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "لغة الواجهة لا تغيّر لغة المشروع الأساسية.",
+  "followOs": "Use system language when supported",
+  "rtlNote": "العربية والأردية تستخدمان تخطيطًا من اليمين إلى اليسار.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

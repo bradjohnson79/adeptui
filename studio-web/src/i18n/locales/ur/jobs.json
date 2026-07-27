@@ -1,0 +1,12 @@
+{
+  "title": "جابات",
+  "queued": "Queued",
+  "running": "چل رہا ہے",
+  "succeeded": "کامیاب",
+  "failed": "جاب {{jobName}} ناکام",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

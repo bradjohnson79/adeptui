@@ -2,20 +2,20 @@ schemaVersion: 1
 modelId: nano_banana_pro
 providerId: fal.api
 engineId: nano_banana_pro
-displayName: "Nano Banana Pro (fal image)"
-modelVersion: "unregistered"
-knowledgePackVersion: "1.0.0"
+displayName: Nano Banana Pro (fal image)
+modelVersion: unregistered
+knowledgePackVersion: 1.0.0
 status: QUARANTINED
 runtimeStatus: product_approval_required
 media:
-  - image
+- image
 modes:
-  - text_to_image
+- text_to_image
 documentation:
   officialSources: []
   releaseNotes: []
   retrievedAt: null
-  reviewedAt: "2026-07-27"
+  reviewedAt: '2026-07-27'
 confidence:
   overall: 0.0
 licensing:
@@ -23,4 +23,15 @@ licensing:
   commercialUse: unknown
   redistribution: unknown
 maintainers:
-  - adept-ui-m30e
+- adept-ui-m30e
+languageSupport:
+  documentedInputLanguages:
+  - en
+  preferredPromptLanguages:
+  - en
+  multilingualReliability: partial
+  languageNotes:
+  - 'M3.0F: prefer English prompts unless pack evidence expands'
+  translationRecommended: true
+  bilingualPromptRecommended: false
+  preserveUnicode: true

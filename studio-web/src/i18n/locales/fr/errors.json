@@ -1,0 +1,11 @@
+{
+  "generic": "Une erreur s'est produite.",
+  "network": "Erreur réseau. Vérifiez votre connexion.",
+  "notFound": "Introuvable.",
+  "unauthorized": "Non autorisé.",
+  "validation": "Échec de la validation.",
+  "modelKnowledgeUnavailable": "Les connaissances du modèle sont indisponibles.",
+  "translationFailed": "Échec de la traduction. Le texte d'origine a été conservé.",
+  "languagePackInvalid": "Le pack de langue a échoué à la validation.",
+  "recoveryHint": "Réessayez ou récupérez les tâches depuis Tâches."
+}

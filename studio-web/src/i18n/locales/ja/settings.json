@@ -1,0 +1,12 @@
+{
+  "title": "設定",
+  "interfaceLanguage": "インターフェース言語",
+  "conversationLanguage": "共同監督の会話言語",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "インターフェース言語はプロジェクトの正規言語を変更しません。",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

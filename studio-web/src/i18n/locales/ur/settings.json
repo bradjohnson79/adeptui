@@ -1,0 +1,12 @@
+{
+  "title": "ترتیبات",
+  "interfaceLanguage": "انٹرفیس زبان",
+  "conversationLanguage": "شریک ڈائریکٹر گفتگو کی زبان",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "انٹرفیس زبان پروجیکٹ کی قانونی زبان نہیں بدلتی۔",
+  "followOs": "Use system language when supported",
+  "rtlNote": "عربی اور اردو دائیں سے بائیں لے آؤٹ استعمال کرتے ہیں۔",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

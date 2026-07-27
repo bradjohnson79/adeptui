@@ -1,0 +1,19 @@
+{
+  "title": "সহ-পরিচালক",
+  "placeholder": "আপনার সৃজনশীল অভিপ্রায় লিখুন…",
+  "send": "পাঠান",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "প্রস্তাবিত মডেল",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

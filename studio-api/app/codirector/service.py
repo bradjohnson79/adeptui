@@ -315,12 +315,26 @@ def _tool_instructions() -> str:
     )
 
 
-def _build_system_message(context: str, *, include_tools: bool = False) -> dict[str, str]:
+def _build_system_message(
+    context: str,
+    *,
+    include_tools: bool = False,
+    conversation_locale: str | None = None,
+) -> dict[str, str]:
     system = assistant_module.SYSTEM_PROMPT
     if context.strip():
         system += "\n\nCurrent studio context:\n" + context.strip()
     if include_tools:
         system += "\n\n" + _tool_instructions()
+    # M3.0F: explicit conversation language preference is authoritative.
+    if conversation_locale and conversation_locale != "en":
+        system += (
+            f"\n\nRespond in locale '{conversation_locale}'. "
+            "Preserve proper names, glossary terms, and fictional languages exactly. "
+            "Do not translate Co-Director, Production Bible, or other protected Adept terms."
+        )
+    elif conversation_locale == "en":
+        system += "\n\nRespond in English unless the user explicitly switches language mid-turn."
     return {"role": "system", "content": system}
 
 
@@ -334,9 +348,11 @@ async def _prepare_chat_request(
     model: str | None,
     provider_id: str | None,
     request_id: str | None,
+    conversation_locale: str | None = None,
 ) -> tuple[CoDirectorProvider, ChatRequest, ContextManifest]:
     request_id = request_id or new_request_id()
     context = ""
+    locale = conversation_locale
     if project_id:
         project = db.get(Project, project_id)
         if not project:
@@ -347,6 +363,15 @@ async def _prepare_chat_request(
                 recoverable=False,
                 recommended_action="none",
             )
+        if not locale:
+            try:
+                import json as _json
+
+                settings = _json.loads(getattr(project, "settings_json", "") or "{}")
+                lang = settings.get("language") or {}
+                locale = lang.get("conversationLocale") or lang.get("interfaceLocale")
+            except Exception:
+                locale = None
         project_payload = _build_project_payload(db, project_id)
         director_payload = None
         if scene_id:
@@ -394,7 +419,12 @@ async def _prepare_chat_request(
 
     # Tools are project-scoped: without a bound project there is nothing for them to read or
     # change, so the catalog is omitted and the prompt is identical to M2.1's.
-    full_messages = [_build_system_message(context, include_tools=bool(project_id)), *chat_messages]
+    full_messages = [
+        _build_system_message(
+            context, include_tools=bool(project_id), conversation_locale=locale
+        ),
+        *chat_messages,
+    ]
     provider = get_provider(provider_id)
     chat_request = ChatRequest(
         request_id=request_id,
@@ -733,6 +763,7 @@ async def chat_for_project(
     model: str | None,
     provider_id: str | None = None,
     request_id: str | None = None,
+    conversation_locale: str | None = None,
 ) -> tuple[
     ChatResult,
     SceneSetupProposal | None,
@@ -750,6 +781,7 @@ async def chat_for_project(
         model=model,
         provider_id=provider_id,
         request_id=request_id,
+        conversation_locale=conversation_locale,
     )
     result = await run_cancellable(chat_request.request_id, provider.generate(chat_request))
 
@@ -840,6 +872,7 @@ async def stream_for_project(
     model: str | None,
     provider_id: str | None = None,
     request_id: str | None = None,
+    conversation_locale: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     provider, chat_request, manifest = await _prepare_chat_request(
         db,
@@ -850,6 +883,7 @@ async def stream_for_project(
         model=model,
         provider_id=provider_id,
         request_id=request_id,
+        conversation_locale=conversation_locale,
     )
     if manifest.bibleVersionId:
         yield {"type": "context_manifest", "requestId": chat_request.request_id, "manifest": manifest.model_dump(mode="json")}

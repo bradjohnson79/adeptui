@@ -1,0 +1,19 @@
+{
+  "title": "联合导演",
+  "placeholder": "描述您的创作意图…",
+  "send": "发送",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "推荐模型",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

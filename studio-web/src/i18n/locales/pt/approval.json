@@ -1,0 +1,8 @@
+{
+  "title": "Approval Center",
+  "pending": "Pending",
+  "approved": "Approved",
+  "rejected": "Rejected",
+  "overrideReason": "Override reason",
+  "requiresReason": "An override reason is required."
+}

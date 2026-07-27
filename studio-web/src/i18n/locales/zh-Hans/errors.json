@@ -1,0 +1,11 @@
+{
+  "generic": "出错了。",
+  "network": "Network error. Check your connection.",
+  "notFound": "Not found.",
+  "unauthorized": "Not authorized.",
+  "validation": "Validation failed.",
+  "modelKnowledgeUnavailable": "所选模型的知识不可用。",
+  "translationFailed": "翻译失败。已保留原文。",
+  "languagePackInvalid": "Language pack failed validation.",
+  "recoveryHint": "Try again or recover running jobs from Jobs."
+}

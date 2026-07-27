@@ -1,0 +1,12 @@
+{
+  "title": "设置",
+  "interfaceLanguage": "界面语言",
+  "conversationLanguage": "联合导演对话语言",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "界面语言不会更改项目规范语言。",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

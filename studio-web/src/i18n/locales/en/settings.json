@@ -1,0 +1,12 @@
+{
+  "title": "Settings",
+  "interfaceLanguage": "Interface language",
+  "conversationLanguage": "Co-Director conversation language",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "Interface language does not change project canon language.",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

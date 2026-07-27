@@ -1,0 +1,11 @@
+{
+  "generic": "問題が発生しました。",
+  "network": "Network error. Check your connection.",
+  "notFound": "Not found.",
+  "unauthorized": "Not authorized.",
+  "validation": "Validation failed.",
+  "modelKnowledgeUnavailable": "選択したモデルの知識は利用できません。",
+  "translationFailed": "翻訳に失敗しました。原文を保持しました。",
+  "languagePackInvalid": "Language pack failed validation.",
+  "recoveryHint": "Try again or recover running jobs from Jobs."
+}

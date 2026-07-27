@@ -1673,6 +1673,15 @@ class JobQueue:
             "export_contract": "m30d-canonical-timeline-v1",
             "sync_model": "director_plan_transformed_into_editor_sequence",
         }
+        # M3.0F: language metadata (UTF-8 preserved; display formatting is client-side).
+        try:
+            settings_obj = json.loads(getattr(project, "settings_json", "") or "{}")
+            payload["language"] = settings_obj.get("language") or {
+                "canonicalLanguage": "en",
+                "exportLocale": "en",
+            }
+        except Exception:
+            payload["language"] = {"canonicalLanguage": "en", "exportLocale": "en"}
         out_dir = settings.data_dir / "exports" / f"{project.name.replace(' ', '_')}_{project.id[:8]}"
         videos = []
         for s in scenes:

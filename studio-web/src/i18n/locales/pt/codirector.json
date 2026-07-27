@@ -1,0 +1,19 @@
+{
+  "title": "Co-diretor",
+  "placeholder": "Descreva sua intenção criativa…",
+  "send": "Enviar",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "Modelo recomendado",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

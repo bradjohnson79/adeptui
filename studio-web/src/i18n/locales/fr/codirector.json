@@ -1,0 +1,19 @@
+{
+  "title": "Co-réalisateur",
+  "placeholder": "Décrivez votre intention créative…",
+  "send": "Envoyer",
+  "conversationLanguage": "Langue de conversation",
+  "recommendedModel": "Modèle recommandé",
+  "why": "Pourquoi",
+  "confidence": "Confiance",
+  "audioPlan": "Plan audio",
+  "knownLimitation": "Limitation connue",
+  "advanced": "Avancé",
+  "compiledPrompt": "Prompt compilé",
+  "appliedRules": "Règles appliquées",
+  "alternatives": "Alternatives",
+  "thinking": "Réflexion…",
+  "meeting": "Réunion",
+  "plan": "Plan",
+  "explain": "Expliquer"
+}

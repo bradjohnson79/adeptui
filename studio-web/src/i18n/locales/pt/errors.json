@@ -1,0 +1,11 @@
+{
+  "generic": "Algo deu errado.",
+  "network": "Network error. Check your connection.",
+  "notFound": "Not found.",
+  "unauthorized": "Not authorized.",
+  "validation": "Validation failed.",
+  "modelKnowledgeUnavailable": "O conhecimento do modelo está indisponível.",
+  "translationFailed": "Falha na tradução. O texto original foi preservado.",
+  "languagePackInvalid": "Language pack failed validation.",
+  "recoveryHint": "Try again or recover running jobs from Jobs."
+}

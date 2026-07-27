@@ -1,0 +1,12 @@
+{
+  "title": "Trabajos",
+  "queued": "En cola",
+  "running": "En ejecución",
+  "succeeded": "Correcto",
+  "failed": "El trabajo {{jobName}} falló",
+  "cancelled": "Cancelado",
+  "recover": "Recuperar trabajos",
+  "inspect": "Inspeccionar trabajo",
+  "noJobs": "Aún no hay trabajos.",
+  "status": "Estado"
+}

@@ -1,0 +1,12 @@
+{
+  "title": "Pekerjaan",
+  "queued": "Queued",
+  "running": "Berjalan",
+  "succeeded": "Berhasil",
+  "failed": "Pekerjaan {{jobName}} gagal",
+  "cancelled": "Cancelled",
+  "recover": "Recover jobs",
+  "inspect": "Inspect job",
+  "noJobs": "No jobs yet.",
+  "status": "Status"
+}

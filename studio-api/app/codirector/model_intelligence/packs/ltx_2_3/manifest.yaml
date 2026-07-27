@@ -2,21 +2,21 @@ schemaVersion: 1
 modelId: ltx_2_3
 providerId: comfy.local
 engineId: ltx
-displayName: "LTX 2.3"
-modelVersion: "2.3"
-knowledgePackVersion: "1.0.0"
+displayName: LTX 2.3
+modelVersion: '2.3'
+knowledgePackVersion: 1.0.0
 status: ACTIVE
 runtimeStatus: not_production_ready
 media:
-  - video
+- video
 modes:
-  - text_to_video
-  - image_to_video
+- text_to_video
+- image_to_video
 documentation:
   officialSources: []
   releaseNotes: []
   retrievedAt: null
-  reviewedAt: "2026-07-27"
+  reviewedAt: '2026-07-27'
 confidence:
   overall: 0.7
 licensing:
@@ -24,4 +24,15 @@ licensing:
   commercialUse: unknown
   redistribution: unknown
 maintainers:
-  - adept-ui-m30e
+- adept-ui-m30e
+languageSupport:
+  documentedInputLanguages:
+  - en
+  preferredPromptLanguages:
+  - en
+  multilingualReliability: partial
+  languageNotes:
+  - 'M3.0F: prefer English prompts unless pack evidence expands'
+  translationRecommended: true
+  bilingualPromptRecommended: false
+  preserveUnicode: true

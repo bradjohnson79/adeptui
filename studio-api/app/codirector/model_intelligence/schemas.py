@@ -84,6 +84,16 @@ class ProvenanceClaim(BaseModel):
     notes: str = ""
 
 
+class LanguageSupport(BaseModel):
+    documentedInputLanguages: list[str] = Field(default_factory=lambda: ["en"])
+    preferredPromptLanguages: list[str] = Field(default_factory=lambda: ["en"])
+    multilingualReliability: Literal["none", "partial", "strong", "unknown"] = "unknown"
+    languageNotes: list[str] = Field(default_factory=list)
+    translationRecommended: bool = True
+    bilingualPromptRecommended: bool = False
+    preserveUnicode: bool = True
+
+
 class PackManifest(BaseModel):
     schemaVersion: int = 1
     modelId: str
@@ -100,6 +110,7 @@ class PackManifest(BaseModel):
     confidence: dict[str, Any] = Field(default_factory=dict)
     licensing: dict[str, Any] = Field(default_factory=dict)
     maintainers: list[str] = Field(default_factory=list)
+    languageSupport: LanguageSupport = Field(default_factory=LanguageSupport)
 
 
 class AudioIntent(BaseModel):
@@ -163,6 +174,13 @@ class CompileResult(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     status: str = "ok"
     overrideDispositions: dict[str, OverrideDisposition] = Field(default_factory=dict)
+    # M3.0F language provenance
+    originalRequest: str = ""
+    sourceLanguage: str = ""
+    promptLanguage: str = ""
+    translationNotes: list[str] = Field(default_factory=list)
+    protectedTermsApplied: list[str] = Field(default_factory=list)
+    normalizedIntent: dict[str, Any] = Field(default_factory=dict)
 
 
 class ModelRecommendation(BaseModel):

@@ -1,0 +1,23 @@
+{
+  "appName": "Adept UI",
+  "save": "حفظ",
+  "cancel": "إلغاء",
+  "close": "إغلاق",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "edit": "Edit",
+  "loading": "جارٍ التحميل…",
+  "retry": "إعادة المحاولة",
+  "back": "Back",
+  "next": "Next",
+  "search": "بحث",
+  "language": "اللغة",
+  "settings": "الإعدادات",
+  "yes": "Yes",
+  "no": "No",
+  "unknown": "Unknown",
+  "copy": "Copy",
+  "export": "Export",
+  "import": "Import",
+  "refresh": "Refresh"
+}

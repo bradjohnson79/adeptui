@@ -1,0 +1,19 @@
+{
+  "title": "شریک ڈائریکٹر",
+  "placeholder": "اپنا تخلیقی ارادہ بیان کریں…",
+  "send": "بھیجیں",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "تجویز کردہ ماڈل",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

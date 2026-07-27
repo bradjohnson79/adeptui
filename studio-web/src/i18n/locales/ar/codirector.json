@@ -1,0 +1,19 @@
+{
+  "title": "المخرج المشارك",
+  "placeholder": "صف نيتك الإبداعية…",
+  "send": "إرسال",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "النموذج الموصى به",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

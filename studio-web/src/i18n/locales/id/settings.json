@@ -1,0 +1,12 @@
+{
+  "title": "Pengaturan",
+  "interfaceLanguage": "Bahasa antarmuka",
+  "conversationLanguage": "Bahasa percakapan Co-Director",
+  "projectLanguage": "Project primary language",
+  "promptLanguagePolicy": "Generation prompt language policy",
+  "exportLanguage": "Export language",
+  "languageHelp": "Bahasa antarmuka tidak mengubah bahasa kanonik proyek.",
+  "followOs": "Use system language when supported",
+  "rtlNote": "Arabic and Urdu use right-to-left layout.",
+  "portugueseNote": "Portuguese uses Brazilian Portuguese conventions (pt-BR)."
+}

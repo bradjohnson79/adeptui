@@ -1,0 +1,19 @@
+{
+  "title": "Co-Director",
+  "placeholder": "Jelaskan niat kreatif Anda…",
+  "send": "Kirim",
+  "conversationLanguage": "Conversation language",
+  "recommendedModel": "Model yang direkomendasikan",
+  "why": "Why",
+  "confidence": "Confidence",
+  "audioPlan": "Audio plan",
+  "knownLimitation": "Known limitation",
+  "advanced": "Advanced",
+  "compiledPrompt": "Compiled prompt",
+  "appliedRules": "Applied rules",
+  "alternatives": "Alternatives",
+  "thinking": "Thinking…",
+  "meeting": "Meeting",
+  "plan": "Plan",
+  "explain": "Explain"
+}

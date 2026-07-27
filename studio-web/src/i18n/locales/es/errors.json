@@ -1,0 +1,11 @@
+{
+  "generic": "Algo salió mal.",
+  "network": "Error de red. Compruebe su conexión.",
+  "notFound": "No encontrado.",
+  "unauthorized": "No autorizado.",
+  "validation": "Error de validación.",
+  "modelKnowledgeUnavailable": "El conocimiento del modelo no está disponible.",
+  "translationFailed": "Falló la traducción. Se conservó el texto original.",
+  "languagePackInvalid": "El paquete de idioma no superó la validación.",
+  "recoveryHint": "Inténtelo de nuevo o recupere trabajos desde Trabajos."
+}

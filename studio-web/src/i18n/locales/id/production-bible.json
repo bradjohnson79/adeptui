@@ -1,0 +1,15 @@
+{
+  "title": "Production Bible",
+  "entities": "Entities",
+  "facts": "Facts",
+  "canon": "Canon",
+  "proposals": "Proposals",
+  "approve": "Approve",
+  "reject": "Reject",
+  "requestRevision": "Request revision",
+  "localizedDisplay": "Localized display",
+  "canonicalText": "Canonical text",
+  "translationStatus": "Translation status",
+  "glossary": "Glossary",
+  "protectedTerm": "Protected term"
+}

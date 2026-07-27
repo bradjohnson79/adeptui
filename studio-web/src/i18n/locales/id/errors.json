@@ -1,0 +1,11 @@
+{
+  "generic": "Terjadi kesalahan.",
+  "network": "Network error. Check your connection.",
+  "notFound": "Not found.",
+  "unauthorized": "Not authorized.",
+  "validation": "Validation failed.",
+  "modelKnowledgeUnavailable": "Pengetahuan model tidak tersedia.",
+  "translationFailed": "Terjemahan gagal. Teks asli dipertahankan.",
+  "languagePackInvalid": "Language pack failed validation.",
+  "recoveryHint": "Coba lagi atau pulihkan pekerjaan dari Pekerjaan."
+}

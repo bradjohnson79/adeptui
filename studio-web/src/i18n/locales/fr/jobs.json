@@ -1,0 +1,12 @@
+{
+  "title": "Tâches",
+  "queued": "En file",
+  "running": "En cours",
+  "succeeded": "Réussi",
+  "failed": "La tâche {{jobName}} a échoué",
+  "cancelled": "Annulé",
+  "recover": "Récupérer les tâches",
+  "inspect": "Inspecter la tâche",
+  "noJobs": "Aucune tâche pour le moment.",
+  "status": "Statut"
+}

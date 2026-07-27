@@ -1,0 +1,23 @@
+{
+  "appName": "Adept UI",
+  "save": "Simpan",
+  "cancel": "Batal",
+  "close": "Tutup",
+  "confirm": "Confirm",
+  "delete": "Delete",
+  "edit": "Edit",
+  "loading": "Memuat…",
+  "retry": "Coba lagi",
+  "back": "Back",
+  "next": "Next",
+  "search": "Cari",
+  "language": "Bahasa",
+  "settings": "Pengaturan",
+  "yes": "Yes",
+  "no": "No",
+  "unknown": "Unknown",
+  "copy": "Copy",
+  "export": "Export",
+  "import": "Import",
+  "refresh": "Refresh"
+}
