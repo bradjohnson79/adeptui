@@ -10,7 +10,21 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import ensure_m214_tables
+from .honesty import HONESTY_VALUES, MOCKED, REAL, UNAVAILABLE, default_honesty
 from .store import M214Store, _jid, _now
+
+
+def _resolve_honesty(honesty: Optional[str], payload: dict[str, Any], *, demo: bool) -> str:
+    if honesty is None:
+        return default_honesty(demo=demo)
+    if honesty not in HONESTY_VALUES:
+        return default_honesty(demo=demo)
+    if honesty == REAL and not (payload.get("assetId") or payload.get("path") or payload.get("url")):
+        # A caller cannot assert "real" without pointing at the artefact it produced.
+        return UNAVAILABLE
+    if honesty == MOCKED and not demo:
+        return default_honesty(demo=False)
+    return honesty
 
 
 def create_media_card(
@@ -21,12 +35,13 @@ def create_media_card(
     title: str,
     scene_id: str = "",
     group_key: str = "",
-    honesty: str = "mocked",
+    honesty: Optional[str] = None,
     payload: Optional[dict[str, Any]] = None,
+    demo: bool = False,
 ) -> dict[str, Any]:
     ensure_m214_tables()
-    if honesty not in {"mocked", "real", "fixture"}:
-        honesty = "mocked"
+    payload = payload or {}
+    honesty = _resolve_honesty(honesty, payload, demo=demo)
     row_id = str(uuid4())
     media = {
         "id": row_id,
@@ -37,7 +52,7 @@ def create_media_card(
         "groupKey": group_key or kind,
         "honesty": honesty,
         "status": "draft",
-        "payload": payload or {},
+        "payload": payload,
         "fake3d": False,
     }
     ts = _now()
@@ -109,14 +124,19 @@ def resolve_contextual_ref(text_ref: str, items: list[dict[str, Any]]) -> dict[s
 
 
 def hitchhiker_smoke_media(db: Session, project_id: str) -> dict[str, Any]:
-    """Create labeled mocked media for hitchhiker smoke test."""
+    """Create labeled mocked media for the hitchhiker smoke walkthrough.
+
+    This surface is explicitly a demo: every card carries a MOCKED/FIXTURE label so it
+    can never be mistaken for generated media.
+    """
     cards = [
         create_media_card(
             db,
             project_id=project_id,
             kind="image",
             title="Hitchhiker thumb — MOCKED",
-            honesty="mocked",
+            honesty=MOCKED,
+            demo=True,
             payload={"label": "MOCKED", "premise": "hitchhiker"},
         ),
         create_media_card(
@@ -124,7 +144,8 @@ def hitchhiker_smoke_media(db: Session, project_id: str) -> dict[str, Any]:
             project_id=project_id,
             kind="video",
             title="Hitchhiker beat video — MOCKED",
-            honesty="mocked",
+            honesty=MOCKED,
+            demo=True,
             payload={"label": "MOCKED", "premise": "hitchhiker"},
         ),
         create_media_card(
@@ -132,7 +153,8 @@ def hitchhiker_smoke_media(db: Session, project_id: str) -> dict[str, Any]:
             project_id=project_id,
             kind="audio",
             title="Road ambience bed — MOCKED",
-            honesty="mocked",
+            honesty=MOCKED,
+            demo=True,
             payload={"label": "MOCKED", "premise": "hitchhiker"},
         ),
         create_media_card(
@@ -140,7 +162,8 @@ def hitchhiker_smoke_media(db: Session, project_id: str) -> dict[str, Any]:
             project_id=project_id,
             kind="storyboard",
             title="Hitchhiker panels — MOCKED",
-            honesty="mocked",
+            honesty=MOCKED,
+            demo=True,
             payload={"label": "MOCKED", "premise": "hitchhiker"},
         ),
         create_media_card(
@@ -149,7 +172,8 @@ def hitchhiker_smoke_media(db: Session, project_id: str) -> dict[str, Any]:
             kind="environment_preview",
             title="M2.13 preview slot (no fake 3D)",
             honesty="fixture",
+            demo=True,
             payload={"m213PreviewIfAvailable": True, "fake3d": False, "label": "FIXTURE"},
         ),
     ]
-    return {"projectId": project_id, "cards": cards, "honesty": "mocked", "fake3d": False}
+    return {"projectId": project_id, "cards": cards, "honesty": MOCKED, "fake3d": False}

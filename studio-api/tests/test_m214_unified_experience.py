@@ -83,7 +83,8 @@ def test_attachment_classify_content_not_filename_alone(client):
     body = r.json()
     assert body["classified_kind"] == "screenplay"
     assert body["status"] == "proposed"
-    assert body["honesty"] == "mocked"
+    # The classifier is a structural scaffold, not a bound provider — say so honestly.
+    assert body["honesty"] == "unavailable"
     cid = body["id"]
     conf = client.post(
         f"/api/codirector/m214/attachments/{cid}/confirm",
@@ -125,9 +126,35 @@ def test_sound_producer_sonic_concept(client):
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["honesty"] == "mocked"
+    assert body["honesty"] == "unavailable"
     assert "music-supervisor" in body["payload"]["coordinatesWith"]
     assert body["approved"] is False
+
+
+def test_specialist_output_is_mocked_only_under_e2e(tmp_path, monkeypatch):
+    monkeypatch.setenv("STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1", "true")
+    monkeypatch.setenv("STUDIO_DATA_DIR", str(tmp_path / "data-e2e"))
+    monkeypatch.setenv("STUDIO_E2E", "1")
+    from app import feature_flags as ff
+    from app.main import app
+
+    ff.feature_flags = ff.FeatureFlags.from_env(os.environ)
+    with TestClient(app) as c:
+        r = c.post(
+            "/api/codirector/m214/sound/concept",
+            json={"projectId": "p-snd-e2e", "emotionalArc": "tension", "mode": "guided"},
+        )
+        assert r.status_code == 200
+        assert r.json()["honesty"] == "mocked"
+
+
+def test_media_card_cannot_be_claimed_real_without_an_artifact(client):
+    r = client.post(
+        "/api/codirector/m214/media",
+        json={"projectId": "p-honest", "kind": "image", "title": "Claimed real", "honesty": "real"},
+    )
+    assert r.status_code == 200
+    assert r.json()["honesty"] == "unavailable"
 
 
 def test_department_messages_brief_meeting_impact(client):

@@ -81,6 +81,10 @@ class VisionEngine:
         else:
             validator_ids = ["technical"] + validator_ids
 
+        # Resolve the provider before any session row exists so a refused provider does not
+        # leave a half-open "running" session behind.
+        provider = get_provider(request.provider)
+
         session = VisionStore.create_session(
             db,
             project_id=request.projectId,
@@ -102,7 +106,6 @@ class VisionEngine:
         ref_asset = db.get(Asset, request.referenceAssetId) if request.referenceAssetId else None
         reference_path = ref_asset.path if ref_asset else None
 
-        provider = get_provider(request.provider)
         try:
             context = provider.prepare_asset_context(
                 asset_path=asset_path,

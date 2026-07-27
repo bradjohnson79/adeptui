@@ -84,6 +84,46 @@ async def get_reference_capabilities(ctx: ToolContext, args: dict[str, Any]) -> 
     }
 
 
+async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """fal.ai connection state + the engines it unlocks.
+
+    Deliberately returns no credential material: not the key, not the masked hint, not the
+    fingerprint. The model only needs to know whether cloud rendering will work and what to
+    tell the user if it will not.
+    """
+    from ....fal_catalog import list_fal_models
+    from ....secrets_store import secret_status
+
+    status = secret_status("fal_api_key")
+    state = str(status.get("state") or "missing")
+    usable = state == "verified"
+    engines = [
+        {
+            "engine": m["engine"],
+            "label": m["label"],
+            "mediaType": m.get("media_type", "video"),
+            "mode": m["mode"],
+            "durations": m["durations"],
+        }
+        for m in list_fal_models()
+    ]
+    guidance = {
+        "missing": "No fal.ai key is saved. The user can add one in Project Settings → Integrations.",
+        "invalid": "fal.ai rejected the saved key. The user needs to replace it before cloud renders will run.",
+        "unverified": "A fal.ai key is saved but has not been confirmed with fal.ai; cloud renders may fail.",
+        "verified": "fal.ai accepted the saved key; cloud engines are available.",
+    }
+    return {
+        "provider": "fal.ai",
+        "credentialState": state,
+        "cloudRenderUsable": usable,
+        "verifiedAt": status.get("verifiedAt"),
+        "guidance": guidance.get(state, ""),
+        "engines": engines,
+        "imageEnginesAvailable": [e for e in engines if e["mediaType"] == "image"],
+    }
+
+
 async def get_engine_capabilities(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     from ....preview_bus import preview_bus
 

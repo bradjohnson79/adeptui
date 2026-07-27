@@ -44,8 +44,9 @@ export const OVERALL_LABELS: Record<SetupOverallStatus, string> = {
 
 export function componentStateLabel(component: SetupComponentStatus): string {
   if (component.component_kind === "credential" || component.installer === "credentials") {
-    if (component.status === "ready") return "Configured";
-    if (component.issue_code === "credential_unverified") return "Verification Failed";
+    if (component.status === "ready") return "Verified";
+    if (component.issue_code === "credential_invalid") return "Key Rejected";
+    if (component.issue_code === "credential_unverified") return "Not Verified";
     if (component.status === "not_installed" || component.issue_code === "credential_missing") {
       return "Not Configured";
     }

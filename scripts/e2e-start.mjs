@@ -32,6 +32,11 @@ fs.mkdirSync(path.join(root, "artifacts", "functional-audit"), { recursive: true
 const logDir = path.join(root, "artifacts", "functional-audit", "logs");
 fs.mkdirSync(logDir, { recursive: true });
 
+// Everything below is Playwright-only. These fixture providers, mock Co-Director provider
+// and fixture-mode flags exist so the suite never depends on a real Comfy/Ollama/fal
+// install — they are handed to the child processes spawned here and nowhere else.
+// Production and `npm run dev` must never inherit them: the API treats every one of these
+// as OFF by default and refuses fixture/mock success paths without them.
 const env = {
   ...process.env,
   STUDIO_E2E: "1",
@@ -59,6 +64,15 @@ const env = {
   // Override with "0"/"false" for flags-off regression runs.
   STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1:
     process.env.STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1 || "1",
+  // The Production Executive ships a background poller *and* a synchronous
+  // `POST /api/codirector/jobs/worker/drain` helper the specs use to step the queue. With the
+  // poller at its 0.25 s default the two race: a drain can return zero steps because the
+  // poller already holds the next job in flight, and a spec that reads the job immediately
+  // afterwards sees an unfinished state. Parking the poller makes the drain the only executor
+  // under Playwright, so job progress is caused by the test rather than by timing. Real
+  // background polling still runs everywhere else — this value is Playwright-only.
+  STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL:
+    process.env.STUDIO_PRODUCTION_EXECUTIVE_POLL_INTERVAL || "3600",
   // M2.8 capability intelligence: fixture mode on; feature flags default off unless suite sets them.
   ADEPT_M28_FIXTURE_MODE: process.env.ADEPT_M28_FIXTURE_MODE || "1",
   STUDIO_FEATURE_MODEL_RADAR_V1: process.env.STUDIO_FEATURE_MODEL_RADAR_V1 || "1",
@@ -73,14 +87,29 @@ const env = {
   STUDIO_FEATURE_IMAGE_PRODUCTION_V1: process.env.STUDIO_FEATURE_IMAGE_PRODUCTION_V1 || "0",
   STUDIO_FEATURE_FRAME_PRODUCTION_V1: process.env.STUDIO_FEATURE_FRAME_PRODUCTION_V1 || "0",
   STUDIO_FEATURE_VIDEO_PRODUCTION_V1: process.env.STUDIO_FEATURE_VIDEO_PRODUCTION_V1 || "0",
-  STUDIO_FEATURE_DIRECTOR_TIMELINE_V1: process.env.STUDIO_FEATURE_DIRECTOR_TIMELINE_V1 || "0",
+  // M3.0 Completion Phase 3: the sound path (M2.9 audio -> Director timeline, blocker B4)
+  // needs these two on to be exercised at all, so they are ON for E2E. They stay OFF in
+  // `feature_flags.py` and can be forced off here for a flags-off regression run.
+  STUDIO_FEATURE_DIRECTOR_TIMELINE_V1: process.env.STUDIO_FEATURE_DIRECTOR_TIMELINE_V1 || "1",
   STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1: process.env.STUDIO_FEATURE_LIPSYNC_PRODUCTION_V1 || "0",
-  STUDIO_FEATURE_AUDIO_PRODUCTION_V1: process.env.STUDIO_FEATURE_AUDIO_PRODUCTION_V1 || "0",
+  STUDIO_FEATURE_AUDIO_PRODUCTION_V1: process.env.STUDIO_FEATURE_AUDIO_PRODUCTION_V1 || "1",
   STUDIO_FEATURE_EDITING_PRODUCTION_V1: process.env.STUDIO_FEATURE_EDITING_PRODUCTION_V1 || "0",
   STUDIO_FEATURE_RENDER_PRODUCTION_V1: process.env.STUDIO_FEATURE_RENDER_PRODUCTION_V1 || "0",
   STUDIO_FEATURE_CODIRECTOR_PRODUCTION_CONTROL_V1:
     process.env.STUDIO_FEATURE_CODIRECTOR_PRODUCTION_CONTROL_V1 || "0",
-  // Deterministic ImageGen via Job+Asset mock adapter (not fake-only inside executive).
+  // M2.14 unified experience replaces the whole Co-Director conversation surface, so it
+  // cannot be switched on process-wide without rerouting every chat spec to a different
+  // screen. It is left OFF here and the M2.14 specs turn it on for themselves through
+  // POST /api/e2e/feature-flags (E2E-only), which gives real ON *and* OFF coverage.
+  // Set it to "1" to run the whole suite against the unified surface.
+  STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1:
+    process.env.STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1 || "0",
+  // M3.0 Completion Phase 6: startup would otherwise promote a real fal key out of .env
+  // and probe fal.ai on every E2E boot. The suite never renders through fal, so keep the
+  // stack offline.
+  STUDIO_FAL_ENV_BRIDGE: process.env.STUDIO_FAL_ENV_BRIDGE || "0",
+  // ADEPT_MOCK_IMAGEGEN is deliberately NOT set: ImageGen polls real Comfy jobs and the
+  // adapter refuses to fabricate a completion even when that variable is present.
 };
 
 fs.writeFileSync(

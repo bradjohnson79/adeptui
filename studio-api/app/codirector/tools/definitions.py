@@ -352,6 +352,16 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(ToolParameter("engine", "string", choices=_ENGINE_CHOICES),),
     ),
     ToolDefinition(
+        tool_id="get_cloud_render_status",
+        kind="read",
+        title="Get cloud render (fal.ai) status",
+        description=(
+            "Whether the fal.ai credential is configured and verified, and which fal engines "
+            "are therefore usable. Never returns the API key or any part of it."
+        ),
+        capability="project",
+    ),
+    ToolDefinition(
         tool_id="vision_validation_status",
         kind="read",
         title="Vision validation status",

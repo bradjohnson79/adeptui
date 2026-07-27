@@ -105,6 +105,7 @@ EXPECTED_READ_TOOLS = {
     "get_source_manager_status",
     "get_reference_capabilities",
     "get_engine_capabilities",
+    "get_cloud_render_status",
     "vision_validation_status",
     "vision_validation_report",
     # M2.6 timeline reference reads

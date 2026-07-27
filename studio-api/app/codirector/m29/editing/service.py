@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -25,12 +26,40 @@ class EditingService:
         scene_id: str | None = None,
         owner: str = "user",
     ) -> dict[str, Any]:
-        del db, scene_id, owner
-        result = fixture_edit_result({"ops": ops})
-        result["projectId"] = project_id
-        result["requiresApproval"] = True
-        result["fixture"] = fixture_mode_enabled()
-        return result
+        """Propose edit ops for approval.
+
+        Outside an env-gated fixture run the proposal is only ever the caller's own ops:
+        there is no edit planner that can invent them, so an empty request is refused
+        rather than answered with fixture ops that look like a suggestion.
+        """
+        del db, owner
+        if wants_fixture():
+            result = fixture_edit_result({"ops": ops})
+            result["projectId"] = project_id
+            result["requiresApproval"] = True
+            result["fixture"] = fixture_mode_enabled()
+            return result
+
+        cleaned = [op for op in (ops or []) if isinstance(op, dict) and op]
+        if not cleaned:
+            raise ValueError(
+                "edit_propose requires explicit ops: no automatic edit planner is wired, "
+                "so Adept UI will not invent edit operations."
+            )
+        return {
+            "editId": f"edit-{uuid.uuid4().hex[:10]}",
+            "provider": "m29_editing",
+            "fixture": False,
+            "status": "proposed",
+            "ops": cleaned,
+            "requiresApproval": True,
+            "projectId": project_id,
+            "sceneId": scene_id,
+            "honesty": (
+                "Proposal echoes the requested ops for approval. Nothing has been applied "
+                "to the director timeline."
+            ),
+        }
 
     @staticmethod
     def apply_edit(

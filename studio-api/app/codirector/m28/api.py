@@ -48,7 +48,7 @@ class CompatBody(BaseModel):
 
 
 class SandboxCreateBody(BaseModel):
-    name: str = "Fixture Sandbox"
+    name: str = "Isolated Sandbox"
     config: Optional[dict[str, Any]] = None
 
 
@@ -246,6 +246,8 @@ def sandbox_validate(sandbox_id: str, db: Session = Depends(get_db)) -> dict[str
         return SandboxService.validate(db, sandbox_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/sandbox/{sandbox_id}/remove")
@@ -532,3 +534,5 @@ def location_spin_camera(
         return LocationSpinService.spin_camera(db, spin_id=spin_id, angles=body.angles)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

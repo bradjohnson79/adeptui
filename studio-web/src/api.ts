@@ -401,10 +401,30 @@ export function isNavigationFetchFailure(error: unknown): boolean {
   );
 }
 
+/** Credential status for the fal.ai key. Never carries the key itself — only a masked hint. */
+export type FalKeyStatus = {
+  configured: boolean;
+  hint?: string | null;
+  fingerprint?: string | null;
+  state: "missing" | "unverified" | "verified" | "invalid";
+  verified?: boolean | null;
+  verifiedAt?: string | null;
+  message: string;
+};
+
+/** A string body with no content type is sent as text/plain, which FastAPI rejects outright. */
+function withJsonContentType(init?: RequestInit): RequestInit | undefined {
+  if (!init || typeof init.body !== "string") return init;
+  const headers = new Headers(init.headers);
+  if (headers.has("Content-Type")) return init;
+  headers.set("Content-Type", "application/json");
+  return { ...init, headers };
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, init);
+    res = await fetch(`${BASE}${path}`, withJsonContentType(init));
   } catch (error) {
     // Preserve AbortError so callers can ignore expected cancellations.
     if (isAbortError(error) || init?.signal?.aborted) {
@@ -508,22 +528,23 @@ export const api = {
         provider: string;
         model_id: string;
         mode: string;
+        media_type: string;
         durations: number[];
         default_duration: number;
         supports_end_image: boolean;
         description: string;
       }[]
     >("/api/fal/models"),
-  falKeyStatus: () =>
-    req<{ configured: boolean; hint?: string | null; fingerprint?: string | null }>("/api/fal/key"),
+  falKeyStatus: () => req<FalKeyStatus>("/api/fal/key"),
   falKeySet: (api_key: string) =>
-    req<{ configured: boolean; hint?: string | null; fingerprint?: string | null }>("/api/fal/key", {
+    req<FalKeyStatus>("/api/fal/key", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key }),
     }),
+  falKeyValidate: () => req<FalKeyStatus>("/api/fal/key/validate", { method: "POST" }),
   falKeyClear: () =>
-    req<{ configured: boolean; hint?: string | null; fingerprint?: string | null }>("/api/fal/key", {
+    req<FalKeyStatus>("/api/fal/key", {
       method: "DELETE",
     }),
   falUsage: (days = 30) =>
@@ -847,6 +868,8 @@ export const api = {
       virtualStageEnabled?: boolean;
       virtualEnvironmentStudioEnabled?: boolean;
       unifiedExperienceEnabled?: boolean;
+      audioProductionEnabled?: boolean;
+      directorTimelineEnabled?: boolean;
       shotProfilesEnabled?: boolean;
       productionRecipeEnabled?: boolean;
       locationSpinEnabled?: boolean;

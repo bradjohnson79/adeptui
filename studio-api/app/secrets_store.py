@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -63,6 +65,7 @@ def clear_secret(name: str) -> None:
     path = secret_path(name)
     if path.exists():
         path.unlink()
+    verification_path(name).unlink(missing_ok=True)
 
 
 def secret_hint(name: str) -> str | None:
@@ -81,12 +84,75 @@ def secret_fingerprint(name: str) -> str | None:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
 
+def verification_path(name: str) -> Path:
+    return secret_path(name).with_suffix(".verified.json")
+
+
+def set_secret_verification(
+    name: str,
+    *,
+    verified: bool | None,
+    message: str = "",
+    detail: dict | None = None,
+) -> dict:
+    """Record the outcome of a live probe against the stored credential.
+
+    The record is bound to the key fingerprint, so replacing the key invalidates it
+    instead of letting a stale "verified" badge describe a different secret. Only
+    non-secret metadata is written — never the key or any prefix of it.
+    """
+    _ensure_dir()
+    record = {
+        "verified": verified,
+        "message": message,
+        "checkedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "fingerprint": secret_fingerprint(name),
+        "detail": {k: v for k, v in (detail or {}).items() if k not in {"key", "api_key"}},
+    }
+    path = verification_path(name)
+    path.write_text(json.dumps(record), encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except Exception:
+        pass
+    return record
+
+
+def get_secret_verification(name: str) -> dict:
+    path = verification_path(name)
+    if not path.exists():
+        return {}
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(record, dict):
+        return {}
+    if record.get("fingerprint") != secret_fingerprint(name):
+        return {}
+    return record
+
+
 def secret_status(name: str) -> dict:
     hint = secret_hint(name)
+    verification = get_secret_verification(name) if hint else {}
+    verified = verification.get("verified")
+    if not hint:
+        state = "missing"
+    elif verified is True:
+        state = "verified"
+    elif verified is False:
+        state = "invalid"
+    else:
+        state = "unverified"
     return {
         "configured": bool(hint),
         "hint": hint,
         "fingerprint": secret_fingerprint(name) if hint else None,
+        "state": state,
+        "verified": verified,
+        "verifiedAt": verification.get("checkedAt"),
+        "message": verification.get("message", ""),
     }
 
 

@@ -48,7 +48,8 @@ class SpinBody(BaseModel):
     projectId: str
     title: str = "Camera Spin Environment"
     level: str = "C1_panorama"
-    fixture: bool = True
+    # Synthetic spin frames are an explicit opt-in; production callers must supply real frames.
+    fixture: bool = False
     sceneId: Optional[str] = None
     frames: Optional[list[dict[str, Any]]] = None
 
@@ -56,7 +57,9 @@ class SpinBody(BaseModel):
 class ReconstructBody(BaseModel):
     projectId: str
     images: Optional[list[str]] = None
-    adapter: str = "fixture"
+    # "detect" resolves to a real adapter if one is installed; the fixture adapter is
+    # never chosen implicitly and must be named explicitly.
+    adapter: str = "detect"
     title: str = "Reconstructed Environment"
     sceneId: Optional[str] = None
     force: bool = False
@@ -109,7 +112,8 @@ class ConceptBody(BaseModel):
     projectId: str
     environmentId: str
     tier: str = "draft"
-    forceMock: Optional[bool] = True
+    # None = use the real provider when configured; True = explicit mock/fixture request.
+    forceMock: Optional[bool] = False
 
 
 class PublishBody(BaseModel):
@@ -189,15 +193,18 @@ async def m213_approve_env(
 @router.post("/camera-spin")
 async def m213_camera_spin(body: SpinBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require()
-    return camera_spin.build_camera_spin_environment(
-        db,
-        project_id=body.projectId,
-        title=body.title,
-        level=body.level,
-        frames=body.frames,
-        fixture=body.fixture,
-        scene_id=body.sceneId,
-    )
+    try:
+        return camera_spin.build_camera_spin_environment(
+            db,
+            project_id=body.projectId,
+            title=body.title,
+            level=body.level,
+            frames=body.frames,
+            fixture=body.fixture,
+            scene_id=body.sceneId,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/reconstruction/adapters")
@@ -361,13 +368,16 @@ async def m213_plan_dashboard(plan_id: str, db: Session = Depends(get_db)) -> di
 @router.post("/concepts")
 async def m213_concept(body: ConceptBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require()
-    return concepts.generate_concept(
-        db,
-        project_id=body.projectId,
-        environment_id=body.environmentId,
-        tier=body.tier,
-        force_mock=body.forceMock,
-    )
+    try:
+        return concepts.generate_concept(
+            db,
+            project_id=body.projectId,
+            environment_id=body.environmentId,
+            tier=body.tier,
+            force_mock=body.forceMock,
+        )
+    except concepts.ConceptProviderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.post("/concepts/{concept_id}/approve")
@@ -427,4 +437,9 @@ async def m213_cap_invoke(body: CapabilityBody, db: Session = Depends(get_db)) -
 @router.post("/e2e/guided")
 async def m213_e2e(body: E2EBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require()
+    if not persistence.e2e_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="The guided E2E slice runs fixture adapters and is only available when STUDIO_E2E is set.",
+        )
     return persistence.end_to_end_guided(db, project_id=body.projectId, fixture=body.fixture)

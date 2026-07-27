@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import AttachmentInterpretation
 from .db import ensure_m214_tables
+from .honesty import default_honesty
 from .store import M214Store, _jid, _now
 
 # Content signals (not filename alone)
@@ -95,7 +96,7 @@ def interpret_attachment(
         ],
         status="proposed",
         content_signals=signals,
-        honesty="mocked",
+        honesty=default_honesty(),
         payload={"filename": filename, "mimeType": mime_type, "secureExtractionOnly": True},
     )
     ts = _now()

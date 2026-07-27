@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..fixtures import fixture_video_result
-from ..providers import run_video, wants_fixture
+from ..providers import run_video, video_provider_available, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job, set_asset_status
 
 
@@ -51,6 +51,9 @@ class VideoService:
             )
             result.update({"jobId": job.id, "versionId": ver["id"], "projectId": project_id})
             return result
+        # Production path: no provider has run, so no asset id and no version row may be
+        # minted here — a client must be able to tell "queued" from "created".
+        provider_ready = video_provider_available(db)
         job = enqueue_executive_job(
             db,
             project_id=project_id,
@@ -59,23 +62,23 @@ class VideoService:
             scene_id=scene_id,
             owner=owner,
         )
-        ver = create_asset_version(
-            db,
-            project_id=project_id,
-            department="video",
-            status="draft",
-            job_id=job.id,
-            metadata={"mode": mode, "prompt": prompt, **params},
-        )
-        return {
+        out: dict[str, Any] = {
             "jobId": job.id,
-            "versionId": ver["id"],
-            "assetId": ver["assetId"],
+            "versionId": None,
+            "assetId": None,
             "mode": mode,
-            "status": "draft",
+            "status": "queued",
             "fixture": False,
+            "providerMissing": not provider_ready,
             "projectId": project_id,
         }
+        if not provider_ready:
+            out["awaitingProvider"] = True
+            out["message"] = (
+                "No video generation provider is available (neither ComfyUI nor a fal key). "
+                "The job is queued and will report Blocked; no asset was created."
+            )
+        return out
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:

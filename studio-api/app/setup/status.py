@@ -422,7 +422,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             installed_bytes = 0
             if verification.issue_code == "credential_missing":
                 canonical = "not_installed"
-            elif verification.issue_code == "credential_unverified":
+            elif verification.issue_code in ("credential_unverified", "credential_invalid"):
                 canonical = "error"
         source_state = pack_fields.get("source_state")
         item = {

@@ -289,25 +289,65 @@ test.describe("@isolated codirector bounded tools secondary flows", () => {
       // The registry is closed: the catalog must be exactly this set. A new tool has to be
       // added here deliberately, which is the point — no shell, filesystem, SQL, or
       // arbitrary-execution tool can appear without this assertion failing first.
+      //
+      // Refreshed in M3.0a against `codirector/tools/definitions.py`: 31 read tools and 20
+      // mutating tools, every one of the latter a preview/apply pair that produces an
+      // approval-gated proposal. The list had drifted 32 tools behind (M2.3 through M2.14
+      // plus M3.0a's `get_cloud_render_status`), so the gate was failing on every run and
+      // had stopped being a signal.
       expect([...ids].sort()).toEqual(
         [
-          "create_scene",
+          // read
+          "build_generation_reference_package",
           "get_active_scene",
           "get_bible_entity",
+          "get_character_bible_context",
+          "get_cloud_render_status",
           "get_comfyui_health",
           "get_current_bible_version",
           "get_engine_capabilities",
+          "get_generation_reference_package",
+          "get_location_bible_context",
+          "get_production_bible_summary",
           "get_project_profile",
           "get_project_status",
           "get_provider_health",
           "get_reference_capabilities",
+          "get_reference_set",
           "get_relevant_bible_context",
           "get_scene",
+          "get_scene_bible_context",
           "get_selected_model",
           "get_source_manager_status",
+          "get_timeline_image",
           "list_bible_entities",
+          "list_canon_records",
+          "list_continuity_warnings",
+          "list_reference_bindings",
           "list_scenes",
+          "list_timeline_images",
+          "suggest_reference_bindings",
+          "vision_validation_report",
+          "vision_validation_status",
+          // mutating: proposal-producing only
+          "create_reference_set_proposal",
+          "create_scene",
+          "propose_add_reference_binding",
+          "propose_apply_reference_preset",
+          "propose_asset_bible_link",
+          "propose_canon_record",
+          "propose_canon_supersession",
+          "propose_character_update",
+          "propose_continuity_update",
+          "propose_production_decision",
+          "propose_reference_link",
+          "propose_remove_reference_binding",
+          "propose_storyboard_generation",
+          "propose_update_reference_binding",
+          "propose_vision_correction",
+          "propose_visual_language_update",
           "record_director_decision",
+          "record_vision_review",
           "set_scene_prompt",
           "update_scene_title",
         ].sort(),

@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 from uuid import uuid4
 
+from .honesty import default_honesty
+
 
 def _id() -> str:
     return str(uuid4())
@@ -24,7 +26,7 @@ class EmotionalSceneProfile:
     unknowns: list[str] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
     mode: str = "guided"  # guided | creative | variation
-    honesty: str = "mocked"  # mocked | real
+    honesty: str = field(default_factory=default_honesty)  # unavailable | mocked | real
     approved: bool = False
     payload: dict[str, Any] = field(default_factory=dict)
 
@@ -61,7 +63,7 @@ class SonicConcept:
     dialogue_plan: str = ""
     mix_intent: str = ""
     mode: str = "guided"
-    honesty: str = "mocked"
+    honesty: str = field(default_factory=default_honesty)
     approved: bool = False
     payload: dict[str, Any] = field(default_factory=dict)
 
@@ -165,7 +167,7 @@ class AttachmentInterpretation:
     proposals: list[dict[str, Any]] = field(default_factory=list)
     status: str = "proposed"  # proposed | approved | corrected | provisional | cancelled
     content_signals: list[str] = field(default_factory=list)
-    honesty: str = "mocked"
+    honesty: str = field(default_factory=default_honesty)
     payload: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:

@@ -225,8 +225,7 @@ export function CoDirectorValidationWorkspace({
         planId: planId || undefined,
         sceneId: sceneId || undefined,
         referenceSet,
-        provider: "mock",
-        fixtureProfile: "warnings",
+        provider: "local",
       });
       const nextSession = result.session as VisionSession;
       setSession(nextSession);

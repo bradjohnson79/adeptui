@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import SonicConcept
 from .db import ensure_m214_tables
+from .honesty import default_honesty, unbound_note
 from .store import M214Store, _jid, _now
 
 
@@ -32,11 +33,12 @@ def create_sonic_concept(
         dialogue_plan="Keep dialogue forward; SFX duck under key lines",
         mix_intent="Intimate close perspective; music under dialogue",
         mode=mode,
-        honesty="mocked",
+        honesty=default_honesty(),
         payload={
             "coordinatesWith": ["music-supervisor", "sound-designer"],
             "noNewProviders": True,
             "questionRule": "2-4 high-impact",
+            "note": unbound_note("Sound Producer"),
         },
     )
     ts = _now()

@@ -8,7 +8,11 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from ..intelligence.schemas import SpecialistFinding
-from ..intelligence.specialist_runner import SpecialistRunner
+from ..intelligence.specialist_runner import (
+    LIMITED_ANALYSIS_MODE,
+    SpecialistRunner,
+    resolve_provider_for_specialists,
+)
 from .conflicts_bridge import bridge_specialist_conflicts
 from .context_pack import build_context_pack
 from .dag import DEFAULT_PIPELINE, default_stage_order, specialist_graph
@@ -172,8 +176,14 @@ def _heuristic_enrichment(brief: str) -> dict[str, Any]:
         "continuity": continuity,
         "missingAssets": missing_assets,
         "checklist": checklist,
-        "source": "heuristic_enrichment",
+        "source": "limited-analysis-heuristic",
         "briefExcerpt": text[:240],
+        "honesty": "limited",
+        "analysisMode": LIMITED_ANALYSIS_MODE,
+        "note": (
+            "Limited-analysis enrichment from brief keywords only — "
+            "not live model reasoning or deep emotional intelligence."
+        ),
     }
 
 
@@ -250,6 +260,7 @@ class ProductionIntelligenceOrchestrator:
         active_lessons = context_pack.get("activeLessons") or []
         graph = specialist_graph()
         stage_order = default_stage_order()
+        provider, use_provider, analysis_mode = await resolve_provider_for_specialists()
 
         trace = ExecutionTraceStore.start(
             db,
@@ -289,7 +300,8 @@ class ProductionIntelligenceOrchestrator:
                         specialist_ids=[node.specialist_id],
                         scene_id=scene_id,
                         model_id=model_used,
-                        use_provider=False,
+                        provider=provider,
+                        use_provider=use_provider,
                     )
                     if errors and not batch:
                         err0 = errors[0]
@@ -443,6 +455,16 @@ class ProductionIntelligenceOrchestrator:
             else:
                 story_out = []
 
+        honesty = "provider" if analysis_mode != LIMITED_ANALYSIS_MODE else "limited"
+        honesty_notes = (
+            []
+            if honesty == "provider"
+            else [
+                "Limited-analysis / heuristic path — Co-Director provider unavailable or "
+                "STUDIO_E2E is set. Specialist digests are not live model reasoning.",
+            ]
+        )
+
         return {
             "story": story_out,
             "bible": {
@@ -472,4 +494,8 @@ class ProductionIntelligenceOrchestrator:
             "modelUsed": model_used,
             "status": status,
             "enriched": bool(enrichment),
+            "analysisMode": analysis_mode,
+            "honesty": honesty,
+            "honestyNotes": honesty_notes,
+            "useProvider": use_provider,
         }

@@ -11,12 +11,22 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import ensure_m28_tables
-from ..fixtures import assert_path_inside_sandbox, sandbox_root, simulate_sandbox_detect
+from ..fixtures import (
+    assert_path_inside_sandbox,
+    fixture_execution_enabled,
+    sandbox_root,
+    simulate_sandbox_detect,
+)
 from ..radar.store import RadarStore
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def sandbox_fixtures_enabled() -> bool:
+    """Simulated sandbox execution is CI-only (ADEPT_M28_FIXTURE_MODE / STUDIO_E2E)."""
+    return fixture_execution_enabled()
 
 
 class SandboxService:
@@ -236,11 +246,22 @@ class SandboxService:
 
     @staticmethod
     def execute_approved_install(db: Session, *, plan_id: str) -> dict[str, Any]:
+        """Perform an approved sandbox install.
+
+        No real installer is wired yet: outside an env-gated fixture run this refuses
+        rather than writing a marker file and reporting `installed`.
+        """
         plan = SandboxService.get_plan(db, plan_id)
         if not plan:
             raise LookupError("Plan not found")
         if plan["status"] != "approved":
             raise PermissionError("Install requires approved plan — no silent install")
+        if not sandbox_fixtures_enabled():
+            raise PermissionError(
+                "Sandbox install is unavailable: no real sandbox installer is wired, and "
+                "simulated installs require ADEPT_M28_FIXTURE_MODE / STUDIO_E2E. "
+                "The plan stays approved and nothing was installed."
+            )
         root = sandbox_root(plan["sandboxId"])
         model_dir = root / "models"
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -252,19 +273,32 @@ class SandboxService:
             {"id": plan_id},
         )
         SandboxService._set_status(db, plan["sandboxId"], "installed")
-        return {"planId": plan_id, "installed": True, "root": str(root)}
+        return {
+            "planId": plan_id,
+            "installed": True,
+            "root": str(root),
+            "fixtureMode": True,
+            "honesty": "Simulated fixture install (CI only) — no model weights were fetched.",
+        }
 
     @staticmethod
     def validate(db: Session, sandbox_id: str) -> dict[str, Any]:
+        """Validate a sandbox. Refuses outside CI rather than reporting a fixture pass."""
         sb = SandboxService.get(db, sandbox_id)
         if not sb:
             raise LookupError("Sandbox not found")
+        if not sandbox_fixtures_enabled():
+            raise PermissionError(
+                "Sandbox validation is unavailable: no real sandbox runtime is wired, and "
+                "the fixture runtime requires ADEPT_M28_FIXTURE_MODE / STUDIO_E2E."
+            )
         result = {
             "ok": True,
             "runtime": "fixture-sandbox",
+            "fixtureMode": True,
             "mockVram": {"usedGb": 4, "totalGb": 24},
             "output": {"preview": "fixture-ok"},
-            "warnings": [],
+            "warnings": ["Fixture runtime — not evidence of a working model install."],
             "errors": [],
             "productionComfyUntouched": True,
         }

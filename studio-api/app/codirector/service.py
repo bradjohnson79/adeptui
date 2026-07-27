@@ -161,6 +161,10 @@ async def get_health(provider_id: str | None = None) -> ProviderHealthResult:
     health.production_executive_enabled = bool(feature_flags.production_executive_v1)
     health.production_intelligence_enabled = bool(feature_flags.codirector_production_intelligence_v1)
     health.adaptive_learning_enabled = bool(feature_flags.codirector_adaptive_learning_v1)
+    health.unified_experience_enabled = bool(feature_flags.codirector_unified_experience_v1)
+    health.virtual_environment_studio_enabled = bool(feature_flags.virtual_environment_studio_v1)
+    health.audio_production_enabled = bool(feature_flags.audio_production_v1)
+    health.director_timeline_enabled = bool(feature_flags.director_timeline_v1)
     return health
 
 
@@ -857,6 +861,8 @@ async def stream_for_project(
     ):
         assert IntelligenceService is not None
         intelligence = IntelligenceService()
+        # use_provider=None → True when provider healthy and not STUDIO_E2E;
+        # otherwise labeled limited-analysis (no fake deep reasoning).
         async for event in intelligence.stream_intelligence(
             db,
             project_id=project_id or "",
@@ -866,6 +872,7 @@ async def stream_for_project(
             provider=provider,
             model_id=model,
             request_id=chat_request.request_id,
+            use_provider=None,
         ):
             yield event
         return

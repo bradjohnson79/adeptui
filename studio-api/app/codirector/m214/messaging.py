@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import SpecialistMessage
 from .db import ensure_m214_tables
+from .honesty import default_honesty
 from .store import M214Store, _jid, _now
 
 # Required exchanges from plan
@@ -123,7 +124,7 @@ def ensure_required_exchanges(db: Session, project_id: str, scene_id: str = "") 
                 body=f"Required exchange scaffold: {frm} -> {to}",
                 kind="handoff",
                 requires_response=True,
-                payload={"required": True, "honesty": "mocked"},
+                payload={"required": True, "honesty": default_honesty()},
             )
         )
     return created

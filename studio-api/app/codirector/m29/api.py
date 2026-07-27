@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
@@ -92,9 +92,17 @@ class AudioGenerateBody(BaseModel):
 class AudioProcessBody(BaseModel):
     projectId: str
     assetId: str
-    ops: list[dict[str, Any]] = Field(default_factory=list)
+    ops: list[dict[str, Any] | str] = Field(default_factory=list)
     sceneId: Optional[str] = None
     owner: str = "user"
+
+    @field_validator("ops")
+    @classmethod
+    def _supported_ops(cls, value: list[Any]) -> list[Any]:
+        from .providers import validate_audio_ops
+
+        validate_audio_ops(value)
+        return value
 
 
 class LipsyncBody(BaseModel):
@@ -135,6 +143,33 @@ class AudioPlaceCueBody(BaseModel):
     sceneId: Optional[str] = None
     volume: float = 1.0
     ducking: bool = False
+
+
+class AudioImportBody(BaseModel):
+    """Real WAV bytes (base64) the user already has — the honest sound path."""
+
+    projectId: str
+    contentBase64: str
+    filename: str = "import.wav"
+    kind: str = Field(default="sfx", pattern="^(dialogue|sfx|music|ambience)$")
+    sceneId: Optional[str] = None
+    startSec: float = 0.0
+    durationSec: Optional[float] = None
+    volume: float = 1.0
+    ducking: bool = False
+    tag: str = ""
+
+
+class AudioPromoteBody(BaseModel):
+    projectId: str
+    sceneId: Optional[str] = None
+    volume: Optional[float] = None
+    ducking: Optional[bool] = None
+
+
+class AudioGainBody(BaseModel):
+    projectId: str
+    volume: float
 
 
 class ActorBody(BaseModel):
@@ -381,6 +416,70 @@ def audio_place_cue(body: AudioPlaceCueBody, db: Session = Depends(get_db)) -> d
     )
 
 
+@router.post("/audio/import")
+def audio_import(body: AudioImportBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Import real WAV bytes as an Asset, cue them, and place them on the timeline."""
+    _require("audio_production_v1")
+    import base64
+    import binascii
+
+    try:
+        content = base64.b64decode(body.contentBase64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="contentBase64 is not valid base64") from None
+    try:
+        return AudioService.import_audio(
+            db,
+            project_id=body.projectId,
+            content=content,
+            filename=body.filename,
+            kind=body.kind,
+            scene_id=body.sceneId,
+            start_sec=body.startSec,
+            duration_sec=body.durationSec,
+            volume=body.volume,
+            ducking=body.ducking,
+            tag=body.tag,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.post("/audio/cues/{cue_id}/promote")
+def audio_promote_cue(
+    cue_id: str, body: AudioPromoteBody, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require("audio_production_v1")
+    try:
+        return AudioService.promote_cue_to_timeline(
+            db,
+            project_id=body.projectId,
+            cue_id=cue_id,
+            scene_id=body.sceneId,
+            volume=body.volume,
+            ducking=body.ducking,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="cue or scene not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/audio/cues/{cue_id}/gain")
+def audio_cue_gain(cue_id: str, body: AudioGainBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require("audio_production_v1")
+    try:
+        return AudioService.revise_cue_gain(
+            db, project_id=body.projectId, cue_id=cue_id, volume=body.volume
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="cue not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
 @router.get("/audio/cues")
 def audio_cues(projectId: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("audio_production_v1")
@@ -466,9 +565,12 @@ def timeline_apply(proposal_id: str, body: ActorBody, db: Session = Depends(get_
 @router.post("/editing/propose")
 def editing_propose(body: EditProposeBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("editing_production_v1")
-    return EditingService.propose_edit(
-        db, project_id=body.projectId, ops=body.ops, scene_id=body.sceneId
-    )
+    try:
+        return EditingService.propose_edit(
+            db, project_id=body.projectId, ops=body.ops, scene_id=body.sceneId
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.post("/editing/apply")

@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import ensure_m28_tables
-from ..fixtures import fixture_mode_enabled
+from ..fixtures import fixture_execution_enabled, fixture_mode_enabled
 
 
 def _now() -> str:
@@ -85,9 +85,22 @@ class LocationSpinService:
     def spin_camera(
         db: Session, *, spin_id: str, angles: list[float] | None = None
     ) -> dict[str, Any]:
+        """Build a coverage pack for a location spin.
+
+        The only frames this can produce are synthetic `fixture-spin-*` placeholders; no
+        real multi-angle generator is wired. Outside an env-gated fixture run it refuses
+        rather than recording a coverage pack that looks like captured coverage.
+        """
         item = LocationSpinService.get(db, spin_id)
         if not item:
             raise LookupError("Location spin not found")
+        if not fixture_execution_enabled():
+            raise PermissionError(
+                "Location spin camera coverage is unavailable: no real multi-angle "
+                "generator is wired, and synthetic fixture-spin frames require "
+                "ADEPT_M28_FIXTURE_MODE / STUDIO_E2E. The plan is unchanged and no "
+                "coverage pack was recorded."
+            )
         angles = angles or [0.0, 45.0, 90.0, 135.0, 180.0]
         coverage = {
             "packId": str(uuid.uuid4()),

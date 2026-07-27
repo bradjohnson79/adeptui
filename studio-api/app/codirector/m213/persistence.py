@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from sqlalchemy import text
@@ -9,6 +10,12 @@ from sqlalchemy.orm import Session
 
 from .db import ensure_m213_tables
 from .store import M213Store
+
+_TRUE = {"1", "true", "TRUE", "yes", "YES", "on"}
+
+
+def e2e_enabled() -> bool:
+    return os.environ.get("STUDIO_E2E", "").strip() in _TRUE
 
 
 def selective_restore(
@@ -177,8 +184,14 @@ def end_to_end_guided(
         subject_id=cam["id"],
     )
 
+    # Mock concepts are only bootstrapped for the E2E slice; otherwise the real provider
+    # must answer (or `generate_concept` raises ConceptProviderUnavailable).
     concept = concepts.generate_concept(
-        db, project_id=project_id, environment_id=env_id, tier="draft", force_mock=True
+        db,
+        project_id=project_id,
+        environment_id=env_id,
+        tier="draft",
+        force_mock=True if e2e_enabled() else None,
     )
     concepts.approve_concept(db, concept_id=concept["id"], note="e2e concept")
     plan = protocol.advance_plan(
@@ -202,7 +215,11 @@ def end_to_end_guided(
         "bibleBind": bind,
         "path": "source->env->blocking->camera/lighting->concept->timeline",
         "persistedApprovals": True,
-        "realGeneration": False,
-        "honesty": "E2E guided path used fixture/mock adapters; approvals persisted; not claiming real generation.",
+        "realGeneration": bool(concept.get("realGeneration")),
+        "honesty": (
+            "E2E guided path used fixture/mock adapters; approvals persisted; not claiming real generation."
+            if not concept.get("realGeneration")
+            else "Guided path used the configured real concept provider; approvals persisted."
+        ),
         "dashboard": protocol.coordination_dashboard(plan),
     }

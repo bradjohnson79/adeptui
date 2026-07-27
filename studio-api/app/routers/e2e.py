@@ -132,6 +132,56 @@ def e2e_codirector_scenario(body: dict[str, Any] | None = None) -> dict[str, Any
     return {"scenario": os.environ.get("ADEPT_CODIRECTOR_MOCK_SCENARIO")}
 
 
+@router.post("/feature-flags")
+def e2e_feature_flags(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Flip `STUDIO_FEATURE_*` flags for the running process (E2E only).
+
+    Some flags change which surface the UI renders at all — M2.14's unified workspace
+    replaces the Co-Director conversation — so a suite-wide env setting would force every
+    other chat spec to run against a different screen. This lets one spec prove both the ON
+    and OFF states and hand the process back the way it found it. Defaults in
+    `feature_flags.py` are untouched: an unset flag is still False.
+    """
+    if not e2e_enabled():
+        raise HTTPException(404, "E2E controls disabled")
+    from dataclasses import fields as dataclass_fields
+
+    from .. import feature_flags as feature_flags_mod
+
+    payload = (body or {}).get("flags")
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(400, "flags object is required, e.g. {\"flags\": {\"codirector_unified_experience_v1\": true}}")
+
+    known = {f.name for f in dataclass_fields(feature_flags_mod.FeatureFlags)}
+    applied: dict[str, Any] = {}
+    for name, value in payload.items():
+        key = str(name).strip()
+        if key not in known:
+            raise HTTPException(400, f"unknown feature flag: {key}")
+        env_name = f"STUDIO_FEATURE_{key.upper()}"
+        if value is None:
+            os.environ.pop(env_name, None)
+            applied[key] = None
+        else:
+            os.environ[env_name] = "1" if value else "0"
+            applied[key] = bool(value)
+
+    # Several modules bound `feature_flags` by value at import time, so the live singleton
+    # is mutated in place rather than replaced — otherwise those readers keep the old view.
+    refreshed = feature_flags_mod.FeatureFlags.from_env(os.environ)
+    singleton = feature_flags_mod.feature_flags
+    for field in dataclass_fields(feature_flags_mod.FeatureFlags):
+        object.__setattr__(singleton, field.name, getattr(refreshed, field.name))
+    return {
+        "applied": applied,
+        "flags": {
+            f.name: bool(getattr(singleton, f.name))
+            for f in dataclass_fields(feature_flags_mod.FeatureFlags)
+            if f.name in applied
+        },
+    }
+
+
 @router.post("/cli-mock")
 def e2e_cli_mock(body: dict[str, Any] | None = None) -> dict[str, Any]:
     """Set ADEPT_CLI_MOCK_JSON for Download Sources detection (process-local)."""

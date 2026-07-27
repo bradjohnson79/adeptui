@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import shutil
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -44,6 +46,39 @@ from .references.models import (
     ReferenceError,
 )
 
+logger = logging.getLogger(__name__)
+
+#: Job states that mean "an earlier process was still carrying this in memory".
+#: The queue is an in-process asyncio queue, so any row left in one of these at
+#: startup belongs to a process that is gone and will never touch it again.
+NON_TERMINAL_STATES: tuple[str, ...] = ("queued", "running")
+
+#: Recovery message written to a job the restart could not resume. It says the work
+#: stopped, not that it failed on its own merits, because those are different things.
+INTERRUPTED_MESSAGE = (
+    "Interrupted by an API restart before it finished. The studio queue does not resume "
+    "work that was already running, because the provider-side render (ComfyUI prompt or "
+    "fal.ai request) cannot be re-attached and re-submitting it would repeat the work and "
+    "any spend. Start it again when you are ready."
+)
+
+STALE_MESSAGE = (
+    "Left queued by an API restart and too old to start automatically. Nothing was "
+    "generated. Start it again when you are ready."
+)
+
+_DEFAULT_RECOVERY_MAX_AGE_HOURS = 24.0
+
+
+def _recovery_max_age_hours() -> float:
+    """How old a queued job may be and still be resumed automatically on startup."""
+    raw = os.environ.get("STUDIO_JOB_RECOVERY_MAX_AGE_HOURS", "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_RECOVERY_MAX_AGE_HOURS
+    return value if value > 0 else _DEFAULT_RECOVERY_MAX_AGE_HOURS
+
 
 class JobQueue:
     def __init__(self) -> None:
@@ -54,6 +89,83 @@ class JobQueue:
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
+
+    async def recover_interrupted(self) -> dict[str, list[str]]:
+        """Reconcile jobs an earlier process left non-terminal, before the loop starts.
+
+        `queued` work never reached a provider, so it is re-enqueued. `running` work may
+        have reached one, so it is closed as interrupted rather than silently restarted -
+        a second fal.ai submission would spend credits again. Either way no row is left
+        non-terminal with nothing watching it.
+        """
+        resumed: list[str] = []
+        interrupted: list[str] = []
+        cutoff = datetime.utcnow() - timedelta(hours=_recovery_max_age_hours())
+
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Job)
+                .filter(Job.status.in_(NON_TERMINAL_STATES))
+                .order_by(Job.created_at.asc())
+                .all()
+            )
+            for job in rows:
+                created = job.created_at or datetime.utcnow()
+                if job.status == "queued" and created >= cutoff:
+                    self._note_recovery(job, action="resumed", previous="queued")
+                    resumed.append(job.id)
+                    continue
+                previous = job.status
+                self._note_recovery(
+                    job,
+                    action="interrupted",
+                    previous=previous,
+                    stale=previous == "queued",
+                )
+                job.status = "failed"
+                job.stage = "interrupted"
+                job.message = (STALE_MESSAGE if previous == "queued" else INTERRUPTED_MESSAGE)[:4000]
+                job.updated_at = datetime.utcnow()
+                interrupted.append(job.id)
+            if rows:
+                db.commit()
+        finally:
+            db.close()
+
+        for job_id in resumed:
+            await self.enqueue(job_id)
+
+        if resumed or interrupted:
+            logger.warning(
+                "Studio job queue recovery: resumed=%s interrupted=%s",
+                len(resumed),
+                len(interrupted),
+            )
+        return {"resumed": resumed, "interrupted": interrupted}
+
+    @staticmethod
+    def _note_recovery(job: Job, *, action: str, previous: str, stale: bool = False) -> None:
+        """Append an audit entry to the job's history so recovery is traceable, not implied."""
+        try:
+            history = json.loads(job.history_json or "{}")
+            if not isinstance(history, dict):
+                history = {}
+        except json.JSONDecodeError:
+            history = {}
+        entries = history.get("recovery")
+        if not isinstance(entries, list):
+            entries = []
+        entries.append(
+            {
+                "action": action,
+                "previousStatus": previous,
+                "stale": stale,
+                "at": datetime.utcnow().isoformat(),
+            }
+        )
+        history["recovery"] = entries
+        job.history_json = json.dumps(history)
 
     async def enqueue(self, job_id: str) -> None:
         await self._q.put(job_id)
@@ -641,6 +753,21 @@ class JobQueue:
 
         return dest, provenance
 
+    @staticmethod
+    def _record_fal_request_id(db: Session, job: Job, *, model_id: str, request_id: str) -> None:
+        """Persist the fal queue request id so a render can be traced in the fal dashboard."""
+        try:
+            history = json.loads(job.history_json or "{}")
+            if not isinstance(history, dict):
+                history = {}
+        except json.JSONDecodeError:
+            history = {}
+        history["falRequestId"] = request_id
+        history["falModelId"] = model_id
+        job.history_json = json.dumps(history)
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
     async def _build_and_run_fal_scene(
         self,
         db: Session,
@@ -692,7 +819,12 @@ class JobQueue:
         job.comfy_prompt_id = model_id[:64]
         db.commit()
 
-        result = await run_fal_model(model_id, args, api_key, on_progress=on_progress)
+        async def on_request_id(request_id: str) -> None:
+            self._record_fal_request_id(db, job, model_id=model_id, request_id=request_id)
+
+        result = await run_fal_model(
+            model_id, args, api_key, on_progress=on_progress, on_request_id=on_request_id
+        )
         video_url = extract_video_url(result)
 
         dest_dir = settings.data_dir / "projects" / project.id / "renders"
@@ -1145,7 +1277,13 @@ class JobQueue:
             }
         )
         db.commit()
-        result = await run_fal_model(model_id, args, api_key, on_progress=on_progress)
+
+        async def on_request_id(request_id: str) -> None:
+            self._record_fal_request_id(db, job, model_id=model_id, request_id=request_id)
+
+        result = await run_fal_model(
+            model_id, args, api_key, on_progress=on_progress, on_request_id=on_request_id
+        )
         video_url = extract_video_url(result)
         dest_dir = settings.data_dir / "projects" / project.id / "renders"
         dest_dir.mkdir(parents=True, exist_ok=True)

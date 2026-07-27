@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import EmotionalSceneProfile, StorytellerHandoff
 from .db import ensure_m214_tables
+from .honesty import default_honesty, unbound_note
 from .store import M214Store, _jid, _now
 
 
@@ -42,8 +43,12 @@ def analyze_scene(
         unknowns=["location specificity", "time of day"] if mode == "guided" else [],
         questions=questions,
         mode=mode,
-        honesty="mocked",
-        payload={"sourceIdea": idea, "questionRule": "2-4 high-impact"},
+        honesty=default_honesty(),
+        payload={
+            "sourceIdea": idea,
+            "questionRule": "2-4 high-impact",
+            "note": unbound_note("Storyteller"),
+        },
     )
     ts = _now()
     db.execute(

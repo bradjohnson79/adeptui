@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import ProductionMeeting
 from .db import ensure_m214_tables
+from .honesty import default_honesty
 from .messaging import list_messages
 from .store import M214Store, _jid, _now
 
@@ -48,7 +49,7 @@ def convene_meeting(
         exchanges=exchanges,
         synthesis=synthesis,
         primary_next_action=primary,
-        payload={"honesty": "mocked", "userFacing": True},
+        payload={"honesty": default_honesty(), "userFacing": True},
     )
     db.execute(
         text(

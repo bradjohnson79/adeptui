@@ -71,8 +71,17 @@ test.describe("@isolated codirector m2.3 production bible vertical slice", () =>
       expect(exported.ok()).toBeTruthy();
       expect((await exported.json()).schemaVersion).toBe("m2.3");
 
+      // Every lifecycle step above is a versioned Bible change (create, approve, lock), so the
+      // number is not a constant. Read it back from the API and require the workspace to be
+      // showing that same version — a stale or wrong version in the UI still fails.
+      const bible = await (await request.get(`${API}/api/codirector/projects/${project.id}/bible`)).json();
+      const currentVersion = Number(bible.currentVersion.versionNumber);
+      expect(currentVersion).toBeGreaterThan(1);
+
       await openBibleWorkspace(page, project.id);
-      await expect(page.getByText(/Version 2 of/)).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText(new RegExp(`Version ${currentVersion} of`))).toBeVisible({
+        timeout: 15_000,
+      });
       await page.getByRole("button", { name: "Characters" }).click();
       await expect(page.getByText("Elena Voss")).toBeVisible();
       await page.getByRole("button", { name: "Export JSON" }).click();

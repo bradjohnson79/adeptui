@@ -16,6 +16,18 @@ import { AuditObserver } from "../helpers/observer";
 
 const PACK = "pack_essential_anime";
 
+// A pack card hides its whole action row while an operation is attached to the component, so the
+// row disappears for as long as the previous link attempt is still settling server-side. Waiting
+// for the button to come back keeps the assertion intact — it must appear — without depending on
+// the click's default action timeout being longer than the operation takes to clear.
+async function clickLinkExisting(page: import("@playwright/test").Page, packId: string) {
+  const button = page
+    .getByTestId(`setup-card-${packId}`)
+    .getByRole("button", { name: /Link Existing Folder/i });
+  await expect(button).toBeVisible({ timeout: 90_000 });
+  await button.click();
+}
+
 test.describe("@critical @isolated pack link existing", () => {
   test("empty rejected; valid accepted; wrong id rejected", async ({ page, request }) => {
     const observer = new AuditObserver(page, test.info());
@@ -31,9 +43,8 @@ test.describe("@critical @isolated pack link existing", () => {
 
     try {
       await openSetup(page, project.id);
-      const card = page.getByTestId(`setup-card-${PACK}`);
 
-      await card.getByRole("button", { name: /Link Existing Folder/i }).click();
+      await clickLinkExisting(page, PACK);
       await browseForcedFolder(page, empty);
       await confirmCheckpoint(page);
       // Scope to the checkpoint dialog — pack cards also mention pack.json in collapsed specs.
@@ -45,7 +56,7 @@ test.describe("@critical @isolated pack link existing", () => {
       await dismissSetupDialogs(page);
 
       await openSetup(page, project.id);
-      await page.getByTestId(`setup-card-${PACK}`).getByRole("button", { name: /Link Existing Folder/i }).click();
+      await clickLinkExisting(page, PACK);
       await browseForcedFolder(page, valid);
       await confirmCheckpoint(page);
       await expect
@@ -59,10 +70,7 @@ test.describe("@critical @isolated pack link existing", () => {
 
       const before = fs.readFileSync(`${wrong}/pack.json`, "utf8");
       await openSetup(page, project.id);
-      await page
-        .getByTestId("setup-card-pack_essential_cinematic")
-        .getByRole("button", { name: /Link Existing Folder/i })
-        .click();
+      await clickLinkExisting(page, "pack_essential_cinematic");
       await browseForcedFolder(page, wrong);
       await confirmCheckpoint(page);
       await expect(page.getByText(/pack id|does not match|wrong|mismatch|invalid/i).first()).toBeVisible({

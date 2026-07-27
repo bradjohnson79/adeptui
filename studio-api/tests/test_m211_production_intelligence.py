@@ -27,6 +27,16 @@ def enable_m211(monkeypatch: pytest.MonkeyPatch):
     import app.feature_flags as ff
 
     ff.feature_flags = FeatureFlags.from_env(os.environ)
+
+    # Keep M2.11 smoke/API tests on the labeled limited-analysis path so a local
+    # Ollama install cannot turn the suite into live multi-specialist LLM calls.
+    async def _force_limited(_provider=None, *, prefer_provider=None):
+        return None, False, "limited-analysis"
+
+    monkeypatch.setattr(
+        "app.codirector.m211.orchestrator.resolve_provider_for_specialists",
+        _force_limited,
+    )
     yield
     ff.feature_flags = FeatureFlags.from_env(os.environ)
 

@@ -147,6 +147,61 @@ def test_recipe_resume_no_duplicate(db):
     assert len(queued) >= 1
 
 
+def test_recipe_stage_refuses_mock_completion_outside_fixture(db, monkeypatch):
+    """M28-08 / EXEC-04: a recipe cannot report a stage completed with a mock result."""
+    from app.codirector.m28.recipes.service import RecipeService
+
+    recipe = RecipeService.create(db, project_id="proj-m28", name="r-prod")
+    monkeypatch.delenv("ADEPT_M28_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    with pytest.raises(PermissionError) as exc:
+        RecipeService.complete_stage(
+            db, recipe_id=recipe["id"], stage_id=recipe["stages"][0]["id"], failed=False
+        )
+    assert "no real" in str(exc.value).lower()
+    unchanged = RecipeService.get(db, recipe["id"])
+    assert all(s["status"] != "completed" for s in unchanged["stages"])
+
+
+def test_recipe_stage_handler_reports_blocked_outside_fixture(db, monkeypatch):
+    from app.codirector.executive.handlers import execute_job
+    from app.codirector.executive.models import JobType
+    from app.codirector.executive.schemas import JobOut
+    from app.codirector.m28.recipes.service import RecipeService
+
+    recipe = RecipeService.create(db, project_id="proj-m28", name="r-blocked")
+    monkeypatch.delenv("ADEPT_M28_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+
+    job = JobOut(
+        id="job-recipe-blocked",
+        type=JobType.RECIPE_STAGE.value,
+        owner="tester",
+        projectId="proj-m28",
+        priority=5,
+        status="running",
+        payload={"recipeId": recipe["id"], "stageId": recipe["stages"][0]["id"]},
+        createdAt="2026-07-26T00:00:00Z",
+        updatedAt="2026-07-26T00:00:00Z",
+    )
+    result = execute_job(job, db)
+    assert result.ok is False
+    assert result.status == "Blocked"
+
+
+def test_location_spin_refuses_synthetic_coverage_outside_fixture(db, monkeypatch):
+    """M28-06: fixture-spin coverage packs are CI-only."""
+    from app.codirector.m28.location_spin.service import LocationSpinService
+
+    spin = LocationSpinService.plan(db, project_id="proj-m28", location_name="Alley")
+    monkeypatch.delenv("ADEPT_M28_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    with pytest.raises(PermissionError):
+        LocationSpinService.spin_camera(db, spin_id=spin["id"])
+    unchanged = LocationSpinService.get(db, spin["id"])
+    assert unchanged["coverage"] is None
+
+
 def test_flags_off_api_404(monkeypatch):
     monkeypatch.delenv("STUDIO_FEATURE_MODEL_RADAR_V1", raising=False)
     import app.feature_flags as ff

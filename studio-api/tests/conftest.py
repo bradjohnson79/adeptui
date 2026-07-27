@@ -14,6 +14,9 @@ import pytest
 # SQLAlchemy engine are constructed at import time.
 _TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="aivideostudio-phase0-")).resolve()
 os.environ["STUDIO_DATA_DIR"] = str(_TEST_DATA_DIR)
+# App startup would otherwise promote a real .env fal key into the store, which means a
+# live network probe on every test that exercises the lifespan.
+os.environ["STUDIO_FAL_ENV_BRIDGE"] = "0"
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

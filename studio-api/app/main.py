@@ -151,6 +151,11 @@ async def lifespan(_: FastAPI):
         ensure_migrated()
     except Exception:
         logger.exception("Source Manager migration failed")
+    # Render jobs read the fal credential from the secret store only, so a key that lives
+    # in .env has to be promoted before the queue starts consuming jobs.
+    from .fal_env_bridge import bridge_fal_key_at_startup
+
+    await bridge_fal_key_at_startup()
     try:
         from .source_manager.downloads.queue import get_queue_manager
 
@@ -163,6 +168,16 @@ async def lifespan(_: FastAPI):
             )
     except Exception:
         logger.exception("Download queue recovery failed")
+    try:
+        job_recovery = await job_queue.recover_interrupted()
+        if job_recovery.get("resumed") or job_recovery.get("interrupted"):
+            logger.warning(
+                "Studio job queue recovery resumed=%s interrupted=%s",
+                len(job_recovery.get("resumed") or []),
+                len(job_recovery.get("interrupted") or []),
+            )
+    except Exception:
+        logger.exception("Studio job queue recovery failed")
     job_queue.start()
 
     exec_worker_started = False

@@ -202,6 +202,28 @@ def test_edit_apply_requires_approval(db):
         )
 
 
+def test_propose_edit_outside_fixture_is_not_a_fixture_result(db, monkeypatch):
+    """M29-08: no fixture ops invented, and nothing labelled as a fixture success."""
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    from app.codirector.m29.editing.service import EditingService
+
+    with pytest.raises(ValueError):
+        EditingService.propose_edit(db, project_id="proj-m29", ops=[])
+
+    out = EditingService.propose_edit(
+        db,
+        project_id="proj-m29",
+        ops=[{"op": "trim", "clipId": "clip-1", "length": 2}],
+        scene_id="scene-x",
+    )
+    assert out["fixture"] is False
+    assert out["status"] == "proposed"
+    assert out["requiresApproval"] is True
+    assert out["provider"] == "m29_editing"
+    assert out["ops"] == [{"op": "trim", "clipId": "clip-1", "length": 2}]
+
+
 def test_fixture_jobs_via_api(client):
     img = client.post(
         "/api/codirector/m29/image/generate",
@@ -408,8 +430,31 @@ def test_control_enqueue_without_fixture_mode(db, monkeypatch):
     assert len(out["jobs"]) >= 1
 
 
-def test_wants_fixture_helper():
+def test_wants_fixture_helper(monkeypatch: pytest.MonkeyPatch):
+    """A client cannot buy itself a fixture success by sending `fixtureComplete`."""
     from app.codirector.m29.providers import wants_fixture
 
-    assert wants_fixture({"fixtureComplete": True}) is True
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    assert wants_fixture({"fixtureComplete": True}) is False
     assert wants_fixture({"m29": True}) is False
+
+    monkeypatch.setenv("ADEPT_M29_FIXTURE_MODE", "1")
+    assert wants_fixture({}) is True
+
+
+def test_client_fixture_markers_stripped_at_executive_ingress(monkeypatch: pytest.MonkeyPatch):
+    from app.codirector.m29.providers import sanitize_client_payload
+
+    monkeypatch.delenv("ADEPT_M29_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    cleaned = sanitize_client_payload(
+        {"m29": True, "fixtureComplete": True, "mockAdapter": True, "prompt": "keep me"}
+    )
+    assert "fixtureComplete" not in cleaned
+    assert "mockAdapter" not in cleaned
+    assert cleaned["prompt"] == "keep me"
+
+    monkeypatch.setenv("ADEPT_M29_FIXTURE_MODE", "1")
+    kept = sanitize_client_payload({"fixtureComplete": True})
+    assert kept["fixtureComplete"] is True

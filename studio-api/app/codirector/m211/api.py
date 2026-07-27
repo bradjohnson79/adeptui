@@ -258,8 +258,9 @@ async def m211_dashboard(
             "note": "M2.11 does not mutate timeline; approvals are recorded only.",
         },
         "providerHealthNote": (
-            "Orchestrator uses SpecialistRunner heuristic path by default "
-            "(STUDIO_E2E friendly); no new providers installed."
+            "Orchestrator uses the live Co-Director provider when available and not "
+            "STUDIO_E2E; otherwise returns clearly labeled limited-analysis / heuristic "
+            "specialist digests (no fake deep reasoning)."
         ),
         "reasoningModel": "gemma",
         "executionHistory": traces,

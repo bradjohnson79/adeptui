@@ -49,7 +49,11 @@ test.describe("@critical @isolated codirector streaming, cancel, retry, persiste
     try {
       await setMockScenario(request, "slow");
       await openCoDirector(page, project.id);
-      await sendMessage(page, "Write me a short script outline.");
+      // Deliberately not a planning prompt. "outline" (and friends) route the turn into the
+      // M2.4 intelligence orchestrator, whose reply is composed server-side and never carries
+      // the provider's "[mock]" marker — so a planning prompt would test intent routing
+      // instead of the provider token stream this case is about.
+      await sendMessage(page, "Write me a short script, please.");
 
       // While the mock streams, the send control flips to a Stop Generating button.
       const stopButton = page.getByRole("button", { name: "Stop generating" });

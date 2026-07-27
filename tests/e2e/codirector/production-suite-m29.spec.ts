@@ -10,7 +10,32 @@ import { createTempProject } from "../helpers/app";
  *   set all STUDIO_FEATURE_*_PRODUCTION_V1=1 (+ control) and ADEPT_M29_FIXTURE_MODE=1
  * Recommended Run B (flags OFF): filter `-g "1 flags off"` with those flags =0
  */
+/** API flag name -> the key it is published under in `/api/health`.operator. */
+const M29_FLAGS: Record<string, string> = {
+  image_production_v1: "imageProductionEnabled",
+  frame_production_v1: "frameProductionEnabled",
+  video_production_v1: "videoProductionEnabled",
+  director_timeline_v1: "directorTimelineEnabled",
+  lipsync_production_v1: "lipsyncProductionEnabled",
+  audio_production_v1: "audioProductionEnabled",
+  editing_production_v1: "editingProductionEnabled",
+  render_production_v1: "renderProductionEnabled",
+  codirector_production_control_v1: "codirectorProductionControlEnabled",
+};
+const M29_FLAG_NAMES = Object.keys(M29_FLAGS);
+
 test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
+  // Scenario 1 forces the flags off for itself and hands back exactly what it found, so the
+  // specs that need audio + director timeline ON are unaffected by the order they run in.
+  let m29FlagsToRestore: Record<string, boolean> | null = null;
+
+  test.afterEach(async ({ request }) => {
+    if (!m29FlagsToRestore) return;
+    const flags = m29FlagsToRestore;
+    m29FlagsToRestore = null;
+    await request.post("/api/e2e/feature-flags", { data: { flags } });
+  });
+
   async function waitForHealth(request: import("@playwright/test").APIRequestContext) {
     let lastStatus = 0;
     for (let i = 0; i < 60; i++) {
@@ -44,9 +69,22 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
   }
 
   async function requireM29(request: import("@playwright/test").APIRequestContext) {
-    const on = await m29FlagsOn(request);
+    // Default e2e-start only leaves the M3.0 sound-path flags on (audio + director). The
+    // section / fixture journeys need the whole M2.9 surface, so flip every flag on for the
+    // duration of this test and restore afterward — same control the flags-off case uses.
+    if (await m29FlagsOn(request)) return;
+    const health = await waitForHealth(request);
+    const op = health?.operator || {};
+    const previous = Object.fromEntries(
+      M29_FLAG_NAMES.map((name) => [name, Boolean(op[M29_FLAGS[name]])]),
+    );
+    const on = await request.post("/api/e2e/feature-flags", {
+      data: { flags: Object.fromEntries(M29_FLAG_NAMES.map((name) => [name, true])) },
+    });
+    test.skip(!on.ok(), `E2E feature-flag control unavailable (${on.status()})`);
+    m29FlagsToRestore = previous;
     test.skip(
-      !on,
+      !(await m29FlagsOn(request)),
       "M2.9 feature flags not enabled - set STUDIO_FEATURE_*_PRODUCTION_V1=1 and ADEPT_M29_FIXTURE_MODE=1",
     );
   }
@@ -65,10 +103,18 @@ test.describe("Co-Director M2.9 Production Suite @critical @isolated", () => {
   test("1 flags off: production suite routes hidden", async ({ page, request }) => {
     const health = await waitForHealth(request);
     const op = health?.operator || {};
-    test.skip(
-      Boolean(op.imageProductionEnabled || op.videoProductionEnabled),
-      "Flags are ON in this environment - covered by unit test_flags_off_api_404; re-run with STUDIO_FEATURE_*_V1=0",
+    // The nav link and the workspace appear when *any* M2.9 flag is on (see StudioChrome), and
+    // E2E now ships audio + director timeline ON for the M3.0 sound-path proof. Rather than
+    // skipping this scenario away, turn every M2.9 flag off for the duration of this test
+    // through the E2E-only control, then hand back whatever was there before.
+    const previous = Object.fromEntries(
+      M29_FLAG_NAMES.map((name) => [name, Boolean(op[M29_FLAGS[name]])]),
     );
+    const off = await request.post("/api/e2e/feature-flags", {
+      data: { flags: Object.fromEntries(M29_FLAG_NAMES.map((name) => [name, false])) },
+    });
+    test.skip(!off.ok(), `E2E feature-flag control unavailable (${off.status()})`);
+    m29FlagsToRestore = previous;
 
     const errors: string[] = [];
     page.on("console", (msg) => {

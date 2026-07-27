@@ -116,7 +116,8 @@ def _handle_storyboard(db: Session, job: JobOut, payload: dict[str, Any]) -> Han
 
 
 def _handle_image(db: Session, job: JobOut, payload: dict[str, Any]) -> HandlerResult:
-    # M2.9 path: fixture only when fixtureComplete / ADEPT_M29_FIXTURE_MODE; else real Comfy.
+    # M2.9 path. `fixtureComplete` only survives ingress sanitization when fixtures are
+    # env-enabled, so outside CI this always resolves to the real Comfy provider.
     if payload.get("m29") or payload.get("fixtureComplete"):
         from ..m29.image.service import ImageService
         from ..m29.providers import ProviderError, ProviderUnavailable, handler_status_for_exc
@@ -528,7 +529,10 @@ def _handle_sandbox_validate(db: Session, job: JobOut, payload: dict[str, Any]) 
     sandbox_id = payload.get("sandboxId")
     if not sandbox_id:
         return HandlerResult(ok=False, status="Failed", error="sandbox_validate requires sandboxId")
-    out = SandboxService.validate(db, str(sandbox_id))
+    try:
+        out = SandboxService.validate(db, str(sandbox_id))
+    except PermissionError as exc:
+        return HandlerResult(ok=False, status="Blocked", error=str(exc))
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
 
 
@@ -565,9 +569,12 @@ def _handle_recipe_stage(db: Session, job: JobOut, payload: dict[str, Any]) -> H
     if not recipe_id or not stage_id:
         return HandlerResult(ok=False, status="Failed", error="recipe_stage requires recipeId and stageId")
     failed = bool(payload.get("simulateProviderFailure") or payload.get("forceFail"))
-    out = RecipeService.complete_stage(
-        db, recipe_id=str(recipe_id), stage_id=str(stage_id), failed=failed
-    )
+    try:
+        out = RecipeService.complete_stage(
+            db, recipe_id=str(recipe_id), stage_id=str(stage_id), failed=failed
+        )
+    except PermissionError as exc:
+        return HandlerResult(ok=False, status="Blocked", error=str(exc))
     if failed:
         return HandlerResult(ok=False, status="Failed", error="simulated provider failure", result=out)
     return HandlerResult(ok=True, status="Completed", result=validate_job_output(job.type, out))
@@ -661,9 +668,21 @@ def _handle_edit_apply(db: Session, job: JobOut, payload: dict[str, Any]) -> Han
     return _m29_run(EditingService.execute_job, db, job, payload)
 
 
+def _sanitize_ingress_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Single ingress point for job payloads.
+
+    Fixture-success markers (`fixtureComplete` and friends) are legitimate when the M2.9
+    services put them there under an env-gated fixture run, and are a forgery when they
+    arrive from a client. Stripping them here covers every job type at once.
+    """
+    from ..m29.providers import sanitize_client_payload
+
+    return sanitize_client_payload(payload)
+
+
 def execute_job(job: JobOut, db: Session | None = None) -> HandlerResult:
     """Run a single job attempt. Pass db for real service wiring; without db, generic only."""
-    payload = dict(job.payload or {})
+    payload = _sanitize_ingress_payload(job.payload)
     if payload.get("forceFail"):
         return HandlerResult(
             ok=False,

@@ -15,6 +15,12 @@ from .store import M213Store
 
 TIERS = ("draft", "production", "final_candidate")
 
+_TRUE = {"1", "true", "TRUE", "yes", "YES", "on"}
+
+
+class ConceptProviderUnavailable(RuntimeError):
+    """No real concept provider is configured and mock output was not explicitly requested."""
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -22,6 +28,10 @@ def _now() -> str:
 
 def _provider_available() -> bool:
     return bool(os.environ.get("STUDIO_M213_REAL_CONCEPT_PROVIDER"))
+
+
+def _e2e_enabled() -> bool:
+    return os.environ.get("STUDIO_E2E", "").strip() in _TRUE
 
 
 def generate_concept(
@@ -32,13 +42,25 @@ def generate_concept(
     tier: str = "draft",
     force_mock: bool | None = None,
 ) -> dict[str, Any]:
+    """Generate a concept with the real provider, or fail honestly.
+
+    Mock output is produced only when the caller explicitly asks for it (`force_mock=True`)
+    or the process is an E2E run. Production never receives a mock labelled as a success.
+    """
     ensure_m213_tables()
     if tier not in TIERS:
         raise ValueError(f"tier must be one of {TIERS}")
-    real = _provider_available() and not (force_mock if force_mock is not None else True)
-    # Default: mock/fixture labeled for CI honesty unless real provider explicitly enabled.
-    if force_mock is None:
+    if force_mock is True:
         real = False
+    elif _provider_available():
+        real = True
+    elif _e2e_enabled():
+        real = False
+    else:
+        raise ConceptProviderUnavailable(
+            "Concept generation is unavailable: no real provider is configured "
+            "(set STUDIO_M213_REAL_CONCEPT_PROVIDER) and mock output was not requested."
+        )
     mode = "real" if real else "mock"
     cid = str(uuid.uuid4())
     payload = {

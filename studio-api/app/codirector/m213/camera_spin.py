@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import ensure_m213_tables
+from .flags import fixtures_enabled
 from .store import M213Store
 
 
@@ -20,11 +21,21 @@ def _now() -> str:
 STITCH_LEVELS = ("C1_panorama", "C2_layers_2_5d", "C3_hybrid_proxy")
 
 
+def synthetic_frames_allowed() -> bool:
+    return fixtures_enabled()
+
+
 def detect_and_order(frames: list[dict[str, Any]] | None = None, *, fixture: bool = True) -> dict[str, Any]:
-    frames = frames or [
-        {"index": i, "angle": float(i * 45), "assetId": f"fixture-spin-{i}", "fixture": True}
-        for i in range(8)
-    ]
+    if not frames:
+        if not synthetic_frames_allowed():
+            raise PermissionError(
+                "Camera spin requires real captured frames: synthetic fixture-spin frames "
+                "are only generated under ADEPT_M213_FIXTURE_MODE / STUDIO_E2E."
+            )
+        frames = [
+            {"index": i, "angle": float(i * 45), "assetId": f"fixture-spin-{i}", "fixture": True}
+            for i in range(8)
+        ]
     ordered = sorted(frames, key=lambda f: float(f.get("angle", f.get("index", 0))))
     return {
         "layout": "circular_spin",
@@ -74,6 +85,12 @@ def build_camera_spin_environment(
     scene_id: str | None = None,
 ) -> dict[str, Any]:
     ensure_m213_tables()
+    if fixture and not synthetic_frames_allowed():
+        raise PermissionError(
+            "A fixture camera spin registers an environment that was never stitched from "
+            "real coverage; it requires ADEPT_M213_FIXTURE_MODE / STUDIO_E2E. Supply real "
+            "frames with fixture=false instead."
+        )
     ordered = detect_and_order(frames, fixture=fixture)
     stitched = stitch(ordered, level=level, real_deps_present=False)
     env_id = str(uuid.uuid4())

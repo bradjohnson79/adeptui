@@ -130,6 +130,23 @@ ADAPTERS: list[EnvironmentReconstructionAdapter] = [
 ]
 
 
+DETECT = "detect"
+
+
+def resolve_adapter_name(adapter_name: str) -> Optional[str]:
+    """Resolve `detect` to an installed real adapter, or None when there is none.
+
+    Detection never falls back to the fixture adapter: a caller that wants synthetic
+    output has to name it.
+    """
+    if adapter_name != DETECT:
+        return adapter_name
+    for adapter in ADAPTERS:
+        if adapter.name != "fixture" and adapter.available():
+            return adapter.name
+    return None
+
+
 def list_adapters() -> list[dict[str, Any]]:
     out = []
     for a in ADAPTERS:
@@ -172,12 +189,26 @@ def reconstruct_environment(
     *,
     project_id: str,
     images: list[str] | None = None,
-    adapter_name: str = "fixture",
+    adapter_name: str = DETECT,
     title: str = "Reconstructed Environment",
     scene_id: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     ensure_m213_tables()
+    requested = adapter_name
+    resolved = resolve_adapter_name(adapter_name)
+    if resolved is None:
+        return {
+            "ok": False,
+            "requestedAdapter": requested,
+            "adapters": list_adapters(),
+            "message": (
+                "No real reconstruction adapter is installed (COLMAP / Nerfstudio / gsplat) "
+                "and Adept UI will not install one silently. Request adapter='fixture' "
+                "explicitly if you want a labelled CI proxy instead of a reconstruction."
+            ),
+        }
+    adapter_name = resolved
     fixture = adapter_name == "fixture"
     assessment = assess_capture(images, fixture=fixture)
     if not assessment.ready and not force:

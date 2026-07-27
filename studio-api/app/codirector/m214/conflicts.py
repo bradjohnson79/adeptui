@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import ProductionDecisionImpact
 from .db import ensure_m214_tables
+from .honesty import default_honesty
 from .store import M214Store, _jid, _now
 
 
@@ -23,7 +24,7 @@ def detect_conflicts(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "from": m.get("from_specialist"),
                     "to": m.get("to_specialist"),
                     "summary": m.get("body"),
-                    "honesty": "mocked",
+                    "honesty": default_honesty(),
                 }
             )
     return conflicts

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ...executive.models import JobType
 from .. import fixture_mode_enabled
 from ..fixtures import fixture_image_result
-from ..providers import run_imagegen, wants_fixture
+from ..providers import image_provider_available, run_imagegen, wants_fixture
 from ..store import create_asset_version, enqueue_executive_job, set_asset_status, _now
 
 
@@ -54,6 +54,9 @@ class ImageService:
             result.update({"jobId": job.id, "versionId": ver["id"], "projectId": project_id})
             return result
 
+        # Production path: nothing has been generated yet, so no asset id and no version
+        # row may be minted here — a client must be able to tell "queued" from "created".
+        provider_ready = image_provider_available()
         job = enqueue_executive_job(
             db,
             project_id=project_id,
@@ -62,23 +65,23 @@ class ImageService:
             scene_id=scene_id,
             owner=owner,
         )
-        ver = create_asset_version(
-            db,
-            project_id=project_id,
-            department="image",
-            status="draft",
-            job_id=job.id,
-            metadata={"operation": operation, "prompt": prompt, **params},
-        )
-        return {
+        out: dict[str, Any] = {
             "jobId": job.id,
-            "versionId": ver["id"],
-            "assetId": ver["assetId"],
-            "status": "draft",
+            "versionId": None,
+            "assetId": None,
+            "status": "queued",
             "operation": operation,
             "fixture": False,
+            "providerMissing": not provider_ready,
             "projectId": project_id,
         }
+        if not provider_ready:
+            out["awaitingProvider"] = True
+            out["message"] = (
+                "No image generation provider is available (ComfyUI/Z-Image unreachable). "
+                "The job is queued and will report Blocked; no asset was created."
+            )
+        return out
 
     @staticmethod
     def execute_job(db: Session, payload: dict[str, Any], project_id: str) -> dict[str, Any]:

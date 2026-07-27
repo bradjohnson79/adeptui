@@ -19,9 +19,57 @@ from .specialist_registry import SpecialistDefinition, SpecialistRegistry
 _SPECIALIST_JSON_RE = re.compile(r"```json\s*([\s\S]*?)```", re.IGNORECASE)
 DEFAULT_TIMEOUT_SEC = 25.0
 
+LIMITED_ANALYSIS_MODE = "limited-analysis"
+PROVIDER_ANALYSIS_MODE = "provider"
+LIMITED_ANALYSIS_ASSUMPTION = (
+    "Limited-analysis / heuristic specialist output — no live model reasoning. "
+    "Not deep story or emotional intelligence."
+)
+
 
 def _e2e_mode() -> bool:
     return os.environ.get("STUDIO_E2E", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+async def resolve_provider_for_specialists(
+    provider: Optional[CoDirectorProvider] = None,
+    *,
+    prefer_provider: bool | None = None,
+) -> tuple[Optional[CoDirectorProvider], bool, str]:
+    """Decide whether specialists may call a live provider.
+
+    Returns ``(provider_or_none, use_provider, analysis_mode)``.
+    ``use_provider`` is True only when a provider is available, healthy enough to
+    serve a model, and the process is not in ``STUDIO_E2E``. Otherwise analysis
+    is explicitly ``limited-analysis`` (heuristic) — never presented as deep reasoning.
+    """
+    if _e2e_mode():
+        return None, False, LIMITED_ANALYSIS_MODE
+
+    candidate = provider
+    if candidate is None and prefer_provider is not False:
+        try:
+            from ..service import get_provider
+
+            candidate = get_provider()
+        except Exception:  # noqa: BLE001
+            return None, False, LIMITED_ANALYSIS_MODE
+
+    if candidate is None:
+        return None, False, LIMITED_ANALYSIS_MODE
+
+    if prefer_provider is False:
+        return None, False, LIMITED_ANALYSIS_MODE
+
+    try:
+        health = await candidate.health()
+    except Exception:  # noqa: BLE001
+        return None, False, LIMITED_ANALYSIS_MODE
+
+    if not (getattr(health, "reachable", False) and getattr(health, "model_available", False)):
+        return None, False, LIMITED_ANALYSIS_MODE
+
+    return candidate, True, PROVIDER_ANALYSIS_MODE
 
 
 class SpecialistRunner:
@@ -214,13 +262,13 @@ class SpecialistRunner:
 
         return SpecialistFinding(
             specialistId=definition.id,
-            summary=f"{definition.display_name} reviewed the request.",
+            summary=f"{definition.display_name} reviewed the request (limited-analysis).",
             recommendation=recommendation,
             requirements=requirements,
             risks=risks,
             blockingIssues=blockers,
             optionalImprovements=[],
             proposedToolActions=tool_actions,
-            assumptions=["Heuristic specialist output (E2E/mock path)."],
-            confidence=0.82,
+            assumptions=[LIMITED_ANALYSIS_ASSUMPTION],
+            confidence=0.55,
         )

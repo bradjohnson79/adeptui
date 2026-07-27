@@ -288,13 +288,52 @@ def fal_key_status():
 
 
 @router.put("/fal/key", response_model=FalKeyStatus)
-def fal_key_set(body: FalKeyUpdate):
-    from ..secrets_store import secret_status, set_secret
+async def fal_key_set(body: FalKeyUpdate):
+    """Store a fal.ai key only after fal itself accepts it.
+
+    A key that fal rejects is refused outright; a key we could not check (fal unreachable)
+    is stored but reported as unverified rather than quietly presented as working.
+    """
+    from ..fal_client import validate_fal_key
+    from ..secrets_store import secret_status, set_secret, set_secret_verification
 
     key = (body.api_key or "").strip()
     if not key:
         raise HTTPException(400, "api_key is required")
+
+    probe = await validate_fal_key(key)
+    if probe.get("valid") is False:
+        raise HTTPException(
+            400,
+            probe.get("message") or "fal.ai rejected this API key.",
+        )
+
     set_secret("fal_api_key", key)
+    set_secret_verification(
+        "fal_api_key",
+        verified=probe.get("valid"),
+        message=probe.get("message", ""),
+        detail={"httpStatus": probe.get("httpStatus"), "probeEndpoint": probe.get("probeEndpoint")},
+    )
+    return FalKeyStatus.model_validate(secret_status("fal_api_key"))
+
+
+@router.post("/fal/key/validate", response_model=FalKeyStatus)
+async def fal_key_validate():
+    """Re-probe the stored key against fal.ai and refresh its recorded state."""
+    from ..fal_client import validate_fal_key
+    from ..secrets_store import get_secret, secret_status, set_secret_verification
+
+    key = get_secret("fal_api_key")
+    if not key:
+        raise HTTPException(404, "No fal.ai API key is configured.")
+    probe = await validate_fal_key(key)
+    set_secret_verification(
+        "fal_api_key",
+        verified=probe.get("valid"),
+        message=probe.get("message", ""),
+        detail={"httpStatus": probe.get("httpStatus"), "probeEndpoint": probe.get("probeEndpoint")},
+    )
     return FalKeyStatus.model_validate(secret_status("fal_api_key"))
 
 

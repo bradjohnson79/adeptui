@@ -17,7 +17,11 @@ from ..providers.base import CoDirectorProvider
 from .intent import classify_intent
 from .planning import PlanBuilder, PlanExecutorBridge
 from .schemas import IntentClassification, ProductionPlan, SynthesisResult
-from .specialist_runner import SpecialistRunner
+from .specialist_runner import (
+    LIMITED_ANALYSIS_MODE,
+    SpecialistRunner,
+    resolve_provider_for_specialists,
+)
 from .specialist_selector import SpecialistSelector
 from .specialist_registry import SpecialistRegistry
 from .stage_router import route_stage
@@ -61,7 +65,7 @@ class IntelligenceService:
         provider: Optional[CoDirectorProvider] = None,
         model_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        use_provider: bool = False,
+        use_provider: bool | None = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {}
         async for event in self.stream_intelligence(
@@ -97,10 +101,14 @@ class IntelligenceService:
         provider: Optional[CoDirectorProvider] = None,
         model_id: Optional[str] = None,
         request_id: Optional[str] = None,
-        use_provider: bool = False,
+        use_provider: bool | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         request_id = request_id or "intelligence"
         prompt_versions = self.prompt_library.version_map()
+        provider, use_provider_effective, analysis_mode = await resolve_provider_for_specialists(
+            provider,
+            prefer_provider=use_provider,
+        )
 
         yield {
             "type": "intelligence_progress",
@@ -108,6 +116,7 @@ class IntelligenceService:
             "stage": "classifying_intent",
             "message": "Understanding the request",
             "promptVersions": prompt_versions,
+            "analysisMode": analysis_mode,
         }
 
         try:
@@ -169,7 +178,7 @@ class IntelligenceService:
             provider=provider,
             model_id=model_id,
             request_id=request_id,
-            use_provider=use_provider,
+            use_provider=use_provider_effective,
         )
         context_hash = ""
         if findings:
@@ -216,11 +225,20 @@ class IntelligenceService:
             yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
             return
 
+        if analysis_mode == LIMITED_ANALYSIS_MODE and "Limited-analysis" not in " ".join(
+            synthesis.assumptions
+        ):
+            synthesis.assumptions = list(synthesis.assumptions) + [
+                "Limited-analysis / heuristic path — provider unavailable or STUDIO_E2E; "
+                "not deep story or emotional intelligence."
+            ]
+
         yield {
             "type": "intelligence_result",
             "requestId": request_id,
             "synthesis": synthesis.model_dump(mode="json"),
             "promptVersions": prompt_versions,
+            "analysisMode": analysis_mode,
         }
 
         yield {

@@ -12,6 +12,7 @@ from ... import feature_flags as feature_flags_mod
 from .approval import record_decision
 from .corrections import create_correction_proposal
 from .engine import run_validation
+from .providers import VisionProviderUnavailable
 from .schemas import ApproveRejectRequest, CorrectionRequest, ValidateRequest
 from .sessions import session_history
 from .store import VisionStore
@@ -29,6 +30,8 @@ def validate_asset(body: ValidateRequest, db: Session = Depends(get_db)) -> dict
     _require_flag()
     try:
         return run_validation(db, body)
+    except VisionProviderUnavailable as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

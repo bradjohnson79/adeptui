@@ -1,6 +1,6 @@
 """M2.9 real-provider bridge for native studio Jobs.
 
-Fixture mode remains CI-only via ADEPT_M29_FIXTURE_MODE / fixtureComplete.
+Fixture mode is CI-only and env-gated (ADEPT_M29_FIXTURE_MODE / STUDIO_E2E).
 Never treats fixture success as production evidence.
 """
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import time
 import uuid
@@ -20,6 +21,19 @@ from . import fixture_mode_enabled
 
 logger = logging.getLogger(__name__)
 
+_TRUE = {"1", "true", "TRUE", "yes", "YES", "on"}
+
+# Payload keys that would turn a job into a fixture "success". They are produced by the
+# M2.9 services themselves while fixture mode is on; a client must never be able to set
+# them, so they are stripped at executive ingress (see executive/handlers.py).
+FIXTURE_PAYLOAD_KEYS: tuple[str, ...] = ("fixtureComplete", "mockAdapter", "forceMock")
+
+
+# Audio process ops accepted over HTTP. The API contract carries dicts
+# (`[{"op": "normalize"}]`); older internal callers pass bare strings.
+LOUDNORM_AUDIO_OPS: frozenset[str] = frozenset({"normalize", "loudnorm", "cleanup"})
+SUPPORTED_AUDIO_OPS: frozenset[str] = LOUDNORM_AUDIO_OPS | {"copy", "passthrough"}
+
 
 class ProviderUnavailable(RuntimeError):
     """Infrastructure or model missing - map to executive Blocked."""
@@ -29,9 +43,36 @@ class ProviderError(RuntimeError):
     """Provider ran but failed - map to executive Failed."""
 
 
+def e2e_enabled() -> bool:
+    return os.environ.get("STUDIO_E2E", "").strip() in _TRUE
+
+
+def fixture_env_enabled() -> bool:
+    """Fixtures activate from the environment only — never from a request payload."""
+    return fixture_mode_enabled() or e2e_enabled()
+
+
 def wants_fixture(payload: dict[str, Any] | None = None) -> bool:
-    payload = payload or {}
-    return fixture_mode_enabled() or bool(payload.get("fixtureComplete"))
+    """Whether this run may take the fixture path.
+
+    A `fixtureComplete` marker in the payload is *evidence of* a fixture run, not
+    permission for one: honouring it alone let any caller ask production for a
+    fabricated success. The environment is the only authority.
+    """
+    del payload  # accepted for call-site symmetry; intentionally not consulted
+    return fixture_env_enabled()
+
+
+def sanitize_client_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop fixture-success markers from an inbound payload unless fixtures are enabled."""
+    data = dict(payload or {})
+    if fixture_env_enabled():
+        return data
+    for key in FIXTURE_PAYLOAD_KEYS:
+        if key in data:
+            logger.warning("Dropping client-supplied %s from job payload (fixtures disabled)", key)
+            data.pop(key, None)
+    return data
 
 
 def comfy_available() -> bool:
@@ -45,6 +86,16 @@ def comfy_available() -> bool:
 
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
+
+
+def image_provider_available() -> bool:
+    """Whether a real still-image generator could run right now."""
+    return comfy_available()
+
+
+def video_provider_available(db: Session | None = None) -> bool:
+    """Whether a real video generator could run right now (Comfy or a fal key)."""
+    return comfy_available() or fal_key_present(db)
 
 
 def fal_key_present(db: Session | None = None) -> bool:
@@ -510,6 +561,35 @@ def run_render(
     }
 
 
+def normalize_audio_ops(ops: Any) -> list[str]:
+    """Canonical op names for both `["normalize"]` and `[{"op": "normalize"}]` shapes."""
+    names: list[str] = []
+    for op in ops or []:
+        if isinstance(op, dict):
+            raw = op.get("op") or op.get("name") or op.get("type")
+        else:
+            raw = op
+        name = str(raw or "").strip().lower()
+        if not name:
+            raise ValueError(f"audio op is missing an operation name: {op!r}")
+        names.append(name)
+    return names
+
+
+def validate_audio_ops(ops: Any) -> list[str]:
+    """Canonicalise ops and reject anything the ffmpeg executor cannot perform."""
+    names = normalize_audio_ops(ops)
+    unsupported = [n for n in names if n not in SUPPORTED_AUDIO_OPS]
+    if unsupported:
+        raise ValueError(
+            "unsupported audio op(s): "
+            + ", ".join(sorted(set(unsupported)))
+            + "; supported: "
+            + ", ".join(sorted(SUPPORTED_AUDIO_OPS))
+        )
+    return names
+
+
 def process_audio_ffmpeg(
     db: Session,
     *,
@@ -526,8 +606,10 @@ def process_audio_ffmpeg(
     from ...media_ops import run_ffmpeg
 
     ops = payload.get("ops") or ["normalize"]
+    op_names = validate_audio_ops(ops)
+    loudnorm = any(name in LOUDNORM_AUDIO_OPS for name in op_names)
     out = src.with_name(src.stem + "_m29_processed" + src.suffix)
-    if any(str(op).lower() in {"normalize", "loudnorm", "cleanup"} for op in ops):
+    if loudnorm:
         run_ffmpeg(
             [
                 "-i",
@@ -554,6 +636,9 @@ def process_audio_ffmpeg(
         "assetId": new_id,
         "sourceAssetId": asset_id,
         "ops": ops,
+        "appliedOps": op_names,
+        "loudnormApplied": loudnorm,
+        "sampleRate": 48000 if loudnorm else None,
         "provider": "ffmpeg",
         "fixture": False,
         "status": "processed",

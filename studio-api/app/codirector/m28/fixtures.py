@@ -22,6 +22,17 @@ CLASSIFICATIONS = (
     "api_only",
 )
 
+_TRUE = {"1", "true", "TRUE", "yes", "YES", "on"}
+
+
+def fixture_execution_enabled() -> bool:
+    """Whether simulated M2.8 execution results may be produced.
+
+    Only the environment grants this (ADEPT_M28_FIXTURE_MODE / STUDIO_E2E); a request
+    payload never can. Outside it, services refuse instead of fabricating a success.
+    """
+    return fixture_mode_enabled() or os.environ.get("STUDIO_E2E", "").strip() in _TRUE
+
 
 def fixture_hf_discoveries() -> list[dict[str, Any]]:
     return [

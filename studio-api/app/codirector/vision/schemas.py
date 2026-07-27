@@ -71,7 +71,7 @@ class ValidationReport(BaseModel):
     weights: dict[str, float] = Field(default_factory=dict)
     findings: list[ValidatorFinding] = Field(default_factory=list)
     blockingFailures: list[str] = Field(default_factory=list)
-    provider: str = "mock"
+    provider: str = "local"
     createdAt: str = ""
 
 
@@ -82,7 +82,7 @@ class ValidationSession(BaseModel):
     planId: Optional[str] = None
     sceneId: Optional[str] = None
     referenceAssetId: Optional[str] = None
-    provider: str = "mock"
+    provider: str = "local"
     status: SessionStatus = "pending"
     validatorSet: list[str] = Field(default_factory=list)
     reportId: Optional[str] = None

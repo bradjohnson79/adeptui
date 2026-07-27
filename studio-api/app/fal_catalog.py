@@ -11,6 +11,9 @@ FAL_ENGINES: tuple[FalEngine, ...] = ("fal_seedance", "fal_kling", "fal_veo", "f
 ALL_ENGINES: tuple[EngineName, ...] = ("auto", "ltx", "wan", *FAL_ENGINES)
 
 
+MediaType = Literal["video", "image"]
+
+
 @dataclass(frozen=True)
 class FalModel:
     engine: FalEngine
@@ -22,6 +25,7 @@ class FalModel:
     default_duration: int
     supports_end_image: bool
     description: str
+    media_type: MediaType = "video"
 
 
 FAL_MODELS: dict[FalEngine, FalModel] = {
@@ -72,8 +76,22 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
 }
 
 
+# fal image families (Seedream, GPT Image, Nano Banana, …) are not wired yet: no endpoint
+# id for any of them appears anywhere in this repository, and inventing one would produce a
+# model the UI offers and the queue cannot run. Still-image generation currently goes
+# through the local ComfyUI ImageGen path (`imagegen_workflows.py`). Adding a family here
+# means adding its verified endpoint id plus the argument builder below — nothing else in
+# the stack special-cases video.
+FAL_IMAGE_MODELS: dict[str, FalModel] = {}
+
+
 def is_fal_engine(engine: str | None) -> bool:
     return (engine or "") in FAL_MODELS
+
+
+def list_fal_models_by_media(media_type: str) -> list[dict[str, Any]]:
+    """Catalogue entries for one media type ("video" today; "image" once wired)."""
+    return [m for m in list_fal_models() if m.get("media_type") == media_type]
 
 
 def get_fal_model(engine: str) -> FalModel:

@@ -146,11 +146,28 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
         return _service(settings.ollama_url, "/api/tags", "Ollama")
 
     if component.verifier == "fal_key":
-        configured = bool(secret_status("fal_api_key").get("configured"))
-        if configured:
+        status = secret_status("fal_api_key")
+        state = status.get("state") or "missing"
+        message = str(status.get("message") or "")
+        if state == "verified":
+            return Verification(
+                True, False, None,
+                "The fal.ai key was accepted by fal.ai.",
+                version=str(status.get("verifiedAt") or ""),
+                details=((message,) if message else ()),
+            )
+        if state == "invalid":
+            return Verification(
+                False, False, "credential_invalid",
+                "fal.ai rejected the configured API key.",
+                details=((message,) if message else ()),
+                recommendation="configure", requires_user_interaction=True,
+            )
+        if state == "unverified":
             return Verification(
                 False, False, "credential_unverified",
                 "The fal.ai key is configured but has not been verified with the service.",
+                details=((message,) if message else ()),
                 recommendation="configure", requires_user_interaction=True,
             )
         return Verification(

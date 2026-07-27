@@ -18,6 +18,12 @@ from app.feature_flags import FeatureFlags
 from app.migrations import DEFAULT_REGISTRY, M006
 
 
+@pytest.fixture(autouse=True)
+def _allow_mock_vision_provider(monkeypatch: pytest.MonkeyPatch):
+    """The mock vision provider is E2E-only in production code; these tests opt in."""
+    monkeypatch.setenv("STUDIO_E2E", "1")
+
+
 @pytest.fixture()
 def db() -> Session:
     init_db()

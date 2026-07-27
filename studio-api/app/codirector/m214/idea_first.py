@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .honesty import default_honesty, unbound_note
 from .kinds import PROJECT_STAGES
 from .store import M214Store
 
@@ -53,8 +54,8 @@ def propose_from_idea(
         "formatGuidance": _FORMAT_GUIDANCE[stage],
         "progressiveDepth": "shallow",
         "questions": questions[:4],
-        "honesty": "mocked",
-        "note": "Proposals only until Storyteller handoff is approved.",
+        "honesty": default_honesty(),
+        "note": "Proposals only until Storyteller handoff is approved. " + unbound_note("Storyteller"),
         "stages": list(PROJECT_STAGES),
     }
 
@@ -69,5 +70,5 @@ def advance_depth(db: Session, project_id: str, stage: str) -> dict[str, Any]:
         "stage": stage,
         "progressiveDepth": depth,
         "formatGuidance": _FORMAT_GUIDANCE.get(stage, ""),
-        "honesty": "mocked",
+        "honesty": default_honesty(),
     }

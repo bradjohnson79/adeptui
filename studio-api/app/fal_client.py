@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 import httpx
 
 ProgressCb = Optional[Callable[[float, str], Awaitable[None]]]
+RequestIdCb = Optional[Callable[[str], Awaitable[None]]]
+
+# Any real endpoint id works for an authorized probe; the request id below never exists,
+# so fal answers 404 for an accepted key and 401/403 for a rejected one. No job is created
+# and nothing is billed.
+_PROBE_MODEL_ID = "fal-ai/veo3.1"
 
 
 class FalApiError(RuntimeError):
     pass
+
+
+class FalAuthError(FalApiError):
+    """fal rejected the credential itself (as opposed to the request)."""
 
 
 async def upload_file_to_fal(path: Path, api_key: str) -> str:
@@ -63,12 +74,56 @@ async def upload_file_to_fal(path: Path, api_key: str) -> str:
         )
 
 
+async def validate_fal_key(api_key: str, *, timeout_sec: float = 15.0) -> dict[str, Any]:
+    """Probe fal with the supplied key on a real authorized endpoint.
+
+    Returns `{"valid": bool|None, ...}` where `None` means the probe itself could not be
+    completed (network/service problem) — that is reported as unverified rather than
+    silently treated as either success or a bad key.
+    """
+    key = (api_key or "").strip()
+    out: dict[str, Any] = {
+        "valid": None,
+        "status": "unverified",
+        "httpStatus": None,
+        "message": "",
+        "probeEndpoint": _PROBE_MODEL_ID,
+    }
+    if not key:
+        out.update(valid=False, status="invalid", message="No API key supplied.")
+        return out
+
+    url = f"https://queue.fal.run/{_PROBE_MODEL_ID}/requests/{uuid.uuid4().hex}/status"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            response = await client.get(url, headers=_headers(key))
+    except Exception as exc:  # noqa: BLE001 - network failure is "unverified", not "invalid"
+        out["message"] = f"Could not reach fal.ai to verify the key: {exc}"
+        return out
+
+    out["httpStatus"] = response.status_code
+    if response.status_code in (401, 403):
+        out.update(
+            valid=False,
+            status="invalid",
+            message="fal.ai rejected this API key. Check the key at fal.ai/dashboard/keys.",
+        )
+        return out
+    if response.status_code < 500:
+        # 404 (unknown request id) proves the key authenticated successfully.
+        out.update(valid=True, status="verified", message="Key accepted by fal.ai.")
+        return out
+    out["message"] = f"fal.ai returned HTTP {response.status_code}; key could not be verified."
+    return out
+
+
 async def run_fal_model(
     model_id: str,
     arguments: dict[str, Any],
     api_key: str,
     *,
     on_progress: ProgressCb = None,
+    on_request_id: RequestIdCb = None,
     poll_interval: float = 2.0,
     timeout_sec: float = 900.0,
 ) -> dict[str, Any]:
@@ -86,12 +141,19 @@ async def run_fal_model(
             headers=headers,
             json=arguments,
         )
+        if submit.status_code in (401, 403):
+            raise FalAuthError(
+                f"fal.ai rejected the API key ({submit.status_code}). "
+                "Re-save a valid key in Project Settings → Integrations."
+            )
         if submit.status_code >= 400:
             raise FalApiError(f"fal submit failed ({submit.status_code}): {submit.text[:800]}")
         meta = submit.json()
         status_url = meta.get("status_url")
         response_url = meta.get("response_url")
         request_id = meta.get("request_id") or meta.get("requestId")
+        if request_id and on_request_id:
+            await on_request_id(str(request_id))
         if not status_url:
             # Some responses are already completed inline
             if "video" in meta or "images" in meta:

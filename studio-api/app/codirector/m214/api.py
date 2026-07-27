@@ -129,7 +129,8 @@ class MediaBody(BaseModel):
     title: str
     sceneId: str = ""
     groupKey: str = ""
-    honesty: str = "mocked"
+    # None lets the server decide honestly; clients cannot assert "real" without an artefact.
+    honesty: Optional[str] = None
 
 
 class BriefBody(BaseModel):

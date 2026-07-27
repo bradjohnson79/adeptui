@@ -6,6 +6,9 @@ from sqlalchemy.engine import Engine
 from ...db import engine as default_engine
 from ...migrations import DEFAULT_REGISTRY, MigrationRunner
 
+# `CREATE TABLE IF NOT EXISTS` means column defaults only apply to fresh installs;
+# existing databases keep whatever default they were created with and their rows read back
+# unchanged. Application code resolves honesty explicitly (see m214/honesty.py).
 _DDL = [
     """
     CREATE TABLE IF NOT EXISTS m214_attachment_interpretations (
@@ -133,7 +136,7 @@ _DDL = [
         kind VARCHAR(32) NOT NULL,
         title TEXT NOT NULL DEFAULT '',
         group_key VARCHAR(64),
-        honesty VARCHAR(16) NOT NULL DEFAULT 'mocked',
+        honesty VARCHAR(16) NOT NULL DEFAULT 'unavailable',
         status VARCHAR(32) NOT NULL DEFAULT 'draft',
         media_json TEXT NOT NULL DEFAULT '{}',
         created_at DATETIME NOT NULL,

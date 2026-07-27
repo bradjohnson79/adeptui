@@ -133,9 +133,44 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
   async function drainWorker(request: import("@playwright/test").APIRequestContext, maxSteps = 80) {
     const drain = await request.post("/api/codirector/jobs/worker/drain", {
       data: { maxSteps },
+      // The drain runs the closed loop synchronously, including a real ComfyUI render, so the
+      // first one after a cold model load routinely passes the 30 s default action timeout.
+      // Abandoning the request client-side does not stop the server: the render keeps going
+      // and starves /api/health for the specs that follow. Wait for it instead, inside the
+      // 120 s per-test budget.
+      timeout: 90_000,
     });
     expect(drain.ok()).toBeTruthy();
     return drain.json();
+  }
+
+  /**
+   * `worker/drain` is not a barrier. It is global (every spec shares one database), bounded by
+   * `maxSteps`, and it stops at the first tick that finds nothing runnable — which is exactly
+   * what happens while the background worker thread already holds the next job in flight. So a
+   * single drain can return zero steps with the job still running, and reading the job straight
+   * afterwards races the worker. Drain and re-check until the job has actually settled, then
+   * let the caller's assertions judge what it did.
+   */
+  async function drainUntil(
+    request: import("@playwright/test").APIRequestContext,
+    settled: () => Promise<boolean>,
+    { rounds = 30, maxSteps = 20 }: { rounds?: number; maxSteps?: number } = {},
+  ) {
+    for (let i = 0; i < rounds; i += 1) {
+      await drainWorker(request, maxSteps);
+      if (await settled()) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  async function jobStatus(
+    request: import("@playwright/test").APIRequestContext,
+    jobId: string,
+  ): Promise<string> {
+    const res = await request.get(`/api/codirector/jobs/${jobId}`);
+    expect(res.ok()).toBeTruthy();
+    return String((await res.json()).job.status);
   }
 
   async function startClosedLoop(
@@ -208,7 +243,14 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const validateJob = loopBody.jobs.find((j) => j.type === "validate");
     expect(awaitJob).toBeTruthy();
 
-    await drainWorker(request, 120);
+    await drainUntil(
+      request,
+      async () =>
+        (await jobStatus(request, awaitJob!.id)) === "NeedsReview" &&
+        (await jobStatus(request, imageJob!.id)) === "Completed" &&
+        (await jobStatus(request, validateJob!.id)) === "Completed",
+      { maxSteps: 120 },
+    );
     await assertAwaitNeedsReviewOrSkipInfra(request, awaitJob!.id);
 
     const imgInspect = await request.get(`/api/codirector/jobs/${imageJob!.id}`);
@@ -256,7 +298,11 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-approve");
     const awaitJob = loopBody.jobs.find((j) => j.type === "await_approval");
     expect(awaitJob).toBeTruthy();
-    await drainWorker(request, 120);
+    await drainUntil(
+      request,
+      async () => (await jobStatus(request, awaitJob!.id)) === "NeedsReview",
+      { maxSteps: 120 },
+    );
 
     const proposalId = await proposalIdFromLoop(request, loopBody);
     const approve = await request.post(`/api/codirector/jobs/${awaitJob!.id}/mark-approval`, {
@@ -279,7 +325,11 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     expect(awaitJob).toBeTruthy();
     expect(applyJob).toBeTruthy();
 
-    await drainWorker(request, 120);
+    await drainUntil(
+      request,
+      async () => (await jobStatus(request, imageJob!.id)) === "Completed",
+      { maxSteps: 120 },
+    );
     const imgJson = await (await request.get(`/api/codirector/jobs/${imageJob!.id}`)).json();
     expect(imgJson.job.result?.assetId).toBeTruthy();
 
@@ -287,7 +337,11 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     await request.post(`/api/codirector/jobs/${awaitJob!.id}/mark-approval`, {
       data: { proposalId, approved: true, actor: "e2e" },
     });
-    await drainWorker(request, 120);
+    await drainUntil(
+      request,
+      async () => (await jobStatus(request, applyJob!.id)) === "Completed",
+      { maxSteps: 120 },
+    );
 
     const applyJson = await (await request.get(`/api/codirector/jobs/${applyJob!.id}`)).json();
     expect(applyJson.job.status).toBe("Completed");
@@ -319,7 +373,18 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const loopBody = await startClosedLoop(request, project.id, "scene-e2e-history");
     const storyJob = loopBody.jobs.find((j) => j.type === "storyboard_generate");
     expect(storyJob).toBeTruthy();
-    await drainWorker(request, 120);
+
+    let historyJson: { attempts: unknown[]; audit: unknown[] } = { attempts: [], audit: [] };
+    await drainUntil(
+      request,
+      async () => {
+        const history = await request.get(`/api/codirector/jobs/${storyJob!.id}/history`);
+        expect(history.ok()).toBeTruthy();
+        historyJson = await history.json();
+        return historyJson.attempts.length > 0;
+      },
+      { maxSteps: 120 },
+    );
 
     const events = await request.get(
       `/api/codirector/jobs/events?projectId=${project.id}&jobId=${storyJob!.id}`,
@@ -328,9 +393,6 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     const eventsJson = await events.json();
     expect(Array.isArray(eventsJson.events)).toBeTruthy();
 
-    const history = await request.get(`/api/codirector/jobs/${storyJob!.id}/history`);
-    expect(history.ok()).toBeTruthy();
-    const historyJson = await history.json();
     expect(historyJson.attempts.length).toBeGreaterThan(0);
     expect(historyJson.audit.length).toBeGreaterThan(0);
   });
@@ -350,23 +412,19 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
     });
     expect(created.ok()).toBeTruthy();
     const jobId = (await created.json()).job.id;
-    await drainWorker(request, 10);
-
-    const failedInspect = await request.get(`/api/codirector/jobs/${jobId}`);
-    expect(failedInspect.ok()).toBeTruthy();
-    expect((await failedInspect.json()).job.status).toBe("Failed");
+    await drainUntil(request, async () => (await jobStatus(request, jobId)) === "Failed");
+    expect(await jobStatus(request, jobId)).toBe("Failed");
 
     const retried = await request.post(`/api/codirector/jobs/${jobId}/retry`, {
       data: { actor: "e2e", reason: "retry" },
     });
     expect(retried.ok()).toBeTruthy();
     expect((await retried.json()).job.status).toBe("Retrying");
-    await drainWorker(request, 10);
+    await drainUntil(request, async () => (await jobStatus(request, jobId)) === "Failed");
     const history = await request.get(`/api/codirector/jobs/${jobId}/history`);
     expect(history.ok()).toBeTruthy();
     expect((await history.json()).attempts.length).toBeGreaterThanOrEqual(2);
-    const after = await request.get(`/api/codirector/jobs/${jobId}`);
-    expect((await after.json()).job.status).toBe("Failed");
+    expect(await jobStatus(request, jobId)).toBe("Failed");
   });
 
   test("pause and resume generic job", async ({ request }) => {
@@ -390,9 +448,8 @@ test.describe("Co-Director M2.7 Production Executive @critical @isolated", () =>
       data: { actor: "e2e", reason: "go" },
     });
     expect(resumed.ok()).toBeTruthy();
-    await drainWorker(request, 10);
-    const done = await request.get(`/api/codirector/jobs/${jobId}`);
-    expect((await done.json()).job.status).toBe("Completed");
+    await drainUntil(request, async () => (await jobStatus(request, jobId)) === "Completed");
+    expect(await jobStatus(request, jobId)).toBe("Completed");
   });
 
   test("cancel generic job", async ({ request }) => {

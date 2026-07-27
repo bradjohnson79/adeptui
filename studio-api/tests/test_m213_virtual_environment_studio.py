@@ -18,6 +18,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("STUDIO_FEATURE_VIRTUAL_ENVIRONMENT_STUDIO_V1", "true")
     # Isolate data dir if settings honor it
     monkeypatch.setenv("STUDIO_DATA_DIR", str(tmp_path / "data"))
+    # Fixture proofs below request synthetic environments, which is env-gated.
+    monkeypatch.setenv("ADEPT_M213_FIXTURE_MODE", "1")
     from app.main import app
     from app import feature_flags as ff
 
@@ -28,6 +30,20 @@ def client(tmp_path, monkeypatch):
         True,
     ) if False else None
     # FeatureFlags is frozen dataclass — rebuild
+    ff.feature_flags = ff.FeatureFlags.from_env(os.environ)
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture()
+def e2e_client(tmp_path, monkeypatch):
+    """Client for the guided fixture slice, which is gated on STUDIO_E2E."""
+    monkeypatch.setenv("STUDIO_FEATURE_VIRTUAL_ENVIRONMENT_STUDIO_V1", "true")
+    monkeypatch.setenv("STUDIO_DATA_DIR", str(tmp_path / "data-e2e"))
+    monkeypatch.setenv("STUDIO_E2E", "1")
+    from app import feature_flags as ff
+    from app.main import app
+
     ff.feature_flags = ff.FeatureFlags.from_env(os.environ)
     with TestClient(app) as c:
         yield c
@@ -146,8 +162,15 @@ def test_proof_d_blocking(client):
     assert ap.json()["approved"] is True
 
 
-def test_proof_e_full_guided_e2e(client):
+def test_guided_slice_refused_outside_e2e(client, monkeypatch):
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    r = client.post("/api/codirector/m213/e2e/guided", json={"projectId": "p-e-prod", "fixture": True})
+    assert r.status_code == 403
+
+
+def test_proof_e_full_guided_e2e(e2e_client):
     """Proof E: source->env->blocking->camera/lighting->concept->timeline with persisted approvals."""
+    client = e2e_client
     r = client.post("/api/codirector/m213/e2e/guided", json={"projectId": "p-e", "fixture": True})
     assert r.status_code == 200
     body = r.json()
@@ -160,8 +183,9 @@ def test_proof_e_full_guided_e2e(client):
     assert body["dashboard"]["vpcSpecialist"] == "virtual-production-coordinator"
 
 
-def test_proof_f_persistence_restore_recovery(client):
+def test_proof_f_persistence_restore_recovery(e2e_client):
     """Proof F: versioned states + recovery."""
+    client = e2e_client
     e2e = client.post("/api/codirector/m213/e2e/guided", json={"projectId": "p-f", "fixture": True}).json()
     env_id = e2e["environmentId"]
     restore = client.post(
@@ -237,6 +261,93 @@ def test_concept_mock_labeled(client):
     assert c["generationMode"] == "mock"
     assert c["realGeneration"] is False
     assert "MOCK" in c["payload"]["honesty"].upper() or "FIXTURE" in c["payload"]["honesty"].upper()
+
+
+def test_concept_defaults_refuse_mock_in_production(client, monkeypatch):
+    """Without a real provider, the default request fails honestly instead of returning a mock."""
+    monkeypatch.delenv("STUDIO_M213_REAL_CONCEPT_PROVIDER", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    spin = client.post(
+        "/api/codirector/m213/camera-spin", json={"projectId": "p-con-real", "fixture": True}
+    ).json()
+    r = client.post(
+        "/api/codirector/m213/concepts",
+        json={"projectId": "p-con-real", "environmentId": spin["environmentId"], "tier": "draft"},
+    )
+    assert r.status_code == 503
+    assert "unavailable" in r.json()["detail"].lower()
+
+
+def test_camera_spin_defaults_to_real_frames(client):
+    """SpinBody.fixture now defaults False, so an unqualified request is not a fixture spin."""
+    from app.codirector.m213.api import SpinBody
+
+    assert SpinBody(projectId="p").fixture is False
+
+
+@pytest.fixture()
+def production_client(tmp_path, monkeypatch):
+    """Client with no fixture/E2E env — the shape a production deployment has."""
+    monkeypatch.setenv("STUDIO_FEATURE_VIRTUAL_ENVIRONMENT_STUDIO_V1", "true")
+    monkeypatch.setenv("STUDIO_DATA_DIR", str(tmp_path / "data-prod"))
+    monkeypatch.delenv("ADEPT_M213_FIXTURE_MODE", raising=False)
+    monkeypatch.delenv("STUDIO_E2E", raising=False)
+    from app import feature_flags as ff
+    from app.main import app
+
+    ff.feature_flags = ff.FeatureFlags.from_env(os.environ)
+    with TestClient(app) as c:
+        yield c
+
+
+def test_camera_spin_refuses_synthetic_frames_outside_fixture(production_client):
+    """M213-04: no frames + no fixture env must not fabricate a spin."""
+    r = production_client.post(
+        "/api/codirector/m213/camera-spin", json={"projectId": "p-prod-spin"}
+    )
+    assert r.status_code == 503
+    assert "real captured frames" in r.json()["detail"]
+
+
+def test_camera_spin_refuses_fixture_request_outside_fixture_env(production_client):
+    """A client asking for fixture=true is a request, not authorisation."""
+    r = production_client.post(
+        "/api/codirector/m213/camera-spin",
+        json={"projectId": "p-prod-spin-2", "fixture": True},
+    )
+    assert r.status_code == 503
+
+
+def test_camera_spin_accepts_real_frames_without_fixture_env(production_client):
+    frames = [
+        {"index": i, "angle": float(i * 90), "assetId": f"asset-{i}"} for i in range(4)
+    ]
+    r = production_client.post(
+        "/api/codirector/m213/camera-spin",
+        json={"projectId": "p-prod-spin-3", "fixture": False, "frames": frames},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["fixture"] is False
+    assert body["summary"]["ordered"]["count"] == 4
+
+
+def test_reconstruct_adapter_defaults_to_detect(production_client):
+    """M213-05: the fixture adapter is never selected implicitly."""
+    from app.codirector.m213.api import ReconstructBody
+
+    assert ReconstructBody(projectId="p").adapter == "detect"
+    r = production_client.post(
+        "/api/codirector/m213/reconstruction",
+        json={"projectId": "p-prod-recon", "images": ["a.jpg", "b.jpg", "c.jpg"], "force": True},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    if body["ok"] is False and body.get("requestedAdapter") == "detect":
+        assert "No real reconstruction adapter is installed" in body["message"]
+    else:
+        # A real COLMAP/Nerfstudio/gsplat binary is installed on this machine.
+        assert body.get("fixture") is not True
 
 
 def test_import_security_rejects_traversal():

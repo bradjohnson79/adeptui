@@ -47,6 +47,10 @@ class ProviderHealthResult:
     production_executive_enabled: bool = False
     production_intelligence_enabled: bool = False
     adaptive_learning_enabled: bool = False
+    unified_experience_enabled: bool = False
+    virtual_environment_studio_enabled: bool = False
+    audio_production_enabled: bool = False
+    director_timeline_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -67,6 +71,10 @@ class ProviderHealthResult:
             "productionExecutiveEnabled": self.production_executive_enabled,
             "productionIntelligenceEnabled": self.production_intelligence_enabled,
             "adaptiveLearningEnabled": self.adaptive_learning_enabled,
+            "unifiedExperienceEnabled": self.unified_experience_enabled,
+            "virtualEnvironmentStudioEnabled": self.virtual_environment_studio_enabled,
+            "audioProductionEnabled": self.audio_production_enabled,
+            "directorTimelineEnabled": self.director_timeline_enabled,
             "ok": self.status == "Ready",
         }
 

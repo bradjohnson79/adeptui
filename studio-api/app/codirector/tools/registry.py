@@ -54,6 +54,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "get_source_manager_status": system.get_source_manager_status,
     "get_reference_capabilities": system.get_reference_capabilities,
     "get_engine_capabilities": system.get_engine_capabilities,
+    "get_cloud_render_status": system.get_cloud_render_status,
     "vision_validation_status": vision.vision_validation_status,
     "vision_validation_report": vision.vision_validation_report,
     "get_timeline_image": timeline_references.get_timeline_image,

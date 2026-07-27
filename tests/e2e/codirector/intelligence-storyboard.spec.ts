@@ -35,6 +35,23 @@ async function sendMessage(page: Page, text: string) {
 }
 
 /**
+ * The product states its own limits in sentences that contain the very words a naive
+ * substring guard looks for — "Does not claim a render completed …", "No asset was
+ * created". Those sentences are the honest behaviour, so they are removed before the guard
+ * runs, and their presence is asserted separately: deleting a caveat can no longer buy a
+ * green test.
+ */
+const HONESTY_CAVEATS: RegExp[] = [
+  /Does not claim a render completed[^\n]*/gi,
+  /No asset was created[^\n]*/gi,
+  /render execution is blocked[^\n]*/gi,
+];
+
+function withoutHonestyCaveats(body: string): string {
+  return HONESTY_CAVEATS.reduce((text, pattern) => text.replace(pattern, ""), body);
+}
+
+/**
  * M2.4.1 integrated vertical slice:
  * intention ? plan ? propose_storyboard_generation ? capability check ? approve ?
  * execution_blocked when Comfy/packs unavailable ? no fake asset ? visualValidationPending remains.
@@ -81,15 +98,19 @@ test.describe("@critical @isolated codirector intelligence storyboard", () => {
       await expect(proposalCard).toBeVisible({ timeout: 45_000 });
       await expect(proposalCard).toContainText(/storyboard/i);
 
-      // UI must not claim a render completed before approval/execution.
+      // UI must not claim a render completed before approval/execution — and must still be
+      // saying so out loud.
       const bodyBefore = await page.locator("body").innerText();
-      expect(bodyBefore).not.toMatch(/render completed|render finished|asset created/i);
+      expect(bodyBefore).toMatch(/Does not claim a render completed/i);
+      expect(withoutHonestyCaveats(bodyBefore)).not.toMatch(
+        /render completed|render finished|asset created/i,
+      );
 
       await proposalCard.getByRole("button", { name: "Approve" }).click();
       await expect(proposalCard).toBeHidden({ timeout: 25_000 });
 
       const bodyAfter = await page.locator("body").innerText();
-      expect(bodyAfter).not.toMatch(/render completed|render finished/i);
+      expect(withoutHonestyCaveats(bodyAfter)).not.toMatch(/render completed|render finished/i);
       // Honest blocked/pending language is acceptable; fake success is not.
       expect(bodyAfter.toLowerCase()).not.toContain("visual validation complete");
 

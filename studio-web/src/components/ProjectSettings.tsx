@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import type { FalKeyStatus } from "../api";
 import type { Project } from "../types";
 import { LearningPanel } from "./LearningPanel";
 import { LearningEvolutionPanel } from "./LearningEvolutionPanel";
@@ -17,6 +18,13 @@ const TABS = [
 
 type TabId = (typeof TABS)[number][0];
 
+const FAL_STATE_LABELS: Record<string, string> = {
+  missing: "Not configured — required for Txt2Vid / fal engines.",
+  unverified: "Configured, not verified with fal.ai.",
+  verified: "Verified with fal.ai.",
+  invalid: "fal.ai rejected this key.",
+};
+
 function parseDefaults(raw?: string) {
   try {
     return raw ? JSON.parse(raw) : {};
@@ -28,8 +36,10 @@ function parseDefaults(raw?: string) {
 export function ProjectSettings({ project, onChange }: { project: Project; onChange: () => void }) {
   const [tab, setTab] = useState<TabId>("general");
   const [defaults, setDefaults] = useState<Record<string, unknown>>(() => parseDefaults(project.defaults_json));
-  const [falStatus, setFalStatus] = useState<{ configured: boolean; hint?: string | null } | null>(null);
+  const [falStatus, setFalStatus] = useState<FalKeyStatus | null>(null);
   const [falKey, setFalKey] = useState("");
+  const [falBusy, setFalBusy] = useState(false);
+  const [falError, setFalError] = useState<string | null>(null);
 
   useEffect(() => {
     const forced = sessionStorage.getItem("adept_settings_tab") as TabId | null;
@@ -46,6 +56,23 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
   useEffect(() => {
     if (tab === "integrations") api.falKeyStatus().then(setFalStatus).catch(() => setFalStatus(null));
   }, [tab]);
+
+  /**
+   * All fal credential mutations funnel through here so the raw key stays in local state
+   * only: it is never logged, never echoed back by the API, and is cleared on success.
+   */
+  const runFalAction = async (action: () => Promise<FalKeyStatus>, clearInput: boolean) => {
+    setFalBusy(true);
+    setFalError(null);
+    try {
+      setFalStatus(await action());
+      if (clearInput) setFalKey("");
+    } catch (err) {
+      setFalError(err instanceof Error ? err.message : "fal.ai request failed.");
+    } finally {
+      setFalBusy(false);
+    }
+  };
 
   const saveMeta = (patch: Partial<Project>) => api.updateProject(project.id, patch).then(onChange);
 
@@ -251,22 +278,57 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
       {tab === "integrations" && (
         <div className="settings-panel">
           <h3>fal.ai</h3>
-          <p className="muted">
-            {falStatus?.configured ? `Configured ${falStatus.hint || ""}` : "Not configured — required for Txt2Vid / fal engines."}
+          <p className="muted" data-testid="fal-key-state">
+            {FAL_STATE_LABELS[falStatus?.state ?? "missing"]}
+            {falStatus?.hint ? ` · ${falStatus.hint}` : ""}
+            {falStatus?.verifiedAt ? ` · checked ${falStatus.verifiedAt}` : ""}
           </p>
+          {falStatus?.message && <p className="muted">{falStatus.message}</p>}
+          {falStatus?.state === "unverified" && (
+            <p className="muted">
+              The key is stored but fal.ai could not confirm it. Renders will fail closed until it verifies.
+            </p>
+          )}
+          {falError && (
+            <p className="error" role="alert" data-testid="fal-key-error">
+              {falError}
+            </p>
+          )}
           <div className="field">
-            <label>API key</label>
-            <input type="password" value={falKey} onChange={(e) => setFalKey(e.target.value)} />
+            <label htmlFor="fal-api-key">API key</label>
+            <input
+              id="fal-api-key"
+              data-testid="fal-key-input"
+              type="password"
+              autoComplete="off"
+              value={falKey}
+              onChange={(e) => setFalKey(e.target.value)}
+            />
           </div>
           <div className="row">
             <button
               type="button"
               className="primary"
-              onClick={() => api.falKeySet(falKey).then(setFalStatus).then(() => setFalKey(""))}
+              data-testid="fal-key-save"
+              disabled={falBusy || !falKey.trim()}
+              onClick={() => runFalAction(() => api.falKeySet(falKey), true)}
             >
-              Save key
+              {falBusy ? "Checking with fal.ai…" : "Save & verify key"}
             </button>
-            <button type="button" onClick={() => api.falKeyClear().then(setFalStatus)}>
+            <button
+              type="button"
+              data-testid="fal-key-validate"
+              disabled={falBusy || !falStatus?.configured}
+              onClick={() => runFalAction(() => api.falKeyValidate(), false)}
+            >
+              Re-verify
+            </button>
+            <button
+              type="button"
+              data-testid="fal-key-clear"
+              disabled={falBusy}
+              onClick={() => runFalAction(() => api.falKeyClear(), true)}
+            >
               Clear
             </button>
           </div>

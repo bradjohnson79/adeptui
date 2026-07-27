@@ -28,6 +28,12 @@ from closed_loop_fixture import ClosedLoopFixture, seed_closed_loop_project
 from flag_matrix import FLAG_MATRIX, FlagCombo, apply_flag_combo
 
 
+@pytest.fixture(autouse=True)
+def _allow_mock_vision_provider(monkeypatch: pytest.MonkeyPatch):
+    """The mock vision provider is E2E-only in production code; these flows opt in."""
+    monkeypatch.setenv("STUDIO_E2E", "1")
+
+
 @pytest.fixture()
 def db() -> Session:
     init_db()

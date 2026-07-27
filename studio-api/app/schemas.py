@@ -352,6 +352,11 @@ class FalKeyStatus(BaseModel):
     configured: bool
     hint: Optional[str] = None
     fingerprint: Optional[str] = None
+    # missing | unverified | verified | invalid — result of the last live fal probe.
+    state: str = "missing"
+    verified: Optional[bool] = None
+    verifiedAt: Optional[str] = None
+    message: str = ""
 
 
 class FalKeyUpdate(BaseModel):
@@ -386,6 +391,7 @@ class FalModelOut(BaseModel):
     provider: str
     model_id: str
     mode: str
+    media_type: str = "video"
     durations: list[int] = Field(default_factory=list)
     default_duration: int = 5
     supports_end_image: bool = False

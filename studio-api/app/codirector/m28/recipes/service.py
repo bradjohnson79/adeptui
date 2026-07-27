@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import ensure_m28_tables
-from ..fixtures import mock_generation_result
+from ..fixtures import fixture_execution_enabled, mock_generation_result
 
 
 def _now() -> str:
@@ -171,6 +171,18 @@ class RecipeService:
         stage_id: str,
         failed: bool = False,
     ) -> dict[str, Any]:
+        """Record the outcome of a recipe stage.
+
+        The only stage result available is `mock_generation_result`, so completing a stage
+        outside an env-gated fixture run would mark a recipe `completed` against an asset
+        that was never generated. Refuse instead; the executive maps this to Blocked.
+        """
+        if not fixture_execution_enabled():
+            raise PermissionError(
+                "Recipe stage completion is unavailable: recipe stages have no real "
+                "generation backend wired, and simulated stage results require "
+                "ADEPT_M28_FIXTURE_MODE / STUDIO_E2E."
+            )
         result = mock_generation_result(stage=stage_id)
         status = "failed" if failed else "completed"
         db.execute(

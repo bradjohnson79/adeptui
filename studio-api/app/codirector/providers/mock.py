@@ -224,9 +224,16 @@ class MockCoDirectorProvider:
                                 "entityType": "character",
                                 "entityKey": "ava",
                                 "displayName": "Ava",
+                                # Field names must match CharacterData exactly: it forbids
+                                # extras, so an invented key ("appearance") makes the whole
+                                # approval fail at apply time instead of at parse time.
                                 "data": {
                                     "description": "Protagonist, mid-20s, short dark hair.",
-                                    "appearance": "Has a small scar above her left eyebrow, established in this scene.",
+                                    "appearanceSummary": (
+                                        "Has a small scar above her left eyebrow, "
+                                        "established in this scene."
+                                    ),
+                                    "distinguishingFeatures": "Small scar above the left eyebrow.",
                                 },
                             }
                         ],
