@@ -83,6 +83,18 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         2000 * MB, 2000 * MB, ("comfyui", "ltx_checkpoint"), "ic_lora_file", "path_link",
         category="Reference & Identity Models",
     ),
+    ComponentDefinition(
+        "index_tts2",
+        "IndexTTS2",
+        "Official IndexTTS2 local character voice runtime with pinned upstream repo, isolated venv, and reference-based expressive voice cloning. ~15GB full install.",
+        False,
+        15000 * MB,
+        15000 * MB,
+        ("python", "ffmpeg"),
+        "index_tts2",
+        "index_tts2",
+        category="Character Voice Models",
+    ),
 )
 
 BY_ID = {component.id: component for component in COMPONENTS}

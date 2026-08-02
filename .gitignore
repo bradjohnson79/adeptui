@@ -41,3 +41,10 @@ scripts/_payloads/
 # M2.10b sandbox runtimes / weights (do not commit)
 data/m210b-sandbox/
 data/m210b-kvenv/
+
+# V1.1 Owner Beta — machine-specific paths / Comfy launch (never commit secrets)
+config/beta-local.local.env
+
+# M4.10 IndexTTS2 isolated runtime / models / outputs (covered by data/ too)
+data/runtimes/index-tts2/
+runtimes/index-tts2/

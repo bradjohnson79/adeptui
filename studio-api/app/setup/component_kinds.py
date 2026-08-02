@@ -36,6 +36,8 @@ def component_kind(definition: ComponentDefinition) -> str:
         return KIND_CREDENTIAL
     if definition.installer == "asset_pack" or definition.verifier == "asset_pack":
         return KIND_DOWNLOADABLE_PACK
+    if definition.installer in ("m210b_qwen_voice", "huggingface_snapshot", "index_tts2"):
+        return KIND_DOWNLOADABLE_MODEL
     if definition.installer == "path_link":
         return KIND_LINKED_RESOURCE
     if definition.verifier in ("comfy_service",):
@@ -65,7 +67,7 @@ def primary_action_for_kind(
             return None
         return {"action": "configure", "label": "Configure API Key", "disabled": False}
 
-    if kind == KIND_DOWNLOADABLE_PACK:
+    if kind in (KIND_DOWNLOADABLE_PACK, KIND_DOWNLOADABLE_MODEL):
         if source_state in (SOURCE_NOT_PUBLISHED, SOURCE_NOT_CONFIGURED):
             return {"action": "add_source_url", "label": "Add Source URL", "disabled": False}
         if source_state == SOURCE_RELEASE_NOT_FOUND:

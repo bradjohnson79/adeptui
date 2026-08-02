@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from .migration import ensure_migrated
 from .persistence import get_source, list_sources, remove_source
@@ -16,6 +17,13 @@ from .service import (
 from ..setup.download_sources.service import verify_source_url
 
 router = APIRouter(prefix="/source-manager", tags=["source-manager"])
+
+
+class VoiceModelInstallBody(BaseModel):
+    confirm: bool = True
+    confirm_download_models: bool = Field(default=False, alias="confirmDownloadModels")
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get("/overview")
@@ -115,3 +123,40 @@ def source_manager_select_provider(body: dict):
     )
     provider = select_provider(source_input)
     return {"providerId": provider.id, "provider": provider.detect().to_dict()}
+
+
+@router.get("/voice-models")
+def source_manager_voice_models():
+    from .voice_models import list_voice_models
+
+    return list_voice_models()
+
+
+@router.post("/voice-models/{component_id}/install")
+def source_manager_voice_model_install(
+    component_id: str,
+    body: VoiceModelInstallBody | None = None,
+):
+    from .voice_models import enqueue_voice_install
+
+    payload = body or VoiceModelInstallBody()
+    try:
+        return enqueue_voice_install(
+            component_id,
+            confirm=bool(payload.confirm),
+            confirm_download_models=bool(payload.confirm_download_models),
+        )
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown voice model: {component_id}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/voice-models/{component_id}/uninstall")
+def source_manager_voice_model_uninstall(component_id: str):
+    from .voice_models import uninstall_voice_model
+
+    try:
+        return uninstall_voice_model(component_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Unknown voice model: {component_id}") from exc
