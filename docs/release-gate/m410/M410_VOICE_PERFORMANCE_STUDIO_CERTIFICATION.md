@@ -7,7 +7,7 @@
 | Starting branch | `feature/m4-8-m4-9-cinematic-image-storyboard` |
 | Starting SHA | `f758744168ec93f559d7fa0d9098ce47c39fe3ff` |
 | Feature branch | `feature/m4-10-voice-performance-index-tts2` |
-| Final SHA | *(set after `feat(m4.10)` commit)* |
+| Implementation SHA | `91443db0e1b93aa3b260410b41db0b0419594c14` |
 | Commit strategy | M4.10-scoped only (see Shared-file notes) |
 | Adept UI version | Beta local (`8760` / `8758`) |
 | Voice Studio version | M4.10 Voice Performance Studio |
@@ -16,100 +16,90 @@
 | IndexTTS2 runtime version | `m4.10-index-tts2` |
 | IndexTTS2 git revision (pinned) | `13495845e3028f0bb6ca1462ad22aa0e76349e40` |
 | IndexTTS2 model | `IndexTeam/IndexTTS-2` (official HF) |
-| Qwen Voice Identity | Qwen3-TTS Design/Clone (unchanged Stage 1) |
-| GPU / VRAM | RTX 5090 · ~32 GB (from beta health) |
+| Install mode | `full` (`confirm=true`, `confirm_download_models=true`) |
+| Torch / CUDA | `2.8.0+cu128` · `cuda:0` |
+| GPU / VRAM | RTX 5090 · ~32 GB total (beta health) |
+| Qwen Voice Identity under test | `f53ac2b6-aa00-4700-a7b3-a740d1b631d7` v1 · character `7337605b-8fb3-46ec-a66c-de5dec4f5360` · project `e32dae30-a014-4ea4-a2f2-69f4b7809bde` |
 
 ## Architecture
 
-- **Qwen3-TTS** owns Voice Identity (design, clone, approval). IndexTTS2 never mutates identity.
-- **IndexTTS2** (`index-tts2-local`) is the exclusive Voice Performance engine via isolated runtime under `data/runtimes/index-tts2/`.
-- **Co-Director** proposes editable performance plans (`voice.*` tools + UI Co-Director Recommended).
-- **Manual Direction** preserves separate plan state when switching modes.
-- **Creator approval** is mandatory before Timeline / Lip Sync handoff.
-- If IndexTTS2 is not installed/ready, APIs report honest `not_installed` / `requires_setup` — no silent Qwen performance fallback presented as IndexTTS2.
+- **Qwen3-TTS** owns Voice Identity. IndexTTS2 never mutates identity (verified unchanged after live generation).
+- **IndexTTS2** (`index-tts2-local`) is the exclusive Voice Performance engine under `data/runtimes/index-tts2/`.
+- **Co-Director** proposes editable plans; **Manual Direction** preserves separate state.
+- Creator approval is mandatory before Timeline / Lip Sync handoff.
+- Product install now requires explicit `confirmDownloadModels` (never silently true).
 
 ## Feature Matrix
 
 | Feature | Status | Evidence |
 | --- | --- | --- |
-| Qwen Voice Identity preserved | PASS | Identity tab + `character_identity` unchanged |
-| IndexTTS2 catalog + Source Manager | PASS | `setup/catalog.py` `index_tts2`; `source_manager/voice_models.py` |
-| Runtime health (honest) | PASS | `/api/voice-performance/m410/runtime/status` → not_installed until install |
-| Co-Director performance plan | PASS | `m410_service.build_codirector_performance_plan` + `voice.*` tools |
-| Manual Direction | PASS | FE mode switch + `set_direction_mode` |
-| Emotion presets | PASS | `emotion_presets.py` + FE presets |
-| Emotion vectors (Advanced) | PASS | Advanced collapsed by default; supported vectors only |
-| Emotional-reference audio | PASS (wired) | Record field + passed as `emotionAudioPath` into IndexTTS2 worker |
-| Multiple takes | PASS (code) | `create_takes` independent jobs; live gen blocked until install |
-| Take comparison | PASS | `compare_takes` API + FE compare |
-| Approval | PASS | Exclusive primary approve; alternatives retained |
-| Scene dialogue batch | PASS | `create_scene_batch` + progression plans |
-| Scriptwriter linkage | PASS | `prepare_timeline` now includes `elementId` + context |
-| Timeline handoff | PASS | prepare + place with replace confirm |
-| Lip Sync handoff | PASS | `prepare_lipsync` binds scene lipsync/audio assets |
-| Persistence | PASS | SQLAlchemy M410 tables + unit tests |
-| Live IndexTTS2 generation | NOT RUN | Runtime not installed on this host |
-| Manual UX human stamp | PENDING | `M410_MANUAL_UX_CHECKLIST.md` |
+| Qwen Voice Identity preserved | PASS | Before/after identity IDs match in `artifacts/m410/live-go-cert.json` |
+| IndexTTS2 catalog + Source Manager | PASS | `confirmDownloadModels` UI + API; catalog IndexTTS2 entry |
+| Runtime install + health | PASS | Manifest `status=ready`; torch CUDA probe OK |
+| Co-Director performance plan | PASS | Live plan + Take 1 |
+| Manual Direction | PASS | Take 3 |
+| Emotion vectors (Advanced) | PASS | Take 2 advanced mix |
+| Emotional-reference audio | PASS (wired) | Path wired; not separately exercised in this live run |
+| Multiple takes | PASS | 3 completed WAV takes |
+| Take comparison | PASS | `compare` payload in live cert |
+| Approval | PASS | `75f80eef-7351-4a7c-894f-1ea7d9cef74a` primary-approved |
+| Scene dialogue batch | PASS | 2 line plans; `autoApproved=false` |
+| Scriptwriter linkage | PASS | `scriptElementId` on records |
+| Timeline handoff | PASS | Clip `f26bdab6-df13-4a38-acf7-f7e1918f7ecd` |
+| Lip Sync handoff | PASS | Prepare payload persisted |
+| Persistence | PASS | Reload covered by Playwright live |
+| Live IndexTTS2 generation | **PASS** | Live cert + Playwright live (no skip) |
+| Manual UX human stamp | **PENDING** | `M410_MANUAL_UX_CHECKLIST.md` unsigned |
+
+## Live evidence
+
+| Item | ID / path |
+| --- | --- |
+| Performance record | `209df85f-1d8b-44fc-b2c9-0af65ac7d31a` |
+| Take 1 (approved) | `75f80eef-…` · asset `981d86c3-…` · 1706 ms |
+| Take 2 | `e01e652b-…` · asset `f1a91b02-…` · 1509 ms |
+| Take 3 | `992354ce-…` · asset `2595c8a1-…` · 1114 ms |
+| Timeline clip | `f26bdab6-df13-4a38-acf7-f7e1918f7ecd` |
+| Runtime root | `data/runtimes/index-tts2/` |
+| Manifest | `artifacts/m410/runtime-manifest.json` |
+| Live cert JSON | `artifacts/m410/live-go-cert.json` |
 
 ## Test Results
 
 | Command | Outcome |
 | --- | --- |
-| `PYTHONPATH=studio-api python -m pytest studio-api/tests/test_m410_voice_performance.py -q` | **7 passed** |
-| `PYTHONPATH=studio-api python -m pytest studio-api/tests/test_m42_w44_voice_performance.py -q` | **13 passed** (with M410 suite: 20 passed) |
-| `studio-web` `npm run build` | **passed** (per UX subagent) |
-| `PLAYWRIGHT_BASE_URL=http://127.0.0.1:8760 npx playwright test tests/e2e/m410/* --project=chromium` | **2 passed, 1 skipped** (live gen skipped: IndexTTS2 not ready) |
-
-### Playwright detail
-
-- API contract: PASS (provider `index-tts2-local`, accent experimental, mixed_language not_recommended)
-- Studio IA / identity gate / viewports: PASS
-- Live generate → approve → timeline → lipsync → reload: **SKIPPED** (IndexTTS2 not installed)
-
-## Evidence paths
-
-- Audit: `docs/release-gate/m410/M410_REPOSITORY_AND_RUNTIME_AUDIT.md`
-- Persistence: `docs/release-gate/m410/M410_DATA_AND_PERSISTENCE.md`
-- Runtime docs: `docs/voice-studio/m4-10-voice-performance/`
-- FE: `studio-web/src/components/voiceStudio/VoicePerformanceStudio.tsx`
-- Runtime: `studio-api/app/voice_performance/runtime/index_tts2.py`
-- E2E: `tests/e2e/m410/`
+| `pytest studio-api/tests/test_m410_voice_performance.py studio-api/tests/test_m42_w44_voice_performance.py -q` | **23 passed** |
+| `PLAYWRIGHT_BASE_URL=http://127.0.0.1:8760 npx playwright test tests/e2e/m410 --project=chromium --retries=0` | **3 passed** (live generate included) |
+| `python scripts/voice_studio/m410_live_go_cert.py` | **GO_CANDIDATE** · 3 completed takes |
 
 ## Shared-file notes (M4.10-scoped commit)
 
-Intentionally **not** staged in the milestone commit because they contain large unrelated uncommitted integration deltas (M4.8/M4.9 image/storyboard and earlier):
+Intentionally **not** staged in `91443db` because they contain large unrelated uncommitted integration deltas:
 
-| File | Reason left unstaged | Working-tree dependency |
-| --- | --- | --- |
-| `studio-web/src/api.ts` | +3k lines mixed clients | Contains `voicePerformanceM410` + `confirmDownloadModels` install client |
-| `studio-web/src/styles.css` | Mixed chrome/CSS | Contains Voice Performance Studio styles |
-| `studio-api/app/codirector/tools/definitions.py` | +3k lines mixed tools | Contains `voice.*` tool defs |
-| `studio-api/app/codirector/tools/registry.py` | Mixed handlers | Registers `voice_m410` handlers |
-| `studio-api/app/setup/diagnostics.py` / `orchestrator.py` | Mixed installers | IndexTTS2 verify/install hooks |
-| `studio-api/app/scriptwriter/service.py` | Untracked package surface | `elementId` dialogue linkage |
-| `studio-api/app/main.py` | Mixed routers | Mounts `voice_performance` router |
+| File | Note |
+| --- | --- |
+| `studio-web/src/api.ts` | Contains `voicePerformanceM410` + install client in working tree |
+| `studio-web/src/styles.css` | Voice Performance styles in working tree |
+| `studio-api/app/codirector/tools/definitions.py` / `registry.py` | `voice.*` registration in working tree |
+| `studio-api/app/setup/diagnostics.py` / `orchestrator.py` | IndexTTS2 installer hooks in working tree |
+| `studio-api/app/scriptwriter/service.py` | `elementId` dialogue linkage in working tree |
+| `studio-api/app/main.py` | Router mount in working tree |
 
 `studio-api/app/setup/catalog.py` was **partially staged** (IndexTTS2 component only).
 
-Runtime install contract fix in this closure: `RuntimeInstallBody.confirm_download_models` + Source Manager/UI acknowledgement (never defaults to true).
-
 ## Known Limitations
 
-1. IndexTTS2 not installed on this machine — install via Source Manager / `POST .../m410/runtime/install` with `confirm=true` and `confirm_download_models=true`.
-2. Accent consistency: **experimental**; mixed-language: **not recommended** until certified.
-3. Live IndexTTS2 generation not certified in this gate run.
-4. Manual UX checklist pending human stamp.
-5. Full HF model download (~15GB) not executed in CI/agent session.
-6. Production Dock model inventory still does not mirror Source Manager voice entries (pre-existing split).
+1. Human UX checklist is still unsigned — blocks full **GO**.
+2. Emotional-reference take was not separately live-exercised in the GO cert script (wiring exists).
+3. HF Hub downloads were intermittently connection-reset; completed via resume after core weights landed.
+4. Shared wiring files remain uncommitted outside the M4.10-scoped SHA (working tree still carries integration surface).
 
 ## Verdict
 
 **CONDITIONAL GO**
 
-Conditions to upgrade to **GO**:
+### Remaining blocker for GO
 
-1. Install + verify IndexTTS2 at pinned revision; complete one live multi-take generation on a character with approved Qwen Voice Identity.
-2. Re-run Playwright live flow (currently skipped) to PASS.
-3. Human stamps `M410_MANUAL_UX_CHECKLIST.md`.
+1. Human must review and sign [`M410_MANUAL_UX_CHECKLIST.md`](M410_MANUAL_UX_CHECKLIST.md) at 1366×768 / 1440×900 / 1920×1080 / 2560×1440.
 
-Architecture separation, Co-Director/Manual direction, persistence, Timeline/Lip Sync prepare, honest capability metadata, and UI IA are implemented and unit/API/UI-certified without live synthesis.
+All other GO criteria from the closure prompt are met: pinned install verified ready, live multi-take synthesis succeeded, Voice Identity unchanged, approval/Timeline/Lip Sync handoffs succeeded, Playwright live passed without skipping synthesis.

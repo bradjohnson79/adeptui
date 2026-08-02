@@ -138,8 +138,12 @@ async function postJson<T>(
   request: APIRequestContext,
   url: string,
   data?: Record<string, unknown>,
+  options?: { timeoutMs?: number },
 ): Promise<{ response: Awaited<ReturnType<APIRequestContext["post"]>>; body: T }> {
-  const response = await request.post(url, { data: data || {} });
+  const response = await request.post(url, {
+    data: data || {},
+    timeout: options?.timeoutMs ?? 30_000,
+  });
   expect(response.ok(), `POST ${url} failed: ${response.status()} ${await response.text()}`).toBeTruthy();
   return { response, body: (await response.json()) as T };
 }
@@ -338,6 +342,7 @@ test.describe("M4.10 Voice Performance Studio", () => {
     page,
     request,
   }) => {
+    test.setTimeout(480_000);
     const { projectId, characterId } = await ensureKorriCharacter(request);
     const [runtime, capabilities, workspace] = await Promise.all([
       getJson<RuntimeStatus>(request, "/api/voice-performance/m410/runtime/status"),
@@ -418,6 +423,7 @@ test.describe("M4.10 Voice Performance Studio", () => {
         count: 1,
         labels: ["M410 Certification Take 1"],
       },
+      { timeoutMs: 300_000 },
     );
     expect(generated.body.ok).toBeTruthy();
     expect(generated.body.mock, "live take generation must not be mock").not.toBe(true);
