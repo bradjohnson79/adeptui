@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 import threading
 import traceback
@@ -257,9 +258,25 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+
+# CORS — explicit origins for credential support (wildcard + credentials is
+# rejected by browsers). Configurable via STUDIO_CORS_ORIGINS env var
+# (comma-separated). Defaults cover local dev + Vercel hosted beta.
+_default_cors_origins = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "https://adeptui.vercel.app",
+    "https://beta.adeptui.org",
+]
+_extra_origins = os.environ.get("STUDIO_CORS_ORIGINS", "")
+if _extra_origins.strip():
+    _default_cors_origins.extend(
+        [o.strip() for o in _extra_origins.split(",") if o.strip()]
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_default_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

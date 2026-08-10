@@ -21,6 +21,7 @@ import {
 import "@babylonjs/loaders/OBJ";
 import "@babylonjs/loaders/glTF";
 import { getArchetypeSpec, getColorSpec } from "./state";
+import { apiUrl } from "../runtime/apiBase";
 import {
   BODY_REGIONS,
   REGION_TO_JOINT,
@@ -381,7 +382,7 @@ function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
   // parented to the figure root and tagged as body meshes for picking. Load
   // is async; the rig is returned immediately and the mesh attaches when ready.
   if (figure.kind === "custom" && figure.customAssetId) {
-    const assetUrl = `/api/assets/${figure.customAssetId}/file`;
+    const assetUrl = apiUrl(`/api/assets/${figure.customAssetId}/file`);
     const rootTransform = root;
     let cancelled = false;
     const finishImport = (meshes: import("@babylonjs/core").AbstractMesh[]) => {

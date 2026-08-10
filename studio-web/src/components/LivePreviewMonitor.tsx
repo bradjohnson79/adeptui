@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Asset, Job, Project, Scene } from "../types";
 import { api } from "../api";
+import { apiUrl } from "../runtime/apiBase";
 import { aspectCssValue } from "../workspacePrefs";
 import { formatJobTimestamp } from "../lib/formatDuration";
 import { PanelHeading } from "./HelpTip";
@@ -218,7 +219,7 @@ export function LivePreviewMonitor({
     // SSE preview stream owned by composer on Timeline path.
     if (composed) return;
     try {
-      const es = new EventSource(`/api/projects/${project.id}/preview/stream`);
+      const es = new EventSource(apiUrl(`/api/projects/${project.id}/preview/stream`));
       esRef.current = es;
       es.onmessage = (ev) => {
         if (pauseUpdates) return;

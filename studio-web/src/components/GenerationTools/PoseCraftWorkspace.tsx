@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HelpTip, PanelHeading } from "../HelpTip";
 import { Button } from "../ui";
 import { api } from "../../api";
+import { apiUrl } from "../../runtime/apiBase";
 import {
   CAMERA_ASPECTS,
   CAMERA_GUIDES,
@@ -651,7 +652,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     formData.append("tag", "posecraft-custom");
     formData.append("kind", "mesh-3d");
     try {
-      const res = await fetch(`/api/projects/${project.id}/assets`, {
+      const res = await fetch(apiUrl(`/api/projects/${project.id}/assets`), {
         method: "POST",
         credentials: "include",
         body: formData,

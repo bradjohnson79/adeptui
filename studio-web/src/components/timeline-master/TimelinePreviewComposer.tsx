@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Job, Project, Scene } from "../../types";
 import { api } from "../../api";
+import { apiUrl } from "../../runtime/apiBase";
 import type { DirectorTimeline } from "../DirectorTracks";
 import type { DirectorSelection } from "../../directorSelection";
 import { LivePreviewMonitor } from "../LivePreviewMonitor";
@@ -138,7 +139,7 @@ export function useGenerationState(
 
   useEffect(() => {
     try {
-      const es = new EventSource(`/api/projects/${projectId}/preview/stream`);
+      const es = new EventSource(apiUrl(`/api/projects/${projectId}/preview/stream`));
       es.onmessage = (ev) => {
         if (pauseUpdates) return;
         try {

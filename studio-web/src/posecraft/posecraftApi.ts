@@ -6,8 +6,7 @@
  * only used for ephemeral client conveniences like favorites and undo).
  */
 import type { PoseCraftDocument, PoseCraftScene, PoseCraftSnapshot, PosePreset } from "./types";
-
-const BASE = "";
+import { apiUrl } from "../runtime/apiBase";
 
 export class PoseCraftApiError extends Error {
   status: number;
@@ -19,7 +18,7 @@ export class PoseCraftApiError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(apiUrl(path), {
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     ...init,
@@ -54,7 +53,7 @@ export async function saveSceneDocument(projectId: string, document: PoseCraftDo
 // away in the same tick as the click (the debounced auto-save would otherwise
 // be cancelled by the navigation, losing the scene).
 export async function flushSceneDocument(projectId: string, document: PoseCraftDocument): Promise<PoseCraftDocument> {
-  const res = await fetch(`/api/posecraft/projects/${projectId}/scene`, {
+  const res = await fetch(apiUrl(`/api/posecraft/projects/${projectId}/scene`), {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

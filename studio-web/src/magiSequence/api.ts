@@ -1,5 +1,6 @@
 import type { MagiSequenceDocument } from "./types";
 import { MagiApiError, magiErrorFromResponse } from "./errors";
+import { apiUrl } from "../runtime/apiBase";
 
 export class MagiSaveConflictError extends Error {
   currentRevision: number;
@@ -15,7 +16,7 @@ export class MagiSaveConflictError extends Error {
 }
 
 export async function fetchMagiSequence(projectId: string): Promise<MagiSequenceDocument> {
-  const res = await fetch(`/api/magi/projects/${encodeURIComponent(projectId)}/sequence`);
+  const res = await fetch(apiUrl(`/api/magi/projects/${encodeURIComponent(projectId)}/sequence`));
   if (!res.ok) throw new MagiApiError(await magiErrorFromResponse(res));
   const data = (await res.json()) as { sequence: MagiSequenceDocument };
   return data.sequence;
@@ -26,7 +27,7 @@ export async function saveMagiSequence(
   sequence: MagiSequenceDocument,
   expectedRevision?: number,
 ): Promise<MagiSequenceDocument> {
-  const res = await fetch(`/api/magi/projects/${encodeURIComponent(projectId)}/sequence`, {
+  const res = await fetch(apiUrl(`/api/magi/projects/${encodeURIComponent(projectId)}/sequence`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sequence, expectedRevision }),

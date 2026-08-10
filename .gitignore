@@ -53,3 +53,11 @@ backup/
 
 # Agent temporary workspace (never commit)
 .adept-tmp/
+
+# Cloudflare Tunnel credentials (never commit)
+.cloudflared/
+*.cloudflared.json
+config/cloudflared/*.local.yml
+
+# Vite local env overrides (never commit)
+studio-web/.env.local

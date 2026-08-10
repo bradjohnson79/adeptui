@@ -1,0 +1,20 @@
+# Cloudflare Tunnel Configuration for Adept UI Hosted Beta
+#
+# This file configures an outbound Cloudflare Tunnel (cloudflared) that maps
+# https://api-beta.adeptui.org → http://127.0.0.1:8758 (Studio API).
+#
+# Requirements:
+#   - cloudflared installed on the Alienware machine
+#   - Cloudflare account with DNS control of adeptui.org
+#   - Tunnel created via `cloudflared tunnel create adept-ui-beta`
+#
+# DO NOT commit tunnel credentials (cert.pem, <tunnel-id>.json).
+# Those live in %USERPROFILE%\.cloudflared\ and are gitignored.
+
+tunnel: <TUNNEL_ID>
+credentials-file: C:\Users\bradj\.cloudflared\<TUNNEL_ID>.json
+
+ingress:
+  - hostname: api-beta.adeptui.org
+    service: http://127.0.0.1:8758
+  - service: http_status:404

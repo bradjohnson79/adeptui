@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiUrl } from "../runtime/apiBase";
 import "./DiagnosticsPage.css";
 
 type PortInfo = {
@@ -60,7 +61,7 @@ export function DiagnosticsPage() {
   const runTrace = async () => {
     setRunning(true);
     try {
-      const res = await fetch("/api/diagnostics/run");
+      const res = await fetch(apiUrl("/api/diagnostics/run"));
       const data = await res.json();
       setResult(data);
     } catch (err) {

@@ -3,6 +3,8 @@
  * One connection state for the whole UI — panels must not independently spam retries.
  */
 
+import { apiUrl } from "./apiBase";
+
 export type StudioApiConnectionState =
   | "CONNECTED"
   | "RECONNECTING"
@@ -152,7 +154,8 @@ async function probeStudioApiHealth(): Promise<boolean> {
     const timeoutId = window.setTimeout(() => controller.abort(), 5_000);
     try {
       // Fast path: lightweight /healthz (no DB, no ComfyUI, no provider checks)
-      const hz = await fetch("/api/healthz", {
+      // Resolve against the central API origin (VITE_API_BASE or relative in dev).
+      const hz = await fetch(apiUrl("/api/healthz"), {
         method: "GET", credentials: "include", signal: controller.signal,
       });
       if (hz.ok) {
@@ -171,7 +174,7 @@ async function probeStudioApiHealth(): Promise<boolean> {
     const fullController = new AbortController();
     const fullTimeoutId = window.setTimeout(() => fullController.abort(), 10_000);
     try {
-      const res = await fetch("/api/health", { method: "GET", credentials: "include", signal: fullController.signal });
+      const res = await fetch(apiUrl("/api/health"), { method: "GET", credentials: "include", signal: fullController.signal });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         let code: StudioApiFailureCode = "STUDIO_API_OFFLINE";

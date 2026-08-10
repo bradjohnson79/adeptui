@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, isAbortError, isNavigationFetchFailure } from "../api";
+import { apiUrl } from "../runtime/apiBase";
 import {
   installJobFromDownloadOperation,
   isInstallJobActive,
@@ -141,7 +142,7 @@ export function useInstallJobs(
     try {
       const params = new URLSearchParams();
       if (opts?.componentId) params.set("componentId", opts.componentId);
-      const url = `/api/setup/install-jobs/events${params.toString() ? `?${params}` : ""}`;
+      const url = apiUrl(`/api/setup/install-jobs/events${params.toString() ? `?${params}` : ""}`);
       es = new EventSource(url);
       setTransport("sse");
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { PROJECT_TEMPLATES } from "../../dashboardImages";
+import { apiUrl } from "../../runtime/apiBase";
 import {
   PRIMARY_PROJECT_TYPES,
   resolveCreateType,
@@ -8,7 +9,7 @@ import {
 // Load video generators dynamically to avoid type issues with the large api module
 async function loadVideoGenerators(): Promise<Array<{ id: string; label: string; available: boolean }>> {
   try {
-    const res = await fetch("/api/knowledge-cards/video-generators");
+    const res = await fetch(apiUrl("/api/knowledge-cards/video-generators"));
     if (!res.ok) return [];
     return await res.json();
   } catch {
