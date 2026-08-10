@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#0a1220" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="600" fill="#0a1220"/>
+  <rect width="960" height="600" fill="url(#g)"/>
+  <rect x="380" y="80" width="200" height="360" rx="28" fill="#111827" stroke="#38bdf8" stroke-opacity="0.4"/>
+  <rect x="400" y="120" width="160" height="240" rx="8" fill="#1f2937"/>
+  <rect x="420" y="300" width="120" height="10" rx="4" fill="#2dd4bf" fill-opacity="0.7"/>
+  <text x="48" y="540" font-family="Georgia, serif" font-size="42" fill="#f3f7fb" opacity="0.92">Social Short</text>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" role="img">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4"/>
+      <stop offset="55%" stop-color="#2dd4bf" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#0a1220" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="600" fill="#0a1220"/>
+  <rect width="960" height="600" fill="url(#g)"/>
+  <ellipse cx="480" cy="220" rx="90" ry="110" fill="#1e293b"/>
+  <circle cx="480" cy="170" r="48" fill="#334155"/>
+  <rect x="300" y="360" width="360" height="48" rx="10" fill="#142033" stroke="#38bdf8" stroke-opacity="0.35"/>
+  <rect x="320" y="376" width="40" height="16" rx="3" fill="#2dd4bf" fill-opacity="0.5"/>
+  <rect x="380" y="372" width="24" height="24" rx="3" fill="#38bdf8" fill-opacity="0.45"/>
+  <rect x="420" y="378" width="60" height="12" rx="3" fill="#94a3b8" fill-opacity="0.4"/>
+  <text x="48" y="540" font-family="Georgia, serif" font-size="42" fill="#f3f7fb" opacity="0.92">Talking Avatar</text>
+</svg>

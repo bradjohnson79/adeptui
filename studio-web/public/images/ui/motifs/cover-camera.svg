@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="Cinema camera motif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a365d"/>
+      <stop offset="45%" stop-color="#1b242c"/>
+      <stop offset="100%" stop-color="#0f766e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="58%" cy="42%" r="42%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#243040"/>
+      <stop offset="100%" stop-color="#101820"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="40%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#67e8f9" stop-opacity="0.85"/>
+      <stop offset="45%" stop-color="#0e7490" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#082f49"/>
+    </radialGradient>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg)"/>
+  <rect width="960" height="540" fill="url(#glow)"/>
+  <g transform="translate(250 130)" opacity="0.97">
+    <!-- magazine -->
+    <rect x="70" y="8" width="170" height="78" rx="16" fill="#15202b" stroke="#2dd4bf" stroke-opacity="0.35" stroke-width="2"/>
+    <rect x="95" y="28" width="120" height="38" rx="10" fill="#0b1220"/>
+    <!-- body -->
+    <rect x="40" y="86" width="300" height="170" rx="22" fill="url(#body)" stroke="#94a3b8" stroke-opacity="0.28" stroke-width="2"/>
+    <!-- viewfinder -->
+    <rect x="18" y="118" width="48" height="72" rx="10" fill="#1e293b" stroke="#2dd4bf" stroke-opacity="0.4" stroke-width="1.5"/>
+    <!-- lens barrel -->
+    <rect x="300" y="118" width="92" height="110" rx="18" fill="#1a2430" stroke="#38bdf8" stroke-opacity="0.45" stroke-width="2"/>
+    <circle cx="392" cy="173" r="52" fill="#0b1220" stroke="#67e8f9" stroke-opacity="0.55" stroke-width="3"/>
+    <circle cx="392" cy="173" r="36" fill="url(#lens)"/>
+    <circle cx="380" cy="158" r="10" fill="#e0f2fe" fill-opacity="0.55"/>
+    <!-- handle -->
+    <rect x="120" y="250" width="140" height="28" rx="10" fill="#15202b"/>
+    <rect x="168" y="278" width="44" height="36" rx="8" fill="#1e293b"/>
+    <!-- accent lights -->
+    <circle cx="78" cy="118" r="7" fill="#2dd4bf"/>
+    <circle cx="102" cy="118" r="7" fill="#f59e0b" opacity="0.85"/>
+  </g>
+  <text x="48" y="492" font-family="Georgia, 'Times New Roman', serif" font-size="34" fill="#f3f7fb" opacity="0.88">Camera</text>
+</svg>

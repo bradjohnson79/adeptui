@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="Film clapboard motif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="48%" stop-color="#122028"/>
+      <stop offset="100%" stop-color="#c45c26"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="62%" cy="38%" r="45%">
+      <stop offset="0%" stop-color="#2dd4bf" stop-opacity="0.42"/>
+      <stop offset="100%" stop-color="#2dd4bf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2630"/>
+      <stop offset="100%" stop-color="#0d141b"/>
+    </linearGradient>
+    <linearGradient id="stick" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f4f7f8"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="540" fill="url(#bg)"/>
+  <rect width="960" height="540" fill="url(#glow)"/>
+  <g transform="translate(270 118)" opacity="0.96">
+    <!-- hinged stick -->
+    <g transform="rotate(-18 210 36)">
+      <rect x="18" y="8" width="384" height="56" rx="8" fill="url(#stick)"/>
+      <g fill="#0b1220">
+        <polygon points="18,8 66,8 42,64 18,64"/>
+        <polygon points="90,8 138,8 114,64 66,64"/>
+        <polygon points="162,8 210,8 186,64 138,64"/>
+        <polygon points="234,8 282,8 258,64 210,64"/>
+        <polygon points="306,8 354,8 330,64 282,64"/>
+        <polygon points="378,8 402,8 402,64 354,64"/>
+      </g>
+    </g>
+    <!-- board body -->
+    <rect x="46" y="78" width="368" height="248" rx="14" fill="url(#board)" stroke="#2dd4bf" stroke-opacity="0.35" stroke-width="2"/>
+    <rect x="46" y="78" width="368" height="52" rx="14" fill="#101820"/>
+    <rect x="46" y="116" width="368" height="14" fill="#101820"/>
+    <g fill="#e8eef3" font-family="Georgia, 'Times New Roman', serif" font-size="22">
+      <text x="72" y="158" opacity="0.75">PROD</text>
+      <text x="72" y="198" opacity="0.9">SCENE</text>
+      <text x="72" y="238" opacity="0.75">TAKE</text>
+      <text x="72" y="278" opacity="0.75">DIR</text>
+    </g>
+    <g fill="none" stroke="#2dd4bf" stroke-opacity="0.45" stroke-width="1.5">
+      <line x1="168" y1="144" x2="380" y2="144"/>
+      <line x1="168" y1="184" x2="380" y2="184"/>
+      <line x1="168" y1="224" x2="380" y2="224"/>
+      <line x1="168" y1="264" x2="380" y2="264"/>
+    </g>
+    <circle cx="414" cy="78" r="10" fill="#94a3b8"/>
+  </g>
+  <text x="48" y="492" font-family="Georgia, 'Times New Roman', serif" font-size="34" fill="#f3f7fb" opacity="0.88">Clapboard</text>
+</svg>
