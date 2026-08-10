@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { StatusBadge } from "./ui";
+import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 
 type BetaStatus = Awaited<ReturnType<typeof api.betaRuntimeStatus>>;
 
@@ -22,6 +23,8 @@ export function BetaRuntimeStatus({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     let alive = true;
     const tick = async () => {
+      if (!alive) return;
+      if (shouldSuspendDependentPolling()) return;
       try {
         const s = await api.betaRuntimeStatus();
         if (alive) setStatus(s);

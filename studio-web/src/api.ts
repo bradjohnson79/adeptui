@@ -867,6 +867,15 @@ function withProjectUnlock(path: string, init?: RequestInit): RequestInit {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (method === "GET") {
+    const { cachedFetch } = await import("./runtime/requestCache");
+    return cachedFetch(method, path, () => reqInner<T>(path, init));
+  }
+  return reqInner<T>(path, init);
+}
+
+async function reqInner<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${BASE}${path}`, withProjectUnlock(path, withJsonContentType(init)));

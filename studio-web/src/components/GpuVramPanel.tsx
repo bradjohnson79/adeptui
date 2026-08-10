@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Project } from "../types";
 import { api } from "../api";
 import { PanelHeading } from "./HelpTip";
+import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 
 type VramPreset = {
   vram_gb: number;
@@ -84,6 +85,7 @@ export function GpuVramPanel({
   };
 
   const refreshStats = async () => {
+    if (shouldSuspendDependentPolling()) return;
     try {
       const s = await api.gpuStats();
       setStatsOk(s.ok);

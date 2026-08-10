@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import { buildAiGuidedSetupPath } from "../setup/navigation";
+import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 import {
   type Capability,
   type CapabilityBlocker,
@@ -61,7 +62,9 @@ export function useCapabilities(options?: { projectId?: string; pollMs?: number 
   useEffect(() => {
     let alive = true;
     const tick = () => {
-      if (alive) void load();
+      if (!alive) return;
+      if (shouldSuspendDependentPolling()) return;
+      void load();
     };
     tick();
     if (!pollMs) return () => {

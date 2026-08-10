@@ -15,6 +15,7 @@ import {
 import { useStudioHealth } from "../../hooks/useStudioHealth";
 import { BetaRuntimeStatus } from "../BetaRuntimeStatus";
 import { buildAiGuidedSetupPath } from "../../setup/navigation";
+import { shouldSuspendDependentPolling } from "../../runtime/studioApiConnection";
 
 type GpuSummary = {
   ok: boolean;
@@ -48,6 +49,8 @@ export function SystemStatusStrip({
   useEffect(() => {
     let alive = true;
     const tick = async () => {
+      if (!alive) return;
+      if (shouldSuspendDependentPolling()) return;
       try {
         const g = await api.gpuStats();
         if (!alive) return;

@@ -81,8 +81,15 @@ function emit() {
 }
 
 function setSnapshot(patch: Partial<StudioApiConnectionSnapshot>) {
-  snapshot = { ...snapshot, ...patch };
-  emit();
+  const next = { ...snapshot, ...patch };
+  const changed =
+    next.state !== snapshot.state ||
+    next.pollingSuspended !== snapshot.pollingSuspended ||
+    next.consecutiveFailures !== snapshot.consecutiveFailures ||
+    next.lastError !== snapshot.lastError ||
+    next.failureCode !== snapshot.failureCode;
+  snapshot = next;
+  if (changed) emit();
 }
 
 export function nextStudioApiRetryMs(consecutiveFailures: number): number {
@@ -150,60 +157,61 @@ async function probeStudioApiHealth(): Promise<boolean> {
   if (probeInFlight) return probeInFlight;
   probeInFlight = (async () => {
     const checkedAt = Date.now();
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 5_000);
     try {
       // Fast path: lightweight /healthz (no DB, no ComfyUI, no provider checks)
-      // Resolve against the central API origin (VITE_API_BASE or relative in dev).
-      const hz = await fetch(apiUrl("/api/healthz"), {
-        method: "GET", credentials: "include", signal: controller.signal,
-      });
-      if (hz.ok) {
-        markStudioApiHealthy();
-        setSnapshot({ lastCheckedAt: checkedAt });
-        return true;
-      }
-      // Fall through to full health check if healthz fails
-    } catch {
-      // healthz failed — fall through to full health check
-    } finally {
-      window.clearTimeout(timeoutId);
-    }
-
-    // Full health check with its own timeout
-    const fullController = new AbortController();
-    const fullTimeoutId = window.setTimeout(() => fullController.abort(), 10_000);
-    try {
-      const res = await fetch(apiUrl("/api/health"), { method: "GET", credentials: "include", signal: fullController.signal });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        let code: StudioApiFailureCode = "STUDIO_API_OFFLINE";
-        try {
-          const payload = JSON.parse(text) as { detail?: { error_code?: string; code?: string } };
-          const c = payload?.detail?.error_code || payload?.detail?.code;
-          if (c === "STUDIO_API_CONNECTION_RESET" || c === "API_PROXY_UNAVAILABLE" || c === "STUDIO_API_OFFLINE") {
-            code = c;
-          }
-        } catch {
-          /* plain body */
+      const hzController = new AbortController();
+      const hzTimeoutId = window.setTimeout(() => hzController.abort(), 5_000);
+      try {
+        const hz = await fetch(apiUrl("/api/healthz"), {
+          method: "GET", credentials: "include", signal: hzController.signal,
+        });
+        if (hz.ok) {
+          markStudioApiHealthy();
+          setSnapshot({ lastCheckedAt: checkedAt });
+          return true;
         }
-        // Phase CK — liveness vs readiness: /healthz succeeded but /api/health failed
-        // The API process is alive; its dependencies are degraded.
-        markStudioApiDegraded(code, `Health check returned HTTP ${res.status}`);
-        return true;
+      } catch {
+        // healthz failed — fall through to full health check
+      } finally {
+        window.clearTimeout(hzTimeoutId);
       }
-      markStudioApiHealthy();
-      return true;
-    } catch (error) {
-      const code = classifyStudioApiTransportFailure(error);
-      markStudioApiFailure(
-        code === "UNKNOWN" ? "STUDIO_API_OFFLINE" : code,
-        error instanceof Error ? error.message : String(error),
-      );
-      return false;
+
+      // Full health check with its own timeout
+      const fullController = new AbortController();
+      const fullTimeoutId = window.setTimeout(() => fullController.abort(), 10_000);
+      try {
+        const res = await fetch(apiUrl("/api/health"), { method: "GET", credentials: "include", signal: fullController.signal });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          let code: StudioApiFailureCode = "STUDIO_API_OFFLINE";
+          try {
+            const payload = JSON.parse(text) as { detail?: { error_code?: string; code?: string } };
+            const c = payload?.detail?.error_code || payload?.detail?.code;
+            if (c === "STUDIO_API_CONNECTION_RESET" || c === "API_PROXY_UNAVAILABLE" || c === "STUDIO_API_OFFLINE") {
+              code = c;
+            }
+          } catch {
+            /* plain body */
+          }
+          markStudioApiDegraded(code, `Health check returned HTTP ${res.status}`);
+          return true;
+        }
+        markStudioApiHealthy();
+        return true;
+      } catch (error) {
+        const code = classifyStudioApiTransportFailure(error);
+        markStudioApiFailure(
+          code === "UNKNOWN" ? "STUDIO_API_OFFLINE" : code,
+          error instanceof Error ? error.message : String(error),
+        );
+        return false;
+      } finally {
+        window.clearTimeout(fullTimeoutId);
+        setSnapshot({ lastCheckedAt: checkedAt });
+      }
     } finally {
-      window.clearTimeout(fullTimeoutId);
-      setSnapshot({ lastCheckedAt: checkedAt });
+      // SINGLE cleanup point — covers healthz success, healthz failure,
+      // full health success, full health failure, timeout, exception, early return.
       probeInFlight = null;
     }
   })();
