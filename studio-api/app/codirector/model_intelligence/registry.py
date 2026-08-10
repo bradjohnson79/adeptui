@@ -55,7 +55,7 @@ BINDINGS: dict[str, ModelBinding] = {
 ENGINE_TO_MODEL: dict[str, str] = {
     b.engineId: b.modelId for b in BINDINGS.values() if b.engineId
 }
-ENGINE_TO_MODEL["auto"] = "fal_seedance"  # default motion preference when MIL scores
+ENGINE_TO_MODEL["auto"] = "ltx_2_3"  # M3.0h local-first: auto maps to ComfyUI LTX, never fal
 
 
 def binding_for_model(model_id: str) -> Optional[ModelBinding]:

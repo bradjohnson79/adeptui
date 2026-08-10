@@ -23,6 +23,7 @@ export type ActionCategory =
   | "mastersheet"
   | "avatar"
   | "director"
+  | "timeline"
   | "editor"
   | "destructive"
   | "model_download"
@@ -165,6 +166,26 @@ export const ACTION_REGISTRY: ActionDef[] = [
     reversible: true,
     cost: "free",
     inputs: ["projectId", "q"],
+  },
+  {
+    id: "resolveLibraryLocation",
+    label: "Resolve library location",
+    description: "Resolve NL or path (e.g. Audio/Music) to canonical folder",
+    category: "library",
+    permission: "read",
+    reversible: true,
+    cost: "free",
+    inputs: ["projectId", "query", "path", "systemKey"],
+  },
+  {
+    id: "planLibraryStorage",
+    label: "Plan library storage",
+    description: "Preflight canonical storage location before generation",
+    category: "library",
+    permission: "prepare",
+    reversible: true,
+    cost: "free",
+    inputs: ["projectId", "task", "path", "systemKey", "entityType", "entityName"],
   },
   {
     id: "queueImageGeneration",
@@ -318,7 +339,7 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "sendAvatarToDirector",
-    label: "Send Avatar to Director",
+    label: "Send Avatar to Timeline",
     description: "Promote approved take to a Director scene",
     category: "avatar",
     permission: "execute",
@@ -328,8 +349,8 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "createDirectorSequence",
-    label: "Create Director Sequence",
-    description: "Snapshot scene Prompt Timeline into a Director Sequence package",
+    label: "Create Timeline Sequence",
+    description: "Snapshot scene Prompt Timeline into a Timeline Sequence package",
     category: "director",
     permission: "execute",
     reversible: true,
@@ -338,8 +359,8 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "sendDirectorToEditor",
-    label: "Send Director to Editor",
-    description: "Create Editor clip linked to an approved Director Sequence",
+    label: "Send Timeline to Editor",
+    description: "Create Editor clip linked to an approved Timeline Sequence",
     category: "director",
     permission: "execute",
     reversible: false,
@@ -348,7 +369,7 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "compileDirectorPrompt",
-    label: "Compile Director Prompt",
+    label: "Compile Timeline Prompt",
     description: "Compile model-ready prompt package for Director generation",
     category: "director",
     permission: "prepare",
@@ -358,8 +379,8 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "importDirectorSequence",
-    label: "Import Director Sequence",
-    description: "Add an approved Director Sequence onto Editor Video 1",
+    label: "Import Timeline Sequence",
+    description: "Add an approved Timeline Sequence onto Editor Video 1",
     category: "editor",
     permission: "execute",
     reversible: true,
@@ -378,8 +399,8 @@ export const ACTION_REGISTRY: ActionDef[] = [
   },
   {
     id: "openSourceInDirector",
-    label: "Open Source in Director",
-    description: "Navigate from Editor clip lineage back to Director Prompt Timeline",
+    label: "Open Source in Timeline",
+    description: "Navigate from Editor clip lineage back to Timeline Prompt",
     category: "editor",
     permission: "read",
     reversible: true,
@@ -454,6 +475,7 @@ export const DEFAULT_POLICIES: Record<ActionCategory, PermissionPolicy> = {
   mastersheet: "ask_once",
   avatar: "ask_once",
   director: "ask_once",
+  timeline: "ask_once",
   editor: "ask_once",
   destructive: "always_ask",
   model_download: "always_ask",
@@ -539,6 +561,7 @@ export function workspaceCapabilities(tab: string): { label: string; level: CapL
         { label: "Sync Master Sheet", level: "warn", note: "Needs review" },
       ];
     case "director":
+    case "timeline":
       return [
         ...base,
         { label: "Prompts / generate", level: "ok" },
@@ -550,8 +573,8 @@ export function workspaceCapabilities(tab: string): { label: string; level: CapL
       return [
         ...base,
         { label: "Assemble / import", level: "ok" },
-        { label: "Director Sources", level: "ok" },
-        { label: "Open in Director", level: "ok" },
+        { label: "Timeline Sources", level: "ok" },
+        { label: "Open in Timeline", level: "ok" },
         { label: "Audio mix / full NLE", level: "warn", note: "Stub this pass" },
       ];
     case "audiostudio":
@@ -578,7 +601,7 @@ export function workspaceCapabilities(tab: string): { label: string; level: CapL
         { label: "Attach audio", level: "ok" },
         { label: "Generate still/video", level: "warn", note: "Asks before render" },
         { label: "Mouth mask", level: "warn", note: "Requires user confirmation" },
-        { label: "Send to Director", level: "ok" },
+        { label: "Send to Timeline", level: "ok" },
       ];
     default:
       return [...base, { label: tab || "workspace", level: "warn", note: "Partial coverage" }];
@@ -629,9 +652,9 @@ export const RECIPE_STUBS: RecipeStub[] = [
   {
     id: "prepare_lip_sync",
     title: "Prepare Lip Sync",
-    description: "Navigate Director; pause for mouth mask placement.",
+    description: "Navigate Timeline; pause for mouth mask placement.",
     expand: ({ projectId }) => [
-      step("goToWorkspace", "Open Director", { tab: "director" }),
+      step("goToWorkspace", "Open Timeline", { tab: "timeline" }),
       step("searchLibrary", "Find dialogue audio", { projectId, q: "audio" }),
       step(
         "manualCheckpoint",
@@ -654,18 +677,18 @@ export const RECIPE_STUBS: RecipeStub[] = [
   {
     id: "build_coverage_from_master_sheet",
     title: "Build coverage from Master Sheet",
-    description: "Spatial + storyboard + Director stubs from authority sheet.",
+    description: "Spatial + storyboard + Timeline stubs from authority sheet.",
     expand: ({ projectId, sceneId }) => [
       step("validateMasterSheet", "Validate Master Sheet", { projectId, sceneId }),
       step("createSpatialFromMasterSheet", "Translate to Spatial", { projectId, sceneId }),
       step("goToWorkspace", "Open Storyboard", { tab: "script" }),
-      step("goToWorkspace", "Open Director", { tab: "director" }),
+      step("goToWorkspace", "Open Timeline", { tab: "timeline" }),
     ],
   },
   {
     id: "create_talking_avatar",
     title: "Create Talking Avatar",
-    description: "Profile → look → audio checkpoint → generate → lip sync → Director.",
+    description: "Profile → look → audio checkpoint → generate → lip sync → Timeline.",
     expand: ({ projectId }) => [
       step("searchLibrary", "Search library for character refs", { projectId, q: "character" }),
       step("createAvatarSession", "Create Avatar Session", { projectId, name: "Talking Avatar", mode: "talking_portrait" }),
@@ -686,7 +709,7 @@ export const RECIPE_STUBS: RecipeStub[] = [
           checkpointMessage: "Place the black rectangle over the character’s mouth, then select Continue.",
         }
       ),
-      step("goToWorkspace", "Review in Director", { tab: "director" }),
+      step("goToWorkspace", "Review in Timeline", { tab: "timeline" }),
     ],
   },
   {
@@ -708,12 +731,12 @@ export const RECIPE_STUBS: RecipeStub[] = [
   },
   {
     id: "build_director_sequence_from_scene",
-    title: "Build Director sequence from Scene",
-    description: "Open Director Prompt Timeline and snapshot a Director Sequence package.",
+    title: "Build Timeline sequence from Scene",
+    description: "Open Timeline Prompt and snapshot a Timeline Sequence package.",
     expand: ({ projectId, sceneId }) => [
-      step("goToWorkspace", "Open Director", { tab: "director" }),
-      step("createDirectorSequence", "Snapshot Director Sequence", { projectId, sceneId, name: "Scene sequence" }),
-      step("compileDirectorPrompt", "Compile Director prompt", {
+      step("goToWorkspace", "Open Timeline", { tab: "timeline" }),
+      step("createDirectorSequence", "Snapshot Timeline Sequence", { projectId, sceneId, name: "Scene sequence" }),
+      step("compileDirectorPrompt", "Compile Timeline prompt", {
         intention: "model-ready shot from Prompt Timeline",
         mode: "structured",
         projectId,
@@ -724,27 +747,27 @@ export const RECIPE_STUBS: RecipeStub[] = [
   {
     id: "send_approved_to_editor",
     title: "Send approved to Editor",
-    description: "Approve current Director Sequence and create a linked Editor clip.",
+    description: "Approve current Timeline Sequence and create a linked Editor clip.",
     expand: ({ projectId, sceneId }) => [
-      step("createDirectorSequence", "Ensure Director Sequence", { projectId, sceneId }),
+      step("createDirectorSequence", "Ensure Timeline Sequence", { projectId, sceneId }),
       step("sendDirectorToEditor", "Send to Editor", { projectId, include_audio: true }),
-      step("goToWorkspace", "Open Editor", { tab: "editor" }),
+      step("goToWorkspace", "Open MAGI Editor", { tab: "magi" }),
     ],
   },
   {
     id: "assemble_scene_from_approved",
     title: "Assemble Scene 12 from approved Director outputs",
-    description: "Open Editor and assemble approved Director Sequences for a scene.",
+    description: "Open Editor and assemble approved Timeline Sequences for a scene.",
     expand: ({ projectId, sceneId }) => [
       step("assembleSceneFromApproved", "Plan assembly from approved", { projectId, sceneId }),
-      step("goToWorkspace", "Open Editor", { tab: "editor" }),
+      step("goToWorkspace", "Open MAGI Editor", { tab: "magi" }),
       step(
         "manualCheckpoint",
         "Review stitch order",
-        { message: "Drag approved Director Sequences onto Video 1, trim, then Continue." },
+        { message: "Drag approved Timeline Sequences onto Video 1, trim, then Continue." },
         {
           status: "checkpoint",
-          checkpointMessage: "Drag approved Director Sequences onto Video 1, trim, then Continue.",
+          checkpointMessage: "Drag approved Timeline Sequences onto Video 1, trim, then Continue.",
         }
       ),
     ],
@@ -795,8 +818,8 @@ export function planFromIntention(
         step("goToWorkspace", "Open relevant workspace", {
           tab: lower.includes("avatar") || lower.includes("talking")
             ? "avatar"
-            : lower.includes("assemble") || lower.includes("editor")
-              ? "editor"
+            : lower.includes("assemble") || lower.includes("editor") || lower.includes("magi")
+              ? "magi"
             : lower.includes("spatial")
               ? "spatial"
               : lower.includes("script") || lower.includes("storyboard")

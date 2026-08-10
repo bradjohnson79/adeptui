@@ -155,6 +155,7 @@ export interface SetupComponentStatus {
   id: string;
   name: string;
   description: string;
+  category?: string;
   purpose?: string;
   required: boolean;
   status: SetupComponentState;
@@ -213,6 +214,115 @@ export interface SetupComponentStatus {
   logs?: string[];
   executable_path?: string | null;
   environment?: Record<string, JsonValue>;
+  group?: string | null;
+  subgroup?: string | null;
+  surfaceGroups?: string[] | null;
+  parameterCount?: string | null;
+  downloadSizeLabel?: string | null;
+  diskUsageLabel?: string | null;
+  vramRecommendationGb?: number | null;
+  typicalGenerationSpeed?: string | null;
+  supportedResolutions?: string[] | null;
+  strengths?: string[] | null;
+  weaknesses?: string[] | null;
+  bestFor?: string[] | null;
+  badges?: string[] | null;
+  experimental?: boolean | null;
+  capabilityTags?: string[] | null;
+  lifecycle?: ProviderLifecycleState | null;
+  lifecycle_status_label?: string | null;
+  lifecycle_chain_state?: string | null;
+  lifecycle_attention_state?: string | null;
+  monitor_findings?: MonitorFinding[] | null;
+  certified?: boolean | null;
+  certified_version?: string | null;
+  certified_date?: string | null;
+  calibration?: CalibrationProfile | null;
+  certified_recipe?: CertifiedRecipe | null;
+}
+
+export interface MonitorFinding {
+  code: string;
+  severity: "info" | "warning" | "error" | string;
+  message: string;
+  recommendedAction?: string | null;
+}
+
+export interface CalibrationProfile {
+  preferredPrecision?: string | null;
+  nativeResolution?: string | null;
+  vramUsageGb?: number | null;
+  safeBatchSize?: number | null;
+  maxRecommendedResolution?: string | null;
+  avgGenerationSeconds?: number | null;
+  recommendedScheduler?: string | null;
+  defaultCfg?: number | null;
+  optimalStepCount?: number | null;
+  machineProfile?: Record<string, JsonValue>;
+}
+
+export interface CertifiedRecipe {
+  recipeId: string;
+  componentId: string;
+  title: string;
+  capabilityTags?: string[];
+  providerKind?: "local" | "cloud" | string;
+  installStrategy?: string;
+  certifiedVersion?: string | null;
+  certifiedDate?: string | null;
+  source?: Record<string, JsonValue>;
+  requirements?: Record<string, JsonValue>;
+  calibrationDefaults?: Record<string, JsonValue>;
+  notes?: string[];
+}
+
+export interface ProviderLifecycleState {
+  componentId: string;
+  componentName: string;
+  chainState?: string | null;
+  attentionState?: string | null;
+  statusLabel: string;
+  certified?: boolean;
+  certifiedRecipeId?: string | null;
+  certifiedVersion?: string | null;
+  certifiedDate?: string | null;
+  installJobId?: string | null;
+  installState?: string | null;
+  verificationHealthy?: boolean | null;
+  verificationSummary?: string | null;
+  monitorFindings?: MonitorFinding[];
+  calibration?: CalibrationProfile | null;
+  recommendations?: string[];
+}
+
+export interface LifecycleInstallPlan {
+  componentId: string;
+  componentName: string;
+  action: string;
+  requiresRuntimeConfirmation: boolean;
+  requiresModelDownloadConfirmation: boolean;
+  destinationRoot?: string | null;
+  estimatedDownloadBytes?: number | null;
+  estimatedInstalledBytes?: number | null;
+  currentVersion?: string | null;
+  targetVersion?: string | null;
+  certifiedRecipeId?: string | null;
+  recommendedSource?: Record<string, JsonValue>;
+  steps: string[];
+  warnings: string[];
+  notes: string[];
+}
+
+export interface LifecycleCloudProvider {
+  providerId: string;
+  displayName: string;
+  statusLabel: string;
+  configured: boolean;
+  state?: string | null;
+  operations?: string[];
+  modelFamilies?: string[];
+  group?: string | null;
+  subgroup?: string | null;
 }
 
 export interface SetupSummaryCounts {

@@ -7,6 +7,8 @@ data/
 *.db
 .DS_Store
 .env
+# V1.1 Owner Beta — machine-specific paths / Comfy launch (never commit secrets)
+config/beta-local.local.env
 studio-api/.venv/
 studio-web/dist/
 *.log
@@ -42,9 +44,12 @@ scripts/_payloads/
 data/m210b-sandbox/
 data/m210b-kvenv/
 
-# V1.1 Owner Beta — machine-specific paths / Comfy launch (never commit secrets)
-config/beta-local.local.env
-
 # M4.10 IndexTTS2 isolated runtime / models / outputs (covered by data/ too)
 data/runtimes/index-tts2/
 runtimes/index-tts2/
+
+# Local backups (never commit — may contain env secrets)
+backup/
+
+# Agent temporary workspace (never commit)
+.adept-tmp/

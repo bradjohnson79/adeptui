@@ -93,6 +93,22 @@ export function IconOverflow(props: IconProps) {
   );
 }
 
+export function IconMenu(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </Base>
+  );
+}
+
+export function IconStop(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" />
+    </Base>
+  );
+}
+
 export function IconCoDirector(props: IconProps) {
   return (
     <Base {...props}>

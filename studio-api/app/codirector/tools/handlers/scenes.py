@@ -49,13 +49,31 @@ def _require_scene(ctx: ToolContext, scene_id: str) -> Scene:
 
 
 async def list_scenes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    limit = int(args.get("limit") or DEFAULT_SCENE_LIMIT)
+    from ..read_envelope import clamp_limit
+
+    limit = clamp_limit(args.get("limit"), default=DEFAULT_SCENE_LIMIT)
     scenes = SceneService.list_for_project(ctx.db, ctx.project_id)
+    page = [scene_helpers.scene_summary(s) for s in scenes[:limit]]
+    has_more = len(scenes) > limit
     return {
         "projectId": ctx.project_id,
         "sceneCount": len(scenes),
-        "returned": min(limit, len(scenes)),
-        "scenes": [scene_helpers.scene_summary(s) for s in scenes[:limit]],
+        "returned": len(page),
+        "scenes": page,
+        "_summary": f"{len(page)} of {len(scenes)} scene(s).",
+        "_pagination": {
+            "limit": limit,
+            "total": len(scenes),
+            "hasMore": has_more,
+            "returnedCount": len(page),
+            "nextCursor": str(limit) if has_more else None,
+            "appliedFilters": {},
+        },
+        "_evidence": [
+            {"sourceType": "scene", "sourceId": s.get("id") or s.get("sceneId"), "repository": "scene_service"}
+            for s in page
+            if s.get("id") or s.get("sceneId")
+        ],
     }
 
 
@@ -64,6 +82,15 @@ async def get_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     detail = scene_helpers.scene_summary(scene)
     detail["continuityNote"] = (scene.continuity_json or "")[:1000]
     detail["summary"] = getattr(scene, "summary", "") or ""
+    detail["_summary"] = f"Scene '{getattr(scene, 'name', scene.id)}'."
+    detail["_evidence"] = [
+        {
+            "sourceType": "scene",
+            "sourceId": scene.id,
+            "sourceName": getattr(scene, "name", None),
+            "repository": "scene_service",
+        }
+    ]
     return detail
 
 

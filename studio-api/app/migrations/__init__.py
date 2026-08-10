@@ -18,10 +18,21 @@ from .m016_virtual_environment_studio import MIGRATION as M016
 from .m017_codirector_unified_experience import MIGRATION as M017
 from .m018_model_intelligence_experience import MIGRATION as M018
 from .m019_language_intelligence import MIGRATION as M019
+from .m020_templates_presets_foundation import MIGRATION as M020
+from .m021_character_identity import MIGRATION as M021
+from .m022_durable_production_plans import MIGRATION as M022
+from .m023_continuity_identity import MIGRATION as M023
+from .m024_scene_references import MIGRATION as M024
+from .m025_character_motion_relationships_prompts import MIGRATION as M025
+from .m026_posecraft_persistence import MIGRATION as M026
+from .m027_posecraft_custom_poses import MIGRATION as M027
+from .m028_codirector_conversation_events import MIGRATION as M028
+from .m029_multi_shot import MIGRATION as M029
+from .m030_multi_shot_timeline import MIGRATION as M030
 from .registry import Migration, MigrationRegistry
 from .runner import ChecksumMismatchError, MigrationRun, MigrationRunner
 
-DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016, M017, M018, M019))
+DEFAULT_REGISTRY = MigrationRegistry((M001, M002, M003, M004, M005, M006, M007, M008, M010, M011, M012, M013, M014, M015, M016, M017, M018, M019, M020, M021, M022, M023, M024, M025, M026, M027, M028, M029, M030))
 
 __all__ = [
     "ChecksumMismatchError",
@@ -44,6 +55,17 @@ __all__ = [
     "M017",
     "M018",
     "M019",
+    "M020",
+    "M021",
+    "M022",
+    "M023",
+    "M024",
+    "M025",
+    "M026",
+    "M027",
+    "M028",
+    "M029",
+    "M030",
     "Migration",
     "MigrationRegistry",
     "MigrationRun",

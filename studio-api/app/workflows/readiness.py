@@ -29,7 +29,12 @@ WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
     "ltx.simple_i2v": ("ltx_checkpoint",),
     "ltx.ingredients_ic_lora": ("ltx_checkpoint", "ltx23_ic_lora_ingredients"),
     "wan.first_last_frame": ("wan_models",),
+    "wan.three_frame": ("wan_models",),
     "lipsync.latentsync": (),
+    "hunyuan15.t2v": ("hunyuan_video_15",),
+    "hunyuan15.i2v": ("hunyuan_video_15",),
+    "hunyuan13b.t2v": ("hunyuan_video_13b",),
+    "hunyuan13b.i2v": ("hunyuan_video_13b",),
     # Still-image production path uses catalogued Z-Image Turbo weights (not FLUX name-only).
     "image.txt2img": ("zimage_models",),
     "image.img2img_edit": ("zimage_models",),
@@ -44,6 +49,24 @@ WORKFLOW_READINESS_UNKNOWN = "WORKFLOW_READINESS_UNKNOWN"
 READY = "ready"
 BLOCKED = "blocked"
 UNKNOWN = "unknown"
+
+# Node class aliases: any one member present satisfies the whole group.
+# hay86/ComfyUI_LatentSync registers D_LatentSyncNode; older packs used LatentSyncNode.
+_NODE_ALTERNATIVE_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"D_LatentSyncNode", "LatentSyncNode"}),
+)
+
+
+def _missing_required_node_types(
+    required_nodes: Iterable[str],
+    node_types: set[str],
+) -> list[str]:
+    """Return required node types that are truly absent, honoring alias groups."""
+    missing = {name for name in required_nodes if name not in node_types}
+    for group in _NODE_ALTERNATIVE_GROUPS:
+        if missing & group and (node_types & group):
+            missing -= group
+    return sorted(missing)
 
 
 def _now() -> str:
@@ -138,7 +161,7 @@ def workflow_readiness(
     missing_models = [item for item in states if not item["present"]]
     node_catalog_available = node_types is not None
     missing_extensions = (
-        sorted(name for name in required_nodes if name not in node_types)
+        _missing_required_node_types(required_nodes, node_types)
         if node_types is not None
         else []
     )

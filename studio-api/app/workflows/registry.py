@@ -9,9 +9,11 @@ from typing import Any, Protocol
 from ..providers import ProviderKind
 from .image_tools import build_zimage_ref_workflow, build_zimage_txt2img_workflow
 from .lipsync_builder import build_latentsync_workflow
+from .hunyuan13b_builder import build_hunyuan13b_i2v, build_hunyuan13b_t2v
+from .hunyuan15_builder import build_hunyuan15_i2v, build_hunyuan15_t2v
 from .ltx_builder import build_ltx_scene_workflow, build_ltx_simple_i2v
 from .ltx_ingredients_compiler import compile_ingredients_workflow
-from .wan_builder import build_wan_flf_workflow
+from .wan_builder import build_wan_flf_workflow, build_wan_three_frame_workflow
 
 WorkflowBuilder = Callable[..., dict[str, Any]]
 
@@ -202,6 +204,19 @@ WORKFLOW_INVENTORY = (
         required_node_types=("WanImageToVideo", "WanFirstLastFrameToVideo", "VHS_VideoCombine"),
     ),
     _entry(
+        key="wan.three_frame",
+        family="wan",
+        modality="video",
+        builder=build_wan_three_frame_workflow,
+        builder_path="app.workflows.wan_builder:build_wan_three_frame_workflow",
+        capabilities=("image_to_video", "three_frame", "first_last_frame"),
+        required_inputs=(
+            "high_noise", "low_noise", "vae_name", "text_encoder", "positive", "negative",
+            "width", "height", "length", "fps", "seed", "start_image", "middle_image", "end_image",
+        ),
+        required_node_types=("WanFirstLastFrameToVideo", "LoadImage", "VHS_VideoCombine"),
+    ),
+    _entry(
         key="lipsync.latentsync",
         family="latentsync",
         modality="video",
@@ -209,7 +224,84 @@ WORKFLOW_INVENTORY = (
         builder_path="app.workflows.lipsync_builder:build_latentsync_workflow",
         capabilities=("lipsync", "audio_conditioning"),
         required_inputs=("video_path", "audio_path"),
-        required_node_types=("LatentSyncNode", "VHS_VideoCombine"),
+        required_node_types=("D_LatentSyncNode", "LatentSyncNode", "PreviewAny", "VHS_VideoCombine"),
+    ),
+    _entry(
+        key="hunyuan15.t2v",
+        family="hunyuan15",
+        modality="video",
+        builder=build_hunyuan15_t2v,
+        builder_path="app.workflows.hunyuan15_builder:build_hunyuan15_t2v",
+        capabilities=("text_to_video",),
+        required_inputs=("model_root", "positive", "negative", "width", "height", "length", "fps", "seed"),
+        # Migrated 2026-08-05: obsolete HunyuanVideo15* → live Kijai HyVideo* nodes.
+        required_node_types=(
+            "HyVideoModelLoader",
+            "HyVideoSampler",
+            "HyVideoTextEncode",
+            "HyVideoDecode",
+            "HyVideoVAELoader",
+            "DownloadAndLoadHyVideoTextEncoder",
+            "VHS_VideoCombine",
+        ),
+    ),
+    _entry(
+        key="hunyuan15.i2v",
+        family="hunyuan15",
+        modality="video",
+        builder=build_hunyuan15_i2v,
+        builder_path="app.workflows.hunyuan15_builder:build_hunyuan15_i2v",
+        capabilities=("image_to_video",),
+        required_inputs=(
+            "model_root", "positive", "negative", "width", "height", "length", "fps", "seed", "start_image",
+        ),
+        required_node_types=(
+            "HyVideoModelLoader",
+            "HyVideoSampler",
+            "HyVideoI2VEncode",
+            "HyVideoDecode",
+            "HyVideoVAELoader",
+            "DownloadAndLoadHyVideoTextEncoder",
+            "VHS_VideoCombine",
+        ),
+    ),
+    _entry(
+        key="hunyuan13b.t2v",
+        family="hunyuan13b",
+        modality="video",
+        builder=build_hunyuan13b_t2v,
+        builder_path="app.workflows.hunyuan13b_builder:build_hunyuan13b_t2v",
+        capabilities=("text_to_video",),
+        required_inputs=("model_root", "positive", "negative", "width", "height", "length", "fps", "seed"),
+        required_node_types=(
+            "HyVideoModelLoader",
+            "HyVideoSampler",
+            "HyVideoTextEncode",
+            "HyVideoDecode",
+            "HyVideoVAELoader",
+            "DownloadAndLoadHyVideoTextEncoder",
+            "VHS_VideoCombine",
+        ),
+    ),
+    _entry(
+        key="hunyuan13b.i2v",
+        family="hunyuan13b",
+        modality="video",
+        builder=build_hunyuan13b_i2v,
+        builder_path="app.workflows.hunyuan13b_builder:build_hunyuan13b_i2v",
+        capabilities=("image_to_video",),
+        required_inputs=(
+            "model_root", "positive", "negative", "width", "height", "length", "fps", "seed", "start_image",
+        ),
+        required_node_types=(
+            "HyVideoModelLoader",
+            "HyVideoSampler",
+            "HyVideoI2VEncode",
+            "HyVideoDecode",
+            "HyVideoVAELoader",
+            "DownloadAndLoadHyVideoTextEncoder",
+            "VHS_VideoCombine",
+        ),
     ),
     _entry(
         key="image.txt2img",

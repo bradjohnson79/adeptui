@@ -165,8 +165,11 @@ def test_synthesis_conflict_priority_and_compression():
     intent = classify_intent("Create the next storyboard shot.")
     synthesis = engine.synthesize(user_message="Create the next storyboard shot.", intent=intent, findings=findings)
     assert synthesis.blockers
-    assert synthesis.structuredRecommendation.get("movement") == "locked"
+    # Prefer specialist findings over canned structured storyboard packages.
+    assert synthesis.structuredRecommendation == {}
     assert "Next:" in synthesis.userMessage
+    assert "Continue with the recommended direction" not in synthesis.userMessage
+    assert "0.95" not in synthesis.userMessage
 
 
 def test_plan_validation_requires_registered_mutating_tools():

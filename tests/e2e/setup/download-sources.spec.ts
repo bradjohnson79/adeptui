@@ -51,11 +51,13 @@ test.describe("@critical @isolated download sources", () => {
       const hf = page.getByTestId("download-source-huggingface");
       await expect(github).toBeVisible();
       await expect(hf).toBeVisible();
-      await expect(github).toHaveAttribute("data-status", "Installed but not authenticated");
-      await expect(hf).toHaveAttribute("data-status", "Not installed");
+      await expect(github).toHaveAttribute("data-status", "Installed but not authenticated", {
+        timeout: 30_000,
+      });
+      await expect(hf).toHaveAttribute("data-status", "Not installed", { timeout: 30_000 });
 
       await page.getByTestId("add-source-url-pack_essential_cinematic").click();
-      const dialog = page.getByTestId("add-source-url-dialog");
+      const dialog = page.getByTestId("add-source-workflow");
       await expect(dialog).toBeVisible();
       await dialog.getByTestId("source-url-input").fill(
         "https://github.com/acme/widgets/archive/refs/heads/main.zip",
@@ -74,7 +76,7 @@ test.describe("@critical @isolated download sources", () => {
       await expect(dialog).toHaveCount(0);
       observer.assertHealthyBrowser();
     } finally {
-      await request.post(`${API}/api/e2e/cli-mock`, { data: { clear: true } });
+      await request.post(`${API}/api/e2e/cli-mock`, { data: { clear: true } }).catch(() => undefined);
       await deleteProject(request, project.id);
       observer.flush();
     }

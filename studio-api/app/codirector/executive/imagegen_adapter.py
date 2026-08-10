@@ -75,17 +75,26 @@ def schedule_job_queue_enqueue(job_id: str) -> None:
             except Exception:  # noqa: BLE001
                 queue_loop = None
 
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
         if queue_loop is not None and queue_loop.is_running():
+            # When the caller is already running on the queue loop, waiting on a
+            # thread-safe future deadlocks the request thread and stretches a
+            # fast enqueue into repeated timeout windows.
+            if current_loop is queue_loop:
+                current_loop.create_task(_put())
+                return
             fut = asyncio.run_coroutine_threadsafe(_put(), queue_loop)
-            fut.result(timeout=30)
+            fut.result(timeout=2)
             return
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
+        if current_loop is None:
             asyncio.run(_put())
         else:
-            loop.create_task(_put())
+            current_loop.create_task(_put())
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Could not enqueue imagegen job %s onto job_queue", job_id, exc_info=True

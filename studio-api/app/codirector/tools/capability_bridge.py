@@ -26,6 +26,7 @@ from .definitions import CAPABILITY_KEYS, ToolDefinition
 # Mapping only ? status values always come from the shared registry/service.
 _TOOL_KEY_TO_PSR_IDS: dict[str, tuple[str, ...]] = {
     "project": ("project.read", "project.scenes.read"),
+    "library": ("assets.read",),
     "bible": ("codirector.bible.read",),
     "provider": ("codirector.provider",),
     "comfyui": ("comfyui.health", "storyboard.generate"),

@@ -11,7 +11,11 @@ export function CoDirectorAttachmentTray() {
   const visible = collapsed ? attachments.slice(0, 3) : attachments;
 
   return (
-    <div className="codirector-attachments" aria-label="Attachments">
+    <div
+      className="codirector-attachments"
+      aria-label="Attachments"
+      data-testid="codirector-attachment-tray"
+    >
       <div className="codirector-attachment-grid">
         {visible.map((item) => (
           <div key={item.id} className="codirector-attachment">

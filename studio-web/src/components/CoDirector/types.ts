@@ -7,11 +7,22 @@ export type ChatMode = "chat" | "prompt" | "guide" | "setup";
 
 export type PromptMode = "creative" | "structured" | "model" | "advanced";
 
-export type OverflowPanel = "none" | "options" | "knowledge" | "access" | "audit" | "provider" | "plan";
+export type OverflowPanel =
+  | "none"
+  | "options"
+  | "knowledge"
+  | "access"
+  | "audit"
+  | "status"
+  | "provider"
+  | "promptBench"
+  | "plan";
 
 export interface CoDirectorUIContext {
   projectId?: string;
   projectName?: string;
+  /** M3.1a primary project type slug (e.g. educational_explainer). */
+  primaryProjectType?: string;
   workspaceId?: string;
   sceneId?: string;
   sceneName?: string;
@@ -19,7 +30,32 @@ export interface CoDirectorUIContext {
   selectedCharacterIds?: string[];
   selectedStoryboardPanelIds?: string[];
   activeGenerationId?: string;
+  /** Active script/document id when known (session-context contract). */
+  activeDocumentId?: string;
+  /** Navigate to a project workspace tab. */
+  onGoTab?: (tab: string) => void;
 }
+
+/** M41 Wave 1 canonical session-context contract (composed; not a second store). */
+export interface CoDirectorSessionContext {
+  projectId?: string | null;
+  projectName?: string | null;
+  activeDocumentId?: string | null;
+  activeSceneId?: string | null;
+  activeWorkspace?: string | null;
+  selectedAssets: string[];
+  provider?: string | null;
+  model?: string | null;
+  activeProductionPlan?: Record<string, unknown> | null;
+  sessionStatus: string;
+  lastSuccessfulToolAction?: string | null;
+  unresolvedBlockers: string[];
+}
+
+export type LastBoundProjectSuggestion = {
+  projectId: string;
+  projectName?: string;
+};
 
 export type CoDirectorMessageStatus = "streaming" | "cancelled" | "interrupted";
 
@@ -36,6 +72,137 @@ export type CoDirectorAssistantMessageType =
   | "error";
 
 export type CoDirectorExpertiseMode = "guided" | "standard" | "expert";
+
+/** Creator collaboration stance (Phase 4). Inferred conservatively; creator can override. */
+export type CollaborationMode =
+  | "explore"
+  | "critique"
+  | "compare"
+  | "refine"
+  | "decide"
+  | "review"
+  | "execute"
+  | "teach";
+
+export type CoDirectorActivityPreference = "always" | "longer_tasks" | "hidden";
+
+export type CoDirectorActivityEventType =
+  | "request_received"
+  | "context_review"
+  | "wiki_review"
+  | "media_review"
+  | "plan_review"
+  | "tool_started"
+  | "tool_completed"
+  | "tool_failed"
+  | "response_composing"
+  | "persistence_started"
+  | "persistence_completed";
+
+export type CoDirectorActivityStageStatus = "pending" | "active" | "completed" | "failed";
+
+export interface CoDirectorActivityStage {
+  id: "request" | "context" | "wiki" | "media" | "plan" | "tool" | "response" | "persistence";
+  eventType: CoDirectorActivityEventType;
+  label: string;
+  status: CoDirectorActivityStageStatus;
+  detail?: string;
+}
+
+export interface CoDirectorActivityState {
+  requestId: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  stages: CoDirectorActivityStage[];
+  summaryFacts: string[];
+  attachmentsCount: number;
+  toolLabels: string[];
+  startedAt: string;
+  completedAt?: string;
+  persistenceError?: string | null;
+  /** Foundational AI observability (creator-safe). */
+  cognitiveMode?: string | null;
+  activeGoal?: string | null;
+  workflowHold?: boolean;
+  toolsSummary?: string | null;
+  memorySummary?: string | null;
+  fallbackUsed?: boolean;
+  selectedModel?: string | null;
+  actualModel?: string | null;
+  creativePosture?: string | null;
+  advisoryDecision?: string | null;
+  advisoryStrength?: string | null;
+  changeStatus?: string | null;
+  waitingForConfirmation?: boolean;
+  canonUpdated?: boolean;
+  roleEmphasis?: string | null;
+  assistantName?: string | null;
+  userPreferredName?: string | null;
+  creativeStage?: string | null;
+  wikiCandidates?: number | null;
+  confirmedWrites?: number | null;
+  discoveryQuestionCount?: number | null;
+  researchStatus?: string | null;
+  documentationReason?: string | null;
+  whatChanged?: string[];
+  projectPulse?: Record<string, unknown> | null;
+  activeDeliverable?: Record<string, unknown> | null;
+  artifactReadiness?: Record<string, unknown>[] | null;
+  visionProfile?: Record<string, unknown> | null;
+  pitchPackage?: Record<string, unknown> | null;
+  journeyState?: Record<string, unknown> | null;
+  processingStages?: string[];
+  conversationActions?: { id: string; label: string }[];
+  onboardingNeeded?: boolean;
+  /** Soft next-step invitations for the latest assistant turn (≤4). */
+  nextStepOptions?: CoDirectorNextStepOption[];
+  nextStepIntro?: string | null;
+  /** Background Wiki enrichment after tokens began streaming. */
+  wikiBackgroundStatus?: "running" | "complete" | "failed" | "processing" | null;
+  wikiVerification?: {
+    persistenceState?: string;
+    presentationState?: string;
+    finalState?: string;
+    error?: string | null;
+  } | null;
+  wikiRefreshNonce?: number;
+  wikiUiMessage?: string | null;
+  coldLoadActive?: boolean;
+  momentumResume?: string | null;
+  momentumSummary?: string | null;
+  lastTimings?: Record<string, unknown> | null;
+  confidenceInsight?: string | null;
+}
+
+export type CoDirectorNextStepType =
+  | "CONTINUE_STORY"
+  | "EXPLORE_CHARACTER"
+  | "EXPLORE_WORLD"
+  | "EXPLORE_RULES"
+  | "BUILD_STORY_TEMPLATE"
+  | "BUILD_TREATMENT"
+  | "BUILD_OUTLINE"
+  | "DEVELOP_SCENE"
+  | "DEVELOP_EPISODE"
+  | "CREATE_CONCEPTS"
+  | "VISUAL_DEVELOPMENT"
+  | "TONE_AND_ATMOSPHERE"
+  | "RESEARCH_COMPARABLES"
+  | "BUILD_PITCH"
+  | "REVIEW_WIKI"
+  | "REVIEW_OPEN_QUESTIONS"
+  | "KEEP_LISTENING";
+
+export interface CoDirectorNextStepOption {
+  id: string;
+  type: CoDirectorNextStepType;
+  label: string;
+  shortDescription?: string | null;
+  whyNow?: string | null;
+  readiness: "AVAILABLE" | "PARTIAL" | "NOT_READY";
+  ownershipRequired: boolean;
+  priority: number;
+  previewSpine?: string | null;
+}
 
 export interface CoDirectorIntelligenceProgress {
   stage: string;
@@ -57,6 +224,7 @@ export interface CoDirectorMessage {
   role: "user" | "assistant";
   content: string;
   attachmentIds?: string[];
+  attachments?: CoDirectorMessageAttachment[];
   createdAt: string;
   /** Present while a streamed reply is in flight, or after it ended abnormally. */
   status?: CoDirectorMessageStatus;
@@ -74,18 +242,28 @@ export interface CoDirectorMessage {
 export interface CoDirectorToolActivity {
   toolId: string;
   title: string;
-  phase: "requested" | "running" | "completed" | "failed" | "blocked";
+  phase: "requested" | "running" | "completed" | "failed" | "blocked" | "operator_pending" | "operator_timeout";
   detail?: string;
   truncated?: boolean;
 }
 
 export type AttachmentKind = "file" | "library";
 
+export interface CoDirectorMessageAttachment {
+  assetId: string;
+  name: string;
+  mimeType?: string;
+  source: AttachmentKind;
+  mediaKind?: string;
+}
+
 export interface CoDirectorAttachment {
   id: string;
   kind: AttachmentKind;
   name: string;
   mimeType?: string;
+  /** Project asset kind once selected or uploaded. */
+  mediaKind?: string;
   /** Object URL for local file previews; revoke on remove. */
   previewUrl?: string;
   /** Library asset id when kind === "library". */
@@ -97,9 +275,12 @@ export interface CoDirectorAttachment {
 export interface CoDirectorWorkspaceBindings {
   projectId?: string;
   projectName?: string;
+  primaryProjectType?: string;
   sceneId?: string;
   sceneName?: string;
   workspaceTab?: string;
+  /** Active ScriptDocument id when Scriptwriter Studio is open. */
+  activeDocumentId?: string;
   onGoTab?: (tab: string) => void;
   onApplyPrompt?: (prompt: string) => void;
   onAppliedSetup?: () => void | Promise<void>;
@@ -137,42 +318,140 @@ export interface CoDirectorSessionSnapshot {
   conversationStarted: boolean;
 }
 
-const DRAFT_KEY = "adept_codirector_draft";
-const MESSAGES_KEY = "adept_codirector_messages";
+const DRAFT_KEY_PREFIX = "adept_codirector_draft_";
+/** Legacy global draft key — never written; cleared when migrating to project-scoped drafts. */
+const LEGACY_DRAFT_KEY = "adept_codirector_draft";
+const MESSAGES_KEY_PREFIX = "adept_codirector_messages_";
+/** Legacy global key — read once for migration, never written. */
+const LEGACY_MESSAGES_KEY = "adept_codirector_messages";
 const MODE_KEY = "adept_codirector_display_mode";
 const CONTEXT_PANEL_KEY = "adept_codirector_context_panel";
 const EXPERTISE_MODE_KEY = "adept_codirector_expertise_mode";
+const LAST_PROJECT_KEY = "adept_codirector_last_project_suggestion";
+const ACTIVITY_PREFERENCE_KEY = "adept_codirector_activity_preference";
 
-export function loadPersistedDraft(): string {
+/** Safe message fields only — never tokens, tool payloads, or technical_evidence. */
+function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMessage[] {
+  return messages.slice(-80).map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: typeof m.content === "string" ? m.content.slice(0, 20_000) : "",
+    attachmentIds: Array.isArray(m.attachmentIds) ? m.attachmentIds.slice(0, 12) : undefined,
+    attachments: Array.isArray(m.attachments)
+      ? m.attachments
+          .filter((item) => item && typeof item.assetId === "string" && typeof item.name === "string")
+          .slice(0, 12)
+          .map((item) => ({
+            assetId: item.assetId,
+            name: item.name.slice(0, 300),
+            mimeType: typeof item.mimeType === "string" ? item.mimeType.slice(0, 120) : undefined,
+            source: item.source === "library" ? "library" : "file",
+            mediaKind: typeof item.mediaKind === "string" ? item.mediaKind.slice(0, 32) : undefined,
+          }))
+      : undefined,
+    createdAt: m.createdAt,
+    status: m.status,
+    messageType: m.messageType,
+  }));
+}
+
+function draftStorageKey(projectId?: string | null): string {
+  return DRAFT_KEY_PREFIX + (projectId || "_none");
+}
+
+export function loadPersistedDraft(projectId?: string | null): string {
   try {
-    return localStorage.getItem(DRAFT_KEY) || "";
+    try {
+      localStorage.removeItem(LEGACY_DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
+    return localStorage.getItem(draftStorageKey(projectId)) || "";
   } catch {
     return "";
   }
 }
 
-export function persistDraft(value: string) {
+export function persistDraft(value: string, projectId?: string | null) {
   try {
-    localStorage.setItem(DRAFT_KEY, value);
+    // Draft text only — never persist secrets/tokens. Scoped per project to prevent leaks.
+    localStorage.setItem(draftStorageKey(projectId), (value || "").slice(0, 20_000));
+    localStorage.removeItem(LEGACY_DRAFT_KEY);
   } catch {
     /* ignore */
   }
 }
 
-export function loadPersistedMessages(): CoDirectorMessage[] | null {
+export function loadPersistedMessages(projectId?: string | null): CoDirectorMessage[] | null {
+  if (!projectId) return null;
   try {
-    const raw = sessionStorage.getItem(MESSAGES_KEY);
-    if (!raw) return null;
+    const raw = sessionStorage.getItem(MESSAGES_KEY_PREFIX + projectId);
+    if (!raw) {
+      // Do not hydrate from the legacy global key (cross-project leak risk).
+      try {
+        sessionStorage.removeItem(LEGACY_MESSAGES_KEY);
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
     const parsed = JSON.parse(raw) as CoDirectorMessage[];
-    return Array.isArray(parsed) ? parsed : null;
+    return Array.isArray(parsed) ? sanitizeMessagesForCache(parsed) : null;
   } catch {
     return null;
   }
 }
 
-export function persistMessages(messages: CoDirectorMessage[]) {
+export function persistMessages(messages: CoDirectorMessage[], projectId?: string | null) {
+  if (!projectId) return;
   try {
-    sessionStorage.setItem(MESSAGES_KEY, JSON.stringify(messages.slice(-80)));
+    sessionStorage.setItem(
+      MESSAGES_KEY_PREFIX + projectId,
+      JSON.stringify(sanitizeMessagesForCache(messages)),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearPersistedMessages(projectId?: string | null) {
+  if (!projectId) return;
+  try {
+    sessionStorage.removeItem(MESSAGES_KEY_PREFIX + projectId);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Suggestion-only — never grants production permissions by itself. */
+export function loadLastBoundProjectSuggestion(): LastBoundProjectSuggestion | null {
+  try {
+    const raw = localStorage.getItem(LAST_PROJECT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LastBoundProjectSuggestion;
+    if (!parsed?.projectId || typeof parsed.projectId !== "string") return null;
+    return {
+      projectId: parsed.projectId,
+      projectName: typeof parsed.projectName === "string" ? parsed.projectName : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function persistLastBoundProjectSuggestion(suggestion: LastBoundProjectSuggestion | null) {
+  try {
+    if (!suggestion?.projectId) {
+      localStorage.removeItem(LAST_PROJECT_KEY);
+      return;
+    }
+    localStorage.setItem(
+      LAST_PROJECT_KEY,
+      JSON.stringify({
+        projectId: suggestion.projectId,
+        projectName: suggestion.projectName?.slice(0, 200),
+      }),
+    );
   } catch {
     /* ignore */
   }
@@ -229,6 +508,24 @@ export function persistExpertiseMode(mode: CoDirectorExpertiseMode) {
   }
 }
 
+export function loadActivityPreference(): CoDirectorActivityPreference {
+  try {
+    const value = localStorage.getItem(ACTIVITY_PREFERENCE_KEY);
+    if (value === "hidden" || value === "longer_tasks") return value;
+    return "always";
+  } catch {
+    return "always";
+  }
+}
+
+export function persistActivityPreference(mode: CoDirectorActivityPreference) {
+  try {
+    localStorage.setItem(ACTIVITY_PREFERENCE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** User-safe labels for intelligence progress stages (not specialist names). */
 export function intelligenceStageLabel(stage: string): string {
   const labels: Record<string, string> = {
@@ -273,6 +570,23 @@ export function consumeAbandonedStreamingFlag(projectId: string): boolean {
     return had;
   } catch {
     return false;
+  }
+}
+
+// Per-tab session token (survives reload within the tab, dies on tab close — same scope as the
+// streaming flags above). Sent as `origin_session_id` on chat-stream requests so an operator ack
+// is addressable to the originating tab.
+const TAB_SESSION_KEY = "adept_codirector_tab_session";
+
+export function getTabSessionId(): string {
+  try {
+    const existing = sessionStorage.getItem(TAB_SESSION_KEY);
+    if (existing) return existing;
+    const id = `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    sessionStorage.setItem(TAB_SESSION_KEY, id);
+    return id;
+  } catch {
+    return `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   }
 }
 

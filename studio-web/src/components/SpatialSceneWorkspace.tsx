@@ -98,12 +98,12 @@ export function SpatialSceneWorkspace({
   project,
   scene,
   onChange,
-  onGoDirector,
+  onGoTimeline,
 }: {
   project: Project;
   scene?: Scene;
   onChange: () => Promise<void> | void;
-  onGoDirector?: () => void;
+  onGoTimeline?: () => void;
 }) {
   const sceneId = scene?.id || project.scenes[0]?.id;
   const [doc, setDoc] = useState<SpatialDoc | null>(null);
@@ -271,7 +271,7 @@ export function SpatialSceneWorkspace({
     });
     setMsg(`Sent to Director (${r.applied.join(", ")})`);
     await onChange();
-    onGoDirector?.();
+    onGoTimeline?.();
   };
 
   const runCommand = async (approve = false) => {
@@ -773,7 +773,7 @@ export function SpatialSceneWorkspace({
               Update current scene
             </button>
             <button type="button" onClick={() => void sendDirector(true)}>
-              Create Director scene
+              Create Timeline scene
             </button>
           </div>
         )}

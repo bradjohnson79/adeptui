@@ -7,6 +7,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
+from ....config import settings
 from ...m29.providers import ProviderUnavailable
 from ..schemas import AudioGenerateRequest, AudioGenerateResult
 from .base import BaseSandboxAudioAdapter
@@ -25,9 +26,15 @@ class KokoroSandboxAdapter(BaseSandboxAudioAdapter):
         super().__init__(KOKORO_REGISTRY_ID, capabilities=self.capabilities)
 
     def _venv_python(self) -> Path | None:
-        root = self.sandbox_root / "venv"
-        for rel in ("Scripts/python.exe", "bin/python", "bin/python3"):
-            candidate = root / rel
+        data = Path(settings.data_dir)
+        for candidate in (
+            data / "m210b-kvenv" / "Scripts" / "python.exe",
+            data / "m210b-kvenv" / "bin" / "python",
+            data / "m210b-kvenv" / "bin" / "python3",
+            self.sandbox_root / "venv" / "Scripts" / "python.exe",
+            self.sandbox_root / "venv" / "bin" / "python",
+            self.sandbox_root / "venv" / "bin" / "python3",
+        ):
             if candidate.is_file():
                 return candidate
         return None
@@ -36,29 +43,38 @@ class KokoroSandboxAdapter(BaseSandboxAudioAdapter):
         models = self.sandbox_root / "models"
         if not models.is_dir():
             return False
-        # Accept any non-empty models tree or an explicit marker.
         marker = models / "READY"
         if marker.is_file():
             return True
         try:
-            return any(models.iterdir())
+            return any(p.name != "READY" for p in models.iterdir())
         except OSError:
             return False
+
+    def _runtime_ready(self) -> bool:
+        return self._venv_python() is not None and self._models_ready()
+
+    def is_installed(self) -> bool:
+        if super().is_installed():
+            return True
+        return self._runtime_ready()
 
     def health_check(self) -> dict[str, Any]:
         base = super().health_check()
         py = self._venv_python()
         models_ready = self._models_ready()
+        runtime_ready = bool(py) and models_ready
         base.update(
             {
                 "provider": "kokoro",
                 "sourceKey": KOKORO_SOURCE_KEY,
                 "venvPython": str(py) if py else None,
                 "modelsReady": models_ready,
-                "runtimeReady": bool(py) and models_ready,
+                "runtimeReady": runtime_ready,
             }
         )
-        base["ok"] = bool(py) and models_ready
+        base["installed"] = self.is_installed()
+        base["ok"] = runtime_ready
         return base
 
     def _try_real_generate(self, request: AudioGenerateRequest, out: Path) -> bool:

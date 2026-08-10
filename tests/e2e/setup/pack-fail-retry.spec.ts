@@ -3,14 +3,15 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import {
   API,
-  browseForcedFolder,
+  clearActiveInstallJobs,
   clearPackOverrides,
-  confirmCheckpoint,
+  confirmInstallPreflight,
   createTempProject,
   deleteProject,
   ensurePackSource,
   makeTempDir,
   openSetup,
+  setInstallPreflightDestination,
   setFixtureScenario,
   waitForAppReady,
 } from "../helpers/app";
@@ -28,6 +29,7 @@ test.describe("@critical @isolated pack fail retry", () => {
     await waitForAppReady(request);
     await clearPackOverrides(request);
     await request.post(`${API}/api/e2e/recover-operations`);
+    await clearActiveInstallJobs(request, PACK);
     await request.post(`${API}/api/e2e/clear-component-location`, {
       data: { component_id: PACK },
     });
@@ -41,38 +43,26 @@ test.describe("@critical @isolated pack fail retry", () => {
       await setFixtureScenario(request, { mode: "fail_download" });
       await openSetup(page, project.id);
       const card = page.getByTestId(`setup-card-${PACK}`);
-      const installBtn = card.getByRole("button", { name: /Download and Install/i });
+      const installBtn = card.getByRole("button", { name: /^(Download and Install|Install|Continue Install)$/i });
       await expect(installBtn).toBeEnabled({ timeout: 30_000 });
-
-      const opResponsePromise = page.waitForResponse(
-        (res) =>
-          res.url().includes(`/setup/components/${PACK}/recommended-action`) &&
-          res.request().method() === "POST" &&
-          res.ok(),
-        { timeout: 30_000 },
-      );
       await installBtn.click();
-      const opResponse = await opResponsePromise;
-      const started = await opResponse.json();
-      const operationId = String(started.operation_id || "");
-      expect(operationId).toBeTruthy();
 
-      await browseForcedFolder(page, destFail);
-      await confirmCheckpoint(page);
+      await setInstallPreflightDestination(page, destFail);
+      await confirmInstallPreflight(page);
 
       await expect
         .poll(async () => {
-          const snap = await (
-            await request.get(`${API}/api/setup/operations/${operationId}`)
-          ).json();
-          return snap.status;
+          const status = await request.get(`${API}/api/setup/install-jobs?componentId=${PACK}`);
+          const body = await status.json();
+          const job = (body.jobs || []).find((item: { componentId?: string }) => item.componentId === PACK);
+          return String(job?.state || "");
         }, { timeout: 90_000 })
-        .toBe("failed");
+        .toMatch(/failed|repair_required/i);
 
-      const failedOp = await (
-        await request.get(`${API}/api/setup/operations/${operationId}`)
-      ).json();
-      expect(String(failedOp.error || failedOp.stage || "")).toMatch(
+      const failedStatus = await request.get(`${API}/api/setup/install-jobs?componentId=${PACK}`);
+      const failedBody = await failedStatus.json();
+      const failedJob = (failedBody.jobs || []).find((job: { componentId?: string }) => job.componentId === PACK);
+      expect(JSON.stringify(failedJob || {})).toMatch(
         /500|download|fail/i,
       );
       expect((await request.get(`${API}/api/health`)).ok()).toBeTruthy();
@@ -80,12 +70,13 @@ test.describe("@critical @isolated pack fail retry", () => {
       // Recover and retry through the same UI path with a fresh empty destination.
       await setFixtureScenario(request, { mode: "valid" });
       await request.post(`${API}/api/e2e/recover-operations`);
+      await clearActiveInstallJobs(request, PACK);
       await request.post(`${API}/api/e2e/clear-component-location`, {
         data: { component_id: PACK },
       });
       await ensurePackSource(request, PACK);
 
-      await page.goto(`/project/${project.id}?workspace=setup&r=${Date.now()}`, {
+      await page.goto(`/project/${project.id}?workspace=setup&setupMode=manual&r=${Date.now()}`, {
         waitUntil: "domcontentloaded",
       });
       await expect(page.locator(".setup-wizard-page").first()).toBeVisible({ timeout: 45_000 });
@@ -95,11 +86,11 @@ test.describe("@critical @isolated pack fail retry", () => {
       await retryCard.scrollIntoViewIfNeeded();
       await expect(retryCard).not.toHaveAttribute("data-status", "ready", { timeout: 15_000 });
 
-      const retryBtn = retryCard.getByRole("button", { name: /Download and Install/i });
+      const retryBtn = retryCard.getByRole("button", { name: /^(Download and Install|Install|Continue Install)$/i });
       await expect(retryBtn).toBeEnabled({ timeout: 30_000 });
       await retryBtn.click();
-      await browseForcedFolder(page, destRetry);
-      await confirmCheckpoint(page);
+      await setInstallPreflightDestination(page, destRetry);
+      await confirmInstallPreflight(page);
 
       await expect
         .poll(async () => {

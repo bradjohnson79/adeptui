@@ -3,9 +3,14 @@ export type DirectorSelectionKind =
   | "promptSeg"
   | "imageClip"
   | "videoClip"
+  | "camera"
   | "audio"
   | "sfx"
   | "lipsync"
+  | "lipsyncTrack"
+  | "lipsyncClip"
+  | "batch"
+  | "repair"
   | "job"
   | null;
 
@@ -13,7 +18,25 @@ export type DirectorSelection = {
   kind: DirectorSelectionKind;
   id?: string;
   trackIndex?: number;
+  trackId?: string;
 };
+
+/**
+ * Single authoritative Timeline selection contract (TIMELINE_OWNS_SELECTION).
+ * The Inspector observes this; it never becomes the source of truth.
+ * One discriminated union per selectable Timeline object so routing is
+ * exhaustive and no object silently falls back to Scene Inspector.
+ */
+export type TimelineSelection =
+  | { type: "SCENE"; sceneId: string }
+  | { type: "PROMPT_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "IMAGE_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "VIDEO_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "AUDIO_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "SFX_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "LIPSYNC_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | { type: "CAMERA_CLIP"; sceneId: string; trackId?: string; clipId: string }
+  | null;
 
 export type WorkspaceTab = "timeline" | "prompt" | "lipsync" | "settings";
 

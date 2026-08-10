@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
 from ...db import get_db
+from ...v11_scope import raise_deferred_3d
 from .compat.service import CompatService
 from .location_spin.service import LocationSpinService
 from .promote.service import PromoteService
@@ -31,6 +32,11 @@ def _require(*flag_names: str) -> None:
     if any(_flag(n) for n in flag_names):
         return
     raise HTTPException(status_code=404, detail="M2.8 capability is not enabled.")
+
+
+def _require_virtual_stage_v11() -> None:
+    """Version 1.1: Virtual Stage execution deferred to Version 1.2 (foundations kept)."""
+    raise_deferred_3d(surface="virtual_stage", flag="virtual_stage_v1", flagEnabled=_flag("virtual_stage_v1"))
 
 
 class DiscoverBody(BaseModel):
@@ -477,7 +483,7 @@ def shot_profile_export(profile_id: str, db: Session = Depends(get_db)) -> dict[
 def virtual_stage_create(
     body: StageCreateBody, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
-    _require("virtual_stage_v1")
+    _require_virtual_stage_v11()
     return VirtualStageService.create(
         db,
         project_id=body.projectId,
@@ -489,7 +495,7 @@ def virtual_stage_create(
 
 @router.get("/virtual-stage/{stage_id}")
 def virtual_stage_get(stage_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
-    _require("virtual_stage_v1")
+    _require_virtual_stage_v11()
     stage = VirtualStageService.get(db, stage_id)
     if not stage:
         raise HTTPException(status_code=404, detail="Virtual stage not found")
@@ -500,7 +506,7 @@ def virtual_stage_get(stage_id: str, db: Session = Depends(get_db)) -> dict[str,
 def virtual_stage_camera(
     stage_id: str, body: StageCameraBody, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
-    _require("virtual_stage_v1")
+    _require_virtual_stage_v11()
     try:
         return VirtualStageService.update_camera(
             db, stage_id=stage_id, camera=body.camera
@@ -511,7 +517,7 @@ def virtual_stage_camera(
 
 @router.get("/virtual-stage")
 def virtual_stage_list(projectId: str, db: Session = Depends(get_db)) -> dict[str, Any]:
-    _require("virtual_stage_v1")
+    _require_virtual_stage_v11()
     return {"stages": VirtualStageService.list_for_project(db, projectId)}
 
 

@@ -1,108 +1,53 @@
-"""Bounded specialist selection for Co-Director M2.4."""
-
+"""RouteDecision-aware specialist selection — minimum-crew, scoped, with structured confidence."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
-
-from .schemas import IntentClassification
+from typing import Optional
+from app.codirector.routing.contracts import RouteActionClass, RouteDecision
 from .specialist_registry import SpecialistRegistry
 
-MAX_SPECIALISTS = 8
+MAX_SPECIALISTS = 3
 
-_INTENT_SPECIALISTS: dict[str, tuple[str, ...]] = {
-    "revise_dialogue": ("screenwriter", "story-editor", "performance-director", "sound-designer"),
-    "plan_scene": (
-        "story-analyst",
-        "director",
-        "screenwriter",
-        "producer",
-        "cinematographer",
-        "script-supervisor",
-        "sound-designer",
-        "music-supervisor",
-    ),
-    "design_location": (
-        "production-designer",
-        "art-director",
-        "cinematographer",
-        "lighting-supervisor",
-        "technical-director",
-    ),
-    "create_storyboard": (
-        "director",
-        "cinematographer",
-        "art-director",
-        "prompt-architect",
-        "technical-director",
-        "script-supervisor",
-        "continuity-analyst",
-        "vision-reviewer",
-    ),
-    "prepare_video_generation": (
-        "director",
-        "cinematographer",
-        "sound-designer",
-        "music-supervisor",
-        "continuity-analyst",
-        "editor",
-        "prompt-architect",
-        "vision-reviewer",
-    ),
-    "review_asset": (
-        "art-director",
-        "continuity-analyst",
-        "asset-manager",
-        "qa-reviewer",
-        "vision-reviewer",
-        "technical-director",
-    ),
-    "prepare_image_generation": (
-        "director",
-        "art-director",
-        "lighting-supervisor",
-        "prompt-architect",
-        "asset-manager",
-        "vision-reviewer",
-    ),
-    "answer_question": ("producer", "pipeline-manager"),
-    "unknown": ("director", "producer", "story-analyst"),
+# Domain → specialist crew mapping (replaces legacy _INTENT_SPECIALISTS)
+# These are the domains specialists can be consulted for, keyed by target domain
+_DOMAIN_SPECIALISTS: dict[str, tuple[str, ...]] = {
+    "story": ("story-analyst", "storyteller", "story-editor"),
+    "script": ("screenwriter", "story-editor", "script-supervisor"),
+    "dialogue": ("screenwriter", "performance-director"),
+    "character": ("character-creator", "casting-director", "performance-director"),
+    "bible": ("bible-manager", "story-analyst", "continuity-analyst"),
+    "scene": ("director", "screenwriter", "story-analyst"),
+    "shot": ("cinematographer", "prompt-architect", "technical-director"),
+    "visual": ("art-director", "production-designer", "lighting-supervisor"),
+    "audio": ("sound-designer", "sound-producer", "music-supervisor"),
+    "continuity": ("continuity-analyst", "script-supervisor"),
+    "production": ("producer", "pipeline-manager", "director"),
+    "general": ("director", "producer", "story-analyst"),  # fallback for unknown domains
 }
 
-# First-class audio/editorial / M2.11 production intelligence intents
-_INTENT_SPECIALISTS.update(
-    {
-        "plan_audio": ("sound-designer", "music-supervisor", "editor", "director"),
-        "assemble_sequence": (
-            "editor",
-            "sound-designer",
-            "music-supervisor",
-            "continuity-analyst",
-            "director",
-        ),
-        "production_intelligence": (
-            "story-analyst",
-            "bible-manager",
-            "continuity-analyst",
-            "director",
-            "cinematographer",
-            "sound-designer",
-            "music-supervisor",
-            "editor",
-        ),
-    }
-)
+# RouteActionClass → (max_specialists, [domain_relevance_order])
+_ROUTE_CREW_RULES: dict[RouteActionClass, tuple[int, list[str]]] = {
+    RouteActionClass.NAVIGATE: (0, []),
+    RouteActionClass.APPROVE: (0, []),
+    RouteActionClass.REJECT: (0, []),
+    RouteActionClass.READ_INSPECT: (1, ["general", "story", "scene"]),  # at most 1, analytical only
+    RouteActionClass.CLARIFY: (1, ["general"]),
+    RouteActionClass.AMBIGUOUS: (1, ["general"]),
+    RouteActionClass.UNKNOWN: (1, ["general"]),
+    RouteActionClass.DISCUSS: (1, ["story", "script", "character", "general"]),
+    RouteActionClass.MODIFY_KNOWLEDGE: (1, ["bible", "story"]),
+    RouteActionClass.PROPOSE_CREATIVE_CHANGE: (2, ["story", "script", "visual", "audio", "scene"]),
+    RouteActionClass.EXECUTE_PRODUCTION: (3, ["production", "shot", "scene", "audio", "visual", "timeline"]),
+}
 
-_CONTINUITY_INTENTS = frozenset(
-    {
-        "revise_dialogue",
-        "plan_scene",
-        "create_storyboard",
-        "prepare_video_generation",
-        "assemble_sequence",
-        "production_intelligence",
-    }
-)
+
+@dataclass
+class SpecialistContext:
+    """Input context for specialist selection — all fields optional, selector degrades gracefully."""
+    route_decision: Optional[RouteDecision] = None
+    creator_goal: Optional[str] = None          # natural language goal from conversation focus
+    workflow_stage: Optional[str] = None        # Phase 6 derived stage id
+    workflow_active_task: Optional[str] = None  # Phase 6 active task
 
 
 @dataclass
@@ -111,6 +56,8 @@ class SpecialistSelection:
     optional: tuple[str, ...] = ()
     skipped: tuple[str, ...] = ()
     reasons: list[str] = field(default_factory=list)
+    selection_confidence: float = 0.0
+    target_domain: Optional[str] = None
 
     @property
     def all_selected(self) -> tuple[str, ...]:
@@ -124,90 +71,114 @@ class SpecialistSelector:
 
     def select(
         self,
-        intent: IntentClassification,
-        *,
-        include_continuity: bool | None = None,
+        context: SpecialistContext,
     ) -> SpecialistSelection:
-        base = _INTENT_SPECIALISTS.get(intent.primaryIntent, _INTENT_SPECIALISTS["unknown"])
-        selected: list[str] = []
-        skipped: list[str] = []
-        reasons: list[str] = [f"intent={intent.primaryIntent}"]
+        """Select specialists based on RouteDecision + context, not legacy IntentKind."""
+        route = context.route_decision
+        if route is None:
+            return self._fallback_selection("general")
 
-        for specialist_id in base:
-            if specialist_id not in self.registry.ids():
-                skipped.append(specialist_id)
-                continue
-            if len(selected) >= self.max_specialists:
-                skipped.append(specialist_id)
-                continue
-            selected.append(specialist_id)
+        action = route.actionClass
+        rule = _ROUTE_CREW_RULES.get(action)
 
-        if include_continuity is None:
-            include_continuity = intent.primaryIntent in _CONTINUITY_INTENTS
-        if include_continuity and "continuity-analyst" in self.registry.ids():
-            if "continuity-analyst" not in selected and len(selected) < self.max_specialists:
-                selected.append("continuity-analyst")
-                reasons.append("continuity context relevant")
-            elif "continuity-analyst" not in selected:
-                skipped.append("continuity-analyst")
+        if rule is None or rule[0] == 0:
+            return SpecialistSelection(
+                reasons=[f"route={action.value}: zero specialists required"],
+                selection_confidence=1.0,
+                target_domain=None,
+            )
 
-        bounded = selected[: self.max_specialists]
-        overflow = selected[self.max_specialists :]
-        skipped.extend(overflow)
+        max_for_action, domain_order = rule
+        effective_max = min(max_for_action, self.max_specialists)
 
-        required_count = min(3, len(bounded)) if intent.complexity != "simple" else min(1, len(bounded))
-        required = tuple(bounded[:required_count])
-        optional = tuple(bounded[required_count:])
-        return SpecialistSelection(required=required, optional=optional, skipped=tuple(dict.fromkeys(skipped)), reasons=reasons)
+        domain = self._resolve_domain(route, context)
+        selected = self._select_for_domain(domain, domain_order, effective_max)
+        confidence = self._compute_confidence(route)
 
-    def validate_selection(self, specialist_ids: Iterable[str]) -> list[str]:
+        if not selected:
+            return self._fallback_selection("general")
+
+        required_count = min(2 if effective_max > 1 else 1, len(selected))
+        required = tuple(selected[:required_count])
+        optional = tuple(selected[required_count:])
+
+        return SpecialistSelection(
+            required=required,
+            optional=optional,
+            reasons=[f"route={action.value}", f"domain={domain}", f"max={effective_max}"],
+            selection_confidence=confidence,
+            target_domain=domain,
+        )
+
+    def _resolve_domain(self, route: RouteDecision, context: SpecialistContext) -> str:
+        """Resolve the specialist domain from route target + creator goal + workflow context."""
+        target = (route.target or "").lower() if route.target else ""
+        goal = (context.creator_goal or "").lower() if context.creator_goal else ""
+
+        for domain_key in _DOMAIN_SPECIALISTS:
+            if domain_key in target:
+                return domain_key
+
+        for domain_key in _DOMAIN_SPECIALISTS:
+            if domain_key in goal:
+                return domain_key
+
+        stage = (context.workflow_stage or "").lower() if context.workflow_stage else ""
+        for domain_key in _DOMAIN_SPECIALISTS:
+            if domain_key in stage:
+                return domain_key
+
+        action_name = route.actionClass.value.lower() if route.actionClass else ""
+        if "discuss" in action_name or "clarify" in action_name or "unknown" in action_name:
+            return "general"
+        if "read" in action_name:
+            return "general"
+        if "propose" in action_name or "modify" in action_name:
+            return "story"
+        if "execute" in action_name or "production" in action_name:
+            return "production"
+
+        return "general"
+
+    def _select_for_domain(self, domain: str, domain_order: list[str], max_count: int) -> list[str]:
+        """Select specialists for a resolved domain, up to max_count."""
+        candidates = list(_DOMAIN_SPECIALISTS.get(domain, _DOMAIN_SPECIALISTS["general"]))
+
+        if len(candidates) < max_count:
+            for alt_domain in domain_order:
+                if alt_domain == domain:
+                    continue
+                alt_ids = _DOMAIN_SPECIALISTS.get(alt_domain, ())
+                for alt_id in alt_ids:
+                    if alt_id not in candidates and alt_id in self.registry.ids():
+                        candidates.append(alt_id)
+                        if len(candidates) >= max_count:
+                            break
+                if len(candidates) >= max_count:
+                    break
+
+        selected = [sid for sid in candidates if sid in self.registry.ids()]
+        return selected[:max_count]
+
+    def _compute_confidence(self, route: RouteDecision) -> float:
+        """Compute selection confidence from route decision confidence and specificity."""
+        base = route.confidence
+        if route.target:
+            base += 0.1
+        if route.targetWorkspace:
+            base += 0.05
+        return min(base, 1.0)
+
+    def _fallback_selection(self, domain: str) -> SpecialistSelection:
+        """Safe fallback when route decision is unavailable."""
+        candidates = list(_DOMAIN_SPECIALISTS.get(domain, _DOMAIN_SPECIALISTS["general"]))
+        selected = [sid for sid in candidates[:1] if sid in self.registry.ids()]
+        return SpecialistSelection(
+            required=tuple(selected),
+            selection_confidence=0.5,
+            target_domain=domain,
+            reasons=["fallback: no route decision available"],
+        )
+
+    def validate_selection(self, specialist_ids: list[str]) -> list[str]:
         return self.registry.validate_ids(specialist_ids)
-
-_INTENT_SPECIALISTS.update(
-    {
-        "virtual_production": (
-            "virtual-production-coordinator",
-            "production-designer",
-            "cinematographer",
-            "lighting-supervisor",
-            "continuity-analyst",
-            "technical-director",
-        ),
-        "environment_studio": (
-            "virtual-production-coordinator",
-            "production-designer",
-            "art-director",
-            "cinematographer",
-            "lighting-supervisor",
-        ),
-    }
-)
-
-_INTENT_SPECIALISTS.update(
-    {
-        "storyteller_discovery": (
-            "storyteller",
-            "sound-producer",
-            "director",
-            "cinematographer",
-            "continuity-analyst",
-        ),
-        "sound_production": (
-            "sound-producer",
-            "music-supervisor",
-            "sound-designer",
-            "storyteller",
-            "editor",
-        ),
-        "unified_experience": (
-            "storyteller",
-            "sound-producer",
-            "cinematographer",
-            "editor",
-            "virtual-production-coordinator",
-            "continuity-analyst",
-            "director",
-        ),
-    }
-)
-_CONTINUITY_INTENTS = frozenset(set(_CONTINUITY_INTENTS) | {"storyteller_discovery", "unified_experience", "sound_production"})

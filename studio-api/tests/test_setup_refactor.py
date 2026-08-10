@@ -10,12 +10,16 @@ import pytest
 @pytest.fixture()
 def setup_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     from app.config import settings
+    from app.setup import diagnostics as setup_diagnostics
+    from app.setup import status as setup_status
 
     monkeypatch.setattr(settings, "data_dir", tmp_path)
     # Keep path helpers inside the temp tree instead of the developer's Comfy Shared folder.
     monkeypatch.setattr(settings, "comfy_input_dir", tmp_path / "missing-comfy" / "input")
     if hasattr(settings, "comfy_models_dir"):
         monkeypatch.setattr(settings, "comfy_models_dir", None)
+    setup_status._STATUS_CACHE = None
+    setup_diagnostics._VERIFY_CACHE.clear()
     return tmp_path
 
 
@@ -170,6 +174,30 @@ def test_status_exposes_active_operation(
     assert ltx["operation_id"] == operation["operation_id"]
     assert ltx["stage"] == "Preparing LTX Video Checkpoint"
     assert ltx["status"] == "installing"
+
+
+def test_status_reuses_short_cache_when_idle(
+    setup_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.setup import status
+    from app.setup.diagnostics import Verification
+
+    calls = {"count": 0}
+
+    def fake_verify(component_id: str, state=None):
+        calls["count"] += 1
+        return Verification(True, False, None, "ok", version="1")
+
+    monkeypatch.setattr(status, "verify_component", fake_verify)
+
+    first = status.build_status()
+    first_calls = calls["count"]
+    second = status.build_status()
+
+    assert first["overall_status"] == "ready"
+    assert second["overall_status"] == "ready"
+    assert first_calls > 0
+    assert calls["count"] == first_calls
 
 
 def test_model_checkpoint_requires_license_and_auto_verifies(
@@ -611,3 +639,24 @@ def test_new_setup_endpoints(client, monkeypatch: pytest.MonkeyPatch) -> None:
     assert suggested.status_code == 200
     assert suggested.json()["path_selector"] == "directory"
     assert client.post("/api/setup/browse-path", json={"component_id": "pack_essential_photoreal"}).json()["path"] == r"C:\Models"
+
+
+def test_status_exposes_first_class_ai_guided_groups(setup_data_dir: Path) -> None:
+    from app.setup.status import build_status
+
+    status = build_status()
+    by_id = {item["id"]: item for item in status["components"]}
+
+    assert by_id["ace_step_local"]["group"] == "Music"
+    assert by_id["ace_step_local"]["surfaceGroups"] == ["Music"]
+
+    assert by_id["longcat-video-avatar-1-5-local"]["group"] == "Avatar"
+    assert by_id["longcat-video-avatar-1-5-local"]["surfaceGroups"] == ["Avatar", "Motion"]
+
+    assert by_id["fal_key"]["group"] == "API Providers"
+    assert by_id["fal_key"]["subgroup"] == "Credentials"
+    assert by_id["fal_key"]["surfaceGroups"] == ["API Providers"]
+
+    assert by_id["pack_essential_photoreal"]["group"] == "Creative Packs"
+    assert by_id["pack_essential_photoreal"]["subgroup"] == "Essential Packs"
+    assert by_id["pack_essential_photoreal"]["surfaceGroups"] == ["Creative Packs"]

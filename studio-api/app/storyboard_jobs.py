@@ -132,36 +132,49 @@ def prepare_storyboard_generate(
     panel.prompt = prompt
     db.commit()
 
+    from .image_product.service import generate_images
+
+    result = generate_images(
+        db,
+        project_id=project_id,
+        body={
+            "prompt": prompt,
+            "negative": project.negative_prompt,
+            "purpose": "storyboard",
+            "operation": "image.storyboard_frame",
+            "presetId": body.get("presetId") or "builtin-storyboard",
+            "modelFamilyPreference": body.get("modelFamilyPreference") or body.get("model") or "zimage",
+            "width": int(body.get("width") or 1280),
+            "height": int(body.get("height") or 720),
+            "aspectRatio": body.get("aspectRatio") or "16:9",
+            "tag": "storyboard",
+            "labels": ["storyboard"],
+            "panelId": panel.id,
+            "segment_id": panel.segment_id,
+            "sceneId": (seg.scene_id if seg else scene_id),
+            "shotId": body.get("shotId"),
+            "cameraId": body.get("cameraId"),
+            "continuityId": body.get("continuityId"),
+            "style": {"label": style} if isinstance(style, str) else (style or {}),
+        },
+    )
+    job_id = result.get("jobId")
+    job = db.get(Job, job_id) if job_id else None
     params = {
         "prompt": prompt,
-        "negative": project.negative_prompt,
-        "style": style,
-        "model": body.get("model") or "auto",
-        "width": int(body.get("width") or 1280),
-        "height": int(body.get("height") or 720),
-        "tag": "storyboard",
-        "labels": ["storyboard"],
         "panel_id": panel.id,
         "segment_id": panel.segment_id,
+        "imageRuntime": result.get("imageRuntime"),
+        "recommendation": result.get("recommendation"),
     }
-    job = Job(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        scene_id=(seg.scene_id if seg else scene_id),
-        kind="imagegen",
-        status="queued",
-        message="Queued storyboard ImageGen",
-        params_json=json.dumps(params),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
     return {
-        "job_id": job.id,
+        "job_id": job_id,
         "panel_id": panel.id,
         "segment_id": panel.segment_id,
         "status": "generating",
         "params": params,
+        "job": job,
+        "imageProduct": True,
     }
 
 
@@ -172,22 +185,23 @@ def enqueue_imagegen_job(
     *,
     scene_id: Optional[str] = None,
 ) -> Job:
-    """Create a queued ImageGen Job row. Does not call job_queue.enqueue."""
+    """Create a queued ImageGen Job via Image Product compiler (M42 W3)."""
+    from .image_product.service import generate_images
+
     body = dict(body or {})
     project = db.get(Project, project_id)
     if not project:
         raise ValueError("Project not found")
-    edit = bool(body.get("edit"))
-    job = Job(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        scene_id=scene_id,
-        kind="imagegen_edit" if edit else "imagegen",
-        status="queued",
-        message="Queued ImageGen" + (" edit" if edit else ""),
-        params_json=json.dumps(body),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
+    payload = {
+        **body,
+        "sceneId": scene_id or body.get("sceneId") or body.get("scene_id"),
+        "modelFamilyPreference": body.get("modelFamilyPreference") or body.get("model") or "zimage",
+    }
+    if body.get("edit") or body.get("source_asset_id"):
+        payload["operation"] = "image.edit"
+        payload.setdefault("sourceAssetId", body.get("source_asset_id"))
+    result = generate_images(db, project_id=project_id, body=payload)
+    job = db.get(Job, result.get("jobId"))
+    if not job:
+        raise RuntimeError("Image Product enqueue failed to create job")
     return job

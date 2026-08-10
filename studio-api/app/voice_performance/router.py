@@ -84,53 +84,72 @@ def provider_translation(plan_id: str, provider: Optional[str] = None, db: Sessi
 
 
 @router.post("/plans/{plan_id}/generate")
-def generate_plan(plan_id: str, body: GeneratePlanBody, request: Request, db: Session = Depends(get_db)):
+def generate_plan(
+    plan_id: str,
+    body: GeneratePlanBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    projectId: Optional[str] = None,
+):
     return service.generate_segments(
         db,
         plan_id,
         allow_kokoro_fallback=body.allowKokoroFallback,
         allow_testing_voice=body.allowTestingVoice,
         request=request,
+        project_id=projectId,
     )
 
 
 @router.get("/plans/{plan_id}/segments")
-def list_segments(plan_id: str, request: Request, db: Session = Depends(get_db)):
-    plan = service.get_plan(db, plan_id, request=request)
+def list_segments(plan_id: str, request: Request, db: Session = Depends(get_db), projectId: Optional[str] = None):
+    plan = service.get_plan(db, plan_id, request=request, project_id=projectId)
     return {"planId": plan_id, "segments": [s.model_dump() for s in plan.segments], "mock": False}
 
 
 @router.post("/segments/{segment_id}/retry")
-def retry_segment(segment_id: str, body: GeneratePlanBody | None = None, db: Session = Depends(get_db)):
+def retry_segment(
+    segment_id: str,
+    body: GeneratePlanBody | None = None,
+    db: Session = Depends(get_db),
+    projectId: Optional[str] = None,
+):
     return service.retry_segment(
-        db, segment_id, allow_kokoro_fallback=bool(body and body.allowKokoroFallback)
+        db,
+        segment_id,
+        allow_kokoro_fallback=bool(body and body.allowKokoroFallback),
+        project_id=projectId,
     )
 
 
 @router.post("/segments/{segment_id}/approve")
-def approve_segment(segment_id: str, db: Session = Depends(get_db)):
-    return service.approve_segment(db, segment_id, approved=True)
+def approve_segment(segment_id: str, db: Session = Depends(get_db), projectId: Optional[str] = None):
+    return service.approve_segment(db, segment_id, approved=True, project_id=projectId)
 
 
 @router.post("/segments/{segment_id}/reject")
-def reject_segment(segment_id: str, db: Session = Depends(get_db)):
-    return service.approve_segment(db, segment_id, approved=False)
+def reject_segment(segment_id: str, db: Session = Depends(get_db), projectId: Optional[str] = None):
+    return service.approve_segment(db, segment_id, approved=False, project_id=projectId)
 
 
 @router.post("/plans/{plan_id}/assemble")
-def assemble(plan_id: str, db: Session = Depends(get_db)):
-    return service.assemble_plan(db, plan_id)
+def assemble(plan_id: str, db: Session = Depends(get_db), projectId: Optional[str] = None):
+    return service.assemble_plan(db, plan_id, project_id=projectId)
 
 
 @router.post("/assemblies/{assembly_id}/approve")
-def approve_assembly(assembly_id: str, approvedBy: str = "owner", db: Session = Depends(get_db)):
-    return service.approve_assembly(db, assembly_id, approved_by=approvedBy)
+def approve_assembly(assembly_id: str, approvedBy: str = "owner", db: Session = Depends(get_db), projectId: Optional[str] = None):
+    return service.approve_assembly(db, assembly_id, approved_by=approvedBy, project_id=projectId)
 
 
 @router.post("/assemblies/{assembly_id}/place-on-timeline")
-def place_timeline(assembly_id: str, body: PlaceOnTimelineBody, db: Session = Depends(get_db)):
+def place_timeline(assembly_id: str, body: PlaceOnTimelineBody, db: Session = Depends(get_db), projectId: Optional[str] = None):
     return service.place_on_timeline(
-        db, assembly_id, timeline_id=body.timelineId, start_ms=body.startMs
+        db,
+        assembly_id,
+        timeline_id=body.timelineId,
+        start_ms=body.startMs,
+        project_id=projectId,
     )
 
 

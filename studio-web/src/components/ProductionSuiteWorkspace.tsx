@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
+import { StudioChrome } from "./dashboard/StudioChrome";
 
 type Section =
   | "image"
@@ -67,10 +68,14 @@ export default function ProductionSuiteWorkspace() {
   const anyOn = SECTIONS.some((s) => Boolean(flags[s.flag]));
   if (!anyOn) {
     return (
-      <div className="page" data-testid="m29-suite-unavailable">
-        <h1>Production Suite unavailable</h1>
-        <p>Enable STUDIO_FEATURE_*_PRODUCTION_V1 (or director/control) flags to use M2.9 workspaces.</p>
-        <Link to="/">Home</Link>
+      <div className="app-shell atmosphere" data-testid="m29-suite-unavailable">
+        <StudioChrome variant="home" />
+        <div className="page">
+          <h1 className="ds-type-h1">Production Suite unavailable</h1>
+          <p className="ds-type-helper">
+            Enable STUDIO_FEATURE_*_PRODUCTION_V1 (or director/control) flags to use M2.9 workspaces.
+          </p>
+        </div>
       </div>
     );
   }
@@ -124,12 +129,14 @@ export default function ProductionSuiteWorkspace() {
   };
 
   return (
-    <div className="page m29-suite-page" data-testid="m29-suite-page">
-      <header className="row" style={{ gap: 12, alignItems: "center" }}>
-        <Link to="/">Home</Link>
-        <h1>Production Suite</h1>
-      </header>
-      <p>M2.9 native production departments (flag-gated, executive-backed).</p>
+    <div className="app-shell atmosphere" data-testid="m29-suite-page">
+      <StudioChrome
+        variant="home"
+        breadcrumbs={[{ label: "Home" }, { label: "Production" }, { label: "Production Suite" }]}
+      />
+      <div className="page m29-suite-page">
+      <h1 className="ds-type-h1">Production Suite</h1>
+      <p className="ds-type-helper">M2.9 native production departments (flag-gated, executive-backed).</p>
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {active.map((s) => (
           <button
@@ -172,6 +179,7 @@ export default function ProductionSuiteWorkspace() {
           {JSON.stringify(result, null, 2)}
         </pre>
       )}
+      </div>
     </div>
   );
 }

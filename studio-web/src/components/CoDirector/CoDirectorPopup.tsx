@@ -42,6 +42,7 @@ export function CoDirectorPopup() {
       role="dialog"
       aria-modal="false"
       aria-label="Co-Director"
+      data-testid="codirector-popup"
     >
       <CoDirectorShell mode="popup" onClose={closeSession} />
     </div>

@@ -241,7 +241,9 @@ export function ContextInspector({
     selection.kind === "videoClip" ||
     selection.kind === "audio" ||
     selection.kind === "sfx" ||
-    selection.kind === "lipsync"
+    selection.kind === "lipsync" ||
+    selection.kind === "lipsyncTrack" ||
+    selection.kind === "lipsyncClip"
   ) {
     return (
       <div className="inspector-stack">
@@ -258,7 +260,11 @@ export function ContextInspector({
                       ? "Audio"
                       : selection.kind === "sfx"
                         ? "SFX"
-                        : "Lip sync"
+                        : selection.kind === "lipsyncTrack"
+                          ? "Lip sync track"
+                          : selection.kind === "lipsyncClip"
+                            ? "Lip sync clip"
+                            : "Lip sync"
             }
             tip="Edit details in the Timeline / Prompt / Lip Sync workspace tabs. Selection drives this inspector."
           />

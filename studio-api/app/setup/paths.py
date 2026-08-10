@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..config import settings
+from ..avatar_runtimes import is_avatar_runtime_component, runtime_root as avatar_runtime_root
 from .catalog import COMPONENTS, get_component
 
 
@@ -65,6 +66,8 @@ def suggested_install_path(component_id: str) -> str:
     Other path_link components may still ensure folders exist.
     """
     component = get_component(component_id)
+    if is_avatar_runtime_component(component_id):
+        return str(avatar_runtime_root(component_id))
     if component.installer == "asset_pack":
         return str(recommended_pack_path(component_id))
     return str(ensure_suggested_path(component_id))
@@ -73,6 +76,10 @@ def suggested_install_path(component_id: str) -> str:
 def ensure_suggested_path(component_id: str) -> Path:
     """Create (if needed) and return the Adept-recommended path for a component."""
     component = get_component(component_id)
+    if is_avatar_runtime_component(component_id):
+        root = avatar_runtime_root(component_id)
+        root.mkdir(parents=True, exist_ok=True)
+        return root
     models = default_models_root()
     models.mkdir(parents=True, exist_ok=True)
 

@@ -10,6 +10,16 @@ type Dashboard = {
   blockers?: unknown[];
 };
 
+const ENV_GENERATE_PURPOSES = [
+  { id: "concept", label: "Concept" },
+  { id: "room", label: "Room" },
+  { id: "landscape", label: "Landscape" },
+  { id: "city", label: "City" },
+  { id: "spacecraft", label: "Spacecraft" },
+  { id: "fantasy", label: "Fantasy" },
+  { id: "background", label: "Background" },
+] as const;
+
 const css = `
 .m213-page { min-height: 100vh; background: linear-gradient(160deg,#12151a 0%,#1c2430 45%,#152028 100%); color:#e8eef5; font-family: "Segoe UI", sans-serif; }
 .m213-hero { padding: 1.25rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
@@ -41,6 +51,10 @@ export default function EnvironmentStudioWorkspace() {
   const [log, setLog] = useState("Ready.");
   const [busy, setBusy] = useState(false);
   const [characters, setCharacters] = useState<ViewportCharacter[]>([]);
+  const [envPrompt, setEnvPrompt] = useState("Production environment concept, cinematic lighting");
+  const [envPurpose, setEnvPurpose] = useState<string>("concept");
+  const [envRefAssetId, setEnvRefAssetId] = useState("");
+  const [families, setFamilies] = useState<any[]>([]);
   const honesty = useMemo(() => {
     const adapters = (status?.adapters as Array<Record<string, unknown>> | undefined) || [];
     return adapters.map((a) => `${a.name}: available=${a.available} fixture=${a.fixture}`).join(" | ");
@@ -62,6 +76,10 @@ export default function EnvironmentStudioWorkspace() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    api.imageProductFamilies().then((r) => setFamilies(r.families || [])).catch(() => setFamilies([]));
   }, []);
 
   const run = async (label: string, fn: () => Promise<unknown>) => {
@@ -130,6 +148,42 @@ export default function EnvironmentStudioWorkspace() {
         facing: (c.facing ?? 90) + 15,
       })),
     );
+  };
+
+  const generateEnvironment = async () => {
+    setBusy(true);
+    try {
+      const referenceIds: string[] = [];
+      if (envRefAssetId.trim()) {
+        const bridged = await api.imageProductBridgeReference(projectId, {
+          assetId: envRefAssetId.trim(),
+          role: "environment",
+          displayName: `env-ref-${envRefAssetId.slice(0, 8)}`,
+        });
+        if (bridged?.referenceId) referenceIds.push(bridged.referenceId);
+      }
+      const purpose = ENV_GENERATE_PURPOSES.find((p) => p.id === envPurpose)?.id || "concept";
+      const subject = envPrompt.trim() || `${purpose} environment`;
+      const out = await api.imageProductGenerate(projectId, {
+        presetId: "builtin-environment-sheet",
+        purpose,
+        subject,
+        prompt: subject,
+        referenceIds,
+        refs: envRefAssetId.trim() ? [{ assetId: envRefAssetId.trim(), role: "environment" }] : [],
+        tag: `env_${purpose}`,
+        creativeContext: { objective: purpose, environmentId },
+      });
+      setLog(
+        (prev) =>
+          prev +
+          `\n[image-generate ${purpose}] job=${out.jobId || "?"} workflow=${out.imageRuntime?.workflowKey || "?"}`,
+      );
+    } catch (err) {
+      setLog((prev) => prev + `\n[image-generate ERROR] ${err}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -205,6 +259,62 @@ export default function EnvironmentStudioWorkspace() {
           </p>
           <h2 style={{ marginTop: "1rem" }}>Activity</h2>
           <div className="m213-log">{log}</div>
+        </section>
+        <section className="m213-panel" data-testid="environment-image-generate">
+          <h2>Image Runtime Generate</h2>
+          <p style={{ fontSize: "0.85rem", opacity: 0.75, marginTop: 0 }}>
+            M42 Image Product · environment sheet preset · alongside M2.13 camera-spin (unchanged above).
+          </p>
+          <div className="m213-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+            <label style={{ fontSize: "0.85rem" }}>
+              Purpose
+              <select
+                value={envPurpose}
+                onChange={(e) => setEnvPurpose(e.target.value)}
+                data-testid="env-gen-purpose"
+                style={{ display: "block", width: "100%", marginTop: "0.25rem" }}
+              >
+                {ENV_GENERATE_PURPOSES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ fontSize: "0.85rem" }}>
+              Prompt / subject
+              <textarea
+                rows={3}
+                value={envPrompt}
+                onChange={(e) => setEnvPrompt(e.target.value)}
+                data-testid="env-gen-prompt"
+                style={{ display: "block", width: "100%", marginTop: "0.25rem" }}
+              />
+            </label>
+            <label style={{ fontSize: "0.85rem" }}>
+              Reference asset id (optional · bridges as environment ReferenceAsset)
+              <input
+                value={envRefAssetId}
+                onChange={(e) => setEnvRefAssetId(e.target.value)}
+                placeholder="asset uuid"
+                data-testid="env-gen-ref-asset"
+                style={{ display: "block", width: "100%", marginTop: "0.25rem" }}
+              />
+            </label>
+            {families.length > 0 && (
+              <p style={{ fontSize: "0.78rem", opacity: 0.65, margin: 0 }}>
+                Families: {families.map((f) => `${f.label}:${f.status}`).join(" · ")}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={busy || !envPrompt.trim()}
+              onClick={() => void generateEnvironment()}
+              data-testid="env-gen-submit"
+            >
+              Generate environment
+            </button>
+          </div>
         </section>
       </div>
     </div>

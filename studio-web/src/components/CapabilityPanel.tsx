@@ -13,14 +13,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import { buildAiGuidedSetupPath } from "../setup/navigation";
 import {
   type Capability,
   type CapabilityBlocker,
   type CapabilitySnapshot,
   capabilityStatusLabel,
-  capabilityStatusTone,
   recommendedActionLabel,
 } from "../capabilities";
+import { Button, ReadinessMeter, SectionHeader, StatusBadge } from "./ui";
+import { mapCapabilityStatus } from "../status";
 
 /** Capability ids the Setup Wizard treats as required before it may claim readiness. */
 export const REQUIRED_FOR_GENERATION = [
@@ -82,16 +84,20 @@ export function useCapabilities(options?: { projectId?: string; pollMs?: number 
  */
 function actionTarget(blocker: CapabilityBlocker, projectId?: string): string | null {
   const componentId = blocker.componentIds[0];
+  const setupTarget = buildAiGuidedSetupPath({
+    projectId,
+    componentId,
+    source: "source_manager",
+  });
   switch (blocker.recommendedAction) {
     case "open_source_manager":
     case "add_source_url":
-      return "/source-manager";
+      return setupTarget;
     case "install_comfyui_extensions":
+      return setupTarget;
     case "verify_model_path":
     case "run_diagnostics":
-      return projectId && componentId
-        ? `/project/${projectId}?workspace=setup#setup-card-${componentId}`
-        : "/source-manager";
+      return setupTarget;
     default:
       return null;
   }
@@ -103,9 +109,7 @@ function BlockerRow({ blocker, projectId }: { blocker: CapabilityBlocker; projec
   return (
     <li className="capability-blocker" data-testid={`capability-blocker-${blocker.capabilityId}`}>
       <div className="capability-blocker-head">
-        <span className={`status-badge ${capabilityStatusTone(blocker.status)}`}>
-          {capabilityStatusLabel(blocker.status)}
-        </span>
+        <StatusBadge kind={mapCapabilityStatus(blocker.status)} label={capabilityStatusLabel(blocker.status)} />
         <strong>{blocker.displayName}</strong>
         {blocker.reasonCode && <code className="capability-reason">{blocker.reasonCode}</code>}
       </div>
@@ -149,19 +153,36 @@ export function CapabilityReadinessPanel({
     return subsystems ? all.filter((item) => subsystems.includes(item.subsystem)) : all;
   }, [snapshot, subsystems]);
 
+  const readinessTotal = snapshot?.readinessTotal ?? snapshot?.capabilities.length ?? 0;
+  const readyCount = snapshot?.callable.length ?? 0;
+  const blockedCount = blockers.length;
+  const deferredCount = snapshot?.deferred?.length ?? snapshot?.counts.deferred_version_1_2 ?? 0;
+  const notInstalledCount = Math.max(0, readinessTotal - readyCount - blockedCount);
+  const [showReadinessHelp, setShowReadinessHelp] = useState(false);
+  const unavailableByDesign = deferredCount;
+  const notApplicable = Math.max(
+    0,
+    (snapshot?.capabilities.length ?? 0) - readinessTotal,
+  );
+  const notTested = snapshot?.counts?.unknown ?? 0;
+
   return (
-    <section className="dash-card capability-panel" data-testid="capability-panel">
-      <div className="capability-panel-head">
-        <h2>{title}</h2>
-        <button
-          type="button"
-          onClick={() => void reload(true)}
-          disabled={busy}
-          data-testid="capability-refresh"
-        >
-          {busy ? "Checking…" : "Refresh"}
-        </button>
-      </div>
+    <section className="dash-card ds-surface capability-panel" data-testid="capability-panel">
+      <SectionHeader
+        title={title}
+        actions={
+          <Button
+            type="button"
+            variant="secondary"
+            compact
+            onClick={() => void reload(true)}
+            disabled={busy}
+            data-testid="capability-refresh"
+          >
+            {busy ? "Checking…" : "Refresh"}
+          </Button>
+        }
+      />
 
       {error && (
         <p className="setup-issue" data-testid="capability-error">
@@ -174,18 +195,50 @@ export function CapabilityReadinessPanel({
       {snapshot && (
         <>
           <p className="capability-summary" data-testid="capability-summary">
-            <strong data-testid="capability-callable-count">{snapshot.callable.length}</strong> of{" "}
-            {snapshot.capabilities.length} capabilities are usable right now
-            {blockers.length > 0 && (
-              <>
-                {" · "}
-                <strong data-testid="capability-blocker-count">{blockers.length}</strong> blocked
-              </>
-            )}
+            <strong data-testid="capability-callable-count">{readyCount}</strong> Ready
+            {" · "}
+            <strong data-testid="capability-blocker-count">{blockedCount}</strong> Blocked
+            {" · "}
+            <strong data-testid="capability-deferred-count">{deferredCount}</strong> Deferred
+            {" · "}
+            <strong data-testid="capability-not-installed-count">{notInstalledCount}</strong> Not installed
+            {snapshot.readinessTotal ? ` · ${readinessTotal} readiness-tracked` : ` · ${snapshot.capabilities.length} total`}
             .
+            {" "}
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => setShowReadinessHelp((value) => !value)}
+              data-testid="capability-readiness-help-toggle"
+            >
+              {showReadinessHelp ? "Hide count details" : "What do these counts mean?"}
+            </button>
           </p>
+          {showReadinessHelp ? (
+            <div className="capability-readiness-help" data-testid="capability-readiness-help">
+              <p>
+                Counts use the readiness-tracked denominator ({readinessTotal}), not every future or
+                platform-inapplicable capability in the full registry.
+              </p>
+              <ul>
+                <li><strong>Ready</strong> — usable now ({readyCount})</li>
+                <li><strong>Blocked</strong> — missing install, source, or runtime ({blockedCount})</li>
+                <li><strong>Not installed</strong> — tracked but not yet ready ({notInstalledCount})</li>
+                <li><strong>Unavailable by design</strong> — deferred / roadmap ({unavailableByDesign})</li>
+                <li><strong>Not applicable</strong> — outside this platform readiness set ({notApplicable})</li>
+                <li><strong>Not tested</strong> — probe unknown / incomplete ({notTested})</li>
+              </ul>
+            </div>
+          ) : null}
+          <ReadinessMeter
+            readyCount={readyCount}
+            totalCount={readinessTotal}
+            blockedCount={blockedCount}
+            kind={blockedCount ? "NeedsAttention" : "Ready"}
+            summary="Capability readiness"
+          />
 
-          {blockers.length === 0 ? (
+          {blockedCount === 0 ? (
             <p className="muted" data-testid="capability-no-blockers">
               Nothing is blocked. Anything not listed as usable is simply not implemented or not
               verified yet — see the capability matrix.
@@ -224,36 +277,48 @@ export function CapabilityReadinessPanel({
  * capabilities rather than a single "OK" — a green light with a blocked dependency behind it
  * is the failure mode this whole registry exists to prevent.
  */
-export function CapabilityStatusBadge({ projectId }: { projectId?: string }) {
+export function CapabilityStatusBadge({
+  projectId,
+  onClick,
+}: {
+  projectId?: string;
+  onClick?: () => void;
+}) {
   const { snapshot, error } = useCapabilities({ projectId, pollMs: 30000 });
 
+  const interactive = onClick ? { onClick } : {};
   if (error) {
     return (
-      <span className="status-badge warn" data-testid="capability-badge">
-        Capabilities unknown
-      </span>
+      <StatusBadge
+        kind="Unknown"
+        label="Capabilities unknown"
+        data-testid="capability-badge"
+        {...interactive}
+      />
     );
   }
   if (!snapshot) {
     return (
-      <span className="status-badge warn" data-testid="capability-badge">
-        Capabilities…
-      </span>
+      <StatusBadge
+        kind="Checking"
+        label="Capabilities…"
+        data-testid="capability-badge"
+        {...interactive}
+      />
     );
   }
   const blocked = snapshot.blockers.length;
+  const title = blocked
+    ? snapshot.blockers.map((item) => `${item.displayName}: ${item.message}`).join("\n")
+    : "No blocked capabilities";
   return (
-    <span
-      className={`status-badge ${blocked ? "warn" : "ok"}`}
+    <StatusBadge
+      kind={blocked ? "NeedsAttention" : "Ready"}
+      label={blocked ? `${blocked} Capability Blocker${blocked === 1 ? "" : "s"}` : "Capabilities Ready"}
       data-testid="capability-badge"
-      title={
-        blocked
-          ? snapshot.blockers.map((item) => `${item.displayName}: ${item.message}`).join("\n")
-          : "No blocked capabilities"
-      }
-    >
-      {blocked ? `${blocked} Capability Blocker${blocked === 1 ? "" : "s"}` : "Capabilities Ready"}
-    </span>
+      title={title}
+      {...interactive}
+    />
   );
 }
 

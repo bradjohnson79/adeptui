@@ -79,7 +79,9 @@ async def get_provider_translation(ctx: ToolContext, args: dict[str, Any]) -> di
     plan_id = str(args.get("planId") or "").strip()
     if not plan_id:
         raise ValueError("planId is required")
-    out = vp.provider_translation_for_plan(ctx.db, plan_id, provider_key=str(args.get("provider") or "") or None)
+    out = vp.provider_translation_for_plan(
+        ctx.db, plan_id, provider_key=str(args.get("provider") or "") or None, project_id=ctx.project_id
+    )
     return {**out, "mock": False, "_evidence": {"source": "voice_performance.provider_translation"}}
 
 
@@ -113,6 +115,7 @@ async def open_workspace(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
         "uiAction": "open_voice_performance",
         "characterId": character_id,
         "projectId": ctx.project_id,
+        "workspaceUrl": f"/project/{ctx.project_id}?workspace=voicestudio&characterId={character_id}",
         "_evidence": {"source": "voice_performance.ui"},
     }
 
@@ -142,6 +145,7 @@ def apply_generate_segments(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
         plan_id,
         allow_kokoro_fallback=bool(args.get("allowKokoroFallback")),
         request=getattr(ctx, "request", None),
+        project_id=ctx.project_id,
     )
     return {
         "ok": True,
@@ -167,7 +171,12 @@ def apply_retry_segment(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
     segment_id = str(args.get("segmentId") or "").strip()
     if not segment_id:
         raise ValueError("segmentId is required")
-    plan = vp.retry_segment(ctx.db, segment_id, allow_kokoro_fallback=bool(args.get("allowKokoroFallback")))
+    plan = vp.retry_segment(
+        ctx.db,
+        segment_id,
+        allow_kokoro_fallback=bool(args.get("allowKokoroFallback")),
+        project_id=ctx.project_id,
+    )
     return {"ok": True, "plan": plan.model_dump(), "persisted": True, "mock": False}
 
 
@@ -200,7 +209,10 @@ def apply_approve_take(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
     segment_id = str(args.get("segmentId") or "").strip()
     if not segment_id:
         raise ValueError("segmentId is required")
-    return {**vp.approve_segment(ctx.db, segment_id, approved=True), "_evidence": {"source": "voice_performance.approve"}}
+    return {
+        **vp.approve_segment(ctx.db, segment_id, approved=True, project_id=ctx.project_id),
+        "_evidence": {"source": "voice_performance.approve"},
+    }
 
 
 def preview_assemble_dialogue(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -218,7 +230,10 @@ def apply_assemble_dialogue(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
     plan_id = str(args.get("planId") or "").strip()
     if not plan_id:
         raise ValueError("planId is required")
-    return {**vp.assemble_plan(ctx.db, plan_id), "_evidence": {"source": "voice_performance.assemble"}}
+    return {
+        **vp.assemble_plan(ctx.db, plan_id, project_id=ctx.project_id),
+        "_evidence": {"source": "voice_performance.assemble"},
+    }
 
 
 def preview_place_on_timeline(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
@@ -246,6 +261,7 @@ def apply_place_on_timeline(ctx: ToolContext, args: dict[str, Any]) -> dict[str,
             assembly_id,
             timeline_id=str(args.get("timelineId") or "") or None,
             start_ms=int(args.get("startMs") or 0),
+            project_id=ctx.project_id,
         ),
         "_evidence": {"source": "voice_performance.timeline"},
     }
@@ -266,7 +282,7 @@ def apply_compare_takes(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
     plan_id = str(args.get("planId") or "").strip()
     if not plan_id:
         raise ValueError("planId is required")
-    plan = vp.get_plan(ctx.db, plan_id)
+    plan = vp.get_plan(ctx.db, plan_id, project_id=ctx.project_id)
     segs = [s.model_dump() for s in plan.segments]
     return {
         "ok": True,

@@ -18,6 +18,11 @@ CAPABILITIES = (
     "audio.sfx.generate",
     "audio.music.generate",
 )
+M33_CAPS = (
+    "audio.character_voice.design",
+    "audio.character_voice.clone",
+)
+ALL_CAPS = CAPABILITIES + M33_CAPS
 
 
 def _sha(path: Path) -> str:
@@ -30,8 +35,8 @@ def _load(path: Path) -> dict:
 
 def _all_candidates(lock: dict) -> list[dict]:
     out: list[dict] = []
-    for cap in CAPABILITIES:
-        out.extend(lock["candidatesByCapability"][cap])
+    for cap in ALL_CAPS:
+        out.extend(lock["candidatesByCapability"].get(cap) or [])
     return out
 
 
@@ -51,12 +56,15 @@ def test_01_execution_lock_exists_and_schema():
     assert lock["weightDownloadAuthorized"] is True
 
 
-def test_02_exactly_nine_candidates():
+def test_02_candidate_counts():
     lock = _load(EXEC_LOCK)
-    assert lock.get("authorizedCandidateCount", len(_all_candidates(lock))) == 9
-    assert len(_all_candidates(lock)) == 9
+    # M2.10b baseline (9) + M3.3 Qwen VoiceDesign + Voice Clone (2) = 11
+    assert lock.get("authorizedCandidateCount", len(_all_candidates(lock))) == 11
+    assert len(_all_candidates(lock)) == 11
     for cap in CAPABILITIES:
         assert len(lock["candidatesByCapability"][cap]) == 3
+    for cap in M33_CAPS:
+        assert len(lock["candidatesByCapability"][cap]) == 1
 
 
 def test_03_subset_of_product_lock():

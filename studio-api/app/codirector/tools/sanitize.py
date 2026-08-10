@@ -31,6 +31,14 @@ MAX_LIST_ITEMS = 50
 MAX_DICT_KEYS = 60
 MAX_DEPTH = 6
 
+# Limits for model-supplied JSON arguments of structured types. The model emits
+# these as JSON, so they are bounded for sanity, not for security — the sanitizer
+# still drops unknown top-level keys, and handlers re-validate meaning.
+MAX_ARRAY_ITEMS = 100
+MAX_OBJECT_CHARS = 8000
+MAX_OBJECT_DEPTH = 6
+_ALLOWED_SCALAR_ITEM_TYPES = (str, int, float, bool)
+
 
 # --------------------------------------------------------------------------
 # Arguments
@@ -45,6 +53,31 @@ def _invalid(tool_id: str, message: str, **details: Any) -> CoDirectorError:
         recoverable=True,
         recommended_action="revise_arguments",
     )
+
+
+def _json_compatible(value: Any) -> bool:
+    """True if the value survives a round-trip through json.dumps without change.
+
+    Callables, sets, custom objects, and bytes are not JSON-compatible; rejecting
+    them keeps structured arguments within the contract the model actually emits.
+    """
+
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _object_depth(value: Any) -> int:
+    depth = 0
+    cur = value
+    while isinstance(cur, dict):
+        if not cur:
+            break
+        depth += 1
+        cur = next(iter(cur.values()))
+    return depth
 
 
 def _coerce(param: ToolParameter, raw: Any, tool_id: str) -> Any:
@@ -72,6 +105,57 @@ def _coerce(param: ToolParameter, raw: Any, tool_id: str) -> Any:
         if isinstance(raw, str) and raw.strip().lower() in ("true", "false"):
             return raw.strip().lower() == "true"
         raise _invalid(tool_id, f"'{param.name}' must be true or false.", parameter=param.name)
+
+    if param.type == "array":
+        if isinstance(raw, dict) or not isinstance(raw, (list, tuple)):
+            raise _invalid(tool_id, f"'{param.name}' must be a JSON array.", parameter=param.name)
+        items = list(raw)
+        if len(items) > MAX_ARRAY_ITEMS:
+            raise _invalid(
+                tool_id,
+                f"'{param.name}' has {len(items)} items; the limit is {MAX_ARRAY_ITEMS}.",
+                parameter=param.name,
+            )
+        out: list[Any] = []
+        for item in items:
+            if not isinstance(item, _ALLOWED_SCALAR_ITEM_TYPES) and not isinstance(item, dict):
+                raise _invalid(
+                    tool_id,
+                    f"'{param.name}' contains an item that is not a string, number, boolean, or object.",
+                    parameter=param.name,
+                )
+            if not _json_compatible(item):
+                raise _invalid(
+                    tool_id,
+                    f"'{param.name}' contains an item that is not JSON-compatible.",
+                    parameter=param.name,
+                )
+            out.append(item)
+        return out
+
+    if param.type == "object":
+        if not isinstance(raw, dict):
+            raise _invalid(tool_id, f"'{param.name}' must be a JSON object.", parameter=param.name)
+        if not _json_compatible(raw):
+            raise _invalid(
+                tool_id,
+                f"'{param.name}' contains values that are not JSON-compatible.",
+                parameter=param.name,
+            )
+        serialized = json.dumps(raw, default=str)
+        if len(serialized) > MAX_OBJECT_CHARS:
+            raise _invalid(
+                tool_id,
+                f"'{param.name}' is larger than the {MAX_OBJECT_CHARS}-character limit.",
+                parameter=param.name,
+            )
+        if _object_depth(raw) > MAX_OBJECT_DEPTH:
+            raise _invalid(
+                tool_id,
+                f"'{param.name}' nests deeper than {MAX_OBJECT_DEPTH} levels.",
+                parameter=param.name,
+            )
+        return raw
 
     # integer / number
     if isinstance(raw, bool):

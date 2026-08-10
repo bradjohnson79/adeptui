@@ -13,7 +13,7 @@ import uuid
 import venv
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ...config import settings
 
@@ -98,6 +98,16 @@ def _dir_size(path: Path) -> int:
             except OSError:
                 pass
     return total
+
+
+def _manifest_int(payload: dict[str, Any], key: str) -> int:
+    try:
+        return max(0, int(payload.get(key) or 0))
+    except Exception:
+        return 0
+
+
+InstallProgressCallback = Callable[[str, dict[str, Any]], None]
 
 
 class IndexTTS2RuntimeManager:
@@ -281,18 +291,22 @@ class IndexTTS2RuntimeManager:
             return None
         return (result.stdout or "").strip() or None
 
-    def _model_presence(self) -> dict[str, Any]:
+    def _model_presence(self, manifest: dict[str, Any] | None = None, *, include_disk_usage: bool = True) -> dict[str, Any]:
+        manifest = manifest or {}
         missing_files = [name for name in REQUIRED_MODEL_FILES if not (self.models_root / name).is_file()]
         missing_dirs = [name for name in REQUIRED_MODEL_DIRS if not (self.models_root / name).is_dir()]
         missing_aux_files = [name for name in REQUIRED_AUX_MODEL_FILES if not (self.models_root / name).is_file()]
         missing_aux_dirs = [name for name in REQUIRED_AUX_MODEL_DIRS if not (self.models_root / name).is_dir()]
+        disk_usage = _manifest_int(manifest, "modelsDiskUsageBytes")
+        if include_disk_usage or disk_usage <= 0:
+            disk_usage = _dir_size(self.models_root)
         return {
             "allPresent": not (missing_files or missing_dirs or missing_aux_files or missing_aux_dirs),
             "missingFiles": missing_files,
             "missingDirs": missing_dirs,
             "missingAuxFiles": missing_aux_files,
             "missingAuxDirs": missing_aux_dirs,
-            "modelsDiskUsageBytes": _dir_size(self.models_root),
+            "modelsDiskUsageBytes": disk_usage,
         }
 
     def _service_snapshot(self) -> dict[str, Any]:
@@ -308,15 +322,24 @@ class IndexTTS2RuntimeManager:
         with self._lock:
             self._ensure_layout()
             manifest = self._read_manifest()
-            repo_revision = self._git_revision()
-            repo_origin = self._git_origin()
+            state_hint = str(manifest.get("status") or "")
+            fast_snapshot_ok = bool(manifest) and state_hint not in {"installing", "checking", "verifying"}
+            repo_revision = (
+                str(manifest.get("repoRevision") or "").strip() or None
+                if fast_snapshot_ok
+                else self._git_revision()
+            )
+            repo_origin = (
+                str(manifest.get("repoOrigin") or "").strip() or None
+                if fast_snapshot_ok
+                else self._git_origin()
+            )
             repo_exists = (self.repo_root / ".git").exists()
             venv_python = self._venv_python()
             venv_ok = venv_python.is_file()
-            models = self._model_presence()
+            models = self._model_presence(manifest, include_disk_usage=not fast_snapshot_ok)
             import_ok = bool((manifest.get("importProbe") or {}).get("ok"))
             service = self._service_snapshot()
-            state_hint = str(manifest.get("status") or "")
             footprint = repo_exists or venv_ok or models["modelsDiskUsageBytes"] > 0
             if state_hint in {"installing", "checking", "verifying"}:
                 state = state_hint
@@ -377,11 +400,11 @@ class IndexTTS2RuntimeManager:
                 "service": service,
                 "lastHealth": manifest.get("lastHealth") or {},
                 "diskUsageBytes": {
-                    "environment": _dir_size(self.environment_root),
+                    "environment": _manifest_int(manifest, "environmentDiskUsageBytes"),
                     "models": models["modelsDiskUsageBytes"],
-                    "repo": _dir_size(self.repo_root),
-                    "logs": _dir_size(self.logs_root),
-                    "outputs": _dir_size(self.outputs_root),
+                    "repo": _manifest_int(manifest, "repoDiskUsageBytes"),
+                    "logs": _manifest_int(manifest, "logsDiskUsageBytes"),
+                    "outputs": _manifest_int(manifest, "outputsDiskUsageBytes"),
                 },
                 "activeJobs": len(self._active_jobs),
             }
@@ -545,12 +568,24 @@ class IndexTTS2RuntimeManager:
         payload["modelsDiskUsageBytes"] = _dir_size(self.models_root)
         return payload
 
-    def install(self, *, confirm: bool = False, confirm_download_models: bool = False, force: bool = False) -> dict[str, Any]:
+    def install(
+        self,
+        *,
+        confirm: bool = False,
+        confirm_download_models: bool = False,
+        force: bool = False,
+        progress_callback: InstallProgressCallback | None = None,
+    ) -> dict[str, Any]:
         if not confirm:
             raise IndexTTS2RuntimeError(
                 "INDEX_TTS2_CONFIRM_REQUIRED",
                 "IndexTTS2 installation requires explicit confirmation.",
             )
+
+        def emit(phase: str, **details: Any) -> None:
+            if progress_callback:
+                progress_callback(phase, dict(details))
+
         with self._lock:
             self._ensure_layout()
             self._update_manifest(status="installing", installed=False, runtimeReady=False, lastError=None)
@@ -563,9 +598,33 @@ class IndexTTS2RuntimeManager:
                 "confirmDownloadModels": bool(confirm_download_models),
             }
             try:
+                emit(
+                    "clone_repo",
+                    step=1,
+                    totalSteps=4,
+                    message="Cloning the pinned IndexTTS2 repository.",
+                )
                 repo = self._clone_repo(force=force)
+                emit(
+                    "create_environment",
+                    step=1,
+                    totalSteps=4,
+                    message="Preparing the isolated Python environment.",
+                )
                 venv_python = self._ensure_venv()
+                emit(
+                    "install_dependencies",
+                    step=2,
+                    totalSteps=4,
+                    message="Installing IndexTTS2 runtime dependencies.",
+                )
                 deps = self._install_repo_dependencies(venv_python)
+                emit(
+                    "import_probe",
+                    step=3,
+                    totalSteps=4,
+                    message="Verifying the isolated runtime import probe.",
+                )
                 import_probe = self._import_probe(venv_python)
                 if not import_probe.get("ok"):
                     raise IndexTTS2RuntimeError(
@@ -583,6 +642,12 @@ class IndexTTS2RuntimeManager:
                 )
                 state = "compatible"
                 if confirm_download_models:
+                    emit(
+                        "download_models",
+                        step=4,
+                        totalSteps=4,
+                        message="Downloading required IndexTTS2 model files.",
+                    )
                     evidence["models"] = self._download_models(venv_python)
                     if not self._model_presence()["allPresent"]:
                         raise IndexTTS2RuntimeError(
@@ -599,11 +664,25 @@ class IndexTTS2RuntimeManager:
                     venvPython=str(venv_python),
                     dependenciesInstalled=True,
                     importProbe=import_probe,
+                    environmentDiskUsageBytes=_dir_size(self.environment_root),
+                    repoDiskUsageBytes=_dir_size(self.repo_root),
+                    logsDiskUsageBytes=_dir_size(self.logs_root),
+                    outputsDiskUsageBytes=_dir_size(self.outputs_root),
                     downloadModelsDeferred=not confirm_download_models,
                     installMode="scaffold_only" if not confirm_download_models else "full",
                     lastInstallAt=_now(),
                 )
                 evidence["manifest"] = manifest
+                emit(
+                    "verify_runtime",
+                    step=4,
+                    totalSteps=4,
+                    message=(
+                        "Verifying the full runtime install."
+                        if confirm_download_models
+                        else "Runtime scaffold complete. Model download remains deferred."
+                    ),
+                )
                 inspection = self.verify() if confirm_download_models else self.inspect_installation()
                 return {
                     "ok": True,

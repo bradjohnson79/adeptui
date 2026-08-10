@@ -61,12 +61,12 @@ const SEG_TYPES = [
 export function ScriptStoryboardWorkspace({
   project,
   onChange,
-  onGoDirector,
+  onGoTimeline,
   shotListOnly = false,
 }: {
   project: Project;
   onChange: () => Promise<void> | void;
-  onGoDirector?: () => void;
+  onGoTimeline?: () => void;
   shotListOnly?: boolean;
 }) {
   const [view, setView] = useState<"split" | "script" | "storyboard" | "shotlist">(
@@ -203,7 +203,7 @@ export function ScriptStoryboardWorkspace({
     });
     setMsg(`Created ${r.created_scene_ids.length} Director scene(s)`);
     await onChange();
-    onGoDirector?.();
+    onGoTimeline?.();
   };
 
   const doImport = async () => {

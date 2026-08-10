@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api, isAbortError } from "../api";
+import { buildHomeCreateProjectPath } from "../projectEntry";
 import type { Project } from "../types";
+import { browseAllProjects } from "../navigation/projectLibrary";
 import { loadRecentProjects, type EditorTab } from "../workspacePrefs";
 
 export function ProjectMenu({
@@ -17,6 +19,7 @@ export function ProjectMenu({
   onGo: (tab: EditorTab) => void;
   onRefresh: () => Promise<void>;
 }) {
+  const location = useLocation();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [busy, setBusy] = useState(false);
@@ -70,7 +73,14 @@ export function ProjectMenu({
             {p.name}
           </button>
         ))}
-        <button type="button" role="menuitem" onClick={() => { onClose(); navigate("/"); }}>
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onClose();
+            browseAllProjects(navigate);
+          }}
+        >
           Browse all projects…
         </button>
       </div>
@@ -79,13 +89,17 @@ export function ProjectMenu({
           type="button"
           role="menuitem"
           disabled={busy}
-          onClick={() =>
-            run(async () => {
-              const p = await api.createProject(`Untitled ${new Date().toLocaleDateString()}`);
-              onClose();
-              navigate(`/project/${p.id}`);
-            })
-          }
+          onClick={() => {
+            onClose();
+            navigate(
+              buildHomeCreateProjectPath({
+                pendingEntry: {
+                  kind: "project",
+                  returnTo: `${location.pathname}${location.search}${location.hash}`,
+                },
+              }),
+            );
+          }}
         >
           Create project
         </button>

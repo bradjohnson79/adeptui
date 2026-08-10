@@ -156,7 +156,10 @@ class EditingService:
             raise ValueError("edit_apply requires sceneId for director timeline mutation")
 
         from ....db import Scene
-        from ....director_timeline import dumps_director_timeline, parse_director_timeline
+        from ....director_timeline import (
+            dumps_director_timeline_preserving_embedded,
+            parse_director_timeline,
+        )
 
         scene = db.get(Scene, scene_id)
         if not scene or scene.project_id != project_id:
@@ -203,7 +206,7 @@ class EditingService:
                 history.append({"op": "redo"})
                 continue
 
-            undo_stack.append(dumps_director_timeline(tl))
+            undo_stack.append(dumps_director_timeline_preserving_embedded(tl, scene.director_json))
             redo_stack.clear()
 
             if name in {"trim", "speed"}:
@@ -254,7 +257,7 @@ class EditingService:
                 cont["transitions"] = transitions
             history.append({"op": name, **{k: v for k, v in op.items() if k != "op"}})
 
-        scene.director_json = dumps_director_timeline(tl)
+        scene.director_json = dumps_director_timeline_preserving_embedded(tl, before)
         cont["m29EditUndo"] = undo_stack[-50:]
         cont["m29EditRedo"] = redo_stack[-50:]
         scene.continuity_json = json.dumps(cont)

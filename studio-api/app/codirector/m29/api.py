@@ -10,6 +10,13 @@ from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
 from ...db import get_db
+from ..tools.ownership import (
+    require_owned_m29_asset_version,
+    require_owned_m29_control_plan,
+    require_owned_m29_frame_record,
+    require_owned_m29_render_manifest,
+    require_owned_m29_timeline_proposal,
+)
 from .audio.service import AudioService
 from .control.service import ControlService
 from .editing.service import EditingService
@@ -48,6 +55,8 @@ class ImageGenerateBody(BaseModel):
 
 class VersionActionBody(BaseModel):
     actor: str = "user"
+    projectId: Optional[str] = None
+    sceneId: Optional[str] = None
 
 
 class FrameGenerateBody(BaseModel):
@@ -63,6 +72,7 @@ class FrameGenerateBody(BaseModel):
 
 class BindShotBody(BaseModel):
     shotId: str
+    projectId: Optional[str] = None
 
 
 class VideoGenerateBody(BaseModel):
@@ -176,6 +186,7 @@ class AudioGainBody(BaseModel):
 
 class ActorBody(BaseModel):
     actor: str = "user"
+    projectId: Optional[str] = None
 
 
 class EditProposeBody(BaseModel):
@@ -261,6 +272,8 @@ def image_generate(body: ImageGenerateBody, db: Session = Depends(get_db)) -> di
 @router.post("/image/{version_id}/approve")
 def image_approve(version_id: str, body: VersionActionBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("image_production_v1")
+    if body.projectId:
+        require_owned_m29_asset_version(db, body.projectId, version_id)
     try:
         return ImageService.approve(db, version_id, actor=body.actor)
     except KeyError:
@@ -270,6 +283,8 @@ def image_approve(version_id: str, body: VersionActionBody, db: Session = Depend
 @router.post("/image/{version_id}/reject")
 def image_reject(version_id: str, body: VersionActionBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("image_production_v1")
+    if body.projectId:
+        require_owned_m29_asset_version(db, body.projectId, version_id)
     try:
         return ImageService.reject(db, version_id, actor=body.actor)
     except KeyError:
@@ -279,6 +294,8 @@ def image_reject(version_id: str, body: VersionActionBody, db: Session = Depends
 @router.post("/image/{version_id}/publish-reference")
 def image_publish(version_id: str, body: VersionActionBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("image_production_v1")
+    if body.projectId:
+        require_owned_m29_asset_version(db, body.projectId, version_id)
     try:
         return ImageService.publish_reference(db, version_id, actor=body.actor)
     except KeyError:
@@ -310,6 +327,8 @@ def frames_list(projectId: str, shotId: Optional[str] = None, db: Session = Depe
 @router.post("/frames/{frame_id}/bind")
 def frames_bind(frame_id: str, body: BindShotBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("frame_production_v1")
+    if body.projectId:
+        require_owned_m29_frame_record(db, body.projectId, frame_id)
     try:
         return FramesService.bind_to_shot(db, frame_id, body.shotId)
     except KeyError:
@@ -539,6 +558,8 @@ def timeline_propose(body: TimelineProposeBody, db: Session = Depends(get_db)) -
 @router.post("/timeline/{proposal_id}/approve")
 def timeline_approve(proposal_id: str, body: ActorBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("director_timeline_v1")
+    if body.projectId:
+        require_owned_m29_timeline_proposal(db, body.projectId, proposal_id)
     try:
         return TimelineService.approve(db, proposal_id, actor=body.actor)
     except KeyError:
@@ -548,6 +569,8 @@ def timeline_approve(proposal_id: str, body: ActorBody, db: Session = Depends(ge
 @router.post("/timeline/{proposal_id}/reject")
 def timeline_reject(proposal_id: str, body: ActorBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("director_timeline_v1")
+    if body.projectId:
+        require_owned_m29_timeline_proposal(db, body.projectId, proposal_id)
     try:
         return TimelineService.reject(db, proposal_id, actor=body.actor)
     except KeyError:
@@ -557,6 +580,8 @@ def timeline_reject(proposal_id: str, body: ActorBody, db: Session = Depends(get
 @router.post("/timeline/{proposal_id}/apply")
 def timeline_apply(proposal_id: str, body: ActorBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("director_timeline_v1")
+    if body.projectId:
+        require_owned_m29_timeline_proposal(db, body.projectId, proposal_id)
     try:
         return TimelineService.apply(db, proposal_id, actor=body.actor)
     except PermissionError as exc:
@@ -635,8 +660,10 @@ def render(body: RenderBody, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 
 @router.get("/render/{manifest_id}")
-def render_get(manifest_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def render_get(manifest_id: str, db: Session = Depends(get_db), projectId: Optional[str] = None) -> dict[str, Any]:
     _require("render_production_v1")
+    if projectId:
+        require_owned_m29_render_manifest(db, projectId, manifest_id)
     out = RenderService.get_manifest(db, manifest_id)
     if not out:
         raise HTTPException(status_code=404, detail="manifest not found")
@@ -657,8 +684,10 @@ def control_decompose(body: ControlBody, db: Session = Depends(get_db)) -> dict[
 
 
 @router.get("/control/{plan_id}")
-def control_get(plan_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+def control_get(plan_id: str, db: Session = Depends(get_db), projectId: Optional[str] = None) -> dict[str, Any]:
     _require("codirector_production_control_v1")
+    if projectId:
+        require_owned_m29_control_plan(db, projectId, plan_id)
     out = ControlService.get_plan(db, plan_id)
     if not out:
         raise HTTPException(status_code=404, detail="plan not found")
@@ -669,6 +698,8 @@ def control_get(plan_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
 def control_resume(plan_id: str, body: Optional[ActorBody] = None, db: Session = Depends(get_db)) -> dict[str, Any]:
     _require("codirector_production_control_v1")
     actor = body.actor if body else "user"
+    if body and body.projectId:
+        require_owned_m29_control_plan(db, body.projectId, plan_id)
     try:
         return ControlService.resume(db, plan_id, owner=actor)
     except KeyError:

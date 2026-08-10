@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
 from ...db import get_db
+from ...v11_scope import DEFERRED_VERSION_1_2, DEFERRED_MESSAGE, DEFERRED_LABEL, raise_deferred_3d
 from . import blocking as blocking_mod
 from . import camera_spin
 from . import concepts
@@ -31,9 +32,12 @@ def _flag() -> bool:
 
 
 def _require() -> None:
-    if _flag():
-        return
-    raise HTTPException(status_code=404, detail="M2.13 virtual environment studio capability is not enabled.")
+    """Version 1.1: native 3D Environment Studio execution is deferred to Version 1.2.
+
+    Foundations remain in-tree behind flags for Version 1.2; production builds must not
+    start import/modeling/animation jobs. Hidden nav alone is not sufficient.
+    """
+    raise_deferred_3d(surface="m213", flag=FLAG_NAME, flagEnabled=_flag())
 
 
 class ImportBody(BaseModel):
@@ -137,18 +141,18 @@ class CapabilityBody(BaseModel):
     reversible: bool = True
 
 
-class E2EBody(BaseModel):
-    projectId: str
-    fixture: bool = True
-
-
 @router.get("/status")
 async def m213_status() -> dict[str, Any]:
     digest = assert_manifest_unchanged()
     return {
-        "enabled": virtual_environment_studio_enabled(),
+        "enabled": False,
+        "deferred": True,
+        "code": DEFERRED_VERSION_1_2,
+        "message": DEFERRED_MESSAGE,
+        "label": DEFERRED_LABEL,
         "flag": FLAG_NAME,
         "flagDefault": False,
+        "flagEnabled": virtual_environment_studio_enabled(),
         "safety": safety_contract(),
         "manifestSha256": digest,
         "assetKinds": list(ASSET_KINDS),
@@ -158,6 +162,9 @@ async def m213_status() -> dict[str, Any]:
         "routes": ["imported_3d", "camera_spin", "reconstruction"],
         "vpcSpecialist": "virtual-production-coordinator",
         "adapters": reconstruction.list_adapters(),
+        "version11Guidance": (
+            "Use 360 panoramic environments and Spatial Map for camera and lighting direction."
+        ),
     }
 
 
@@ -432,14 +439,3 @@ async def m213_cap_invoke(body: CapabilityBody, db: Session = Depends(get_db)) -
         reversible=body.reversible,
     )
     return {"ok": True, "logged": log, "schemaValidated": True, "reversible": body.reversible}
-
-
-@router.post("/e2e/guided")
-async def m213_e2e(body: E2EBody, db: Session = Depends(get_db)) -> dict[str, Any]:
-    _require()
-    if not persistence.e2e_enabled():
-        raise HTTPException(
-            status_code=403,
-            detail="The guided E2E slice runs fixture adapters and is only available when STUDIO_E2E is set.",
-        )
-    return persistence.end_to_end_guided(db, project_id=body.projectId, fixture=body.fixture)

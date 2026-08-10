@@ -89,7 +89,13 @@ class BaseSandboxAudioAdapter(AudioGenerationProviderABC):
         return {"ok": not errors, "errors": errors}
 
     def cancel(self, job_id: str) -> None:
-        return None
+        """Certified cancel-to-source for tracked sandbox audio workers."""
+        try:
+            from ....audio_studio.process_registry import terminate_job
+
+            terminate_job(str(job_id))
+        except Exception:
+            return None
 
     def dispose(self) -> None:
         return None

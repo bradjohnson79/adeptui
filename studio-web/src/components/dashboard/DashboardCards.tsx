@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DashboardImage } from "../../dashboardImages";
 import type { EditorTab } from "../../workspacePrefs";
+import { WorkspaceCard } from "../ui/WorkspaceCard";
 
 export function ProductionStatCard({
   value,
@@ -27,34 +28,31 @@ export function WorkspaceFeatureCard({
   description,
   status,
   image,
+  badges,
   onContinue,
+  testId,
 }: {
   title: string;
   description: string;
   status?: string;
   image: DashboardImage;
+  badges?: readonly string[];
   tab?: EditorTab;
   onContinue: () => void;
+  testId?: string;
 }) {
+  const badgeList = badges?.length ? badges : status ? [status] : [];
   return (
-    <button type="button" className="dash-card workspace-feature-card" onClick={onContinue}>
-      <div className={`cinematic-media ${image.motif}`}>
-        <div className="cinematic-media-fallback" aria-hidden="true" />
-        <img
-          src={image.src}
-          alt=""
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).style.display = "none";
-          }}
-        />
-        <div className="cinematic-media-overlay" />
-        <div className="workspace-feature-copy">
-          <h3>{title}</h3>
-          {status && <span className="pill">{status}</span>}
-          <p>{description}</p>
-        </div>
-      </div>
-    </button>
+    <WorkspaceCard
+      title={title}
+      description={description}
+      badges={badgeList}
+      imageSrc={image.src}
+      imageAlt={image.alt || title}
+      plateClass={`${image.motif} cinematic-media-fallback`}
+      onOpen={onContinue}
+      testId={testId}
+    />
   );
 }
 

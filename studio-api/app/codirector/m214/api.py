@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 
 from ... import feature_flags as feature_flags_mod
 from ...db import get_db
+from ..tools.ownership import (
+    require_owned_m214_attachment_interpretation,
+    require_owned_m214_sonic_concept,
+    require_owned_m214_storyteller_handoff,
+)
 from . import approvals as approvals_mod
 from . import attachments
 from . import brief
@@ -66,6 +71,7 @@ class ConfirmBody(BaseModel):
     decision: str
     correctedKind: Optional[str] = None
     note: str = ""
+    projectId: Optional[str] = None
 
 
 class StoryBody(BaseModel):
@@ -163,6 +169,10 @@ class HitchhikerBody(BaseModel):
     projectId: str
 
 
+class ProjectScopeBody(BaseModel):
+    projectId: Optional[str] = None
+
+
 class CapabilityBody(BaseModel):
     projectId: Optional[str] = None
     capabilityId: str
@@ -227,6 +237,8 @@ async def m214_attach_confirm(
     interpretation_id: str, body: ConfirmBody, db: Session = Depends(get_db)
 ) -> dict[str, Any]:
     _require()
+    if body.projectId:
+        require_owned_m214_attachment_interpretation(db, body.projectId, interpretation_id)
     try:
         return attachments.confirm_interpretation(
             db,
@@ -267,8 +279,12 @@ async def m214_story_handoff(body: HandoffBody, db: Session = Depends(get_db)) -
 
 
 @router.post("/storyteller/handoff/{handoff_id}/approve")
-async def m214_story_approve(handoff_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def m214_story_approve(
+    handoff_id: str, body: Optional[ProjectScopeBody] = None, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     _require()
+    if body and body.projectId:
+        require_owned_m214_storyteller_handoff(db, body.projectId, handoff_id)
     try:
         return storyteller.approve_handoff(db, handoff_id)
     except KeyError as exc:
@@ -288,8 +304,12 @@ async def m214_sonic(body: SonicBody, db: Session = Depends(get_db)) -> dict[str
 
 
 @router.post("/sound/concept/{concept_id}/approve")
-async def m214_sonic_approve(concept_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def m214_sonic_approve(
+    concept_id: str, body: Optional[ProjectScopeBody] = None, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     _require()
+    if body and body.projectId:
+        require_owned_m214_sonic_concept(db, body.projectId, concept_id)
     try:
         return sound_producer.approve_sonic_concept(db, concept_id)
     except KeyError as exc:

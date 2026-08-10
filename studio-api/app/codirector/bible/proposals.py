@@ -198,7 +198,14 @@ class ProposalService:
         db.add(row)
         db.commit()
         db.refresh(row)
-        return _row_to_out(row, is_stale=False)
+        # c2/D10: surface staleness at creation time, not only at approval. The
+        # pinned base_resource_versions were just captured from the current
+        # state, so this is normally False here — but computing it makes the
+        # `isStale` field authoritative from the moment the proposal exists and
+        # lets the chat path emit a `proposal_stale` event at propose time
+        # instead of waiting for approval.
+        is_stale = _is_tool_proposal_stale(db, row) if row.status in _REVIEWABLE_STATUSES else False
+        return _row_to_out(row, is_stale=is_stale)
 
     @staticmethod
     def _get_row(db: Session, project_id: str, proposal_id: str) -> CoDirectorProposal:
@@ -359,6 +366,20 @@ class ProposalService:
         row = ProposalService._get_row(db, project_id, proposal_id)
 
         if row.status == "completed":
+            existing_receipt = (
+                db.query(CoDirectorExecutionReceipt)
+                .filter(
+                    CoDirectorExecutionReceipt.proposal_id == row.id,
+                    CoDirectorExecutionReceipt.status == "success",
+                )
+                .order_by(CoDirectorExecutionReceipt.executed_at.desc())
+                .first()
+            )
+            if existing_receipt:
+                out = _receipt_to_out(db, existing_receipt)
+                if is_tool_proposal(row):
+                    _attach_tool_details(db, row, out)
+                return out
             raise CoDirectorError(
                 APPROVAL_ALREADY_RECORDED,
                 "This proposal was already approved and applied.",

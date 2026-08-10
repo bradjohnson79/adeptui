@@ -10,7 +10,7 @@ from typing import Any
 
 from ..config import settings
 from .catalog import COMPONENTS, get_component
-from .diagnostics import diagnose, verify_component
+from .diagnostics import diagnose, invalidate_verify_cache, verify_component
 from .operations import registry
 from .paths import browse_path, path_selector_mode, suggested_install_path
 from .state import load_state, update_state
@@ -178,6 +178,45 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
         kind = "credentials"
         summary = f"Configure {component.name} in the secure credentials screen."
         fields = []
+    elif component.installer == "m210b_qwen_voice":
+        kind = "qwen_voice_install"
+        summary = (
+            f"Install {component.name} from the official Hugging Face repository "
+            "(isolated venv + multi-GB weights). Progress appears in Source Manager Active Downloads."
+        )
+        fields = []
+        extra = {
+            "estimated_download_bytes": component.download_bytes,
+            "official_source_only": True,
+            "may_require_elevation": False,
+        }
+    elif component.installer == "index_tts2":
+        kind = "index_tts2_install"
+        summary = (
+            f"Install {component.name} from the official pinned IndexTTS repository into an isolated runtime. "
+            "Repo clone + dedicated venv are prepared first; model download can remain deferred until explicitly requested."
+        )
+        fields = []
+        extra = {
+            "estimated_download_bytes": component.download_bytes,
+            "official_source_only": True,
+            "may_require_elevation": False,
+            "pinned_revision": "13495845e3028f0bb6ca1462ad22aa0e76349e40",
+        }
+    elif component.installer == "huggingface_snapshot":
+        kind = "hunyuan_hf_install"
+        summary = (
+            f"Install {component.name} from the official Tencent Hugging Face repository "
+            "(isolated model directory, resume-safe). Each Hunyuan model installs independently — "
+            "this never overwrites the other. Progress appears in Source Manager Active Downloads."
+        )
+        fields = []
+        extra = {
+            "estimated_download_bytes": component.download_bytes,
+            "official_source_only": True,
+            "may_require_elevation": False,
+            "independent_install": True,
+        }
     else:
         kind = "manual_installer"
         summary = (
@@ -262,6 +301,7 @@ def _persist_install_destination(component_id: str, value: str) -> str:
             component_id, destination
         )
     )
+    invalidate_verify_cache(component_id)
     return destination
 
 
@@ -277,6 +317,7 @@ def _persist_link_existing(component_id: str, value: str) -> str:
             component_id, linked["destination"]
         )
     )
+    invalidate_verify_cache(component_id)
     return linked["destination"]
 
 
@@ -304,6 +345,7 @@ def _persist_path(component_id: str, value: str, *, workflow: str | None = None)
             component_id, str(path)
         )
     )
+    invalidate_verify_cache(component_id)
     if (
         component.verifier == "linked_files"
         and path.is_dir()
@@ -377,6 +419,7 @@ def _run_asset_pack_install(operation_id: str, component_id: str, action: dict[s
                 component_id, result["destination"]
             )
         )
+        invalidate_verify_cache(component_id)
         verified = verify_component(component_id)
         if not verified.healthy:
             raise PackInstallError(
@@ -860,10 +903,133 @@ def browse_setup_path(
     return browse_path(mode=selector, start_dir=start, title=dialog_title)
 
 
+def _enqueue_qwen_voice_install(component_id: str) -> dict[str, Any]:
+    """Product path: queue HF+venv install via Source Manager download executor."""
+    from ..codirector.m210b.qwen_voice_install import COMPONENT_SPECS, scaffold
+    from ..source_manager.downloads.models import create_install_plan
+    from ..source_manager.downloads.queue import get_queue_manager
+
+    if component_id not in COMPONENT_SPECS:
+        raise ValueError(f"Not a Qwen voice component: {component_id}")
+    spec = COMPONENT_SPECS[component_id]
+    sandbox = scaffold(component_id)
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=spec["sourceKey"],
+        provider_id="huggingface_snapshot",
+        artifacts=[
+            {
+                "remotePath": spec["sourceKey"],
+                "destinationRelativePath": "models",
+                "downloadUrl": f"https://huggingface.co/{spec['sourceKey']}",
+            }
+        ],
+        destination_root=str(sandbox),
+        estimated_download_bytes=3_500_000_000,
+        estimated_extracted_bytes=3_500_000_000,
+        metadata={
+            "componentId": component_id,
+            "registryId": spec["registryId"],
+            "sourceKey": spec["sourceKey"],
+            "officialOnly": True,
+        },
+    )
+    op = get_queue_manager().enqueue(plan, priority=50)
+    operation = registry.create("component_action", [component_id])
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": True,
+            "downloadOperationId": op.get("id"),
+            "message": (
+                f"{component_id} install queued (venv + official HF weights). "
+                "Track progress in Source Manager Active Downloads."
+            ),
+            "operation": op,
+        },
+    )
+
+
+def _enqueue_hunyuan_install(component_id: str) -> dict[str, Any]:
+    from ..video_runtime.hunyuan_install import enqueue_install
+
+    op_wrap = enqueue_install(component_id)
+    op = op_wrap.get("operation") or {}
+    operation = registry.create("component_action", [component_id])
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": True,
+            "downloadOperationId": op.get("id"),
+            "providerId": op_wrap.get("providerId"),
+            "message": (
+                f"{component_id} install queued from official Tencent HF source. "
+                "Track progress in Source Manager Active Downloads. "
+                "The other Hunyuan model is not queued."
+            ),
+            "operation": op,
+        },
+    )
+
+
+def _install_index_tts2(component_id: str, *, force: bool = False) -> dict[str, Any]:
+    from ..voice_performance.runtime import get_index_tts2_runtime
+
+    runtime = get_index_tts2_runtime()
+    result = runtime.install(confirm=True, confirm_download_models=False, force=force)
+    operation = registry.create("component_action", [component_id])
+    if not result.get("ok"):
+        return registry.finish(
+            operation["operation_id"],
+            error=(result.get("error") or {}).get("code") or "index_tts2_install_failed",
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "message": (result.get("error") or {}).get("message") or "IndexTTS2 install failed.",
+                "runtime": result,
+            },
+        )
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": False,
+            "message": result.get("message") or "IndexTTS2 runtime prepared.",
+            "runtime": result,
+        },
+    )
+
+
 def execute_recommended_action(component_id: str) -> dict[str, Any]:
     component = get_component(component_id)
     diagnostic = diagnose_component(component_id)
     action = diagnostic["recommendation"]
+
+    if component.installer == "m210b_qwen_voice" and action in (
+        "install",
+        "repair",
+        "reinstall",
+        "update",
+    ):
+        return _enqueue_qwen_voice_install(component_id)
+
+    if component.installer == "huggingface_snapshot" and action in (
+        "install",
+        "repair",
+        "reinstall",
+        "update",
+    ):
+        return _enqueue_hunyuan_install(component_id)
+
+    if component.installer == "index_tts2" and action in (
+        "install",
+        "repair",
+        "reinstall",
+        "update",
+    ):
+        return _install_index_tts2(component_id, force=action in ("repair", "reinstall", "update"))
 
     if component.installer == "asset_pack":
         from .pack_manifests import get_pack_manifest

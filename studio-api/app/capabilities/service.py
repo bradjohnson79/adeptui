@@ -24,6 +24,7 @@ from typing import Any, Callable, Optional
 from . import errors
 from .models import (
     BLOCKING_STATUSES,
+    DEFERRED_FROM_READINESS_STATUSES,
     USABLE_STATUSES,
     CapabilityBlockerOut,
     CapabilityDefinition,
@@ -88,6 +89,18 @@ def _blocked(
 def _baseline(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     """Default evaluation for capabilities with no live dependency of their own."""
     status = definition.baseline_status
+    if status == S.DEFERRED_VERSION_1_2:
+        return CapabilityEvaluation(
+            status=status,
+            available=False,
+            configured=True,
+            healthy=True,
+            reason_code=errors.CAPABILITY_DEFERRED_VERSION_1_2,
+            message=definition.baseline_reason
+            or "Coming in Version 1.2 — not available in Version 1.1 by product policy.",
+            recommended_action="none",
+            details={"label": "Coming in Version 1.2", "roadmapVersion": "1.2"},
+        )
     if status == S.NOT_IMPLEMENTED:
         return CapabilityEvaluation(
             status=status,
@@ -349,6 +362,11 @@ def _model_component_eval(
 def _eval_models_image(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     # Still-image readiness is Z-Image (or other still packs), never LTX video alone.
     return _model_component_eval(definition, snapshot, required=("zimage_models",))
+
+
+def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    # Krea 2 readiness is its own component — never inferred from other still packs.
+    return _model_component_eval(definition, snapshot, required=("krea2_models",))
 
 
 def _eval_models_video(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
@@ -753,6 +771,7 @@ EVALUATORS: dict[str, Evaluator] = {
     "comfyui.outputs": _eval_comfy_dependent,
     "extensions.comfyui.ready": _eval_extensions_ready,
     "models.image.ready": _eval_models_image,
+    "models.image.krea2.ready": _eval_models_image_krea2,
     "models.video.ready": _eval_models_video,
     "workflows.discover": _eval_workflow_discovery,
     "workflows.validate": _eval_workflow_discovery,
@@ -801,7 +820,7 @@ def _apply_dependencies(
         changed = False
         for definition in definitions:
             evaluation = results[definition.id]
-            if evaluation.status in (S.NOT_IMPLEMENTED, S.UI_ONLY):
+            if evaluation.status in (S.NOT_IMPLEMENTED, S.UI_ONLY, S.DEFERRED_VERSION_1_2):
                 continue
             for dependency_id in definition.dependencies:
                 dependency = results.get(dependency_id)
@@ -860,7 +879,7 @@ def _apply_project_scope(
     for definition in definitions:
         if definition.scope != "project":
             continue
-        if results[definition.id].status in (S.NOT_IMPLEMENTED, S.UI_ONLY):
+        if results[definition.id].status in (S.NOT_IMPLEMENTED, S.UI_ONLY, S.DEFERRED_VERSION_1_2):
             continue
         results[definition.id] = _blocked(
             errors.PROJECT_NOT_FOUND,
@@ -922,6 +941,12 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
         for item in capabilities
         if item.status in BLOCKING_STATUSES
     ]
+    deferred_ids = [
+        item.id for item in capabilities if item.status in DEFERRED_FROM_READINESS_STATUSES
+    ]
+    readiness_total = sum(
+        1 for item in capabilities if item.status not in DEFERRED_FROM_READINESS_STATUSES
+    )
     return CapabilitySnapshotOut(
         projectId=snapshot.project_id,
         generatedAt=snapshot.checked_at,
@@ -930,6 +955,8 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
         capabilities=capabilities,
         blockers=blockers,
         callable=[item.id for item in capabilities if item.available],
+        readinessTotal=readiness_total,
+        deferred=deferred_ids,
         probeWarnings=sorted(set(snapshot.warnings)),
     )
 

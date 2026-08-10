@@ -1,10 +1,12 @@
 from .direct_http import DirectHttpDownloadExecutor
 from .fixture import FixtureDownloadExecutor
+from .huggingface_snapshot import HuggingFaceSnapshotExecutor
 from .local_copy import LocalCopyExecutor
 
 __all__ = [
     "DirectHttpDownloadExecutor",
     "FixtureDownloadExecutor",
+    "HuggingFaceSnapshotExecutor",
     "LocalCopyExecutor",
 ]
 
@@ -19,5 +21,7 @@ def get_executor(provider_id: str):
         # CLI executors: fall back to fixture/direct until dedicated adapters mature
         "github_cli": DirectHttpDownloadExecutor(),
         "huggingface_cli": DirectHttpDownloadExecutor(),
+        "huggingface_snapshot": HuggingFaceSnapshotExecutor(),
+        "huggingface_hub": HuggingFaceSnapshotExecutor(),
     }
     return mapping.get(provider_id) or DirectHttpDownloadExecutor()

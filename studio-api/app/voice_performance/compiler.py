@@ -51,6 +51,17 @@ def resolve_character_context(db: Session, project_id: str, character_id: str, v
         voice = next((v for v in voices if v.get("approval_status") == "approved"), None)
     if not voice and profile.active_voice_profile_id:
         voice = next((v for v in voices if v["id"] == profile.active_voice_profile_id), None)
+    wiki_audio: dict[str, Any] = {}
+    try:
+        from ..codirector.wiki_intelligence.maintenance import tool_wiki_context
+
+        wiki_audio = tool_wiki_context(
+            db,
+            project_id,
+            domains=["characters", "creativeFoundation", "worldAndSetting"],
+        )
+    except Exception:
+        wiki_audio = {}
     return {
         "profile": profile,
         "voice": voice,
@@ -59,6 +70,7 @@ def resolve_character_context(db: Session, project_id: str, character_id: str, v
         "relationships": profile.relationships or [],
         "motion": profile.motion or {},
         "prompt_package": profile.prompt_package or {},
+        "wikiToolContext": wiki_audio if wiki_audio.get("ok") else None,
     }
 
 

@@ -58,7 +58,10 @@ export type VoiceProfileData = {
   usage_rights: string;
   /** Required for execute this pass */
   audio_asset_id?: string | null;
+  fallback_audio_asset_id?: string | null;
   profile_id?: string | null;
+  approved_record_id?: string | null;
+  approved_take_id?: string | null;
 };
 
 export type PerformanceDirection = {
@@ -85,6 +88,163 @@ export type AvatarTake = {
   approved?: boolean;
   performance_note?: string;
   created_at: string;
+};
+
+export type AvatarGenerationSectionStatus =
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "retake_requested"
+  | "approved";
+
+export type AvatarPresentationPlanSection = {
+  id: string;
+  label: string;
+  summary: string;
+  delivery: string;
+  gaze: string;
+  gesture: string;
+  pacing: string;
+  emphasis: string;
+  posture: string;
+  pronunciation: string;
+  transition: string;
+  background: string;
+  framing: string;
+  retakeFocus: string;
+  continuity: string;
+  excerpt?: string;
+  startMs?: number;
+  endMs?: number;
+};
+
+export type AvatarPresentationPlan = {
+  version: string;
+  source?: string;
+  summary: string;
+  sectioningStrategy: string;
+  sectionTargetSeconds: number;
+  deliveryStyle: string;
+  gazeStyle: string;
+  gestureStyle: string;
+  pacingStyle: string;
+  chapterTransitionStyle: string;
+  emphasisNotes: string;
+  postureNotes: string;
+  pronunciationNotes: string;
+  backgroundRecommendation: string;
+  framingRecommendation: string;
+  continuityChecklist: string;
+  retakeGuidance: string;
+  sections: AvatarPresentationPlanSection[];
+  updatedAt?: string;
+};
+
+export type AvatarJobStatus =
+  | "planning"
+  | "queued"
+  | "generating"
+  | "paused"
+  | "assembling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type AvatarGenerationSection = {
+  id: string;
+  order: number;
+  scriptText: string;
+  audioStartMs: number;
+  audioEndMs: number;
+  overlapBeforeMs?: number;
+  overlapAfterMs?: number;
+  continuationFrameAssetId?: string | null;
+  outputVideoAssetId?: string | null;
+  presentationPlan: Record<string, unknown>;
+  status: AvatarGenerationSectionStatus;
+  providerJobId?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  attempt?: number;
+  retryCount?: number;
+  updatedAt?: string;
+  retakeNote?: string;
+  retakeReason?: string;
+  retakeActionType?: string;
+  currentVersionId?: string;
+  retakeRequest?: Record<string, unknown> | null;
+  retakeHistory?: Array<Record<string, unknown>>;
+  versionHistory?: Array<Record<string, unknown>>;
+  lipsyncRepairPlan?: Record<string, unknown>;
+};
+
+export type AvatarTimelineProposal = {
+  jobId: string;
+  sessionId: string;
+  placementMode: string;
+  trackId: string;
+  startMs: number;
+  selectedSectionId?: string | null;
+  replaceSectionId?: string | null;
+  sectionIds: string[];
+  readySectionIds: string[];
+  clips: Array<Record<string, unknown>>;
+  provenance: Record<string, unknown>;
+  audioMix?: Record<string, unknown>;
+  timelineWritten: boolean;
+  createdAt: string;
+};
+
+export type AvatarProjectJob = {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  avatarId: string;
+  providerId: string;
+  scriptSourceId?: string;
+  audioAssetId: string;
+  sections: AvatarGenerationSection[];
+  assemblyState: string;
+  requestedDurationMs: number;
+  completedDurationMs: number;
+  status: AvatarJobStatus;
+  createdAt: string;
+  updatedAt: string;
+  sharedStyleProfileId?: string;
+  identityProfileRef?: string;
+  presentationPlan?: AvatarPresentationPlan;
+  progress?: {
+    totalSections: number;
+    completedSections: number;
+    failedSections: number;
+    pendingSections: number;
+  };
+  transitionValidation?: {
+    validated: boolean;
+    notes?: string;
+    updatedAt?: string | null;
+  };
+  lastError?: {
+    code?: string;
+    message?: string;
+    sectionId?: string;
+  };
+  assembly?: {
+    compositeVideoAssetId?: string | null;
+    stub?: boolean;
+    message?: string;
+    validatedAt?: string | null;
+    provenance?: Record<string, unknown>;
+  };
+  scriptSource?: Record<string, unknown>;
+  voiceAsset?: Record<string, unknown>;
+  audioMix?: Record<string, unknown>;
+  timelineProposal?: AvatarTimelineProposal | null;
+  timelinePlacements?: Array<Record<string, unknown>>;
+  assemblyVersion?: number;
+  retakeSummary?: Record<string, number>;
 };
 
 export type MouthMaskState = {
@@ -120,17 +280,33 @@ export type AvatarSession = {
   };
   background_mode: string;
   background_notes: string;
+  input_mode?: "script" | "approved_voice";
+  presentation_style?: string;
+  framing_choice?: string;
+  background_choice?: string;
+  duration_class?: string;
+  presentation_plan?: AvatarPresentationPlan;
+  provider_mode?: "best_match" | "choose_provider" | "compare";
+  provider_choice?: string | null;
   model_id: string;
   prompt: string;
   negative_prompt: string;
   source_video_asset_id?: string | null;
   source_still_asset_id?: string | null;
+  active_job_id?: string | null;
   mouth_mask: MouthMaskState;
   lip_sync_method: "external" | "native" | "none";
   takes: AvatarTake[];
   preset_id?: string | null;
   links: {
     script_segment_id?: string | null;
+    script_document_id?: string | null;
+    script_scene_heading_id?: string | null;
+    script_scene_id?: string | null;
+    script_source_label?: string;
+    script_revision_version?: number | null;
+    voice_record_id?: string | null;
+    voice_take_id?: string | null;
     storyboard_panel_id?: string | null;
     master_sheet_id?: string | null;
     scene_id?: string | null;
@@ -217,7 +393,10 @@ export function emptyVoice(): VoiceProfileData {
     stability: "high",
     usage_rights: "project",
     audio_asset_id: null,
+    fallback_audio_asset_id: null,
     profile_id: null,
+    approved_record_id: null,
+    approved_take_id: null,
   };
 }
 
@@ -262,12 +441,41 @@ export function emptyAvatarSession(projectId: string, name = "Avatar Session"): 
     },
     background_mode: "solid",
     background_notes: "Neutral studio background",
+    input_mode: "script",
+    presentation_style: "direct_presenter",
+    framing_choice: "medium_presenter",
+    background_choice: "studio_gradient",
+    duration_class: "story_section",
+    presentation_plan: {
+      version: "m4.12",
+      source: "manual",
+      summary: "Plan this presenter section as clean, reviewable beats with clear continuity.",
+      sectioningStrategy: "Break the script into creator-reviewable presenter beats.",
+      sectionTargetSeconds: 6,
+      deliveryStyle: "Clear, confident presenter delivery.",
+      gazeStyle: "Hold steady eye contact on key lines.",
+      gestureStyle: "Keep gestures compact and purposeful.",
+      pacingStyle: "Measured pacing with short emphasis pauses.",
+      chapterTransitionStyle: "Use a small breath and reset between sections.",
+      emphasisNotes: "Save the strongest emphasis for pivots and the close.",
+      postureNotes: "Stay upright with relaxed shoulders.",
+      pronunciationNotes: "",
+      backgroundRecommendation: "Soft studio gradient with clean separation.",
+      framingRecommendation: "medium close-up",
+      continuityChecklist: "Keep eye line, camera height, and background continuity consistent.",
+      retakeGuidance: "Retake only the drifting section and preserve the handoff into the next beat.",
+      sections: [],
+      updatedAt: now,
+    },
+    provider_mode: "best_match",
+    provider_choice: null,
     model_id: "ltx_2_3",
     prompt: "",
     negative_prompt:
       "identity drift, teeth distortion, frozen face, overactive facial motion, mouth drift, cropped chin, background warping, duplicate characters, blurry, low quality",
     source_video_asset_id: null,
     source_still_asset_id: null,
+    active_job_id: null,
     mouth_mask: { placed: false },
     lip_sync_method: "external",
     takes: [],
@@ -287,10 +495,12 @@ export function buildAvatarPrompt(session: AvatarSession): { prompt: string; neg
   const parts: string[] = [];
   const name = session.character_name || "the character";
   parts.push(`${session.camera.shot_size} of ${name}`);
+  if (session.presentation_style) parts.push(session.presentation_style.replace(/_/g, " "));
   if (session.look.wardrobe) parts.push(`wearing ${session.look.wardrobe}`);
   if (session.look.expression) parts.push(`${session.look.expression} expression`);
   if (session.performance.tone) parts.push(`${session.performance.tone} performance`);
   if (session.background_notes) parts.push(session.background_notes);
+  if (session.duration_class) parts.push(`${session.duration_class.replace(/_/g, " ")} pacing`);
   parts.push(`${session.camera.lens} lens, ${session.camera.angle}, ${session.camera.movement}`);
   parts.push(session.look.lighting || "cinematic lighting");
   parts.push(session.look.style || "cinematic live-action realism");
@@ -305,16 +515,26 @@ export function buildAvatarPrompt(session: AvatarSession): { prompt: string; neg
 
 export function validateAvatarSession(session: AvatarSession): { level: string; text: string }[] {
   const issues: { level: string; text: string }[] = [];
+  const resolvedAudioAssetId =
+    session.input_mode === "approved_voice"
+      ? session.voice.audio_asset_id
+      : session.voice.fallback_audio_asset_id || session.voice.audio_asset_id;
   if (!session.character_profile_id && !session.character_name && !session.source_still_asset_id) {
     issues.push({ level: "warn", text: "Identity reference missing — attach Character Profile or still" });
   }
-  if (!session.voice.audio_asset_id && session.mode !== "talking_portrait") {
+  if (
+    session.input_mode === "approved_voice" &&
+    (!session.voice.audio_asset_id || !session.voice.approved_record_id || !session.voice.approved_take_id)
+  ) {
+    issues.push({ level: "bad", text: "Choose an approved Voice Studio take or switch back to Script" });
+  }
+  if (!resolvedAudioAssetId && session.mode !== "talking_portrait") {
     issues.push({ level: "warn", text: "Voice audio not attached (required before lip sync)" });
   }
-  if (!session.voice.audio_asset_id && session.lip_sync_method === "external") {
+  if (!resolvedAudioAssetId && session.lip_sync_method === "external") {
     issues.push({ level: "bad", text: "Audio required for external lip-sync method" });
   }
-  if (!session.dialogue_original.trim() && !session.dialogue_spoken.trim() && !session.voice.audio_asset_id) {
+  if (!session.dialogue_original.trim() && !session.dialogue_spoken.trim() && !resolvedAudioAssetId) {
     issues.push({ level: "warn", text: "Dialogue empty" });
   }
   if (session.lip_sync_method === "external" && !session.mouth_mask.placed) {

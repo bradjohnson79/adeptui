@@ -85,18 +85,15 @@ async def get_reference_capabilities(ctx: ToolContext, args: dict[str, Any]) -> 
 
 
 async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    """fal.ai connection state + the engines it unlocks.
-
-    Deliberately returns no credential material: not the key, not the masked hint, not the
-    fingerprint. The model only needs to know whether cloud rendering will work and what to
-    tell the user if it will not.
-    """
+    """Hosted AI Providers status (Kie.ai / WaveSpeed.ai / fal.ai) — no credential material."""
     from ....fal_catalog import list_fal_models
-    from ....secrets_store import secret_status
+    from ....hosted_providers import service as hosted
+    from ....hosted_providers.resolver import describe_for_codirector
 
-    status = secret_status("fal_api_key")
-    state = str(status.get("state") or "missing")
-    usable = state == "verified"
+    catalog = hosted.catalog()
+    capability = str(args.get("capability") or "text_to_video")
+    canonical_model = str(args.get("canonicalModel") or args.get("model") or "") or None
+    resolution = hosted.resolve(capability=capability, canonical_model=canonical_model)
     engines = [
         {
             "engine": m["engine"],
@@ -104,23 +101,58 @@ async def get_cloud_render_status(ctx: ToolContext, args: dict[str, Any]) -> dic
             "mediaType": m.get("media_type", "video"),
             "mode": m["mode"],
             "durations": m["durations"],
+            "hostedProvider": "fal",
         }
         for m in list_fal_models()
     ]
-    guidance = {
-        "missing": "No fal.ai key is saved. The user can add one in Project Settings → Integrations.",
-        "invalid": "fal.ai rejected the saved key. The user needs to replace it before cloud renders will run.",
-        "unverified": "A fal.ai key is saved but has not been confirmed with fal.ai; cloud renders may fail.",
-        "verified": "fal.ai accepted the saved key; cloud engines are available.",
-    }
+    providers = [
+        {
+            "providerId": p["providerId"],
+            "displayName": p["displayName"],
+            "role": p["role"],
+            "recommended": p["recommended"],
+            "connectionStatus": p["connectionStatus"],
+            "healthStatus": p["healthStatus"],
+            "certifiedModels": p["certifiedModels"],
+        }
+        for p in catalog.get("providers") or []
+    ]
+    any_usable = any(p.get("connectionStatus") == "verified" for p in providers)
     return {
-        "provider": "fal.ai",
-        "credentialState": state,
-        "cloudRenderUsable": usable,
-        "verifiedAt": status.get("verifiedAt"),
-        "guidance": guidance.get(state, ""),
+        "hostedProviders": providers,
+        "recommendationOrder": ["kie", "wavespeed", "fal"],
+        "preferences": catalog.get("preferences"),
+        "resolution": resolution,
+        "codirector": describe_for_codirector(resolution),
+        "cloudRenderUsable": any_usable or bool(resolution.get("ok")),
         "engines": engines,
         "imageEnginesAvailable": [e for e in engines if e["mediaType"] == "image"],
+        "setupPath": "Setup → AI Providers (Project Settings → Integrations)",
+        "silentSwitchForbidden": True,
+        "guidance": resolution.get("explanation")
+        or "Configure Hosted AI Providers under Setup → AI Providers: Kie.ai (recommended), WaveSpeed.ai, fal.ai.",
+        "mock": False,
+        # Legacy fields for existing clients
+        "provider": "Hosted AI Providers",
+        "credentialState": next(
+            (p["connectionStatus"] for p in providers if p["providerId"] == "fal"),
+            "missing",
+        ),
+    }
+
+
+async def recommend_hosted_provider(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Provider-aware recommendation for Co-Director — never invents support."""
+    from ....hosted_providers import service as hosted
+    from ....hosted_providers.resolver import describe_for_codirector
+
+    capability = str(args.get("capability") or "").strip() or None
+    canonical_model = str(args.get("canonicalModel") or args.get("model") or "").strip() or None
+    resolution = hosted.resolve(capability=capability, canonical_model=canonical_model)
+    return {
+        **describe_for_codirector(resolution),
+        "resolution": resolution,
+        "_evidence": {"source": "hosted_providers.resolver"},
     }
 
 

@@ -104,6 +104,9 @@ const env = {
   // Set it to "1" to run the whole suite against the unified surface.
   STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1:
     process.env.STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1 || "0",
+  // M3.3 Character Identity — Character Profile / Voice System
+  STUDIO_FEATURE_CHARACTER_IDENTITY_V1:
+    process.env.STUDIO_FEATURE_CHARACTER_IDENTITY_V1 || "1",
   // M3.0 Completion Phase 6: startup would otherwise promote a real fal key out of .env
   // and probe fal.ai on every E2E boot. The suite never renders through fal, so keep the
   // stack offline.
@@ -187,11 +190,16 @@ if (!fs.existsSync(venvPython)) {
   process.exit(1);
 }
 
+const reuseExternalApi =
+  process.env.ADEPT_M32G_REAL_LOCAL === "1" || process.env.ADEPT_E2E_REUSE_API === "1";
+
 async function alreadyReady() {
   try {
     await waitHttp(`http://${host}:${fixturePort}/health`, { timeoutMs: 1500 });
     await waitHttp(`http://${host}:${apiPort}/api/health`, { timeoutMs: 1500 });
-    await waitHttp(`http://${host}:${apiPort}/api/e2e/status`, { timeoutMs: 1500 });
+    if (!reuseExternalApi) {
+      await waitHttp(`http://${host}:${apiPort}/api/e2e/status`, { timeoutMs: 1500 });
+    }
     await waitHttp(`http://127.0.0.1:${webPort}/`, { timeoutMs: 1500 });
     return true;
   } catch {
@@ -218,13 +226,26 @@ const fixture = spawnLogged(
 );
 children.push(fixture);
 
-const api = spawnLogged(
-  venvPython,
-  ["-m", "uvicorn", "app.main:app", "--host", host, "--port", String(apiPort)],
-  "api",
-  apiDir,
-);
-children.push(api);
+let api = null;
+if (reuseExternalApi) {
+  try {
+    await waitHttp(`http://${host}:${apiPort}/api/health`, { timeoutMs: 5000 });
+    console.log(`[e2e-start] REAL_LOCAL/reuse: using existing API on ${host}:${apiPort}`);
+  } catch (err) {
+    console.error(
+      `[e2e-start] ADEPT_M32G_REAL_LOCAL/ADEPT_E2E_REUSE_API set but API not healthy at http://${host}:${apiPort}/api/health`,
+    );
+    process.exit(1);
+  }
+} else {
+  api = spawnLogged(
+    venvPython,
+    ["-m", "uvicorn", "app.main:app", "--host", host, "--port", String(apiPort)],
+    "api",
+    apiDir,
+  );
+  children.push(api);
+}
 
 const viteJs = path.join(root, "studio-web", "node_modules", "vite", "bin", "vite.js");
 if (!fs.existsSync(viteJs)) {
@@ -259,12 +280,18 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 try {
   await waitHttp(`http://${host}:${fixturePort}/health`);
   await waitHttp(`http://${host}:${apiPort}/api/health`);
-  await waitHttp(`http://${host}:${apiPort}/api/setup/status`);
+  if (!reuseExternalApi) {
+    await waitHttp(`http://${host}:${apiPort}/api/setup/status`);
+  }
   await waitHttp(`http://127.0.0.1:${webPort}/`);
   console.log("[e2e-start] ready");
   fs.writeFileSync(
     path.join(root, "artifacts", "functional-audit", "ready.json"),
-    JSON.stringify({ readyAt: new Date().toISOString(), dataDir }, null, 2),
+    JSON.stringify({
+      readyAt: new Date().toISOString(),
+      dataDir,
+      reusedApi: reuseExternalApi,
+    }, null, 2),
   );
   // Keep alive for Playwright webServer reuse
   await new Promise(() => {});

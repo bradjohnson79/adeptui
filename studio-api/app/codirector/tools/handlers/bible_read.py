@@ -58,6 +58,15 @@ async def get_current_bible_version(ctx: ToolContext, args: dict[str, Any]) -> d
     }
 
 
+def _canonical_status_from_row(row: Any) -> str:
+    status = str(getattr(row, "lifecycle_status", None) or getattr(row, "lifecycleStatus", None) or "").lower()
+    if status in {"approved", "locked", "canonical", "active"}:
+        return "canonical"
+    if status in {"draft", "proposed", "pending"}:
+        return "draft"
+    return status or "unknown"
+
+
 async def get_bible_entity(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     _, version = _require_current_version(ctx)
     entity_key = str(args["entityKey"])
@@ -69,10 +78,24 @@ async def get_bible_entity(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
                 for f in ops.facts_for_version(ctx.db, version.id)
                 if f.entity_key == entity_key
             ]
+            payload = entity.model_dump(mode="json")
+            canonical_status = _canonical_status_from_row(row)
+            if isinstance(payload, dict) and "canonical_status" not in payload:
+                payload["canonical_status"] = canonical_status
             return {
                 "versionNumber": version.version_number,
-                "entity": entity.model_dump(mode="json"),
+                "entity": payload,
                 "facts": related[:20],
+                "canonical_status": canonical_status,
+                "_summary": f"Bible entity '{entity_key}' ({canonical_status}).",
+                "_evidence": [
+                    {
+                        "sourceType": "production_bible",
+                        "sourceId": entity_key,
+                        "sourceName": getattr(row, "display_name", None),
+                        "repository": "bible.operations",
+                    }
+                ],
             }
     raise CoDirectorError(
         TOOL_TARGET_NOT_FOUND,
@@ -84,19 +107,44 @@ async def get_bible_entity(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
 
 
 async def list_bible_entities(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ..read_envelope import clamp_limit
+
     _, version = _require_current_version(ctx)
     entity_type = args.get("entityType")
-    limit = int(args.get("limit") or DEFAULT_ENTITY_LIMIT)
+    limit = clamp_limit(args.get("limit"), default=DEFAULT_ENTITY_LIMIT)
     rows = ops.entities_for_version(ctx.db, version.id)
     if entity_type:
         rows = [r for r in rows if r.entity_type == entity_type]
+    entities = [
+        {
+            "entityType": r.entity_type,
+            "entityKey": r.entity_key,
+            "displayName": r.display_name or "",
+            "canonical_status": _canonical_status_from_row(r),
+        }
+        for r in rows[:limit]
+    ]
     return {
         "versionNumber": version.version_number,
         "entityType": entity_type,
         "total": len(rows),
-        "entities": [
-            {"entityType": r.entity_type, "entityKey": r.entity_key, "displayName": r.display_name or ""}
-            for r in rows[:limit]
+        "entities": entities,
+        "_summary": f"{len(entities)} Bible entit(y/ies).",
+        "_pagination": {
+            "limit": limit,
+            "total": len(rows),
+            "hasMore": len(rows) > limit,
+            "returnedCount": len(entities),
+            "appliedFilters": {"entityType": entity_type} if entity_type else {},
+        },
+        "_evidence": [
+            {
+                "sourceType": "production_bible",
+                "sourceId": e["entityKey"],
+                "sourceName": e["displayName"],
+                "repository": "bible.operations",
+            }
+            for e in entities
         ],
     }
 

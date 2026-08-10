@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..character_identity.schemas import DialogueGenerateRequest
 from ..character_identity.voice_runtime import _project_audio_dir, _register_asset, run_generate_dialogue
+from ..codirector.tools.ownership import find_owned_segment_plan
 from ..config import settings
 from ..db import Asset, Project
 from .compiler import character_readiness, compile_performance, resolve_character_context
@@ -158,9 +159,11 @@ def create_plan(db: Session, body: CreatePlanBody, request=None) -> PlanOut:
     return _plan_out(row)
 
 
-def get_plan(db: Session, plan_id: str, request=None) -> PlanOut:
+def get_plan(db: Session, plan_id: str, request=None, *, project_id: str | None = None) -> PlanOut:
     row = db.get(PerformancePlanRow, plan_id)
     if not row:
+        raise _err("NOT_FOUND", "Performance plan not found.", 404)
+    if project_id is not None and row.project_id != project_id:
         raise _err("NOT_FOUND", "Performance plan not found.", 404)
     from .compiler import _locked_project_guard
 
@@ -181,10 +184,14 @@ def submit_plan(db: Session, plan_id: str) -> PlanOut:
     return _plan_out(row)
 
 
-def provider_translation_for_plan(db: Session, plan_id: str, provider_key: str | None = None) -> dict[str, Any]:
-    plan = get_plan(db, plan_id)
+def provider_translation_for_plan(
+    db: Session, plan_id: str, provider_key: str | None = None, *, project_id: str | None = None
+) -> dict[str, Any]:
+    plan = get_plan(db, plan_id, project_id=project_id)
     row = db.get(PerformancePlanRow, plan_id)
     assert row
+    if project_id is not None and row.project_id != project_id:
+        raise _err("NOT_FOUND", "Performance plan not found.", 404)
     ctx = resolve_character_context(db, row.project_id, row.character_id, row.voice_version_id)
     prefs = plan.providerPreferences or ["qwen3-tts"]
     key = provider_key or prefs[0]
@@ -208,9 +215,12 @@ def generate_segments(
     allow_kokoro_fallback: bool = False,
     allow_testing_voice: bool = False,
     request=None,
+    project_id: str | None = None,
 ) -> PlanOut:
     row = db.get(PerformancePlanRow, plan_id)
     if not row:
+        raise _err("NOT_FOUND", "Performance plan not found.", 404)
+    if project_id is not None and row.project_id != project_id:
         raise _err("NOT_FOUND", "Performance plan not found.", 404)
     from .compiler import _locked_project_guard
 
@@ -342,19 +352,32 @@ def generate_segments(
     return _plan_out(row)
 
 
-def retry_segment(db: Session, segment_id: str, *, allow_kokoro_fallback: bool = False) -> PlanOut:
-    rows = db.query(PerformancePlanRow).order_by(PerformancePlanRow.created_at.desc()).limit(200).all()
-    target_row = None
-    target_seg = None
-    segs: list[dict] = []
-    for row in rows:
-        segs = _loads(row.segments_json, [])
-        for s in segs:
-            if s.get("id") == segment_id:
-                target_row, target_seg = row, s
+def retry_segment(
+    db: Session,
+    segment_id: str,
+    *,
+    allow_kokoro_fallback: bool = False,
+    project_id: str | None = None,
+) -> PlanOut:
+    if project_id is not None:
+        plan_id, _seg = find_owned_segment_plan(db, project_id, segment_id)
+        target_row = db.get(PerformancePlanRow, plan_id)
+        assert target_row is not None
+        segs = _loads(target_row.segments_json, [])
+        target_seg = next((s for s in segs if isinstance(s, dict) and s.get("id") == segment_id), None)
+    else:
+        rows = db.query(PerformancePlanRow).order_by(PerformancePlanRow.created_at.desc()).limit(200).all()
+        target_row = None
+        target_seg = None
+        segs: list[dict] = []
+        for row in rows:
+            segs = _loads(row.segments_json, [])
+            for s in segs:
+                if s.get("id") == segment_id:
+                    target_row, target_seg = row, s
+                    break
+            if target_row:
                 break
-        if target_row:
-            break
     if not target_row or not target_seg:
         raise _err("NOT_FOUND", "Segment not found.", 404)
     parent_id = target_seg.get("id")
@@ -402,7 +425,26 @@ def retry_segment(db: Session, segment_id: str, *, allow_kokoro_fallback: bool =
     return _plan_out(target_row)
 
 
-def approve_segment(db: Session, segment_id: str, *, approved: bool = True) -> dict[str, Any]:
+def approve_segment(
+    db: Session,
+    segment_id: str,
+    *,
+    approved: bool = True,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    if project_id is not None:
+        plan_id, _seg = find_owned_segment_plan(db, project_id, segment_id)
+        row = db.get(PerformancePlanRow, plan_id)
+        assert row is not None
+        segs = _loads(row.segments_json, [])
+        for s in segs:
+            if isinstance(s, dict) and s.get("id") == segment_id:
+                s["status"] = "approved" if approved else "rejected"
+                row.segments_json = json.dumps(segs, ensure_ascii=False)
+                row.updated_at = _now()
+                db.commit()
+                return {"ok": True, "segmentId": segment_id, "status": s["status"], "mock": False}
+        raise _err("NOT_FOUND", "Segment not found.", 404)
     rows = db.query(PerformancePlanRow).order_by(PerformancePlanRow.created_at.desc()).limit(200).all()
     for row in rows:
         segs = _loads(row.segments_json, [])
@@ -416,9 +458,11 @@ def approve_segment(db: Session, segment_id: str, *, approved: bool = True) -> d
     raise _err("NOT_FOUND", "Segment not found.", 404)
 
 
-def assemble_plan(db: Session, plan_id: str) -> dict[str, Any]:
+def assemble_plan(db: Session, plan_id: str, *, project_id: str | None = None) -> dict[str, Any]:
     row = db.get(PerformancePlanRow, plan_id)
     if not row:
+        raise _err("NOT_FOUND", "Plan not found.", 404)
+    if project_id is not None and row.project_id != project_id:
         raise _err("NOT_FOUND", "Plan not found.", 404)
     segs = _loads(row.segments_json, [])
     # Prefer approved speech/reaction; allow ready if none approved yet
@@ -528,9 +572,17 @@ def _concat_wavs(paths: list[Path], dest: Path) -> None:
             out.writeframes(f)
 
 
-def approve_assembly(db: Session, assembly_id: str, *, approved_by: str = "owner") -> dict[str, Any]:
+def approve_assembly(
+    db: Session,
+    assembly_id: str,
+    *,
+    approved_by: str = "owner",
+    project_id: str | None = None,
+) -> dict[str, Any]:
     row = db.get(PerformanceAssemblyRow, assembly_id)
     if not row:
+        raise _err("NOT_FOUND", "Assembly not found.", 404)
+    if project_id is not None and row.project_id != project_id:
         raise _err("NOT_FOUND", "Assembly not found.", 404)
     row.status = "approved"
     row.approved_at = _now()
@@ -544,11 +596,18 @@ def approve_assembly(db: Session, assembly_id: str, *, approved_by: str = "owner
 
 
 def place_on_timeline(
-    db: Session, assembly_id: str, *, timeline_id: str | None = None, start_ms: int = 0
+    db: Session,
+    assembly_id: str,
+    *,
+    timeline_id: str | None = None,
+    start_ms: int = 0,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Persist dialogue clips into project settings_json timeline dialogue track (canonical project state)."""
     row = db.get(PerformanceAssemblyRow, assembly_id)
     if not row:
+        raise _err("NOT_FOUND", "Assembly not found.", 404)
+    if project_id is not None and row.project_id != project_id:
         raise _err("NOT_FOUND", "Assembly not found.", 404)
     if row.status not in ("assembled", "approved"):
         raise _err("NOT_READY", "Assembly must be assembled/approved before Timeline placement.", 409)

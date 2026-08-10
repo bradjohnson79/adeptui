@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from ...config import settings
+from ...setup.catalog import get_component
+from ...setup.diagnostics import invalidate_verify_cache
 from ...setup.pack_install import staging_root
+from ...setup.state import update_state
 from .disk import preflight_disk
 from .executors import get_executor
 from .executors.base import DownloadExecutionContext
@@ -545,6 +548,17 @@ class DownloadQueueManager:
                         )
                     persist_receipt(receipt)
                     op["installId"] = receipt.get("id")
+                    try:
+                        component = get_component(component_id)
+                        if component.installer == "asset_pack" and destination:
+                            update_state(
+                                lambda state: state.setdefault("model_locations", {}).__setitem__(
+                                    component_id, destination
+                                )
+                            )
+                            invalidate_verify_cache(component_id)
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to persist installed component location")
                 except Exception:  # noqa: BLE001
                     logger.exception("Failed to persist install receipt")
                 # Cleanup staging

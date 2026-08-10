@@ -112,8 +112,11 @@ def list_fal_models() -> list[dict[str, Any]]:
 def list_engines_for_ui() -> list[dict[str, str]]:
     return [
         {"id": "auto", "label": "Auto Select (recommend)", "group": "auto"},
-        {"id": "ltx", "label": "LTX 2.3 (local ComfyUI)", "group": "local"},
-        {"id": "wan", "label": "WAN 2.2 (local ComfyUI)", "group": "local"},
+        {"id": "minimax-h3", "label": "MiniMax H3 (Default · local)", "group": "local"},
+        {"id": "ltx", "label": "LTX Video (local ComfyUI)", "group": "local"},
+        {"id": "hunyuan15", "label": "HunyuanVideo 1.5 (local optional)", "group": "local"},
+        {"id": "hunyuan13b", "label": "HunyuanVideo 13B (local advanced)", "group": "local"},
+        {"id": "wan", "label": "WAN 2.2 (local optional)", "group": "local"},
         *[
             {"id": m.engine, "label": m.label, "group": "fal"}
             for m in FAL_MODELS.values()

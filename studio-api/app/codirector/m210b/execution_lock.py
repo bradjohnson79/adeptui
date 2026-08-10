@@ -19,6 +19,8 @@ _AUDIO_CAPS = (
     "audio.dialogue.generate",
     "audio.sfx.generate",
     "audio.music.generate",
+    "audio.character_voice.design",
+    "audio.character_voice.clone",
 )
 
 

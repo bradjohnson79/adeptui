@@ -1,17 +1,24 @@
 import { useEffect, useRef } from "react";
+import { Button } from "../ui";
 import { useCoDirectorSession } from "./CoDirectorSession";
+import { CoDirectorActivityPanel } from "./CoDirectorActivityPanel";
+import { CoDirectorChangeReview } from "./CoDirectorChangeReview";
 import { CoDirectorMessage } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
 import { CoDirectorTaskStatus } from "./CoDirectorTaskStatus";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
-import { CoDirectorToolStatus } from "./CoDirectorToolStatus";
-import { CoDirectorIntelligenceStatus } from "./CoDirectorIntelligenceStatus";
-import { CoDirectorProductionAnalysisPanel } from "./CoDirectorProductionAnalysis";
-import { CoDirectorValidationWorkspace } from "./CoDirectorValidationWorkspace";
-import { CoDirectorProductionExecutive } from "./CoDirectorProductionExecutive";
-import { CoDirectorProductionIntelligenceDashboard } from "./CoDirectorProductionIntelligenceDashboard";
+import { CoDirectorRelationshipCard } from "./CoDirectorRelationshipCard";
+import { CoDirectorProjectPulse } from "./CoDirectorProjectPulse";
+import { CoDirectorProcessingStatus } from "./CoDirectorProcessingStatus";
+import { CoDirectorNextStepChips } from "./CoDirectorNextStepChips";
+import { CoDirectorMomentumCard } from "./CoDirectorMomentumCard";
+import { CoDirectorDeliverableReview } from "./CoDirectorPartnershipPanels";
 import { summarizeSetup } from "./types";
 
+/**
+ * Chat-first conversation surface.
+ * Dense dashboards are omitted from the default stream — use Project Content / menu.
+ */
 export function CoDirectorConversation({ compactWelcome = false }: { compactWelcome?: boolean }) {
   const {
     messages,
@@ -27,104 +34,126 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     dismissSuggestedPrompt,
     proposals,
     proposalActingId,
-    toolActivity,
-    intelligenceProgress,
-    productionAnalysis,
-    productionAnalysisExpanded,
-    expertiseMode,
-    setExpertiseMode,
-    toggleProductionAnalysis,
+    activity,
     approveProposal,
     rejectProposal,
     requestProposalRevision,
     cancelProposal,
-    uiContext,
+    productionCapable,
     send,
     busy,
     sendError,
     dismissSendError,
     retryLastSend,
     openSettings,
-    visionValidationEnabled,
-    productionExecutiveEnabled,
-    productionIntelligenceEnabled,
+    uiContext,
   } = useCoDirectorSession();
-  const visualValidationPending = Boolean(
-    productionAnalysis?.recommendation?.visualValidationPending,
-  );
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, plan, setup, suggestedPrompt, proposals, toolActivity, intelligenceProgress, productionAnalysis]);
+  }, [messages, plan, setup, suggestedPrompt, proposals, activity]);
 
   return (
-    <div className="codirector-conversation" aria-live="polite">
+    <div className="codirector-conversation" aria-live="polite" data-testid="codirector-conversation">
       {!conversationStarted && <CoDirectorWelcome compact={compactWelcome} />}
-      {intelligenceProgress && <CoDirectorIntelligenceStatus progress={intelligenceProgress} />}
+      <CoDirectorRelationshipCard />
+      <CoDirectorActivityPanel />
+      <CoDirectorProcessingStatus />
+      <CoDirectorMomentumCard />
+      <CoDirectorProjectPulse />
+      <CoDirectorChangeReview />
+      <CoDirectorDeliverableReview />
+      {activity?.conversationActions?.length ? (
+        <div
+          className="codirector-content-card"
+          data-testid="codirector-conversation-actions"
+          style={{ marginTop: "0.5rem", display: "flex", flexWrap: "wrap", gap: "0.35rem" }}
+        >
+          {activity.conversationActions.map((action) => (
+            <Button
+              key={action.id}
+              variant={action.id === "continue_explaining" ? undefined : "ghost"}
+              compact
+              data-testid={`codirector-action-${action.id}`}
+              disabled={busy}
+              onClick={() => {
+                if (busy) return;
+                if (action.id === "continue_explaining") {
+                  void send("I’d like to continue explaining. Keep listening.", "chat");
+                } else if (action.id === "answer_questions") {
+                  void send("I’ll answer a few discovery questions next.", "chat");
+                } else if (action.id === "research_comparables") {
+                  void send("Please authorize research into similar works and note what makes this project different.", "chat");
+                } else if (action.id === "create_story_template" || action.id === "expand_preview") {
+                  void send("Please expand that preview into a draft story template for me to review.", "chat");
+                } else if (action.id === "prepare_short_pitch") {
+                  void send("Please prepare a short pitch draft from what we have so I can review it.", "chat");
+                } else if (action.id === "review_draft") {
+                  void send("Let’s revise the draft together — keep what works and improve what feels thin.", "chat");
+                }
+              }}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
 
-      {uiContext.projectId && (
-        <CoDirectorValidationWorkspace
-          projectId={uiContext.projectId}
-          enabled={Boolean(visionValidationEnabled)}
-          pending={visualValidationPending}
-          sceneId={uiContext.sceneId}
-        />
-      )}
-      {uiContext.projectId && (
-        <CoDirectorProductionExecutive
-          projectId={uiContext.projectId}
-          enabled={Boolean(productionExecutiveEnabled)}
-          sceneId={uiContext.sceneId}
-        />
-      )}
-      {uiContext.projectId && (
-        <CoDirectorProductionIntelligenceDashboard
-          projectId={uiContext.projectId}
-          enabled={Boolean(productionIntelligenceEnabled)}
-          sceneId={uiContext.sceneId}
-        />
-      )}
-      <CoDirectorProductionAnalysisPanel
-        analysis={productionAnalysis}
-        expanded={productionAnalysisExpanded}
-        onToggle={toggleProductionAnalysis}
-        expertiseMode={expertiseMode}
-        onExpertiseModeChange={setExpertiseMode}
-      />
       <div className="codirector-messages">
-        {messages.map((message) => (
-          <CoDirectorMessage
-            key={message.id}
-            message={message}
-            onRetry={
-              message.role === "user"
-                ? () => {
-                    if (!busy) void send(message.content, "chat");
-                  }
-                : undefined
-            }
-          />
-        ))}
+        {messages.map((message, index) => {
+          const isLatestAssistant =
+            message.role === "assistant" &&
+            index === messages.map((m) => m.role).lastIndexOf("assistant");
+          return (
+            <div key={message.id}>
+              <CoDirectorMessage
+                message={message}
+                onRetry={
+                  message.role === "user"
+                    ? () => {
+                        if (!busy) void send(message.content, "chat");
+                      }
+                    : undefined
+                }
+              />
+              {isLatestAssistant ? <CoDirectorNextStepChips /> : null}
+            </div>
+          );
+        })}
       </div>
 
-      {toolActivity && <CoDirectorToolStatus activity={toolActivity} />}
-
       {sendError && (
-        <div className="codirector-cta-card codirector-error-card" role="alert">
-          <p className="scene-meta">Co-Director couldn't send that message</p>
+        <div className="codirector-action-card" role="alert" data-testid="codirector-send-error">
+          <h3>{sendError.category === "tool" ? "Change not saved" : "Request failed"}</h3>
           <p>{sendError.message}</p>
-          <div className="row-actions">
-            <button type="button" className="ghost" onClick={() => dismissSendError()}>
+          {sendError.details || sendError.technical_evidence ? (
+            <details>
+              <summary>Technical details</summary>
+              <pre className="codirector-retrieval-json">
+                {JSON.stringify(
+                  {
+                    code: sendError.code,
+                    details: sendError.details || undefined,
+                    technicalEvidence: sendError.technical_evidence || undefined,
+                  },
+                  null,
+                  2,
+                )}
+              </pre>
+            </details>
+          ) : null}
+          <div className="row">
+            <Button variant="ghost" compact onClick={() => dismissSendError()}>
               Dismiss
-            </button>
-            <button type="button" className="ghost" onClick={() => openSettings()}>
-              Open Settings
-            </button>
+            </Button>
+            <Button variant="ghost" compact onClick={() => openSettings()}>
+              Settings
+            </Button>
             {sendError.recoverable !== false && (
-              <button type="button" className="primary" disabled={busy} onClick={() => retryLastSend()}>
+              <Button variant="primary" compact disabled={busy} onClick={() => retryLastSend()}>
                 Retry
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -137,6 +166,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
           key={proposal.id}
           proposal={proposal}
           busy={proposalActingId === proposal.id}
+          productionCapable={productionCapable}
           onApprove={() => void approveProposal(proposal.id)}
           onReject={(note) => void rejectProposal(proposal.id, note)}
           onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
@@ -145,9 +175,9 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
       ))}
 
       {setup && (
-        <div className="codirector-cta-card">
-          <p className="scene-meta">Proposed scene setup</p>
-          <ul className="assistant-setup-list">
+        <div className="codirector-action-card" data-testid="codirector-setup-card">
+          <h3>Next step</h3>
+          <ul>
             {summarizeSetup(setup).map((line) => (
               <li key={line}>{line}</li>
             ))}
@@ -155,33 +185,33 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
           {!uiContext.projectId || !uiContext.sceneId ? (
             <p className="muted">Open a project and select a scene to apply.</p>
           ) : (
-            <div className="row-actions">
-              <button type="button" className="ghost" disabled={applying} onClick={() => dismissSetup()}>
+            <div className="row">
+              <Button variant="ghost" compact disabled={applying} onClick={() => dismissSetup()}>
                 Dismiss
-              </button>
-              <button type="button" className="primary" disabled={applying} onClick={() => void applySetup()}>
+              </Button>
+              <Button variant="primary" compact disabled={applying} onClick={() => void applySetup()}>
                 {applying ? "Applying…" : "Add to Scene"}
-              </button>
+              </Button>
             </div>
           )}
         </div>
       )}
 
       {suggestedPrompt && !setup && (
-        <div className="codirector-cta-card">
-          <p className="scene-meta">Suggested prompt ready</p>
-          <div className="row-actions">
-            <button type="button" className="ghost" onClick={() => dismissSuggestedPrompt()}>
+        <div className="codirector-action-card">
+          <h3>Suggested prompt</h3>
+          <div className="row">
+            <Button variant="ghost" compact onClick={() => dismissSuggestedPrompt()}>
               Dismiss
-            </button>
-            <button type="button" className="primary" onClick={() => applySuggestedPrompt()}>
+            </Button>
+            <Button variant="primary" compact onClick={() => applySuggestedPrompt()}>
               Use this prompt
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
-      {applyNote && !setup && <div className="codirector-cta-card muted">{applyNote}</div>}
+      {applyNote && !setup && <div className="codirector-action-card muted">{applyNote}</div>}
       <div ref={endRef} />
     </div>
   );

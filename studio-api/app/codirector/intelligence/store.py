@@ -10,6 +10,7 @@ from typing import Any, Iterable, Optional
 from sqlalchemy.orm import Session
 
 from ...db import CoDirectorProductionPlan, CoDirectorSpecialistFinding, CoDirectorSynthesisRecord
+from ..plans.service import PlanService
 from .schemas import ProductionPlan, SpecialistFinding, SynthesisResult
 
 
@@ -79,21 +80,41 @@ class IntelligenceStore:
         plan: ProductionPlan,
         status: str = "draft",
     ) -> CoDirectorProductionPlan:
-        row = CoDirectorProductionPlan(
-            id=plan.planId,
+        """Route intelligence drafts through the canonical Wave 4 PlanService.
+
+        Always persists as an unapproved `draft` regardless of the legacy `status` argument —
+        authoritative transitions require propose → approve.
+        """
+
+        _ = status  # legacy callers may pass status; Wave 4 ignores it for authority
+        steps = [
+            {
+                "stepId": s.stepId,
+                "title": s.title,
+                "description": s.description,
+                "proposedToolId": s.toolId,
+                "requiresApproval": s.requiresApproval,
+                "requiredCapabilities": [s.capability] if s.capability else [],
+                "order": i + 1,
+            }
+            for i, s in enumerate(plan.steps or [])
+        ]
+        result = PlanService.create_draft(
+            db,
             project_id=plan.projectId,
-            request_id=plan.requestId or "",
-            playbook_id=plan.playbookId or "",
-            title=plan.title,
-            status=status,
-            plan_json=json.dumps(plan.model_dump(mode="json"), default=str),
-            visual_validation_pending=1 if plan.visualValidationPending else 0,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            request_id=plan.requestId or str(uuid.uuid4()),
+            title=plan.title or "Intelligence draft plan",
+            objective=plan.summary or "",
+            description=plan.summary or "",
+            steps=steps,
+            source_type="intelligence",
+            source_id=plan.playbookId,
+            actor_type="codirector",
+            plan_id=plan.planId,
         )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+        row = db.get(CoDirectorProductionPlan, result.plan.planId)
+        if row is None:
+            raise RuntimeError("PlanService.create_draft did not persist a plan head")
         return row
 
     @staticmethod
@@ -102,7 +123,37 @@ class IntelligenceStore:
         if not row:
             return None
         data = json.loads(row.plan_json or "{}")
-        return ProductionPlan.model_validate(data)
+        # Wave 4 schema may be richer; map back to intelligence ProductionPlan shape.
+        try:
+            return ProductionPlan.model_validate(
+                {
+                    "planId": data.get("planId") or row.id,
+                    "projectId": data.get("projectId") or row.project_id,
+                    "playbookId": data.get("playbookId") or row.playbook_id,
+                    "title": data.get("title") or row.title,
+                    "summary": data.get("objective") or data.get("summary") or "",
+                    "steps": [
+                        {
+                            "stepId": s.get("stepId"),
+                            "title": s.get("title"),
+                            "description": s.get("description") or "",
+                            "toolId": s.get("proposedToolId") or s.get("toolId"),
+                            "requiresApproval": s.get("requiresApproval", True),
+                            "capability": (s.get("requiredCapabilities") or [None])[0],
+                            "status": s.get("state") or s.get("status") or "pending",
+                        }
+                        for s in (data.get("steps") or [])
+                        if isinstance(s, dict)
+                    ],
+                    "blockers": [
+                        b.get("title") if isinstance(b, dict) else str(b) for b in (data.get("blockers") or [])
+                    ],
+                    "approvalRequired": True,
+                    "requestId": data.get("requestId") or row.request_id,
+                }
+            )
+        except Exception:
+            return ProductionPlan.model_validate(data)
 
     @staticmethod
     def list_findings(db: Session, project_id: str, *, request_id: Optional[str] = None) -> list[dict[str, Any]]:

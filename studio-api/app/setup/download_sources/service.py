@@ -69,13 +69,13 @@ def detect_download_sources(*, force: bool = False) -> dict[str, Any]:
     return payload
 
 
-def start_cli_sign_in(provider: str) -> dict[str, Any]:
-    """Return a guided sign-in command; does not capture tokens."""
+def start_cli_sign_in(provider: str, *, launch: bool = False) -> dict[str, Any]:
+    """Return a guided sign-in command; optionally open a local terminal. Never captures tokens."""
     provider = (provider or "").strip().lower()
     if provider == "github":
         gh = detect_github_cli()
         exe = gh.executable_path or "gh"
-        return {
+        payload = {
             "provider": "github",
             "command": [exe, "auth", "login"],
             "command_summary": "gh auth login",
@@ -84,11 +84,12 @@ def start_cli_sign_in(provider: str) -> dict[str, Any]:
                 "Sign in with GitHub CLI in a terminal. Adept UI never displays or stores your token."
             ),
             "cli": gh.to_dict(),
+            "launched": False,
         }
-    if provider in {"huggingface", "hf"}:
+    elif provider in {"huggingface", "hf"}:
         hf = detect_huggingface_cli()
         exe = hf.executable_path or hf.executable_name or "hf"
-        return {
+        payload = {
             "provider": "huggingface",
             "command": [exe, "auth", "login"],
             "command_summary": f"{hf.executable_name or 'hf'} auth login",
@@ -97,17 +98,115 @@ def start_cli_sign_in(provider: str) -> dict[str, Any]:
                 "Sign in with the Hugging Face CLI in a terminal. Adept UI never displays or stores your token."
             ),
             "cli": hf.to_dict(),
+            "launched": False,
         }
-    raise ValueError(f"Unknown provider: {provider}")
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    if launch:
+        payload.update(_launch_auth_terminal(payload["command"], title=f"Adept UI — {payload['provider']} sign-in"))
+    return payload
+
+
+def _launch_auth_terminal(command: list[str], *, title: str = "") -> dict[str, Any]:
+    """Open a local console for interactive `auth login`. Windows-first; never pipes tokens."""
+    _ = title  # kept for API symmetry; Windows uses CREATE_NEW_CONSOLE (no cmd `start` quoting)
+    if not command or len(command) < 3:
+        return {"launched": False, "launch_error": "No sign-in command available."}
+    if command[-2:] != ["auth", "login"]:
+        return {"launched": False, "launch_error": "Refusing to launch unexpected command."}
+    exe = Path(str(command[0]))
+    if exe.is_absolute() and not exe.is_file():
+        return {"launched": False, "launch_error": f"CLI executable not found: {exe}"}
+
+    argv = [str(command[0]), "auth", "login"]
+    try:
+        if os.name == "nt":
+            # Launch the CLI directly in a new console. Do NOT use `cmd /c start ... /k`
+            # with list2cmdline — nested quotes break paths under Program Files.
+            create_new_console = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)
+            subprocess.Popen(
+                argv,
+                cwd=str(Path.home()),
+                close_fds=True,
+                creationflags=create_new_console,
+            )
+            return {
+                "launched": True,
+                "message": (
+                    "Opened a terminal for sign-in. Complete the prompts there, then click Verify."
+                ),
+            }
+        subprocess.Popen(
+            argv,
+            cwd=str(Path.home()),
+            start_new_session=True,
+        )
+        return {
+            "launched": True,
+            "message": "Started CLI sign-in. Complete the prompts in that process, then click Verify.",
+        }
+    except OSError as exc:
+        return {"launched": False, "launch_error": str(exc)[:240]}
+
+
+# winget HRESULTs that mean "desired package already present / no update needed"
+_WINGET_ALREADY_PRESENT = {
+    0x8A15002B,  # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
+    0x8A150061,  # APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED
+    0x8A15010D,  # APPINSTALLER_CLI_ERROR_INSTALL_ALREADY_INSTALLED
+}
+
+
+def _unsigned32(code: int) -> int:
+    return int(code) & 0xFFFFFFFF
+
+
+def _provider_cli_ready(provider: str, detection: dict[str, Any] | None = None) -> bool:
+    key = "github" if provider == "github" else "huggingface"
+    payload = detection if detection is not None else detect_download_sources(force=True)
+    row = payload.get(key) or {}
+    return bool(row.get("cli_detected"))
 
 
 def install_cli(provider: str, *, confirm: bool = False, method: str | None = None) -> dict[str, Any]:
     """Guided CLI install. Requires confirm=True. Captures exit code; redacts secrets."""
+    provider = (provider or "").strip().lower()
+    if provider in {"hf"}:
+        provider = "huggingface"
+
     if not confirm:
         plan = _install_plan(provider, method=method)
         plan["requires_confirmation"] = True
         plan["executed"] = False
+        if _provider_cli_ready(provider):
+            plan["already_installed"] = True
+            plan["message"] = (
+                f"{'GitHub' if provider == 'github' else 'Hugging Face'} CLI is already installed. "
+                "Install is unnecessary; use Detect / Verify instead."
+            )
         return plan
+
+    # Skip package managers when detection already sees the CLI.
+    if _provider_cli_ready(provider):
+        detection = detect_download_sources(force=True)
+        return {
+            "provider": provider,
+            "method": "already_installed",
+            "command": [],
+            "command_summary": "already installed (skipped)",
+            "executed": True,
+            "ok": True,
+            "exit_code": 0,
+            "already_installed": True,
+            "stdout": "",
+            "stderr": "",
+            "message": (
+                f"{'GitHub' if provider == 'github' else 'Hugging Face'} CLI is already installed. "
+                "Skipped package install."
+            ),
+            "detection": detection,
+        }
 
     plan = _install_plan(provider, method=method)
     cmd = plan.get("command") or []
@@ -137,13 +236,26 @@ def install_cli(provider: str, *, confirm: bool = False, method: str | None = No
             "detection": detect_download_sources(force=True),
         }
     detection = detect_download_sources(force=True)
+    unsigned = _unsigned32(code)
+    already = unsigned in _WINGET_ALREADY_PRESENT or (
+        code != 0 and _provider_cli_ready(provider, detection)
+    )
+    ok = code == 0 or already
+    message = plan.get("message")
+    if already and code != 0:
+        message = (
+            f"{'GitHub' if provider == 'github' else 'Hugging Face'} CLI is already installed "
+            f"(installer exit {code} / {hex(unsigned)} = already present / no update)."
+        )
     return {
         **plan,
         "executed": True,
-        "ok": code == 0,
+        "ok": ok,
         "exit_code": code,
+        "already_installed": already,
         "stdout": stdout[-4000:],
         "stderr": stderr[-4000:],
+        "message": message,
         "detection": detection,
     }
 
@@ -185,15 +297,16 @@ def _install_plan(provider: str, *, method: str | None = None) -> dict[str, Any]
         }
     if provider in {"huggingface", "hf"}:
         python = sys.executable
-        cmd = [python, "-m", "pip", "install", "--upgrade", "huggingface_hub[cli]"]
+        # huggingface_hub >=1.x ships the `hf` console script without a separate [cli] extra.
+        cmd = [python, "-m", "pip", "install", "--upgrade", "huggingface_hub"]
         return {
             "provider": "huggingface",
             "method": "pip_venv",
             "command": cmd,
-            "command_summary": f"{python} -m pip install --upgrade 'huggingface_hub[cli]'",
+            "command_summary": f"{python} -m pip install --upgrade huggingface_hub",
             "target_environment": python,
             "may_require_elevation": False,
-            "message": "Install Hugging Face Hub CLI into the Adept UI Python environment.",
+            "message": "Install Hugging Face Hub CLI (`hf`) into the Adept UI Python environment.",
         }
     raise ValueError(f"Unknown provider: {provider}")
 

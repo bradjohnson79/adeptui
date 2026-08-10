@@ -20,6 +20,6 @@
 | Submissions | `1` |
 | generate_audio | false (compiled + queued) |
 
-Evidence: `artifacts/m30i/live-fal-music-off/`
+Evidence: `artifacts/m30i/historical/fal-backup/live-fal-music-off/` (canonical historical archive; see `artifacts/m30i/live-fal-music-off/MOVED.md`)
 
 First paid submit failed fal content_policy_violation (422) on suspense prompt; zero automatic retries. Milder prompt staged for explicit human `ADEPT_M30I_FAL_FORCE=1` rerun only.

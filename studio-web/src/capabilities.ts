@@ -18,7 +18,8 @@ export type CapabilityStatus =
   | "blocked"
   | "degraded"
   | "not_configured"
-  | "unknown";
+  | "unknown"
+  | "deferred_version_1_2";
 
 export interface Capability {
   id: string;
@@ -66,6 +67,10 @@ export interface CapabilitySnapshot {
   blockers: CapabilityBlocker[];
   /** Capability ids a caller (including Co-Director) may invoke right now. */
   callable: string[];
+  /** Version 1.1 readiness denominator (excludes deferred_version_1_2). */
+  readinessTotal?: number;
+  /** Roadmap-deferred capability ids. */
+  deferred?: string[];
   probeWarnings: string[];
 }
 
@@ -133,6 +138,7 @@ const STATUS_LABELS: Record<CapabilityStatus, string> = {
   degraded: "Degraded",
   not_configured: "Not configured",
   unknown: "Unknown",
+  deferred_version_1_2: "Coming in Version 1.2",
 };
 
 export function capabilityStatusLabel(status: CapabilityStatus): string {
@@ -142,6 +148,8 @@ export function capabilityStatusLabel(status: CapabilityStatus): string {
 /** Maps a capability status onto the existing `status-badge` ok/warn/bad vocabulary. */
 export function capabilityStatusTone(status: CapabilityStatus): "ok" | "warn" | "bad" {
   if (status === "locally_verified" || status === "production_ready") return "ok";
+  // Roadmap deferral is informational — never Failed / Missing / Blocked styling.
+  if (status === "deferred_version_1_2") return "ok";
   if (status === "blocked") return "bad";
   if (status === "not_configured" || status === "degraded" || status === "unknown") return "warn";
   return "warn";

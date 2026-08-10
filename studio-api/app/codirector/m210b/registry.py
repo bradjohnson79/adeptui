@@ -5,18 +5,38 @@ from __future__ import annotations
 from typing import Callable
 
 from ..m29.providers import ProviderUnavailable
+from .adapters.ace_step import ACE_STEP_REGISTRY_ID, AceStepSandboxAdapter
 from .adapters.fixture_ci import FIXTURE_REGISTRY_ID, FixtureCiAudioAdapter
 from .adapters.generic_sandbox import GENERIC_CANDIDATES, GenericSandboxAudioAdapter
 from .adapters.kokoro import KOKORO_REGISTRY_ID, KokoroSandboxAdapter
+from .adapters.mmaudio import MMAUDIO_REGISTRY_ID, MMAudioSandboxAdapter
+from .adapters.qwen_voice_clone import QWEN_VOICE_CLONE_REGISTRY_ID, QwenVoiceCloneSandboxAdapter
+from .adapters.qwen_voice_design import QWEN_VOICE_DESIGN_REGISTRY_ID, QwenVoiceDesignSandboxAdapter
 from .contract import AudioGenerationProviderABC
 from .execution_lock import is_execution_authorized
 from .flags import fixture_mode_enabled, m210b_audio_sandbox_enabled
 
 AdapterFactory = Callable[[], AudioGenerationProviderABC]
 
+_REAL_ADAPTERS = {
+    KOKORO_REGISTRY_ID,
+    ACE_STEP_REGISTRY_ID,
+    MMAUDIO_REGISTRY_ID,
+    QWEN_VOICE_DESIGN_REGISTRY_ID,
+    QWEN_VOICE_CLONE_REGISTRY_ID,
+}
+
 _FACTORIES: dict[str, AdapterFactory] = {
     KOKORO_REGISTRY_ID: KokoroSandboxAdapter,
-    **{rid: (lambda r=rid: GenericSandboxAudioAdapter(r)) for rid in GENERIC_CANDIDATES},
+    ACE_STEP_REGISTRY_ID: AceStepSandboxAdapter,
+    MMAUDIO_REGISTRY_ID: MMAudioSandboxAdapter,
+    QWEN_VOICE_DESIGN_REGISTRY_ID: QwenVoiceDesignSandboxAdapter,
+    QWEN_VOICE_CLONE_REGISTRY_ID: QwenVoiceCloneSandboxAdapter,
+    **{
+        rid: (lambda r=rid: GenericSandboxAudioAdapter(r))
+        for rid in GENERIC_CANDIDATES
+        if rid not in _REAL_ADAPTERS
+    },
 }
 
 

@@ -223,12 +223,41 @@ class ImportPreviewRequest(BaseModel):
     includeAssetsAsProps: bool = True
 
 
+class ImportDiscoveryAsset(BaseModel):
+    assetId: str
+    tag: str = ""
+    kind: str = "image"
+    filename: str = ""
+
+
+class ImportDiscoveryItem(BaseModel):
+    id: str
+    kind: Literal["entity", "fact"]
+    title: str
+    subtitle: str = ""
+    entityKey: Optional[str] = None
+    factIndex: Optional[int] = None
+    entityType: Optional[EntityType] = None
+    included: bool = True
+    needsReview: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    referenceAssets: list[ImportDiscoveryAsset] = Field(default_factory=list)
+
+
+class ImportDiscoveryGroup(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    items: list[ImportDiscoveryItem] = Field(default_factory=list)
+
+
 class ImportPreviewResponse(BaseModel):
     projectId: str
     entities: list[BibleEntity]
     facts: list[BibleFact]
     summary: str
     warnings: list[str] = Field(default_factory=list)
+    discoveries: list[ImportDiscoveryGroup] = Field(default_factory=list)
 
 
 class ImportConfirmRequest(BaseModel):

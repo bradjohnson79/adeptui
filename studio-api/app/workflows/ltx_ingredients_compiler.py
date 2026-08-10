@@ -194,6 +194,7 @@ def compile_ingredients_workflow(
     panels: list[dict[str, Any]] | None = None,
     configured_model_path: str | None = None,
     skip_model_check: bool = False,
+    text_encoder: str | None = None,
 ) -> dict[str, Any]:
     probe = probe_ic_lora_nodes(object_info)
     if not probe.get("available") or not probe.get("strategy"):
@@ -243,25 +244,36 @@ def compile_ingredients_workflow(
     )
     negative = negative or "worst quality, inconsistent motion, blurry, jittery, distorted"
 
-    n_ckpt, n_load, n_pos, n_neg = "1", "2", "3", "4"
+    n_ckpt, n_clip, n_load, n_pos, n_neg = "1", "1b", "2", "3", "4"
     n_empty, n_lora, n_params, n_guide = "5", "6", "7", "8"
     n_noise, n_samp, n_sched = "9", "10", "11"
     n_guider, n_custom, n_dec = "12", "13", "14"
     n_vid, n_save = "15", "16"
     n_vhs = "17"
 
+    # LTX 2.3 distilled checkpoints expose CLIP=None via CheckpointLoaderSimple;
+    # text encoding must come from LTXAVTextEncoderLoader (same as ltx.simple_i2v).
+    te_name = text_encoder or "gemma_3_12B_it_fp4_mixed.safetensors"
     wf: dict[str, Any] = {
         n_ckpt: {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
         },
+        n_clip: {
+            "class_type": "LTXAVTextEncoderLoader",
+            "inputs": {
+                "text_encoder": te_name,
+                "ckpt_name": checkpoint,
+                "device": "default",
+            },
+        },
         n_pos: {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": prompt, "clip": [n_ckpt, 1]},
+            "inputs": {"text": prompt, "clip": [n_clip, 0]},
         },
         n_neg: {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative, "clip": [n_ckpt, 1]},
+            "inputs": {"text": negative, "clip": [n_clip, 0]},
         },
         n_empty: {
             "class_type": "EmptyLTXVLatentVideo",

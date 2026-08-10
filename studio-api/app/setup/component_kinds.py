@@ -36,7 +36,7 @@ def component_kind(definition: ComponentDefinition) -> str:
         return KIND_CREDENTIAL
     if definition.installer == "asset_pack" or definition.verifier == "asset_pack":
         return KIND_DOWNLOADABLE_PACK
-    if definition.installer in ("m210b_qwen_voice", "huggingface_snapshot", "index_tts2"):
+    if definition.installer in ("m210b_qwen_voice", "huggingface_snapshot", "index_tts2", "avatar_runtime"):
         return KIND_DOWNLOADABLE_MODEL
     if definition.installer == "path_link":
         return KIND_LINKED_RESOURCE

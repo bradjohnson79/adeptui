@@ -21,7 +21,11 @@ def recommend_engine(
     scene: Any,
     prompt: str | None = None,
 ) -> dict[str, Any]:
-    """Heuristic engine recommendation. User must confirm before apply."""
+    """Local-first engine recommendation. fal.ai is never selected for `auto`.
+
+    Cloud engines appear only as optional alternatives in warnings when a fal key
+    exists. User must explicitly choose a fal engine and approve paid fallback.
+    """
     vram = normalize_vram_tier(getattr(project, "vram_gb", 32))
     profile = get_profile(vram)
     duration = float(getattr(scene, "duration_sec", 5) or 5)
@@ -29,6 +33,7 @@ def recommend_engine(
     text = (prompt or getattr(scene, "prompt", "") or "") + " " + (getattr(project, "global_prompt", "") or "")
     fal_ok = bool(secret_status("fal_api_key").get("configured"))
     motion = bool(MOTION_RE.search(text))
+    has_start = bool(getattr(scene, "start_asset_id", None))
 
     reasons: list[str] = []
     warnings: list[str] = []
@@ -37,58 +42,55 @@ def recommend_engine(
     local = True
 
     if vram <= 8:
-        engine = "ltx"
-        confidence = 0.8
-        reasons.append(f"{vram} GB VRAM tier favors LTX with reduced budgets")
+        engine = "minimax-h3"
+        confidence = 0.75
+        reasons.append(f"{vram} GB VRAM tier — MiniMax H3 is the Adept UI default (may require setup)")
         if duration > profile.max_duration_sec:
-            warnings.append(f"Duration {duration:.1f}s exceeds {profile.max_duration_sec}s profile max — expect clamping")
+            warnings.append(
+                f"Duration {duration:.1f}s exceeds {profile.max_duration_sec}s profile max — expect clamping"
+            )
     elif vram <= 16:
-        engine = "ltx"
-        confidence = 0.7
-        reasons.append("16 GB class: LTX is the safer local default")
+        engine = "minimax-h3"
+        confidence = 0.78
+        reasons.append("16 GB class: MiniMax H3 is the Adept UI default video engine")
     else:
         if motion and duration >= 6:
-            engine = "wan"
-            confidence = 0.62
-            reasons.append("Longer clip with motion keywords — WAN local path")
+            engine = "minimax-h3"
+            confidence = 0.8
+            reasons.append("Longer clip with motion — MiniMax H3 default (WAN remains selectable)")
         else:
-            engine = "ltx"
-            confidence = 0.68
-            reasons.append("24–32 GB: LTX quality path is the studio default")
+            engine = "minimax-h3"
+            confidence = 0.85
+            reasons.append("24–32 GB: MiniMax H3 is the studio default video engine")
 
     if lipsync:
         reasons.append("Lip sync enabled — keep a local engine so LatentSync can follow")
         if is_fal_engine(engine):
-            engine = "ltx"
+            engine = "minimax-h3"
             local = True
             confidence = min(confidence, 0.6)
             warnings.append("Cloud engines skipped because lip sync is enabled")
 
-    if fal_ok and not lipsync and motion and duration <= 10 and vram <= 16:
-        engine = "fal_kling"
-        local = False
-        confidence = 0.58
-        reasons.append("fal.ai key present + motion on modest VRAM — Kling cloud suggested")
-        warnings.append("Cloud render uses fal.ai credits; confirm before apply")
-    elif fal_ok and not lipsync and "cinematic" in text.lower() and duration <= 12:
-        # Soft cloud hint only when local is fine but cinematic asked
-        if vram >= 24:
-            reasons.append("fal.ai available for cinematic cloud alternatives (Seedance/Veo)")
-        else:
-            engine = "fal_seedance"
-            local = False
-            confidence = 0.52
-            reasons.append("Cinematic brief + fal key — Seedance suggested")
-            warnings.append("Confirm cloud engine before enqueue")
+    if not has_start and engine in ("ltx", "wan"):
+        warnings.append(
+            "Local LTX/WAN need a start frame — generate a local still first "
+            "(do not silently route to fal)"
+        )
+        reasons.append("Local-first I2V chain: ImageGen still → LTX/WAN")
 
-    if not fal_ok and engine.startswith("fal_"):
-        engine = profile.recommended_engine
-        local = True
-        confidence = 0.65
-        warnings.append("fal.ai key not configured — fell back to local")
-        reasons.append(f"Local fallback: {engine}")
+    # Soft cloud alternatives only — never auto-select fal for recommend/auto.
+    if fal_ok and not lipsync:
+        if motion and duration <= 10 and vram <= 16:
+            warnings.append(
+                "Optional paid fal.ai Kling available if local path is exhausted; "
+                "requires explicit approval"
+            )
+        elif "cinematic" in text.lower() and duration <= 12:
+            warnings.append(
+                "Optional paid fal.ai Seedance/Veo available as cinematic cloud fallback; "
+                "requires explicit approval"
+            )
 
-    # M3.0e: when filmmaker language implies audio policy / I2V, prefer MIL recommendation.
     mil_meta: dict[str, Any] = {}
     try:
         from .codirector.model_intelligence.compiler import normalize_audio_from_text
@@ -97,7 +99,6 @@ def recommend_engine(
         from .codirector.model_intelligence.registry import BINDINGS
 
         audio = normalize_audio_from_text(text)
-        has_start = bool(getattr(scene, "start_asset_id", None))
         mil_intent = NormalizedGenerationIntent(
             userPrompt=text.strip(),
             mode="image_to_video" if has_start else "text_to_video",
@@ -108,24 +109,46 @@ def recommend_engine(
         )
         mil = mil_recommend(
             mil_intent,
-            provider_health={"fal.api": 0.9 if fal_ok else 0.2, "comfy.local": 0.8},
+            provider_health={"fal.api": 0.9 if fal_ok else 0.2, "comfy.local": 0.95},
         )
         binding = BINDINGS.get(mil.recommendedModel)
-        if binding and binding.engineId and binding.capabilityIds:
-            # Prefer MIL for fal motion when music policy is explicit and fal is available.
-            if fal_ok and not lipsync and binding.providerId == "fal.api":
-                if engine.startswith("fal_") or "no music" in text.lower() or "no background" in text.lower():
-                    engine = binding.engineId
-                    local = False
-                    confidence = max(confidence, float(mil.confidence))
-                    reasons.append(f"Model Intelligence recommends {mil.recommendedModel}")
-                    mil_meta = {
-                        "modelId": mil.recommendedModel,
-                        "explanation": mil.explanation,
-                        "confidence": mil.confidence,
-                    }
+        # Local-first: only accept MIL recommendations that stay on comfy.local.
+        if (
+            binding
+            and binding.engineId
+            and binding.capabilityIds
+            and binding.providerId == "comfy.local"
+            and not is_fal_engine(binding.engineId)
+        ):
+            engine = binding.engineId
+            local = True
+            confidence = max(confidence, float(mil.confidence))
+            reasons.append(f"Model Intelligence recommends local {mil.recommendedModel}")
+            mil_meta = {
+                "modelId": mil.recommendedModel,
+                "explanation": mil.explanation,
+                "confidence": mil.confidence,
+            }
+        elif binding and binding.providerId == "fal.api" and fal_ok:
+            warnings.append(
+                f"Model Intelligence also scored {mil.recommendedModel} (fal) — "
+                "not auto-applied; paid approval required"
+            )
+            mil_meta = {
+                "modelId": mil.recommendedModel,
+                "explanation": mil.explanation,
+                "confidence": mil.confidence,
+                "notApplied": "local_first_policy",
+            }
     except Exception:
         mil_meta = {}
+
+    # Hard guard: auto recommendation must never return fal.
+    if is_fal_engine(engine):
+        engine = "minimax-h3"
+        local = True
+        confidence = 0.7
+        reasons.append(f"Local-first guard remapped auto away from fal → {engine}")
 
     out = {
         "engineId": engine,
@@ -135,6 +158,8 @@ def recommend_engine(
         "local": local,
         "vram_tier": vram,
         "profile_engine": profile.recommended_engine,
+        "requiresStartFrame": engine in ("ltx", "wan") and not has_start,
+        "paidFallbackAvailable": fal_ok,
     }
     if mil_meta:
         out["modelIntelligence"] = mil_meta
@@ -142,8 +167,8 @@ def recommend_engine(
 
 
 def resolve_engine_id(engine: str | None, project: Any, scene: Any) -> str:
-    """Resolve scene engine, expanding `auto` via recommend_engine."""
-    raw = (engine or getattr(scene, "engine", None) or "ltx").strip().lower()
+    """Resolve scene engine, expanding `auto` via recommend_engine (local-first)."""
+    raw = (engine or getattr(scene, "engine", None) or "minimax-h3").strip().lower()
     if raw != "auto":
         return raw
     rec = recommend_engine(project=project, scene=scene)

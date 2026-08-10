@@ -55,7 +55,7 @@ def create_scene(
     project: Project,
     *,
     name: str = "",
-    engine: str = "ltx",
+    engine: str = "minimax-h3",
     prompt: str = "",
     duration_sec: float = 5.0,
     start_asset_id: Optional[str] = None,

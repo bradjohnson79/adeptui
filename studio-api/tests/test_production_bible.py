@@ -33,6 +33,16 @@ def _create_project(client, name: str = "Bible Test Project") -> str:
     return res.json()["id"]
 
 
+def _upload_asset(client, project_id: str, *, tag: str, filename: str = "asset.png", kind: str = "image") -> dict:
+    res = client.post(
+        f"/api/projects/{project_id}/assets",
+        data={"tag": tag, "kind": kind},
+        files={"file": (filename, b"fake-asset-bytes", "image/png")},
+    )
+    assert res.status_code == 200
+    return res.json()
+
+
 # --------------------------------------------------------------------------
 # Bible: not-found before creation, import preview/confirm
 # --------------------------------------------------------------------------
@@ -59,6 +69,29 @@ def test_import_preview_does_not_persist_anything(client) -> None:
     assert still_missing.status_code == 404
 
 
+def test_import_preview_groups_character_images_under_character_references(client) -> None:
+    project_id = _create_project(client, "Bible Classifier Test")
+    _upload_asset(client, project_id, tag="Korri Character", filename="korri-front.png")
+    _upload_asset(client, project_id, tag="Korri Character", filename="korri-side.png")
+    _upload_asset(client, project_id, tag="Skybridge Rooftop Location", filename="roof.png")
+
+    preview = client.post(f"/api/codirector/projects/{project_id}/bible/import/preview", json={})
+    assert preview.status_code == 200
+    body = preview.json()
+
+    korri = next(e for e in body["entities"] if e["entityKey"] == "korri-character")
+    assert korri["entityType"] == "character"
+    assert len(korri["data"]["referenceAssets"]) == 2
+    assert not any(
+        e["entityType"] == "prop" and e["entityKey"] == "korri-character" for e in body["entities"]
+    )
+
+    characters_group = next(group for group in body["discoveries"] if group["id"] == "characters")
+    korri_item = next(item for item in characters_group["items"] if item["entityKey"] == "korri-character")
+    assert len(korri_item["referenceAssets"]) == 2
+    assert korri_item["needsReview"] is False
+
+
 def test_import_confirm_creates_version_1(client) -> None:
     project_id = _create_project(client)
     preview = client.post(f"/api/codirector/projects/{project_id}/bible/import/preview", json={}).json()
@@ -75,6 +108,26 @@ def test_import_confirm_creates_version_1(client) -> None:
     fetched = client.get(f"/api/codirector/projects/{project_id}/bible")
     assert fetched.status_code == 200
     assert fetched.json()["currentVersion"]["versionNumber"] == 1
+
+
+def test_import_confirm_ignores_preview_only_asset_kind_metadata(client) -> None:
+    project_id = _create_project(client, "Bible Import Preview Metadata")
+    _upload_asset(client, project_id, tag="character_voice", filename="korri-line.wav", kind="audio")
+    preview = client.post(f"/api/codirector/projects/{project_id}/bible/import/preview", json={}).json()
+
+    character_voice = next(e for e in preview["entities"] if e["entityKey"] == "character-voice")
+    character_voice["data"]["kind"] = "audio"
+
+    res = client.post(
+        f"/api/codirector/projects/{project_id}/bible/import/confirm",
+        json={"entities": preview["entities"], "facts": preview["facts"], "summary": preview["summary"]},
+    )
+    assert res.status_code == 200
+
+    persisted = next(e for e in res.json()["currentVersion"]["entities"] if e["entityKey"] == "character-voice")
+    assert persisted["entityType"] == "character"
+    assert persisted["data"]["sourceTag"] == "character_voice"
+    assert "kind" not in persisted["data"]
 
 
 def test_import_confirm_twice_conflicts(client) -> None:

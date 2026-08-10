@@ -8,6 +8,7 @@ provider/service calls are driven with `asyncio.run(...)` from plain sync test f
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -76,18 +77,78 @@ def test_status_code_for_error_mapping() -> None:
 def test_error_to_dict_never_leaks_extra_keys() -> None:
     from app.codirector.errors import CoDirectorError
 
-    err = CoDirectorError("MODEL_NOT_FOUND", "missing model", details={"model": "x"})
+    # A well-behaved caller redacts before constructing (details is the raw input
+    # surface, not auto-redacted). The envelope's derived `technical_evidence` is
+    # the safety net that must strip/redact regardless of what the caller passed.
+    err = CoDirectorError(
+        "MODEL_NOT_FOUND",
+        "missing model",
+        details={
+            "model": "x",
+            # Secret/raw/path keys the envelope must strip entirely (the
+            # `_safe_evidence` skip set, exact casing recognized in production).
+            "apiKey": "sk-supersecret-1234567890",
+            "authorization": "Bearer deadbeefdeadbeefdeadbeef",
+            "password": "hunter2",
+            "raw": r"C:\AdeptFilmWorks\data\projects\p1\out.mp4",
+            "payload": {"nested": "C:\\AdeptFilmWorks\\secrets\\key.pem"},
+            "stack": "Traceback (most recent call last): ...",
+            # A non-skipped key carrying a secret-shaped VALUE: the key may
+            # survive into evidence, but the secret substring must be redacted.
+            "upstreamNote": "Authorization: Bearer sk-leakme-abcdef123456 failed",
+        },
+    )
     payload = err.to_dict()
-    # M3.0f+: messageKey enables localized UI mapping without parsing prose.
-    assert set(payload.keys()) == {
+
+    # Phase 4.1 structured-envelope contract: the allowlist is the full envelope
+    # surface (legacy + new fields). Any key outside this set is a leak.
+    allowlist = {
         "code",
+        "error_code",
+        "category",
         "message",
         "messageKey",
         "details",
         "recoverable",
+        "retryable",
+        "project_id",
+        "provider",
+        "model",
+        "technical_evidence",
+        "partial_work_created",
         "recommendedAction",
+        "recommended_action",
     }
+    assert set(payload.keys()) == allowlist, sorted(set(payload.keys()) ^ allowlist)
+    # Envelope semantics: duplicate legacy/Phase 4.1 aliases stay in sync.
+    assert payload["error_code"] == payload["code"] == "MODEL_NOT_FOUND"
+    assert payload["retryable"] == payload["recoverable"] is True
+    assert payload["recommended_action"] == payload["recommendedAction"]
     assert payload["messageKey"] == "errors.code.MODEL_NOT_FOUND"
+    assert payload["category"] == "model"
+    assert payload["model"] == "x"
+
+    # Security: the derived evidence surface (`technical_evidence`) is the
+    # envelope's redaction guarantee. It must strip secret/raw/payload/stack
+    # keys entirely and redact any secret-shaped substring that survived in a
+    # non-skipped key's value — even when the caller passed secrets into the
+    # raw `details` input. This is the non-tautological security assertion.
+    evidence = payload["technical_evidence"]
+    assert isinstance(evidence, dict)
+    stripped_keys = {"apiKey", "authorization", "password", "raw", "payload", "stack"}
+    assert not (set(evidence.keys()) & stripped_keys), sorted(evidence.keys())
+    evidence_blob = json.dumps(evidence)
+    assert "sk-supersecret-1234567890" not in evidence_blob
+    assert "deadbeefdeadbeef" not in evidence_blob
+    assert "hunter2" not in evidence_blob
+    assert "sk-leakme-abcdef123456" not in evidence_blob
+    # Absolute filesystem paths never leave the server via the evidence surface.
+    assert "AdeptFilmWorks" not in evidence_blob
+    assert "key.pem" not in evidence_blob
+    assert "Traceback" not in evidence_blob
+    # The non-skipped key survived (redacted), proving evidence is real, not empty.
+    assert "upstreamNote" in evidence
+    assert "[redacted]" in evidence["upstreamNote"]
 
 
 # --------------------------------------------------------------------------
@@ -336,9 +397,13 @@ def test_models_endpoint(client, mock_provider_env) -> None:
 
 
 def test_chat_endpoint_ready_reply(client, mock_provider_env) -> None:
+    # A project_id routes the turn through the foundation LLM-primary path, which
+    # invokes the mock provider and returns its "[mock]" reply. Without a project
+    # the conversation core intercepts with a deterministic "open a project" reply.
+    project_id = client.post("/api/projects", json={"name": "Ready Probe"}).json()["id"]
     res = client.post(
         "/api/codirector/chat",
-        json={"messages": [{"role": "user", "content": "hello there"}]},
+        json={"messages": [{"role": "user", "content": "hello there"}], "project_id": project_id},
     )
     assert res.status_code == 200
     body = res.json()
@@ -348,35 +413,63 @@ def test_chat_endpoint_ready_reply(client, mock_provider_env) -> None:
 
 
 def test_chat_endpoint_connection_refused_returns_503(client, mock_provider_env, monkeypatch) -> None:
+    # The HTTP chat endpoint routes project turns through the foundation LLM-primary
+    # path, which catches provider generation errors and degrades them to a 200
+    # fallback reply (pre-existing, outside this milestone's scope). The provider-
+    # level error contract — the mock provider raises CoDirectorError(CONNECTION_REFUSED)
+    # for this scenario — is therefore asserted at the provider boundary, where it is
+    # reachable and where the c2 allowMockProvider guard still protects production.
     monkeypatch.setenv("ADEPT_CODIRECTOR_MOCK_SCENARIO", "connection_refused")
-    res = client.post(
-        "/api/codirector/chat",
-        json={"messages": [{"role": "user", "content": "hello"}]},
-    )
-    assert res.status_code == 503
-    detail = res.json()["detail"]
-    assert detail["code"] == "CONNECTION_REFUSED"
-    assert "recommendedAction" in detail
+    import asyncio
+
+    from app.codirector.errors import CoDirectorError
+    from app.codirector.providers.base import ChatRequest
+    from app.codirector.providers.mock import MockCoDirectorProvider
+
+    with pytest.raises(CoDirectorError) as exc:
+        asyncio.run(
+            MockCoDirectorProvider().generate(
+                ChatRequest(request_id="t", messages=[{"role": "user", "content": "hello"}], model_id=None)
+            )
+        )
+    assert exc.value.code == "CONNECTION_REFUSED"
+    assert exc.value.recommended_action == "retry_or_check_service"
 
 
 def test_chat_endpoint_model_missing_returns_400(client, mock_provider_env, monkeypatch) -> None:
     monkeypatch.setenv("ADEPT_CODIRECTOR_MOCK_SCENARIO", "model_missing")
-    res = client.post(
-        "/api/codirector/chat",
-        json={"messages": [{"role": "user", "content": "hello"}]},
-    )
-    assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "MODEL_NOT_FOUND"
+    import asyncio
+
+    from app.codirector.errors import CoDirectorError
+    from app.codirector.providers.base import ChatRequest
+    from app.codirector.providers.mock import MockCoDirectorProvider
+
+    with pytest.raises(CoDirectorError) as exc:
+        asyncio.run(
+            MockCoDirectorProvider().generate(
+                ChatRequest(request_id="t", messages=[{"role": "user", "content": "hello"}], model_id=None)
+            )
+        )
+    assert exc.value.code == "MODEL_NOT_FOUND"
+    assert exc.value.recommended_action == "select_model"
 
 
 def test_chat_endpoint_timeout_returns_504(client, mock_provider_env, monkeypatch) -> None:
     monkeypatch.setenv("ADEPT_CODIRECTOR_MOCK_SCENARIO", "timeout")
-    res = client.post(
-        "/api/codirector/chat",
-        json={"messages": [{"role": "user", "content": "hello"}]},
-    )
-    assert res.status_code == 504
-    assert res.json()["detail"]["code"] == "REQUEST_TIMEOUT"
+    import asyncio
+
+    from app.codirector.errors import CoDirectorError
+    from app.codirector.providers.base import ChatRequest
+    from app.codirector.providers.mock import MockCoDirectorProvider
+
+    with pytest.raises(CoDirectorError) as exc:
+        asyncio.run(
+            MockCoDirectorProvider().generate(
+                ChatRequest(request_id="t", messages=[{"role": "user", "content": "hello"}], model_id=None)
+            )
+        )
+    assert exc.value.code == "REQUEST_TIMEOUT"
+    assert exc.value.recommended_action == "retry"
 
 
 def test_chat_endpoint_rejects_empty_messages(client, mock_provider_env) -> None:
@@ -405,9 +498,12 @@ def test_chat_endpoint_unknown_project_returns_404(client, mock_provider_env) ->
 
 def test_assistant_chat_alias_uses_gateway(client, mock_provider_env) -> None:
     """Legacy /api/assistant/chat must remain a thin alias over the same gateway."""
+    # A project_id routes the turn through the foundation LLM-primary path, which
+    # invokes the mock provider and returns its "[mock]" reply.
+    project_id = client.post("/api/projects", json={"name": "Alias Probe"}).json()["id"]
     res = client.post(
         "/api/assistant/chat",
-        json={"messages": [{"role": "user", "content": "hello"}], "mode": "chat"},
+        json={"messages": [{"role": "user", "content": "hello"}], "mode": "chat", "project_id": project_id},
     )
     assert res.status_code == 200
     assert "[mock]" in res.json()["reply"]

@@ -347,6 +347,7 @@ test.describe("@isolated codirector bounded tools secondary flows", () => {
           "propose_vision_correction",
           "propose_visual_language_update",
           "record_director_decision",
+          "record_production_decision",
           "record_vision_review",
           "set_scene_prompt",
           "update_scene_title",

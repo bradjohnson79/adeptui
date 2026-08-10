@@ -15,13 +15,13 @@ import {
   classifyCoDirectorError,
   isAbortError,
   type ClassifiedError,
+  type CoDirectorContextManifest,
   type CoDirectorProposal,
   type CoDirectorStreamEvent,
 } from "../../api";
 import {
   loadAudit,
   loadPolicies,
-  planFromIntention,
   savePolicies,
   type ActionCategory,
   type ActionPlan,
@@ -31,10 +31,37 @@ import {
 import { executeStep, type ExecuteContext } from "../../codirector/execute";
 import type { Project, SceneSetup } from "../../types";
 import {
+  fetchLatestStatus,
+  fetchStatusHistory,
+  fetchStatusRegistry,
+  runDeepDiagnostic as requestDeepDiagnostic,
+  runStatusCheck as requestStatusCheck,
+} from "../../codirector/status/client";
+import type {
+  StatusRegistryCheck,
+  StatusRun,
+} from "../../codirector/status/types";
+import {
+  deriveRuntimeState,
+  isConnectedLike,
+  runtimeChipText,
+  type CoDirectorRuntimeState,
+} from "./runtimeState";
+import {
+  applyToolEvent,
+  createActivityState,
+  summarizeActivity,
+  updateStage,
+  upsertStage,
+} from "./activity";
+import {
   consumeAbandonedStreamingFlag,
+  getTabSessionId,
+  loadActivityPreference,
   loadContextPanelOpen,
   loadDisplayMode,
   loadExpertiseMode,
+  loadLastBoundProjectSuggestion,
   loadPersistedDraft,
   loadPersistedMessages,
   markStreamingEnd,
@@ -45,19 +72,26 @@ import {
   persistDisplayMode,
   persistDraft,
   persistExpertiseMode,
+  persistActivityPreference,
+  persistLastBoundProjectSuggestion,
   persistMessages,
   WELCOME_ASSISTANT,
+  type CoDirectorActivityPreference,
+  type CoDirectorActivityState,
   type ChatMode,
   type CoDirectorAssistantMessageType,
   type CoDirectorAttachment,
   type CoDirectorDisplayMode,
   type CoDirectorExpertiseMode,
   type CoDirectorIntelligenceProgress,
+  type CoDirectorMessageAttachment,
   type CoDirectorMessage,
   type CoDirectorProductionAnalysis,
+  type CoDirectorSessionContext,
   type CoDirectorToolActivity,
   type CoDirectorUIContext,
   type CoDirectorWorkspaceBindings,
+  type LastBoundProjectSuggestion,
   type OverflowPanel,
   type PromptMode,
   type WelcomeSuggestion,
@@ -86,6 +120,10 @@ type SessionValue = {
   proposals: CoDirectorProposal[];
   proposalActingId: string | null;
   toolActivity: CoDirectorToolActivity | null;
+  activity: CoDirectorActivityState | null;
+  activityPreference: CoDirectorActivityPreference;
+  setActivityPreference: (mode: CoDirectorActivityPreference) => void;
+  retryActivityPersistence: () => Promise<void>;
   intelligenceProgress: CoDirectorIntelligenceProgress | null;
   productionAnalysis: CoDirectorProductionAnalysis | null;
   productionAnalysisExpanded: boolean;
@@ -140,6 +178,7 @@ type SessionValue = {
   productionIntelligenceEnabled: boolean;
   unifiedExperienceEnabled: boolean;
   refreshProviderHealth: () => Promise<void>;
+  reconnect: () => Promise<void>;
   setSelectedModelId: (modelId: string | null) => void;
   runSteps: (steps: PlannedStep[]) => Promise<void>;
   applySetup: () => Promise<void>;
@@ -155,12 +194,99 @@ type SessionValue = {
   loadKnowledge: () => Promise<void>;
   loadKnowledgeDoc: (modelId: string) => Promise<void>;
   refreshAudit: () => void;
+  runtimeState: CoDirectorRuntimeState;
+  runtimeChip: string;
+  sessionContext: CoDirectorSessionContext;
+  productionCapable: boolean;
+  lastBoundProjectSuggestion: LastBoundProjectSuggestion | null;
+  resumeSuggestedProject: () => void;
+  selectProject: () => void;
+  createProject: () => void;
+  showReconnectAction: boolean;
+  statusRegistry: StatusRegistryCheck[];
+  statusLatestRun: StatusRun | null;
+  statusHistory: StatusRun[];
+  statusChecking: boolean;
+  statusError: string | null;
+  loadStatus: () => Promise<void>;
+  runStatusCheck: (opts?: { deep?: boolean }) => Promise<void>;
+  openStatusPanel: () => void;
 };
 
 const SessionContext = createContext<SessionValue | null>(null);
 
 function buildWelcomeSuggestions(ctx: CoDirectorUIContext): WelcomeSuggestion[] {
   const suggestions: WelcomeSuggestion[] = [];
+  const projectType = (ctx.primaryProjectType || "").toLowerCase();
+  const isExplainer =
+    projectType === "educational_explainer" ||
+    projectType === "explainer_video" ||
+    projectType.includes("explainer");
+  const isDocumentary = projectType === "documentary" || projectType === "docuseries";
+  const isSocial =
+    projectType === "social_media" ||
+    projectType.includes("tiktok") ||
+    projectType.includes("reel") ||
+    projectType.includes("youtube_short");
+  const isTrailer =
+    projectType === "video_cinematic_trailer" ||
+    projectType.includes("trailer") ||
+    projectType === "teaser_trailer";
+  const isTalkingAvatar = projectType === "talking_avatar";
+
+  if (isExplainer) {
+    suggestions.push({
+      id: "explainer-outline",
+      label: "Outline this explainer",
+      description: "Script beats, clarity, and captions.",
+      text: "Outline this educational explainer: define learning goals, clear script beats, on-screen captions, and a simple visual sequence Co-Director can produce.",
+      mode: "chat",
+    });
+    suggestions.push({
+      id: "explainer-diagram-frames",
+      label: "Plan diagram frames",
+      description: "Visual steps for clarity.",
+      text: "Propose diagram-style storyboard frames for this explainer that prioritize clarity over cinematic drama, with caption-ready titles.",
+      mode: "prompt",
+    });
+  }
+  if (isDocumentary) {
+    suggestions.push({
+      id: "doc-interview-plan",
+      label: "Plan interview + B-roll",
+      description: "Nonfiction coverage structure.",
+      text: "Plan this documentary sequence: interview questions, observational B-roll, and archive/honesty notes Co-Director should respect.",
+      mode: "chat",
+    });
+  }
+  if (isSocial) {
+    suggestions.push({
+      id: "social-hook",
+      label: "Write a hook-first short",
+      description: "Captions and CTA pacing.",
+      text: "Draft a social short for this project: strong opening hook, caption-ready lines, and a clear CTA within a short duration.",
+      mode: "prompt",
+    });
+  }
+  if (isTrailer) {
+    suggestions.push({
+      id: "trailer-beats",
+      label: "Build trailer beats",
+      description: "Cold open to title card.",
+      text: "Build a cinematic trailer beat sheet: cold open, escalation, hero shots, title reveal, and release information — without inventing fake assets.",
+      mode: "chat",
+    });
+  }
+  if (isTalkingAvatar) {
+    suggestions.push({
+      id: "avatar-presenter",
+      label: "Prep talking-avatar scene",
+      description: "Script, voice, lip-sync.",
+      text: "Prepare a talking-avatar presenter scene: concise script, Character Profile / voice needs, lip-sync path, and caption defaults.",
+      mode: "setup",
+    });
+  }
+
   if (ctx.sceneId) {
     suggestions.push({
       id: "continue-scene",
@@ -196,6 +322,37 @@ function buildWelcomeSuggestions(ctx: CoDirectorUIContext): WelcomeSuggestion[] 
       text: "Review the selected generation and suggest what to refine next.",
       mode: "guide",
     });
+  }
+  if (!ctx.sceneId && !ctx.activeGenerationId && !ctx.selectedAssetIds?.length) {
+    suggestions.push({
+      id: "talk-story",
+      label: "Talk about the Story",
+      description: "Premise, plot, conflict, theme, or what happens.",
+      text: "Tell me about the story however you want — the premise, what happens, who it follows, or simply the idea you're starting from.",
+      mode: "chat",
+    });
+    suggestions.push({
+      id: "talk-character",
+      label: "Talk about a Character",
+      description: "Who they are, role, personality, appearance, or references.",
+      text: "Tell me about them however you like — their name, role, personality, appearance, history, or what they contribute to the story. You can also attach a reference if you have one.",
+      mode: "chat",
+    });
+    suggestions.push({
+      id: "talk-vision",
+      label: "Talk about your Vision",
+      description: "Audience experience, creative goals, emotional intent.",
+      text: "Tell me what you're trying to create and what you want the audience to feel. References, influences, things to avoid, pacing, emotional effect — any of that is useful.",
+      mode: "chat",
+    });
+    suggestions.push({
+      id: "talk-style",
+      label: "Talk about the Project Style",
+      description: "Visual language, tone, genre, color, lighting, references.",
+      text: "Describe how you imagine it looking and feeling — animation or live action, realism, color, lighting, camera language, genre, pacing, or any visual references you have in mind.",
+      mode: "chat",
+    });
+    return suggestions;
   }
   const defaults: WelcomeSuggestion[] = [
     {
@@ -234,32 +391,176 @@ function buildWelcomeSuggestions(ctx: CoDirectorUIContext): WelcomeSuggestion[] 
   return suggestions.slice(0, 4);
 }
 
+function inferAttachmentMediaKind(name: string, mimeType?: string): string {
+  const lowerMime = (mimeType || "").toLowerCase();
+  const lowerName = name.toLowerCase();
+  if (lowerMime.startsWith("image/")) return "image";
+  if (lowerMime.startsWith("audio/")) return "audio";
+  if (lowerMime.startsWith("video/")) return "video";
+  if (/\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(lowerName)) return "image";
+  if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(lowerName)) return "audio";
+  if (/\.(mp4|webm|mov|mkv|m4v)$/i.test(lowerName)) return "video";
+  return "document";
+}
+
+function buildAttachmentTag(name: string): string {
+  const stem = name.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[._-]+|[._-]+$/g, "");
+  return (stem || "co-director-reference").slice(0, 64);
+}
+
+function toMessageAttachments(attachments: CoDirectorAttachment[]): CoDirectorMessageAttachment[] {
+  return attachments
+    .filter((item): item is CoDirectorAttachment & { assetId: string } => Boolean(item.assetId))
+    .map((item) => ({
+      assetId: item.assetId,
+      name: item.name,
+      mimeType: item.mimeType,
+      source: item.kind,
+      mediaKind: item.mediaKind,
+    }));
+}
+
+function revokeFilePreview(attachment: CoDirectorAttachment) {
+  if (attachment.previewUrl && attachment.kind === "file") {
+    URL.revokeObjectURL(attachment.previewUrl);
+  }
+}
+
+function throwIfAborted(signal: AbortSignal) {
+  if (signal.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+}
+
+// Normalizes a server-side conversation message into the client CoDirectorMessage
+// shape. Server messages use snake_case (created_at, attachment_ids) and may
+// carry attachments as objects; the client uses camelCase fields.
+type ServerConversationMessage = {
+  id?: string;
+  role: string;
+  content: string;
+  created_at?: string;
+  attachmentIds?: unknown;
+  attachment_ids?: unknown;
+  attachments?: unknown;
+};
+
+function normalizeServerMessage(m: ServerConversationMessage): CoDirectorMessage {
+  const attachmentIds = Array.isArray(m.attachmentIds)
+    ? ((m.attachmentIds as string[]).filter(Boolean) as string[])
+    : Array.isArray(m.attachment_ids)
+      ? ((m.attachment_ids as string[]).filter(Boolean) as string[])
+      : undefined;
+  const attachments = Array.isArray(m.attachments)
+    ? (m.attachments as Array<Record<string, unknown>>).reduce<CoDirectorMessageAttachment[]>(
+        (acc, item) => {
+          const assetId = String(item.assetId || item.asset_id || "").trim();
+          const name = String(item.name || "").trim();
+          if (!assetId || !name) return acc;
+          const source = item.source === "library" ? "library" : "file";
+          const mimeType =
+            typeof item.mimeType === "string"
+              ? item.mimeType
+              : typeof item.mime_type === "string"
+                ? item.mime_type
+                : undefined;
+          const mediaKind =
+            typeof item.mediaKind === "string"
+              ? item.mediaKind
+              : typeof item.kind === "string"
+                ? item.kind
+                : undefined;
+          acc.push({ assetId, name, mimeType, source, mediaKind });
+          return acc;
+        },
+        [],
+      )
+    : undefined;
+  return {
+    id: m.id || newMessageId(),
+    role: m.role === "user" ? "user" : "assistant",
+    content: m.content,
+    attachmentIds,
+    attachments,
+    createdAt: m.created_at || new Date().toISOString(),
+  };
+}
+
+// Merges `incoming` (client messages) onto the latest server conversation by
+// id. Server messages are kept first; any incoming message whose id is not
+// already on the server is appended. This is the durable guard against the
+// reload persistence race: a stale React `messages` closure (e.g.
+// [WELCOME, userMsg] from a send that landed before the async conversation
+// load completed) can never overwrite the real persisted history — it can
+// only add messages the server doesn't have yet.
+function mergeOntoServer(
+  serverMessages: ServerConversationMessage[] | undefined,
+  incoming: CoDirectorMessage[],
+): CoDirectorMessage[] {
+  const normalized = (serverMessages || []).map(normalizeServerMessage);
+  const serverIds = new Set(normalized.map((m) => m.id).filter(Boolean) as string[]);
+  const merged = [...normalized];
+  for (const m of incoming) {
+    if (m.id && serverIds.has(m.id)) continue;
+    merged.push(m);
+  }
+  return merged;
+}
+
 export function CoDirectorSessionProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const bindingsRef = useRef<CoDirectorWorkspaceBindings>({});
   const [open, setOpenState] = useState(false);
   const [displayMode, setDisplayModeState] = useState<CoDirectorDisplayMode>(() => loadDisplayMode());
   const [draft, setDraftState] = useState(() => loadPersistedDraft());
-  const [messages, setMessages] = useState<CoDirectorMessage[]>(
-    () => loadPersistedMessages() || [WELCOME_ASSISTANT],
-  );
+  const [messages, setMessages] = useState<CoDirectorMessage[]>([WELCOME_ASSISTANT]);
   const [attachments, setAttachments] = useState<CoDirectorAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
   const [providerStatus, setProviderStatus] = useState("Checking Co-Director…");
   const [providerModel, setProviderModel] = useState<string | null>(null);
   const [providerHealth, setProviderHealth] = useState<ProviderHealth | null>(null);
+  const [healthPending, setHealthPending] = useState(true);
+  const [modelLoading, setModelLoading] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [showReconnectAction, setShowReconnectAction] = useState(false);
   const [selectedModelId, setSelectedModelIdState] = useState<string | null>(null);
   const [sendError, setSendError] = useState<ClassifiedError | null>(null);
+  const [lastSuccessfulToolAction, setLastSuccessfulToolAction] = useState<string | null>(null);
+  const [lastBoundProjectSuggestion, setLastBoundProjectSuggestion] = useState<LastBoundProjectSuggestion | null>(
+    () => loadLastBoundProjectSuggestion(),
+  );
+  const reconnectAttemptsRef = useRef(0);
+  const wasConnectedRef = useRef(false);
+  const sendInFlightRef = useRef(false);
   // `messageId: null` means the failed attempt never got far enough to append a user
   // message (preflight failure) — retry should go through `send()` again. Once a message
   // *has* been appended, `messageId` points at it so retry resends the same transcript
   // slice instead of appending a duplicate copy of the same user message.
   const pendingRetryRef = useRef<{ text: string; mode: ChatMode; messageId: string | null } | null>(null);
+  const pendingToolRetryRef = useRef<{
+    kind: "read" | "mutating";
+    toolId: string;
+    arguments: Record<string, unknown>;
+  } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeRequestIdRef = useRef<string | null>(null);
   const cancelledByUserRef = useRef(false);
   const lastLoadedProjectIdRef = useRef<string | undefined>(undefined);
+  // Tracks whether the conversation for the current project has been hydrated
+  // from the server. The send path persists `[...messages, userMsg]` using the
+  // React `messages` closure; if a send lands before the async load completes,
+  // `messages` is still `[WELCOME_ASSISTANT]` and the persist would overwrite
+  // the real server conversation with a 2-message stub (data loss). This guard
+  // lets `persistConversation` merge against the server list when stale.
+  const conversationHydratedRef = useRef(false);
+  // Serializes `persistConversation` calls. A turn fires multiple persists
+  // (the fire-and-forget user-turn persist, then the final transcript persist,
+  // plus error/cancel paths). Without serialization two persists can race:
+  // P1 GET old, P2 GET old, P1 POST merged, P2 POST merged-over-old → data loss.
+  // Each persist chains onto the previous so its GET-merge-POST runs strictly
+  // after the prior one settles.
+  const persistChainRef = useRef<Promise<unknown> | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => {
     // StrictMode double-invokes effects in dev (mount → cleanup → mount) — reset on each
@@ -274,6 +575,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<CoDirectorToolActivity | null>(null);
+  const [activity, setActivity] = useState<CoDirectorActivityState | null>(null);
+  const [activityPreference, setActivityPreferenceState] = useState<CoDirectorActivityPreference>(() =>
+    loadActivityPreference(),
+  );
   const [intelligenceProgress, setIntelligenceProgress] = useState<CoDirectorIntelligenceProgress | null>(null);
   const [productionAnalysis, setProductionAnalysis] = useState<CoDirectorProductionAnalysis | null>(null);
   const [productionAnalysisExpanded, setProductionAnalysisExpanded] = useState(false);
@@ -292,69 +597,361 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [kbDoc, setKbDoc] = useState("");
   const [audit, setAudit] = useState(() => loadAudit().slice(0, 20));
   const [uiContext, setUiContext] = useState<CoDirectorUIContext>({});
+  const [statusRegistry, setStatusRegistry] = useState<StatusRegistryCheck[]>([]);
+  const [statusLatestRun, setStatusLatestRun] = useState<StatusRun | null>(null);
+  const [statusHistory, setStatusHistory] = useState<StatusRun[]>([]);
+  const [statusChecking, setStatusChecking] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const activityPersistenceRef = useRef<{
+    messages: CoDirectorMessage[];
+    model?: string | null;
+    providerId?: string | null;
+  } | null>(null);
+  const activityManifestRef = useRef<CoDirectorContextManifest | null>(null);
+
+  const clearComposerAttachments = useCallback(() => {
+    setAttachments((prev) => {
+      for (const item of prev) revokeFilePreview(item);
+      return [];
+    });
+  }, []);
 
   const conversationStarted = messages.some((m) => m.role === "user");
 
+  const cancelInFlightForProjectSwitch = useCallback(() => {
+    const requestId = activeRequestIdRef.current;
+    cancelledByUserRef.current = true;
+    sendInFlightRef.current = false;
+    if (requestId) void api.codirectorCancel(requestId).catch(() => {});
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    activeRequestIdRef.current = null;
+    setBusy(false);
+    setToolActivity(null);
+    setActivity(null);
+    setIntelligenceProgress(null);
+  }, []);
+
+  const syncProjectIdentity = useCallback((projectId?: string, projectName?: string) => {
+    const resolvedProjectId = (projectId || bindingsRef.current.projectId || "").trim();
+    const resolvedProjectName = (projectName || "").trim();
+    if (!resolvedProjectId || !resolvedProjectName) return;
+    if (bindingsRef.current.projectId && bindingsRef.current.projectId !== resolvedProjectId) return;
+    bindingsRef.current = { ...bindingsRef.current, projectId: resolvedProjectId, projectName: resolvedProjectName };
+    setUiContext((prev) =>
+      prev.projectId === resolvedProjectId && prev.projectName === resolvedProjectName
+        ? prev
+        : { ...prev, projectId: resolvedProjectId, projectName: resolvedProjectName },
+    );
+    const suggestion = { projectId: resolvedProjectId, projectName: resolvedProjectName };
+    persistLastBoundProjectSuggestion(suggestion);
+    setLastBoundProjectSuggestion((prev) =>
+      prev?.projectId === suggestion.projectId && prev?.projectName === suggestion.projectName ? prev : suggestion,
+    );
+    window.dispatchEvent(new CustomEvent("adept:project-renamed", { detail: suggestion }));
+  }, []);
+
+  const syncProjectIdentityFromResult = useCallback(
+    (result: Record<string, unknown>) => {
+      const projectRecord =
+        result.project && typeof result.project === "object" ? (result.project as Record<string, unknown>) : null;
+      const projectId = String(projectRecord?.id || result.projectId || bindingsRef.current.projectId || "");
+      const projectName = String(projectRecord?.name || result.projectName || "");
+      syncProjectIdentity(projectId, projectName);
+    },
+    [syncProjectIdentity],
+  );
+
   const refreshProviderHealth = useCallback(async () => {
+    setHealthPending(true);
     try {
       const health = await api.codirectorHealth("active");
       setProviderHealth(health);
       setProviderModel(health.selectedModel);
+      const testLabel = health.testOnly || health.honesty === "mocked" ? " (test-only)" : "";
       setProviderStatus(
-        health.status === "Ready" ? `${health.displayName} · ${health.selectedModel}` : health.status,
+        health.status === "Ready"
+          ? `${health.displayName} · ${health.selectedModel}${testLabel}`
+          : health.status,
       );
       setSelectedModelIdState((prev) => prev ?? health.selectedModel ?? null);
+      if (health.ok && health.reachable && health.modelAvailable) {
+        wasConnectedRef.current = true;
+        reconnectAttemptsRef.current = 0;
+        setReconnecting(false);
+        setShowReconnectAction(false);
+      } else if (wasConnectedRef.current && !health.reachable) {
+        setReconnecting(true);
+      }
     } catch {
       setProviderHealth(null);
       setProviderModel(null);
       setProviderStatus("Co-Director unavailable");
+      if (wasConnectedRef.current) {
+        setReconnecting(true);
+      }
+    } finally {
+      setHealthPending(false);
+      setModelLoading(false);
     }
   }, []);
+
+  const reconnect = useCallback(async () => {
+    setShowReconnectAction(false);
+    setReconnecting(true);
+    reconnectAttemptsRef.current = 0;
+    await refreshProviderHealth();
+  }, [refreshProviderHealth]);
 
   useEffect(() => {
     void refreshProviderHealth();
   }, [refreshProviderHealth]);
 
+  // Bounded auto-reconnect when previously connected and now unavailable.
+  useEffect(() => {
+    if (!reconnecting) return;
+    if (reconnectAttemptsRef.current >= 5) {
+      setShowReconnectAction(true);
+      return;
+    }
+    const delay = Math.min(8000, 1000 * 2 ** reconnectAttemptsRef.current);
+    const timer = window.setTimeout(() => {
+      reconnectAttemptsRef.current += 1;
+      void refreshProviderHealth();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [reconnecting, providerHealth, refreshProviderHealth]);
+
   // Cancel any in-flight request when the panel unmounts (app close / hard navigation away).
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
   const persistConversation = useCallback(
-    (msgs: CoDirectorMessage[], model?: string | null, providerId?: string | null) => {
+    async (msgs: CoDirectorMessage[], model?: string | null, providerId?: string | null) => {
       const projectId = bindingsRef.current.projectId;
-      if (!projectId) return;
-      void api
-        .codirectorSaveConversation(projectId, {
-          messages: msgs.map((m) => ({ id: m.id, role: m.role, content: m.content, created_at: m.createdAt })),
-          model: model ?? null,
-          provider_id: providerId ?? null,
-        })
-        .catch(() => {
-          /* server persistence is authoritative when reachable; local draft cache still holds the turn */
-        });
+      if (!projectId) return { ok: false, skipped: true, message: "No project is selected." };
+      // Safe message fields only — never persist tool payloads or error traces locally.
+      persistMessages(msgs, projectId);
+
+      // Serialize persists so two concurrent persists can't race (P1 GET old,
+      // P2 GET old, P1 POST merged, P2 POST merged-over-old → data loss). Each
+      // persist waits for the previous to settle before doing its own
+      // GET-merge-POST. The chain is per-process; project switches drop stale
+      // queued persists via the `lastLoadedProjectIdRef` guard below.
+      const prev = persistChainRef.current ?? Promise.resolve();
+      const run = prev.then(
+        async (): Promise<{ ok: boolean; skipped: boolean; message: string | null }> => {
+          // If the bound project switched while this persist was queued, drop it —
+          // saving a stale transcript to a new project would corrupt it.
+          if (lastLoadedProjectIdRef.current !== projectId) {
+            return { ok: false, skipped: true, message: "Project changed before save." };
+          }
+          // ALWAYS merge by id onto the latest server conversation, regardless
+          // of `conversationHydratedRef`. A turn fires multiple persists: the
+          // fire-and-forget user-turn persist (send()), then the final
+          // transcript persist (performSend completion / error / cancel paths).
+          // The final persist carries a `transcriptForApi` captured from the
+          // React `messages` closure at send time — which can be a stale
+          // [WELCOME, userMsg] stub if the send landed before the async
+          // conversation load completed. Gating the merge on
+          // `!conversationHydratedRef` (the prior fix) let the second persist
+          // skip the merge once the first set the flag, overwriting the real
+          // server conversation with the stale stub (data loss). Merging every
+          // time means the server is always the source of truth and a stale
+          // stub can only ADD messages the server doesn't have, never remove
+          // history.
+          let messagesToSave = msgs;
+          try {
+            const server = await api.codirectorGetConversation(projectId);
+            if (lastLoadedProjectIdRef.current !== projectId) {
+              return { ok: false, skipped: true, message: "Project changed during save." };
+            }
+            messagesToSave = mergeOntoServer(server.messages, msgs);
+            // If hydration hasn't happened yet (send before async load), adopt
+            // the merged state so the UI shows the real history instead of the
+            // stub. Once hydrated, leave the in-memory state alone — the
+            // streaming token handler has already been appending to it.
+            if (!conversationHydratedRef.current && mountedRef.current) {
+              setMessages(messagesToSave);
+            }
+            conversationHydratedRef.current = true;
+          } catch {
+            // Server fetch failed — fall back to saving `msgs` as-is. Only mark
+            // hydrated if we're still on the same project, so a failed fetch
+            // for the old project doesn't falsely hydrate a new project.
+            if (lastLoadedProjectIdRef.current === projectId) {
+              conversationHydratedRef.current = true;
+            }
+          }
+          try {
+            await api.codirectorSaveConversation(projectId, {
+              messages: messagesToSave.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                created_at: m.createdAt,
+                attachment_ids: Array.isArray(m.attachmentIds) ? m.attachmentIds : [],
+                attachments: Array.isArray(m.attachments)
+                  ? m.attachments.map((item) => ({
+                      asset_id: item.assetId,
+                      name: item.name,
+                      mime_type: item.mimeType,
+                      source: item.source,
+                      kind: item.mediaKind,
+                    }))
+                  : [],
+              })),
+              model: model ?? null,
+              provider_id: providerId ?? null,
+            });
+            return { ok: true, skipped: false, message: null };
+          } catch (err) {
+            return {
+              ok: false,
+              skipped: false,
+              message:
+                err instanceof Error
+                  ? err.message
+                  : "Co-Director finished the reply, but saving this conversation did not.",
+            };
+          }
+        },
+      );
+      // Keep the chain alive regardless of success/failure so a failed persist
+      // doesn't permanently block subsequent ones.
+      persistChainRef.current = run.then(() => undefined, () => undefined);
+      return run;
     },
     [],
   );
+
+  // Tracks the server-side conversation revision for optimistic concurrency on
+  // appends. Updated from GET / append responses.
+  const conversationRevisionRef = useRef<number | null>(null);
+
+  // Wave A persistent memory: the server owns durability. The client appends a
+  // creator turn as a single idempotent event (keyed on client_request_id) and
+  // never replaces the authoritative transcript after generation. The server
+  // appends the assistant reply (+ tool call/result) itself during stream
+  // completion, so after a turn the client only RECONCILES by id (GET + merge).
+  const appendUserTurn = useCallback(
+    async (userMsg: CoDirectorMessage, clientRequestId: string) => {
+      const projectId = bindingsRef.current.projectId;
+      if (!projectId) return { ok: false, skipped: true, message: "No project is selected." };
+      persistMessages([...messages, userMsg], projectId); // sessionStorage cache only
+      try {
+        const res = await api.codirectorAppendConversationEvents(projectId, {
+          events: [
+            {
+              role: "user",
+              content: userMsg.content,
+              message_id: userMsg.id,
+              client_request_id: clientRequestId,
+              attachments: (userMsg.attachments || []).map((a) => ({
+                assetId: a.assetId,
+                name: a.name,
+                mimeType: a.mimeType,
+                source: a.source,
+                kind: a.mediaKind,
+              })),
+              actor: "user",
+              created_at: userMsg.createdAt,
+            },
+          ],
+        });
+        // Adopt the server's revision so a subsequent append can present it.
+        conversationRevisionRef.current = res.revision;
+        return { ok: true, skipped: false, message: null };
+      } catch (err) {
+        return {
+          ok: false,
+          skipped: false,
+          message: err instanceof Error ? err.message : "Could not save your message.",
+        };
+      }
+    },
+    [messages],
+  );
+
+  // Reconcile local state with the server's authoritative event log by id.
+  // The server already appended the assistant reply (+ tool events) during
+  // stream completion; this just pulls them in so the UI matches durability.
+  // It NEVER POSTs the full transcript — that path is deprecated.
+  const reconcileConversation = useCallback(async () => {
+    const projectId = bindingsRef.current.projectId;
+    if (!projectId) return { ok: false, skipped: true, message: "No project is selected." };
+    try {
+      const server = await api.codirectorGetConversation(projectId);
+      if (lastLoadedProjectIdRef.current !== projectId) {
+        return { ok: false, skipped: true, message: "Project changed during reconcile." };
+      }
+      if (typeof server.revision === "number") {
+        conversationRevisionRef.current = server.revision;
+      }
+      const serverMessages = (server.messages || []).map(normalizeServerMessage);
+      setMessages((prev) => {
+        const localIds = new Set(prev.map((m) => m.id).filter(Boolean) as string[]);
+        const merged = [...prev];
+        for (const sm of serverMessages) {
+          if (sm.id && localIds.has(sm.id)) continue;
+          merged.push(sm);
+        }
+        return merged;
+      });
+      conversationHydratedRef.current = true;
+      return { ok: true, skipped: false, message: null };
+    } catch (err) {
+      return {
+        ok: false,
+        skipped: false,
+        message: err instanceof Error ? err.message : "Could not reconcile the conversation.",
+      };
+    }
+  }, []);
 
   // The server is the source of truth for a project's conversation. Hydrate from it whenever
   // the bound project changes, and surface a mid-stream reload as an interrupted turn instead
   // of silently dropping the user's last message.
   useEffect(() => {
     const projectId = uiContext.projectId;
-    if (!projectId || projectId === lastLoadedProjectIdRef.current) return;
+    if (!projectId) {
+      if (lastLoadedProjectIdRef.current) {
+        cancelInFlightForProjectSwitch();
+        lastLoadedProjectIdRef.current = undefined;
+        setMessages([WELCOME_ASSISTANT]);
+        setPlan(null);
+        setProposals([]);
+        setSendError(null);
+        setActivity(null);
+      }
+      return;
+    }
+    if (projectId === lastLoadedProjectIdRef.current) return;
+
+    // Cancel previous project's in-flight work before clearing / hydrating.
+    cancelInFlightForProjectSwitch();
+    const previousProjectId = lastLoadedProjectIdRef.current;
     lastLoadedProjectIdRef.current = projectId;
+    conversationHydratedRef.current = false;
+    // Drop any queued persists for the previous project so they can't race into
+    // this new project's conversation. In-flight GET/POST for the old project
+    // are still guarded by the `lastLoadedProjectIdRef` check inside
+    // `persistConversation` and will self-skip.
+    persistChainRef.current = null;
+    setMessages([WELCOME_ASSISTANT]);
+    setPlan(null);
+    setSendError(null);
+    setToolActivity(null);
+    setActivity(null);
+    if (previousProjectId) markStreamingEnd(previousProjectId);
+
     let cancelled = false;
     (async () => {
       const abandoned = consumeAbandonedStreamingFlag(projectId);
       try {
         const convo = await api.codirectorGetConversation(projectId);
-        if (cancelled) return;
+        if (cancelled || lastLoadedProjectIdRef.current !== projectId) return;
         if (convo.messages && convo.messages.length) {
-          let loaded: CoDirectorMessage[] = convo.messages.map((m) => ({
-            id: m.id || newMessageId(),
-            role: m.role === "user" ? "user" : "assistant",
-            content: m.content,
-            createdAt: m.created_at || new Date().toISOString(),
-          }));
+          let loaded: CoDirectorMessage[] = convo.messages.map(normalizeServerMessage);
           if (abandoned && loaded[loaded.length - 1]?.role === "user") {
             loaded = [
               ...loaded,
@@ -367,20 +964,82 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               },
             ];
           }
-          setMessages(loaded);
+          // If the send path already hydrated+merged (persistConversation ran
+          // during the await above), keep its merged state — do not revert to
+          // the stale server snapshot we fetched before the merge saved.
+          if (!conversationHydratedRef.current) {
+            setMessages(loaded);
+          }
           if (convo.model) setSelectedModelIdState((prev) => prev ?? convo.model);
+          if (convo.providerId || convo.model) {
+            /* provider/model recorded on session via conversation row */
+          }
         } else {
-          const local = loadPersistedMessages();
-          setMessages(local && local.length ? local : [WELCOME_ASSISTANT]);
+          const local = loadPersistedMessages(projectId);
+          if (!conversationHydratedRef.current) {
+            setMessages(local && local.length ? local : [WELCOME_ASSISTANT]);
+          }
+        }
+        if (!cancelled && lastLoadedProjectIdRef.current === projectId) {
+          conversationHydratedRef.current = true;
         }
       } catch {
-        /* server unreachable — keep whatever is currently rendered (local draft cache) */
+        if (cancelled || lastLoadedProjectIdRef.current !== projectId) return;
+        const local = loadPersistedMessages(projectId);
+        if (local && local.length) setMessages(local);
+        conversationHydratedRef.current = true;
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [uiContext.projectId]);
+  }, [uiContext.projectId, cancelInFlightForProjectSwitch]);
+
+  // Wave C: poll server revision when tab is visible; reconcile on change.
+  useEffect(() => {
+    const projectId = uiContext.projectId;
+    if (!projectId) return;
+
+    let cancelled = false;
+    let lastRevision = conversationRevisionRef.current;
+
+    const tick = async () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      if (lastLoadedProjectIdRef.current !== projectId) return;
+      const { shouldSuspendDependentPolling } = await import("../../runtime/studioApiConnection");
+      if (shouldSuspendDependentPolling()) return;
+      try {
+        const rev = await api.codirectorGetConversationRevision(projectId);
+        if (cancelled || lastLoadedProjectIdRef.current !== projectId) return;
+        if (typeof rev.revision !== "number") return;
+        if (lastRevision !== null && rev.revision !== lastRevision) {
+          await reconcileConversation();
+        }
+        lastRevision = rev.revision;
+        conversationRevisionRef.current = rev.revision;
+      } catch {
+        /* ignore transient poll failures — outage coordinator owns reconnect */
+      }
+    };
+
+    void tick();
+    const interval = window.setInterval(() => void tick(), 5000);
+    const onVisible = () => void tick();
+    document.addEventListener("visibilitychange", onVisible);
+    let unsubRecover: (() => void) | undefined;
+    void import("../../runtime/studioApiConnection").then((m) => {
+      unsubRecover = m.onStudioApiRecovered(() => {
+        void tick();
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      unsubRecover?.();
+    };
+  }, [uiContext.projectId, reconcileConversation]);
 
   const NON_TERMINAL_PROPOSAL_STATUSES = new Set(["pending", "revision_requested", "stale", "executing"]);
 
@@ -402,13 +1061,30 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     void refreshProposals();
   }, [refreshProposals, uiContext.projectId]);
 
-  useEffect(() => {
-    persistDraft(draft);
-  }, [draft]);
+  // Track which project the in-memory draft belongs to (project-scoped persistence).
+  const draftProjectRef = useRef<string | undefined>(uiContext.projectId);
 
   useEffect(() => {
-    persistMessages(messages);
-  }, [messages]);
+    persistDraft(draft, draftProjectRef.current);
+  }, [draft]);
+
+  // Swap composer draft when project binding changes so drafts cannot leak across projects.
+  useEffect(() => {
+    const nextId = uiContext.projectId;
+    const prevId = draftProjectRef.current;
+    if (nextId === prevId) return;
+    persistDraft(draft, prevId);
+    draftProjectRef.current = nextId;
+    const nextDraft = loadPersistedDraft(nextId);
+    setDraftState((prev) => (prev === nextDraft ? prev : nextDraft));
+    // Intentionally omit `draft` from deps — snapshot outgoing project only on bind change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiContext.projectId]);
+
+  useEffect(() => {
+    const projectId = uiContext.projectId;
+    if (projectId) persistMessages(messages, projectId);
+  }, [messages, uiContext.projectId]);
 
   const setDraft = useCallback((value: string) => setDraftState(value), []);
   const setOpen = useCallback((value: boolean) => setOpenState(value), []);
@@ -426,37 +1102,81 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     persistExpertiseMode(mode);
   }, []);
 
+  const setActivityPreference = useCallback((mode: CoDirectorActivityPreference) => {
+    setActivityPreferenceState(mode);
+    persistActivityPreference(mode);
+  }, []);
+
   const toggleProductionAnalysis = useCallback(() => {
     setProductionAnalysisExpanded((prev) => !prev);
   }, []);
 
   const bindWorkspace = useCallback((bindings: CoDirectorWorkspaceBindings) => {
+    const prevProjectId = bindingsRef.current.projectId;
+    if (prevProjectId && bindings.projectId && prevProjectId !== bindings.projectId) {
+      cancelInFlightForProjectSwitch();
+    }
     bindingsRef.current = bindings;
     setUiContext((prev) => {
       const next: CoDirectorUIContext = {
         projectId: bindings.projectId,
         projectName: bindings.projectName,
+        primaryProjectType: bindings.primaryProjectType,
         sceneId: bindings.sceneId,
         sceneName: bindings.sceneName,
         workspaceId: bindings.workspaceTab,
+        activeDocumentId: bindings.activeDocumentId,
+        onGoTab: bindings.onGoTab,
       };
       if (
         prev.projectId === next.projectId &&
         prev.projectName === next.projectName &&
+        prev.primaryProjectType === next.primaryProjectType &&
         prev.sceneId === next.sceneId &&
         prev.sceneName === next.sceneName &&
-        prev.workspaceId === next.workspaceId
+        prev.workspaceId === next.workspaceId &&
+        prev.activeDocumentId === next.activeDocumentId
       ) {
         return prev;
       }
       return next;
     });
-  }, []);
+    // Suggestion-only persistence — never auto-binds or grants production permissions.
+    if (bindings.projectId) {
+      const suggestion = { projectId: bindings.projectId, projectName: bindings.projectName };
+      persistLastBoundProjectSuggestion(suggestion);
+      setLastBoundProjectSuggestion((prev) => {
+        if (
+          prev?.projectId === suggestion.projectId &&
+          prev?.projectName === suggestion.projectName
+        ) {
+          return prev;
+        }
+        return suggestion;
+      });
+    }
+  }, [cancelInFlightForProjectSwitch]);
 
   const unbindWorkspace = useCallback(() => {
+    cancelInFlightForProjectSwitch();
     bindingsRef.current = {};
     setUiContext({});
-  }, []);
+  }, [cancelInFlightForProjectSwitch]);
+
+  const selectProject = useCallback(() => {
+    navigate("/#projects-library");
+  }, [navigate]);
+
+  const createProject = useCallback(() => {
+    navigate("/?create=1");
+  }, [navigate]);
+
+  const resumeSuggestedProject = useCallback(() => {
+    const suggestion = lastBoundProjectSuggestion || loadLastBoundProjectSuggestion();
+    if (!suggestion?.projectId) return;
+    // Explicit user action only — navigate so route binding becomes canonical.
+    navigate(`/project/${encodeURIComponent(suggestion.projectId)}`);
+  }, [lastBoundProjectSuggestion, navigate]);
 
   const execCtx = useCallback((): ExecuteContext => {
     const b = bindingsRef.current;
@@ -522,6 +1242,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setCompileExplain([]);
     setSelectedSteps({});
     setSendError(null);
+    setActivity(null);
     pendingRetryRef.current = null;
     const projectId = bindingsRef.current.projectId;
     if (projectId) {
@@ -544,7 +1265,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
 
   const setSelectedModelId = useCallback((modelId: string | null) => {
     setSelectedModelIdState(modelId);
-  }, []);
+    setModelLoading(true);
+    void api
+      .codirectorUpdateConfig({ selectedModel: modelId })
+      .then(() => refreshProviderHealth())
+      .catch(() => {
+        setModelLoading(false);
+      });
+  }, [refreshProviderHealth]);
 
   /**
    * Talk to the gateway for an already-built transcript (`transcriptForApi` includes the
@@ -553,7 +1281,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
    * duplicating the user's turn in the transcript.
    */
   const performSend = useCallback(
-    async (transcriptForApi: CoDirectorMessage[], mode: ChatMode) => {
+    async (transcriptForApi: CoDirectorMessage[], mode: ChatMode, requestId = newMessageId()) => {
+      // Single-flight: avoid duplicate message submission / tool execution on reconnect.
+      if (sendInFlightRef.current) return;
+      sendInFlightRef.current = true;
       setSendError(null);
       setBusy(true);
       setSuggestedPrompt(null);
@@ -565,7 +1296,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setOverflowPanel((prev) => (prev === "provider" ? prev : "none"));
 
       const b = bindingsRef.current;
-      const requestId = newMessageId();
       activeRequestIdRef.current = requestId;
       cancelledByUserRef.current = false;
       const controller = new AbortController();
@@ -573,6 +1303,11 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       if (b.projectId) markStreamingStart(b.projectId, requestId);
 
       const assistantId = newMessageId();
+      // Wave A persistent memory: the server assigns the assistant message id
+      // (`asst-{requestId}`) when it appends the reply event. We adopt it on
+      // `completed` so the local bubble and the server event share an id and
+      // reconciliation by id cannot duplicate.
+      let serverAssistantId: string | null = null;
       let streamedText = "";
       let sawToken = false;
       let outcome: "completed" | "cancelled" | "error" | null = null;
@@ -589,14 +1324,270 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       let postCompletionError: ClassifiedError | null = null;
 
       const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
+      const lastUser = [...transcriptForApi].reverse().find((m) => m.role === "user");
+      const turnAttachmentIds = Array.isArray(lastUser?.attachmentIds)
+        ? lastUser.attachmentIds.filter((value): value is string => Boolean(value))
+        : [];
 
       let assistantMessageType: CoDirectorAssistantMessageType | undefined;
+      const updateActivityForRequest = (updater: (current: CoDirectorActivityState) => CoDirectorActivityState) => {
+        setActivity((prev) => {
+          if (!prev || prev.requestId !== requestId) return prev;
+          return updater(prev);
+        });
+      };
+      const markResponseComposing = () => {
+        updateActivityForRequest((prev) => {
+          let next = updateStage(prev, "request", { status: "completed" });
+          next = updateStage(next, "context", { status: "completed" });
+          next = updateStage(next, "media", { status: "completed" });
+          next = updateStage(next, "plan", { status: "completed" });
+          return upsertStage(next, {
+            id: "response",
+            eventType: "response_composing",
+            label: "Composing a response",
+            status: "active",
+          });
+        });
+      };
 
       const onEvent = (event: CoDirectorStreamEvent) => {
         if (!mountedRef.current || activeRequestIdRef.current !== requestId) return; // stale / unmounted
-        if (event.type === "token") {
+        if (event.type === "request_started") {
+          updateActivityForRequest((prev) => {
+            const next = updateStage(prev, "request", { status: "completed" });
+            return prev.stages.some((stageItem) => stageItem.id === "context")
+              ? updateStage(next, "context", { status: "active" })
+              : prev.stages.some((stageItem) => stageItem.id === "media")
+                ? updateStage(next, "media", { status: "active" })
+                : upsertStage(next, {
+                    id: "response",
+                    eventType: "response_composing",
+                    label: "Composing a response",
+                    status: "active",
+                  });
+          });
+        } else if (event.type === "context_manifest") {
+          activityManifestRef.current = event.manifest;
+          updateActivityForRequest((prev) => {
+            let next = updateStage(prev, "context", { status: "completed" });
+            next = upsertStage(next, {
+              id: "wiki",
+              eventType: "wiki_review",
+              label: "Checking saved project notes",
+              status: "completed",
+            });
+            return next;
+          });
+        } else if (event.type === "conversation_state") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            cognitiveMode: event.state?.mode ?? prev.cognitiveMode,
+            activeGoal: event.state?.activeGoal ?? prev.activeGoal,
+            workflowHold: Boolean(event.state?.workflowHold),
+            creativePosture: event.state?.creativePosture ?? event.state?.companionNeed ?? prev.creativePosture,
+            advisoryDecision: event.state?.advisoryDecision ?? prev.advisoryDecision,
+            advisoryStrength: event.state?.advisoryStrength ?? prev.advisoryStrength,
+            changeStatus: event.state?.changeStatus ?? prev.changeStatus,
+            waitingForConfirmation: Boolean(event.state?.waitingForConfirmation),
+            canonUpdated: Boolean(event.state?.canonUpdated),
+            roleEmphasis: event.state?.roleEmphasis ?? prev.roleEmphasis,
+            assistantName: event.state?.assistantName ?? prev.assistantName,
+            userPreferredName: event.state?.userPreferredName ?? prev.userPreferredName,
+            creativeStage: event.state?.creativeStage ?? prev.creativeStage,
+            wikiCandidates: event.state?.wikiCandidates ?? prev.wikiCandidates,
+            confirmedWrites: event.state?.confirmedWrites ?? prev.confirmedWrites,
+            discoveryQuestionCount: event.state?.discoveryQuestions ?? prev.discoveryQuestionCount,
+            researchStatus: event.state?.researchStatus ?? prev.researchStatus,
+            documentationReason: event.state?.documentationReason ?? prev.documentationReason,
+            whatChanged: event.state?.whatChanged ?? prev.whatChanged,
+            projectPulse: event.state?.projectPulse ?? prev.projectPulse,
+            processingStages: event.state?.processingStages ?? prev.processingStages,
+            onboardingNeeded: Boolean(event.state?.onboardingNeeded),
+            memorySummary: event.state?.workflowHold
+              ? "Listening preference saved · holding production steps"
+              : prev.memorySummary || "Working memory updated",
+            toolsSummary: event.state?.toolsSummary || "None this turn",
+          }));
+        } else if (event.type === "processing_stage") {
+          const stageName = String(event.stage || "");
+          updateActivityForRequest((prev) => {
+            const stages = [...(prev.processingStages || []), stageName].filter(Boolean);
+            const next = {
+              ...prev,
+              processingStages: stages,
+              wikiBackgroundStatus:
+                stageName === "UPDATING_WIKI" ? ("running" as const) : prev.wikiBackgroundStatus,
+              coldLoadActive: stageName === "LOADING_MODEL" ? true : stageName === "STREAMING_RESPONSE" ? false : prev.coldLoadActive,
+            };
+            // Keep ActivityPanel request row honest — complete it once SSE stages move past RECEIVING.
+            if (stageName && stageName !== "RECEIVING" && stageName !== "RECEIVED") {
+              return updateStage(next, "request", {
+                status: "completed",
+                label: "Received your message",
+              });
+            }
+            return next;
+          });
+        } else if (event.type === "wiki_status") {
+          const verification = (event.verification || {}) as {
+            persistenceState?: string;
+            presentationState?: string;
+            finalState?: string;
+            error?: string | null;
+          };
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            wikiVerification: verification,
+            wikiBackgroundStatus:
+              verification.finalState === "QUEUED" || verification.persistenceState === "PERSISTED"
+                ? ("processing" as const)
+                : prev.wikiBackgroundStatus,
+            wikiUiMessage: event.message || prev.wikiUiMessage,
+            wikiRefreshNonce: (prev.wikiRefreshNonce || 0) + 1,
+          }));
+        } else if (event.type === "background_job") {
+          if (String(event.jobType || "") === "wiki_enrichment") {
+            const status = String(event.status || "").toUpperCase();
+            const verification = ((event.result as { verification?: Record<string, unknown> } | undefined)
+              ?.verification || {}) as {
+              persistenceState?: string;
+              presentationState?: string;
+              finalState?: string;
+              error?: string | null;
+            };
+            const persistenceOk =
+              verification.persistenceState === "VERIFIED" || verification.persistenceState === "PERSISTED";
+            updateActivityForRequest((prev) => ({
+              ...prev,
+              wikiVerification: Object.keys(verification).length ? verification : prev.wikiVerification,
+              wikiBackgroundStatus:
+                status === "COMPLETE"
+                  ? ("complete" as const)
+                  : persistenceOk
+                    ? ("complete" as const)
+                    : ("failed" as const),
+              wikiUiMessage:
+                status === "COMPLETE"
+                  ? null
+                  : persistenceOk
+                    ? "The project knowledge was saved, but the Wiki panel did not refresh."
+                    : "The Wiki update could not be saved.",
+              // Always bump refresh so TOC/articles can catch verified writes (never blocks chat).
+              wikiRefreshNonce: (prev.wikiRefreshNonce || 0) + 1,
+            }));
+          }
+        } else if (event.type === "next_step_options") {
+          const opts = Array.isArray(event.options)
+            ? event.options.map((raw) => ({
+                id: String(raw.id || ""),
+                type: String(raw.type || "CONTINUE_STORY") as import("./types").CoDirectorNextStepType,
+                label: String(raw.label || "Continue"),
+                shortDescription: raw.shortDescription ?? null,
+                whyNow: raw.whyNow ?? null,
+                readiness: (raw.readiness as "AVAILABLE" | "PARTIAL" | "NOT_READY") || "AVAILABLE",
+                ownershipRequired: Boolean(raw.ownershipRequired),
+                priority: Number(raw.priority || 50),
+                previewSpine: raw.previewSpine ?? null,
+              }))
+            : [];
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            nextStepOptions: opts.slice(0, 4),
+            nextStepIntro: event.intro || "Where would you like to go next?",
+          }));
+        } else if (event.type === "momentum_resume") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            momentumResume: event.resume || prev.momentumResume,
+            momentumSummary: event.resume || prev.momentumSummary,
+          }));
+        } else if (event.type === "creative_momentum") {
+          const mom = event.momentum || {};
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            momentumSummary:
+              String(mom.lastSessionSummary || prev.momentumSummary || "") || prev.momentumSummary,
+          }));
+        } else if (event.type === "creative_confidence") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            confidenceInsight: event.insight || prev.confidenceInsight,
+          }));
+        } else if (event.type === "conversation_timings") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            lastTimings: (event.timings as Record<string, unknown>) || prev.lastTimings,
+          }));
+        } else if (event.type === "what_changed") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            whatChanged: Array.isArray(event.lines) ? event.lines.map(String) : prev.whatChanged,
+          }));
+        } else if (event.type === "project_pulse") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            projectPulse: event.pulse || prev.projectPulse,
+          }));
+        } else if (event.type === "conversation_actions") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            conversationActions: Array.isArray(event.actions) ? event.actions : prev.conversationActions,
+          }));
+        } else if (event.type === "artifact_readiness") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            artifactReadiness: Array.isArray(event.assessments) ? event.assessments : prev.artifactReadiness,
+          }));
+        } else if (event.type === "deliverable") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            activeDeliverable: event.deliverable || prev.activeDeliverable,
+          }));
+        } else if (event.type === "vision_profile") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            visionProfile: event.vision || prev.visionProfile,
+          }));
+        } else if (event.type === "pitch_package") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            pitchPackage: event.pitch || prev.pitchPackage,
+          }));
+        } else if (event.type === "journey_state") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            journeyState: event.journey || prev.journeyState,
+          }));
+        } else if (event.type === "inference_trace") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            cognitiveMode: event.trace?.mode || prev.cognitiveMode,
+            selectedModel: event.trace?.selected_model || prev.selectedModel,
+            actualModel: event.trace?.actual_model || prev.actualModel,
+            fallbackUsed: Boolean(event.trace?.fallback_used),
+            toolsSummary:
+              event.trace?.workflow_advance_policy === "HOLD"
+                ? "None this turn"
+                : prev.toolsSummary || "None this turn",
+            summaryFacts: [
+              ...(prev.summaryFacts || []),
+              event.trace?.mode ? `Mode: ${event.trace.mode}` : "",
+              event.trace?.primary_intent ? `Intent: ${event.trace.primary_intent}` : "",
+              event.trace?.fallback_used
+                ? "Used a safe fallback after the model reply could not be grounded."
+                : "Replied with the selected model.",
+            ].filter(Boolean),
+          }));
+        } else if (event.type === "token") {
+          markResponseComposing();
           sawToken = true;
-          streamedText += event.content;
+          // Contaminated stream may be replaced with a clean same-model retry.
+          if (event.replace) {
+            streamedText = event.content || "";
+          } else {
+            streamedText += event.content;
+          }
           const snapshot = streamedText;
           setMessages((prev) => {
             const idx = prev.findIndex((m) => m.id === assistantId);
@@ -617,12 +1608,23 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             return next;
           });
         } else if (event.type === "completed") {
+          updateActivityForRequest((prev) =>
+            upsertStage(prev, {
+              id: "response",
+              eventType: "response_composing",
+              label: "Composing a response",
+              status: "completed",
+            }),
+          );
           outcome = "completed";
           streamedText = event.content || streamedText;
           finalModel = event.modelId;
           finalProviderId = event.providerId;
           sceneSetupResult = (event.sceneSetup as SceneSetup) || null;
           suggestedPromptResult = event.suggestedPrompt || null;
+          if (event.messageId) {
+            serverAssistantId = event.messageId;
+          }
           if (event.responseType) {
             assistantMessageType = event.responseType as CoDirectorAssistantMessageType;
           }
@@ -659,6 +1661,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             assistantMessageType = synthesis.responseType as CoDirectorAssistantMessageType;
           }
         } else if (event.type === "intelligence_plan") {
+          updateActivityForRequest((prev) =>
+            upsertStage(prev, {
+              id: "plan",
+              eventType: "plan_review",
+              label: "Reviewing the active plan",
+              status: "completed",
+            }),
+          );
           const planPayload = event.plan as {
             title?: string;
             steps?: { title?: string; status?: string; id?: string }[];
@@ -699,12 +1709,18 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           setProposals((prev) => [event.proposal, ...prev.filter((p) => p.id !== event.proposal.id)]);
           setIntelligenceProgress({ stage: "creating_proposals", message: "Ready for approval" });
         } else if (event.type === "cancelled") {
+          updateActivityForRequest((prev) => ({
+            ...prev,
+            status: "cancelled",
+            completedAt: new Date().toISOString(),
+          }));
           outcome = "cancelled";
         } else if (event.type === "proposal_created" || event.type === "tool_proposal_created") {
           setProposals((prev) => [event.proposal, ...prev.filter((p) => p.id !== event.proposal.id)]);
           if (event.type === "tool_proposal_created") setToolActivity(null);
         } else if (event.type === "tool_requested") {
           setToolActivity({ toolId: event.toolId, title: event.toolId, phase: "requested" });
+          updateActivityForRequest((prev) => applyToolEvent(prev, event.toolId, "started"));
           if (event.kind === "read") {
             // The tokens streamed so far were the model asking for a lookup, not an answer. The
             // server withholds `completed` for that turn and re-asks with the result, so the
@@ -714,22 +1730,150 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           }
         } else if (event.type === "tool_started") {
           setToolActivity({ toolId: event.toolId, title: event.title, phase: "running" });
+          updateActivityForRequest((prev) => applyToolEvent(prev, event.toolId, "started"));
         } else if (event.type === "tool_completed") {
+          setLastSuccessfulToolAction(event.toolId);
+          updateActivityForRequest((prev) => applyToolEvent(prev, event.toolId, "completed"));
           setToolActivity((prev) => ({
             toolId: event.toolId,
             title: prev?.title || event.toolId,
             phase: "completed",
             truncated: prev?.truncated || event.invocation.resultTruncated,
           }));
+          const result = (event.invocation?.result || {}) as Record<string, unknown>;
+          pendingToolRetryRef.current = null;
+          syncProjectIdentityFromResult(result);
+          const uiAction = String(result.uiAction || "");
+          if (uiAction === "open_voice_performance" || uiAction === "open_voice_creator") {
+            const characterId = String(result.characterId || "");
+            const workspaceUrl = String(result.workspaceUrl || "");
+            if (workspaceUrl) {
+              navigate(workspaceUrl);
+            } else {
+              try {
+                bindingsRef.current.onGoTab?.("characters");
+              } catch {
+                /* tab binding optional */
+              }
+              window.dispatchEvent(
+                new CustomEvent("adept:open-character-voice", {
+                  detail: {
+                    tab: uiAction === "open_voice_performance" ? "voicePerformance" : "voice",
+                    characterId,
+                  },
+                }),
+              );
+            }
+          }
+          if (uiAction === "open_audio_studio") {
+            try {
+              bindingsRef.current.onGoTab?.("audiostudio");
+            } catch {
+              /* tab binding optional */
+            }
+          }
+          if (uiAction === "open_scriptwriter") {
+            const workspaceUrl = String(result.workspaceUrl || "");
+            if (workspaceUrl) {
+              navigate(workspaceUrl);
+            } else {
+              try {
+                bindingsRef.current.onGoTab?.("scriptwriter");
+              } catch {
+                /* tab binding optional */
+              }
+            }
+          }
+          const uiFocus = (result._uiFocus || result.uiFocus) as Record<string, unknown> | undefined;
+          if (uiFocus && typeof uiFocus === "object" && uiFocus.target) {
+            try {
+              bindingsRef.current.onGoTab?.("timeline");
+            } catch {
+              /* tab binding optional */
+            }
+            window.dispatchEvent(
+              new CustomEvent("adept-timeline-focus", {
+                detail: uiFocus,
+              }),
+            );
+          }
+          const operator = result.operator as
+            | { requestId?: string; originSessionId?: string; toolId?: string }
+            | undefined;
+          if (operator?.requestId) {
+            const operatorRequestId = operator.requestId;
+            const operatorToolId = operator.toolId || event.toolId;
+            let operatorWorkspace = "";
+            let operatorTarget = "";
+            let operatorVerified = false;
+            if (uiAction === "open_voice_performance" || uiAction === "open_voice_creator") {
+              operatorWorkspace = "voicestudio";
+              operatorTarget = "voice";
+              operatorVerified = true;
+            } else if (uiAction === "open_audio_studio") {
+              operatorWorkspace = "audiostudio";
+              operatorTarget = "audio";
+              operatorVerified = true;
+            } else if (uiFocus && typeof uiFocus === "object" && uiFocus.target) {
+              operatorWorkspace = "timeline";
+              operatorTarget = String(uiFocus.target);
+              operatorVerified = true;
+            }
+            setToolActivity({ toolId: event.toolId, title: operatorToolId, phase: "operator_pending" });
+            let ackSent = false;
+            const ackTimer = window.setTimeout(() => {
+              if (ackSent) return;
+              setToolActivity((prev) => (prev ? { ...prev, phase: "operator_timeout" } : prev));
+            }, 3000);
+            const confirmAndAck = () => {
+              if (ackSent) return;
+              ackSent = true;
+              window.clearTimeout(ackTimer);
+              void api
+                .codirectorOperatorAck(operatorRequestId, {
+                  originSessionId: operator.originSessionId || getTabSessionId(),
+                  workspace: operatorWorkspace,
+                  target: operatorTarget || undefined,
+                  verified: operatorVerified,
+                })
+                .catch(() => {
+                  // fire-and-forget: an ack failure must never break the chat stream
+                });
+              setToolActivity((prev) => (prev ? { ...prev, phase: "completed", title: operatorToolId } : prev));
+            };
+            // The navigation above ran synchronously; defer the ack one tick so the pending badge paints.
+            window.setTimeout(confirmAndAck, 0);
+          }
         } else if (event.type === "tool_result_truncated") {
           setToolActivity((prev) => (prev ? { ...prev, truncated: true } : prev));
         } else if (event.type === "tool_failed" || event.type === "capability_blocked") {
+          const classified = classifyCoDirectorError(
+            new ApiError(event.error.message || "Co-Director could not finish that action.", 0, {
+              code: event.error.code,
+              details: event.error.details,
+              recoverable: event.error.recoverable,
+              recommendedAction: event.error.recommendedAction,
+            }),
+          );
+          updateActivityForRequest((prev) => applyToolEvent(prev, event.toolId, "failed", classified.message));
           setToolActivity((prev) => ({
             toolId: event.toolId,
             title: prev?.title || event.toolId,
             phase: event.type === "capability_blocked" ? "blocked" : "failed",
-            detail: event.error.message,
+            detail: classified.message,
           }));
+          if (event.arguments && (event.kind === "read" || event.kind === "mutating")) {
+            pendingToolRetryRef.current = {
+              kind: event.kind,
+              toolId: String(event.toolId || ""),
+              arguments: event.arguments as Record<string, unknown>,
+            };
+            if (outcome !== "completed") {
+              classifiedError = classified;
+            } else {
+              postCompletionError = classified;
+            }
+          }
         } else if (event.type === "error") {
           const classified = classifyCoDirectorError(
             new ApiError(event.error.message || "Co-Director returned an error.", 0, {
@@ -752,15 +1896,28 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         setMessages((prev) => prev.filter((m) => !(m.id === assistantId && m.status === "streaming" && !m.content)));
       };
 
-      const finalizeCompleted = () => {
+      const finalizeCompleted = async () => {
         const finalText = streamedText;
+        // Wave A persistent memory: adopt the server-assigned assistant message
+        // id when present so the local bubble and the server event share an id.
+        const finalMessageId = serverAssistantId || assistantId;
+        const finalMessage = {
+          id: finalMessageId,
+          role: "assistant" as const,
+          content: finalText,
+          createdAt: new Date().toISOString(),
+        };
         setMessages((prev) => {
+          // Replace the streaming bubble (assistantId) with the finalized
+          // message (finalMessageId). If they differ, drop the old bubble and
+          // append the finalized one so reconciliation by id stays clean.
+          if (finalMessageId !== assistantId) {
+            const withoutStreaming = prev.filter((m) => m.id !== assistantId);
+            return [...withoutStreaming, { ...finalMessage, messageType: assistantMessageType }];
+          }
           const idx = prev.findIndex((m) => m.id === assistantId);
           const finished: CoDirectorMessage = {
-            id: assistantId,
-            role: "assistant",
-            content: finalText,
-            createdAt: new Date().toISOString(),
+            ...finalMessage,
             messageType: assistantMessageType,
           };
           if (idx === -1) return [...prev, finished];
@@ -772,11 +1929,56 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         else if (suggestedPromptResult) setSuggestedPrompt(suggestedPromptResult);
         setProviderModel(finalModel ?? null);
         pendingRetryRef.current = null;
-        persistConversation(
-          [...transcriptForApi, { id: assistantId, role: "assistant", content: finalText, createdAt: new Date().toISOString() }],
-          finalModel,
-          finalProviderId,
+        const transcriptWithAssistant = [...transcriptForApi, finalMessage];
+        activityPersistenceRef.current = {
+          messages: transcriptWithAssistant,
+          model: finalModel,
+          providerId: finalProviderId,
+        };
+        updateActivityForRequest((prev) =>
+          upsertStage(prev, {
+            id: "persistence",
+            eventType: "persistence_started",
+            label: "Saving this conversation",
+            status: "active",
+          }),
         );
+        // The server already appended the assistant reply event during stream
+        // completion. The client only RECONCILES by id (GET + merge) — it must
+        // NOT POST a full replacement transcript (deprecated, can truncate).
+        const persistence = await reconcileConversation();
+        updateActivityForRequest((prev) => {
+          const next = upsertStage(prev, {
+            id: "persistence",
+            eventType: persistence.ok ? "persistence_completed" : "persistence_started",
+            label: "Saving this conversation",
+            status: persistence.ok ? "completed" : "failed",
+            detail: persistence.ok ? undefined : persistence.message || undefined,
+          });
+          const summaryFacts = summarizeActivity({
+            uiContext,
+            manifest: activityManifestRef.current,
+            attachmentsCount: next.attachmentsCount,
+            stages: next.stages,
+          });
+          return {
+            ...next,
+            status: persistence.ok ? "completed" : "failed",
+            completedAt: new Date().toISOString(),
+            persistenceError: persistence.ok ? null : persistence.message,
+            summaryFacts:
+              summaryFacts.length > 0
+                ? summaryFacts
+                : ["Co-Director responded from the current conversation without changing project records."],
+          };
+        });
+        if (b.projectId) {
+          window.dispatchEvent(
+            new CustomEvent("adept:codirector-plan-workspace-refresh", {
+              detail: { projectId: b.projectId, requestId },
+            }),
+          );
+        }
       };
 
       try {
@@ -788,25 +1990,22 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             model: selectedModelId || undefined,
             mode,
             request_id: requestId,
+            origin_session_id: getTabSessionId(),
+            attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
           },
           { signal: controller.signal, onEvent },
         );
 
         if (!mountedRef.current) {
-          // Component unmounted mid-stream; still persist whatever finished so it isn't lost.
-          if (outcome === "completed") {
-            persistConversation(
-              [...transcriptForApi, { id: assistantId, role: "assistant", content: streamedText, createdAt: new Date().toISOString() }],
-              finalModel,
-              finalProviderId,
-            );
-          }
+          // Component unmounted mid-stream. The server already appended the
+          // assistant reply event during stream completion (Wave A persistent
+          // memory), so durability is guaranteed without a client persist.
           return;
         }
 
         if (outcome === "completed") {
           setIntelligenceProgress(null);
-          finalizeCompleted();
+          await finalizeCompleted();
           if (postCompletionError) setSendError(postCompletionError);
         } else if (outcome === "cancelled") {
           setMessages((prev) =>
@@ -814,20 +2013,60 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               .map((m) => (m.id === assistantId ? { ...m, status: "cancelled" as const } : m))
               .filter((m) => !(m.id === assistantId && !m.content)),
           );
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "cancelled",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: ["Co-Director stopped before replying."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         } else if (outcome === "error" && classifiedError) {
           dropEmptyStreamingBubble();
           setSendError(classifiedError);
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "failed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: ["Co-Director could not finish the reply."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         } else if (sawToken) {
           // Stream ended without a terminal event but tokens arrived — preserve the partial
           // reply instead of discarding it.
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "interrupted" as const } : m)));
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "failed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: ["Co-Director started a reply, but the response was interrupted."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         } else {
           dropEmptyStreamingBubble();
           setSendError(classifyCoDirectorError(new Error("The response ended unexpectedly.")));
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "failed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: ["Co-Director could not finish the reply."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         }
       } catch (err) {
         if (isAbortError(err)) {
@@ -842,7 +2081,21 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               )
               .filter((m) => !(m.id === assistantId && !m.content)),
           );
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: wasUserCancel ? "cancelled" : "failed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: [
+                    wasUserCancel
+                      ? "Co-Director stopped before finishing the reply."
+                      : "Co-Director was interrupted before finishing the reply.",
+                  ],
+                }
+              : prev,
+          );
+          void reconcileConversation();
           return;
         }
 
@@ -853,28 +2106,105 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         dropEmptyStreamingBubble();
         try {
           const res = await api.codirectorChat(
-            { messages: apiMessages, project_id: b.projectId, scene_id: b.sceneId, model: selectedModelId || undefined, mode, request_id: requestId },
+            {
+              messages: apiMessages,
+              project_id: b.projectId,
+              scene_id: b.sceneId,
+              model: selectedModelId || undefined,
+              mode,
+              request_id: requestId,
+              attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
+            },
             { signal: controller.signal },
           );
           const assistantMsg: CoDirectorMessage = {
-            id: newMessageId(),
+            id: `asst-${requestId}`,
             role: "assistant",
             content: res.reply,
             createdAt: new Date().toISOString(),
           };
-          setMessages((prev) => [...prev, assistantMsg]);
+          setMessages((prev) => {
+            // Drop the streaming bubble if present, then append the finalized
+            // assistant message with the server-assigned id so reconcile by
+            // id cannot duplicate.
+            const withoutStreaming = prev.filter((m) => m.id !== assistantId);
+            return [...withoutStreaming, assistantMsg];
+          });
           if (res.sceneSetup) setSetup(res.sceneSetup as SceneSetup);
           else if (res.suggestedPrompt) setSuggestedPrompt(res.suggestedPrompt);
           pendingRetryRef.current = null;
           setProviderModel(res.model);
-          persistConversation([...transcriptForApi, assistantMsg], res.model, res.providerId);
+          const transcriptWithAssistant = [...transcriptForApi, assistantMsg];
+          activityPersistenceRef.current = {
+            messages: transcriptWithAssistant,
+            model: res.model,
+            providerId: res.providerId,
+          };
+          setActivity((prev) => {
+            if (!prev || prev.requestId !== requestId) return prev;
+            const withResponse = upsertStage(
+              updateStage(prev, "request", { status: "completed" }),
+              {
+                id: "response",
+                eventType: "response_composing",
+                label: "Composing a response",
+                status: "completed",
+              },
+            );
+            return upsertStage(withResponse, {
+              id: "persistence",
+              eventType: "persistence_started",
+              label: "Saving this conversation",
+              status: "active",
+            });
+          });
+          // Server already appended the assistant reply in chat_for_project;
+          // the client only reconciles by id (no full-replace POST).
+          const persistence = await reconcileConversation();
+          setActivity((prev) => {
+            if (!prev || prev.requestId !== requestId) return prev;
+            const next = upsertStage(prev, {
+              id: "persistence",
+              eventType: persistence.ok ? "persistence_completed" : "persistence_started",
+              label: "Saving this conversation",
+              status: persistence.ok ? "completed" : "failed",
+              detail: persistence.ok ? undefined : persistence.message || undefined,
+            });
+            const summaryFacts = summarizeActivity({
+              uiContext,
+              manifest: activityManifestRef.current,
+              attachmentsCount: next.attachmentsCount,
+              stages: next.stages,
+            });
+            return {
+              ...next,
+              status: persistence.ok ? "completed" : "failed",
+              completedAt: new Date().toISOString(),
+              persistenceError: persistence.ok ? null : persistence.message,
+              summaryFacts:
+                summaryFacts.length > 0
+                  ? summaryFacts
+                  : ["Co-Director responded from the current conversation without changing project records."],
+            };
+          });
         } catch (err2) {
           if (isAbortError(err2)) return;
           const classified = classifyCoDirectorError(err2);
           setSendError(classified);
-          persistConversation(transcriptForApi, selectedModelId ?? undefined, undefined);
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "failed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: ["Co-Director could not finish the reply."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         }
       } finally {
+        sendInFlightRef.current = false;
         setBusy(false);
         if (activeRequestIdRef.current === requestId) activeRequestIdRef.current = null;
         if (abortControllerRef.current === controller) abortControllerRef.current = null;
@@ -882,43 +2212,60 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         cancelledByUserRef.current = false;
       }
     },
-    [persistConversation, selectedModelId],
+    [persistConversation, reconcileConversation, selectedModelId, uiContext],
+  );
+
+  const uploadPendingAttachments = useCallback(
+    async (pending: CoDirectorAttachment[], projectId: string, signal: AbortSignal): Promise<CoDirectorAttachment[]> => {
+      const uploaded: CoDirectorAttachment[] = [];
+      const seen = new Set<string>();
+      for (const attachment of pending) {
+        throwIfAborted(signal);
+        if (attachment.assetId) {
+          if (!seen.has(attachment.assetId)) {
+            uploaded.push(attachment);
+            seen.add(attachment.assetId);
+          }
+          continue;
+        }
+        if (attachment.kind !== "file" || !attachment.file) continue;
+        const mediaKind = attachment.mediaKind || inferAttachmentMediaKind(attachment.name, attachment.mimeType);
+        const asset = await api.uploadAsset(
+          projectId,
+          attachment.file,
+          buildAttachmentTag(attachment.name),
+          mediaKind,
+          { signal },
+        );
+        const assetId = String(asset.id || "").trim();
+        if (!assetId) {
+          throw new Error("Co-Director could not keep track of the uploaded attachment.");
+        }
+        const resolved: CoDirectorAttachment = {
+          ...attachment,
+          assetId,
+          mediaKind: asset.kind || mediaKind,
+        };
+        setAttachments((prev) =>
+          prev.map((item) => (item.id === attachment.id ? { ...item, assetId, mediaKind: resolved.mediaKind } : item)),
+        );
+        if (!seen.has(assetId)) {
+          uploaded.push(resolved);
+          seen.add(assetId);
+        }
+      }
+      return uploaded;
+    },
+    [],
   );
 
   const send = useCallback(
     async (text?: string, mode: ChatMode = "chat") => {
       const trimmed = (text ?? draft).trim();
       if ((!trimmed && !attachments.length) || busy) return;
+      pendingToolRetryRef.current = null;
       setSendError(null);
       setBusy(true);
-
-      // Append the user's message immediately — it must survive any downstream failure
-      // (provider down, no models, network error). Never silently drop it.
-      const attachmentNote = attachments.length
-        ? `\n\n[Attached: ${attachments.map((a) => a.name).join(", ")}]`
-        : "";
-      const content = `${trimmed}${attachmentNote}`.trim();
-      const userMsg: CoDirectorMessage = {
-        id: newMessageId(),
-        role: "user",
-        content,
-        attachmentIds: attachments.map((a) => a.id),
-        createdAt: new Date().toISOString(),
-      };
-      const next = [...messages, userMsg];
-      setMessages(next);
-      setDraftState("");
-      // Keep library attachments listed in message; revoke file previews after send.
-      setAttachments((prev) => {
-        for (const item of prev) {
-          if (item.previewUrl && item.kind === "file") URL.revokeObjectURL(item.previewUrl);
-        }
-        return [];
-      });
-      // Persist the user's turn immediately (before the reply arrives) so a reload mid-flight
-      // still shows the question, not just silence.
-      persistConversation(next, selectedModelId ?? undefined, undefined);
-      pendingRetryRef.current = { text: trimmed, mode, messageId: userMsg.id };
 
       // Preflight: never let a bare `TypeError: Failed to fetch` reach the transcript.
       // Block the send (message stays in the transcript) if the gateway or model isn't ready.
@@ -948,44 +2295,184 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         return;
       }
 
+      const projectId = bindingsRef.current.projectId;
+      const needsUpload = attachments.some((item) => item.kind === "file" && !item.assetId);
+      if (needsUpload && !projectId) {
+        setSendError({
+          code: "PROJECT_REQUIRED",
+          message: "Select a project before attaching local files so Co-Director can store them in the project Library.",
+          recommendedAction: "select_project",
+          recoverable: true,
+          category: "project",
+          retryable: true,
+          partial_work_created: false,
+        });
+        setBusy(false);
+        return;
+      }
+
       const wantsPlan =
         /build|create|prepare|plan|dialogue|storyboard|lip.?sync|master sheet|coverage|generate|workflow|assemble|editor|director sequence/i.test(
           trimmed,
         ) && mode !== "setup";
 
-      const b = bindingsRef.current;
-      // Outcome B: backend M2.4 plans are authoritative when intelligence is enabled.
-      // planFromIntention is offline/mock fallback only when intelligence is disabled/unavailable.
+      // M41 Wave 1: never invent a local offline plan as production success.
+      // Backend intelligence plans are authoritative; when unavailable, fail honestly.
       const intelligenceOn = Boolean(health.intelligenceEnabled);
       if (wantsPlan && !intelligenceOn) {
-        const p = planFromIntention(trimmed, { projectId: b.projectId, sceneId: b.sceneId });
-        setPlan(p);
-        setSelectedSteps(Object.fromEntries(p.steps.map((s) => [s.id, true])));
-        setMessages([
-          ...next,
-          {
-            id: newMessageId(),
-            role: "assistant",
-            content: `I drafted a plan: “${p.title}” with ${p.steps.length} steps. Review the steps below, then Approve all or Run selected.`,
-            createdAt: new Date().toISOString(),
-          },
-        ]);
-        pendingRetryRef.current = null;
+        setSendError({
+          code: "PLAN_UNAVAILABLE",
+          message:
+            "Production planning is unavailable because Co-Director intelligence is off. Enable intelligence or continue with general chat.",
+          recommendedAction: "retry_or_check_service",
+          recoverable: true,
+          category: "runtime",
+          retryable: true,
+          partial_work_created: false,
+        });
         setBusy(false);
         return;
       }
-      // When intelligence is on, clear any stale local fallback plan so SSE intelligence_plan wins.
       if (intelligenceOn) {
         setPlan(null);
         setSelectedSteps({});
       }
 
-      await performSend(next, mode);
+      const preflightController = new AbortController();
+      abortControllerRef.current = preflightController;
+      cancelledByUserRef.current = false;
+      let resolvedAttachments: CoDirectorAttachment[] = [];
+      try {
+        resolvedAttachments =
+          projectId && attachments.length
+            ? await uploadPendingAttachments(attachments, projectId, preflightController.signal)
+            : attachments.filter((item) => item.kind === "library" && item.assetId);
+        throwIfAborted(preflightController.signal);
+      } catch (err) {
+        if (abortControllerRef.current === preflightController) abortControllerRef.current = null;
+        if (isAbortError(err)) {
+          if (cancelledByUserRef.current) clearComposerAttachments();
+          cancelledByUserRef.current = false;
+          setBusy(false);
+          return;
+        }
+        setSendError(classifyCoDirectorError(err));
+        setBusy(false);
+        return;
+      }
+      if (abortControllerRef.current === preflightController) abortControllerRef.current = null;
+
+      // Append the user's message only after file uploads have real asset ids.
+      const attachmentNote = resolvedAttachments.length
+        ? `\n\n[Attached: ${resolvedAttachments.map((a) => a.name).join(", ")}]`
+        : "";
+      const content = `${trimmed}${attachmentNote}`.trim();
+      const userMsg: CoDirectorMessage = {
+        id: newMessageId(),
+        role: "user",
+        content,
+        attachmentIds: resolvedAttachments.map((a) => a.assetId).filter((value): value is string => Boolean(value)),
+        attachments: toMessageAttachments(resolvedAttachments),
+        createdAt: new Date().toISOString(),
+      };
+      const next = [...messages, userMsg];
+      setMessages(next);
+      setDraftState("");
+      clearComposerAttachments();
+      const requestId = newMessageId();
+      // Wave A persistent memory: append the user turn as a single idempotent
+      // event (keyed on requestId) so a reload mid-flight still shows the
+      // question. The server owns durability; the client never replaces the
+      // authoritative transcript.
+      void appendUserTurn(userMsg, requestId);
+      pendingRetryRef.current = { text: trimmed, mode, messageId: userMsg.id };
+      activityManifestRef.current = null;
+      activityPersistenceRef.current = null;
+      setActivity(
+        createActivityState({
+          requestId,
+          hasProject: Boolean(bindingsRef.current.projectId),
+          hasContext: Boolean(
+            includeProjectKnowledge &&
+              (bindingsRef.current.projectId || bindingsRef.current.sceneId || bindingsRef.current.workspaceTab),
+          ),
+          attachmentsCount: attachments.length,
+        }),
+      );
+
+      await performSend(next, mode, requestId);
     },
-    [attachments, busy, draft, messages, performSend, persistConversation, selectedModelId],
+    [
+      appendUserTurn,
+      attachments,
+      busy,
+      clearComposerAttachments,
+      draft,
+      messages,
+      performSend,
+      selectedModelId,
+      uploadPendingAttachments,
+    ],
   );
 
   const retryLastSend = useCallback(() => {
+    const pendingTool = pendingToolRetryRef.current;
+    const projectId = bindingsRef.current.projectId;
+    if (pendingTool && projectId && !busy) {
+      setSendError(null);
+      setBusy(true);
+      void (async () => {
+        try {
+          if (pendingTool.kind === "read") {
+            const invocation = await api.runCoDirectorReadTool(projectId, {
+              toolId: pendingTool.toolId,
+              arguments: pendingTool.arguments,
+              requestId: `retry-${pendingTool.toolId}-${Date.now()}`,
+            });
+            setToolActivity({
+              toolId: pendingTool.toolId,
+              title: pendingTool.toolId,
+              phase: "completed",
+              truncated: invocation.resultTruncated,
+            });
+            const result = (invocation.result || {}) as Record<string, unknown>;
+            syncProjectIdentityFromResult(result);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: newMessageId(),
+                role: "assistant",
+                content: "I retried that lookup successfully.",
+                createdAt: new Date().toISOString(),
+              },
+            ]);
+          } else {
+            const proposal = await api.proposeCoDirectorToolCall(projectId, {
+              toolId: pendingTool.toolId,
+              arguments: pendingTool.arguments,
+              requestId: `retry-${pendingTool.toolId}-${Date.now()}`,
+              createdBy: "user",
+            });
+            setProposals((prev) => [proposal, ...prev.filter((item) => item.id !== proposal.id)]);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: newMessageId(),
+                role: "assistant",
+                content: "I retried that change. It is ready for approval.",
+                createdAt: new Date().toISOString(),
+              },
+            ]);
+          }
+          pendingToolRetryRef.current = null;
+        } catch (err) {
+          setSendError(classifyCoDirectorError(err));
+        } finally {
+          setBusy(false);
+        }
+      })();
+      return;
+    }
     const pending = pendingRetryRef.current;
     if (!pending || busy) return;
     setSendError(null);
@@ -1000,7 +2487,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     const idx = messages.findIndex((m) => m.id === pending.messageId);
     const transcript = idx >= 0 ? messages.slice(0, idx + 1) : messages;
     void performSend(transcript, pending.mode);
-  }, [busy, messages, performSend, send]);
+  }, [busy, messages, performSend, send, syncProjectIdentityFromResult]);
 
   const cancelSend = useCallback(() => {
     const requestId = activeRequestIdRef.current;
@@ -1031,6 +2518,18 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const runSteps = useCallback(
     async (steps: PlannedStep[]) => {
       if (!plan) return;
+      if (!bindingsRef.current.projectId) {
+        setSendError({
+          code: "PROJECT_REQUIRED",
+          message: "No project selected. Select or create a project before running production steps.",
+          recommendedAction: "select_project",
+          recoverable: true,
+          category: "project",
+          retryable: true,
+          partial_work_created: false,
+        });
+        return;
+      }
       let current = { ...plan, steps: [...plan.steps] };
       for (const step of steps) {
         const idx = current.steps.findIndex((s) => s.id === step.id);
@@ -1108,18 +2607,43 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       const isTool = approved?.proposalType === "tool_call";
       try {
         const receipt = await api.approveProposal(projectId, proposalId);
+        const toolResult =
+          receipt.toolResult && typeof receipt.toolResult === "object"
+            ? (receipt.toolResult as Record<string, unknown>)
+            : null;
+        if (toolResult) syncProjectIdentityFromResult(toolResult);
         setMessages((m) => [
           ...m,
           {
             id: newMessageId(),
             role: "assistant",
             content:
-              receipt.toolId || isTool
-                ? `Approved — I applied “${approved?.title || receipt.toolId}”.`
+              toolResult?.confirmation && typeof toolResult.confirmation === "string"
+                ? toolResult.confirmation
+                : receipt.toolId || isTool
+                  ? `Approved — I applied “${approved?.title || receipt.toolId}”.`
                 : "Proposal approved and applied — a new Production Bible version was created.",
             createdAt: new Date().toISOString(),
           },
         ]);
+        // c5: any tool proposal that mutates native project/scene/character/timeline/voice
+        // state should notify the active workspace to refresh without requiring a manual reload.
+        if (projectId && isTool) {
+          window.dispatchEvent(
+            new CustomEvent("adept:codirector-project-mutated", {
+              detail: { projectId, proposalId, toolId: receipt.toolId },
+            }),
+          );
+          // Legacy plan-workspace refresh: keep emitting the old event name for production_plan.*
+          // tools until the Plan workspace migrates to the generic event.
+          if (String(receipt.toolId || "").startsWith("production_plan.")) {
+            window.dispatchEvent(
+              new CustomEvent("adept:codirector-plan-workspace-refresh", {
+                detail: { projectId, proposalId, toolId: receipt.toolId },
+              }),
+            );
+          }
+        }
       } catch (err) {
         const classified = classifyCoDirectorError(err);
         setMessages((m) => [
@@ -1141,7 +2665,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         await refreshProposals();
       }
     },
-    [proposalActingId, proposals, refreshProposals],
+    [proposalActingId, proposals, refreshProposals, syncProjectIdentityFromResult],
   );
 
   const rejectProposal = useCallback(
@@ -1252,6 +2776,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         kind: "file" as const,
         name: file.name,
         mimeType: file.type,
+        mediaKind: inferAttachmentMediaKind(file.name, file.type),
         previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
         file,
       })),
@@ -1269,6 +2794,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             kind: "library" as const,
             name: a.name,
             mimeType: a.mimeType,
+            mediaKind: inferAttachmentMediaKind(a.name, a.mimeType),
             previewUrl: a.previewUrl,
             assetId: a.id,
           }));
@@ -1282,7 +2808,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
       const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl && target.kind === "file") URL.revokeObjectURL(target.previewUrl);
+      if (target) revokeFilePreview(target);
       return prev.filter((a) => a.id !== id);
     });
   }, []);
@@ -1317,7 +2843,188 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     }
   }, []);
 
+  const loadStatus = useCallback(async () => {
+    try {
+      const [latest, history] = await Promise.all([
+        fetchLatestStatus(uiContext.projectId, uiContext.sceneId),
+        fetchStatusHistory(uiContext.projectId, uiContext.sceneId, 20),
+      ]);
+      setStatusLatestRun(latest);
+      setStatusHistory(history);
+      setStatusError(null);
+    } catch (err) {
+      setStatusError(err instanceof Error ? err.message : "Status is unavailable.");
+    }
+  }, [uiContext.projectId, uiContext.sceneId]);
+
+  const runStatusCheck = useCallback(
+    async (opts?: { deep?: boolean }) => {
+      setStatusChecking(true);
+      setStatusError(null);
+      try {
+        const { shouldSuspendDependentPolling, retryStudioApiConnection } = await import(
+          "../../runtime/studioApiConnection"
+        );
+        if (shouldSuspendDependentPolling()) {
+          const ok = await retryStudioApiConnection();
+          if (!ok) {
+            setStatusError("Cross-check unavailable because Studio API is offline.");
+            return;
+          }
+        } else {
+          // Light preflight — never fan out PA probes when /api/health is unreachable.
+          try {
+            await api.health();
+          } catch {
+            setStatusError("Cross-check unavailable because Studio API is offline.");
+            return;
+          }
+        }
+        const body = {
+          projectId: uiContext.projectId,
+          sceneId: uiContext.sceneId,
+          workspace: uiContext.workspaceId,
+        };
+        const run = opts?.deep
+          ? await requestDeepDiagnostic({ ...body, confirm: true })
+          : await requestStatusCheck(body);
+        setStatusLatestRun(run);
+        setStatusHistory((prev) => [run, ...prev.filter((item) => item.runId !== run.runId)].slice(0, 20));
+      } catch (err) {
+        const { isStudioApiConnectivityFailure } = await import("../../runtime/studioApiConnection");
+        if (isStudioApiConnectivityFailure(err)) {
+          setStatusError("Cross-check unavailable because Studio API is offline.");
+        } else {
+          setStatusError(err instanceof Error ? err.message : "Status check failed.");
+        }
+      } finally {
+        setStatusChecking(false);
+      }
+    },
+    [uiContext.projectId, uiContext.sceneId, uiContext.workspaceId],
+  );
+
+  const openStatusPanel = useCallback(() => {
+    setOverflowPanel("status");
+    void loadStatus();
+  }, [loadStatus]);
+
+  const retryActivityPersistence = useCallback(async () => {
+    const pending = activityPersistenceRef.current;
+    if (!pending) return;
+    setActivity((prev) =>
+      prev
+        ? upsertStage(prev, {
+            id: "persistence",
+            eventType: "persistence_started",
+            label: "Saving this conversation",
+            status: "active",
+          })
+        : prev,
+    );
+    const result = await reconcileConversation();
+    setActivity((prev) => {
+      if (!prev) return prev;
+      const next = upsertStage(prev, {
+        id: "persistence",
+        eventType: result.ok ? "persistence_completed" : "persistence_started",
+        label: "Saving this conversation",
+        status: result.ok ? "completed" : "failed",
+        detail: result.ok ? undefined : result.message || undefined,
+      });
+      return {
+        ...next,
+        status: result.ok ? "completed" : "failed",
+        persistenceError: result.ok ? null : result.message,
+      };
+    });
+  }, [reconcileConversation]);
+
+  useEffect(() => {
+    void fetchStatusRegistry()
+      .then((checks) => setStatusRegistry(checks))
+      .catch(() => {
+        setStatusRegistry([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  // Phase BS — automatic cross-check on mount (deferred briefly so UI paints first)
+  const autoCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!uiContext.projectId || autoCheckedRef.current) return;
+    autoCheckedRef.current = true;
+    const timer = window.setTimeout(() => {
+      void runStatusCheck();
+    }, 500);
+    return () => window.clearTimeout(timer);
+    // Only run once per mount; project switch resets via the dependency.
+  }, [uiContext.projectId, runStatusCheck]);
+
   const welcomeSuggestions = useMemo(() => buildWelcomeSuggestions(uiContext), [uiContext]);
+
+  const productionCapable = Boolean(uiContext.projectId);
+  const runtimeState = useMemo(
+    () =>
+      deriveRuntimeState({
+        health: providerHealth,
+        healthPending,
+        reconnecting,
+        modelLoading,
+        projectId: uiContext.projectId,
+        toolsBlocked: Boolean(toolActivity?.phase === "blocked"),
+      }),
+    [
+      providerHealth,
+      healthPending,
+      reconnecting,
+      modelLoading,
+      uiContext.projectId,
+      toolActivity?.phase,
+    ],
+  );
+  const runtimeChip = useMemo(
+    () =>
+      runtimeChipText({
+        state: runtimeState,
+        model: selectedModelId || providerModel,
+        projectName: uiContext.projectName,
+        testOnly: Boolean(providerHealth?.testOnly || providerHealth?.honesty === "mocked"),
+      }),
+    [runtimeState, selectedModelId, providerModel, uiContext.projectName, providerHealth],
+  );
+  const sessionContext = useMemo<CoDirectorSessionContext>(
+    () => ({
+      projectId: uiContext.projectId ?? null,
+      projectName: uiContext.projectName ?? null,
+      activeDocumentId: uiContext.activeDocumentId ?? null,
+      activeSceneId: uiContext.sceneId ?? null,
+      activeWorkspace: uiContext.workspaceId ?? null,
+      selectedAssets: uiContext.selectedAssetIds || [],
+      provider: providerHealth?.providerId ?? null,
+      model: selectedModelId || providerModel,
+      activeProductionPlan: plan ? { id: plan.id, title: plan.title } : null,
+      sessionStatus: runtimeState,
+      lastSuccessfulToolAction,
+      unresolvedBlockers: [
+        ...(uiContext.projectId ? [] : ["no_project_selected"]),
+        ...(isConnectedLike(runtimeState) ? [] : [`runtime:${runtimeState}`]),
+        ...(providerHealth?.testOnly ? ["test_only_provider"] : []),
+      ],
+    }),
+    [
+      uiContext,
+      providerHealth,
+      selectedModelId,
+      providerModel,
+      plan,
+      runtimeState,
+      lastSuccessfulToolAction,
+    ],
+  );
 
   // Expose open with autoSend for launcher compatibility
   const openSessionPublic = useCallback(
@@ -1348,6 +3055,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       proposals,
       proposalActingId,
       toolActivity,
+      activity,
+      activityPreference,
+      setActivityPreference,
+      retryActivityPersistence,
       intelligenceProgress,
       productionAnalysis,
       productionAnalysisExpanded,
@@ -1403,6 +3114,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       productionIntelligenceEnabled: Boolean(providerHealth?.productionIntelligenceEnabled),
       unifiedExperienceEnabled: Boolean(providerHealth?.unifiedExperienceEnabled),
       refreshProviderHealth,
+      reconnect,
       setSelectedModelId,
       runSteps,
       applySetup,
@@ -1422,6 +3134,23 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       loadKnowledge,
       loadKnowledgeDoc,
       refreshAudit: () => setAudit(loadAudit().slice(0, 20)),
+      runtimeState,
+      runtimeChip,
+      sessionContext,
+      productionCapable,
+      lastBoundProjectSuggestion,
+      resumeSuggestedProject,
+      selectProject,
+      createProject,
+      showReconnectAction,
+      statusRegistry,
+      statusLatestRun,
+      statusHistory,
+      statusChecking,
+      statusError,
+      loadStatus,
+      runStatusCheck,
+      openStatusPanel,
     }),
     [
       open,
@@ -1442,10 +3171,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       proposals,
       proposalActingId,
       toolActivity,
+      activity,
+      activityPreference,
       intelligenceProgress,
       productionAnalysis,
       productionAnalysisExpanded,
       expertiseMode,
+      setActivityPreference,
+      retryActivityPersistence,
       approveProposal,
       rejectProposal,
       requestProposalRevision,
@@ -1486,6 +3219,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       openSettings,
       providerHealth,
       refreshProviderHealth,
+      reconnect,
       setSelectedModelId,
       runSteps,
       applySetup,
@@ -1497,6 +3231,23 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setPolicies,
       loadKnowledge,
       loadKnowledgeDoc,
+      runtimeState,
+      runtimeChip,
+      sessionContext,
+      productionCapable,
+      lastBoundProjectSuggestion,
+      resumeSuggestedProject,
+      selectProject,
+      createProject,
+      showReconnectAction,
+      statusRegistry,
+      statusLatestRun,
+      statusHistory,
+      statusChecking,
+      statusError,
+      loadStatus,
+      runStatusCheck,
+      openStatusPanel,
     ],
   );
 
@@ -1513,11 +3264,20 @@ export function useCoDirectorSession(): SessionValue {
 export function useOpenCoDirector() {
   const session = useCoDirectorSession();
   return useCallback(
-    (prompt?: string) => {
-      session.openSession({ prompt, autoSend: Boolean(prompt) });
-      if (session.displayMode === "fullscreen") {
-        /* already full screen */
-      } else {
+    (prompt?: string, opts?: { fullscreen?: boolean; autoSend?: boolean }) => {
+      const fullscreen = Boolean(opts?.fullscreen);
+      // Prefill the composer by default — never silently send canned prompts as if the creator typed them.
+      // Callers that truly want auto-send (e.g. PoseCraft handoff) must pass autoSend: true.
+      session.openSession({
+        prompt,
+        autoSend: Boolean(opts?.autoSend && prompt),
+        mode: fullscreen ? "fullscreen" : undefined,
+      });
+      if (fullscreen) {
+        session.expandToFullScreen();
+        return;
+      }
+      if (session.displayMode !== "fullscreen") {
         session.setOpen(true);
       }
     },
@@ -1535,9 +3295,11 @@ export function useBindCoDirectorWorkspace(bindings: CoDirectorWorkspaceBindings
     bindWorkspace,
     bindings.projectId,
     bindings.projectName,
+    bindings.primaryProjectType,
     bindings.sceneId,
     bindings.sceneName,
     bindings.workspaceTab,
+    bindings.activeDocumentId,
     bindings.onGoTab,
     bindings.onApplyPrompt,
     bindings.onAppliedSetup,

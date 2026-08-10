@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api, ApiError } from "../api";
 import {
   componentStateLabel,
@@ -26,12 +26,33 @@ import type {
   SetupStatusResponse,
   StudioPreparationPlan,
 } from "../setup/types";
-import { AddSourceUrlDialog } from "./AddSourceUrlDialog";
+import type { InstallJob } from "../contracts/installJobs";
+import { useInstallJobsPoll } from "../hooks/useInstallJobsPoll";
 import { requiredBlockers, useCapabilities } from "./CapabilityPanel";
+import { VideoModelLibrary } from "./VideoModelLibrary";
+import { AddCustomCapability } from "./docker-runtime/AddCustomCapability";
+import { PromptIntelligenceBenchmarkDashboard } from "./CoDirector/PromptIntelligenceBenchmarkDashboard";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
+import { HostedProvidersSetupPanel } from "./HostedProvidersSetupPanel";
+import { ModelStoragePanel } from "./ModelStoragePanel";
 import { PanelHeading } from "./HelpTip";
+import { AddSourceWorkflow } from "./install/AddSourceWorkflow";
+import { InstallProgressCard } from "./install/InstallProgressCard";
+import { PreflightDialog, type PreflightConfirm } from "./install/PreflightDialog";
+import { AiGuidedSetupPanel } from "../setup/lifecycle/AiGuidedSetupPanel";
 
 const TERMINAL_OPERATION_STATES = new Set(["completed", "failed", "cancelled", "interrupted"]);
+type SetupMode = "guided" | "ai_guided" | "manual";
+
+function installActionLabel(component: SetupComponentStatus, job?: InstallJob | null): string {
+  if (job && !["ready", "completed", "failed", "repair_required", "cancelled"].includes(job.state)) {
+    return "View Progress";
+  }
+  if (!component.source_available || component.source_valid === false) return "Add Source";
+  if (component.status === "ready") return "Verify";
+  if (component.status === "error") return "Repair";
+  return "Install";
+}
 
 function SetupProgress({ operation, component }: {
   operation?: SetupOperation;
@@ -109,19 +130,33 @@ function DiagnosticResult({
 function SetupComponentCard({
   component,
   operation,
+  installJob,
   busy,
   onPrimaryAction,
   onLater,
   onSecondaryAction,
   onPackAction,
+  onInstallJobPause,
+  onInstallJobResume,
+  onInstallJobCancel,
+  onInstallJobRetry,
+  onInstallJobRepair,
+  onInstallJobAction,
 }: {
   component: SetupComponentStatus;
   operation?: SetupOperation;
+  installJob?: InstallJob;
   busy: boolean;
   onPrimaryAction: (component: SetupComponentStatus) => void;
   onLater: (componentId: string) => void;
   onSecondaryAction?: (component: SetupComponentStatus) => void;
   onPackAction?: (component: SetupComponentStatus, action: SetupPrimaryActionKind) => void;
+  onInstallJobPause?: (job: InstallJob) => void;
+  onInstallJobResume?: (job: InstallJob) => void;
+  onInstallJobCancel?: (job: InstallJob) => void;
+  onInstallJobRetry?: (job: InstallJob) => void;
+  onInstallJobRepair?: (job: InstallJob) => void;
+  onInstallJobAction?: (job: InstallJob, action: string) => void;
 }) {
   const errorActionKind: SetupPrimaryActionKind =
     component.diagnostic?.recommendation === "install"
@@ -140,7 +175,9 @@ function SetupComponentCard({
           }
       : component.primary_action;
   const size = formatComponentSize(component);
-  const isActive = component.status === "installing" || component.status === "checking" || Boolean(operation);
+  const hasInstallJob = Boolean(installJob);
+  const isInstallJobActive = Boolean(installJob && !["ready", "completed", "failed", "repair_required", "cancelled"].includes(installJob.state));
+  const isActive = component.status === "installing" || component.status === "checking" || Boolean(operation) || isInstallJobActive;
   // Never block Download/Install when a concrete source is available (retry after failure).
   const isCredential = component.component_kind === "credential" || component.installer === "credentials";
   const installDisabled = component.source_available
@@ -211,14 +248,31 @@ function SetupComponentCard({
       ) && (
         <DiagnosticResult diagnostic={component.diagnostic} issueSummary={component.issue_summary} />
       )}
-      {isActive && <SetupProgress operation={operation} component={component} />}
+      {isActive && !isInstallJobActive && <SetupProgress operation={operation} component={component} />}
+      {installJob && (
+        <InstallProgressCard
+          job={installJob}
+          onPause={installJob.capabilities?.canPause && onInstallJobPause ? () => onInstallJobPause(installJob) : undefined}
+          onResume={installJob.capabilities?.canResume && onInstallJobResume ? () => onInstallJobResume(installJob) : undefined}
+          onCancel={onInstallJobCancel ? () => onInstallJobCancel(installJob) : undefined}
+          onRetry={onInstallJobRetry ? () => onInstallJobRetry(installJob) : undefined}
+          onRepair={onInstallJobRepair ? () => onInstallJobRepair(installJob) : undefined}
+          onAction={onInstallJobAction ? (action) => onInstallJobAction(installJob, action) : undefined}
+        />
+      )}
 
-      {component.status === "ready" && (component.installation_path || component.last_verified_at) && (
-        <details className="setup-ready-details">
+      {(component.status === "ready" || hasInstallJob) && (component.installation_path || component.last_verified_at || installJob?.destinationRoot || installJob?.providerId) && (
+        <details className="setup-ready-details" open={Boolean(isInstallJobActive)}>
           <summary>Installation details</summary>
           {component.installation_path && <div><span>Path</span><code>{component.installation_path}</code></div>}
+          {installJob?.destinationRoot && <div><span>Destination</span><code>{installJob.destinationRoot}</code></div>}
+          {installJob?.providerId && <div><span>Provider</span><code>{installJob.providerId}</code></div>}
+          {installJob?.progress?.currentFile && <div><span>Current file</span><code>{installJob.progress.currentFile}</code></div>}
           {component.last_verified_at && (
             <div><span>Last verified</span><time dateTime={component.last_verified_at}>{new Date(component.last_verified_at).toLocaleString()}</time></div>
+          )}
+          {installJob?.updatedAt && (
+            <div><span>Updated</span><time dateTime={installJob.updatedAt}>{new Date(installJob.updatedAt).toLocaleString()}</time></div>
           )}
         </details>
       )}
@@ -252,48 +306,72 @@ function SetupComponentCard({
 
       {!isActive && (component.installer === "asset_pack" || component.verifier === "asset_pack") && onPackAction ? (
         <div className="setup-card-actions">
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || installDisabled}
-            title={installDisabled ? "Download and Install requires a verified per-component source." : undefined}
-            onClick={() => onPackAction(component, "install")}
-          >
-            Download and Install
-          </button>
-          <button
-            type="button"
-            className="linkish"
-            disabled={busy}
-            onClick={() => onPackAction(component, "choose_install_location")}
-          >
-            Choose Install Location
-          </button>
-          <button
-            type="button"
-            className="linkish"
-            disabled={busy}
-            onClick={() => onPackAction(component, "link_existing")}
-          >
-            Link Existing Folder
-          </button>
-          <button
-            type="button"
-            className="linkish"
-            disabled={busy}
-            onClick={() => onPackAction(component, "add_source_url")}
-            data-testid={`add-source-url-${component.id}`}
-          >
-            Add Source URL
-          </button>
-          <button
-            type="button"
-            className="linkish"
-            disabled={busy}
-            onClick={() => onPackAction(component, "refresh_source")}
-          >
-            Check Again
-          </button>
+          {!component.source_available || component.source_valid === false ? (
+            <>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy}
+                onClick={() => onPackAction(component, "refresh_source")}
+              >
+                Use Official
+              </button>
+              <button
+                type="button"
+                className="linkish"
+                disabled={busy}
+                onClick={() => onPackAction(component, "add_source_url")}
+                data-testid={`add-source-url-${component.id}`}
+              >
+                Add Source URL
+              </button>
+              <button
+                type="button"
+                className="linkish"
+                disabled={busy}
+                onClick={() => onPackAction(component, "link_existing")}
+              >
+                Link Existing Folder
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || installDisabled}
+                title={installDisabled ? "Download and Install requires a verified per-component source." : undefined}
+                onClick={() => onPackAction(component, component.status === "error" ? "recommended_action" : "install")}
+              >
+                {installActionLabel(component, installJob)}
+              </button>
+              <button
+                type="button"
+                className="linkish"
+                disabled={busy}
+                onClick={() => onPackAction(component, "link_existing")}
+              >
+                Link Existing Folder
+              </button>
+              <button
+                type="button"
+                className="linkish"
+                disabled={busy}
+                onClick={() => onPackAction(component, "add_source_url")}
+                data-testid={`add-source-url-${component.id}`}
+              >
+                Add Source URL
+              </button>
+              <button
+                type="button"
+                className="linkish"
+                disabled={busy}
+                onClick={() => onPackAction(component, "refresh_source")}
+              >
+                Check Again
+              </button>
+            </>
+          )}
           {component.status === "update_available" && (
             <button type="button" className="linkish setup-later" disabled={busy} onClick={() => onLater(component.id)}>
               Later
@@ -335,10 +413,12 @@ function SetupComponentCard({
 function SetupSummary({
   status,
   preparing,
+  projectId,
   onPrepare,
 }: {
   status: SetupStatusResponse;
   preparing: boolean;
+  projectId?: string;
   onPrepare: () => void;
 }) {
   const counts = status.counts ?? status.summary ?? summarizeComponents(status.components);
@@ -396,7 +476,7 @@ function SetupSummary({
               </li>
             ))}
           </ul>
-          <Link to="/source-manager" data-testid="setup-blockers-open-source-manager">
+          <Link to={`/source-manager${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`} data-testid="setup-blockers-open-source-manager">
             Open Source Manager
           </Link>
         </div>
@@ -772,7 +852,7 @@ function SetupCheckpointDialog({
       {kind === "credentials" && (
         <div className="setup-credential-guidance">
           <p>Credentials are entered only in the secure Integration Settings screen. Setup does not display or store them here.</p>
-          <button type="button" onClick={openIntegrationSettings}>Open Integration Settings</button>
+          <button type="button" onClick={openIntegrationSettings}>Open Setup → AI Providers</button>
         </div>
       )}
       {(checkpoint.help_url || checkpoint.license_url) && (
@@ -838,7 +918,11 @@ function PreparationPlanDialog({
   );
 }
 
-export function SetupWizardPanel() {
+export function SetupWizardPanel({ projectId }: { projectId?: string }) {
+  const location = useLocation();
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const forcedSetupMode = searchParams.get("setupMode");
+  const focusedSetupComponentId = searchParams.get("setupComponent") || searchParams.get("componentId") || undefined;
   const [status, setStatus] = useState<SetupStatusResponse | null>(null);
   const [operations, setOperations] = useState<Record<string, SetupOperation>>({});
   const [trackedOperationIds, setTrackedOperationIds] = useState<string[]>([]);
@@ -849,6 +933,27 @@ export function SetupWizardPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [pathDrafts, setPathDrafts] = useState<Record<string, string>>({});
   const [addSourceFor, setAddSourceFor] = useState<SetupComponentStatus | null>(null);
+  const [preflightFor, setPreflightFor] = useState<SetupComponentStatus | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [setupMode, setSetupMode] = useState<SetupMode>(() => {
+    if (typeof window === "undefined") return "guided";
+    const params = new URLSearchParams(window.location.search);
+    const forced = params.get("setupMode");
+    if (forced === "guided" || forced === "ai_guided" || forced === "manual") return forced;
+    const saved = window.localStorage.getItem("adept.setup.mode");
+    return saved === "guided" || saved === "ai_guided" || saved === "manual" ? saved : "guided";
+  });
+  const { jobs: installJobs, refresh: refreshInstallJobs } = useInstallJobsPoll(true, 1000, { activeOnly: false });
+
+  useEffect(() => {
+    window.localStorage.setItem("adept.setup.mode", setupMode);
+  }, [setupMode]);
+
+  useEffect(() => {
+    if (forcedSetupMode === "guided" || forcedSetupMode === "ai_guided" || forcedSetupMode === "manual") {
+      setSetupMode(forcedSetupMode);
+    }
+  }, [forcedSetupMode]);
 
   const refresh = useCallback(async () => {
     const next = await api.setupStatus();
@@ -982,6 +1087,18 @@ export function SetupWizardPanel() {
     return byComponent;
   }, [operations]);
 
+  const installJobsByComponent = useMemo(() => {
+    const byComponent: Record<string, InstallJob> = {};
+    installJobs.forEach((job) => {
+      if (!job.componentId) return;
+      const existing = byComponent[job.componentId];
+      const existingTime = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+      const nextTime = job.updatedAt ? new Date(job.updatedAt).getTime() : 0;
+      if (!existing || nextTime >= existingTime) byComponent[job.componentId] = job;
+    });
+    return byComponent;
+  }, [installJobs]);
+
   const trackOperation = (operationId: string, operation?: SetupOperation) => {
     setTrackedOperationIds((current) => Array.from(new Set([...current, operationId])));
     if (operation) setOperations((current) => ({ ...current, [operation.operation_id]: operation }));
@@ -1036,10 +1153,19 @@ export function SetupWizardPanel() {
       } else if (kind === "link_existing") {
         const result = await api.setupLinkExisting(component.id);
         trackOperation(result.operation_id, result);
-      } else if (kind === "choose_install_location") {
-        const result = await api.setupChooseInstallLocation(component.id);
-        trackOperation(result.operation_id, result);
-      } else if (kind === "install" || kind === "update" || kind === "recommended_action") {
+      } else if (kind === "choose_install_location" || kind === "install") {
+        setPreflightFor(component);
+        return;
+      } else if (kind === "recommended_action" && component.status === "error" && component.source_available) {
+        const existing = installJobsByComponent[component.id];
+        if (existing) {
+          await api.installJobs.repair(existing.id);
+          await refreshInstallJobs();
+        } else {
+          setPreflightFor(component);
+        }
+        return;
+      } else if (kind === "update" || kind === "recommended_action") {
         const result = await api.setupRecommendedAction(component.id);
         trackOperation(result.operation_id, result);
       } else if (kind === "diagnostics") {
@@ -1055,6 +1181,55 @@ export function SetupWizardPanel() {
       } else {
         setMessage(error instanceof Error ? error.message : String(error));
       }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const confirmPreflight = async (component: SetupComponentStatus, payload: PreflightConfirm) => {
+    setPreflightBusy(true);
+    setMessage(null);
+    try {
+      await api.installJobs.create(component.id, {
+        projectId,
+        action: component.status === "error" ? "repair" : "install",
+        destinationRoot: payload.destinationRoot,
+        confirm: payload.confirm,
+        confirmDownloadModels: payload.confirmDownloadModels,
+      });
+      setPreflightFor(null);
+      await Promise.all([refresh(), refreshInstallJobs()]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPreflightBusy(false);
+    }
+  };
+
+  const runInstallJobAction = async (
+    job: InstallJob,
+    action: "pause" | "resume" | "cancel" | "retry" | "repair" | string,
+  ) => {
+    setBusyId(job.id);
+    setMessage(null);
+    try {
+      if (action === "pause") await api.installJobs.pause(job.id);
+      else if (action === "resume") await api.installJobs.resume(job.id);
+      else if (action === "cancel" || action === "cancel_safely") await api.installJobs.cancel(job.id);
+      else if (action === "retry") await api.installJobs.retry(job.id);
+      else if (action === "repair") {
+        const preferred =
+          job.recoveryActions?.[0]?.action ||
+          job.error?.suggestedAction ||
+          job.error?.recommendedAction ||
+          "retry_download";
+        await api.installJobs.repair(job.id, preferred);
+      } else {
+        await api.installJobs.repair(job.id, action);
+      }
+      await Promise.all([refresh(), refreshInstallJobs()]);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyId(null);
     }
@@ -1209,26 +1384,99 @@ export function SetupWizardPanel() {
     );
   }
 
-  const required = status.components.filter((component) => component.required);
-  const optional = status.components.filter((component) => !component.required);
+  const visibleComponents = status.components.filter((component) => component.category !== "Avatar Runtimes");
+  const required = visibleComponents.filter((component) => component.required);
+  const optional = visibleComponents.filter((component) => !component.required);
   const preparing = trackedOperationIds.length > 0 || status.overall_status === "preparing";
+  const openLifecyclePreflight = (component: SetupComponentStatus) => setPreflightFor(component);
+  const repairLifecycleComponent = (component: SetupComponentStatus) => {
+    const existing = installJobsByComponent[component.id];
+    if (existing) {
+      void runInstallJobAction(existing, "repair");
+      return;
+    }
+    setPreflightFor(component);
+  };
+  const verifyLifecycleComponent = (component: SetupComponentStatus) => {
+    void api.setupLifecycleVerify(component.id)
+      .then(() => refresh())
+      .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
+  };
 
   return (
     <div className="page setup-wizard-page">
       <PanelHeading title="Setup Wizard" tip="Checks readiness and prepares required studio components." />
-      <SetupSummary status={status} preparing={preparing} onPrepare={() => void preparePlan()} />
+      <section className="panel" aria-label="Setup mode">
+        <div className="setup-section-heading">
+          <div>
+            <h2>Setup Mode</h2>
+            <p>Choose the setup experience that fits how you want to work right now.</p>
+          </div>
+        </div>
+        <div className="row-actions">
+          <button type="button" className={setupMode === "guided" ? "primary" : "ghost"} onClick={() => setSetupMode("guided")}>
+            Guided
+          </button>
+          <button type="button" className={setupMode === "ai_guided" ? "primary" : "ghost"} onClick={() => setSetupMode("ai_guided")}>
+            AI-Guided
+          </button>
+          <button type="button" className={setupMode === "manual" ? "primary" : "ghost"} onClick={() => setSetupMode("manual")}>
+            Manual
+          </button>
+        </div>
+        <p className="muted">
+          {setupMode === "guided" ? "Guided keeps the existing Prepare My Studio flow front and center."
+            : setupMode === "ai_guided" ? "AI-Guided recommends certified providers, compares options, and walks you through install, calibration, and certification."
+            : "Manual keeps the full setup catalog, advanced actions, and Source Manager tools visible."}
+        </p>
+      </section>
+      <SetupSummary status={status} preparing={preparing} projectId={projectId} onPrepare={() => void preparePlan()} />
 
       {message && <div className="setup-message" role="status">{message}</div>}
 
-      <DownloadSourcesPanel onMessage={setMessage} />
-      <p className="setup-message">
-        <Link to="/source-manager" data-testid="open-source-manager">
-          Open Source Manager
-        </Link>{" "}
-        for provider priority, saved sources, and upcoming download queue tools.
-      </p>
+      {setupMode === "ai_guided" ? (
+        <AiGuidedSetupPanel
+          projectId={projectId}
+          focusComponentId={focusedSetupComponentId}
+          status={status}
+          installJobsByComponent={installJobsByComponent}
+          onInstall={openLifecyclePreflight}
+          onRepair={repairLifecycleComponent}
+          onVerify={verifyLifecycleComponent}
+        />
+      ) : (
+        <>
+          <DownloadSourcesPanel onMessage={setMessage} />
+          <p className="setup-nav-strip">
+            <Link to={`/source-manager${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`} data-testid="open-source-manager">
+              Open Source Manager
+            </Link>{" "}
+            for provider priority, saved sources, and download queue tools.
+          </p>
 
-      <section className="setup-component-section" aria-labelledby="required-components-heading">
+          <ModelStoragePanel onMessage={(m) => setMessage(m)} />
+
+          <HostedProvidersSetupPanel onMessage={setMessage} />
+
+          <p className="setup-nav-strip">
+            <Link to="/runtime-manager" data-testid="open-runtime-manager">
+              Open Runtime Manager
+            </Link>{" "}
+            for Docker Local runtimes, repair, and safe uninstall.
+          </p>
+
+          <AddCustomCapability onRegistered={() => void refresh()} />
+
+          <VideoModelLibrary />
+          <PromptIntelligenceBenchmarkDashboard />
+
+          {setupMode === "manual" && (
+            <div className="panel">
+              <p>Manual mode keeps the full component list, advanced actions, and Source Manager workflow visible.</p>
+            </div>
+          )}
+
+          <section className="setup-component-section" aria-labelledby="required-components-heading">
         <div className="setup-section-heading">
           <div>
             <h2 id="required-components-heading">Required</h2>
@@ -1242,16 +1490,23 @@ export function SetupWizardPanel() {
               key={component.id}
               component={component}
               operation={operationsByComponent[component.id]}
+              installJob={installJobsByComponent[component.id]}
               busy={busyId != null}
               onPrimaryAction={(item) => void runPrimaryAction(item)}
               onPackAction={(item, action) => void runPackAction(item, action)}
               onLater={(id) => void deferUpdate(id)}
+              onInstallJobPause={(job) => void runInstallJobAction(job, "pause")}
+              onInstallJobResume={(job) => void runInstallJobAction(job, "resume")}
+              onInstallJobCancel={(job) => void runInstallJobAction(job, "cancel")}
+              onInstallJobRetry={(job) => void runInstallJobAction(job, "retry")}
+              onInstallJobRepair={(job) => void runInstallJobAction(job, "repair")}
+              onInstallJobAction={(job, action) => void runInstallJobAction(job, action)}
             />
           ))}
         </div>
       </section>
 
-      <section className="setup-component-section" aria-labelledby="optional-components-heading">
+          <section className="setup-component-section" aria-labelledby="optional-components-heading">
         <div className="setup-section-heading">
           <div>
             <h2 id="optional-components-heading">Optional</h2>
@@ -1265,32 +1520,40 @@ export function SetupWizardPanel() {
               key={component.id}
               component={component}
               operation={operationsByComponent[component.id]}
+              installJob={installJobsByComponent[component.id]}
               busy={busyId != null}
               onPrimaryAction={(item) => void runPrimaryAction(item)}
               onSecondaryAction={(item) => void runSecondaryAction(item)}
               onPackAction={(item, action) => void runPackAction(item, action)}
               onLater={(id) => void deferUpdate(id)}
+              onInstallJobPause={(job) => void runInstallJobAction(job, "pause")}
+              onInstallJobResume={(job) => void runInstallJobAction(job, "resume")}
+              onInstallJobCancel={(job) => void runInstallJobAction(job, "cancel")}
+              onInstallJobRetry={(job) => void runInstallJobAction(job, "retry")}
+              onInstallJobRepair={(job) => void runInstallJobAction(job, "repair")}
+              onInstallJobAction={(job, action) => void runInstallJobAction(job, action)}
             />
           ))}
         </div>
       </section>
-
-      <SetupAdvancedPanel
-        status={status}
-        legacy={legacyDetection}
-        operations={operations}
-        busyId={busyId}
-        pathDrafts={pathDrafts}
-        onPathChange={(componentId, value) => setPathDrafts((current) => ({ ...current, [componentId]: value }))}
-        onAction={(component, action) => void runAdvancedAction(component, action)}
-        onOpen={() => {
-          if (!legacyDetection) {
-            void api.setupDetect()
-              .then(setLegacyDetection)
-              .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
-          }
-        }}
-      />
+          <SetupAdvancedPanel
+            status={status}
+            legacy={legacyDetection}
+            operations={operations}
+            busyId={busyId}
+            pathDrafts={pathDrafts}
+            onPathChange={(componentId, value) => setPathDrafts((current) => ({ ...current, [componentId]: value }))}
+            onAction={(component, action) => void runAdvancedAction(component, action)}
+            onOpen={() => {
+              if (!legacyDetection) {
+                void api.setupDetect()
+                  .then(setLegacyDetection)
+                  .catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error)));
+              }
+            }}
+          />
+        </>
+      )}
 
       {plan && (
         <PreparationPlanDialog
@@ -1300,14 +1563,28 @@ export function SetupWizardPanel() {
           onConfirm={() => void startPreparation()}
         />
       )}
+      {preflightFor && (
+        <PreflightDialog
+          open
+          componentId={preflightFor.id}
+          componentName={preflightFor.name}
+          expectedBytes={preflightFor.expected_download_bytes ?? preflightFor.download_size_bytes ?? null}
+          gpuSummary={preflightFor.recommended_vram_gb ? `${preflightFor.recommended_vram_gb} GB recommended` : null}
+          requiresModelDownloadConfirm={(preflightFor.expected_download_bytes ?? preflightFor.download_size_bytes ?? 0) >= 10 * 1024 * 1024 * 1024}
+          busy={preflightBusy}
+          onClose={() => setPreflightFor(null)}
+          onConfirm={(payload) => void confirmPreflight(preflightFor, payload)}
+        />
+      )}
       {addSourceFor && (
-        <AddSourceUrlDialog
+        <AddSourceWorkflow
+          open
           componentId={addSourceFor.id}
           componentName={addSourceFor.name}
           onClose={() => setAddSourceFor(null)}
           onSaved={() => {
             setAddSourceFor(null);
-            void refresh();
+            void Promise.all([refresh(), refreshInstallJobs()]);
           }}
         />
       )}

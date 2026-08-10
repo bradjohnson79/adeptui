@@ -5,13 +5,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from ..director_references.tags import ensure_tags
 from ..director_timeline import (
     DirectorTimeline,
     dumps_director_timeline,
+    dumps_director_timeline_preserving_embedded,
     migrate_scene_to_director,
     parse_director_timeline,
     sync_legacy_fields_from_director,
@@ -31,6 +32,7 @@ from ..comfy_client import comfy
 from ..config import settings
 from ..db import Asset, Job, Project, Scene, get_db
 from .. import project_service
+from ..project_cleanup import delete_project_residue
 from ..queue_worker import job_queue
 from ..references import resolve_prompt
 from ..services.scene_service import SceneService
@@ -80,7 +82,7 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
     assets = db.query(Asset).filter(Asset.project_id == project.id).all()
     with_output = sum(1 for s in scenes if getattr(s, "output_path", None))
     render_pct = int(100 * with_output / max(1, len(scenes))) if scenes else 0
-    cover = next((a for a in assets if a.kind == "image"), None)
+    cover = project_service.pick_cover_asset(assets)
     # Status heuristic for library filters — shared with Co-Director's get_project_status tool.
     status_label = project_service.status_label(
         archived=bool(getattr(project, "archived", 0)),
@@ -108,11 +110,17 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
         description=getattr(project, "description", "") or "",
         company=getattr(project, "company", "") or "",
         director_name=getattr(project, "director_name", "") or "",
+        storyboard_style=_settings_get(project, "storyboardStyle"),
+        preferred_video_generator=_settings_get(project, "preferredVideoGenerator"),
         version=getattr(project, "version", "1.0") or "1.0",
         tags_json=getattr(project, "tags_json", "[]") or "[]",
         archived=int(getattr(project, "archived", 0) or 0),
         defaults_json=getattr(project, "defaults_json", "") or "",
         settings_json=getattr(project, "settings_json", "") or "",
+        primary_project_type=getattr(project, "primary_project_type", None) or "custom",
+        project_traits_json=getattr(project, "project_traits_json", None) or "[]",
+        resolved_profile_json=getattr(project, "resolved_profile_json", None) or "{}",
+        project_type_version=int(getattr(project, "project_type_version", 1) or 1),
         created_at=project.created_at,
         updated_at=project.updated_at,
         scenes=[SceneOut.model_validate(s) for s in scenes],
@@ -121,8 +129,66 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
         asset_count=len(assets),
         render_pct=render_pct,
         cover_asset_id=cover.id if cover else None,
+        cover_kind=project_service.cover_media_kind(cover),
         status_label=status_label,
+        password_protected=False,
+        password_locked=False,
     )
+
+
+def _settings_get(project: Project, key: str) -> Optional[str]:
+    """Read a value from project.settings_json JSON blob."""
+    raw = getattr(project, "settings_json", None)
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        data = json.loads(raw)
+        val = data.get(key)
+        return str(val) if val is not None else None
+    except Exception:
+        return None
+
+
+def _settings_set(project: Project, key: str, value: Optional[str]) -> None:
+    """Store a value in project.settings_json JSON blob."""
+    raw = getattr(project, "settings_json", None) or "{}"
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else {}
+    except Exception:
+        data = {}
+    if value is not None:
+        data[key] = value
+    else:
+        data.pop(key, None)
+    project.settings_json = json.dumps(data, ensure_ascii=False)
+
+
+def _probe_bible_storage() -> str:
+    """Lightweight Production Bible DB reachability — never invents readiness."""
+    try:
+        from sqlalchemy import inspect, text
+
+        from ..db import SessionLocal, engine
+
+        if not inspect(engine).has_table("production_bibles"):
+            return "unavailable"
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            return "ready"
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 — health probe must not raise
+        return "unavailable"
+
+
+@router.get("/healthz")
+async def healthz() -> dict:
+    """Lightweight health — no DB, no ComfyUI, no capability check.
+    Returns 200 immediately if the uvicorn worker is responsive.
+    Used by the frontend health probe for fast ONLINE/OFFLINE detection.
+    The full /health endpoint remains for detailed dependency status."""
+    return {"status": "ok"}
 
 
 @router.get("/health", response_model=HealthOut)
@@ -136,48 +202,96 @@ async def health():
     `missing_models` is retained as human-readable labels for existing consumers.
     """
     from ..comfy_health import comfy_health
+    from ..feature_flags import feature_flags
 
-    payload = await comfy_health()
+    api_state = "ok"
+    partial_errors: list[str] = []
+
+    try:
+        payload = await comfy_health()
+    except Exception as exc:  # noqa: BLE001
+        payload = {"reachable": False, "models": [], "status": "error", "message": str(exc)[:240]}
+        api_state = "degraded"
+        partial_errors.append(f"comfy:{type(exc).__name__}")
+
     reachable = bool(payload.get("reachable"))
     models = payload.get("models") or []
     missing = [str(item.get("name") or item.get("componentId")) for item in models if not item.get("present")]
 
-    from ..capabilities import service as capability_service
-    from ..codirector import service as codirector_service
-    from ..codirector.intelligence.specialist_registry import SpecialistRegistry
-    from ..feature_flags import feature_flags
+    caps = None
+    provider = None
+    specialist_count = 0
+    pack_blockers: list[dict] = []
 
-    caps = await capability_service.get_capabilities(force=False)
-    provider = await codirector_service.get_health()
-    specialist_count = len(SpecialistRegistry().all())
-    pack_blockers = [
-        {
-            "capabilityId": b.capabilityId,
-            "message": b.message,
-            "recommendedAction": b.recommendedAction,
-            "componentIds": list(b.componentIds),
-        }
-        for b in caps.blockers
-        if b.subsystem in ("source_manager", "models", "workflows", "comfyui")
-    ]
+    try:
+        from ..capabilities import service as capability_service
+
+        caps = await capability_service.get_capabilities(force=False)
+    except Exception as exc:  # noqa: BLE001
+        api_state = "degraded"
+        partial_errors.append(f"capabilities:{type(exc).__name__}")
+
+    try:
+        from ..codirector import service as codirector_service
+
+        provider = await codirector_service.get_health()
+    except Exception as exc:  # noqa: BLE001
+        api_state = "degraded"
+        partial_errors.append(f"provider:{type(exc).__name__}")
+
+    try:
+        from ..codirector.intelligence.specialist_registry import SpecialistRegistry
+
+        specialist_count = len(SpecialistRegistry().all())
+    except Exception as exc:  # noqa: BLE001
+        api_state = "degraded"
+        partial_errors.append(f"specialists:{type(exc).__name__}")
+
+    if caps is not None:
+        pack_blockers = [
+            {
+                "capabilityId": b.capabilityId,
+                "message": b.message,
+                "recommendedAction": b.recommendedAction,
+                "componentIds": list(b.componentIds),
+            }
+            for b in caps.blockers
+            if b.subsystem in ("source_manager", "models", "workflows", "comfyui")
+        ]
+
+    bible_storage = _probe_bible_storage()
+    if bible_storage != "ready":
+        # Bible probe failure is informational; keep API up unless already degraded.
+        partial_errors.append("bibleStorage:unavailable")
+
+    provider_payload = {
+        "id": getattr(provider, "provider_id", None),
+        "status": getattr(provider, "status", "unavailable"),
+        "reachable": bool(getattr(provider, "reachable", False)),
+        "modelAvailable": bool(getattr(provider, "model_available", False)),
+        "selectedModel": getattr(provider, "selected_model", None),
+    }
+
+    registry_payload = {
+        "callable": len(caps.callable) if caps is not None else 0,
+        "blocked": len(caps.blockers) if caps is not None else 0,
+        "total": int(getattr(caps, "readinessTotal", None) or (len(caps.capabilities) if caps is not None else 0)),
+        "deferred": len(getattr(caps, "deferred", None) or []) if caps is not None else 0,
+        "counts": dict(caps.counts) if caps is not None else {},
+    }
+
     operator = {
-        "api": "ok",
+        "api": api_state,
         "comfy": "reachable" if reachable else "down",
-        "provider": {
-            "id": provider.provider_id,
-            "status": provider.status,
-            "reachable": provider.reachable,
-            "modelAvailable": provider.model_available,
-            "selectedModel": provider.selected_model,
-        },
-        "bibleStorage": "ready",
+        "provider": provider_payload,
+        "bibleStorage": bible_storage,
         "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
         "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
         "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
         "productionExecutiveEnabled": bool(feature_flags.production_executive_v1),
         "modelRadarEnabled": bool(feature_flags.model_radar_v1),
         "sandboxRuntimeEnabled": bool(feature_flags.sandbox_runtime_v1),
-        "virtualStageEnabled": bool(feature_flags.virtual_stage_v1),
+        "virtualStageEnabled": False,
         "shotProfilesEnabled": bool(feature_flags.shot_profiles_v1),
         "productionRecipeEnabled": bool(feature_flags.production_recipe_v1),
         "locationSpinEnabled": bool(feature_flags.location_spin_v1),
@@ -192,22 +306,26 @@ async def health():
         "codirectorProductionControlEnabled": bool(feature_flags.codirector_production_control_v1),
         "productionIntelligenceEnabled": bool(feature_flags.codirector_production_intelligence_v1),
         "adaptiveLearningEnabled": bool(feature_flags.codirector_adaptive_learning_v1),
-        "virtualEnvironmentStudioEnabled": bool(feature_flags.virtual_environment_studio_v1),
+        # V1.1: never advertise native 3D Environment Studio / Virtual Stage as enabled
+        # in operator health (foundations remain flag-gated for Version 1.2).
+        "virtualEnvironmentStudioEnabled": False,
         "unifiedExperienceEnabled": bool(feature_flags.codirector_unified_experience_v1),
+        "templatesPresetsEnabled": bool(feature_flags.templates_presets_v1),
         "specialistCount": specialist_count,
-        "registry": {
-            "callable": len(caps.callable),
-            "blocked": len(caps.blockers),
-            "total": len(caps.capabilities),
-            "counts": dict(caps.counts),
-        },
+        "registry": registry_payload,
         "packBlockers": pack_blockers[:12],
         "visualValidationPendingNote": (
             "M2.5 vision validation enabled — review pending assets in Validation Workspace."
             if feature_flags.vision_validation_v1
             else "M2.5 — visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
         ),
+        "partialErrors": partial_errors[:12],
     }
+    health_message = str(payload.get("message") or "")
+    if api_state == "degraded" and partial_errors:
+        health_message = (health_message + " " if health_message else "") + (
+            "Partial health probe failure: " + ", ".join(partial_errors[:6])
+        )
     return HealthOut(
         ok=reachable,
         comfy_reachable=reachable,
@@ -219,7 +337,7 @@ async def health():
         node_catalog_available=bool(payload.get("nodeCatalogAvailable")),
         reason_code=payload.get("reasonCode"),
         recommended_action=payload.get("recommendedAction"),
-        message=str(payload.get("message") or ""),
+        message=health_message,
         operator=operator,
     )
 
@@ -366,15 +484,33 @@ async def fal_usage(days: int = 30):
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(request: Request, db: Session = Depends(get_db)):
     projects = db.query(Project).order_by(Project.updated_at.desc()).all()
     # Hide archived from default home list
     projects = [p for p in projects if not getattr(p, "archived", 0)]
-    return [_project_out(db, p) for p in projects]
+    out = []
+    try:
+        from ..project_security import service as project_security
+
+        for p in projects:
+            po = _project_out(db, p)
+            redacted = project_security.redact_project_dict(db, po.model_dump(), p.id, request)
+            out.append(ProjectOut.model_validate(redacted))
+    except Exception:
+        out = [_project_out(db, p) for p in projects]
+    return out
 
 
 @router.post("/projects", response_model=ProjectOut)
 def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
+    from ..feature_flags import feature_flags
+
+    settings: dict[str, Any] = {}
+    if body.storyboard_style:
+        settings["storyboardStyle"] = body.storyboard_style
+    if body.preferred_video_generator:
+        settings["preferredVideoGenerator"] = body.preferred_video_generator
+
     project = Project(
         id=str(uuid.uuid4()),
         name=body.name,
@@ -388,6 +524,11 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
         preset=body.preset,
         vram_gb=body.vram_gb,
         spatial_map_json="{}",
+        primary_project_type=body.primary_project_type or "custom",
+        project_traits_json=json.dumps(list(body.project_traits or [])),
+        resolved_profile_json="{}",
+        project_type_version=1,
+        settings_json=json.dumps(settings) if settings else "{}",
     )
     db.add(project)
     # default first scene
@@ -405,17 +546,122 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
     # Prefer live GPU detection for new projects; fall back to requested tier.
     tier = detect_vram_gb() or normalize_vram_tier(body.vram_gb)
     apply_profile_to_project(project, tier)
+    from ..project_library.service import init_project_library
+
+    init_project_library(db, project)
     db.commit()
     db.refresh(project)
+
+    # M3.1a: apply Project Profile when flag is on (or when an explicit type was provided).
+    if feature_flags.templates_presets_v1 or body.primary_project_type:
+        try:
+            from ..templates_presets.db import ensure_m31a_tables
+            from ..templates_presets import project_types as project_types_service
+
+            ensure_m31a_tables()
+            primary = body.primary_project_type or "custom"
+            profile = project_types_service.resolve_project_profile(
+                db,
+                primary_type=primary,
+                traits=list(body.project_traits or []),
+                overrides=dict(body.profile_overrides or {}),
+            )
+            # If caller passed explicit width/height/fps without overrides, keep them
+            # unless profile_overrides or primary type implies profile-driven dims.
+            update_dims = bool(body.primary_project_type or body.profile_overrides)
+            project_types_service.apply_profile_to_project(
+                db,
+                project,
+                profile,
+                traits=list(body.project_traits or []),
+                seed_units=True,
+                update_dims=update_dims,
+            )
+            db.refresh(project)
+        except Exception:
+            # Never fail project create if profile seeding has a soft failure.
+            pass
+
     return _project_out(db, project)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(project_id: str, request: Request, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    return _project_out(db, project)
+    # Middleware enforces unlock; still annotate protection flags for UI.
+    po = _project_out(db, project)
+    try:
+        from ..project_security import service as project_security
+
+        redacted = project_security.redact_project_dict(db, po.model_dump(), project_id, request)
+        return ProjectOut.model_validate(redacted)
+    except Exception:
+        return po
+
+
+@router.get("/projects/{project_id}/project-profile")
+def get_project_profile(project_id: str, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    from ..templates_presets.project_types import get_project_profile_payload
+    from .. import project_service as project_service_mod
+
+    payload = get_project_profile_payload(project)
+    payload["identity"] = project_service_mod.project_profile(project)
+    try:
+        from ..templates_presets import store as tp_store
+
+        payload["productionUnits"] = tp_store.list_production_units(db, project_id)
+    except Exception:
+        payload["productionUnits"] = []
+    return payload
+
+
+@router.post("/projects/{project_id}/project-type/preview")
+def preview_project_type_change(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..feature_flags import feature_flags
+    from ..templates_presets.db import ensure_m31a_tables
+    from ..templates_presets import project_types as project_types_service
+
+    if not feature_flags.templates_presets_v1:
+        raise HTTPException(404, "Templates & Presets feature disabled")
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    ensure_m31a_tables()
+    return project_types_service.preview_project_type_change(
+        db,
+        project,
+        primary_type=str(body.get("primaryProjectType") or body.get("primary_project_type") or "custom"),
+        traits=list(body.get("projectTraits") or body.get("project_traits") or []),
+        overrides=dict(body.get("overrides") or {}),
+    )
+
+
+@router.post("/projects/{project_id}/project-type")
+def apply_project_type_change(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..feature_flags import feature_flags
+    from ..templates_presets.db import ensure_m31a_tables
+    from ..templates_presets import project_types as project_types_service
+
+    if not feature_flags.templates_presets_v1:
+        raise HTTPException(404, "Templates & Presets feature disabled")
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    ensure_m31a_tables()
+    result = project_types_service.apply_project_type_change(
+        db,
+        project,
+        primary_type=str(body.get("primaryProjectType") or body.get("primary_project_type") or "custom"),
+        traits=list(body.get("projectTraits") or body.get("project_traits") or []),
+        overrides=dict(body.get("overrides") or {}),
+        apply_dimension_defaults=bool(body.get("applyDimensionDefaults", True)),
+    )
+    return {"ok": True, **result, "project": _project_out(db, project)}
 
 
 @router.get("/projects/{project_id}/execution-plan", response_model=ExecutionPlanOut)
@@ -653,6 +899,10 @@ def update_project(project_id: str, body: ProjectUpdate, db: Session = Depends(g
         raise HTTPException(404, "Project not found")
     data = body.model_dump(exclude_unset=True)
     apply_vram = bool(data.pop("apply_vram_profile", False))
+    # Phase CK — storyboard/video generator stored in settings_json, not direct columns
+    for settings_field, settings_key in [("storyboard_style", "storyboardStyle"), ("preferred_video_generator", "preferredVideoGenerator")]:
+        if settings_field in data:
+            _settings_set(project, settings_key, data.pop(settings_field))
     for field, value in data.items():
         setattr(project, field, value)
     if apply_vram:
@@ -670,9 +920,7 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    from ..codirector.bible.cleanup import delete_bible_for_project
-
-    delete_bible_for_project(db, project_id)
+    delete_project_residue(db, project_id)
     db.delete(project)
     db.commit()
     return {"ok": True}
@@ -738,7 +986,14 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
     body = ensure_tags(body)
-    scene.director_json = dumps_director_timeline(body)
+    # PUT_DIRECTOR_PRESERVES_MASTER: never replace the entire director_json
+    # blob. Merge the incoming DirectorTimeline fields over the existing blob
+    # so embedded timelineMaster / timelineWorkspace (W46 batch state) and
+    # other non-DirectorTimeline keys survive a legacy track update. Without
+    # this, every Visual-track / Inspector / undo-redo save erased
+    # timelineMaster and load_master re-migrated to a single Batch 1,
+    # destroying all other batches.
+    scene.director_json = dumps_director_timeline_preserving_embedded(body, scene.director_json)
     legacy = sync_legacy_fields_from_director(body)
     for k, v in legacy.items():
         setattr(scene, k, v)
@@ -950,12 +1205,32 @@ def put_spatial(project_id: str, body: SpatialMap, db: Session = Depends(get_db)
 
 @router.post("/projects/{project_id}/render", response_model=JobOut)
 async def render_project(project_id: str, body: RenderRequest, db: Session = Depends(get_db)):
+    """Queue a project render.
+
+    Body ``kind``:
+      - ``scene`` → job ``render_scene`` (requires ``scene_id``)
+      - ``shot`` → job ``render_shot`` (requires ``scene_id``; certified shot render)
+      - ``timeline`` → job ``render_timeline`` (reuse scene outputs when present, stitch)
+      - ``batch_timeline`` → job ``batch_timeline`` (regenerate all scenes, stitch)
+      - ``editor_mix`` → job ``editor_mix`` — ffmpeg final mix of Editor
+        dialogue/sfx/ambience/music stems onto a primary video MP4.
+        Optional ``primary_video_path``; otherwise resolves latest timeline
+        output, Editor video clip, or scene lipsync/output. Result is a
+        project Asset (kind=video) with ``prompt_meta_json`` stem provenance.
+    """
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    kind = "render_scene" if body.kind == "scene" else "render_timeline"
-    if kind == "render_scene" and not body.scene_id:
-        raise HTTPException(400, "scene_id required for scene render")
+    kind_map = {
+        "scene": "render_scene",
+        "shot": "render_shot",
+        "timeline": "render_timeline",
+        "batch_timeline": "batch_timeline",
+        "editor_mix": "editor_mix",
+    }
+    kind = kind_map.get(body.kind, "render_timeline")
+    if kind in {"render_scene", "render_shot"} and not body.scene_id:
+        raise HTTPException(400, "scene_id required for scene/shot render")
     params: dict = {}
     if body.reference_method:
         params["reference_method"] = body.reference_method
@@ -967,6 +1242,60 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         params["strength"] = body.strength
     if body.ingredients_ic_lora is not None:
         params["ingredients_ic_lora"] = body.ingredients_ic_lora
+    if body.providerPreference:
+        params["providerPreference"] = body.providerPreference
+    params["paidFallbackApproved"] = bool(body.paidFallbackApproved)
+    if body.startFrameModel:
+        params["startFrameModel"] = body.startFrameModel
+    if body.generate_audio is not None:
+        params["generate_audio"] = bool(body.generate_audio)
+    if body.primary_video_path:
+        params["primary_video_path"] = body.primary_video_path
+    # Production Dock → video resolver (scene/shot renders consume active engine).
+    if kind in {"render_scene", "render_shot", "batch_timeline"}:
+        try:
+            from ..production_control.runtime_map import apply_video_dock_preference
+
+            dock = apply_video_dock_preference(project_id, engine_hint=params.get("engine"))
+            if dock.get("engine") and not params.get("engine"):
+                params["engine"] = dock["engine"]
+            params["productionDock"] = dock
+            params["preferenceProvenance"] = dock.get("provenance")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # Smart Production Gates (SMART_PRODUCTION_GATES): final scene/shot
+    # generation is blocked on PRODUCTION_LOCK. Editing remains available —
+    # only the generation job is refused with a creator-readable reason.
+    if kind in {"render_scene", "render_shot"} and body.scene_id:
+        try:
+            from ..codirector.timeline_context.smart_gates import can_generate_scene
+
+            allowed, reason, gate = can_generate_scene(
+                db, project_id, body.scene_id, action_scope="production"
+            )
+            params["smartGate"] = {
+                "level": gate.get("level"),
+                "decision": gate.get("decision"),
+                "reason": reason,
+            }
+            if not allowed:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "SMART_PRODUCTION_GATE_LOCKED",
+                        "reason": reason,
+                        "gateLevel": gate.get("level"),
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            # Gate evaluation must never hard-block on internal failure —
+            # allow generation and record the diagnostic.
+            params["smartGate"] = {"level": "EXPLORATION", "decision": "ALLOW", "reason": "Gate unavailable"}
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -991,14 +1320,34 @@ async def lipsync(project_id: str, body: LipSyncRequest, db: Session = Depends(g
     if body.audio_asset_id:
         scene.lipsync_audio_asset_id = body.audio_asset_id
         scene.lipsync_enabled = 1
-        db.commit()
+    if body.face_asset_id:
+        scene.start_asset_id = body.face_asset_id
+    if body.prefer_still_face or body.face_asset_id:
+        try:
+            meta = json.loads(scene.director_json or "{}")
+        except Exception:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        meta["prefer_still_face"] = True
+        if body.face_asset_id:
+            meta["face_asset_id"] = body.face_asset_id
+        scene.director_json = json.dumps(meta)
+    db.commit()
+    params: dict = {}
+    if body.prefer_still_face or body.face_asset_id:
+        params["prefer_still_face"] = True
+        if body.face_asset_id:
+            params["face_asset_id"] = body.face_asset_id
+    if body.direct_latentsync:
+        params["direct_latentsync"] = True
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project_id,
         scene_id=scene.id,
         kind="lipsync",
         status="queued",
-        message="Queued lip sync",
+        message=json.dumps(params) if params else "Queued lip sync",
     )
     db.add(job)
     db.commit()
@@ -1008,10 +1357,33 @@ async def lipsync(project_id: str, body: LipSyncRequest, db: Session = Depends(g
 
 
 @router.post("/projects/{project_id}/export", response_model=JobOut)
-async def export_project(project_id: str, db: Session = Depends(get_db)):
+async def export_project(project_id: str, body: dict | None = None, db: Session = Depends(get_db)):
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
+    try:
+        from ..project_security import audit as security_audit
+        from ..project_security import service as project_security
+
+        if project_security.is_protected(db, project_id):
+            mode = str((body or {}).get("exportMode") or "without_password")
+            security_audit.record_audit(
+                db, project_id, "protected_project_export_attempted", {"exportMode": mode}
+            )
+            db.commit()
+            if mode == "encrypted_archive":
+                raise HTTPException(
+                    501,
+                    detail={
+                        "code": "ENCRYPTED_EXPORT_UNAVAILABLE",
+                        "message": "Encrypted project export is not currently available.",
+                    },
+                )
+            # Default: export without project password (hash never included in portable export)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     job = Job(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -1046,16 +1418,19 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    job_queue.cancel(job_id)
-    try:
-        await comfy.interrupt()
-    except Exception:
-        pass
-    job.status = "cancelled"
-    job.message = "Cancel requested"
-    job.updated_at = datetime.utcnow()
-    db.commit()
-    return {"ok": True}
+    # Deep cancel: enter cancelling, interrupt+delete, confirm prompt stopped, then cancelled.
+    # Does NOT mark cancelled until Comfy confirms the prompt is inactive (or timeout → cancel_failed).
+    result = await job_queue.cancel_and_halt(job_id)
+    job = db.get(Job, job_id)
+    status = (job.status if job else result.get("status")) or "cancelling"
+    return {
+        "ok": bool(result.get("ok")),
+        "status": status,
+        "confirmedStopped": bool(result.get("confirmedStopped")),
+        "errorCode": result.get("errorCode"),
+        "halt": result.get("halt"),
+        "promptId": result.get("promptId"),
+    }
 
 
 @router.get("/assistant/health", response_model=AssistantHealth)
@@ -1154,6 +1529,7 @@ async def _enqueue_image_tool(project_id: str, kind: str, body: ImageToolRequest
         kind=kind,
         status="queued",
         message=_json.dumps(payload),
+        params_json=_json.dumps(payload),
     )
     db.add(job)
     db.commit()

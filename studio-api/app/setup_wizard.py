@@ -320,6 +320,59 @@ def approve_install(component_id: str, *, action: str, path: str | None = None) 
         "status": "pending",
         "message": "",
     }
+    if component_id in {
+        "longcat-video-avatar-1-5-local",
+        "infinitetalk-local",
+        "musetalk-1-5-local",
+        "echomimic-v2-local",
+    }:
+        from .avatar_runtimes import benchmark_runtime, link_existing_runtime, remove_runtime, verify_runtime
+
+        if action == "remove":
+            result = remove_runtime(component_id)
+            entry["status"] = "removed"
+            entry["message"] = str(result.get("message") or "Removed runtime.")
+            state.get("model_locations", {}).pop(component_id, None)
+        elif action == "benchmark":
+            result = benchmark_runtime(component_id)
+            entry["status"] = str(result.get("status") or "benchmark_recorded")
+            entry["message"] = str(result.get("message") or "Benchmark hook recorded.")
+        elif action == "link_existing":
+            if not path:
+                raise ValueError("Path is required to link an existing runtime folder.")
+            result = link_existing_runtime(component_id, path)
+            entry["status"] = "installed"
+            entry["message"] = str(result.get("message") or "Linked existing runtime.")
+            state.setdefault("model_locations", {})[component_id] = path
+        elif action == "verify":
+            result = verify_runtime(component_id)
+            entry["status"] = "installed" if result.get("runtimeReady") else "failed"
+            entry["message"] = str(result.get("message") or "Verification completed.")
+        elif action == "update":
+            entry["status"] = "update_noted"
+            entry["message"] = "Update approved. Use Download and Install from Source Manager to apply the audited pins."
+        elif action == "repair":
+            entry["status"] = "repair_noted"
+            entry["message"] = "Repair approved. Use Source Manager to rerun the isolated install."
+        else:
+            entry["status"] = "approved"
+            entry["message"] = f"{action} approved for Source Manager."
+        comps[component_id] = entry
+        save_setup_state(state)
+        from .setup.orchestrator import diagnose_component
+
+        diagnostic = diagnose_component(component_id)
+        entry["verified"] = bool(diagnostic["healthy"])
+        entry["verification"] = {
+            "checked_at": diagnostic["checked_at"],
+            "issue_code": diagnostic["issue_code"],
+            "summary": diagnostic["summary"],
+            "recommendation": diagnostic["recommendation"],
+        }
+        latest = load_setup_state()
+        latest.setdefault("components", {})[component_id] = entry
+        save_setup_state(latest)
+        return entry
     if action in ("verify", "repair", "link", "install"):
         if path:
             from .setup.paths import ensure_path_exists, path_selector_mode

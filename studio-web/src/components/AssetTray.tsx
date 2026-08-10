@@ -1,15 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, EngineName, Project } from "../types";
 import { api } from "../api";
-import { PanelHeading } from "./HelpTip";
+import { PanelHeading, HelpTip } from "./HelpTip";
+import { getTimelineHelp } from "../timelineMaster/helpCatalog";
 import {
   CONTINUITY_KEYS,
   parseContinuity,
   type ContinuityKey,
   type ContinuityLock,
 } from "../directorSelection";
+import { isTimelineMediaAsset, normalizeTimelineMediaKind } from "../timelineMediaTypes";
 
-export function AssetTray({ project, onChange }: { project: Project; onChange: () => void }) {
+export function AssetTray({
+  project,
+  onChange,
+  selectedAssetId,
+  onSelectAsset,
+  onAddToTimeline,
+  onAddAsReference,
+}: {
+  project: Project;
+  onChange: () => void;
+  selectedAssetId?: string | null;
+  onSelectAsset?: (asset: Asset) => void;
+  onAddToTimeline?: (asset: Asset) => void;
+  onAddAsReference?: (asset: Asset) => void;
+}) {
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -24,18 +40,38 @@ export function AssetTray({ project, onChange }: { project: Project; onChange: (
     onChange();
   };
 
-  const filtered = project.assets.filter((a) => filter === "all" || a.kind === filter);
+  // TIMELINE_LIBRARY_MEDIA_ONLY: the Library only lists media that can live
+  // on a track (image/video/audio). Documents and other non-media are
+  // excluded. "all" means all compatible media, never every asset kind.
+  const timelineAssets = useMemo(
+    () => project.assets.filter((a) => isTimelineMediaAsset(a)),
+    [project.assets],
+  );
+  const filtered = timelineAssets.filter(
+    (a) => filter === "all" || normalizeTimelineMediaKind(a.kind, a.filename) === filter,
+  );
 
   return (
     <div className="panel">
       <PanelHeading
         title="Assets"
-        tip="Upload images, audio, or video and tag them. Drag onto Director tracks. Type @tag in prompts."
+        tip="Upload images, audio, or video. Optional Reference Name lets you use @name in prompts. Add to Timeline places media on a track; Add as Reference attaches optional supporting guidance."
       />
-      <p className="scene-meta">Tag assets to reference them with @name in prompts. Drag onto timeline tracks.</p>
+      <p className="scene-meta">
+        Give assets a short Reference Name so they can be recognized in prompts and reference lists. Leave empty to
+        auto-generate a safe name.
+      </p>
       <div className="field">
-        <label>Tag for next upload</label>
-        <input placeholder="hero" value={tag} onChange={(e) => setTag(e.target.value)} />
+        <label>Reference Name (optional)</label>
+        <input
+          placeholder="korri_front"
+          value={tag}
+          onChange={(e) => setTag(e.target.value)}
+          aria-describedby="asset-ref-name-hint"
+        />
+        <p id="asset-ref-name-hint" className="scene-meta">
+          {tag.trim() ? `Use in prompts as: @${tag.trim()}` : "Auto name assigned on upload if left empty."}
+        </p>
       </div>
       <div className="row-actions">
         <button onClick={() => fileRef.current?.click()}>Upload image</button>
@@ -85,31 +121,76 @@ export function AssetTray({ project, onChange }: { project: Project; onChange: (
         ))}
       </div>
       <div className="section-label">Library</div>
-      <div className="asset-list">
+      <p className="scene-meta" style={{ marginTop: 0 }}>
+        Click any item to preview it in the Preview Monitor.
+      </p>
+      <div className="asset-list" data-testid="asset-library-list">
         {filtered.length === 0 && <div className="empty">No assets yet</div>}
-        {filtered.map((a: Asset) => (
-          <div
-            className="asset-item"
-            key={a.id}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("application/x-adept-asset", a.id);
-              e.dataTransfer.setData("application/x-adept-kind", a.kind);
-              e.dataTransfer.effectAllowed = "copy";
-            }}
-          >
-            {a.kind === "image" ? (
-              <img src={api.assetUrl(a.id)} alt={a.filename} />
-            ) : (
-              <div className="ph">{a.kind}</div>
-            )}
-            <div>
-              <div className="tag">@{a.tag || "untagged"}</div>
-              <div className="scene-meta">{a.filename}</div>
+        {filtered.map((a: Asset) => {
+          const selected = selectedAssetId === a.id;
+          return (
+            <div
+              className={`asset-item${selected ? " selected" : ""}`}
+              key={a.id}
+              data-testid={`asset-library-item-${a.id}`}
+              data-kind={a.kind}
+              draggable
+              role="button"
+              tabIndex={0}
+              aria-pressed={selected}
+              aria-label={`Preview ${a.tag || a.filename}`}
+              onClick={() => onSelectAsset?.(a)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelectAsset?.(a);
+                }
+              }}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/x-adept-asset", a.id);
+                e.dataTransfer.setData("application/x-adept-kind", a.kind);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+            >
+              {a.kind === "image" ? (
+                <img src={api.assetUrl(a.id)} alt={a.filename} />
+              ) : (
+                <div className="ph">{a.kind}</div>
+              )}
+              <div>
+                <div className="tag">@{a.tag || "untagged"}</div>
+                <div className="scene-meta">{a.filename}</div>
+                <div className="scene-meta">{a.kind}</div>
+              </div>
+              <div className="asset-item__actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid={`asset-add-timeline-${a.id}`}
+                  onClick={() => onAddToTimeline?.(a)}
+                >
+                  Add to Timeline
+                  <HelpTip
+                    label={getTimelineHelp("add_to_timeline").title}
+                    content={getTimelineHelp("add_to_timeline").body}
+                  />
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid={`asset-add-reference-${a.id}`}
+                  onClick={() => onAddAsReference?.(a)}
+                >
+                  Add as Reference
+                  <HelpTip
+                    label={getTimelineHelp("add_as_reference").title}
+                    content={getTimelineHelp("add_as_reference").body}
+                  />
+                </button>
+              </div>
             </div>
-            <span className="scene-meta">{a.kind}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -176,10 +257,13 @@ export function PromptComposer({
             <option value="auto">Auto Select</option>
           </optgroup>
           <optgroup label="Local (ComfyUI)">
-            <option value="ltx">LTX 2.3</option>
-            <option value="wan">WAN 2.2</option>
+            <option value="minimax-h3">MiniMax H3 (Default)</option>
+            <option value="ltx">LTX Video</option>
+            <option value="hunyuan15">HunyuanVideo 1.5</option>
+            <option value="hunyuan13b">HunyuanVideo 13B</option>
+            <option value="wan">WAN 2.2 (Optional)</option>
           </optgroup>
-          <optgroup label="Cloud API (fal.ai)">
+          <optgroup label="Hosted AI Providers (Kie.ai · WaveSpeed.ai · fal.ai)">
             <option value="fal_seedance">Seedance 2.0</option>
             <option value="fal_kling">Kling 2.5 Turbo Pro</option>
             <option value="fal_veo">Veo 3.1</option>

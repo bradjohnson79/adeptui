@@ -40,11 +40,25 @@ class CharacterData(BaseModel):
     appearanceSummary: str = ""
     distinguishingFeatures: str = ""
     voiceNotes: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    titles: list[str] = Field(default_factory=list)
+    affiliations: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    fears: list[str] = Field(default_factory=list)
+    arcSummary: str = ""
     profileItemId: Optional[str] = None
     avatarSessionId: Optional[str] = None
     masterSheetId: Optional[str] = None
+    characterProfileId: Optional[str] = None
+    activeVoiceProfileId: Optional[str] = None
     readiness: ReadinessLevel = "incomplete"
     notes: str = ""
+    sourceTag: str = ""
+    sourceAssetIds: list[str] = Field(default_factory=list)
+    referenceAssets: list[dict[str, Any]] = Field(default_factory=list)
+    needsReview: bool = False
+    classificationReasons: list[str] = Field(default_factory=list)
+    discoveryGroup: str = ""
 
 
 class LocationData(BaseModel):
@@ -56,8 +70,21 @@ class LocationData(BaseModel):
     geography: str = ""
     lightingNotes: str = ""
     soundscape: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    locationType: str = ""
+    interiors: list[str] = Field(default_factory=list)
+    exteriors: list[str] = Field(default_factory=list)
+    connectedSpaces: list[str] = Field(default_factory=list)
+    materials: list[str] = Field(default_factory=list)
+    colorPalette: list[str] = Field(default_factory=list)
     readiness: ReadinessLevel = "incomplete"
     notes: str = ""
+    sourceTag: str = ""
+    sourceAssetIds: list[str] = Field(default_factory=list)
+    referenceAssets: list[dict[str, Any]] = Field(default_factory=list)
+    needsReview: bool = False
+    classificationReasons: list[str] = Field(default_factory=list)
+    discoveryGroup: str = ""
 
 
 class ProductionObjectData(BaseModel):
@@ -70,6 +97,12 @@ class ProductionObjectData(BaseModel):
     state: str = "intact"
     readiness: ReadinessLevel = "incomplete"
     notes: str = ""
+    sourceTag: str = ""
+    sourceAssetIds: list[str] = Field(default_factory=list)
+    referenceAssets: list[dict[str, Any]] = Field(default_factory=list)
+    needsReview: bool = False
+    classificationReasons: list[str] = Field(default_factory=list)
+    discoveryGroup: str = ""
 
 
 class WardrobeData(BaseModel):
@@ -80,6 +113,10 @@ class WardrobeData(BaseModel):
     items: list[str] = Field(default_factory=list)
     condition: str = ""
     notes: str = ""
+    lookName: str = ""
+    variantOf: Optional[str] = None
+    accessories: list[str] = Field(default_factory=list)
+    continuityRules: list[str] = Field(default_factory=list)
 
 
 class AppearanceStateData(BaseModel):
@@ -102,6 +139,12 @@ class VisualLanguageData(BaseModel):
     sceneOverride: bool = False
     sceneId: Optional[str] = None
     notes: str = ""
+    sourceTag: str = ""
+    sourceAssetIds: list[str] = Field(default_factory=list)
+    referenceAssets: list[dict[str, Any]] = Field(default_factory=list)
+    needsReview: bool = False
+    classificationReasons: list[str] = Field(default_factory=list)
+    discoveryGroup: str = ""
 
 
 class CanonRecordData(BaseModel):
@@ -203,11 +246,16 @@ _ENTITY_DATA_MODELS: dict[str, type[BaseModel]] = {
 
 
 _META_DATA_KEYS = frozenset({"stableId", "slug", "lifecycleStatus", "contentRevision", "updatedAt"})
+# Guided import previews may carry UX-only metadata that helps the creator review discoveries
+# before Version 1 exists, but that metadata should not become canon entity data.
+_IMPORT_PREVIEW_ONLY_KEYS = frozenset({"kind"})
 
 
 def validate_entity_data(entity_type: str, data: dict[str, Any]) -> dict[str, Any]:
     model = _ENTITY_DATA_MODELS.get(entity_type)
     if model is None:
         return data
-    payload = {k: v for k, v in data.items() if k not in _META_DATA_KEYS}
+    payload = {
+        k: v for k, v in data.items() if k not in _META_DATA_KEYS and k not in _IMPORT_PREVIEW_ONLY_KEYS
+    }
     return model.model_validate(payload).model_dump(mode="json")

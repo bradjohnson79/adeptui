@@ -165,6 +165,42 @@
         "licenseSummary": "MIT",
         "proposedSandbox": true
       }
+    ],
+    "audio.character_voice.design": [
+      {
+        "sourceKey": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "registryId": "m2101-voice-design-021",
+        "capabilityId": "audio.character_voice.design",
+        "repositoryOrModelIdentifier": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "repositoryUrl": "https://github.com/QwenLM/Qwen3-TTS",
+        "modelRepository": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "qualificationStatus": "qualified",
+        "sandboxOnly": true,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "licenseSummary": "apache-2.0",
+        "productionApproved": false,
+        "proposedSandbox": true
+      }
+    ],
+    "audio.character_voice.clone": [
+      {
+        "sourceKey": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "registryId": "m2101-voice-clone-022",
+        "capabilityId": "audio.character_voice.clone",
+        "repositoryOrModelIdentifier": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "repositoryUrl": "https://github.com/QwenLM/Qwen3-TTS",
+        "modelRepository": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "qualificationStatus": "qualified",
+        "sandboxOnly": true,
+        "installationAuthorized": false,
+        "executionAuthorized": false,
+        "weightDownloadAuthorized": false,
+        "licenseSummary": "apache-2.0",
+        "productionApproved": false,
+        "proposedSandbox": true
+      }
     ]
   },
   "approvedCandidateCount": 9,

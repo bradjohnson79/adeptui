@@ -28,6 +28,19 @@ from .stage_router import route_stage
 from .store import IntelligenceStore
 from .synthesis import SynthesisEngine
 
+try:
+    from ..foundation.pipeline import (
+        merge_findings_for_synthesis,
+        resolve_domain_profile_ids,
+        run_foundation_creative_pass,
+        should_run_foundation_creative,
+    )
+except Exception:  # noqa: BLE001
+    merge_findings_for_synthesis = None  # type: ignore[assignment]
+    resolve_domain_profile_ids = None  # type: ignore[assignment]
+    run_foundation_creative_pass = None  # type: ignore[assignment]
+    should_run_foundation_creative = None  # type: ignore[assignment]
+
 
 class IntelligenceService:
     PROGRESS_STAGES = (
@@ -66,6 +79,7 @@ class IntelligenceService:
         model_id: Optional[str] = None,
         request_id: Optional[str] = None,
         use_provider: bool | None = None,
+        route_decision: Optional[Any] = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {}
         async for event in self.stream_intelligence(
@@ -78,6 +92,7 @@ class IntelligenceService:
             model_id=model_id,
             request_id=request_id,
             use_provider=use_provider,
+            route_decision=route_decision,
         ):
             event_type = event.get("type")
             if event_type == "intelligence_result":
@@ -102,6 +117,10 @@ class IntelligenceService:
         model_id: Optional[str] = None,
         request_id: Optional[str] = None,
         use_provider: bool | None = None,
+        attachment_ids: Optional[list[str]] = None,
+        recent_messages: Optional[list[dict[str, Any]]] = None,
+        conversation_plan: Optional[dict[str, Any]] = None,
+        route_decision: Optional[Any] = None,
     ) -> AsyncIterator[dict[str, Any]]:
         request_id = request_id or "intelligence"
         prompt_versions = self.prompt_library.version_map()
@@ -142,65 +161,139 @@ class IntelligenceService:
             }
             return
 
-        yield {
-            "type": "intelligence_progress",
-            "requestId": request_id,
-            "stage": "selecting_specialists",
-            "message": "Selecting production specialists",
-            "intent": intent.model_dump(mode="json"),
-        }
-        selection = self.selector.select(intent)
-        specialist_ids = selection.all_selected
-        if not specialist_ids:
-            err = CoDirectorError(
-                CONTEXT_INCOMPLETE,
-                "No specialists could be selected for this request.",
-                details={"intent": intent.primaryIntent},
-                recoverable=True,
-            )
-            yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
-            return
-
-        yield {
-            "type": "intelligence_progress",
-            "requestId": request_id,
-            "stage": "running_specialists",
-            "message": "Reviewing project context",
-            "specialists": list(specialist_ids),
-        }
-
-        findings, specialist_errors = await self.runner.run_all(
-            db,
-            project_id=project_id,
-            user_message=user_message,
-            specialist_ids=specialist_ids,
-            scene_id=scene_id,
-            provider=provider,
-            model_id=model_id,
-            request_id=request_id,
-            use_provider=use_provider_effective,
+        use_foundation = bool(
+            should_run_foundation_creative is not None
+            and run_foundation_creative_pass is not None
+            and should_run_foundation_creative(intent.primaryIntent)
         )
-        context_hash = ""
-        if findings:
-            package = await self.runner.context_compiler.compile(
+        findings = []
+        specialist_ids: list[str] = []
+        foundation_review = None
+        foundation_knowledge_refs: list[str] = []
+
+        if use_foundation:
+            # One foundation orchestration path for creative intents (no parallel legacy stack).
+            yield {
+                "type": "intelligence_progress",
+                "requestId": request_id,
+                "stage": "foundation_specialists",
+                "message": "Consulting creative foundation",
+                "intent": intent.model_dump(mode="json"),
+            }
+            domain_ids: list[str] = []
+            if resolve_domain_profile_ids is not None:
+                try:
+                    import json as _json
+
+                    from ...db import Project as _Project
+
+                    project_row = db.get(_Project, project_id) if project_id else None
+                    primary = getattr(project_row, "primary_project_type", None) or "custom"
+                    traits_raw = getattr(project_row, "project_traits_json", "[]") or "[]"
+                    try:
+                        traits = _json.loads(traits_raw) if isinstance(traits_raw, str) else traits_raw
+                    except Exception:  # noqa: BLE001
+                        traits = []
+                    subtype = str(traits[0]) if isinstance(traits, list) and traits else None
+                    domain_ids = resolve_domain_profile_ids(
+                        primary_slug=str(primary),
+                        subtype_slug=subtype,
+                        traits=traits,
+                    )
+                except Exception:  # noqa: BLE001
+                    domain_ids = []
+            stage = conversation_plan.get("creativeStage") if conversation_plan else None
+            substate = conversation_plan.get("creativeSubstate") if conversation_plan else None
+            findings, foundation_review, foundation_knowledge_refs = run_foundation_creative_pass(
+                project_id=project_id,
+                user_message=user_message,
+                intent_kind=intent.primaryIntent,
+                domain_profile_ids=domain_ids,
+                creative_stage=stage,
+                creative_substate=substate,
+            )
+            specialist_ids = [getattr(item, "specialistId", "") for item in findings if getattr(item, "specialistId", "")]
+            if not findings:
+                err = CoDirectorError(
+                    CONTEXT_INCOMPLETE,
+                    "No foundation specialists could be selected for this request.",
+                    details={"intent": intent.primaryIntent},
+                    recoverable=True,
+                )
+                yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
+                return
+        else:
+            yield {
+                "type": "intelligence_progress",
+                "requestId": request_id,
+                "stage": "selecting_specialists",
+                "message": "Selecting production specialists",
+                "intent": intent.model_dump(mode="json"),
+            }
+            # Phase 7 — RouteDecision-aware specialist selection
+            if route_decision is not None:
+                from .specialist_selector import SpecialistContext
+                ctx = SpecialistContext(
+                    route_decision=route_decision,
+                    creator_goal=getattr(conversation_plan or {}, "userGoalSummary", None) if conversation_plan else None,
+                )
+                selection = self.selector.select(ctx)
+            else:
+                # Fallback: legacy IntentKind-driven selection (preserved for backward compatibility)
+                selection = self.selector.select(intent)
+            specialist_ids = list(selection.all_selected)
+            if not specialist_ids:
+                err = CoDirectorError(
+                    CONTEXT_INCOMPLETE,
+                    "No specialists could be selected for this request.",
+                    details={"intent": intent.primaryIntent},
+                    recoverable=True,
+                )
+                yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
+                return
+
+            yield {
+                "type": "intelligence_progress",
+                "requestId": request_id,
+                "stage": "running_specialists",
+                "message": "Reviewing project context",
+                "specialists": list(specialist_ids),
+            }
+            findings, specialist_errors = await self.runner.run_all(
                 db,
                 project_id=project_id,
                 user_message=user_message,
+                specialist_ids=specialist_ids,
                 scene_id=scene_id,
-                specialists=[self.registry.require(sid) for sid in specialist_ids],
+                provider=provider,
+                model_id=model_id,
+                request_id=request_id,
+                use_provider=use_provider_effective,
+                attachment_ids=attachment_ids,
+                recent_messages=recent_messages,
+                conversation_plan=conversation_plan,
             )
-            context_hash = package.contextHash
-            for finding in findings:
-                IntelligenceStore.save_finding(
+            if findings:
+                package = await self.runner.context_compiler.compile(
                     db,
                     project_id=project_id,
-                    request_id=request_id,
-                    finding=finding,
-                    context_hash=context_hash,
+                    user_message=user_message,
+                    scene_id=scene_id,
+                    specialists=[self.registry.require(sid) for sid in specialist_ids],
+                    attachment_ids=attachment_ids,
+                    recent_messages=recent_messages,
+                    conversation_plan=conversation_plan,
                 )
-
-        for err in specialist_errors:
-            yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
+                for finding in findings:
+                    IntelligenceStore.save_finding(
+                        db,
+                        project_id=project_id,
+                        request_id=request_id,
+                        finding=finding,
+                        context_hash=package.contextHash,
+                    )
+            for err in specialist_errors:
+                yield {"type": "error", "requestId": request_id, "error": err.to_dict()}
 
         yield {
             "type": "intelligence_progress",
@@ -215,6 +308,24 @@ class IntelligenceService:
                 intent=intent,
                 findings=findings,
             )
+            if foundation_review is not None and foundation_review.prioritizedRecommendations:
+                synthesis.recommendation = foundation_review.prioritizedRecommendations[0]
+                if foundation_review.overloadRisk == "high":
+                    synthesis.assumptions = list(synthesis.assumptions) + [
+                        "Creative Director trimmed overlapping specialist advice to reduce overload."
+                    ]
+                if foundation_review.contradictions:
+                    synthesis.conflictsResolved = list(
+                        dict.fromkeys([*synthesis.conflictsResolved, *foundation_review.contradictions])
+                    )
+                # Keep creator-facing prose coherent; never dump specialist ids or confidence.
+                if foundation_review.prioritizedRecommendations:
+                    synthesis.userMessage = foundation_review.prioritizedRecommendations[0]
+            if foundation_knowledge_refs:
+                synthesis.structuredRecommendation = {
+                    **(synthesis.structuredRecommendation or {}),
+                    "knowledgeRefs": foundation_knowledge_refs[:8],
+                }
         except Exception as exc:  # noqa: BLE001
             err = CoDirectorError(
                 SYNTHESIS_FAILED,

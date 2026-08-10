@@ -179,12 +179,52 @@
         "environmentId": "m210b-riffusion-venv",
         "riskClassification": "low"
       }
+    ],
+    "audio.character_voice.design": [
+      {
+        "sourceKey": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "registryId": "m2101-voice-design-021",
+        "capabilityId": "audio.character_voice.design",
+        "repositoryOrModelIdentifier": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "repositoryUrl": "https://github.com/QwenLM/Qwen3-TTS",
+        "modelRepository": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+        "qualificationStatus": "qualified",
+        "sandboxOnly": true,
+        "productionAuthorized": false,
+        "installationAuthorized": true,
+        "executionAuthorized": true,
+        "weightDownloadAuthorized": true,
+        "licenseSummary": "apache-2.0",
+        "sandboxPath": "data/m210b-sandbox/providers/m2101-voice-design-021",
+        "environmentId": "m210b-qwen-voice-design-venv",
+        "riskClassification": "medium"
+      }
+    ],
+    "audio.character_voice.clone": [
+      {
+        "sourceKey": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "registryId": "m2101-voice-clone-022",
+        "capabilityId": "audio.character_voice.clone",
+        "repositoryOrModelIdentifier": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "repositoryUrl": "https://github.com/QwenLM/Qwen3-TTS",
+        "modelRepository": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+        "qualificationStatus": "qualified",
+        "sandboxOnly": true,
+        "productionAuthorized": false,
+        "installationAuthorized": true,
+        "executionAuthorized": true,
+        "weightDownloadAuthorized": true,
+        "licenseSummary": "apache-2.0",
+        "sandboxPath": "data/m210b-sandbox/providers/m2101-voice-clone-022",
+        "environmentId": "m210b-qwen-voice-clone-venv",
+        "riskClassification": "medium"
+      }
     ]
   },
-  "authorizedCandidateCount": 9,
+  "authorizedCandidateCount": 11,
   "productionAuthorized": false,
   "installationAuthorized": true,
   "executionAuthorized": true,
   "weightDownloadAuthorized": true,
-  "notes": "M2.10b Slice 1 execution lock. Authorizes sandbox install/execute/weight for the nine Product-approved audio candidates only. productionAuthorized remains false. Gate 6 product lock is unchanged (install/execute/weight false). Provider Manifest must remain untouched."
+  "notes": "M2.10b + M3.3 execution lock. Authorizes sandbox install/execute/weight for the original nine audio candidates plus Qwen3-TTS VoiceDesign and Voice Clone. productionAuthorized remains false."
 }

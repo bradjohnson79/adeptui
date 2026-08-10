@@ -26,6 +26,24 @@ if (!fs.existsSync(venvPython)) {
   process.exit(1);
 }
 
+/**
+ * Local product defaults for operator-facing readiness.
+ * Only applied when the env var is unset so CI/E2E and explicit overrides win.
+ * Set STUDIO_FEATURE_*=0 to force a flag off.
+ */
+const localProductFlags = {
+  STUDIO_FEATURE_CODIRECTOR_INTELLIGENCE_V2: "1",
+  STUDIO_FEATURE_VISION_VALIDATION_V1: "1",
+  STUDIO_FEATURE_PRODUCTION_EXECUTIVE_V1: "1",
+  STUDIO_FEATURE_TIMELINE_REFERENCES_V1: "1",
+};
+const childEnv = { ...process.env };
+for (const [key, value] of Object.entries(localProductFlags)) {
+  if (childEnv[key] == null || String(childEnv[key]).trim() === "") {
+    childEnv[key] = value;
+  }
+}
+
 const args = [
   "-m",
   "uvicorn",
@@ -43,7 +61,7 @@ console.log(`[studio-api] cwd=${apiDir}  http://${host}:${port}`);
 const child = spawn(venvPython, args, {
   cwd: apiDir,
   stdio: "inherit",
-  env: process.env,
+  env: childEnv,
   windowsHide: true,
 });
 

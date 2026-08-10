@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -190,11 +190,12 @@ def setup_download_sources_verify(provider: str):
 
 
 @router.post("/setup/download-sources/{provider}/sign-in")
-def setup_download_sources_sign_in(provider: str):
+def setup_download_sources_sign_in(provider: str, body: dict | None = None):
     from ..setup.download_sources import start_cli_sign_in
 
+    payload = body or {}
     try:
-        return start_cli_sign_in(provider)
+        return start_cli_sign_in(provider, launch=bool(payload.get("launch")))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -303,6 +304,8 @@ def setup_component_action(
         raise HTTPException(400, "Installation/management requires explicit approval (approved=true).")
     try:
         return approve_install(component_id, action=action, path=path or None)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -656,7 +659,9 @@ def project_dashboard(project_id: str, db: Session = Depends(get_db)):
         health.append({"level": "info", "text": "No scene renders yet"})
     learning = parse_learning(project.learning_json, project.learning_enabled_json)
     suggestions = continuity_suggestions(scenes, learning.dismissed_continuity)
-    cover = next((a for a in assets if a.kind == "image"), None)
+    from .. import project_service as _project_service
+
+    cover = _project_service.pick_cover_asset(assets)
     activity = []
     for j in jobs[:8]:
         when = j.created_at.isoformat() if j.created_at else None
@@ -682,6 +687,7 @@ def project_dashboard(project_id: str, db: Session = Depends(get_db)):
     return {
         "project_id": project_id,
         "cover_asset_id": cover.id if cover else None,
+        "cover_kind": _project_service.cover_media_kind(cover),
         "counts": {
             "scenes": len(scenes),
             "assets": len(assets),
@@ -727,10 +733,56 @@ def project_dashboard(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/projects/{project_id}/duplicate")
-def duplicate_project(project_id: str, db: Session = Depends(get_db)):
+def duplicate_project(
+    project_id: str,
+    request: Request,
+    body: dict | None = None,
+    db: Session = Depends(get_db),
+):
     src = db.get(Project, project_id)
     if not src:
         raise HTTPException(404, "Project not found")
+    body = body or {}
+    try:
+        from ..project_security import service as project_security
+
+        if project_security.is_protected(db, project_id):
+            token = ""
+            if request is not None:
+                token = project_security.extract_unlock_token_for_project(request, project_id)
+            if not project_security.is_unlocked(db, project_id, token):
+                auth_pw = str(body.get("authorizePassword") or "")
+                if not auth_pw:
+                    raise HTTPException(
+                        403,
+                        detail={
+                            "code": "PROJECT_LOCKED",
+                            "message": "This project is password protected. Unlock it before accessing production data.",
+                        },
+                    )
+                # Verify password without creating a long-lived grant for the source
+                row = project_security.get_or_create_security(db, project_id)
+                params = {}
+                try:
+                    params = json.loads(row.password_params_json or "{}")
+                except Exception:
+                    params = {}
+                from ..project_security.hashing import verify_password
+
+                if not verify_password(
+                    auth_pw,
+                    password_hash=row.password_hash or "",
+                    algorithm=row.password_algorithm or "",
+                    params=params,
+                ):
+                    raise HTTPException(
+                        401,
+                        detail={"code": "UNLOCK_FAILED", "message": "The password is incorrect."},
+                    )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     new_id = str(uuid.uuid4())
     clone = Project(
         id=new_id,
@@ -779,6 +831,35 @@ def duplicate_project(project_id: str, db: Session = Depends(get_db)):
                 director_json=getattr(s, "director_json", "") or "",
             )
         )
+    try:
+        from ..project_security import service as project_security
+
+        mode = str(body.get("protectionMode") or "none")
+        if mode == "same_password":
+            # Require re-entry so we mint a fresh salted hash (never copy hash bytes).
+            pw = str(body.get("password") or body.get("authorizePassword") or "")
+            project_security.apply_duplicate_protection(
+                db,
+                source_project_id=project_id,
+                new_project_id=new_id,
+                mode="new_password",
+                password=pw,
+                confirm_password=pw,
+            )
+        elif mode == "new_password":
+            project_security.apply_duplicate_protection(
+                db,
+                source_project_id=project_id,
+                new_project_id=new_id,
+                mode="new_password",
+                password=str(body.get("password") or ""),
+                confirm_password=str(body.get("confirmPassword") or body.get("password") or ""),
+            )
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        pass
     db.commit()
     return {"ok": True, "id": new_id, "name": clone.name}
 
@@ -829,25 +910,32 @@ async def enqueue_txt2vid(project_id: str, body: dict, db: Session = Depends(get
 
 @router.post("/projects/{project_id}/imagegen")
 async def enqueue_imagegen(project_id: str, body: dict, db: Session = Depends(get_db)):
-    from ..queue_worker import job_queue
-
+    """Legacy path — migrated to Image Product compiler (M42 W3)."""
     project = db.get(Project, project_id)
     if not project:
         raise HTTPException(404, "Project not found")
-    edit = bool((body or {}).get("edit"))
-    job = Job(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        scene_id=None,
-        kind="imagegen_edit" if edit else "imagegen",
-        status="queued",
-        message="Queued ImageGen" + (" edit" if edit else ""),
-        params_json=json.dumps(body or {}),
-    )
-    db.add(job)
-    db.commit()
-    await job_queue.enqueue(job.id)
-    db.refresh(job)
+    from ..image_product.service import generate_images
+
+    payload = dict(body or {})
+    payload.setdefault("modelFamilyPreference", payload.get("model") or "zimage")
+    if payload.get("edit") or payload.get("source_asset_id"):
+        payload["operation"] = "image.edit"
+        payload.setdefault("sourceAssetId", payload.get("source_asset_id"))
+    result = generate_images(db, project_id=project_id, body=payload)
+    job_id = result.get("jobId")
+    job = db.get(Job, job_id) if job_id else None
+    if not job:
+        return {
+            "id": job_id,
+            "project_id": project_id,
+            "kind": "imagegen",
+            "status": "queued",
+            "progress": 0.0,
+            "message": "Queued via Image Product",
+            "params_json": json.dumps(payload),
+            "recommendation": result.get("recommendation"),
+            "imageRuntime": result.get("imageRuntime"),
+        }
     return {
         "id": job.id,
         "project_id": job.project_id,
@@ -855,9 +943,12 @@ async def enqueue_imagegen(project_id: str, body: dict, db: Session = Depends(ge
         "status": job.status,
         "progress": job.progress,
         "message": job.message,
+        "stage": getattr(job, "stage", None),
         "params_json": job.params_json,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
+        "recommendation": result.get("recommendation"),
+        "imageRuntime": result.get("imageRuntime"),
     }
 
 
@@ -869,8 +960,20 @@ def imagegen_models():
 
 
 @router.get("/projects/{project_id}/library")
-def project_library(project_id: str, q: str = "", scope: str = "project", db: Session = Depends(get_db)):
+def project_library(
+    project_id: str,
+    q: str = "",
+    scope: str = "project",
+    folder: str = "",
+    system_key: str = "",
+    db: Session = Depends(get_db),
+):
     from ..asset_graph import search_assets
+    from ..project_library.service import enrich_library_item, get_library_response
+
+    project = db.get(Project, project_id)
+    if not project and scope != "global":
+        raise HTTPException(404, "Project not found")
 
     if scope == "global":
         rows = search_assets(db, None, q, global_only=True)
@@ -878,22 +981,140 @@ def project_library(project_id: str, q: str = "", scope: str = "project", db: Se
         rows = search_assets(db, project_id, q, global_only=False)
         if scope == "project":
             rows = [a for a in rows if a.project_id == project_id]
-    return [
-        {
-            "id": a.id,
-            "project_id": a.project_id,
-            "tag": a.tag,
-            "kind": a.kind,
-            "filename": a.filename,
-            "path": a.path,
-            "scope": getattr(a, "scope", "project"),
-            "labels_json": getattr(a, "labels_json", "[]"),
-            "prompt_meta_json": getattr(a, "prompt_meta_json", "{}"),
-            "parent_asset_id": getattr(a, "parent_asset_id", None),
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in rows
-    ]
+    items = [enrich_library_item(a) for a in rows]
+    return get_library_response(
+        db,
+        project_id,
+        items,
+        folder_id=folder or None,
+        system_key=system_key or None,
+    )
+
+
+@router.post("/projects/{project_id}/library/migrate")
+def project_library_migrate(project_id: str, db: Session = Depends(get_db)):
+    from ..project_library.service import migrate_project_library
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    try:
+        return migrate_project_library(db, project_id)
+    except ValueError as exc:
+        if str(exc) == "PROJECT_NOT_FOUND":
+            raise HTTPException(404, "Project not found") from exc
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/library/repair")
+def project_library_repair(project_id: str, db: Session = Depends(get_db)):
+    from ..project_library.service import repair_library
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    try:
+        return repair_library(db, project_id)
+    except ValueError as exc:
+        if str(exc) == "PROJECT_NOT_FOUND":
+            raise HTTPException(404, "Project not found") from exc
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/projects/{project_id}/library/resolve-path")
+def project_library_resolve_path(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..project_library.service import resolve_path
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    folder_id = body.get("folderId") or body.get("folder_id") or None
+    system_key = body.get("systemKey") or body.get("system_key") or None
+    path = resolve_path(db, project_id, folder_id=folder_id, system_key=system_key)
+    return {
+        "projectId": project_id,
+        "folderId": folder_id,
+        "systemKey": system_key,
+        "libraryPath": path,
+    }
+
+
+@router.post("/projects/{project_id}/library/resolve")
+def project_library_resolve(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..project_library.codirector import resolve_library_location
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    return resolve_library_location(
+        db,
+        project_id,
+        path=body.get("path") or None,
+        system_key=body.get("systemKey") or body.get("system_key") or None,
+        query=body.get("query") or body.get("q") or None,
+    )
+
+
+@router.get("/projects/{project_id}/library/codirector-context")
+def project_library_codirector_context(project_id: str, limit: int = 8, db: Session = Depends(get_db)):
+    from ..project_library.codirector import get_library_context
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    return get_library_context(db, project_id, recent_limit=max(1, min(limit, 20)))
+
+
+@router.post("/projects/{project_id}/library/preflight")
+def project_library_preflight(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..project_library.codirector import storage_preflight
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    task = body.get("task")
+    if not task:
+        raise HTTPException(400, "task is required")
+    return storage_preflight(
+        db,
+        project_id,
+        task=str(task),
+        system_key=body.get("systemKey") or body.get("system_key") or None,
+        path=body.get("path") or None,
+        entity_type=body.get("entityType") or body.get("entity_type") or None,
+        entity_name=body.get("entityName") or body.get("entity_name") or None,
+        entity_id=body.get("entityId") or body.get("entity_id") or None,
+        filename_hint=body.get("filenameHint") or body.get("expectedName") or None,
+    )
+
+
+@router.patch("/assets/{asset_id}/library")
+def patch_asset_library(asset_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..project_library.service import assign_asset, enrich_library_item
+
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+
+    system_key = body.get("systemKey") or body.get("system_key")
+    folder_id = body.get("folderId") or body.get("folder_id")
+    entity_type = body.get("entityType") or body.get("entity_type")
+    entity_name = body.get("entityName") or body.get("entity_name")
+    entity_id = body.get("entityId") or body.get("entity_id")
+    override = bool(body.get("override"))
+    hints = body.get("hints") if isinstance(body.get("hints"), dict) else None
+
+    meta = assign_asset(
+        db,
+        asset,
+        system_key=system_key,
+        folder_id=folder_id,
+        entity_type=entity_type,
+        entity_name=entity_name,
+        entity_id=entity_id,
+        classified_by="manual",
+        override=override or bool(system_key or folder_id),
+        hints=hints,
+    )
+    return {
+        "ok": True,
+        "asset": enrich_library_item(asset),
+        "meta": meta.to_dict(),
+    }
 
 
 @router.patch("/assets/{asset_id}/meta")

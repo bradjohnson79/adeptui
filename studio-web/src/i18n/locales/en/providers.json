@@ -1,7 +1,11 @@
 {
-  "title": "Providers",
+  "title": "Hosted AI Providers",
   "local": "Local",
   "fal": "fal.ai",
+  "kie": "Kie.ai",
+  "wavespeed": "WaveSpeed.ai",
+  "hosted": "Hosted AI Providers",
+  "recommended": "Recommended",
   "unavailable": "Provider unavailable",
   "health": "Provider health"
 }

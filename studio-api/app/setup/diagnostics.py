@@ -1,19 +1,31 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..avatar_runtimes import verify_runtime as verify_avatar_runtime
 from ..config import settings
 from ..secrets_store import secret_status
 from .catalog import ComponentDefinition, get_component
 from .paths import ensure_configured_paths
 from .state import load_state, update_state
+
+# Short TTL avoids multi-second runtime probes (IndexTTS2 / Qwen voice) on every Setup poll.
+_VERIFY_CACHE_TTL_SEC = 45.0
+_VERIFY_CACHE: dict[str, tuple[float, "Verification"]] = {}
+_CACHE_UNHEALTHY_COMPONENTS = {
+    "index_tts2",
+    "qwen_voice_design_17b",
+    "qwen_voice_clone_17b",
+}
 
 
 def utc_now() -> str:
@@ -85,6 +97,108 @@ def _candidate_file(location: str | None, filename: str, extra_dirs: tuple[str, 
     return None
 
 
+def _krea2_roots(location: str | None) -> list[Path]:
+    """Krea-scoped search roots: the configured component path, then the Krea 2 model root.
+
+    The ComfyUI shared models dir is deliberately excluded — loose official filenames
+    (turbo.safetensors / raw.safetensors) would false-positive on unrelated packs there.
+    """
+    roots: list[Path] = []
+    if location:
+        roots.append(Path(location).expanduser())
+    model_root = str(getattr(settings, "krea2_model_root", "") or "").strip()
+    if model_root:
+        roots.append(Path(model_root).expanduser())
+    return roots
+
+
+def _krea2_find(
+    roots: list[Path],
+    configured: str,
+    patterns: tuple[str, ...],
+    extra_dirs: tuple[str, ...],
+) -> Path | None:
+    """Locate one Krea 2 file by configured name (exact) or install-time glob patterns."""
+    configured = (configured or "").strip()
+    if configured and Path(configured).is_absolute():
+        candidate = Path(configured).expanduser()
+        return candidate if candidate.is_file() else None
+    for root in roots:
+        for relative in ("", *extra_dirs):
+            base = root / relative if relative else root
+            if configured:
+                candidate = base / configured
+                if candidate.is_file():
+                    return candidate
+            if not base.is_dir():
+                continue
+            for pattern in patterns:
+                matches = sorted(p for p in base.glob(pattern) if p.is_file())
+                if matches:
+                    return matches[0]
+    return None
+
+
+def _verify_krea2_files(location: str | None) -> Verification:
+    roots = _krea2_roots(location)
+    specs = (
+        (
+            "Turbo checkpoint",
+            settings.krea2_turbo_checkpoint,
+            ("*turbo*.safetensors",),
+            ("checkpoints", "diffusion_models"),
+        ),
+        (
+            "RAW checkpoint",
+            settings.krea2_raw_checkpoint,
+            ("*raw*.safetensors",),
+            ("checkpoints", "diffusion_models"),
+        ),
+        (
+            "Qwen3-VL text encoder",
+            settings.krea2_text_encoder,
+            ("*qwen3*vl*.safetensors", "*qwen3_vl*.safetensors"),
+            ("text_encoders", "clip"),
+        ),
+        (
+            "Qwen Image VAE",
+            settings.krea2_vae,
+            ("*qwen*image*vae*.safetensors", "*qwen_image_vae*.safetensors"),
+            ("vae",),
+        ),
+    )
+    found = [
+        _krea2_find(roots, configured, patterns, extra_dirs)
+        for _label, configured, patterns, extra_dirs in specs
+    ]
+    missing = [label for (label, *_rest), path in zip(specs, found) if path is None]
+    if not missing and all(path and os.access(path, os.R_OK) for path in found):
+        return Verification(
+            True,
+            False,
+            None,
+            "Krea 2 Turbo/RAW checkpoints, Qwen3-VL text encoder, and Qwen Image VAE are readable.",
+            str(roots[0]) if roots else None,
+        )
+    details = []
+    for (label, configured, patterns, _dirs), path in zip(specs, found):
+        if path is None:
+            want = configured or " / ".join(patterns)
+            details.append(f"Missing: {label} ({want})")
+    if not roots:
+        details.append("No Krea 2 model root is configured or linked.")
+    return Verification(
+        False,
+        not any(found),
+        "required_models_missing",
+        "One or more Krea 2 model files are missing.",
+        str(roots[0]) if roots else None,
+        details=tuple(details),
+        recommendation="correct_path" if location else "install",
+        requires_user_interaction=True,
+    )
+
+
 def _service(url: str, suffix: str, name: str) -> Verification:
     try:
         import httpx
@@ -107,6 +221,25 @@ def _service(url: str, suffix: str, name: str) -> Verification:
 
 
 def verify_component(component_id: str, state: dict[str, Any] | None = None) -> Verification:
+    cached = _VERIFY_CACHE.get(component_id)
+    if cached and (time.monotonic() - cached[0]) < _VERIFY_CACHE_TTL_SEC:
+        return cached[1]
+    result = _verify_component_uncached(component_id, state)
+    if result.healthy or component_id in _CACHE_UNHEALTHY_COMPONENTS:
+        _VERIFY_CACHE[component_id] = (time.monotonic(), result)
+    else:
+        _VERIFY_CACHE.pop(component_id, None)
+    return result
+
+
+def invalidate_verify_cache(component_id: str | None = None) -> None:
+    if component_id:
+        _VERIFY_CACHE.pop(component_id, None)
+        return
+    _VERIFY_CACHE.clear()
+
+
+def _verify_component_uncached(component_id: str, state: dict[str, Any] | None = None) -> Verification:
     component = get_component(component_id)
     state = state or load_state()
     # Keep in-memory state aligned with Adept-owned defaults so callers that do
@@ -203,6 +336,35 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
             recommendation="correct_path" if location else "install", requires_user_interaction=True,
         )
 
+    if component.verifier == "hunyuan_files":
+        from ..video_runtime.hunyuan_providers import PROVIDER_BY_COMPONENT
+        from ..video_runtime.hunyuan_install import verify_weights, hardware_preflight
+
+        provider_id = PROVIDER_BY_COMPONENT.get(component_id)
+        if not provider_id:
+            return Verification(
+                False, True, "unknown_component", "Unknown Hunyuan component.",
+                recommendation="install", requires_user_interaction=True,
+            )
+        verify = verify_weights(provider_id)
+        if verify.get("ok"):
+            return Verification(
+                True, False, None, verify.get("message") or "Hunyuan weights verified.",
+                verify.get("path"),
+            )
+        pre = hardware_preflight(provider_id)
+        details = tuple(verify.get("missing") or ()) + tuple(pre.get("reasons") or ())
+        return Verification(
+            False,
+            True,
+            "required_models_missing",
+            verify.get("message") or "Hunyuan weights missing or incomplete.",
+            verify.get("path"),
+            details=details,
+            recommendation="install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "zimage_files":
         names = (settings.zimage_unet, settings.zimage_clip, settings.zimage_vae)
         extra_dirs = ("diffusion_models", "text_encoders", "vae", "clip", "clip_vision")
@@ -218,6 +380,37 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
             location, details=tuple(f"Missing: {name}" for name in missing),
             recommendation="correct_path" if location else "install", requires_user_interaction=True,
         )
+
+    if component.verifier == "qwen_image_2512_files":
+        names = (
+            settings.qwen_image_2512_unet,
+            settings.qwen_image_2512_clip,
+            settings.qwen_image_2512_vae,
+        )
+        extra_dirs = ("diffusion_models", "text_encoders", "vae")
+        found = [_candidate_file(location, name, extra_dirs) for name in names]
+        missing = [name for name, path in zip(names, found) if path is None]
+        if not missing and all(path and os.access(path, os.R_OK) for path in found):
+            return Verification(
+                True,
+                False,
+                None,
+                "Qwen-Image-2512 UNET, text encoder, and VAE are readable.",
+                location,
+            )
+        return Verification(
+            False,
+            not any(found),
+            "required_models_missing",
+            "One or more Qwen-Image-2512 model files are missing.",
+            location,
+            details=tuple(f"Missing: {name}" for name in missing),
+            recommendation="correct_path" if location else "install",
+            requires_user_interaction=True,
+        )
+
+    if component.verifier == "krea2_files":
+        return _verify_krea2_files(location)
 
     if component.verifier == "linked_files":
         if not location:
@@ -275,6 +468,189 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
             status.get("summary") or status.get("message") or "Ingredients IC-LoRA is not ready.",
             status.get("path") or location,
             details=tuple(str(d) for d in details),
+            recommendation=recommendation,
+            requires_user_interaction=True,
+        )
+
+    if component.verifier == "m210b_sandbox":
+        from ..codirector.m210b.qwen_voice_install import runtime_ready
+
+        ready, detail = runtime_ready(component_id)
+        root = str(detail.get("sandbox") or "")
+        if ready:
+            return Verification(
+                True,
+                False,
+                "ok",
+                f"{component.name} is installed and runtime-ready (venv + weights).",
+                root,
+                details=(
+                    f"source={detail.get('sourceKey')}",
+                    f"venv={detail.get('venvPython')}",
+                    f"diskBytes={detail.get('diskUsageBytes')}",
+                ),
+            )
+        missing = []
+        if not detail.get("modelsPresent"):
+            missing.append("weights")
+        if not detail.get("venvPython"):
+            missing.append("venv")
+        if not detail.get("manifestInstalled"):
+            missing.append("manifest.installed")
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            (
+                f"{component.name} is not runtime-ready (missing: {', '.join(missing) or 'unknown'}). "
+                "Install via Source Manager / Setup Wizard (official HF + isolated venv)."
+            ),
+            root,
+            recommendation="install",
+            requires_user_interaction=True,
+            details=tuple(f"{k}={v}" for k, v in detail.items() if k != "error"),
+        )
+
+    if component.verifier == "index_tts2":
+        from ..voice_performance.runtime import get_index_tts2_runtime
+
+        runtime = get_index_tts2_runtime()
+        inspection = runtime.inspect_installation()
+        last_health = inspection.get("lastHealth") if isinstance(inspection.get("lastHealth"), dict) else {}
+        root = str((inspection.get("paths") or {}).get("runtimeRoot") or "")
+        state = str(inspection.get("state") or "not_installed")
+        if state == "ready":
+            return Verification(
+                True,
+                False,
+                None,
+                str(last_health.get("message") or inspection.get("message") or "IndexTTS2 is installed and runtime-ready."),
+                root,
+                version=str(inspection.get("repo", {}).get("revision") or ""),
+                details=(
+                    f"providerId={inspection.get('providerId')}",
+                    f"modelRepository={inspection.get('modelRepository')}",
+                    f"venvPython={(inspection.get('paths') or {}).get('venvPython')}",
+                    f"device={last_health.get('device')}",
+                ),
+            )
+        issue = {
+            "not_installed": "not_installed",
+            "compatible": "required_models_missing",
+            "installed": "verification_required",
+            "checking": "verification_in_progress",
+            "verifying": "verification_in_progress",
+            "installing": "install_in_progress",
+            "update_available": "pinned_revision_mismatch",
+            "incompatible": "source_mismatch",
+            "repair_required": "repair_required",
+            "failed": "runtime_failed",
+        }.get(state, str(last_health.get("code") or "runtime_failed"))
+        return Verification(
+            False,
+            state in {"not_installed", "compatible"},
+            issue,
+            str(last_health.get("message") or inspection.get("message") or "IndexTTS2 is not ready."),
+            root,
+            version=str(inspection.get("repo", {}).get("revision") or ""),
+            details=(
+                f"state={state}",
+                f"providerId={inspection.get('providerId')}",
+                f"modelRepository={inspection.get('modelRepository')}",
+            ),
+            recommendation="repair" if state in {"repair_required", "failed", "update_available", "incompatible"} else "install",
+            requires_user_interaction=True,
+        )
+
+    if component.verifier == "audio_sandbox":
+        from ..audio_studio.provider_resolver import local_runtime_status
+
+        runtimes = local_runtime_status()
+        runtime_name = "ACE-Step" if component_id == "ace_step_local" else "MMAudio"
+        runtime = runtimes.get(runtime_name) or {}
+        health = runtime.get("health") or {}
+        root = str(health.get("venvPython") or "")
+        if runtime.get("ready") and runtime.get("cuda"):
+            return Verification(
+                True,
+                False,
+                None,
+                str(runtime.get("message") or f"{runtime_name} is installed and GPU-ready."),
+                root,
+                version=str(health.get("torchVersion") or ""),
+                details=(
+                    f"runtime={runtime_name}",
+                    f"accelerator={runtime.get('accelerator')}",
+                    f"device={runtime.get('device')}",
+                ),
+            )
+        if runtime.get("ready") and not runtime.get("cuda"):
+            return Verification(
+                False,
+                False,
+                "gpu_not_ready",
+                str(
+                    runtime.get("message")
+                    or (
+                        f"{runtime_name} is installed but currently CPU-only. "
+                        "Repair the CUDA runtime before using production audio generation."
+                    )
+                ),
+                root,
+                version=str(health.get("torchVersion") or ""),
+                details=(
+                    f"runtime={runtime_name}",
+                    f"accelerator={runtime.get('accelerator')}",
+                    f"device={runtime.get('device')}",
+                ),
+                recommendation="repair",
+                requires_user_interaction=True,
+            )
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            str(runtime.get("message") or f"{runtime_name} is not installed."),
+            root,
+            details=(f"runtime={runtime_name}",),
+            recommendation="manual_help",
+            requires_user_interaction=True,
+        )
+
+    if component.verifier == "avatar_runtime":
+        runtime = verify_avatar_runtime(component_id)
+        inspection = runtime.get("inspection") or {}
+        if runtime.get("runtimeReady"):
+            return Verification(
+                True,
+                False,
+                None,
+                str(runtime.get("message") or f"{component.name} is installed."),
+                str(inspection.get("runtimeRoot") or ""),
+                version=str(inspection.get("codeRevision") or ""),
+                details=(
+                    f"providerId={inspection.get('providerId')}",
+                    f"launchPath={inspection.get('launchPath')}",
+                    f"healthState={inspection.get('healthState')}",
+                    f"gpu={((inspection.get('gpu') or {}).get('message') or 'unknown')}",
+                ),
+            )
+        issue = "required_models_missing" if inspection.get("installed") else "not_installed"
+        recommendation = "update" if inspection.get("updateAvailable") else "repair" if inspection.get("installed") else "install"
+        return Verification(
+            False,
+            not bool(inspection.get("installed")),
+            issue,
+            str(runtime.get("message") or f"{component.name} is not ready."),
+            str(inspection.get("runtimeRoot") or ""),
+            version=str(inspection.get("codeRevision") or ""),
+            details=tuple(
+                [
+                    f"providerId={inspection.get('providerId')}",
+                    f"healthState={inspection.get('healthState')}",
+                    *[f"blocker={item}" for item in (inspection.get("blockers") or [])],
+                ]
+            ),
             recommendation=recommendation,
             requires_user_interaction=True,
         )
@@ -406,6 +782,61 @@ def verify_component(component_id: str, state: dict[str, Any] | None = None) -> 
             f"{component.name} files are available and verified.",
             location,
             version=manifest.version,
+        )
+
+    if component.verifier == "comfy_extension_nodes":
+        from ..source_manager.install_jobs.comfy_extension_installer import (
+            probe_required_nodes,
+            resolve_custom_nodes_dir,
+            resolve_extension_source,
+        )
+
+        try:
+            source = resolve_extension_source(component_id)
+            target = resolve_custom_nodes_dir() / str(source["packageName"])
+        except Exception:
+            target = resolve_custom_nodes_dir() / component_id
+            source = {}
+        if not target.is_dir():
+            return Verification(
+                False,
+                True,
+                "not_installed",
+                f"{component.name} is not installed in ComfyUI custom_nodes.",
+                recommendation="install",
+                requires_user_interaction=True,
+            )
+        probe = probe_required_nodes()
+        if probe.get("ok"):
+            return Verification(
+                True,
+                False,
+                None,
+                f"{component.name} is installed and required nodes are registered.",
+                str(target),
+                details=(probe.get("message") or "",),
+            )
+        if not probe.get("available"):
+            return Verification(
+                False,
+                False,
+                "restart_required",
+                "Extension files are present, but ComfyUI must restart before nodes can be verified.",
+                str(target),
+                details=(probe.get("message") or "",),
+                recommendation="repair",
+                requires_user_interaction=True,
+            )
+        missing = ", ".join(probe.get("missing") or [])
+        return Verification(
+            False,
+            False,
+            "nodes_missing",
+            f"Extension installed, but required nodes were not registered: {missing}.",
+            str(target),
+            details=(probe.get("message") or "",),
+            recommendation="repair",
+            requires_user_interaction=True,
         )
 
     return Verification(False, False, "unsupported_verifier", "Verification is not supported.", recommendation="manual_help")

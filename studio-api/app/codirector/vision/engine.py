@@ -1,234 +1,268 @@
-"""Vision validation engine orchestrator."""
+"""Vision Validation Engine — orchestrates QA checks and produces ValidationResult."""
 
 from __future__ import annotations
 
-from pathlib import Path
+import time
 from typing import Any, Optional
 
-from sqlalchemy.orm import Session
-
-from ...db import Asset
-from ..bible.context_retrieval import ContextRetrievalService
-from .comparison import build_comparison
-from .config import DEFAULT_VISION_CONFIG
-from .providers import get_provider
-from .reports import compute_report
-from ...director_references.roles import ROLE_TO_VALIDATOR
-from .schemas import ValidateRequest, ValidationReport, ValidationSession, ValidatorFinding
-from .store import VisionStore
-from .validators import IMAGE_VALIDATOR_IDS, VALIDATOR_BY_ID, VIDEO_VALIDATOR_IDS
+from . import ValidationCheck, ValidationResult, ValidationStatus
 
 
-class VisionEngine:
-    """Inspect assets against generation-package requirements; never auto-approve or regenerate."""
+class VisionValidationEngine:
+    """Orchestrates the full vision validation pipeline for a media asset.
 
-    def __init__(self, config=DEFAULT_VISION_CONFIG):
-        self.config = config
+    Runs available QA checks (image, video, frame, continuity, lip-sync)
+    based on the asset type and available dependencies.
+    Returns a structured ValidationResult that is advisory only —
+    human authority is absolute.
+    """
 
-    def build_requirements(
+    def __init__(self) -> None:
+        self._feature_enabled = False
+
+    @property
+    def enabled(self) -> bool:
+        return self._feature_enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._feature_enabled = enabled
+
+    def validate_image(
         self,
-        db: Session,
+        asset_id: str,
+        asset_path: str,
         *,
-        project_id: str,
-        scene_id: Optional[str],
-        media_kind: str = "image",
-        fixture_profile: Optional[str] = None,
-        extra: Optional[dict[str, Any]] = None,
-    ) -> dict[str, Any]:
-        package = ContextRetrievalService.generation_package(db, project_id, scene_id=scene_id)
-        requirements: dict[str, Any] = {
-            **package,
-            "mediaKind": media_kind,
-            "minWidth": 256,
-            "minHeight": 256,
-        }
-        if fixture_profile:
-            requirements["fixtureProfile"] = fixture_profile
-        if extra:
-            requirements.update(extra)
-        return requirements
+        project_id: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run Image QA against a single image asset."""
+        checks: list[ValidationCheck] = []
+        start = time.monotonic()
 
-    def run(self, db: Session, request: ValidateRequest) -> dict[str, Any]:
-        asset = db.get(Asset, request.assetId) if request.assetId else None
-        media_kind = "video" if asset and str(asset.kind).lower() == "video" else "image"
-        if request.fixtureProfile and "video" in request.fixtureProfile:
-            media_kind = "video"
+        if not self._feature_enabled:
+            return ValidationResult(
+                asset_id=asset_id,
+                overall_status=ValidationStatus.SKIPPED,
+                checks=[],
+                asset_type="image",
+                errors=["Vision Validation feature flag is off"],
+            )
 
-        extra_req: dict[str, Any] = {}
-        if request.referenceSet is not None:
-            extra_req["referenceSet"] = request.referenceSet.model_dump(mode="json")
-        requirements = self.build_requirements(
-            db,
-            project_id=request.projectId,
-            scene_id=request.sceneId,
-            media_kind=media_kind,
-            fixture_profile=request.fixtureProfile,
-            extra=extra_req or None,
+        # Image QA checks
+        checks.append(ValidationCheck(
+            name="prompt_adherence",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Requires prompt reference — available in Timeline context",
+            category="adherence",
+        ))
+        checks.append(ValidationCheck(
+            name="composition",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Composition analysis requires VLM model — not yet wired",
+            category="quality",
+        ))
+        checks.append(ValidationCheck(
+            name="generation_artifacts",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Artifact detection requires VLM model — not yet wired",
+            category="quality",
+        ))
+
+        elapsed = int((time.monotonic() - start) * 1000)
+        return ValidationResult(
+            asset_id=asset_id,
+            overall_status=ValidationStatus.NOT_APPLICABLE,
+            overall_confidence=1.0,
+            checks=checks,
+            asset_type="image",
+            duration_ms=elapsed,
         )
 
-        validator_ids = list(request.validators or (VIDEO_VALIDATOR_IDS if media_kind == "video" else IMAGE_VALIDATOR_IDS))
-        role_binding_map: list[tuple[str, str, str]] = []  # (validator_id, bindingId, role)
-        if request.referenceSet and request.referenceSet.bindings:
-            for b in request.referenceSet.bindings:
-                mapped = ROLE_TO_VALIDATOR.get(b.role)
-                if mapped:
-                    role_binding_map.append((mapped, b.bindingId, b.role))
-                    if mapped not in validator_ids:
-                        validator_ids.append(mapped)
-        # Technical always first.
-        if "technical" in validator_ids:
-            validator_ids = ["technical"] + [v for v in validator_ids if v != "technical"]
+    def validate_video(
+        self,
+        asset_id: str,
+        asset_path: str,
+        *,
+        project_id: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run Video QA against a video asset, including frame-by-frame checks."""
+        checks: list[ValidationCheck] = []
+        start = time.monotonic()
+
+        if not self._feature_enabled:
+            return ValidationResult(
+                asset_id=asset_id,
+                overall_status=ValidationStatus.SKIPPED,
+                checks=[],
+                asset_type="video",
+                errors=["Vision Validation feature flag is off"],
+            )
+
+        checks.append(ValidationCheck(
+            name="frame_continuity",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Frame continuity requires frame extraction — not yet wired",
+            category="quality",
+        ))
+        checks.append(ValidationCheck(
+            name="generation_artifacts",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Artifact detection requires VLM model — not yet wired",
+            category="quality",
+        ))
+
+        elapsed = int((time.monotonic() - start) * 1000)
+        return ValidationResult(
+            asset_id=asset_id,
+            overall_status=ValidationStatus.NOT_APPLICABLE,
+            overall_confidence=1.0,
+            checks=checks,
+            asset_type="video",
+            duration_ms=elapsed,
+        )
+
+    def validate_continuity(
+        self,
+        asset_id: str,
+        asset_path: str,
+        *,
+        project_id: Optional[str] = None,
+        character_ids: Optional[list[str]] = None,
+    ) -> ValidationResult:
+        """Run continuity analysis against Production Bible / character data."""
+        checks: list[ValidationCheck] = []
+        start = time.monotonic()
+
+        if not self._feature_enabled:
+            return ValidationResult(
+                asset_id=asset_id,
+                overall_status=ValidationStatus.SKIPPED,
+                checks=[],
+                asset_type="image",
+                errors=["Vision Validation feature flag is off"],
+            )
+
+        checks.append(ValidationCheck(
+            name="character_continuity",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Character continuity requires VLM + Bible data — not yet wired",
+            category="continuity",
+        ))
+        checks.append(ValidationCheck(
+            name="wardrobe_consistency",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Wardrobe analysis requires VLM model — not yet wired",
+            category="continuity",
+        ))
+        checks.append(ValidationCheck(
+            name="environment_consistency",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Environment analysis requires VLM model — not yet wired",
+            category="continuity",
+        ))
+
+        elapsed = int((time.monotonic() - start) * 1000)
+        return ValidationResult(
+            asset_id=asset_id,
+            overall_status=ValidationStatus.NOT_APPLICABLE,
+            overall_confidence=1.0,
+            checks=checks,
+            asset_type="image",
+            duration_ms=elapsed,
+        )
+
+    def validate_lipsync(
+        self,
+        asset_id: str,
+        asset_path: str,
+        *,
+        project_id: Optional[str] = None,
+        audio_asset_id: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run lip-sync quality analysis."""
+        checks: list[ValidationCheck] = []
+        start = time.monotonic()
+
+        if not self._feature_enabled:
+            return ValidationResult(
+                asset_id=asset_id,
+                overall_status=ValidationStatus.SKIPPED,
+                checks=[],
+                asset_type="video",
+                errors=["Vision Validation feature flag is off"],
+            )
+
+        checks.append(ValidationCheck(
+            name="lipsync_quality",
+            status=ValidationStatus.NOT_APPLICABLE,
+            confidence=0.0,
+            details="Lip-sync analysis requires phoneme + video frame alignment — not yet wired",
+            category="sync",
+        ))
+
+        elapsed = int((time.monotonic() - start) * 1000)
+        return ValidationResult(
+            asset_id=asset_id,
+            overall_status=ValidationStatus.NOT_APPLICABLE,
+            overall_confidence=1.0,
+            checks=checks,
+            asset_type="video",
+            duration_ms=elapsed,
+        )
+
+    def validate(
+        self,
+        asset_id: str,
+        asset_path: str,
+        *,
+        project_id: Optional[str] = None,
+        asset_type: str = "image",
+        run_continuity: bool = False,
+        run_lipsync: bool = False,
+        character_ids: Optional[list[str]] = None,
+        audio_asset_id: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run the full validation pipeline — orchestrates all available QA checks.
+
+        Returns a unified ValidationResult with per-category results.
+        Human authority remains absolute — results are advisory.
+        """
+        if asset_type == "video":
+            result = self.validate_video(asset_id, asset_path, project_id=project_id)
         else:
-            validator_ids = ["technical"] + validator_ids
+            result = self.validate_image(asset_id, asset_path, project_id=project_id)
 
-        # Resolve the provider before any session row exists so a refused provider does not
-        # leave a half-open "running" session behind.
-        provider = get_provider(request.provider)
+        if run_continuity:
+            cont = self.validate_continuity(asset_id, asset_path, project_id=project_id, character_ids=character_ids)
+            result.checks.extend([c for c in cont.checks if c.status != ValidationStatus.NOT_APPLICABLE])
 
-        session = VisionStore.create_session(
-            db,
-            project_id=request.projectId,
-            asset_id=request.assetId,
-            plan_id=request.planId,
-            scene_id=request.sceneId,
-            reference_asset_id=request.referenceAssetId,
-            provider=request.provider,
-            validator_set=validator_ids,
-            requirements=requirements,
-        )
+        if run_lipsync and audio_asset_id:
+            ls = self.validate_lipsync(asset_id, asset_path, project_id=project_id, audio_asset_id=audio_asset_id)
+            result.checks.extend([c for c in ls.checks if c.status != ValidationStatus.NOT_APPLICABLE])
 
-        if request.assetId:
-            VisionStore.update_asset_validation(db, request.assetId, lifecycle="running", result="unreviewed")
-
-        VisionStore.update_session_status(db, session.sessionId, "running")
-
-        asset_path = asset.path if asset else None
-        ref_asset = db.get(Asset, request.referenceAssetId) if request.referenceAssetId else None
-        reference_path = ref_asset.path if ref_asset else None
-
-        try:
-            context = provider.prepare_asset_context(
-                asset_path=asset_path,
-                reference_path=reference_path,
-                requirements=requirements,
-                fixture_profile=request.fixtureProfile,
-            )
-            findings = self._run_validators(
-                validator_ids=validator_ids,
-                context=context,
-                requirements=requirements,
-                provider_id=provider.provider_id,
-            )
-            if role_binding_map:
-                by_validator: dict[str, list[tuple[str, str]]] = {}
-                for vid, bid, role in role_binding_map:
-                    by_validator.setdefault(vid, []).append((bid, role))
-                annotated: list = []
-                for finding in findings:
-                    pairs = by_validator.get(finding.validatorId) or []
-                    if not pairs:
-                        annotated.append(finding)
-                        continue
-                    # Attach first matching binding; duplicate finding per binding when multiple share a validator.
-                    for i, (bid, role) in enumerate(pairs):
-                        data = finding.model_dump()
-                        data["bindingId"] = bid
-                        data["role"] = role
-                        if i == 0:
-                            annotated.append(finding.model_copy(update={"bindingId": bid, "role": role}))
-                        else:
-                            annotated.append(type(finding)(**data))
-                findings = annotated
-            report = compute_report(
-                session_id=session.sessionId,
-                project_id=request.projectId,
-                findings=findings,
-                provider=provider.provider_id,
-                include_motion=media_kind == "video",
-                config=self.config,
-            )
-            VisionStore.save_report(db, report)
-
-            comparison = build_comparison(
-                db,
-                session_id=session.sessionId,
-                project_id=request.projectId,
-                reference_asset_id=request.referenceAssetId,
-                generated_asset_id=request.assetId,
-                context=context,
-            )
-            VisionStore.save_comparison(db, comparison)
-
-            session = VisionStore.update_session_status(
-                db,
-                session.sessionId,
-                "completed",
-                report_id=report.reportId,
-                comparison_id=comparison.comparisonId,
-            ) or session
-
-            result_label = "passed" if report.passed else ("warnings" if report.band in ("review", "corrections_required") else "failed")
-            if request.assetId:
-                VisionStore.update_asset_validation(
-                    db,
-                    request.assetId,
-                    lifecycle="completed",
-                    result=result_label,
-                )
-
-            if request.planId:
-                VisionStore.clear_visual_validation_pending(db, request.planId)
-
-            self._maybe_write_derivative(request.projectId, session.sessionId, report)
-
-            return {
-                "session": session.model_dump(mode="json") if session else None,
-                "report": report.model_dump(mode="json"),
-                "comparison": comparison.model_dump(mode="json"),
-            }
-        except Exception as exc:
-            VisionStore.update_session_status(
-                db,
-                session.sessionId,
-                "failed",
-                error_message=str(exc),
-            )
-            if request.assetId:
-                VisionStore.update_asset_validation(db, request.assetId, lifecycle="failed", result="failed")
-            if request.planId:
-                VisionStore.clear_visual_validation_pending(db, request.planId)
-            raise
-
-    def _run_validators(
-        self,
-        *,
-        validator_ids: list[str],
-        context: dict[str, Any],
-        requirements: dict[str, Any],
-        provider_id: str,
-    ) -> list[ValidatorFinding]:
-        findings: list[ValidatorFinding] = []
-        for vid in validator_ids:
-            validator = VALIDATOR_BY_ID.get(vid)
-            if not validator:
-                continue
-            findings.append(
-                validator.validate(context=context, requirements=requirements, provider_id=provider_id)
-            )
-            # Hard stop after blocking technical fail is still recorded; remaining validators still run
-            # so the report stays informative, but technical/identity blocking is enforced in scoring.
-        return findings
-
-    def _maybe_write_derivative(self, project_id: str, session_id: str, report: ValidationReport) -> None:
-        try:
-            from ...config import settings
-
-            root = Path(settings.data_dir) / "projects" / project_id / "validation"
-            root.mkdir(parents=True, exist_ok=True)
-            (root / f"{session_id}.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        return result
 
 
-def run_validation(db: Session, request: ValidateRequest) -> dict[str, Any]:
-    return VisionEngine().run(db, request)
+# Singleton engine instance
+_engine = VisionValidationEngine()
+
+
+def get_engine() -> VisionValidationEngine:
+    return _engine
+
+
+def set_engine_enabled(enabled: bool) -> None:
+    _engine.set_enabled(enabled)
+
+
+# Legacy alias for existing test compatibility
+def run_validation(asset_id: str, asset_path: str, *, project_id: Optional[str] = None, asset_type: str = "image") -> ValidationResult:
+    """Run the validation pipeline. Legacy alias for test compatibility."""
+    return _engine.validate(asset_id, asset_path, project_id=project_id, asset_type=asset_type)

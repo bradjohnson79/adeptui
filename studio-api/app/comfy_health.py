@@ -34,6 +34,8 @@ MODEL_COMPONENT_IDS: tuple[str, ...] = (
     "ltx_checkpoint",
     "wan_models",
     "ltx23_ic_lora_ingredients",
+    "zimage_models",
+    "krea2_models",
 )
 
 
@@ -131,7 +133,7 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
         payload["message"] = (
             f"ComfyUI is not reachable at {settings.comfy_url}. Start ComfyUI, then refresh."
         )
-        payload["models"] = model_component_states()
+        payload["models"] = await asyncio.to_thread(model_component_states)
         payload["missingModelComponentIds"] = [
             item["componentId"] for item in payload["models"] if not item["present"]
         ]
@@ -163,7 +165,8 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
                 "gaps cannot be detected."
             )
 
-    payload["models"] = model_component_states()
+    # Model disk verification is sync filesystem work — keep it off the event loop.
+    payload["models"] = await asyncio.to_thread(model_component_states)
     missing = [item["componentId"] for item in payload["models"] if not item["present"]]
     payload["missingModelComponentIds"] = missing
     missing_required = [

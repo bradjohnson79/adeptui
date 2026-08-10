@@ -9,7 +9,7 @@ import traceback
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -31,10 +31,15 @@ from .workflows import (
     build_ltx_scene_workflow,
     build_ltx_simple_i2v,
     build_wan_flf_workflow,
-    build_zimage_ref_workflow,
     customize_angle_prompts,
     lipsync_available_hint,
     views_for_tool,
+)
+from .workflows.lipsync_runtime import (
+    extract_output_path_from_history,
+    lipsync_no_output_error,
+    prepare_still_face_video,
+    run_latentsync_direct,
 )
 from .workflows.ltx_ingredients_compiler import (
     compile_ingredients_workflow,
@@ -52,7 +57,7 @@ logger = logging.getLogger(__name__)
 #: Job states that mean "an earlier process was still carrying this in memory".
 #: The queue is an in-process asyncio queue, so any row left in one of these at
 #: startup belongs to a process that is gone and will never touch it again.
-NON_TERMINAL_STATES: tuple[str, ...] = ("queued", "running")
+NON_TERMINAL_STATES: tuple[str, ...] = ("queued", "running", "cancelling", "cancel_requested")
 
 #: Recovery message written to a job the restart could not resume. It says the work
 #: stopped, not that it failed on its own merits, because those are different things.
@@ -86,10 +91,69 @@ class JobQueue:
         self._q: asyncio.Queue[str] = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._cancel: set[str] = set()
+        self._active_prompt: dict[str, str] = {}
+        self._heavy_local_active: Optional[str] = None
 
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
+
+    def is_cancelled(self, job_id: str) -> bool:
+        return job_id in self._cancel
+
+    def bind_prompt(self, job_id: str, prompt_id: str) -> None:
+        self._active_prompt[job_id] = prompt_id
+
+    def unbind_prompt(self, job_id: str) -> None:
+        self._active_prompt.pop(job_id, None)
+
+    async def _wait_comfy(
+        self,
+        job: Job,
+        prompt_id: str,
+        *,
+        on_progress: Any = None,
+    ) -> dict:
+        """Wait for Comfy with cancel observation + prompt binding."""
+        self.bind_prompt(job.id, prompt_id)
+        job.comfy_prompt_id = prompt_id
+
+        async def _progress(p: float, msg: str, stage: str | None = None) -> None:
+            # Never register successful progress once cancel was requested.
+            if job.id in self._cancel:
+                return
+            job.progress = p
+            job.message = msg
+            if stage:
+                job.stage = stage
+            job.updated_at = datetime.utcnow()
+            db = SessionLocal()
+            try:
+                row = db.get(Job, job.id)
+                if row:
+                    if row.status in ("cancelling", "cancel_requested", "cancelled", "cancel_failed_runtime_active"):
+                        return
+                    row.progress = p
+                    row.message = (msg or "")[:4000]
+                    if stage:
+                        row.stage = stage
+                    row.updated_at = datetime.utcnow()
+                    db.commit()
+            finally:
+                db.close()
+            if on_progress:
+                try:
+                    result = on_progress(p, msg)
+                    if hasattr(result, "__await__"):
+                        await result
+                except TypeError:
+                    pass
+
+        return await comfy.wait_for_prompt(
+            prompt_id,
+            on_progress=_progress,
+            cancel_check=lambda: job.id in self._cancel,
+        )
 
     async def recover_interrupted(self) -> dict[str, list[str]]:
         """Reconcile jobs an earlier process left non-terminal, before the loop starts.
@@ -174,6 +238,101 @@ class JobQueue:
     def cancel(self, job_id: str) -> None:
         self._cancel.add(job_id)
 
+    async def cancel_and_halt(self, job_id: str) -> dict:
+        """Verified deep cancel: cancelling → confirm Comfy stopped → cancelled.
+
+        Transitions to ``cancelled`` only after the prompt is confirmed absent from
+        Comfy running and pending queues (or there was no prompt yet). If the
+        prompt remains active after timeout → ``cancel_failed_runtime_active`` with
+        ``COMFY_CANCEL_NOT_CONFIRMED``. Idempotent for repeat cancel requests.
+        """
+        from .comfy_client import comfy
+
+        self._cancel.add(job_id)
+        prompt_id = self._active_prompt.get(job_id)
+        db = SessionLocal()
+        try:
+            job = db.get(Job, job_id)
+            if not job:
+                return {"ok": False, "error": "job_not_found"}
+            # Idempotent: already terminal cancel states
+            if job.status == "cancelled" and job.stage == "cancelled":
+                return {"ok": True, "alreadyCancelled": True, "promptId": job.comfy_prompt_id}
+            if not prompt_id and job.comfy_prompt_id:
+                prompt_id = job.comfy_prompt_id
+            job.status = "cancelling"
+            job.stage = "cancelling"
+            job.message = "Cancel requested — waiting for ComfyUI to confirm prompt stopped"
+            job.updated_at = datetime.utcnow()
+            from .video_runtime.job_model import merge_video_runtime_history
+
+            job.history_json = merge_video_runtime_history(
+                job.history_json,
+                {
+                    "stage": "cancelling",
+                    "cancelRequestedAt": datetime.utcnow().isoformat(),
+                    "promptId": prompt_id,
+                },
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        halt = await comfy.halt_prompt(prompt_id, confirm_timeout_sec=20.0)
+        confirmed = bool(halt.get("confirmedStopped"))
+        if confirmed:
+            self._set_status(
+                job_id,
+                "cancelled",
+                0,
+                "Cancelled — ComfyUI confirmed prompt is no longer active or queued",
+                stage="cancelled",
+                video_runtime_patch={
+                    "stage": "cancelled",
+                    "failureClass": "user_cancellation",
+                    "computeConsumed": bool(prompt_id),
+                    "halt": halt,
+                    "vramFullyReleased": False,
+                },
+            )
+            if self._heavy_local_active == job_id:
+                self._heavy_local_active = None
+            return {
+                "ok": True,
+                "status": "cancelled",
+                "promptId": prompt_id,
+                "halt": halt,
+                "confirmedStopped": True,
+            }
+
+        self._set_status(
+            job_id,
+            "cancel_failed_runtime_active",
+            0,
+            (
+                "Cancel failed — interrupt/delete sent but ComfyUI prompt remained "
+                "active or queued (COMFY_CANCEL_NOT_CONFIRMED). Manual Comfy restart may be required."
+            ),
+            stage="cancel_failed_runtime_active",
+            video_runtime_patch={
+                "stage": "cancel_failed_runtime_active",
+                "failureClass": "COMFY_CANCEL_NOT_CONFIRMED",
+                "errorCode": "COMFY_CANCEL_NOT_CONFIRMED",
+                "computeConsumed": True,
+                "halt": halt,
+                "retrySafe": False,
+                "settingsShouldChange": True,
+            },
+        )
+        return {
+            "ok": False,
+            "status": "cancel_failed_runtime_active",
+            "errorCode": "COMFY_CANCEL_NOT_CONFIRMED",
+            "promptId": prompt_id,
+            "halt": halt,
+            "confirmedStopped": False,
+        }
+
     async def _loop(self) -> None:
         while True:
             job_id = await self._q.get()
@@ -184,11 +343,57 @@ class JobQueue:
                     continue
                 await self._run_job(job_id)
             except Exception as exc:
-                self._set_status(job_id, "failed", 0, f"{exc}\n{traceback.format_exc()[-1500:]}")
+                from .comfy_client import JobCancelledError
+                from .video_runtime.failures import classify_exception, failure_payload
+
+                if isinstance(exc, JobCancelledError) or job_id in self._cancel:
+                    # Deep cancel is owned by cancel_and_halt — do not race it to
+                    # "cancelled" before Comfy confirms the prompt stopped.
+                    db = SessionLocal()
+                    try:
+                        row = db.get(Job, job_id)
+                        terminal = row and row.status in (
+                            "cancelled",
+                            "cancel_failed_runtime_active",
+                            "cancelling",
+                        )
+                    finally:
+                        db.close()
+                    if not terminal:
+                        # Cancel observed in-worker without API cancel_and_halt path.
+                        await self.cancel_and_halt(job_id)
+                    self._cancel.discard(job_id)
+                else:
+                    fc = classify_exception(exc)
+                    payload = failure_payload(fc, message=str(exc)[:500], compute_consumed=True)
+                    summary = str(exc).strip().splitlines()[0][:280] or "Job failed"
+                    detail = traceback.format_exc()[-1500:]
+                    self._set_status(
+                        job_id,
+                        "failed",
+                        0,
+                        f"{summary}\n\n--- details ---\n{detail}",
+                        video_runtime_patch={
+                            "stage": "failed",
+                            "failure": payload,
+                        },
+                    )
             finally:
+                self.unbind_prompt(job_id)
+                if self._heavy_local_active == job_id:
+                    self._heavy_local_active = None
                 self._q.task_done()
 
-    def _set_status(self, job_id: str, status: str, progress: float, message: str, output: str | None = None) -> None:
+    def _set_status(
+        self,
+        job_id: str,
+        status: str,
+        progress: float,
+        message: str,
+        output: str | None = None,
+        video_runtime_patch: dict | None = None,
+        stage: str | None = None,
+    ) -> None:
         db = SessionLocal()
         try:
             job = db.get(Job, job_id)
@@ -197,6 +402,12 @@ class JobQueue:
             job.status = status
             job.progress = progress
             job.message = message[:4000]
+            if video_runtime_patch:
+                from .video_runtime.job_model import merge_video_runtime_history
+
+                job.history_json = merge_video_runtime_history(job.history_json, video_runtime_patch)
+            if stage:
+                job.stage = stage
             # Infer coarse stage from message when not already set by callers
             low = (message or "").lower()
             if "prepar" in low or "load" in low:
@@ -235,10 +446,95 @@ class JobQueue:
             job.updated_at = datetime.utcnow()
             db.commit()
 
-            if job.kind == "render_scene":
+            if job.id in self._cancel:
+                job.status = "cancelled"
+                job.stage = "cancelled"
+                job.message = "Cancelled before execution"
+                db.commit()
+                return
+
+            # W47 / Law 27: Docker Local — wait for runtime/GPU; never silent substitute
+            try:
+                params = {}
+                if job.params_json:
+                    import json as _json
+
+                    params = _json.loads(job.params_json) if isinstance(job.params_json, str) else (job.params_json or {})
+                model_id = params.get("modelId") or params.get("activeModelId") or params.get("runtimeModelId")
+                if model_id and str(model_id).startswith("docker-runtime:"):
+                    from .docker_runtime.queue_hooks import ensure_docker_runtime_ready, reserve_vram, release_vram
+
+                    gate = ensure_docker_runtime_ready(str(model_id))
+                    if not gate.get("ok"):
+                        job.status = "queued"
+                        job.stage = str(gate.get("stage") or "waiting_for_runtime")
+                        job.message = str(gate.get("message") or "Waiting for Docker runtime")
+                        job.progress = 0.02
+                        job.updated_at = datetime.utcnow()
+                        hist = {}
+                        try:
+                            hist = _json.loads(job.history_json) if job.history_json else {}
+                        except Exception:
+                            hist = {}
+                        if not isinstance(hist, dict):
+                            hist = {}
+                        hist["dockerRuntimeGate"] = gate
+                        hist["noSilentFallback"] = True
+                        job.history_json = _json.dumps(hist)
+                        db.commit()
+                        return
+                    rid = str(gate.get("runtimeId") or "")
+                    vram = float(params.get("estimatedVramGb") or 0)
+                    if rid and vram:
+                        reserve_vram(rid, vram)
+                    # Attach provenance onto history for asset consumers
+                    hist = {}
+                    try:
+                        hist = _json.loads(job.history_json) if job.history_json else {}
+                    except Exception:
+                        hist = {}
+                    if not isinstance(hist, dict):
+                        hist = {}
+                    hist["dockerRuntimeProvenance"] = gate.get("provenance") or {
+                        "runtimeId": rid,
+                        "fallbackUsed": False,
+                    }
+                    job.history_json = _json.dumps(hist)
+                    job.message = "Docker runtime ready"
+                    db.commit()
+                    # release reservation when job finishes is best-effort below via finally pattern
+                    self._docker_vram_lease = (rid, vram)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+
+            if job.kind == "video_upscale":
+                # Honest deferred path — do not pretend SeedVR2 ran.
+                job.status = "failed"
+                job.stage = "failed"
+                job.message = (
+                    "video.upscale is deferred in M41 4.1A. The SeedVR2 worker path is not "
+                    "implemented; capabilityState=deferred. No compute was consumed."
+                )
+                from .video_runtime.job_model import merge_video_runtime_history
+
+                job.history_json = merge_video_runtime_history(
+                    job.history_json,
+                    {
+                        "failureClass": "workflow_invalid",
+                        "capabilityState": "deferred",
+                        "computeConsumed": False,
+                        "retrySafe": False,
+                    },
+                )
+                db.commit()
+                return
+
+            if job.kind in ("render_scene", "render_shot"):
                 await self._render_scene(db, job, project)
-            elif job.kind == "render_timeline":
-                await self._render_timeline(db, job, project)
+            elif job.kind in ("render_timeline", "batch_timeline"):
+                await self._render_timeline(db, job, project, batch=job.kind == "batch_timeline")
+            elif job.kind == "editor_mix":
+                await self._editor_mix(db, job, project)
             elif job.kind == "lipsync":
                 await self._lipsync(db, job, project)
             elif job.kind == "export":
@@ -247,10 +543,24 @@ class JobQueue:
                 await self._image_tool(db, job, project)
             elif job.kind == "dual_lipsync":
                 await self._dual_lipsync(db, job, project)
+            elif job.kind == "video_extend":
+                await self._video_extend_local(db, job, project)
             elif job.kind == "txt2vid":
-                await self._txt2vid(db, job, project)
+                # video.extend may have been queued as txt2vid historically — route local extend
+                params = self._job_params(job)
+                vr = params.get("videoRuntime") if isinstance(params.get("videoRuntime"), dict) else {}
+                if (params.get("mode") == "generative_continuation") or (
+                    isinstance(vr, dict) and vr.get("mode") == "video_extend"
+                ):
+                    await self._video_extend_local(db, job, project)
+                else:
+                    await self._txt2vid(db, job, project)
             elif job.kind in ("imagegen", "imagegen_edit"):
                 await self._imagegen(db, job, project)
+            elif job.kind == "magi_overlay_compose":
+                from .magi.composition.service import run_overlay_compose_job
+
+                run_overlay_compose_job(db, job)
             else:
                 raise RuntimeError(f"Unknown job kind {job.kind}")
         finally:
@@ -393,14 +703,45 @@ class JobQueue:
         db.commit()
         try:
             if is_fal_engine(scene.engine):
+                from .local_first import assert_fal_allowed
+
+                assert_fal_allowed(self._job_params(job), engine=scene.engine)
                 return await self._build_and_run_fal_scene(
                     db, project, scene, job, positive, negative, seed, plan
                 )
 
             length = self._frames_for_scene(scene, plan_fps)
             length, frame_clamped = clamp_frames(length, plan)
+            # WAN 14B dual-UNET is extremely heavy; keep length in a playable cert band
+            # (wan_builder also snaps to 4n+1) so jobs finish and still show camera motion.
+            if str(resolved_engine).lower() == "wan" and length > 33:
+                length = 33
+                frame_clamped = True
             steps = plan.steps
             width, height = plan_width, plan_height
+            if str(resolved_engine).lower() == "wan":
+                width = min(width, 832)
+                height = min(height, 480)
+
+            # TIMELINE_BATCH_LTX: when this render_scene job was submitted by the
+            # LTX Timeline adapter (timelineGeneration=True), override the
+            # scene-global prompt/duration/start frame with the per-batch
+            # values stored in job params. This makes the LTX render act on the
+            # specific BatchBlock instead of the whole scene (BATCH_ISOLATION).
+            params = self._job_params(job)
+            is_timeline_batch = bool(params.get("timelineGeneration"))
+            if is_timeline_batch:
+                bp = params.get("prompt")
+                if isinstance(bp, str) and bp:
+                    positive = bp
+                bd = params.get("duration")
+                if isinstance(bd, (int, float)) and bd > 0:
+                    frames = max(9, int(round(float(bd) * plan_fps)))
+                    length = max(9, ((frames - 1) // 8) * 8 + 1)
+                    length, frame_clamped = clamp_frames(length, plan)
+                bseed = params.get("seed")
+                if isinstance(bseed, int) and bseed >= 0:
+                    seed = bseed
 
             if plan.notes or frame_clamped:
                 bits = [
@@ -422,11 +763,50 @@ class JobQueue:
 
             prefix = f"studio/{project.id[:8]}_{scene.index}"
             params = self._job_params(job)
+            # TIMELINE_BATCH_LTX: per-batch output prefix so concurrent/sequential
+            # batch outputs never share a filename stem (traceability + no
+            # reliance on ComfyUI session counters for uniqueness).
+            if is_timeline_batch:
+                b_id = params.get("batchBlockId")
+                if b_id:
+                    prefix = f"{prefix}/batch_{str(b_id)[:8]}"
+            # TIMELINE_BATCH_LTX: override start frame with the per-batch
+            # startImageAssetId when present (BATCH_ISOLATION).
+            if is_timeline_batch:
+                b_start_id = params.get("startImageAssetId")
+                if b_start_id:
+                    b_start_asset = self._get_asset(db, b_start_id)
+                    if b_start_asset:
+                        start = await self._ensure_comfy_image(b_start_asset)
             use_ingredients = scene.engine != "wan" and wants_ingredients_ic_lora(
                 params, getattr(scene, "director_json", "") or ""
             )
 
-            if use_ingredients:
+            # M41 4.1B: WorkflowResolver selects leaf workflow — QueueWorker executes only.
+            from .video_runtime.workflow_resolver import resolve_from_scene_params
+            from .video_runtime.workflow_execute import build_leaf_graph, prepare_executable_graph
+            from .video_runtime.job_model import merge_video_runtime_history
+
+            intent = "shot_render" if job.kind == "render_shot" else "scene_render"
+            contract = resolve_from_scene_params(
+                engine=scene.engine,
+                start_asset_id=scene.start_asset_id,
+                middle_asset_id=scene.middle_asset_id,
+                end_asset_id=scene.end_asset_id,
+                audio_asset_id=scene.audio_asset_id,
+                wants_ingredients=use_ingredients,
+                paid_fal_approved=bool(params.get("paidFallbackApproved")),
+                intent=intent,
+            )
+            for d in contract.disclosures:
+                job.message = d
+            job.history_json = merge_video_runtime_history(
+                job.history_json,
+                {"workflowContract": contract.to_dict()},
+            )
+            db.commit()
+
+            if use_ingredients and contract.leaf_workflow_key == "ltx.ingredients_ic_lora":
                 dest, _provenance = await self._build_and_run_ingredients_scene(
                     db,
                     project,
@@ -447,12 +827,55 @@ class JobQueue:
                 db.commit()
                 return dest
 
-            if scene.engine == "wan":
-                wf = build_wan_flf_workflow(
-                    high_noise=settings.wan_high_noise,
-                    low_noise=settings.wan_low_noise,
-                    vae_name=settings.wan_vae,
-                    text_encoder=settings.wan_text_encoder,
+            if contract.leaf_workflow_key.startswith("wan."):
+                from .setup.paths import default_models_root
+                from .workflows.wan_encoder_contract import (
+                    WanEncoderContractError,
+                    assert_wan_text_encoder_contract,
+                )
+
+                try:
+                    roots = [default_models_root(), Path(settings.data_dir) / "models"]
+                    assert_wan_text_encoder_contract(
+                        settings.wan_text_encoder,
+                        search_roots=roots,
+                        require_file_probe=True,
+                    )
+                except WanEncoderContractError as exc:
+                    raise RuntimeError(f"WAN encoder contract failed (before UNET): {exc}") from exc
+                try:
+                    await comfy.free_memory(unload_models=True, free_memory=True)
+                except Exception:
+                    logging.getLogger(__name__).warning("Comfy free_memory before WAN failed", exc_info=True)
+
+            if contract.leaf_workflow_key in {"ltx.simple_i2v", "ltx.scene"} and not start:
+                raise RuntimeError(
+                    "Local LTX requires a start frame (I2V only). True local T2V is deferred."
+                )
+
+            async def on_progress(p: float, msg: str) -> None:
+                job.progress = p
+                job.message = msg
+                job.updated_at = datetime.utcnow()
+                db.commit()
+
+            async def _run_graph(wf: dict, workflow_key: str):
+                wf = prepare_executable_graph(contract, wf, enforce_certified_fingerprint=True)
+                prompt_id = await comfy.queue_prompt(wf, workflow_key=workflow_key)
+                job.comfy_prompt_id = prompt_id
+                self.bind_prompt(job.id, prompt_id)
+                db.commit()
+                return await self._wait_comfy(job, prompt_id, on_progress=on_progress)
+
+            # WAN three-frame: dual-segment FLF + stitch (middle never ignored).
+            if contract.leaf_workflow_key == "wan.three_frame":
+                if not (start and middle and end):
+                    raise RuntimeError("wan.three_frame requires start, middle, and end frames")
+                job.message = "WAN three-frame: segment start→middle"
+                db.commit()
+                wf_a = build_leaf_graph(
+                    contract,
+                    settings=settings,
                     positive=positive,
                     negative=negative,
                     width=width,
@@ -461,14 +884,49 @@ class JobQueue:
                     fps=plan_fps,
                     seed=seed,
                     start_image=start,
-                    end_image=end or middle,
-                    steps_high=steps // 2 or 2,
-                    steps_low=steps // 2 or 2,
+                    middle_image=middle,
+                    end_image=end,
+                    steps=steps,
                     filename_prefix=prefix,
+                    wan_segment="start_mid",
                 )
+                hist_a = await _run_graph(wf_a, "wan.three_frame")
+                files_a = comfy.find_output_files(hist_a)
+                if not files_a:
+                    raise RuntimeError("WAN three-frame segment start_mid produced no output")
+                job.message = "WAN three-frame: segment middle→end"
+                db.commit()
+                wf_b = build_leaf_graph(
+                    contract,
+                    settings=settings,
+                    positive=positive,
+                    negative=negative,
+                    width=width,
+                    height=height,
+                    length=length,
+                    fps=plan_fps,
+                    seed=seed,
+                    start_image=start,
+                    middle_image=middle,
+                    end_image=end,
+                    steps=steps,
+                    filename_prefix=prefix,
+                    wan_segment="mid_end",
+                )
+                hist_b = await _run_graph(wf_b, "wan.three_frame")
+                files_b = comfy.find_output_files(hist_b)
+                if not files_b:
+                    raise RuntimeError("WAN three-frame segment mid_end produced no output")
+                dest_dir = settings.data_dir / "projects" / project.id / "renders"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}.mp4"
+                stitch_videos([files_a[0], files_b[0]], dest, fps=plan_fps)
+                history = hist_b
+                files = [dest]
             else:
-                wf = build_ltx_scene_workflow(
-                    checkpoint=settings.ltx_checkpoint,
+                wf = build_leaf_graph(
+                    contract,
+                    settings=settings,
                     positive=positive,
                     negative=negative,
                     width=width,
@@ -483,21 +941,12 @@ class JobQueue:
                     steps=steps,
                     filename_prefix=prefix,
                 )
+                workflow_key = contract.leaf_workflow_key
 
-            async def on_progress(p: float, msg: str) -> None:
-                job.progress = p
-                job.message = msg
-                job.updated_at = datetime.utcnow()
-                db.commit()
+                def _simple_i2v_workflow() -> dict:
+                    from .workflows.ltx_builder import build_ltx_simple_i2v
 
-            try:
-                prompt_id = await comfy.queue_prompt(wf)
-            except Exception as first_err:
-                # LTX Director fallback to simple I2V if we have a start frame
-                if scene.engine == "ltx" and start:
-                    job.message = f"Director submit failed, falling back to simple I2V: {first_err}"
-                    db.commit()
-                    wf = build_ltx_simple_i2v(
+                    return build_ltx_simple_i2v(
                         checkpoint=settings.ltx_checkpoint,
                         positive=positive,
                         negative=negative,
@@ -509,22 +958,62 @@ class JobQueue:
                         start_image=start,
                         steps=steps,
                         filename_prefix=prefix,
+                        text_encoder=settings.ltx_text_encoder,
                     )
-                    prompt_id = await comfy.queue_prompt(wf)
-                else:
-                    raise
 
-            job.comfy_prompt_id = prompt_id
-            db.commit()
-            history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
-            files = comfy.find_output_files(history)
-            if not files:
-                raise RuntimeError("ComfyUI finished but no output video was found")
+                try:
+                    history = await _run_graph(wf, workflow_key)
+                except Exception as first_err:
+                    if workflow_key == "ltx.scene" and start:
+                        job.message = f"Director submit failed, falling back to simple I2V: {first_err}"
+                        db.commit()
+                        contract.leaf_workflow_key = "ltx.simple_i2v"
+                        wf = _simple_i2v_workflow()
+                        history = await _run_graph(wf, "ltx.simple_i2v")
+                    else:
+                        raise
 
-            dest_dir = settings.data_dir / "projects" / project.id / "renders"
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
-            shutil.copy2(files[0], dest)
+                if job.id in self._cancel:
+                    from .comfy_client import JobCancelledError
+
+                    raise JobCancelledError("Cancelled by user — discarding ComfyUI output")
+                files = comfy.find_output_files(history)
+                if not files:
+                    raise RuntimeError("ComfyUI finished but no output video was found")
+
+                dest_dir = settings.data_dir / "projects" / project.id / "renders"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest = dest_dir / f"scene_{scene.index}_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+                shutil.copy2(files[0], dest)
+
+            from .video_runtime.output_gate import maybe_create_poster, maybe_create_proxy, validate_video_output
+
+            gate = validate_video_output(dest, asset_registered=False)
+            if not gate.passed:
+                job.status = "failed"
+                job.stage = gate.status
+                job.message = gate.message[:4000]
+                from .video_runtime.job_model import merge_video_runtime_history
+
+                job.history_json = merge_video_runtime_history(
+                    job.history_json, {"outputGate": gate.to_dict()}
+                )
+                db.commit()
+                raise RuntimeError(gate.message)
+            poster = maybe_create_poster(dest)
+            proxy = maybe_create_proxy(dest)
+            if proxy and proxy != dest:
+                from .video_runtime.job_model import merge_video_runtime_history
+
+                job.history_json = merge_video_runtime_history(
+                    job.history_json,
+                    {
+                        "outputGate": gate.to_dict(),
+                        "posterPath": str(poster) if poster else None,
+                        "proxyPath": str(proxy),
+                        "masterPath": str(dest),
+                    },
+                )
 
             # Optional mux scene audio if not already in video
             audio_asset = self._get_asset(db, scene.audio_asset_id)
@@ -537,6 +1026,76 @@ class JobQueue:
                     pass
 
             scene.output_path = str(dest)
+            # TIMELINE_BATCH_LTX: for Timeline batches, register the output as
+            # a project Asset and record its id in job params so the LTX
+            # adapter's collect_result can surface outputAssetIds to the W46
+            # watcher, which calls apply_shared_completion to bind the result
+            # to the correct BatchBlock. Do NOT leave scene.output_path as the
+            # authoritative batch output (that would race batch-level binding).
+            if is_timeline_batch:
+                try:
+                    out_asset = Asset(
+                        id=str(uuid4()),
+                        project_id=project.id,
+                        kind="video",
+                        filename=dest.name,
+                        path=str(dest),
+                        tag=f"batch_{params.get('batchBlockId', 'tl')[:8]}",
+                    )
+                    db.add(out_asset)
+                    db.commit()
+                    params = {**params, "outputAssetIds": [out_asset.id]}
+                    job.params_json = json.dumps(params)
+                    db.commit()
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "Timeline batch output asset registration failed", exc_info=True
+                    )
+            # M3.0h: persist two-stage local provenance + start-frame binding proof.
+            try:
+                from .local_first import local_first_provenance
+
+                bind = {
+                    "startFrameAssetId": scene.start_asset_id,
+                    "renderSceneJobId": job.id,
+                    "ltxWorkflowInputBinding": {
+                        "assetId": scene.start_asset_id,
+                        "comfyImageName": start,
+                        "role": "start_frame",
+                    },
+                    "engine": scene.engine,
+                    "comfyPromptId": job.comfy_prompt_id,
+                    "outputPath": str(dest),
+                }
+                start_hash = None
+                start_asset = self._get_asset(db, scene.start_asset_id)
+                if start_asset and start_asset.path and Path(start_asset.path).is_file():
+                    import hashlib
+
+                    h = hashlib.sha256()
+                    with open(start_asset.path, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    start_hash = h.hexdigest()
+                    bind["startFrameFileHash"] = start_hash
+                provenance = local_first_provenance(
+                    start_frame_provider="comfyui" if scene.start_asset_id else None,
+                    start_frame_model=str((params.get("startFrameModel") or params.get("still_model") or "")),
+                    video_provider="comfyui",
+                    video_model="ltx-2.3" if scene.engine == "ltx" else scene.engine,
+                    paid_provider_used=False,
+                    current_job_fal_submission_count=0,
+                )
+                job.params_json = json.dumps(
+                    {
+                        **params,
+                        "localFirstProvenance": provenance,
+                        "ltxStartFrameBinding": bind,
+                        "executionClass": "REAL_LOCAL_EXECUTION",
+                    }
+                )
+            except Exception:
+                pass
             db.commit()
             return dest
         finally:
@@ -666,6 +1225,7 @@ class JobQueue:
                 filename_prefix=prefix,
                 reference_prompt=refs.get("reference_prompt") or "",
                 source_labels=refs.get("source_asset_ids") or [],
+                text_encoder=settings.ltx_text_encoder,
             )
         except (IcLoraError, ReferenceError) as exc:
             job.status = "failed"
@@ -694,14 +1254,15 @@ class JobQueue:
             job.updated_at = datetime.utcnow()
             db.commit()
 
-        prompt_id = await comfy.queue_prompt(compiled["workflow"])
-        job.comfy_prompt_id = prompt_id
+        prompt_id = await comfy.queue_prompt(
+            compiled["workflow"], workflow_key="ltx.ingredients_ic_lora"
+        )
         provenance["comfy_prompt_id"] = prompt_id
         job.history_json = json.dumps(provenance)
         job.params_json = json.dumps({**params, "ic_lora_provenance": provenance})
         db.commit()
 
-        history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
+        history = await self._wait_comfy(job, prompt_id, on_progress=on_progress)
         files = comfy.find_output_files(history)
         if not files:
             raise RuntimeError("ComfyUI finished but no Ingredients IC-LoRA output was found")
@@ -783,8 +1344,8 @@ class JobQueue:
         api_key = get_secret("fal_api_key")
         if not api_key:
             raise RuntimeError(
-                "fal.ai API key not configured. Open Advanced → fal.ai API key, paste your key from "
-                "https://fal.ai/dashboard/keys, then retry."
+                "Hosted AI Provider credential not configured for fal.ai. Open Setup → AI Providers "
+                "(Kie.ai · WaveSpeed.ai · fal.ai), connect a key, then retry."
             )
 
         start_asset = self._get_asset(db, scene.start_asset_id)
@@ -861,7 +1422,23 @@ class JobQueue:
         path = await self._build_and_run_scene(db, project, scene, job)
         self._set_status(job.id, "done", 1.0, "Scene render complete", str(path))
 
-    async def _render_timeline(self, db: Session, job: Job, project: Project) -> None:
+    async def _render_timeline(
+        self, db: Session, job: Job, project: Project, *, batch: bool = False
+    ) -> None:
+        """Certified orchestration: director.timeline_render / director.batch_timeline."""
+        from .video_runtime.job_model import merge_video_runtime_history
+        from .video_runtime.workflow_resolver import resolve_workflow
+
+        orch_intent = "batch_timeline" if batch else "timeline_render"
+        try:
+            orch = resolve_workflow(orch_intent, engine="director")
+            job.history_json = merge_video_runtime_history(
+                job.history_json, {"workflowContract": orch.to_dict()}
+            )
+            db.commit()
+        except Exception:
+            pass
+
         scenes = (
             db.query(Scene)
             .filter(Scene.project_id == project.id)
@@ -877,7 +1454,19 @@ class JobQueue:
                 self._set_status(job.id, "cancelled", i / len(scenes), "Cancelled")
                 return
             job.progress = i / max(1, len(scenes))
-            job.message = f"Rendering scene {i + 1}/{len(scenes)} ({scene.engine})"
+            # batch_timeline always (re)generates; timeline_render skips scenes with output
+            if (
+                not batch
+                and scene.output_path
+                and Path(scene.output_path).is_file()
+            ):
+                job.message = f"Reusing scene {i + 1}/{len(scenes)} output"
+                db.commit()
+                outputs.append(Path(scene.output_path))
+                continue
+            job.message = (
+                f"{'Batch' if batch else 'Rendering'} scene {i + 1}/{len(scenes)} ({scene.engine})"
+            )
             job.updated_at = datetime.utcnow()
             db.commit()
 
@@ -908,46 +1497,269 @@ class JobQueue:
         stitch_videos(outputs, final, fps=project.fps)
         self._set_status(job.id, "done", 1.0, "Timeline render complete", str(final))
 
-    async def _lipsync_scene(self, db: Session, project: Project, scene: Scene) -> Path | None:
+    async def _editor_mix(self, db: Session, job: Job, project: Project) -> None:
+        """M3.2g Phase 6: mux Editor audio stems onto primary video; register Asset."""
+        from .editor_mix import (
+            default_primary_video,
+            mix_editor_onto_video,
+            new_mix_output_path,
+            resolve_editor_path_factory,
+        )
+        from .editor_sequences import EditorProjectRow, _row_to_editor
+
+        params = self._job_params(job)
+        job.message = "Loading Editor tracks"
+        job.progress = 0.1
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
+        ed_row = (
+            db.query(EditorProjectRow)
+            .filter(EditorProjectRow.project_id == project.id)
+            .first()
+        )
+        if not ed_row:
+            raise RuntimeError("No Editor project for this project; add clips before editor_mix")
+        editor_data = _row_to_editor(ed_row)
+
+        primary = default_primary_video(db, project.id, editor_data, params)
+        if primary is None:
+            raise RuntimeError(
+                "No primary video for editor_mix; render a timeline/scene first "
+                "or pass primary_video_path"
+            )
+
+        job.message = "Mixing Editor stems"
+        job.progress = 0.4
+        db.commit()
+
+        out_path = new_mix_output_path(project.id, settings.data_dir)
+        resolve = resolve_editor_path_factory(db, project.id)
+        result = mix_editor_onto_video(
+            primary_video=primary,
+            editor_data=editor_data,
+            out_path=out_path,
+            resolve_path=resolve,
+        )
+
+        meta = {
+            **result.prompt_meta,
+            "jobId": job.id,
+            "projectId": project.id,
+            "editorId": ed_row.id,
+        }
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project.id,
+            tag="editor_mix",
+            kind="video",
+            filename=out_path.name,
+            path=str(out_path),
+            comfy_name="",
+            scope="project",
+            prompt_meta_json=json.dumps(meta),
+            labels_json=json.dumps(["editor_mix", "final-mix"]),
+            production_approval="none",
+        )
+        db.add(asset)
+        db.flush()
+        try:
+            from .asset_graph import add_edge
+
+            for stem in result.stems_used:
+                if stem.asset_id and db.get(Asset, stem.asset_id):
+                    add_edge(db, asset.id, stem.asset_id, relation="uses_audio")
+        except Exception:
+            pass
+        job.params_json = json.dumps({**params, "output_asset_id": asset.id})
+        db.commit()
+
+        stem_n = len(result.stems_used)
+        skip_n = len(result.skipped)
+        msg = f"Editor mix complete ({stem_n} stem(s)"
+        if skip_n:
+            msg += f", {skip_n} skipped"
+        msg += ")"
+        self._set_status(job.id, "done", 1.0, msg, str(out_path))
+
+    async def _lipsync_scene(
+        self, db: Session, project: Project, scene: Scene, job: Job | None = None
+    ) -> Path | None:
         if not scene.output_path or not Path(scene.output_path).exists():
             raise RuntimeError("Scene has no rendered video for lip sync")
         audio_asset = self._get_asset(db, scene.lipsync_audio_asset_id or scene.audio_asset_id)
         if not audio_asset:
             raise RuntimeError("No lip sync audio asset")
 
-        # Validate LatentSync node exists
+        # M41 4.1B-L L-10B: resolve Certified lipsync contract before any builder work.
+        from .video_runtime.workflow_resolver import resolve_workflow
+        from .video_runtime.job_model import merge_video_runtime_history
+
+        lipsync_contract = resolve_workflow(
+            "lipsync",
+            present_inputs={
+                "audio_asset_id": audio_asset.id,
+                "video": True,
+            },
+        )
+        if job is not None:
+            job.history_json = merge_video_runtime_history(
+                job.history_json,
+                {"workflowContract": lipsync_contract.to_dict()},
+            )
+            job.message = f"lipsync → {lipsync_contract.leaf_workflow_key}@{lipsync_contract.leaf_workflow_version}"
+            db.commit()
+
+        # Probe installed LatentSync node (hay86: D_LatentSyncNode; legacy: LatentSyncNode)
+        from .workflows.lipsync_builder import preferred_lipsync_node
+
+        node_class: str | None = None
         try:
             import httpx
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                r = await client.get(f"{settings.comfy_url}/object_info/LatentSyncNode")
-                if r.status_code != 200:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                available: set[str] = set()
+                for candidate in ("D_LatentSyncNode", "LatentSyncNode"):
+                    r = await client.get(f"{settings.comfy_url}/object_info/{candidate}")
+                    if r.status_code == 200:
+                        payload = r.json() or {}
+                        if candidate in payload or payload:
+                            available.add(candidate)
+                node_class = preferred_lipsync_node(available)
+                if not node_class:
                     raise RuntimeError(lipsync_available_hint())
+        except RuntimeError:
+            raise
         except Exception as exc:
             raise RuntimeError(str(exc)) from exc
 
-        video_name = await comfy.upload_file_copy(Path(scene.output_path), filename=Path(scene.output_path).name)
-        audio_name = await self._ensure_comfy_file(audio_asset)
-        plan = resolve_render_plan(project)
-        wf = build_latentsync_workflow(
-            video_path=str(settings.comfy_input_dir / video_name.replace("/", "\\")),
-            audio_path=str(settings.comfy_input_dir / (audio_name or "").replace("/", "\\")),
-            filename_prefix=f"studio/{project.id[:8]}_lipsync_{scene.index}",
-            custom_width=plan.lipsync_size,
-            custom_height=plan.lipsync_size,
-            inference_steps=plan.lipsync_steps,
+        video_source = Path(scene.output_path)
+        job_params = self._job_params(job) if job else {}
+        prefer_still_face = bool(
+            os.environ.get("STUDIO_LIPSYNC_PREFER_STILL_FACE") == "1"
+            or job_params.get("prefer_still_face")
+            or "prefer_still_face" in (getattr(job, "message", "") or "").lower()
         )
-        # Prefer relative paths for VHS loaders
-        wf["1"]["inputs"]["video"] = str(settings.comfy_input_dir / video_name.replace("/", "\\"))
-        wf["2"]["inputs"]["audio_file"] = audio_name
+        for metadata_text in (
+            getattr(scene, "director_json", ""),
+            getattr(scene, "continuity_json", ""),
+        ):
+            try:
+                metadata = json.loads(metadata_text or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metadata = {}
+            if isinstance(metadata, dict) and metadata.get("prefer_still_face"):
+                prefer_still_face = True
+            if isinstance(metadata, dict):
+                image_id = (
+                    metadata.get("face_asset_id")
+                    or metadata.get("image_asset_id")
+                    or metadata.get("start_asset_id")
+                )
+                if image_id and not scene.start_asset_id:
+                    scene.start_asset_id = image_id
 
-        prompt_id = await comfy.queue_prompt(wf)
-        history = await comfy.wait_for_prompt(prompt_id)
-        files = comfy.find_output_files(history)
-        if not files:
-            raise RuntimeError("Lip sync produced no output")
-        dest = Path(scene.output_path).with_name(Path(scene.output_path).stem + "_lipsync.mp4")
-        shutil.copy2(files[0], dest)
+        if prefer_still_face:
+            still_asset = self._get_asset(db, scene.start_asset_id)
+            if still_asset and still_asset.kind == "image" and Path(still_asset.path).is_file():
+                still_dest = (
+                    settings.data_dir
+                    / "projects"
+                    / project.id
+                    / "renders"
+                    / f"scene_{scene.index}_lipsync_still_{uuid.uuid4().hex[:8]}.mp4"
+                )
+                video_source = prepare_still_face_video(
+                    image_path=Path(still_asset.path),
+                    audio_path=Path(audio_asset.path),
+                    dest=still_dest,
+                    fps=getattr(project, "fps", 25) or 25,
+                )
+
+        async def _run_once(source: Path) -> Path:
+            v_name = await comfy.upload_file_copy(source, filename=source.name)
+            a_name = await self._ensure_comfy_file(audio_asset)
+            v_abs = str(settings.comfy_input_dir / v_name.replace("/", "\\"))
+            a_abs = str(settings.comfy_input_dir / (a_name or "").replace("/", "\\"))
+            graph = build_latentsync_workflow(
+                video_path=v_abs,
+                audio_path=a_name or a_abs,
+                filename_prefix=f"studio/{project.id[:8]}_lipsync_{scene.index}",
+                custom_width=plan.lipsync_size,
+                custom_height=plan.lipsync_size,
+                inference_steps=plan.lipsync_steps,
+                node_class=node_class,
+                seed=int(uuid.uuid4().int % 2_147_483_647),
+            )
+            if node_class == "LatentSyncNode":
+                graph["1"]["inputs"]["video"] = v_abs
+                graph["2"]["inputs"]["audio_file"] = a_name
+            elif node_class == "D_LatentSyncNode":
+                graph["1"]["inputs"]["audio"] = a_name or a_abs
+                graph["2"]["inputs"]["video_path"] = v_abs
+            pid = await comfy.queue_prompt(graph, workflow_key="lipsync.latentsync")
+            hist = await self._wait_comfy(job, pid)
+            found = comfy.find_output_files(hist)
+            out_dest = Path(scene.output_path).with_name(Path(scene.output_path).stem + "_lipsync.mp4")
+            if found:
+                shutil.copy2(found[0], out_dest)
+                return out_dest
+            recovered = extract_output_path_from_history(hist)
+            if recovered:
+                shutil.copy2(recovered, out_dest)
+                return out_dest
+            raise lipsync_no_output_error(hist)
+
+        plan = resolve_render_plan(project)
+        use_direct = os.environ.get("STUDIO_LIPSYNC_DIRECT", "").strip() in {"1", "true", "yes"} or bool(
+            job_params.get("direct_latentsync")
+        )
+
+        async def _direct(source: Path) -> Path:
+            out_dest = Path(scene.output_path).with_name(Path(scene.output_path).stem + "_lipsync.mp4")
+            return await asyncio.to_thread(
+                run_latentsync_direct,
+                video_path=source,
+                audio_path=Path(audio_asset.path),
+                dest=out_dest,
+                seed=int(uuid.uuid4().int % 2_147_483_647),
+            )
+
+        try:
+            dest = await (_direct(video_source) if use_direct else _run_once(video_source))
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            face_needed = "no detectable face" in msg or "no face" in msg or "produced no output" in msg or "no discoverable output" in msg
+            still_asset = self._get_asset(db, scene.start_asset_id or job_params.get("face_asset_id"))
+            if (
+                face_needed
+                and not prefer_still_face
+                and still_asset
+                and still_asset.kind == "image"
+                and Path(still_asset.path).is_file()
+            ):
+                still_dest = (
+                    settings.data_dir
+                    / "projects"
+                    / project.id
+                    / "renders"
+                    / f"scene_{scene.index}_lipsync_still_{uuid.uuid4().hex[:8]}.mp4"
+                )
+                retry_source = prepare_still_face_video(
+                    image_path=Path(still_asset.path),
+                    audio_path=Path(audio_asset.path),
+                    dest=still_dest,
+                    fps=getattr(project, "fps", 25) or 25,
+                )
+                try:
+                    dest = await (_direct(retry_source) if use_direct else _run_once(retry_source))
+                except RuntimeError:
+                    dest = await _direct(retry_source)
+            elif "produced no output" in msg or "no discoverable output" in msg or "execution_success" in msg:
+                # Comfy node may return a stale cached path; fall back to direct inference.
+                dest = await _direct(video_source)
+            else:
+                raise
         scene.lipsync_output_path = str(dest)
         db.commit()
         return dest
@@ -956,14 +1768,96 @@ class JobQueue:
         scene = db.get(Scene, job.scene_id) if job.scene_id else None
         if not scene:
             raise RuntimeError("Scene not found")
-        path = await self._lipsync_scene(db, project, scene)
+        path = await self._lipsync_scene(db, project, scene, job)
+        if path:
+            self._register_lipsync_asset(db, project, scene, Path(path), job)
         self._set_status(job.id, "done", 1.0, "Lip sync complete", str(path) if path else None)
 
-    async def _image_tool(self, db: Session, job: Job, project: Project) -> None:
+    def _register_lipsync_asset(
+        self,
+        db: Session,
+        project: Project,
+        scene: Scene,
+        dest: Path,
+        job: Job,
+    ) -> Asset | None:
+        """Register a real lipsync MP4 into the project library with lineage."""
+        if not dest.is_file() or dest.stat().st_size <= 0:
+            return None
+        existing = (
+            db.query(Asset)
+            .filter(Asset.project_id == project.id, Asset.path == str(dest))
+            .first()
+        )
+        if existing:
+            return existing
+        parent_id = None
         try:
-            payload = json.loads(job.message or "{}")
+            payload = json.loads(job.params_json or "{}")
         except Exception:
             payload = {}
+        face_id = payload.get("face_asset_id") or payload.get("faceAssetId")
+        audio_id = (
+            payload.get("audio_asset_id")
+            or payload.get("audioAssetId")
+            or scene.lipsync_audio_asset_id
+            or scene.audio_asset_id
+        )
+        if face_id and db.get(Asset, face_id):
+            parent_id = str(face_id)
+        meta = {
+            "op": "lipsync",
+            "sceneId": scene.id,
+            "sceneIndex": scene.index,
+            "sourceVideo": scene.output_path,
+            "audioAssetId": audio_id,
+            "faceAssetId": face_id,
+            "jobId": job.id,
+            "provider": "latentsync",
+        }
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project.id,
+            tag=f"scene_{scene.index}_lipsync",
+            kind="video",
+            filename=dest.name,
+            path=str(dest),
+            comfy_name="",
+            scope="project",
+            parent_asset_id=parent_id,
+            prompt_meta_json=json.dumps(meta),
+            labels_json=json.dumps(["lipsync", "final-candidate", f"scene-{scene.index}"]),
+            production_approval="none",
+        )
+        db.add(asset)
+        db.flush()
+        try:
+            from .asset_graph import add_edge
+
+            if audio_id and db.get(Asset, audio_id):
+                add_edge(db, asset.id, str(audio_id), relation="uses_audio")
+            if parent_id:
+                add_edge(db, asset.id, parent_id, relation="derived_from")
+        except Exception:
+            logging.getLogger(__name__).debug("lipsync lineage edges skipped", exc_info=True)
+        project.updated_at = datetime.utcnow()
+        db.commit()
+        return asset
+
+    async def _image_tool(self, db: Session, job: Job, project: Project) -> None:
+        # Prefer params_json — job.message is overwritten with status/error text during execution.
+        payload: dict = {}
+        try:
+            payload = json.loads(job.params_json or "{}") or {}
+        except Exception:
+            payload = {}
+        if not payload.get("source_asset_id"):
+            try:
+                msg_payload = json.loads(job.message or "{}") or {}
+                if isinstance(msg_payload, dict) and msg_payload.get("source_asset_id"):
+                    payload = msg_payload
+            except Exception:
+                pass
         source_id = payload.get("source_asset_id")
         char_name = (payload.get("character_name") or "character").strip().lower()
         char_name = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in char_name) or "character"
@@ -990,6 +1884,7 @@ class JobQueue:
             views = views_for_tool("character_sheet")
 
         created_paths: list[str] = []
+        view_assets: dict[str, dict[str, str]] = {}
         for i, view in enumerate(views):
             if job.id in self._cancel:
                 self._set_status(job.id, "cancelled", i / len(views), "Cancelled")
@@ -1006,12 +1901,18 @@ class JobQueue:
 
             view_seed = seed if seed >= 0 else (abs(hash(f"{project.id}:{view['key']}")) % (2**31))
             prefix = f"studio/{project.id[:8]}_{job.kind}_{view['key']}"
-            wf = build_zimage_ref_workflow(
-                unet_name=settings.zimage_unet,
-                clip_name=settings.zimage_clip,
-                vae_name=settings.zimage_vae,
-                clip_vision_name=settings.zimage_clip_vision,
-                reference_image=ref,
+            from .image_runtime.contract import resolve_image_workflow
+            from .image_runtime.workflow_execute import build_leaf_graph
+
+            sheet_contract = resolve_image_workflow(
+                "image.edit",
+                engine="zimage",
+                force_workflow_key="zimage.ref_edit",
+                allow_draft=True,
+            )
+            wf = build_leaf_graph(
+                sheet_contract,
+                settings=settings,
                 prompt=prompt,
                 width=width,
                 height=height,
@@ -1019,11 +1920,15 @@ class JobQueue:
                 steps=settings.zimage_steps,
                 cfg=settings.zimage_cfg,
                 filename_prefix=prefix,
+                reference_image=ref,
             )
-            prompt_id = await comfy.queue_prompt(wf)
-            job.comfy_prompt_id = prompt_id
+            from .image_runtime.workflow_execute import legacy_comfy_workflow_key
+
+            prompt_id = await comfy.queue_prompt(
+                wf, workflow_key=legacy_comfy_workflow_key("zimage.ref_edit")
+            )
             db.commit()
-            history = await comfy.wait_for_prompt(prompt_id)
+            history = await self._wait_comfy(job, prompt_id)
             files = comfy.find_output_files(history)
             if not files:
                 raise RuntimeError(f"No output for {view['label']}")
@@ -1054,6 +1959,41 @@ class JobQueue:
             db.add(asset)
             db.commit()
             created_paths.append(str(dest))
+            view_assets[str(view["key"])] = {
+                "assetId": asset_id,
+                "tag": tag,
+                "path": str(dest),
+                "label": view.get("label") or view["key"],
+            }
+
+        # Persist role-mappable outputs for Character Creator visual sheet attach
+        try:
+            from .workflows.image_tools import CHARACTER_SHEET_ROLE_MAP
+
+            role_assets = {
+                CHARACTER_SHEET_ROLE_MAP[k]: v["assetId"]
+                for k, v in view_assets.items()
+                if k in CHARACTER_SHEET_ROLE_MAP
+            }
+        except Exception:
+            role_assets = {}
+        params = {}
+        try:
+            params = json.loads(job.params_json or "{}") or {}
+        except Exception:
+            params = {}
+        params.update(
+            {
+                "output_asset_id": next(iter(view_assets.values()), {}).get("assetId"),
+                "output_asset_ids": [v["assetId"] for v in view_assets.values()],
+                "view_assets": view_assets,
+                "role_assets": role_assets,
+                "character_name": char_name,
+                "tool": job.kind,
+            }
+        )
+        job.params_json = json.dumps(params)
+        db.commit()
 
         summary = f"Created {len(created_paths)} images as @{char_name}_* assets"
         self._set_status(job.id, "done", 1.0, summary, created_paths[0] if created_paths else None)
@@ -1155,10 +2095,12 @@ class JobQueue:
                     },
                 }
 
-            prompt_id = await comfy.queue_prompt(wf)
-            job.comfy_prompt_id = prompt_id
+            prompt_id = await comfy.queue_prompt(
+                wf,
+                workflow_key="lipsync.latentsync" if use_latent else None,
+            )
             db.commit()
-            history = await comfy.wait_for_prompt(prompt_id)
+            history = await self._wait_comfy(job, prompt_id)
             files = comfy.find_output_files(history)
             if not files:
                 raise RuntimeError(f"No lip-sync output for {track.label}")
@@ -1213,8 +2155,233 @@ class JobQueue:
         except Exception:
             return False
 
+    def _checkpoint_file_present(self, checkpoint_name: str) -> bool:
+        name = (checkpoint_name or "").strip()
+        if not name:
+            return False
+        try:
+            from .setup.paths import default_models_root
+
+            roots = [default_models_root(), Path(settings.data_dir) / "models"]
+            for root in roots:
+                if not root or not Path(root).exists():
+                    continue
+                for sub in ("checkpoints", "diffusion_models", "unet"):
+                    candidate = Path(root) / sub / name
+                    if candidate.is_file():
+                        return True
+                # Basename search — capped depth via rglob on known folders only.
+                for sub in ("checkpoints", "diffusion_models", "unet"):
+                    folder = Path(root) / sub
+                    if folder.is_dir():
+                        for path in folder.rglob(name):
+                            if path.is_file():
+                                return True
+        except Exception:
+            return False
+        return False
+
+    def _resolve_ready_still_model(self, requested: str) -> tuple[str, list[str]]:
+        """Pick preferred or alternate compatible local ImageGen model.
+
+        Z-Image is preferred when GREEN, but not mandatory when another supported
+        local still engine is ready.
+        """
+        reasons: list[str] = []
+        mid = (requested or "auto").lower()
+        if mid != "auto":
+            return mid, reasons
+
+        if self._zimage_stack_ready():
+            reasons.append("Preferred local still engine: catalogued Z-Image Turbo (GREEN)")
+            return "zimage", reasons
+
+        alternates = (
+            ("flux", settings.imagegen_flux_checkpoint),
+            ("hidream", settings.imagegen_hidream_checkpoint),
+            ("sd35", settings.imagegen_sd35_checkpoint),
+            ("custom", settings.imagegen_custom_checkpoint or settings.imagegen_flux_checkpoint),
+        )
+        for model_id, ckpt in alternates:
+            if ckpt and self._checkpoint_file_present(ckpt):
+                reasons.append(
+                    f"Z-Image unavailable; selected compatible local still engine '{model_id}' "
+                    f"({ckpt})"
+                )
+                return model_id, reasons
+
+        raise RuntimeError(
+            "No ready local still-image engine. Install/verify zimage_models or another "
+            "supported ImageGen checkpoint (FLUX / HiDream / SD3.5 / custom) in Source Manager."
+        )
+
+    def _extract_last_frame(self, video_path: Path, dest: Path) -> Path:
+        """Extract last frame of a video for generative continuation (video.extend)."""
+        import subprocess
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg required to extract last frame for video.extend")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # -sseof seeks from end; one frame PNG
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-sseof",
+            "-0.05",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            str(dest),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0 or not dest.is_file():
+            # Fallback: first frame if last-frame seek fails on short clips
+            cmd2 = [ffmpeg, "-y", "-i", str(video_path), "-frames:v", "1", str(dest)]
+            proc2 = subprocess.run(cmd2, capture_output=True, text=True)
+            if proc2.returncode != 0 or not dest.is_file():
+                raise RuntimeError(
+                    f"Failed to extract frame for video.extend: {proc.stderr or proc2.stderr}"
+                )
+        return dest
+
+    async def _video_extend_local(self, db: Session, job: Job, project: Project) -> None:
+        """M41 4.1B: certified video.extend — last frame → local I2V (not fal-only txt2vid)."""
+        from .video_runtime.job_model import merge_video_runtime_history
+        from .video_runtime.output_gate import validate_video_output
+        from .video_runtime.workflow_execute import build_leaf_graph, prepare_executable_graph
+        from .video_runtime.workflow_resolver import resolve_workflow
+
+        params = self._job_params(job)
+        source_id = (
+            params.get("source_asset_id")
+            or params.get("start_asset_id")
+            or (params.get("videoRuntime") or {}).get("start_asset_id")
+        )
+        source = self._get_asset(db, source_id) if source_id else None
+        if not source or not source.path or not Path(source.path).is_file():
+            raise RuntimeError("video.extend requires a source asset with a readable file")
+
+        src_path = Path(source.path)
+        work = settings.data_dir / "projects" / project.id / "extend" / job.id
+        work.mkdir(parents=True, exist_ok=True)
+        start_frame = work / "last_frame.png"
+        if src_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+            shutil.copy2(src_path, start_frame)
+        else:
+            self._extract_last_frame(src_path, start_frame)
+
+        comfy_name = await self._ensure_comfy_image_path(start_frame)
+        engine = str(
+            (params.get("videoRuntime") or {}).get("engine")
+            or params.get("engine")
+            or "ltx"
+        )
+        contract = resolve_workflow(
+            "extend",
+            engine=engine,
+            present_inputs={"start_frame": True, "source_video": True},
+        )
+        job.history_json = merge_video_runtime_history(
+            job.history_json,
+            {
+                "workflowContract": contract.to_dict(),
+                "extend": {"sourceAssetId": source.id, "lastFrame": str(start_frame)},
+            },
+        )
+        job.message = f"video.extend → {contract.leaf_workflow_key}"
+        db.commit()
+
+        prompt = (params.get("prompt") or "Continue the motion naturally").strip()
+        negative = params.get("negative") or project.negative_prompt or ""
+        duration = float(params.get("duration_sec") or 2.0)
+        fps = int(project.fps or 24)
+        length = max(17, int(duration * fps))
+        width = int(getattr(project, "width", None) or 768)
+        height = int(getattr(project, "height", None) or 512)
+        seed = int(params.get("seed") if params.get("seed") is not None else project.seed)
+
+        if contract.leaf_workflow_key.startswith("wan."):
+            length = min(length, 33)
+            width = min(width, 832)
+            height = min(height, 480)
+
+        wf = build_leaf_graph(
+            contract,
+            settings=settings,
+            positive=prompt,
+            negative=negative,
+            width=width,
+            height=height,
+            length=length,
+            fps=fps,
+            seed=seed,
+            start_image=comfy_name,
+            steps=8,
+            filename_prefix=f"studio/extend_{job.id[:8]}",
+        )
+        wf = prepare_executable_graph(contract, wf)
+        prompt_id = await comfy.queue_prompt(wf, workflow_key=contract.leaf_workflow_key)
+        job.comfy_prompt_id = prompt_id
+        self.bind_prompt(job.id, prompt_id)
+        db.commit()
+
+        async def on_progress(p: float, msg: str) -> None:
+            job.progress = p
+            job.message = msg
+            job.updated_at = datetime.utcnow()
+            db.commit()
+
+        history = await self._wait_comfy(job, prompt_id, on_progress=on_progress)
+        files = comfy.find_output_files(history)
+        if not files:
+            raise RuntimeError("video.extend finished but no output video was found")
+        dest_dir = settings.data_dir / "projects" / project.id / "renders"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f"extend_{uuid.uuid4().hex[:8]}{files[0].suffix}"
+        shutil.copy2(files[0], dest)
+        gate = validate_video_output(dest, asset_registered=False)
+        if not gate.passed:
+            raise RuntimeError(gate.message)
+        # Register derived asset
+        try:
+            from .generation_tools.lineage import register_derived_asset
+
+            asset = register_derived_asset(
+                db,
+                project_id=project.id,
+                source_path=dest,
+                kind="video",
+                tag="video_extend",
+                parent_asset_id=source.id,
+                op="video_extend",
+                model="generative_continuation",
+                prompt_meta={"mode": "generative_continuation", "jobId": job.id},
+                library_key="video.generated",
+            )
+            self._set_status(
+                job.id, "done", 1.0, "video.extend complete (local I2V)", str(dest)
+            )
+            job.history_json = merge_video_runtime_history(
+                job.history_json, {"assetId": asset.id, "outputGate": gate.to_dict()}
+            )
+            db.commit()
+        except Exception:
+            self._set_status(job.id, "done", 1.0, "video.extend complete", str(dest))
+
+    async def _ensure_comfy_image_path(self, path: Path) -> str:
+        """Upload a local image path into Comfy input and return the Comfy filename."""
+        # Reuse asset helper pattern when possible
+        return await comfy.upload_image(path)
+
     async def _txt2vid(self, db: Session, job: Job, project: Project) -> None:
-        """Text-to-video: prefer fal T2V; local I2V engines warn and fail clearly."""
+        """Text-to-video under local-first policy.
+
+        Local LTX/WAN are I2V and never silently fall through to fal. Without a start
+        frame, raise LOCAL_START_FRAME_REQUIRED (preferred: generate local still).
+        fal.ai runs only when paidFallbackApproved is true.
+        """
         params = self._job_params(job)
         prompt = (params.get("prompt") or "").strip() or project.global_prompt
         negative = params.get("negative") or project.negative_prompt
@@ -1227,8 +2394,64 @@ class JobQueue:
         style = params.get("style") or ""
         if style:
             prompt = f"{prompt}, {style} style".strip(", ")
+        creator_prompt = prompt
+
+        spatial_bundle = None
+        spatial_summary: dict[str, Any] | None = None
+        spatial_start_camera_id = params.get("spatialStartCameraId") or params.get("spatialCameraId")
+        spatial_end_camera_id = params.get("spatialEndCameraId")
+        try:
+            if params.get("spatialMapId"):
+                from .spatial_map.reference_bundle import (
+                    preferred_reference_assets,
+                    summarize_reference_bundle,
+                )
+                from .spatial_map.service import build_reference_bundle as build_spatial_reference_bundle
+
+                spatial_bundle = build_spatial_reference_bundle(
+                    db,
+                    project.id,
+                    str(params["spatialMapId"]),
+                    target="video",
+                    camera_id=str(spatial_start_camera_id) if spatial_start_camera_id else None,
+                )
+                spatial_summary = summarize_reference_bundle(
+                    spatial_bundle,
+                    start_camera_id=str(spatial_start_camera_id) if spatial_start_camera_id else None,
+                    end_camera_id=str(spatial_end_camera_id) if spatial_end_camera_id else None,
+                )
+                params["spatialReferenceBundle"] = spatial_bundle.model_dump()
+                params["spatialMapVersion"] = params.get("spatialMapVersion") or spatial_bundle.documentVersion
+                params["spatialCameraId"] = params.get("spatialCameraId") or (
+                    spatial_bundle.primaryCamera.id if spatial_bundle.primaryCamera else None
+                )
+                params["spatialReferenceAssetIds"] = [
+                    item.assetId for item in preferred_reference_assets(spatial_bundle, limit=4)
+                ]
+            elif isinstance(params.get("spatialReferenceBundle"), dict):
+                from .spatial_map.reference_bundle import summarize_reference_bundle
+                from .spatial_map.schemas import SpatialReferenceBundle
+
+                spatial_bundle = SpatialReferenceBundle.model_validate(params["spatialReferenceBundle"])
+                spatial_summary = summarize_reference_bundle(
+                    spatial_bundle,
+                    start_camera_id=str(spatial_start_camera_id) if spatial_start_camera_id else None,
+                    end_camera_id=str(spatial_end_camera_id) if spatial_end_camera_id else None,
+                )
+        except Exception:
+            spatial_bundle = None
+            spatial_summary = None
+
+        if spatial_summary and spatial_summary.get("summary"):
+            prompt = f"{prompt}. {str(spatial_summary['summary']).strip()}".strip()
 
         from .engine_recommend import resolve_engine_id
+        from .local_first import (
+            assert_fal_allowed,
+            local_start_frame_blocker,
+            paid_fallback_approved,
+            provider_prefers_local,
+        )
 
         # Temporary scene-like object for resolve
         class _S:
@@ -1238,23 +2461,31 @@ class JobQueue:
         s.engine = engine
         s.prompt = prompt
         s.duration_sec = duration
-        s.start_asset_id = None
+        s.start_asset_id = params.get("start_asset_id") or None
         resolved = resolve_engine_id(engine, project, s) if engine == "auto" else engine
+        job.params_json = json.dumps(params)
+        db.commit()
 
-        if not is_fal_engine(resolved) and resolved in ("ltx", "wan"):
-            raise RuntimeError(
-                f"Local engine '{resolved}' is image-to-video and needs a start frame. "
-                "Use ImageGen or 1 Frame first, or choose a fal T2V-capable engine / Auto."
-            )
-
-        # Force fal path for T2V when local
-        if not is_fal_engine(resolved):
+        # Explicit fal engine still requires paid approval (no silent submit).
+        if is_fal_engine(engine) or (engine != "auto" and is_fal_engine(resolved)):
+            resolved = engine if is_fal_engine(engine) else resolved
+            assert_fal_allowed(params, engine=resolved)
+        elif provider_prefers_local(params) or engine in ("auto", "ltx", "wan") or resolved in ("ltx", "wan"):
+            # LOCAL-16: never force fal_seedance. Prefer local start-frame generation.
+            preferred = resolved if resolved in ("ltx", "wan") else "ltx"
+            if not paid_fallback_approved(params):
+                raise RuntimeError(json.dumps(local_start_frame_blocker(preferred_engine=preferred)))
+            # User approved paid fal after local start-frame path was declined.
             resolved = "fal_seedance"
+            assert_fal_allowed(params, engine=resolved)
+        elif not is_fal_engine(resolved):
+            raise RuntimeError(json.dumps(local_start_frame_blocker(preferred_engine="ltx")))
 
         api_key = get_secret("fal_api_key")
         if not api_key:
             raise RuntimeError(
-                "fal.ai API key not configured. Open Project Settings → Integrations or Advanced → fal.ai API key."
+                "Hosted AI Provider credential not configured. Open Setup → AI Providers "
+                "(Kie.ai · WaveSpeed.ai · fal.ai)."
             )
 
         async def on_progress(p: float, msg: str) -> None:
@@ -1276,12 +2507,31 @@ class JobQueue:
             generate_audio = True
         fal_prompt = str(mil_params.get("compiledPrompt") or prompt)
         fal_negative = str(mil_params.get("negativePrompt") or negative)
+        image_url = None
+        end_image_url = None
+        spatial_reference_assets = []
+        if spatial_bundle is not None:
+            try:
+                from .spatial_map.reference_bundle import preferred_reference_assets
+
+                spatial_reference_assets = preferred_reference_assets(spatial_bundle, limit=4)
+            except Exception:
+                spatial_reference_assets = []
+        if spatial_reference_assets:
+            first_ref = spatial_reference_assets[0]
+            if first_ref.path and Path(first_ref.path).is_file():
+                await on_progress(0.08, f"Uploading spatial references to fal.ai ({resolved})")
+                image_url = await upload_file_to_fal(Path(first_ref.path), api_key)
+            if len(spatial_reference_assets) > 1 and spatial_end_camera_id:
+                second_ref = spatial_reference_assets[1]
+                if second_ref.path and Path(second_ref.path).is_file():
+                    end_image_url = await upload_file_to_fal(Path(second_ref.path), api_key)
         model_id, args = build_fal_arguments(
             engine=resolved,
             prompt=fal_prompt,
             negative=fal_negative,
-            image_url=None,
-            end_image_url=None,
+            image_url=image_url,
+            end_image_url=end_image_url,
             duration_sec=duration,
             width=width,
             height=height,
@@ -1292,6 +2542,7 @@ class JobQueue:
         job.history_json = json.dumps(
             {
                 "prompt": prompt,
+                "creatorPrompt": creator_prompt,
                 "negative": negative,
                 "seed": seed,
                 "model": model_id,
@@ -1301,6 +2552,12 @@ class JobQueue:
                 "height": height,
                 "duration_sec": duration,
                 "style": style,
+                "spatialMapId": params.get("spatialMapId"),
+                "spatialMapVersion": params.get("spatialMapVersion"),
+                "spatialCameraId": params.get("spatialCameraId"),
+                "spatialStartCameraId": spatial_start_camera_id,
+                "spatialEndCameraId": spatial_end_camera_id,
+                "spatialSummary": spatial_summary,
                 "loras": params.get("loras") or [],
             }
         )
@@ -1351,127 +2608,254 @@ class JobQueue:
         self._set_status(job.id, "done", 1.0, "Txt2Vid complete", str(dest))
 
     async def _imagegen(self, db: Session, job: Job, project: Project) -> None:
+        """Execute-only image path: ImageIntent → pinned contract → workflow_execute → Output Gate."""
+        from .image_runtime.contract import resolve_image_workflow
+        from .image_runtime.legacy_adapter import normalize_legacy_image_params
+        from .image_runtime.output_gate import validate_image_output
+        from .image_runtime.provenance import ImageProvenance
+        from .image_runtime.workflow_execute import (
+            build_leaf_graph,
+            legacy_comfy_workflow_key,
+            prepare_executable_graph,
+        )
+
         params = self._job_params(job)
-        prompt = (params.get("prompt") or "").strip()
-        negative = params.get("negative") or project.negative_prompt
-        model = (params.get("model") or "auto").lower()
-        custom_ckpt = params.get("checkpoint") or ""
-        seed = int(params.get("seed") if params.get("seed") is not None else (project.seed if project.seed >= 0 else 0))
-        width = int(params.get("width") or 1024)
-        height = int(params.get("height") or 1024)
+        edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
+
+        # Retry path: reuse validated but unregistered output (no silent regeneration)
+        pending = params.get("validated_output_path")
+        if params.get("status_detail") == "output_valid_but_unregistered" and pending and Path(pending).is_file():
+            gate = validate_image_output(pending, expected_aspect=params.get("aspect"), generate_previews=True)
+            if not gate.ok:
+                raise RuntimeError(f"Cached validated output failed re-validation: {gate.errors}")
+            await self._imagegen_commit_asset(
+                db, job, project, params, Path(pending), gate, edit_op=edit_op
+            )
+            return
+
+        pinned = params.get("imageRuntime") if isinstance(params.get("imageRuntime"), dict) else None
+        compatibility = params.get("compatibility") if isinstance(params.get("compatibility"), dict) else None
+        intent_block = params.get("imageIntent") if isinstance(params.get("imageIntent"), dict) else None
+
+        if intent_block:
+            from .image_runtime.intent import ImageIntent
+
+            intent = ImageIntent.model_validate(intent_block)
+            compatibility = compatibility or {"legacyInputUsed": False, "normalizedBy": "caller"}
+        else:
+            intent, compatibility = normalize_legacy_image_params(
+                params, project_id=project.id, job_kind=job.kind
+            )
+
+        style = params.get("style") or ""
+        prompt = (intent.prompt or params.get("prompt") or "").strip()
+        if style and isinstance(style, str):
+            prompt = f"{prompt}, {style}".strip(", ")
+        negative = intent.negativePrompt or params.get("negative") or project.negative_prompt
+        seed = int(
+            intent.seed
+            if intent.seed is not None
+            else (params.get("seed") if params.get("seed") is not None else (project.seed if project.seed >= 0 else 0))
+        )
+        width = int(intent.width or params.get("width") or 1024)
+        height = int(intent.height or params.get("height") or 1024)
         steps = int(params.get("steps") or settings.imagegen_default_steps)
         cfg = float(params.get("cfg") or settings.imagegen_default_cfg)
-        style = params.get("style") or ""
-        edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
-        source_asset_id = params.get("source_asset_id")
+        source_asset_id = intent.sourceAssetId or params.get("source_asset_id")
         denoise = float(params.get("denoise") or 0.45)
-        if style:
-            prompt = f"{prompt}, {style}".strip(", ")
+        model = (params.get("model") or intent.enginePreference or "zimage").lower()
+        custom_ckpt = params.get("checkpoint") or ""
+        reasons: list[str] = []
 
-        # Soft Auto reasons — prefer catalogued Z-Image when present; fail honestly otherwise.
-        reasons = []
         zimage_ready = self._zimage_stack_ready()
         if model == "auto":
-            if zimage_ready:
-                reasons.append(
-                    "Auto selected catalogued Z-Image Turbo (UNET + Qwen + AE); "
-                    "FLUX/HiDream/SD3.5 remain opt-in when installed"
-                )
-                model = "zimage"
-            else:
-                raise RuntimeError(
-                    "ImageGen auto has no catalogued still-image provider. "
-                    "Install/verify zimage_models (Z-Image Turbo stack) in Source Manager, then retry."
-                )
+            model, reasons = self._resolve_ready_still_model("auto")
         use_zimage = model in ("zimage", "z-image", "z_image")
         if use_zimage and not zimage_ready:
-            raise RuntimeError(
-                "Z-Image Turbo weights are not verified on disk (component zimage_models). "
-                "Open Source Manager, link the shared models root, then retry."
-            )
+            alt, alt_reasons = self._resolve_ready_still_model("auto")
+            if alt not in ("zimage", "z-image", "z_image"):
+                model = alt
+                use_zimage = False
+                reasons.extend(alt_reasons)
+                intent.enginePreference = "checkpoint" if not str(alt).startswith("flux") else "flux"
+            else:
+                raise RuntimeError(
+                    "Z-Image Turbo weights are not verified on disk (component zimage_models). "
+                    "Open Source Manager, link the shared models root, then retry."
+                )
         if use_zimage:
             steps = int(params.get("steps") or settings.zimage_steps)
             cfg = float(params.get("cfg") if params.get("cfg") is not None else settings.zimage_cfg)
             ckpt = settings.zimage_unet
+            intent.enginePreference = intent.enginePreference or "zimage"
         else:
             ckpt = self._checkpoint_for_model(model, custom_ckpt)
-        job.stage = "preparing"
-        job.message = f"ImageGen · {model} · {ckpt}" + (f" · {'; '.join(reasons)}" if reasons else "")
+            if not intent.enginePreference or intent.enginePreference == "zimage":
+                intent.enginePreference = "checkpoint"
+
+        # Resolve / revalidate pinned contract — never silently switch certified version
+        allow_draft = bool(params.get("allow_draft_cert_harness"))
+        if pinned and pinned.get("workflowKey"):
+            from .image_runtime.certified_registry import get_workflow
+
+            wf_meta = get_workflow(str(pinned["workflowKey"]))
+            if wf_meta is None:
+                raise RuntimeError(f"Pinned workflow unknown: {pinned.get('workflowKey')}")
+            if pinned.get("workflowVersion") and pinned["workflowVersion"] != wf_meta.workflow_version:
+                raise RuntimeError(
+                    f"Pinned contract version mismatch: job={pinned.get('workflowVersion')} "
+                    f"registry={wf_meta.workflow_version} — refusing silent upgrade"
+                )
+            if pinned.get("certificationRecordId") and wf_meta.certification_record_id:
+                if pinned["certificationRecordId"] != wf_meta.certification_record_id and not allow_draft:
+                    # Revalidate same key/version; do not move to a different cert record silently
+                    if wf_meta.status == "Certified" and pinned.get("fingerprint"):
+                        pass  # fingerprint check below is authoritative
+            contract = resolve_image_workflow(
+                intent.operation,
+                engine=intent.enginePreference or "zimage",
+                model_family=pinned.get("modelFamily") or intent.enginePreference,
+                force_workflow_key=str(pinned["workflowKey"]),
+                allow_draft=allow_draft or wf_meta.status != "Certified",
+                present_inputs={"prompt": prompt, "reference_image": bool(source_asset_id)},
+            )
+            expected_fp = pinned.get("fingerprint") or (pinned.get("fingerprints") or {}).get("graphHash")
+        else:
+            contract = resolve_image_workflow(
+                intent.operation,
+                engine=intent.enginePreference or "zimage",
+                model_family=intent.enginePreference,
+                force_workflow_key=intent.workflowPreference,
+                allow_draft=allow_draft,
+                present_inputs={"prompt": prompt, "reference_image": bool(source_asset_id)},
+                provider_preference=intent.providerPreference,
+            )
+            pinned = contract.to_pinned_snapshot()
+            expected_fp = pinned.get("fingerprint")
+
+        from .image_runtime.job_model import ImageJobStage
+
+        job.stage = ImageJobStage.PREPARING.value
+        job.message = f"ImageGen · {contract.workflow_key} · {ckpt}"
+        params = {
+            **params,
+            "imageRuntime": pinned,
+            "imageIntent": intent.model_dump(),
+            "compatibility": compatibility,
+            "model": model,
+            "checkpoint": ckpt,
+        }
+        job.params_json = json.dumps(params)
         db.commit()
 
-        from .imagegen_workflows import build_img2img_edit_stub, build_txt2img_workflow
-        from .workflows.image_tools import build_zimage_ref_workflow, build_zimage_txt2img_workflow
-
         prefix = f"studio/{project.id[:8]}_imagegen"
-        if job.kind == "imagegen_edit" and source_asset_id:
-            src = self._get_asset(db, source_asset_id)
-            image_name = await self._ensure_comfy_image(src)
-            if not image_name:
-                raise RuntimeError("Edit source image missing")
-            edit_prompt = f"{prompt}. Edit operation: {edit_op}".strip()
-            if use_zimage:
-                wf = build_zimage_ref_workflow(
-                    unet_name=settings.zimage_unet,
-                    clip_name=settings.zimage_clip,
-                    vae_name=settings.zimage_vae,
-                    clip_vision_name=settings.zimage_clip_vision,
-                    reference_image=image_name,
-                    prompt=edit_prompt,
-                    negative=negative or "blurry, low quality",
-                    width=width,
-                    height=height,
-                    seed=seed,
-                    steps=steps,
-                    cfg=cfg,
-                    filename_prefix=prefix,
-                )
-            else:
-                wf = build_img2img_edit_stub(
-                    checkpoint=ckpt,
-                    positive=edit_prompt,
-                    negative=negative,
-                    image_name=image_name,
-                    denoise=denoise,
-                    seed=seed,
-                    steps=steps,
-                    filename_prefix=prefix,
-                )
-        elif use_zimage:
-            wf = build_zimage_txt2img_workflow(
-                unet_name=settings.zimage_unet,
-                clip_name=settings.zimage_clip,
-                vae_name=settings.zimage_vae,
-                positive=prompt,
-                negative=negative or "blurry, low quality, watermark",
-                width=width,
-                height=height,
-                seed=seed,
-                steps=steps,
-                cfg=cfg,
-                filename_prefix=prefix,
-            )
-        else:
-            wf = build_txt2img_workflow(
-                checkpoint=ckpt,
-                positive=prompt,
-                negative=negative,
-                width=width,
-                height=height,
-                seed=seed,
-                steps=steps,
-                cfg=cfg,
-                filename_prefix=prefix,
-            )
+        reference_image = None
+        mask_image = None
+        needs_source = (
+            source_asset_id
+            or contract.workflow_key.endswith("ref_edit")
+            or "img2img" in contract.workflow_key
+            or "edit" in contract.workflow_key
+            or "reference" in contract.workflow_key
+            or "inpaint" in contract.workflow_key
+            or "outpaint" in contract.workflow_key
+            or contract.workflow_key == "image.upscale"
+        )
+        if needs_source:
+            if source_asset_id:
+                src = self._get_asset(db, source_asset_id)
+                reference_image = await self._ensure_comfy_image(src)
+                if not reference_image:
+                    raise RuntimeError("Edit/reference source image missing or unreadable")
+            elif "reference_image" in (contract.required_inputs or []) or "inpaint" in contract.workflow_key:
+                raise RuntimeError("Reference image required before queue execution")
+
+        # Mask for inpaint (from ImageEditIntent metadata or params)
+        meta = (intent.metadata if hasattr(intent, "metadata") else None) or params.get("imageIntent", {}).get("metadata") or {}
+        mask_specs = params.get("masks") or meta.get("masks") or []
+        if mask_specs and ("inpaint" in contract.workflow_key or edit_op in {"inpaint", "object_remove", "object_replace"}):
+            job.stage = ImageJobStage.PREPARING_MASKS.value
+            job.message = "Preparing masks"
+            db.commit()
+            mid = None
+            m0 = mask_specs[0] if isinstance(mask_specs[0], dict) else {"maskAssetId": mask_specs[0]}
+            mid = m0.get("maskAssetId") or m0.get("assetId")
+            if mid:
+                try:
+                    from .image_product.masks import get_mask_path
+
+                    mpath = get_mask_path(project.id, str(mid))
+                    if mpath and Path(mpath).is_file():
+                        mask_image = await comfy.upload_image(Path(mpath))
+                except Exception:
+                    mask_asset = self._get_asset(db, str(mid))
+                    if mask_asset:
+                        mask_image = await self._ensure_comfy_image(mask_asset)
+            if not mask_image and "inpaint" in contract.workflow_key:
+                raise RuntimeError("Inpaint requires a persisted mask asset")
+
+        build_prompt = prompt
+        if job.kind == "imagegen_edit" and edit_op:
+            build_prompt = f"{prompt}. Edit operation: {edit_op}".strip()
+
+        job.stage = ImageJobStage.LOADING_MODELS.value
+        job.message = "Loading models"
+        db.commit()
+
+        outpaint = meta.get("output") or params.get("outpaint") or {}
+        wf = build_leaf_graph(
+            contract,
+            settings=settings,
+            prompt=build_prompt,
+            negative=negative or "blurry, low quality, watermark",
+            width=width,
+            height=height,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            filename_prefix=prefix,
+            reference_image=reference_image,
+            source_image=reference_image,
+            mask_image=mask_image,
+            checkpoint=ckpt if not use_zimage else None,
+            denoise=denoise,
+            outpaint_left=int(outpaint.get("left") or 0),
+            outpaint_top=int(outpaint.get("top") or 0),
+            outpaint_right=int(outpaint.get("right") or (256 if "outpaint" in contract.workflow_key else 0)),
+            outpaint_bottom=int(outpaint.get("bottom") or (256 if "outpaint" in contract.workflow_key else 0)),
+        )
+        wf = prepare_executable_graph(
+            contract,
+            wf,
+            expected_graph_hash=expected_fp,
+            enforce_certified_fingerprint=contract.status == "Certified" and not allow_draft,
+        )
 
         async def on_progress(p: float, msg: str) -> None:
             job.progress = p
             job.message = msg
-            job.stage = "processing"
+            lower = (msg or "").lower()
+            if "sampl" in lower or p >= 0.2:
+                job.stage = ImageJobStage.SAMPLING.value
+            elif "load" in lower:
+                job.stage = ImageJobStage.LOADING_MODELS.value
+            else:
+                job.stage = ImageJobStage.SAMPLING.value
             job.updated_at = datetime.utcnow()
             db.commit()
 
-        prompt_id = await comfy.queue_prompt(wf)
+        prompt_id = await comfy.queue_prompt(
+            wf, workflow_key=legacy_comfy_workflow_key(contract.workflow_key)
+        )
         job.comfy_prompt_id = prompt_id
+        job.stage = ImageJobStage.SAMPLING.value
+        ref_hash = None
+        if source_asset_id:
+            src_asset = self._get_asset(db, source_asset_id)
+            if src_asset and src_asset.path and Path(src_asset.path).is_file():
+                from .image_runtime.fingerprints import file_content_hash
+
+                ref_hash = file_content_hash(src_asset.path)
         job.history_json = json.dumps(
             {
                 "prompt": prompt,
@@ -1488,22 +2872,184 @@ class JobQueue:
                 "loras": params.get("loras") or [],
                 "aspect": params.get("aspect"),
                 "reasons": reasons,
+                "workflowKey": contract.workflow_key,
+                "workflowVersion": contract.workflow_version,
+                "certificationRecordId": contract.certification_record_id,
+                "referenceHash": ref_hash,
+                "compatibility": compatibility,
             }
         )
         db.commit()
-        history = await comfy.wait_for_prompt(prompt_id, on_progress=on_progress)
+        history = await self._wait_comfy(job, prompt_id, on_progress=on_progress)
         files = comfy.find_output_files(history)
         if not files:
             raise RuntimeError(
                 "ComfyUI finished but no image output found. Confirm checkpoint exists and ImageGen workflow nodes are available."
             )
 
+        # Temporary output inspection (atomic gate)
+        tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"imagegen_{edit_op}_{uuid.uuid4().hex[:8]}{Path(files[0]).suffix or '.png'}"
+        shutil.copy2(files[0], tmp_path)
+
+        job.stage = ImageJobStage.VALIDATING.value
+        job.message = "Output Gate validation"
+        db.commit()
+        edit_operation = str(
+            (intent.metadata or {}).get("editOperation")
+            or params.get("editOperation")
+            or edit_op
+            or ""
+        )
+        source_path_for_gate = None
+        if source_asset_id:
+            src_a = self._get_asset(db, source_asset_id)
+            if src_a and src_a.path:
+                source_path_for_gate = src_a.path
+        is_edit_op = bool(
+            (edit_operation and edit_operation not in {"generate", "image.generate"})
+            or "inpaint" in contract.workflow_key
+            or "outpaint" in contract.workflow_key
+            or contract.workflow_key == "image.upscale"
+        )
+        if is_edit_op:
+            from .image_runtime.output_gate import validate_edit_output
+
+            mask_path_for_gate = None
+            try:
+                from .image_product.masks import get_mask_path
+
+                specs = params.get("masks") or (intent.metadata or {}).get("masks") or []
+                if specs:
+                    m0 = specs[0] if isinstance(specs[0], dict) else {"maskAssetId": specs[0]}
+                    mid = m0.get("maskAssetId") or m0.get("assetId")
+                    if mid:
+                        mask_path_for_gate = get_mask_path(project.id, str(mid))
+            except Exception:
+                pass
+            gate = validate_edit_output(
+                tmp_path,
+                operation=edit_operation if edit_operation.startswith("image.") else f"image.{edit_operation}",
+                source_path=source_path_for_gate,
+                mask_path=mask_path_for_gate,
+                require_transparency=bool((intent.metadata or {}).get("output", {}).get("transparentBackground")),
+                generate_previews=True,
+            )
+        else:
+            gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
+        if not gate.ok:
+            raise RuntimeError(f"Output Gate failed: {'; '.join(gate.errors)}")
+
+        job.stage = ImageJobStage.REGISTERING_ASSET.value
+        job.message = "Registering asset"
+        db.commit()
+        try:
+            await self._imagegen_commit_asset(
+                db,
+                job,
+                project,
+                params,
+                tmp_path,
+                gate,
+                edit_op=edit_op,
+                prompt=prompt,
+                negative=negative,
+                seed=seed,
+                ckpt=ckpt,
+                model=model,
+                reasons=reasons,
+                contract_key=contract.workflow_key,
+                contract_version=contract.workflow_version,
+                ref_hash=ref_hash,
+                source_asset_id=source_asset_id,
+                intent_id=intent.intentId,
+            )
+            job.stage = ImageJobStage.COMPLETED.value
+            db.commit()
+        except Exception as reg_exc:
+            # Validated output exists but registration/provenance failed — not completed
+            params = {
+                **params,
+                "status_detail": "output_valid_but_unregistered",
+                "validated_output_path": str(tmp_path),
+                "gate": gate.to_dict(),
+                "registration_error": str(reg_exc),
+            }
+            job.params_json = json.dumps(params)
+            job.status = "error"
+            job.stage = ImageJobStage.FAILED.value
+            job.message = f"output_valid_but_unregistered: {reg_exc}"
+            db.commit()
+            raise RuntimeError(f"output_valid_but_unregistered: {reg_exc}") from reg_exc
+
+    async def _imagegen_commit_asset(
+        self,
+        db: Session,
+        job: Job,
+        project: Project,
+        params: dict,
+        tmp_path: Path,
+        gate: Any,
+        *,
+        edit_op: str = "generate",
+        prompt: str = "",
+        negative: str = "",
+        seed: int = 0,
+        ckpt: str = "",
+        model: str = "",
+        reasons: list | None = None,
+        contract_key: str = "",
+        contract_version: str = "",
+        ref_hash: str | None = None,
+        source_asset_id: str | None = None,
+        intent_id: str | None = None,
+    ) -> None:
+        from .image_runtime.provenance import ImageProvenance
+
         dest_dir = settings.data_dir / "projects" / project.id / "assets"
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"imagegen_{edit_op}_{uuid.uuid4().hex[:8]}{Path(files[0]).suffix or '.png'}"
-        shutil.copy2(files[0], dest)
+        dest = dest_dir / tmp_path.name.replace(".pending", "")
+        if tmp_path.resolve() != dest.resolve():
+            shutil.copy2(tmp_path, dest)
 
-        parent_id = source_asset_id if job.kind == "imagegen_edit" else None
+        parent_id = source_asset_id or params.get("source_asset_id")
+        if job.kind != "imagegen_edit" and not parent_id:
+            parent_id = None
+
+        hist = {}
+        try:
+            hist = json.loads(job.history_json or "{}")
+        except Exception:
+            hist = {}
+
+        provenance = ImageProvenance(
+            workflow=contract_key or hist.get("workflowKey"),
+            workflowVersion=contract_version or hist.get("workflowVersion"),
+            runtime="comfy",
+            provider="local",
+            references=[ref_hash] if ref_hash else list(params.get("reference_ids") or []),
+            prompt=prompt or hist.get("prompt") or "",
+            seed=seed or hist.get("seed"),
+            parentImages=[parent_id] if parent_id else [],
+            validation=gate.to_dict() if hasattr(gate, "to_dict") else dict(gate or {}),
+            intentId=intent_id,
+            settings={"checkpoint": ckpt, "model": model, "checksum": getattr(gate, "checksum", None)},
+        )
+
+        intent_metadata = {}
+        if isinstance(params.get("imageIntent"), dict):
+            intent_metadata = dict(params["imageIntent"].get("metadata") or {})
+
+        prompt_meta = {
+            **hist,
+            "provenance": provenance.to_dict(),
+            "gate": gate.to_dict() if hasattr(gate, "to_dict") else gate,
+            "checksum": getattr(gate, "checksum", None),
+            "spatialMapId": params.get("spatialMapId") or intent_metadata.get("spatialMapId"),
+            "spatialMapVersion": params.get("spatialMapVersion") or intent_metadata.get("spatialMapVersion"),
+            "spatialCameraId": params.get("spatialCameraId") or intent_metadata.get("spatialCameraId"),
+        }
         asset = Asset(
             id=str(uuid.uuid4()),
             project_id=project.id,
@@ -1514,32 +3060,27 @@ class JobQueue:
             comfy_name="",
             scope="project",
             labels_json=json.dumps(params.get("labels") or []),
-            prompt_meta_json=job.history_json or "{}",
+            prompt_meta_json=json.dumps(prompt_meta),
             parent_asset_id=parent_id,
         )
         db.add(asset)
-        try:
-            from .asset_graph import add_edge, add_version
+        from .asset_graph import add_edge, add_version
 
-            add_version(
-                db,
-                asset_id=asset.id,
-                op=edit_op,
-                path=str(dest),
-                seed=seed,
-                prompt={"prompt": prompt, "negative": negative},
-                model=ckpt,
-            )
-            if parent_id:
-                add_edge(db, parent_id, asset.id, "derived_from", {"op": edit_op})
-        except Exception:
-            pass
-        db.commit()
-        job.params_json = json.dumps({**params, "output_asset_id": asset.id})
-        db.commit()
-        # Link storyboard / spatial lineage when requested
+        add_version(
+            db,
+            asset_id=asset.id,
+            op=edit_op,
+            path=str(dest),
+            seed=seed,
+            prompt={"prompt": prompt, "negative": negative},
+            model=ckpt,
+        )
+        if parent_id:
+            add_edge(db, parent_id, asset.id, "derived_from", {"op": edit_op, "referenceHash": ref_hash})
+            add_edge(db, parent_id, asset.id, "reference_of", {"op": edit_op, "referenceHash": ref_hash})
+
+        # Storyboard / spatial lineage
         try:
-            from .asset_graph import add_edge
             from .script_storyboard import StoryboardPanelRow
 
             panel_id = params.get("panel_id")
@@ -1551,7 +3092,6 @@ class JobQueue:
                     panel.status = "complete"
                     panel.script_sync_status = "ok"
                     panel.approval = panel.approval or "draft"
-                    db.commit()
                     if segment_id:
                         add_edge(db, segment_id, panel_id, "storyboard_of", {})
                     add_edge(db, panel_id, asset.id, "derived_from", {"op": "storyboard"})
@@ -1563,9 +3103,24 @@ class JobQueue:
                     "spatial_of",
                     {"state_id": params.get("spatial_state_id"), "camera_id": params.get("camera_avatar_id")},
                 )
-            db.commit()
         except Exception:
             pass
+
+        params = {
+            **params,
+            "output_asset_id": asset.id,
+            "model": model,
+            "checkpoint": ckpt,
+            "startFrameProvider": "comfyui",
+            "startFrameModel": model,
+            "selectionReasons": reasons or [],
+            "status_detail": "completed",
+            "validated_output_path": None,
+            "gate": gate.to_dict() if hasattr(gate, "to_dict") else gate,
+        }
+        job.params_json = json.dumps(params)
+        job.history_json = json.dumps(prompt_meta)
+        db.commit()
         self._set_status(job.id, "done", 1.0, f"ImageGen ({edit_op}) complete", str(dest))
 
     async def _export(self, db: Session, job: Job, project: Project) -> None:

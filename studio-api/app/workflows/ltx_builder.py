@@ -63,10 +63,14 @@ def build_ltx_scene_workflow(
     steps: int = 8,
     cfg: float = 1.0,
     filename_prefix: str = "studio/ltx_scene",
+    text_encoder: str = "gemma_3_12B_it_fp4_mixed.safetensors",
 ) -> dict[str, Any]:
     """
     Practical LTX I2V workflow using LTXDirector + LTXDirectorGuide.
     Keyframes are encoded as image segments on the Director timeline.
+
+    LTX 2.3 distilled/dev checkpoints expose MODEL+VAE via CheckpointLoaderSimple but
+    CLIP is None — CLIP must come from LTXAVTextEncoderLoader.
     """
     # Frame placement: start at 0, middle at mid, end marked isEndFrame
     segs: list[dict[str, Any]] = []
@@ -166,11 +170,19 @@ def build_ltx_scene_workflow(
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
         },
+        n_clip: {
+            "class_type": "LTXAVTextEncoderLoader",
+            "inputs": {
+                "text_encoder": text_encoder,
+                "ckpt_name": checkpoint,
+                "device": "default",
+            },
+        },
         n_dir: {
             "class_type": "LTXDirector",
             "inputs": {
                 "model": [n_ckpt, 0],
-                "clip": [n_ckpt, 1],
+                "clip": [n_clip, 0],
                 "start_second": 0.0,
                 "end_second": length / float(fps),
                 "duration_seconds": length / float(fps),
@@ -299,20 +311,37 @@ def build_ltx_simple_i2v(
     start_image: str,
     steps: int = 8,
     filename_prefix: str = "studio/ltx_simple",
+    text_encoder: str = "gemma_3_12B_it_fp4_mixed.safetensors",
 ) -> dict[str, Any]:
-    """Fallback simpler LTXVImgToVideo path if Director graph fails validation."""
+    """Fallback simpler LTXVImgToVideo path if Director graph fails validation/execution."""
     return {
         "1": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
         },
+        "1b": {
+            "class_type": "LTXAVTextEncoderLoader",
+            "inputs": {
+                "text_encoder": text_encoder,
+                "ckpt_name": checkpoint,
+                "device": "default",
+            },
+        },
         "2": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": positive, "clip": ["1", 1]},
+            "inputs": {"text": positive, "clip": ["1b", 0]},
         },
         "3": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"text": negative, "clip": ["1", 1]},
+            "inputs": {"text": negative, "clip": ["1b", 0]},
+        },
+        "3b": {
+            "class_type": "LTXVConditioning",
+            "inputs": {
+                "positive": ["2", 0],
+                "negative": ["3", 0],
+                "frame_rate": float(fps),
+            },
         },
         "4": {
             "class_type": "LoadImage",
@@ -321,8 +350,8 @@ def build_ltx_simple_i2v(
         "5": {
             "class_type": "LTXVImgToVideo",
             "inputs": {
-                "positive": ["2", 0],
-                "negative": ["3", 0],
+                "positive": ["3b", 0],
+                "negative": ["3b", 1],
                 "vae": ["1", 2],
                 "image": ["4", 0],
                 "width": width,

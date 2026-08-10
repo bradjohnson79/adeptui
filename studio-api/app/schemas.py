@@ -3,12 +3,30 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-EngineName = Literal["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]
+EngineName = Literal[
+    "auto",
+    "minimax-h3",
+    "ltx",
+    "wan",
+    "hunyuan15",
+    "hunyuan13b",
+    "fal_seedance",
+    "fal_kling",
+    "fal_veo",
+    "fal_runway",
+]
 PresetName = Literal["draft", "quality"]
-JobKind = Literal["render_scene", "render_timeline", "lipsync", "stitch", "export"]
+JobKind = Literal[
+    "render_scene",
+    "render_timeline",
+    "editor_mix",
+    "lipsync",
+    "stitch",
+    "export",
+]
 JobStatus = Literal["queued", "running", "done", "failed", "cancelled"]
 ContinuityLock = Literal["locked", "unlocked", "inherit_project", "inherit_previous"]
 
@@ -113,7 +131,7 @@ class SceneIn(BaseModel):
     name: str = "Scene"
     #: Short description of the scene for humans and for Co-Director. Not generation input.
     summary: str = ""
-    engine: EngineName = "ltx"
+    engine: EngineName = "minimax-h3"
     prompt: str = ""
     duration_sec: float = 5.0
     start_asset_id: Optional[str] = None
@@ -140,7 +158,7 @@ class SceneOut(BaseModel):
     index: int
     name: str = "Scene"
     summary: str = ""
-    engine: EngineName = "ltx"
+    engine: EngineName = "minimax-h3"
     prompt: str = ""
     duration_sec: float = 5.0
     start_asset_id: Optional[str] = None
@@ -201,8 +219,8 @@ class SceneOut(BaseModel):
 
 
 class ProjectCreate(BaseModel):
-    name: str = "Untitled Project"
-    engine_default: EngineName = "ltx"
+    name: str
+    engine_default: EngineName = "minimax-h3"
     global_prompt: str = ""
     negative_prompt: str = "blurry, low quality, watermark"
     width: int = 1280
@@ -211,6 +229,21 @@ class ProjectCreate(BaseModel):
     seed: int = -1
     preset: PresetName = "quality"
     vram_gb: int = 32
+    # M3.1a Project Types — when templates_presets_v1 is on, profile drives dims/hierarchy.
+    primary_project_type: Optional[str] = None
+    project_traits: list[str] = Field(default_factory=list)
+    profile_overrides: dict[str, Any] = Field(default_factory=dict)
+    # Project-level production preferences
+    storyboard_style: Optional[str] = None
+    preferred_video_generator: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("Project name is required.")
+        return trimmed
 
 
 class ProjectUpdate(BaseModel):
@@ -237,6 +270,12 @@ class ProjectUpdate(BaseModel):
     archived: Optional[int] = None
     defaults_json: Optional[str] = None
     settings_json: Optional[str] = None
+    primary_project_type: Optional[str] = None
+    project_traits_json: Optional[str] = None
+    resolved_profile_json: Optional[str] = None
+    project_type_version: Optional[int] = None
+    storyboard_style: Optional[str] = None
+    preferred_video_generator: Optional[str] = None
     apply_vram_profile: bool = False
 
 
@@ -265,6 +304,10 @@ class ProjectOut(BaseModel):
     archived: int = 0
     defaults_json: str = ""
     settings_json: str = ""
+    primary_project_type: str = "custom"
+    project_traits_json: str = "[]"
+    resolved_profile_json: str = "{}"
+    project_type_version: int = 1
     created_at: datetime
     updated_at: datetime
     scenes: list[SceneOut] = Field(default_factory=list)
@@ -274,7 +317,13 @@ class ProjectOut(BaseModel):
     asset_count: int = 0
     render_pct: int = 0
     cover_asset_id: Optional[str] = None
+    cover_kind: Optional[str] = None  # "image" | "video" when cover_asset_id is set
+    storyboard_style: Optional[str] = None
+    preferred_video_generator: Optional[str] = None
     status_label: str = "Active"
+    # Project password protection (never include hash)
+    password_protected: bool = False
+    password_locked: bool = False
 
     class Config:
         from_attributes = True
@@ -405,19 +454,40 @@ class EngineOptionOut(BaseModel):
 
 
 class RenderRequest(BaseModel):
+    """POST /api/projects/{id}/render body.
+
+    kind:
+      - scene: queue render_scene (requires scene_id)
+      - shot: queue render_shot (shot-scoped; requires scene_id)
+      - timeline: queue render_timeline (reuse existing scene outputs when present, then stitch)
+      - batch_timeline: regenerate all scenes then stitch
+      - editor_mix: mux Editor music/sfx/dialogue/ambience onto a primary video
+        (optional primary_video_path; else latest timeline / editor video / scene output)
+    """
+
     scene_id: Optional[str] = None
     retake: bool = False
-    kind: Literal["scene", "timeline"] = "timeline"
+    kind: Literal["scene", "shot", "timeline", "batch_timeline", "editor_mix"] = "timeline"
     reference_method: Optional[str] = None
     sheet_id: Optional[str] = None
     strength_preset: Optional[str] = None
     strength: Optional[float] = None
     ingredients_ic_lora: Optional[bool] = None
+    # M3.0h local-first provenance / paid-fallback gates
+    providerPreference: Optional[str] = "local"
+    paidFallbackApproved: bool = False
+    startFrameModel: Optional[str] = None
+    generate_audio: Optional[bool] = None
+    # M3.2g Phase 6 — Editor final mix primary video override
+    primary_video_path: Optional[str] = None
 
 
 class LipSyncRequest(BaseModel):
     scene_id: str
     audio_asset_id: Optional[str] = None
+    prefer_still_face: bool = False
+    face_asset_id: Optional[str] = None
+    direct_latentsync: bool = False
 
 
 class SpatialMapPoint(BaseModel):
@@ -492,7 +562,19 @@ class SetupSfxClipOut(BaseModel):
 class SceneSetupOut(BaseModel):
     summary: str = ""
     scene_name: Optional[str] = None
-    engine: Optional[Literal["ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"]] = None
+    engine: Optional[
+        Literal[
+            "minimax-h3",
+            "ltx",
+            "wan",
+            "hunyuan15",
+            "hunyuan13b",
+            "fal_seedance",
+            "fal_kling",
+            "fal_veo",
+            "fal_runway",
+        ]
+    ] = None
     duration_sec: Optional[float] = None
     media_mode: Optional[Literal["image", "video"]] = None
     global_prompt: Optional[str] = None

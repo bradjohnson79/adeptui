@@ -5,9 +5,24 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from ..codirector.m213 import persistence
+from ..db import get_db
 
 router = APIRouter(prefix="/e2e", tags=["e2e"])
+
+
+class _M213GuidedBody(BaseModel):
+    projectId: str
+    fixture: bool = True
+
+
+@router.post("/codirector/m213/guided")
+def e2e_m213_guided(body: _M213GuidedBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return persistence.end_to_end_guided(db, project_id=body.projectId, fixture=body.fixture)
 
 
 def e2e_enabled() -> bool:
@@ -75,20 +90,62 @@ def e2e_clear_component_location(body: dict[str, Any]) -> dict[str, Any]:
     component_id = str(body.get("component_id") or "").strip()
     if not component_id:
         raise HTTPException(400, "component_id is required")
+    import json
+    from pathlib import Path
+
+    from ..config import settings
+    from ..setup.diagnostics import invalidate_verify_cache
     from ..setup.state import update_state
+    from ..source_manager.downloads.persistence import delete_operation as delete_download_operation
+    from ..source_manager.downloads.queue import get_queue_manager
 
     def mutate(state: dict[str, Any]) -> None:
         locations = state.setdefault("model_locations", {})
         locations.pop(component_id, None)
         packs = state.setdefault("pack_installs", {})
         packs.pop(component_id, None)
+        attempts = state.setdefault("pack_install_attempts", {})
+        attempts.pop(component_id, None)
         status = state.setdefault("status", {})
         if component_id in status and isinstance(status[component_id], dict):
             status[component_id].pop("installation_path", None)
             status[component_id].pop("path", None)
             status[component_id]["status"] = "not_installed"
+        operations = state.setdefault("operations", {})
+        stale_ids: list[str] = []
+        for op_id, payload in operations.items():
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("component_id") or "") == component_id:
+                stale_ids.append(op_id)
+                continue
+            component_ids = payload.get("component_ids") or []
+            if isinstance(component_ids, list) and component_id in component_ids:
+                stale_ids.append(op_id)
+        for op_id in stale_ids:
+            operations.pop(op_id, None)
 
     update_state(mutate)
+    invalidate_verify_cache(component_id)
+    jobs_dir = Path(settings.data_dir) / "source_manager" / "install_jobs"
+    for path in jobs_dir.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if str(payload.get("componentId") or "") != component_id:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    queue = get_queue_manager()
+    queue._ensure_loaded()  # E2E-only cleanup of persisted terminal queue history.
+    for op_id, payload in list(queue._ops.items()):
+        if str(payload.get("componentId") or "") != component_id:
+            continue
+        queue._ops.pop(op_id, None)
+        delete_download_operation(op_id)
     return {"component_id": component_id, "cleared": True}
 
 
@@ -130,6 +187,53 @@ def e2e_codirector_scenario(body: dict[str, Any] | None = None) -> dict[str, Any
     else:
         os.environ.pop("ADEPT_CODIRECTOR_MOCK_SCENARIO", None)
     return {"scenario": os.environ.get("ADEPT_CODIRECTOR_MOCK_SCENARIO")}
+
+
+@router.post("/codirector/script")
+def e2e_codirector_script(body: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Install a scripted mock-provider script (E2E only).
+
+    Accepts ``{"steps": [...]}`` to install the script, or ``{"steps": []}`` /
+    an empty body to clear it. Each step is ``{"match": <regex>, "reply"?: str,
+    "tool"?: {"toolId": str, "arguments": dict, "responseType"?: str},
+    "followUpReply"?: str}``. Invalid scripts are rejected with a 400 and a
+    clear message; the mock provider never silently emits a fence for an
+    unknown/missing script. Unreachable when e2e is disabled (same guard as
+    the scenario endpoint).
+    """
+    if not e2e_enabled():
+        raise HTTPException(404, "E2E controls disabled")
+    from ..codirector.providers.mock import (
+        ScriptValidationError,
+        clear_scripted_steps,
+        get_scripted_steps,
+        set_scripted_steps,
+    )
+
+    payload = body or {}
+    steps = payload.get("steps")
+    if steps is None:
+        # An empty body (no "steps" key) clears the script.
+        clear_scripted_steps()
+        return {"installed": 0, "steps": []}
+    if not isinstance(steps, list):
+        raise HTTPException(400, "steps must be a list")
+    try:
+        count = set_scripted_steps(steps)
+    except ScriptValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"installed": count, "steps": get_scripted_steps()}
+
+
+@router.delete("/codirector/script")
+def e2e_codirector_script_delete() -> dict[str, Any]:
+    """Clear the installed scripted mock-provider script (E2E only)."""
+    if not e2e_enabled():
+        raise HTTPException(404, "E2E controls disabled")
+    from ..codirector.providers.mock import clear_scripted_steps
+
+    clear_scripted_steps()
+    return {"installed": 0, "steps": []}
 
 
 @router.post("/feature-flags")

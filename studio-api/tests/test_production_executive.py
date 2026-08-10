@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from contextlib import suppress
 
 import pytest
 from sqlalchemy.orm import Session
@@ -121,6 +123,38 @@ def _proposal_id_from_loop(db: Session, loop: dict) -> str:
     proposal_id = prop_job.result.get("proposalId")
     assert proposal_id
     return str(proposal_id)
+
+
+def test_schedule_job_queue_enqueue_same_loop_does_not_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app import queue_worker as queue_worker_module
+    from app.codirector.executive.imagegen_adapter import schedule_job_queue_enqueue
+
+    async def run() -> None:
+        loop = asyncio.get_running_loop()
+
+        class DummyQueue:
+            def __init__(self) -> None:
+                self._q: asyncio.Queue[str] = asyncio.Queue()
+                self._task = loop.create_task(asyncio.sleep(3600))
+
+            async def enqueue(self, job_id: str) -> None:
+                await self._q.put(job_id)
+
+        dummy = DummyQueue()
+        monkeypatch.setattr(queue_worker_module, "job_queue", dummy)
+
+        def _unexpected_threadsafe(*args, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("same-loop enqueue should not use run_coroutine_threadsafe")
+
+        monkeypatch.setattr(asyncio, "run_coroutine_threadsafe", _unexpected_threadsafe)
+        schedule_job_queue_enqueue("job-same-loop")
+        assert await asyncio.wait_for(dummy._q.get(), timeout=0.5) == "job-same-loop"
+
+        dummy._task.cancel()
+        with suppress(asyncio.CancelledError):
+            await dummy._task
+
+    asyncio.run(run())
 
 
 def test_feature_flag_defaults_off() -> None:

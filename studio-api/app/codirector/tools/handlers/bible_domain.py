@@ -9,7 +9,15 @@ from ...bible.domain_service import BibleDomainService
 from ...bible.domain.schemas import CanonRecordData, CharacterData, VisualLanguageData
 from ...bible import operations as ops
 from ...bible.schemas import BibleMutationSet, EntityMutation, FactMutation
-from ...errors import CAPABILITY_NOT_CONFIGURED, CoDirectorError
+from ....db import Asset
+from ...errors import (
+    CAPABILITY_NOT_CONFIGURED,
+    CoDirectorError,
+    REFERENCE_ASSET_MISSING,
+    REFERENCE_LINK_EXISTS,
+    REFERENCE_TARGET_MISSING,
+    SUPERSEDED_NOT_CURRENT,
+)
 from ..definitions import ToolContext, ToolPreview
 
 
@@ -28,7 +36,14 @@ def _require_bible(ctx: ToolContext):
 
 
 async def get_production_bible_summary(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    return BibleDomainService.get_summary(ctx.db, ctx.project_id)
+    summary = BibleDomainService.get_summary(ctx.db, ctx.project_id)
+    if not isinstance(summary, dict):
+        summary = {"value": summary}
+    summary["_summary"] = "Production Bible summary from domain service."
+    summary["_evidence"] = [
+        {"sourceType": "production_bible", "sourceId": ctx.project_id, "repository": "bible.domain"}
+    ]
+    return summary
 
 
 async def get_scene_bible_context(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -148,12 +163,43 @@ def preview_propose_canon_supersession(ctx: ToolContext, args: dict[str, Any]) -
 
 
 def apply_propose_canon_supersession(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    # D4: authoritative read-before-write — verify the superseded record exists
+    # and is the current version (not already superseded) before delegating to
+    # the service. The service applies the supersession, but the tool boundary
+    # must reject a supersession against a stale or missing record.
+    bible, version = _require_bible(ctx)
+    supersedes_stable_id = str(args.get("supersedesStableId") or "")
+    if not supersedes_stable_id:
+        raise CoDirectorError(
+            "TOOL_ARGUMENTS_INVALID",
+            "supersedesStableId is required for a canon supersession.",
+            recoverable=True,
+            recommended_action="revise_arguments",
+        )
+    entities = [ops.entity_row_to_schema(r) for r in ops.entities_for_version(ctx.db, version.id)]
+    superseded = next((e for e in entities if e.stableId == supersedes_stable_id and e.entityType == "canon_record"), None)
+    if superseded is None:
+        raise CoDirectorError(
+            SUPERSEDED_NOT_CURRENT,
+            "The canon record being superseded does not exist in the current Bible version.",
+            details={"supersedesStableId": supersedes_stable_id},
+            recoverable=False,
+            recommended_action="none",
+        )
+    if str(superseded.data.get("status") or "").lower() in {"superseded", "retired"}:
+        raise CoDirectorError(
+            SUPERSEDED_NOT_CURRENT,
+            "The canon record being superseded is already superseded — supersede the current record instead.",
+            details={"supersedesStableId": supersedes_stable_id, "currentStatus": superseded.data.get("status")},
+            recoverable=True,
+            recommended_action="reload_and_retry",
+        )
     result = BibleDomainService.create_canon_record(
         ctx.db,
         ctx.project_id,
         claim=str(args["claim"]),
         entity_stable_id=args.get("entityStableId"),
-        supersedes_stable_id=str(args["supersedesStableId"]),
+        supersedes_stable_id=supersedes_stable_id,
     )
     return {"canonRecord": result}
 
@@ -171,20 +217,54 @@ def preview_propose_continuity_update(ctx: ToolContext, args: dict[str, Any]) ->
 def apply_propose_continuity_update(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     import uuid
 
+    # D5: authoritative read-before-write — query existing continuity entities
+    # for the same subject before generating a new entity_key. When an existing
+    # continuity_state entity for the same subject+scene exists, update it in
+    # place via the domain service instead of creating a duplicate.
+    bible, version = _require_bible(ctx)
+    aspect = str(args.get("aspect", "other"))
+    scene_id = args.get("sceneId")
+    subject_stable_id = args.get("entityStableId")
+    entities = [ops.entity_row_to_schema(r) for r in ops.entities_for_version(ctx.db, version.id)]
+    existing = next(
+        (
+            e
+            for e in entities
+            if e.entityType == "continuity_state"
+            and (e.data.get("aspect") or "other") == aspect
+            and (e.data.get("sceneId") or None) == (scene_id or None)
+            and (
+                # Match either by explicit subject stable id, or by aspect+scene when no subject.
+                (subject_stable_id and e.data.get("entityStableId") == subject_stable_id)
+                or (not subject_stable_id)
+            )
+        ),
+        None,
+    )
+    data = {
+        "aspect": aspect,
+        "entityStableId": subject_stable_id,
+        "sceneId": scene_id,
+        "expectedValue": args.get("expectedValue", ""),
+        "actualValue": args.get("actualValue", ""),
+        "resolved": args.get("resolved", False),
+    }
+    if existing is not None:
+        updated = BibleDomainService.update_entity(
+            ctx.db,
+            ctx.project_id,
+            existing.stableId,
+            display_name=f"Continuity {aspect}",
+            data=data,
+        )
+        return {"continuityState": updated}
     result = BibleDomainService.create_entity(
         ctx.db,
         ctx.project_id,
         entity_type="continuity_state",
         entity_key=f"cont-{uuid.uuid4().hex[:8]}",
-        display_name=f"Continuity {args.get('aspect', 'other')}",
-        data={
-            "aspect": args.get("aspect", "other"),
-            "entityStableId": args.get("entityStableId"),
-            "sceneId": args.get("sceneId"),
-            "expectedValue": args.get("expectedValue", ""),
-            "actualValue": args.get("actualValue", ""),
-            "resolved": args.get("resolved", False),
-        },
+        display_name=f"Continuity {aspect}",
+        data=data,
     )
     return {"continuityState": result}
 
@@ -200,13 +280,67 @@ def preview_propose_reference_link(ctx: ToolContext, args: dict[str, Any]) -> To
 
 
 def apply_propose_reference_link(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    # D6: authoritative read-before-write — verify the asset and target exist
+    # and that an identical reference link is not already present before
+    # delegating to the service. The service checks the target entity, but the
+    # tool boundary must also verify the asset (an Asset row) and reject a
+    # duplicate link with explicit codes.
+    bible, version = _require_bible(ctx)
+    asset_id = str(args["assetId"])
+    target_stable_id = str(args["targetStableId"])
+    purpose = str(args.get("purpose", "identity"))
+    primary = bool(args.get("primary", False))
+
+    asset = ctx.db.query(Asset).filter(Asset.id == asset_id, Asset.project_id == ctx.project_id).first()
+    if asset is None:
+        raise CoDirectorError(
+            REFERENCE_ASSET_MISSING,
+            "The asset being linked does not exist in this project.",
+            details={"assetId": asset_id, "projectId": ctx.project_id},
+            recoverable=False,
+            recommended_action="none",
+        )
+    entities = [ops.entity_row_to_schema(r) for r in ops.entities_for_version(ctx.db, version.id)]
+    target = next((e for e in entities if e.stableId == target_stable_id), None)
+    if target is None:
+        raise CoDirectorError(
+            REFERENCE_TARGET_MISSING,
+            "The link target does not exist in the current Bible version.",
+            details={"targetStableId": target_stable_id},
+            recoverable=False,
+            recommended_action="none",
+        )
+    existing_link = next(
+        (
+            e
+            for e in entities
+            if e.entityType == "reference_link"
+            and e.data.get("assetId") == asset_id
+            and e.data.get("targetStableId") == target_stable_id
+            and (e.data.get("purpose") or "identity") == purpose
+        ),
+        None,
+    )
+    if existing_link is not None:
+        raise CoDirectorError(
+            REFERENCE_LINK_EXISTS,
+            "An identical reference link already exists in the current Bible version.",
+            details={
+                "assetId": asset_id,
+                "targetStableId": target_stable_id,
+                "purpose": purpose,
+                "existingStableId": existing_link.stableId,
+            },
+            recoverable=True,
+            recommended_action="none",
+        )
     result = BibleDomainService.link_reference(
         ctx.db,
         ctx.project_id,
-        asset_id=str(args["assetId"]),
-        target_stable_id=str(args["targetStableId"]),
-        purpose=str(args.get("purpose", "identity")),
-        primary=bool(args.get("primary", False)),
+        asset_id=asset_id,
+        target_stable_id=target_stable_id,
+        purpose=purpose,
+        primary=primary,
     )
     return {"referenceLink": result}
 

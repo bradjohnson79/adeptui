@@ -17,6 +17,7 @@ what "ready" was supposed to imply:
 | `degraded` | Usable with reduced function or a fallback path. |
 | `not_configured` | Implemented, but the operator has not supplied required configuration. |
 | `unknown` | Not yet probed in this environment. |
+| `deferred_version_1_2` | Intentionally out of Version 1.1 scope; planned for Version 1.2. Not a failure. |
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ class CapabilityStatus(str, Enum):
     DEGRADED = "degraded"
     NOT_CONFIGURED = "not_configured"
     UNKNOWN = "unknown"
+    DEFERRED_VERSION_1_2 = "deferred_version_1_2"
 
 
 #: Statuses that mean "a caller may invoke this now".
@@ -68,8 +70,29 @@ UNPROVEN_STATUSES = frozenset(
         CapabilityStatus.PARTIALLY_WIRED,
         CapabilityStatus.MOCK_VERIFIED,
         CapabilityStatus.UNKNOWN,
+        CapabilityStatus.DEFERRED_VERSION_1_2,
     }
 )
+
+#: Roadmap-deferred rows: listed for honesty, excluded from Version 1.1 readiness denominator.
+DEFERRED_FROM_READINESS_STATUSES = frozenset(
+    {
+        CapabilityStatus.DEFERRED_VERSION_1_2,
+    }
+)
+
+# SceneCraft is a planned future module — not part of the current release gate.
+# It must never appear in CAPABILITIES, UI exposure, Co-Director tools, or blocker counts.
+SCENECRAFT_RELEASE_EXCLUSION = {
+    "capabilityId": "scenecraft",
+    "releaseStatus": "PLANNED_FUTURE_MODULE",
+    "notPartOfCurrentRelease": True,
+    "exposedInUi": False,
+    "exposedToCoDirector": False,
+    "requiredForCurrentGate": False,
+    "includedInBlockedCount": False,
+    "includedInDeferredCount": False,
+}
 
 
 @dataclass(frozen=True)
@@ -159,4 +182,8 @@ class CapabilitySnapshotOut(BaseModel):
     blockers: list[CapabilityBlockerOut] = Field(default_factory=list)
     #: Capability ids that a caller (including Co-Director) may invoke right now.
     callable: list[str] = Field(default_factory=list)
+    #: Version 1.1 readiness denominator — excludes DEFERRED_VERSION_1_2 rows.
+    readinessTotal: int = 0
+    #: Deferred capability ids (roadmap only; not in readinessTotal).
+    deferred: list[str] = Field(default_factory=list)
     probeWarnings: list[str] = Field(default_factory=list)

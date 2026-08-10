@@ -1,7 +1,34 @@
 import { useState } from "react";
 import { DEFAULT_POLICIES, type ActionCategory, type PermissionPolicy } from "../../codirector/types";
 import { useCoDirectorSession } from "./CoDirectorSession";
-import type { PromptMode } from "./types";
+import { PromptIntelligencePanel } from "./PromptIntelligencePanel";
+import { PromptIntelligenceBenchmarkDashboard } from "./PromptIntelligenceBenchmarkDashboard";
+import { CoDirectorStatusPanel } from "./CoDirectorStatusPanel";
+import { CoDirectorInitiativeDial } from "./CoDirectorInitiativeDial";
+import type { CollaborationMode, CoDirectorActivityPreference, PromptMode } from "./types";
+
+const COLLABORATION_MODES: { id: CollaborationMode; label: string }[] = [
+  { id: "explore", label: "Explore" },
+  { id: "critique", label: "Critique" },
+  { id: "compare", label: "Compare" },
+  { id: "refine", label: "Refine" },
+  { id: "decide", label: "Decide" },
+  { id: "review", label: "Review" },
+  { id: "execute", label: "Execute" },
+  { id: "teach", label: "Teach" },
+];
+
+function loadCollaborationMode(): CollaborationMode {
+  try {
+    const raw = window.localStorage.getItem("codirector.collaborationMode");
+    if (COLLABORATION_MODES.some((mode) => mode.id === raw)) {
+      return raw as CollaborationMode;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "explore";
+}
 
 export function CoDirectorOverflowMenu() {
   const {
@@ -9,6 +36,9 @@ export function CoDirectorOverflowMenu() {
     setOverflowPanel,
     promptMode,
     setPromptMode,
+    activityPreference,
+    setActivityPreference,
+    uiContext,
     includeProjectKnowledge,
     setIncludeProjectKnowledge,
     compilePrompt,
@@ -19,6 +49,10 @@ export function CoDirectorOverflowMenu() {
     selectedModelId,
     setSelectedModelId,
     refreshProviderHealth,
+    reconnect,
+    showReconnectAction,
+    runtimeState,
+    runtimeChip,
     clearConversation,
     expandToFullScreen,
     displayMode,
@@ -31,21 +65,32 @@ export function CoDirectorOverflowMenu() {
     audit,
     refreshAudit,
     plan,
+    openStatusPanel,
   } = useCoDirectorSession();
   const [testing, setTesting] = useState(false);
+  const [collaborationMode, setCollaborationMode] = useState<CollaborationMode>(() => loadCollaborationMode());
+  const projectTypeLabel = uiContext?.primaryProjectType?.replace(/_/g, " ") || "custom";
 
   if (overflowPanel === "none") return null;
 
   return (
-    <div className="codirector-overflow" role="menu" aria-label="Co-Director options">
+    <div
+      id="codirector-overflow-panel"
+      className="codirector-overflow"
+      role="region"
+      aria-label="Co-Director options"
+      data-testid="codirector-overflow-panel"
+    >
       <div className="codirector-overflow-nav">
         {(
           [
             ["options", "Options"],
             ["provider", "Model"],
+            ["promptBench", "PI Benchmarks"],
             ["knowledge", "Knowledge"],
             ["access", "Access"],
             ["audit", "Audit"],
+            ["status", "Status"],
             ...(plan ? [["plan", "Active plan"] as const] : []),
           ] as const
         ).map(([id, label]) => (
@@ -57,6 +102,7 @@ export function CoDirectorOverflowMenu() {
               setOverflowPanel(id);
               if (id === "knowledge") void loadKnowledge();
               if (id === "audit") refreshAudit();
+              if (id === "status") void openStatusPanel();
             }}
           >
             {label}
@@ -70,12 +116,13 @@ export function CoDirectorOverflowMenu() {
       {overflowPanel === "options" && (
         <div className="codirector-overflow-body">
           <p className="eyebrow">Response style</p>
-          <div className="codirector-filter-chips">
+          <div className="codirector-filter-chips" role="group" aria-label="Response style">
             {(["creative", "structured", "model", "advanced"] as PromptMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
-                className={promptMode === mode ? "primary" : ""}
+                className={promptMode === mode ? "primary is-active" : ""}
+                aria-pressed={promptMode === mode}
                 onClick={() => setPromptMode(mode)}
               >
                 {mode}
@@ -88,7 +135,49 @@ export function CoDirectorOverflowMenu() {
               checked={includeProjectKnowledge}
               onChange={(e) => setIncludeProjectKnowledge(e.target.checked)}
             />
-            Include project knowledge
+            <span>Include project knowledge</span>
+          </label>
+          <CoDirectorInitiativeDial compact />
+          <p className="eyebrow" style={{ marginTop: "0.85rem" }}>
+            Working style
+          </p>
+          <p className="muted" style={{ margin: "0 0 0.4rem", fontSize: "0.85rem" }}>
+            Project format: <strong data-testid="codirector-domain-badge">{projectTypeLabel}</strong>
+          </p>
+          <div className="codirector-filter-chips" role="group" aria-label="Working style">
+            {COLLABORATION_MODES.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={collaborationMode === mode.id ? "primary is-active" : ""}
+                aria-pressed={collaborationMode === mode.id}
+                data-testid={`codirector-collab-mode-${mode.id}`}
+                onClick={() => {
+                  setCollaborationMode(mode.id);
+                  try {
+                    window.localStorage.setItem("codirector.collaborationMode", mode.id);
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <label
+            className="codirector-check"
+            style={{ flexDirection: "column", alignItems: "flex-start", gap: "0.3rem" }}
+          >
+            <span>Show Co-Director Activity</span>
+            <select
+              value={activityPreference}
+              onChange={(e) => setActivityPreference(e.target.value as CoDirectorActivityPreference)}
+            >
+              <option value="always">Always</option>
+              <option value="longer_tasks">Only for longer tasks</option>
+              <option value="hidden">Hidden</option>
+            </select>
           </label>
           <div className="row-actions">
             <button type="button" disabled={busy} onClick={() => void compilePrompt()}>
@@ -110,16 +199,44 @@ export function CoDirectorOverflowMenu() {
               </button>
             )}
           </div>
+          <PromptIntelligencePanel
+            creatorPrompt=""
+            domain="video"
+            compact
+            onApply={({ finalProviderPrompt }) => {
+              // Soft handoff: copy into clipboard-friendly toast via alert when no host bind.
+              window.dispatchEvent(
+                new CustomEvent("adept-prompt-intelligence-apply", {
+                  detail: { finalProviderPrompt },
+                }),
+              );
+            }}
+          />
+          <p className="muted" style={{ fontSize: "0.72rem" }}>
+            Open Timeline / Image / Video / Audio generators and use Prompt Intelligence there with the active prompt, or paste a prompt into those panels after Preview.
+          </p>
+        </div>
+      )}
+
+      {overflowPanel === "promptBench" && (
+        <div className="codirector-overflow-body" data-testid="codirector-prompt-bench-overflow">
+          <PromptIntelligenceBenchmarkDashboard />
         </div>
       )}
 
       {overflowPanel === "provider" && (
         <div className="codirector-overflow-body">
           <p className="eyebrow">Model & provider</p>
-          <p>
-            {providerStatus}
+          <p data-testid="codirector-runtime-status">
+            {runtimeChip || providerStatus}
             {providerHealth?.reachable ? " ✓" : ""}
           </p>
+          <p className="muted">State: {runtimeState}</p>
+          {(providerHealth?.testOnly || providerHealth?.honesty === "mocked") && (
+            <p className="muted" data-testid="codirector-test-only-provider">
+              Test-only mock provider — not a production connection.
+            </p>
+          )}
           {providerHealth?.endpoint && <p className="muted">Endpoint: {providerHealth.endpoint}</p>}
           {providerModel && <p className="muted">Active model: {providerModel}</p>}
           {!providerHealth?.reachable && providerHealth?.message && (
@@ -131,6 +248,7 @@ export function CoDirectorOverflowMenu() {
               <select
                 value={selectedModelId || providerHealth.selectedModel || ""}
                 onChange={(e) => setSelectedModelId(e.target.value || null)}
+                data-testid="codirector-model-select"
               >
                 {providerHealth.models.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -155,6 +273,11 @@ export function CoDirectorOverflowMenu() {
             >
               {testing ? "Testing…" : "Refresh / Test"}
             </button>
+            {showReconnectAction ? (
+              <button type="button" data-testid="codirector-reconnect-options" onClick={() => void reconnect()}>
+                Reconnect
+              </button>
+            ) : null}
           </div>
         </div>
       )}
@@ -212,6 +335,8 @@ export function CoDirectorOverflowMenu() {
           ))}
         </ul>
       )}
+
+      {overflowPanel === "status" && <CoDirectorStatusPanel />}
 
       {overflowPanel === "plan" && plan && (
         <div className="codirector-overflow-body">

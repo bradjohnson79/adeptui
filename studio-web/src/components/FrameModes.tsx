@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Asset, Project, Scene } from "../types";
 import { api } from "../api";
 import { PanelHeading } from "./HelpTip";
+import { ReferencesPane } from "./sceneReferences/ReferencesPane";
+import { MiniMaxH3PlanPanel } from "./minimax-h3/MiniMaxH3PlanPanel";
 
 function KeyframeSlot({
   label,
@@ -65,7 +67,12 @@ export function OneFramePanel({
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [draftPrompt, setDraftPrompt] = useState(scene?.prompt || "");
   const images = useMemo(() => project.assets.filter((a) => a.kind === "image"), [project.assets]);
+
+  useEffect(() => {
+    setDraftPrompt(scene?.prompt || "");
+  }, [scene?.id, scene?.prompt]);
 
   if (!scene) return <div className="panel"><p className="empty">Select a scene</p></div>;
 
@@ -81,16 +88,18 @@ export function OneFramePanel({
   };
 
   return (
-    <div className="panel frame-mode-panel">
+    <div className="panel frame-mode-panel" data-testid="one-frame-panel">
       <PanelHeading
-        title="1 Frame"
-        tip="Generate video from one still. Upload or pick a single image, write motion, then retake the scene."
+        title="One Frame"
+        tip="Generate video from one still. Upload or pick a Start Frame, write motion, then generate."
       />
-      <p className="scene-meta">Single-frame image-to-video — one keyframe drives the whole clip.</p>
+      <p className="scene-meta">
+        Start Frame (below) is separate from supporting References — the Start Frame is not the only reference.
+      </p>
       <div className="frame-slots one">
         <KeyframeSlot
-          label="Frame"
-          tip="The only still used for this scene. Motion and camera come from the prompt."
+          label="Start Frame"
+          tip="Opening still for this scene. Supporting References (left pane / below) are additional guidance."
           assetId={scene.start_asset_id}
           images={images}
           onPick={(id) => update({ start_asset_id: id, middle_asset_id: null, end_asset_id: null })}
@@ -98,13 +107,29 @@ export function OneFramePanel({
         />
       </div>
       <div className="field">
-        <label>Motion prompt</label>
+        <label htmlFor="one-frame-motion-prompt">Motion prompt</label>
         <textarea
-          value={scene.prompt}
-          onChange={(e) => update({ prompt: e.target.value })}
+          id="one-frame-motion-prompt"
+          data-testid="one-frame-motion-prompt"
+          value={draftPrompt}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDraftPrompt(next);
+            void update({ prompt: next });
+          }}
           placeholder="camera slowly pushes in, soft wind, she turns toward the light…"
         />
       </div>
+      <MiniMaxH3PlanPanel
+        projectId={project.id}
+        prompt={draftPrompt}
+        mode="one-frame"
+        sourceSurface="one-frame"
+        durationSec={scene.duration_sec}
+        sceneId={scene.id}
+        startAssetId={scene.start_asset_id}
+      />
+      <ReferencesPane project={project} sceneId={scene.id} workflowTab="one" onChange={onChange} />
       <div className="field">
         <label>Duration (seconds)</label>
         <input
@@ -201,7 +226,12 @@ export function ThreeFramePanel({
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [draftPrompt, setDraftPrompt] = useState(scene?.prompt || "");
   const images = useMemo(() => project.assets.filter((a) => a.kind === "image"), [project.assets]);
+
+  useEffect(() => {
+    setDraftPrompt(scene?.prompt || "");
+  }, [scene?.id, scene?.prompt]);
 
   if (!scene) return <div className="panel"><p className="empty">Select a scene</p></div>;
 
@@ -218,15 +248,17 @@ export function ThreeFramePanel({
   };
 
   return (
-    <div className="panel frame-mode-panel">
+    <div className="panel frame-mode-panel" data-testid="three-frame-panel">
       <PanelHeading
-        title="3 Frame"
-        tip="Start, middle, and end stills guide the arc. Fill the slots, write motion, then generate the scene."
+        title="Three Frame"
+        tip="Start, Middle, and End stills guide the arc. MiniMax H3 uses two linked beats (Start→Middle, Middle→End)."
       />
-      <p className="scene-meta">Keyframe path — beginning, midpoint, and ending images for guided video generation.</p>
-      <div className="frame-slots three">
+      <p className="scene-meta">
+        Start / Middle Guidance / End frames plus shared supporting References — scopes preserved.
+      </p>
+      <div className="frame-slots three" data-testid="three-frame-strip">
         <KeyframeSlot
-          label="Start"
+          label="Start Frame"
           tip="Opening still. Sets identity and framing at time zero."
           assetId={scene.start_asset_id}
           images={images}
@@ -234,15 +266,15 @@ export function ThreeFramePanel({
           onUpload={(f) => uploadSlot("start", f)}
         />
         <KeyframeSlot
-          label="Middle"
-          tip="Mid-clip still. Optional bridge pose or camera position."
+          label="Middle Guidance Frame"
+          tip="Mid-clip still. Bridges Start and End. MiniMax H3 does not treat this as a native timed keyframe."
           assetId={scene.middle_asset_id}
           images={images}
           onPick={(id) => update({ middle_asset_id: id })}
           onUpload={(f) => uploadSlot("middle", f)}
         />
         <KeyframeSlot
-          label="End"
+          label="End Frame"
           tip="Closing still. Anchors where the motion should finish."
           assetId={scene.end_asset_id}
           images={images}
@@ -251,13 +283,31 @@ export function ThreeFramePanel({
         />
       </div>
       <div className="field">
-        <label>Motion prompt</label>
+        <label htmlFor="three-frame-motion-prompt">Motion prompt</label>
         <textarea
-          value={scene.prompt}
-          onChange={(e) => update({ prompt: e.target.value })}
+          id="three-frame-motion-prompt"
+          data-testid="three-frame-motion-prompt"
+          value={draftPrompt}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDraftPrompt(next);
+            void update({ prompt: next });
+          }}
           placeholder="walks from door to window, camera follows, rain on glass…"
         />
       </div>
+      <MiniMaxH3PlanPanel
+        projectId={project.id}
+        prompt={draftPrompt}
+        mode="three-frame"
+        sourceSurface="three-frame"
+        durationSec={scene.duration_sec}
+        sceneId={scene.id}
+        startAssetId={scene.start_asset_id}
+        middleAssetId={scene.middle_asset_id}
+        endAssetId={scene.end_asset_id}
+      />
+      <ReferencesPane project={project} sceneId={scene.id} workflowTab="three" onChange={onChange} />
       <div className="field">
         <label>Duration (seconds)</label>
         <input

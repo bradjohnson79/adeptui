@@ -1,7 +1,30 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
+const betaBaseURL = "http://127.0.0.1:8760";
+const betaApiBase = "http://127.0.0.1:8758";
+const betaApiPort = "8758";
+
+/** ADEPT_BETA_TARGET=1 or explicit 8760/8758 wiring → certify against live Beta, not e2e-start. */
+const betaTarget =
+  process.env.ADEPT_BETA_TARGET === "1" ||
+  process.env.ADEPT_BETA_TARGET === "true" ||
+  process.env.ADEPT_BETA_TARGET === "TRUE" ||
+  process.env.PLAYWRIGHT_BASE_URL === betaBaseURL ||
+  process.env.STUDIO_API_BASE === betaApiBase ||
+  process.env.STUDIO_API_PORT === betaApiPort;
+
+const baseURL =
+  process.env.PLAYWRIGHT_BASE_URL ||
+  (betaTarget ? betaBaseURL : "http://127.0.0.1:5173");
+
+if (betaTarget) {
+  process.env.PLAYWRIGHT_BASE_URL = process.env.PLAYWRIGHT_BASE_URL || betaBaseURL;
+  process.env.STUDIO_API_BASE = process.env.STUDIO_API_BASE || betaApiBase;
+  process.env.STUDIO_API_PORT = process.env.STUDIO_API_PORT || betaApiPort;
+  process.env.ADEPT_BETA_TARGET = "1";
+}
+
 const artifactDir = path.join("artifacts", "functional-audit");
 
 export default defineConfig({
@@ -9,6 +32,9 @@ export default defineConfig({
   // The M3.0a live-render checks inside that suite additionally require ADEPT_M30A_FAL_LIVE=1
   // and a real key, and skip themselves otherwise; the env passes through to the webServer
   // below. The workspace specs under studio-web/e2e run as a second project (see `projects`).
+  //
+  // Certification smoke against live Beta: `npm run test:e2e:beta` (ADEPT_BETA_TARGET=1).
+  // Isolated fixture harness remains the default for pack/e2e-route specs.
   testDir: path.join("tests", "e2e"),
   fullyParallel: false,
   workers: 1,
@@ -46,12 +72,17 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
   ],
-  webServer: {
-    command: "node scripts/e2e-start.mjs",
-    url: `${baseURL}/`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  // Against live Beta we must NOT spawn scripts/e2e-start.mjs (different ports + STUDIO_E2E).
+  ...(betaTarget
+    ? {}
+    : {
+        webServer: {
+          command: "node scripts/e2e-start.mjs",
+          url: `${baseURL}/`,
+          reuseExistingServer: !process.env.CI,
+          timeout: 180_000,
+          stdout: "pipe" as const,
+          stderr: "pipe" as const,
+        },
+      }),
 });

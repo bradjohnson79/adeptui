@@ -1,79 +1,66 @@
-/** Central cinematic image registry — drop JPEGs into public/images/dashboard later. */
+/** Central cinematic image registry — prefers Aurora registry; drop JPEGs into public/images/dashboard later. */
+import { auroraCardImagery } from "./theme/auroraCardImagery";
+
 export type DashboardImage = {
   src: string;
   alt: string;
   attribution?: string;
   motif: string; // CSS class motif when image missing
+  plate?: string;
 };
 
+function fromAurora(key: keyof typeof auroraCardImagery): DashboardImage {
+  const img = auroraCardImagery[key];
+  return { src: img.src, alt: img.alt, motif: img.motif, plate: img.plate };
+}
+
 export const dashboardImages = {
-  hero: {
-    src: "/images/dashboard/hero-film-set.jpg",
-    alt: "Cinematic film production set with camera and monitors",
-    motif: "motif-set",
+  hero: fromAurora("hero"),
+  narrative: fromAurora("templates.narrative"),
+  dialogue: fromAurora("templates.dialogue"),
+  commercial: fromAurora("templates.commercial"),
+  music: fromAurora("templates.music"),
+  animation: fromAurora("templates.animation"),
+  explainer: fromAurora("templates.explainer"),
+  documentary: fromAurora("templates.documentary"),
+  social: fromAurora("templates.social"),
+  trailer: fromAurora("templates.trailer"),
+  talkingAvatar: fromAurora("templates.talkingAvatar"),
+  director: fromAurora("workspaces.director"),
+  timeline: {
+    src: "/images/hero/Timeline_Anadriya_4-3.png",
+    alt: "Adept UI Timeline Generator — Anadriya",
+    motif: "motif-timeline",
+    plate: "plate-aurora",
   },
-  narrative: {
-    src: "/images/dashboard/template-narrative.jpg",
-    alt: "Narrative film storyboard and script desk",
-    motif: "motif-narrative",
+  editor: fromAurora("workspaces.editor"),
+  magi: {
+    src: "/images/hero/MAGI_Editor_Hero_Korri.png",
+    alt: "Adept UI MAGI Editor — Korri",
+    motif: "motif-edit",
+    plate: "plate-aurora",
   },
-  dialogue: {
-    src: "/images/dashboard/template-dialogue.jpg",
-    alt: "Two-character dialogue scene blocking",
-    motif: "motif-dialogue",
-  },
-  commercial: {
-    src: "/images/dashboard/template-commercial.jpg",
-    alt: "Clean commercial product lighting",
-    motif: "motif-commercial",
-  },
-  music: {
-    src: "/images/dashboard/template-music.jpg",
-    alt: "Music video performance and lighting",
-    motif: "motif-music",
-  },
-  animation: {
-    src: "/images/dashboard/template-animation.jpg",
-    alt: "Animation character design wall",
-    motif: "motif-animation",
-  },
-  director: {
-    src: "/images/dashboard/ws-director.jpg",
-    alt: "Director monitors and editing timeline",
-    motif: "motif-director",
-  },
-  script: {
-    src: "/images/dashboard/ws-script.jpg",
-    alt: "Screenplay pages and storyboard sketches",
-    motif: "motif-script",
-  },
-  spatial: {
-    src: "/images/dashboard/ws-spatial.jpg",
-    alt: "Top-down spatial blocking map",
-    motif: "motif-spatial",
-  },
-  imagegen: {
-    src: "/images/dashboard/ws-imagegen.jpg",
-    alt: "Cinematic concept still frame",
-    motif: "motif-imagegen",
-  },
-  video: {
-    src: "/images/dashboard/ws-video.jpg",
-    alt: "Film camera and moving frame",
-    motif: "motif-video",
-  },
-  library: {
-    src: "/images/dashboard/ws-library.jpg",
-    alt: "Visual contact sheet of production assets",
-    motif: "motif-library",
-  },
-  avatar: {
-    src: "/images/dashboard/ws-avatar.jpg",
-    alt: "Cinematic speaking portrait of a character at camera",
-    motif: "motif-imagegen",
-  },
+  script: fromAurora("workspaces.script"),
+  spatial: fromAurora("workspaces.spatial"),
+  imagegen: fromAurora("workspaces.imagegen"),
+  video: fromAurora("workspaces.video"),
+  library: fromAurora("workspaces.library"),
+  avatar: fromAurora("workspaces.avatar"),
+  audio: fromAurora("workspaces.audio"),
+  brand: fromAurora("workspaces.brand"),
+  voice: fromAurora("workspaces.voice"),
+  posecraft: fromAurora("workspaces.posecraft"),
+  oneFrame: fromAurora("workspaces.oneFrame"),
+  threeFrame: fromAurora("workspaces.threeFrame"),
+  characterCreator: fromAurora("workspaces.characterCreator"),
+  scriptwriter: fromAurora("workspaces.scriptwriter"),
+  createProject: fromAurora("surfaces.createProject"),
 } as const satisfies Record<string, DashboardImage>;
 
+/**
+ * @deprecated Soft UI labels only. M3.1a source of truth is project type slugs
+ * in `projectTypes.ts` / backend project type catalog.
+ */
 export const PRODUCTION_TYPES = [
   "Short Film",
   "Feature Film",
@@ -82,17 +69,40 @@ export const PRODUCTION_TYPES = [
   "Music Video",
   "Social Video",
   "Animation",
+  "Educational / Explainer",
+  "Documentary",
+  "Trailer",
+  "Talking Avatar",
   "Custom",
 ] as const;
 
+/** @deprecated Prefer PrimaryProjectType slugs from projectTypes.ts */
 export type ProductionType = (typeof PRODUCTION_TYPES)[number];
 
-export const PROJECT_TEMPLATES = [
+export type ProjectTemplateDef = {
+  id: string;
+  title: string;
+  description: string;
+  type: ProductionType;
+  primaryProjectType: string;
+  image: DashboardImage;
+  defaults: {
+    aspect?: string;
+    storyboard_style?: string;
+    resolution?: string;
+    fps?: number;
+    /** Subtype traits forwarded to createProject (e.g. web_series, brand_ad). */
+    projectTraits?: string[];
+  };
+};
+
+export const PROJECT_TEMPLATES: readonly ProjectTemplateDef[] = [
   {
     id: "narrative",
     title: "Narrative Film",
     description: "Script, storyboard, spatial planning, coverage, and Director timeline.",
-    type: "Short Film" as ProductionType,
+    type: "Short Film",
+    primaryProjectType: "short_film",
     image: dashboardImages.narrative,
     defaults: { aspect: "2.39:1", storyboard_style: "Pencil storyboard", resolution: "1080p" },
   },
@@ -100,7 +110,8 @@ export const PROJECT_TEMPLATES = [
     id: "dialogue",
     title: "Dialogue Scene",
     description: "Two-character blocking, standard coverage, reaction shots, and lip-sync prep.",
-    type: "Series Episode" as ProductionType,
+    type: "Series Episode",
+    primaryProjectType: "television_episodic",
     image: dashboardImages.dialogue,
     defaults: { aspect: "16:9", storyboard_style: "Grayscale cinematic", resolution: "1080p" },
   },
@@ -108,7 +119,8 @@ export const PROJECT_TEMPLATES = [
     id: "commercial",
     title: "Product Film",
     description: "Product consistency, controlled camera movement, clean commercial lighting.",
-    type: "Commercial" as ProductionType,
+    type: "Commercial",
+    primaryProjectType: "commercial",
     image: dashboardImages.commercial,
     defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p" },
   },
@@ -116,7 +128,8 @@ export const PROJECT_TEMPLATES = [
     id: "music",
     title: "Music Video",
     description: "Rhythm-focused shot planning, visual experimentation, and performance coverage.",
-    type: "Music Video" as ProductionType,
+    type: "Music Video",
+    primaryProjectType: "music_video",
     image: dashboardImages.music,
     defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p", fps: 24 },
   },
@@ -124,11 +137,76 @@ export const PROJECT_TEMPLATES = [
     id: "animation",
     title: "Animation",
     description: "Character Profiles, storyboard-first workflow, and stylized generation.",
-    type: "Animation" as ProductionType,
+    type: "Animation",
+    primaryProjectType: "animation",
     image: dashboardImages.animation,
     defaults: { aspect: "16:9", storyboard_style: "Anime storyboard", resolution: "1080p" },
   },
-] as const;
+  {
+    id: "explainer",
+    title: "Explainer",
+    description:
+      "Clear script beats, on-screen captions, diagram frames, and Co-Director educational planning.",
+    type: "Educational / Explainer",
+    primaryProjectType: "educational_explainer",
+    image: dashboardImages.explainer,
+    defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p", fps: 24 },
+  },
+  {
+    id: "documentary",
+    title: "Documentary",
+    description: "Interview structure, B-roll planning, archive honesty, and observational coverage.",
+    type: "Documentary",
+    primaryProjectType: "documentary",
+    image: dashboardImages.documentary,
+    defaults: { aspect: "16:9", storyboard_style: "Grayscale cinematic", resolution: "1080p", fps: 24 },
+  },
+  {
+    id: "social",
+    title: "Social Short",
+    description: "Hook-first short-form cuts, captions, CTA pacing, and vertical-ready delivery.",
+    type: "Social Video",
+    primaryProjectType: "social_media",
+    image: dashboardImages.social,
+    defaults: { aspect: "9:16", storyboard_style: "Color concept frame", resolution: "1080p", fps: 30 },
+  },
+  {
+    id: "trailer",
+    title: "Cinematic Trailer",
+    description: "Cold open, escalation beats, title reveal, and release-card trailer structure.",
+    type: "Trailer",
+    primaryProjectType: "video_cinematic_trailer",
+    image: dashboardImages.trailer,
+    defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p", fps: 24 },
+  },
+  {
+    id: "talking-avatar",
+    title: "Talking Avatar",
+    description: "Character Profile, voice, lip-sync presenter workflow, and caption-ready delivery.",
+    type: "Talking Avatar",
+    primaryProjectType: "talking_avatar",
+    image: dashboardImages.talkingAvatar,
+    defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p", fps: 24 },
+  },
+  {
+    id: "web-series",
+    title: "Web Series",
+    description: "Episode-based series with recurring characters, serialized story beats, and season planning.",
+    type: "Series Episode",
+    primaryProjectType: "series",
+    image: dashboardImages.dialogue,
+    defaults: { aspect: "16:9", storyboard_style: "Grayscale cinematic", resolution: "1080p", fps: 24, projectTraits: ["web_series"] },
+  },
+  {
+    id: "brand-ad",
+    title: "Brand Ad",
+    description: "Brand-led commercial with identity, logo reveal, CTA, and multi-format delivery.",
+    type: "Commercial",
+    primaryProjectType: "commercial",
+    image: dashboardImages.commercial,
+    defaults: { aspect: "16:9", storyboard_style: "Color concept frame", resolution: "1080p", fps: 24, projectTraits: ["brand_ad"] },
+  },
+];
 
 export function relativeTime(iso?: string | null): string {
   if (!iso) return "—";

@@ -2,6 +2,98 @@ import { useEffect, useState } from "react";
 import type { Job, Project } from "../types";
 import { api } from "../api";
 import { HelpTip, PanelHeading } from "./HelpTip";
+import { Button, EmptyState, StatusBadge } from "./ui";
+import { mapJobStatus } from "../status";
+
+const IMAGE_PIPELINE_STAGES = [
+  "Queued",
+  "Preparing",
+  "PreparingControls",
+  "PreparingMasks",
+  "LoadingModels",
+  "Sampling",
+  "Compositing",
+  "Validating",
+  "RegisteringAsset",
+  "CreatingVersion",
+  "Retrying",
+  "Completed",
+] as const;
+
+function isImageProductJob(job: Job): boolean {
+  return job.kind === "imagegen" || job.kind === "imagegen_edit";
+}
+
+function imageStageIndex(stage: string | undefined): number {
+  if (!stage) return -1;
+  const idx = IMAGE_PIPELINE_STAGES.indexOf(stage as (typeof IMAGE_PIPELINE_STAGES)[number]);
+  if (idx >= 0) return idx;
+  if (stage === "Failed" || stage === "Cancelled") return IMAGE_PIPELINE_STAGES.length;
+  return -1;
+}
+
+function ImageJobStagePipeline({ job }: { job: Job }) {
+  const stage = job.stage || "";
+  if (!isImageProductJob(job)) return null;
+  if (!stage && !["queued", "running"].includes(job.status)) return null;
+
+  const knownStages = new Set([...IMAGE_PIPELINE_STAGES, "Failed", "Cancelled"]);
+  if (!knownStages.has(stage) && job.status !== "queued" && job.status !== "running") return null;
+
+  const activeIdx =
+    stage === "Failed" || stage === "Cancelled"
+      ? IMAGE_PIPELINE_STAGES.length
+      : imageStageIndex(stage) >= 0
+        ? imageStageIndex(stage)
+        : job.status === "done"
+          ? IMAGE_PIPELINE_STAGES.length - 1
+          : 0;
+
+  const failed = stage === "Failed" || job.status === "failed";
+  const cancelled = stage === "Cancelled" || job.status === "cancelled";
+
+  return (
+    <div className="image-job-pipeline" style={{ marginTop: 8 }}>
+      <div className="row" style={{ flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
+        {IMAGE_PIPELINE_STAGES.map((s, i) => {
+          const done = i < activeIdx || (s === "Completed" && job.status === "done");
+          const active = i === activeIdx && !failed && !cancelled && job.status !== "done";
+          return (
+            <span
+              key={s}
+              className="pill"
+              style={{
+                opacity: done || active ? 1 : 0.45,
+                fontWeight: active ? 600 : 400,
+                borderColor: active ? "var(--accent)" : undefined,
+              }}
+            >
+              {s.replace(/([A-Z])/g, " $1").trim()}
+            </span>
+          );
+        })}
+        {failed && <StatusBadge kind="Failed" label="Failed" compact />}
+        {cancelled && <StatusBadge kind="Cancelled" label="Cancelled" compact />}
+      </div>
+    </div>
+  );
+}
+
+function formatJobMessage(message: string | null | undefined) {
+  const value = message || "";
+  const traceback = value.includes("Traceback") || (value.match(/File "/g) || []).length > 1 || value.length > 280;
+  if (!traceback) return <>{value}</>;
+  const summary = value.split(/\r?\n/).find((line) => line.trim()) || "Job failed.";
+  return (
+    <>
+      {summary.slice(0, 280)}
+      <details>
+        <summary>Show details</summary>
+        <pre>{value}</pre>
+      </details>
+    </>
+  );
+}
 
 export function JobPanel({
   projectId,
@@ -37,12 +129,12 @@ export function JobPanel({
   }, [projectId, onDone]);
 
   return (
-    <div className="panel">
+    <div className="panel ds-surface">
       <PanelHeading
         title="Render queue"
         tip="Live jobs for scene renders, timeline stitches, lip sync, and image tools. Cancel running work here."
       />
-      {jobs.length === 0 && <div className="empty">No jobs yet</div>}
+      {jobs.length === 0 && <EmptyState kind="first-use" title="No jobs yet" description="Render a scene or run a generation tool to see work here." />}
       {jobs.slice(0, 8).map((j) => (
         <div
           className="job-item"
@@ -56,14 +148,17 @@ export function JobPanel({
         >
           <div className="scene-head">
             <strong>{j.kind}</strong>
-            <span className="scene-meta">{j.status}</span>
+            <StatusBadge kind={mapJobStatus(j.status)} label={j.status} compact />
           </div>
-          <div className="scene-meta">{j.message}</div>
+          <div className="scene-meta">{formatJobMessage(j.message)}</div>
           <div className="bar">
             <i style={{ width: `${Math.round((j.progress || 0) * 100)}%` }} />
           </div>
+          <ImageJobStagePipeline job={j} />
           {(j.status === "queued" || j.status === "running") && (
-            <button
+            <Button
+              variant="secondary"
+              compact
               style={{ marginTop: 8 }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -71,10 +166,12 @@ export function JobPanel({
               }}
             >
               Cancel
-            </button>
+            </Button>
           )}
           {j.scene_id && (j.status === "queued" || j.status === "running") && onViewInDirector && (
-            <button
+            <Button
+              variant="ghost"
+              compact
               style={{ marginTop: 8, marginLeft: 8 }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -82,13 +179,13 @@ export function JobPanel({
               }}
             >
               View in Director
-            </button>
+            </Button>
           )}
           {(j.stage || j.message) && (
             <div className="scene-meta" style={{ marginTop: 4 }}>
-              {j.stage ? `Stage: ${j.stage}` : null}
+              {j.stage && !isImageProductJob(j) ? `Stage: ${j.stage}` : null}
               {j.status === "running" && (j.message || "").toLowerCase().includes("preview")
-                ? " · Live preview available"
+                ? `${j.stage && !isImageProductJob(j) ? " · " : ""}Live preview available`
                 : ""}
             </div>
           )}
@@ -272,7 +369,7 @@ export function AdvancedPanel({ project, onChange }: { project: Project; onChang
               <option value="ltx">LTX 2.3</option>
               <option value="wan">WAN 2.2</option>
             </optgroup>
-            <optgroup label="Cloud API (fal.ai)">
+            <optgroup label="Hosted AI Providers (Kie.ai · WaveSpeed.ai · fal.ai)">
               <option value="fal_seedance">Seedance 2.0</option>
               <option value="fal_kling">Kling 2.5 Turbo Pro</option>
               <option value="fal_veo">Veo 3.1</option>
@@ -281,12 +378,13 @@ export function AdvancedPanel({ project, onChange }: { project: Project; onChang
           </select>
           {String(project.engine_default).startsWith("fal_") && (
             <p className="scene-meta" style={{ marginTop: 6 }}>
-              Cloud engines bill through your fal.ai account. Add a start image for best I2V results.
+              Hosted cloud engines bill through your connected provider account (Kie.ai, WaveSpeed.ai, or fal.ai).
+              Configure under Setup → AI Providers. Add a start image for best I2V results.
             </p>
           )}
         </div>
         <div className="field">
-          <label>fal.ai API key</label>
+          <label>fal.ai API key (legacy — prefer Setup → AI Providers)</label>
           <p className="scene-meta" style={{ marginTop: 0 }}>
             Stored encrypted on this machine only (never sent to the browser after save). Get a key at{" "}
             <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer">

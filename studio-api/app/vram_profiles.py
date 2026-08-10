@@ -25,7 +25,7 @@ class VramProfile:
     lipsync_steps: int
     # Soft assist: process video in frame windows on low VRAM (documented for future chunked pipelines)
     assist_chunk_frames: int
-    recommended_engine: Literal["ltx", "wan"]
+    recommended_engine: Literal["minimax-h3", "ltx", "wan"]
     summary: str
     assists: tuple[str, ...]
 
@@ -45,7 +45,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         lipsync_size=384,
         lipsync_steps=10,
         assist_chunk_frames=25,
-        recommended_engine="ltx",
+        recommended_engine="minimax-h3",
         summary="Safe mode for entry GPUs — lower res, short clips, fewer steps, chunked assist.",
         assists=(
             "640×384 output",
@@ -70,7 +70,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         lipsync_size=448,
         lipsync_steps=14,
         assist_chunk_frames=41,
-        recommended_engine="ltx",
+        recommended_engine="minimax-h3",
         summary="Balanced — good for most 5s scenes without aggressive quality settings.",
         assists=(
             "960×544 output",
@@ -95,7 +95,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         lipsync_size=512,
         lipsync_steps=18,
         assist_chunk_frames=0,
-        recommended_engine="ltx",
+        recommended_engine="minimax-h3",
         summary="Full HD comfort zone — default Adept quality path for LTX / WAN.",
         assists=(
             "1280×720 output",
@@ -119,7 +119,7 @@ PROFILES: dict[VramTier, VramProfile] = {
         lipsync_size=512,
         lipsync_steps=20,
         assist_chunk_frames=0,
-        recommended_engine="ltx",
+        recommended_engine="minimax-h3",
         summary="High-VRAM headroom — longer clips, more steps, fewer OOM safeguards.",
         assists=(
             "1280×720 (room to push higher manually)",

@@ -18,7 +18,7 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
-    engine_default: Mapped[str] = mapped_column(String(16), default="ltx")
+    engine_default: Mapped[str] = mapped_column(String(16), default="minimax-h3")
     global_prompt: Mapped[str] = mapped_column(Text, default="")
     negative_prompt: Mapped[str] = mapped_column(Text, default="blurry, low quality, watermark")
     width: Mapped[int] = mapped_column(Integer, default=1280)
@@ -28,6 +28,8 @@ class Project(Base):
     preset: Mapped[str] = mapped_column(String(32), default="quality")
     vram_gb: Mapped[int] = mapped_column(Integer, default=32)
     spatial_map_json: Mapped[str] = mapped_column(Text, default="{}")
+    # M026: PoseCraft production scene document (live working copy), project-scoped.
+    posecraft_document_json: Mapped[str] = mapped_column(Text, default="")
     render_safety_json: Mapped[str] = mapped_column(Text, default="")
     learning_json: Mapped[str] = mapped_column(Text, default="")
     learning_enabled_json: Mapped[str] = mapped_column(Text, default="")
@@ -40,6 +42,11 @@ class Project(Base):
     archived: Mapped[int] = mapped_column(Integer, default=0)
     defaults_json: Mapped[str] = mapped_column(Text, default="")
     settings_json: Mapped[str] = mapped_column(Text, default="")
+    # M3.1a Project Types — primary_project_type is source of truth; defaults_json.production_type is deprecated soft metadata.
+    primary_project_type: Mapped[str] = mapped_column(String(128), default="custom")
+    project_traits_json: Mapped[str] = mapped_column(Text, default="[]")
+    resolved_profile_json: Mapped[str] = mapped_column(Text, default="{}")
+    project_type_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -58,7 +65,7 @@ class Scene(Base):
     #: Short description of what happens in the scene, for humans and for Co-Director.
     #: Distinct from `prompt`, which is generation input.
     summary: Mapped[str] = mapped_column(Text, default="")
-    engine: Mapped[str] = mapped_column(String(16), default="ltx")
+    engine: Mapped[str] = mapped_column(String(16), default="minimax-h3")
     prompt: Mapped[str] = mapped_column(Text, default="")
     duration_sec: Mapped[float] = mapped_column(Float, default=5.0)
     start_asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
@@ -79,6 +86,7 @@ class Scene(Base):
     height: Mapped[int] = mapped_column(Integer, default=0)
     fps_mode: Mapped[str] = mapped_column(String(16), default="auto")
     fps: Mapped[int] = mapped_column(Integer, default=0)
+    production_unit_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="scenes")
 
@@ -130,6 +138,18 @@ class Job(Base):
 
 
 class CoDirectorConversation(Base):
+    """Thin header for a project-scoped Co-Director conversation.
+
+    The authoritative transcript lives in the append-only
+    `codirector_conversation_events` table (Wave A persistent memory). This row
+    only carries model/provider metadata and a monotonically increasing
+    `revision` used for optimistic concurrency on the legacy full-replace path
+    (which is now deprecated for creator use — see
+    `docs/release-gate/codirector/CODIRECTOR_PERSISTENT_MEMORY_ARCHITECTURE.md`).
+    `messages_json` is retained only for the reversible migration that backfills
+    events from pre-existing rows; it is no longer the source of truth.
+    """
+
     __tablename__ = "codirector_conversations"
 
     project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -137,6 +157,47 @@ class CoDirectorConversation(Base):
     model_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     provider_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class CoDirectorConversationEvent(Base):
+    """Append-only event log for a Co-Director conversation (Wave A persistent memory).
+
+    The server owns BOTH creator and assistant/tool events. One row per
+    appended message (user turn, assistant reply, tool call, tool result).
+    `sequence` is server-assigned and strictly increasing per project; clients
+    reconcile by id and use `sequence` only for ordering. Idempotency is keyed on
+    `client_request_id` (creator sends) and `message_id` (dedupe retries).
+    """
+
+    __tablename__ = "codirector_conversation_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # NOTE: intentionally NOT a FK to projects.id. The legacy
+    # `codirector_conversations` header used a plain string project_id with no
+    # FK so conversations could be seeded for project ids that are not (yet) in
+    # the projects table (test seeding, historical data, repair tooling). The
+    # event log mirrors that contract to preserve backward compatibility.
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    sequence: Mapped[int] = mapped_column(Integer, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), default="message")
+    # `message` | `tool_call` | `tool_result` | `summary`
+    role: Mapped[str] = mapped_column(String(16), default="user")
+    # `user` | `assistant` | `tool` | `system`
+    message_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    client_request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    message_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # answer | clarification | recommendation | interrupted | cancelled
+    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    attachments_json: Mapped[str] = mapped_column(Text, default="[]")
+    tool_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    tool_arguments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    tool_result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    request_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    actor: Mapped[str] = mapped_column(String(32), default="user")
+    # `user` | `assistant` | `system`
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # --------------------------------------------------------------------------
@@ -342,6 +403,59 @@ class CoDirectorProductionPlan(Base):
     visual_validation_pending: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Wave 4 durable planning operator fields
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    active_step_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    revision_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    paused_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class CoDirectorProductionPlanVersion(Base):
+    __tablename__ = "codirector_production_plan_versions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    state: Mapped[str] = mapped_column(String(24), default="draft")
+    snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
+    revision_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorProductionPlanEvent(Base):
+    __tablename__ = "codirector_production_plan_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    plan_id: Mapped[str] = mapped_column(String(36), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    plan_version: Mapped[int] = mapped_column(Integer, default=1)
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    actor_type: Mapped[str] = mapped_column(String(24), default="system")
+    actor_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    request_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    changes_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class CoDirectorPlanCommandIdempotency(Base):
+    __tablename__ = "codirector_plan_command_idempotency"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    request_id: Mapped[str] = mapped_column(String(64), index=True)
+    command: Mapped[str] = mapped_column(String(64), default="")
+    plan_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # --------------------------------------------------------------------------
@@ -605,6 +719,18 @@ def init_db() -> None:
         ensure_script_tables()
     except Exception:
         pass
+    try:
+        from .scriptwriter.store import ensure_scriptwriter_tables
+
+        ensure_scriptwriter_tables()
+    except Exception:
+        pass
+    try:
+        from .image_pipeline.multi_shot.service import ensure_tables as ensure_multi_shot_tables
+
+        ensure_multi_shot_tables()
+    except Exception:
+        pass
     with engine.begin() as conn:
         scene_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(scenes)").fetchall()}
         _add_col(conn, "scenes", "lipsync_tracks_json", "lipsync_tracks_json TEXT DEFAULT ''", scene_cols)
@@ -631,6 +757,41 @@ def init_db() -> None:
         _add_col(conn, "projects", "archived", "archived INTEGER DEFAULT 0", project_cols)
         _add_col(conn, "projects", "defaults_json", "defaults_json TEXT DEFAULT ''", project_cols)
         _add_col(conn, "projects", "settings_json", "settings_json TEXT DEFAULT ''", project_cols)
+        _add_col(
+            conn,
+            "projects",
+            "primary_project_type",
+            "primary_project_type VARCHAR(128) DEFAULT 'custom'",
+            project_cols,
+        )
+        _add_col(
+            conn,
+            "projects",
+            "project_traits_json",
+            "project_traits_json TEXT DEFAULT '[]'",
+            project_cols,
+        )
+        _add_col(
+            conn,
+            "projects",
+            "resolved_profile_json",
+            "resolved_profile_json TEXT DEFAULT '{}'",
+            project_cols,
+        )
+        _add_col(
+            conn,
+            "projects",
+            "project_type_version",
+            "project_type_version INTEGER DEFAULT 1",
+            project_cols,
+        )
+        _add_col(
+            conn,
+            "scenes",
+            "production_unit_id",
+            "production_unit_id VARCHAR(64)",
+            scene_cols,
+        )
 
         job_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()}
         _add_col(conn, "jobs", "stage", "stage TEXT DEFAULT ''", job_cols)
@@ -665,6 +826,34 @@ def init_db() -> None:
             "production_approval TEXT DEFAULT 'none'",
             asset_cols,
         )
+
+        plan_cols = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(codirector_production_plans)").fetchall()
+        }
+        if plan_cols:
+            _add_col(conn, "codirector_production_plans", "version", "version INTEGER DEFAULT 1", plan_cols)
+            _add_col(conn, "codirector_production_plans", "conversation_id", "conversation_id VARCHAR(64)", plan_cols)
+            _add_col(conn, "codirector_production_plans", "active_step_id", "active_step_id VARCHAR(64)", plan_cols)
+            _add_col(conn, "codirector_production_plans", "parent_version_id", "parent_version_id VARCHAR(64)", plan_cols)
+            _add_col(conn, "codirector_production_plans", "revision_reason", "revision_reason TEXT", plan_cols)
+            _add_col(conn, "codirector_production_plans", "paused_at", "paused_at DATETIME", plan_cols)
+            _add_col(conn, "codirector_production_plans", "resumed_at", "resumed_at DATETIME", plan_cols)
+            _add_col(conn, "codirector_production_plans", "cancelled_at", "cancelled_at DATETIME", plan_cols)
+            _add_col(conn, "codirector_production_plans", "archived_at", "archived_at DATETIME", plan_cols)
+            _add_col(conn, "codirector_production_plans", "completed_at", "completed_at DATETIME", plan_cols)
+
+        convo_cols = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(codirector_conversations)").fetchall()
+        }
+        if convo_cols:
+            _add_col(conn, "codirector_conversations", "revision", "revision INTEGER DEFAULT 0", convo_cols)
+
+    try:
+        from .migrations import DEFAULT_REGISTRY, MigrationRunner
+
+        MigrationRunner(engine, DEFAULT_REGISTRY).apply_pending()
+    except Exception:
+        pass
 
     try:
         from .preview_bus import preview_bus

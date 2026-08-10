@@ -32,11 +32,19 @@ class FixtureProvider:
     def _enabled(self) -> bool:
         e2e = os.environ.get("STUDIO_E2E", "").strip().lower() in {"1", "true", "yes"}
         provider = os.environ.get("ADEPT_PACK_PROVIDER", "").strip().lower()
-        return e2e or provider == "fixture_http"
+        # Opt-in for Source Manager visibility without enabling full STUDIO_E2E mocks.
+        surface = os.environ.get("ADEPT_ENABLE_FIXTURE_PROVIDER", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        return e2e or provider == "fixture_http" or surface
 
     def detect(self) -> ProviderDetectionResult:
         enabled = self._enabled()
         base = os.environ.get("ADEPT_PACK_FIXTURE_BASE_URL") or "http://127.0.0.1:8765"
+        e2e = os.environ.get("STUDIO_E2E", "").strip().lower() in {"1", "true", "yes"}
+        provider = os.environ.get("ADEPT_PACK_PROVIDER", "").strip().lower()
         return ProviderDetectionResult(
             provider_id=self.id,
             display_name=self.display_name,
@@ -47,9 +55,19 @@ class FixtureProvider:
             message=(
                 f"Fixture HTTP pack provider at {base}."
                 if enabled
-                else "Fixture provider is only available in E2E / fixture_http mode."
+                else (
+                    "Fixture Provider is for deterministic E2E pack installs. "
+                    "Enable with ADEPT_PACK_PROVIDER=fixture_http (plus a fixture server), "
+                    "or ADEPT_ENABLE_FIXTURE_PROVIDER=1 for Source Manager visibility. "
+                    "Do not enable on production Beta when using real GitHub/HF downloads."
+                )
             ),
-            diagnostics={"baseUrl": base, "e2e": enabled},
+            diagnostics={
+                "baseUrl": base,
+                "e2e": e2e,
+                "packProvider": provider or None,
+                "enabled": enabled,
+            },
         )
 
     def parse_source(self, source_input: SourceInput) -> ParsedSource:

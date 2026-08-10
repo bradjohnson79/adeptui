@@ -4,11 +4,40 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .spatial_scene import PromptLayers, SceneAvatar, SpatialSceneDoc, resolve_avatars_for_state
+from .spatial_scene import PromptLayers, SceneAvatar, SceneState, SpatialSceneDoc, resolve_avatars_for_state
 
 
 def _label(a: SceneAvatar) -> str:
     return a.label or a.initials or a.entity_type
+
+
+def _active_state(doc: SpatialSceneDoc, state_id: str | None = None) -> SceneState | None:
+    sid = state_id or doc.active_state_id
+    return next((s for s in doc.states if s.id == sid), None)
+
+
+def build_lighting_layer(
+    doc: SpatialSceneDoc,
+    *,
+    state_id: str | None = None,
+    avatars: list[SceneAvatar] | None = None,
+) -> str:
+    """Aggregate SceneState.lighting + light avatar prompts into the lighting layer."""
+    resolved = avatars if avatars is not None else resolve_avatars_for_state(doc, state_id)
+    bits: list[str] = []
+    state = _active_state(doc, state_id)
+    if state and (state.lighting or "").strip():
+        bits.append(state.lighting.strip())
+    for a in resolved:
+        if a.entity_type != "light":
+            continue
+        label = _label(a)
+        detail = (a.spatial_prompt or "").strip()
+        if detail:
+            bits.append(f"{label}: {detail}")
+        else:
+            bits.append(f"{label} at map position ({a.x:.0f}, {a.y:.0f}).")
+    return "\n".join(bits)
 
 
 def _facing_text(a: SceneAvatar, by_id: dict[str, SceneAvatar]) -> str:
@@ -86,7 +115,7 @@ def build_spatial_composition(doc: SpatialSceneDoc, state_id: str | None = None)
         focus = ", ".join(_label(by_id[t]) for t in cam.focus_targets if t in by_id) or "scene"
         lines.append(
             f"Camera {_label(a)} is at ({a.x:.0f}, {a.y:.0f}), height {cam.height_m} m, "
-            f"{cam.lens_mm:g} mm lens, {cam.shot_size} shot, focus on {focus}, "
+            f"{cam.lens_mm:g} mm lens, FOV {cam.fov_deg:g}°, {cam.shot_size} shot, focus on {focus}, "
             f"rig {cam.rig}, movement {cam.movement}, aspect {cam.aspect}."
         )
 
@@ -143,6 +172,7 @@ def assemble_prompt_layers(
     # Prefer camera-only subset for camera layer
     cam_lines = [ln for ln in cam_text.splitlines() if ln.lower().startswith("camera")]
     spatial = build_spatial_composition(doc, state_id)
+    lighting = build_lighting_layer(doc, state_id=state_id, avatars=avatars)
 
     layers = doc.prompt_layers.model_copy(deep=True)
     if not layers.spatial.strip():
@@ -157,6 +187,8 @@ def assemble_prompt_layers(
         layers.props = prop_text
     if not layers.environment.strip() and doc.notes:
         layers.environment = doc.notes
+    if not layers.lighting.strip() and lighting.strip():
+        layers.lighting = lighting
     if style and not layers.style.strip():
         layers.style = style
     if not layers.negative_spatial.strip():

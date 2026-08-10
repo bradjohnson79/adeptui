@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../api";
-import type { FalKeyStatus } from "../api";
 import type { Project } from "../types";
 import { LearningPanel } from "./LearningPanel";
 import { LearningEvolutionPanel } from "./LearningEvolutionPanel";
+import { CoDirectorMemoryPanel } from "./CoDirectorMemoryPanel";
 import { LanguageSettings } from "../i18n";
 import { ASPECT_PRESETS, FPS_OPTIONS } from "../workspacePrefs";
+import { PRIMARY_PROJECT_TYPES } from "../projectTypes";
+import { HostedProvidersPanel } from "./HostedProvidersPanel";
 
 const TABS = [
   ["general", "General"],
@@ -14,19 +16,12 @@ const TABS = [
   ["learning", "AI Learning"],
   ["defaults", "Defaults"],
   ["library", "Library"],
-  ["integrations", "Integrations"],
+  ["integrations", "AI Providers"],
   ["rendering", "Rendering"],
   ["collab", "Collaboration"],
 ] as const;
 
 type TabId = (typeof TABS)[number][0];
-
-const FAL_STATE_LABELS: Record<string, string> = {
-  missing: "Not configured — required for Txt2Vid / fal engines.",
-  unverified: "Configured, not verified with fal.ai.",
-  verified: "Verified with fal.ai.",
-  invalid: "fal.ai rejected this key.",
-};
 
 function parseDefaults(raw?: string) {
   try {
@@ -40,10 +35,10 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
   const { t } = useTranslation(["settings", "common", "navigation"]);
   const [tab, setTab] = useState<TabId>("general");
   const [defaults, setDefaults] = useState<Record<string, unknown>>(() => parseDefaults(project.defaults_json));
-  const [falStatus, setFalStatus] = useState<FalKeyStatus | null>(null);
-  const [falKey, setFalKey] = useState("");
-  const [falBusy, setFalBusy] = useState(false);
-  const [falError, setFalError] = useState<string | null>(null);
+  const [typeSlug, setTypeSlug] = useState(project.primary_project_type || "custom");
+  const [typePreview, setTypePreview] = useState<any>(null);
+  const [typeBusy, setTypeBusy] = useState(false);
+  const [customSlug, setCustomSlug] = useState("");
 
   useEffect(() => {
     const forced = sessionStorage.getItem("adept_settings_tab") as TabId | null;
@@ -55,28 +50,8 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
 
   useEffect(() => {
     setDefaults(parseDefaults(project.defaults_json));
-  }, [project.defaults_json]);
-
-  useEffect(() => {
-    if (tab === "integrations") api.falKeyStatus().then(setFalStatus).catch(() => setFalStatus(null));
-  }, [tab]);
-
-  /**
-   * All fal credential mutations funnel through here so the raw key stays in local state
-   * only: it is never logged, never echoed back by the API, and is cleared on success.
-   */
-  const runFalAction = async (action: () => Promise<FalKeyStatus>, clearInput: boolean) => {
-    setFalBusy(true);
-    setFalError(null);
-    try {
-      setFalStatus(await action());
-      if (clearInput) setFalKey("");
-    } catch (err) {
-      setFalError(err instanceof Error ? err.message : "fal.ai request failed.");
-    } finally {
-      setFalBusy(false);
-    }
-  };
+    setTypeSlug(project.primary_project_type || "custom");
+  }, [project.defaults_json, project.primary_project_type]);
 
   const saveMeta = (patch: Partial<Project>) => api.updateProject(project.id, patch).then(onChange);
 
@@ -151,12 +126,108 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
               onChange={(e) => saveMeta({ tags_json: e.target.value } as any)}
             />
           </div>
+          <div className="field" data-testid="project-type-settings">
+            <label>Project type</label>
+            <p className="muted">
+              Active: <strong>{project.primary_project_type || "custom"}</strong>
+              {project.project_traits_json ? ` · traits ${project.project_traits_json}` : ""}
+            </p>
+            <select
+              value={typeSlug}
+              onChange={(e) => {
+                setTypeSlug(e.target.value);
+                setTypePreview(null);
+              }}
+              data-testid="project-type-select"
+            >
+              {PRIMARY_PROJECT_TYPES.map((t) => (
+                <option key={t.slug} value={t.slug}>
+                  {t.displayName}
+                </option>
+              ))}
+            </select>
+            <div className="row" style={{ marginTop: "0.5rem", gap: "0.5rem" }}>
+              <button
+                type="button"
+                className="ghost"
+                disabled={typeBusy || typeSlug === (project.primary_project_type || "custom")}
+                onClick={async () => {
+                  setTypeBusy(true);
+                  try {
+                    setTypePreview(
+                      await api.previewProjectTypeChange(project.id, { primaryProjectType: typeSlug })
+                    );
+                  } catch {
+                    setTypePreview({ error: "Preview unavailable (enable STUDIO_FEATURE_TEMPLATES_PRESETS_V1)." });
+                  } finally {
+                    setTypeBusy(false);
+                  }
+                }}
+              >
+                Preview type change
+              </button>
+              <button
+                type="button"
+                className="primary"
+                disabled={typeBusy || !typePreview || typePreview.error || !typePreview.allowed}
+                data-testid="apply-project-type"
+                onClick={async () => {
+                  setTypeBusy(true);
+                  try {
+                    await api.applyProjectTypeChange(project.id, {
+                      primaryProjectType: typeSlug,
+                      applyDimensionDefaults: true,
+                    });
+                    setTypePreview(null);
+                    onChange();
+                  } finally {
+                    setTypeBusy(false);
+                  }
+                }}
+              >
+                Apply non-destructive change
+              </button>
+            </div>
+            {typePreview && (
+              <pre className="muted" style={{ whiteSpace: "pre-wrap", fontSize: "0.85rem" }}>
+                {JSON.stringify(typePreview.deltas || typePreview, null, 2)}
+              </pre>
+            )}
+            <div className="row" style={{ marginTop: "0.75rem", gap: "0.5rem" }}>
+              <input
+                placeholder="custom-type-slug"
+                value={customSlug}
+                onChange={(e) => setCustomSlug(e.target.value)}
+                aria-label="Custom project type slug"
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={typeBusy || !customSlug.trim()}
+                onClick={async () => {
+                  setTypeBusy(true);
+                  try {
+                    await api.saveCustomProjectType({
+                      projectId: project.id,
+                      slug: customSlug.trim(),
+                    });
+                    onChange();
+                  } finally {
+                    setTypeBusy(false);
+                  }
+                }}
+              >
+                Save as custom project type
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       {tab === "learning" && (
         <>
           <LearningPanel project={project} onChange={onChange} />
+          <CoDirectorMemoryPanel project={project} />
           <LearningEvolutionPanel project={project} enabled />
         </>
       )}
@@ -234,9 +305,19 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
                 value={String(defaults.imagegen_model || "auto")}
                 onChange={(e) => saveDefaults({ ...defaults, imagegen_model: e.target.value })}
               >
-                {["auto", "flux", "hidream", "sd35", "custom"].map((m) => (
+                {(
+                  [
+                    ["auto", "auto (Qwen-Image-2512 recommended)"],
+                    ["qwen2512", "Qwen-Image-2512 (Recommended)"],
+                    ["flux", "FLUX (Alternative)"],
+                    ["zimage", "Z-Image (Fallback)"],
+                    ["hidream", "hidream"],
+                    ["sd35", "sd35"],
+                    ["custom", "custom"],
+                  ] as const
+                ).map(([m, label]) => (
                   <option key={m} value={m}>
-                    {m}
+                    {label}
                   </option>
                 ))}
               </select>
@@ -285,65 +366,7 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
         </div>
       )}
 
-      {tab === "integrations" && (
-        <div className="settings-panel">
-          <h3>fal.ai</h3>
-          <p className="muted" data-testid="fal-key-state">
-            {FAL_STATE_LABELS[falStatus?.state ?? "missing"]}
-            {falStatus?.hint ? ` · ${falStatus.hint}` : ""}
-            {falStatus?.verifiedAt ? ` · checked ${falStatus.verifiedAt}` : ""}
-          </p>
-          {falStatus?.message && <p className="muted">{falStatus.message}</p>}
-          {falStatus?.state === "unverified" && (
-            <p className="muted">
-              The key is stored but fal.ai could not confirm it. Renders will fail closed until it verifies.
-            </p>
-          )}
-          {falError && (
-            <p className="error" role="alert" data-testid="fal-key-error">
-              {falError}
-            </p>
-          )}
-          <div className="field">
-            <label htmlFor="fal-api-key">API key</label>
-            <input
-              id="fal-api-key"
-              data-testid="fal-key-input"
-              type="password"
-              autoComplete="off"
-              value={falKey}
-              onChange={(e) => setFalKey(e.target.value)}
-            />
-          </div>
-          <div className="row">
-            <button
-              type="button"
-              className="primary"
-              data-testid="fal-key-save"
-              disabled={falBusy || !falKey.trim()}
-              onClick={() => runFalAction(() => api.falKeySet(falKey), true)}
-            >
-              {falBusy ? "Checking with fal.ai…" : "Save & verify key"}
-            </button>
-            <button
-              type="button"
-              data-testid="fal-key-validate"
-              disabled={falBusy || !falStatus?.configured}
-              onClick={() => runFalAction(() => api.falKeyValidate(), false)}
-            >
-              Re-verify
-            </button>
-            <button
-              type="button"
-              data-testid="fal-key-clear"
-              disabled={falBusy}
-              onClick={() => runFalAction(() => api.falKeyClear(), true)}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
+      {tab === "integrations" && <HostedProvidersPanel />}
 
       {tab === "rendering" && (
         <div className="settings-panel">

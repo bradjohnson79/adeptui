@@ -35,6 +35,7 @@ EXPECTED_STATUSES = {
     "degraded",
     "not_configured",
     "unknown",
+    "deferred_version_1_2",
 }
 
 
@@ -53,9 +54,10 @@ def _create_project(client, name: str = "Capability Project") -> str:
     return res.json()["id"]
 
 
-def _snapshot(client, project_id: str | None = None) -> dict:
+def _snapshot(client, project_id: str | None = None, *, refresh: bool = False) -> dict:
     url = "/api/capabilities" if project_id is None else f"/api/projects/{project_id}/capabilities"
-    res = client.get(url, params={"refresh": "true"})
+    params = {"refresh": "true"} if refresh else {}
+    res = client.get(url, params=params)
     assert res.status_code == 200
     return res.json()
 
@@ -282,7 +284,7 @@ def test_mock_provider_never_produces_a_local_verification(client, monkeypatch) 
     monkeypatch.setenv("STUDIO_E2E", "1")
     monkeypatch.setenv("ADEPT_CODIRECTOR_PROVIDER", "mock")
 
-    capabilities = _by_id(_snapshot(client))
+    capabilities = _by_id(_snapshot(client, refresh=True))
     assert capabilities["codirector.provider"]["status"] == "mock_verified"
     assert capabilities["codirector.provider"]["available"] is False
     assert capabilities["codirector.chat"]["status"] != "locally_verified"
@@ -319,7 +321,7 @@ def test_one_broken_probe_does_not_take_out_the_registry(client, monkeypatch) ->
 
     monkeypatch.setattr(source_registry, "overview_payload", _boom)
 
-    snapshot = _snapshot(client)
+    snapshot = _snapshot(client, refresh=True)
     assert "source_manager_probe_failed" in snapshot["probeWarnings"]
     assert _by_id(snapshot)["source_manager.read"]["status"] in ("degraded", "unknown")
     # Unrelated capabilities are still answered.
@@ -371,6 +373,17 @@ def test_workflow_readiness_is_ready_when_nodes_and_models_are_present() -> None
     assert readiness["status"] == "ready"
     assert readiness["reasonCode"] is None
     assert readiness["missingExtensions"] == []
+
+
+def test_latentsync_readiness_accepts_d_latentsync_alias() -> None:
+    """hay86 registers D_LatentSyncNode; legacy LatentSyncNode must not be required alongside it."""
+    from app.workflows.readiness import workflow_readiness
+
+    nodes = {"D_LatentSyncNode", "PreviewAny", "VHS_VideoCombine"}
+    readiness = workflow_readiness("lipsync.latentsync", node_types=nodes, model_states={})
+    assert "LatentSyncNode" not in readiness["missingExtensions"]
+    assert readiness["missingExtensions"] == []
+    assert readiness["status"] in ("ready", "unknown")  # unknown if models unverified by design
 
 
 def test_workflow_readiness_is_unknown_without_a_node_catalogue() -> None:
@@ -463,7 +476,7 @@ def test_source_pending_components_are_not_configured_rather_than_broken(client,
         }
 
     monkeypatch.setattr(probes, "probe_setup", _with_pending_pack)
-    item = _by_id(_snapshot(client))["models.image.ready"]
+    item = _by_id(_snapshot(client, refresh=True))["models.image.ready"]
     assert item["status"] == "not_configured"
     assert item["reasonCode"] == "MODEL_SOURCE_PENDING"
     assert item["componentIds"] == ["zimage_models"]

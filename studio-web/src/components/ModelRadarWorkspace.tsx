@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api";
+import { StudioChrome } from "./dashboard/StudioChrome";
 
 type Entry = {
   id: string;
@@ -39,14 +39,21 @@ export default function ModelRadarWorkspace() {
   }, []);
 
   if (enabled === null) {
-    return <div className="page" data-testid="model-radar-loading">Loading…</div>;
+    return (
+      <div className="app-shell atmosphere" data-testid="model-radar-loading">
+        <StudioChrome variant="home" />
+        <div className="page">Loading…</div>
+      </div>
+    );
   }
   if (!enabled) {
     return (
-      <div className="page" data-testid="model-radar-unavailable">
-        <h1>Model Radar unavailable</h1>
-        <p>Enable STUDIO_FEATURE_MODEL_RADAR_V1 to use this workspace.</p>
-        <Link to="/">Home</Link>
+      <div className="app-shell atmosphere" data-testid="model-radar-unavailable">
+        <StudioChrome variant="home" />
+        <div className="page">
+          <h1 className="ds-type-h1">Model Radar unavailable</h1>
+          <p className="ds-type-helper">Enable STUDIO_FEATURE_MODEL_RADAR_V1 to use this workspace.</p>
+        </div>
       </div>
     );
   }
@@ -57,12 +64,14 @@ export default function ModelRadarWorkspace() {
   };
 
   return (
-    <div className="page model-radar-page" data-testid="model-radar-page">
-      <header className="row" style={{ gap: 12, alignItems: "center" }}>
-        <Link to="/">Home</Link>
-        <h1>Model Radar</h1>
-      </header>
-      <p>Discover, classify, evaluate, and sandbox models (fixture-capable).</p>
+    <div className="app-shell atmosphere" data-testid="model-radar-page">
+      <StudioChrome
+        variant="home"
+        breadcrumbs={[{ label: "Home" }, { label: "Tools" }, { label: "Model Radar" }]}
+      />
+      <div className="page model-radar-page">
+      <h1 className="ds-type-h1">Model Radar</h1>
+      <p className="ds-type-helper">Discover, classify, evaluate, and sandbox models (fixture-capable).</p>
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <button
           type="button"
@@ -199,6 +208,7 @@ export default function ModelRadarWorkspace() {
       <SandboxPanel sandboxId={sandboxId} projectId={projectId} />
       <ShotProfilePanel projectId={projectId} />
       <RecipePanel projectId={projectId} />
+      </div>
     </div>
   );
 }

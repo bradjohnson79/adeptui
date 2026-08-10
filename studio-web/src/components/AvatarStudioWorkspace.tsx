@@ -1,28 +1,414 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
-import type { Project } from "../types";
-import type { EditorTab } from "../workspacePrefs";
 import {
-  AVATAR_MODES,
-  AVATAR_PRESETS,
   buildAvatarPrompt,
   emptyAvatarSession,
-  emptyLook,
-  emptyPerformance,
   estimateDialogueSeconds,
   validateAvatarSession,
   type AvatarMode,
+  type AvatarPresentationPlan,
+  type AvatarProjectJob,
   type AvatarSession,
-  type PerformanceTone,
 } from "../avatar/types";
+import { useBindCoDirectorWorkspace, useOpenCoDirector } from "./CoDirector";
+import type { VoicePerformanceRecord } from "../contracts/voicePerformanceM410";
+import { buildAiGuidedSetupPath } from "../setup/navigation";
+import type { SetupComponentStatus } from "../setup/types";
+import type { Project } from "../types";
+import type { EditorTab } from "../workspacePrefs";
 
 type ProfileItem = { id: string; name: string; kind: string; media_path?: string; tag?: string };
 
-/**
- * Avatar Studio — talking characters as film performances.
- * Profile → Look → Voice/audio → Performance → Lip Sync → Clip → Director
- */
+type ReviewTab = "sections" | "takes" | "progress" | "completed";
+
+type ApprovedVoiceChoice = {
+  recordId: string;
+  takeId: string;
+  audioAssetId: string;
+  voiceIdentityId: string;
+  providerId: string;
+  title: string;
+  subtitle: string;
+  updatedAt: string;
+};
+
+type VoiceReadiness = {
+  approvedVoice?: boolean;
+  readyForPerformance?: boolean;
+  readyForTestingPerformance?: boolean;
+  testingVoiceReady?: boolean;
+  pronunciationCount?: number;
+  reactionReadyCount?: number;
+  voiceVersionId?: string | null;
+};
+
+type ScriptDocumentChoice = {
+  id: string;
+  title: string;
+  updatedAt?: string;
+};
+
+type ScriptSceneChoice = {
+  sceneHeadingId: string;
+  sceneHeading: string;
+  sceneNumber?: string;
+  productionStatus?: string;
+  sceneId?: string | null;
+};
+
+type RetakeActionChoice = {
+  id: string;
+  label: string;
+  note: string;
+  toolId?: "avatar.request_retake" | "avatar.repair_lipsync";
+};
+
+const MODE_CARDS: Array<{
+  id: AvatarMode;
+  label: string;
+  blurb: string;
+  shotSize: string;
+}> = [
+  {
+    id: "talking_portrait",
+    label: "Talking Head",
+    blurb: "A close, steady presenter frame for direct delivery.",
+    shotSize: "close-up",
+  },
+  {
+    id: "cinematic_character",
+    label: "Presenter",
+    blurb: "A clean long-form host setup for explainers and updates.",
+    shotSize: "medium close-up",
+  },
+  {
+    id: "full_body",
+    label: "Full-Body Presenter",
+    blurb: "More room for gesture, posture, and walk-on presentation.",
+    shotSize: "medium full",
+  },
+  {
+    id: "existing_video_lipsync",
+    label: "Existing Video Dubbing",
+    blurb: "Replace dialogue on an already-shot presenter clip.",
+    shotSize: "match source video",
+  },
+];
+
+const STYLE_CARDS = [
+  {
+    id: "direct_presenter",
+    label: "Direct Presenter",
+    blurb: "Clear, confident delivery straight to camera.",
+    tone: "confident",
+    angle: "direct-to-camera",
+    style: "cinematic live-action presenter",
+  },
+  {
+    id: "warm_host",
+    label: "Warm Host",
+    blurb: "Friendly and welcoming without overplaying it.",
+    tone: "friendly",
+    angle: "direct-to-camera",
+    style: "warm studio host",
+  },
+  {
+    id: "guided_explainer",
+    label: "Guided Explainer",
+    blurb: "Calm instruction with a little more space for motion.",
+    tone: "calm",
+    angle: "slightly off-camera",
+    style: "clean explainer performance",
+  },
+  {
+    id: "stylized_performance",
+    label: "Stylized Performance",
+    blurb: "More graphic, designed, or cinematic styling.",
+    tone: "serious",
+    angle: "three-quarter",
+    style: "stylized presenter performance",
+  },
+] as const;
+
+const FRAMING_CARDS = [
+  {
+    id: "tight_headline",
+    label: "Tight Headline",
+    blurb: "Great for punchy lines and strong eye contact.",
+    shotSize: "close-up",
+    lens: "85mm",
+  },
+  {
+    id: "medium_presenter",
+    label: "Presenter Frame",
+    blurb: "Balanced framing for most long-form speaking work.",
+    shotSize: "medium close-up",
+    lens: "50mm",
+  },
+  {
+    id: "desk_or_podium",
+    label: "Desk or Podium",
+    blurb: "A little wider when hands or props matter.",
+    shotSize: "medium shot",
+    lens: "35mm",
+  },
+  {
+    id: "full_stage",
+    label: "Full Stage",
+    blurb: "Use when the whole body and movement sell the performance.",
+    shotSize: "full body",
+    lens: "28mm",
+  },
+] as const;
+
+const BACKGROUND_CARDS = [
+  {
+    id: "studio_gradient",
+    label: "Studio",
+    blurb: "Simple polished backdrop for presenter work.",
+    backgroundMode: "solid",
+    notes: "Soft studio gradient with clean separation.",
+  },
+  {
+    id: "branded_set",
+    label: "Branded Set",
+    blurb: "A designed stage for show formats and recurring series.",
+    backgroundMode: "environment",
+    notes: "Branded presenter set with room for subtle depth.",
+  },
+  {
+    id: "soft_environment",
+    label: "Environment",
+    blurb: "A believable location that still keeps the presenter clear.",
+    backgroundMode: "environment",
+    notes: "Natural environment with presenter-friendly lighting.",
+  },
+  {
+    id: "graphic_canvas",
+    label: "Graphic Canvas",
+    blurb: "A stylized background for title cards or punchier segments.",
+    backgroundMode: "generated",
+    notes: "Graphic canvas background with clean contrast.",
+  },
+] as const;
+
+const DURATION_CARDS = [
+  {
+    id: "quick_update",
+    label: "Quick Update",
+    blurb: "Best for a short presenter beat or hook.",
+    seconds: 4,
+  },
+  {
+    id: "story_section",
+    label: "Story Section",
+    blurb: "A balanced section size for long-form assembly.",
+    seconds: 6,
+  },
+  {
+    id: "chapter_pass",
+    label: "Chapter Pass",
+    blurb: "Use when you want a fuller section before retakes.",
+    seconds: 8,
+  },
+] as const;
+
+const PROVIDER_ORDER = [
+  "longcat-video-avatar-1-5-local",
+  "infinitetalk-local",
+  "musetalk-1-5-local",
+  "echomimic-v2-local",
+] as const;
+
+const REVIEW_TABS: ReviewTab[] = ["sections", "takes", "progress", "completed"];
+
+const RETAKE_ACTIONS: RetakeActionChoice[] = [
+  {
+    id: "reperform_sentence",
+    label: "Re-perform Sentence",
+    note: "Re-perform the drifting sentence while matching the surrounding delivery.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "resync_paragraph",
+    label: "Re-sync Paragraph",
+    note: "Re-sync this paragraph while preserving the neighboring continuity.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "regenerate_gesture",
+    label: "Regenerate Gesture",
+    note: "Refresh the gesture timing without changing the rest of the section.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "correct_pronunciation",
+    label: "Correct Pronunciation",
+    note: "Correct pronunciation while keeping the rest of the performance intact.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "replace_background",
+    label: "Replace Background",
+    note: "Replace the background while preserving the presenter continuity.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "regenerate_section",
+    label: "Regenerate Section",
+    note: "Regenerate only this section and preserve the completed neighboring sections.",
+    toolId: "avatar.request_retake",
+  },
+  {
+    id: "repair_lip_sync",
+    label: "Repair Lip-Sync",
+    note: "Repair lip sync with MuseTalk while preserving the current section as reference.",
+    toolId: "avatar.repair_lipsync",
+  },
+];
+
+function Tip({ text }: { text: string }) {
+  return (
+    <span className="avatar-inline-tip" title={text} aria-label={text}>
+      {" "}
+      (?)
+    </span>
+  );
+}
+
+function displayTime(value?: string | null): string {
+  if (!value) return "Just now";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Just now";
+  return parsed.toLocaleString();
+}
+
+function formatDurationMs(value = 0): string {
+  const totalSeconds = Math.max(0, Math.round(value / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+function sectionStatusLabel(status?: string): string {
+  switch (status) {
+    case "planning":
+      return "Planning";
+    case "queued":
+      return "Queued";
+    case "running":
+    case "generating":
+      return "Generating";
+    case "paused":
+      return "Paused";
+    case "assembling":
+      return "Assembling";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "retake_requested":
+      return "Retake requested";
+    case "approved":
+      return "Approved";
+    default:
+      return "Planned";
+  }
+}
+
+function normalizeSession(session: AvatarSession): AvatarSession {
+  return {
+    ...session,
+    input_mode:
+      session.input_mode ||
+      (session.voice?.approved_take_id || session.voice?.approved_record_id ? "approved_voice" : "script"),
+    presentation_style: session.presentation_style || "direct_presenter",
+    framing_choice: session.framing_choice || "medium_presenter",
+    background_choice: session.background_choice || "studio_gradient",
+    duration_class: session.duration_class || "story_section",
+    provider_mode: session.provider_mode || "best_match",
+    provider_choice: session.provider_choice ?? null,
+    voice: {
+      ...session.voice,
+      fallback_audio_asset_id: session.voice?.fallback_audio_asset_id ?? null,
+      approved_record_id: session.voice?.approved_record_id ?? null,
+      approved_take_id: session.voice?.approved_take_id ?? null,
+    },
+    links: {
+      ...session.links,
+      script_document_id: session.links?.script_document_id ?? null,
+      script_scene_heading_id: session.links?.script_scene_heading_id ?? null,
+      script_scene_id: session.links?.script_scene_id ?? null,
+      script_source_label: session.links?.script_source_label ?? "",
+      script_revision_version: session.links?.script_revision_version ?? null,
+      voice_record_id: session.links?.voice_record_id ?? null,
+      voice_take_id: session.links?.voice_take_id ?? null,
+    },
+  };
+}
+
+function planSectionDurationMs(plan?: AvatarPresentationPlan | null): number {
+  if (!plan?.sectionTargetSeconds) return 0;
+  return Math.max(2000, Math.round(plan.sectionTargetSeconds * 1000));
+}
+
+function runtimeStatus(component: SetupComponentStatus): {
+  label: "Experimental" | "Not Installed" | "Needs Repair";
+  tone: "warn" | "bad";
+} {
+  const healthState = String((component.environment?.healthState as string | undefined) || "");
+  if (healthState === "experimental" || component.status === "ready") {
+    return { label: "Experimental", tone: "warn" };
+  }
+  if (component.status === "error" || component.status === "update_available") {
+    return { label: "Needs Repair", tone: "bad" };
+  }
+  return { label: "Not Installed", tone: "warn" };
+}
+
+function bestMatchProvider(
+  session: AvatarSession,
+  providers: SetupComponentStatus[],
+): SetupComponentStatus | null {
+  const byId = new Map(providers.map((item) => [item.id, item]));
+  if (session.mode === "existing_video_lipsync") {
+    return byId.get("musetalk-1-5-local") || null;
+  }
+  if (session.mode === "full_body") {
+    return byId.get("longcat-video-avatar-1-5-local") || null;
+  }
+  if (session.presentation_style === "stylized_performance") {
+    return byId.get("longcat-video-avatar-1-5-local") || null;
+  }
+  return byId.get("infinitetalk-local") || byId.get("longcat-video-avatar-1-5-local") || null;
+}
+
+function approvedVoiceOptions(records: VoicePerformanceRecord[], characterId?: string | null): ApprovedVoiceChoice[] {
+  if (!characterId) return [];
+  return records
+    .filter((record) => String(record.characterId || "") === String(characterId))
+    .map((record) => {
+      const approvedTake = record.takes.find(
+        (take) => take.id === record.approvedTakeId && take.audioAssetId,
+      );
+      if (!approvedTake?.audioAssetId) return null;
+      return {
+        recordId: record.id,
+        takeId: approvedTake.id,
+        audioAssetId: approvedTake.audioAssetId,
+        voiceIdentityId: record.voiceIdentityId,
+        providerId: record.providerId,
+        title: record.dialogueText.trim().slice(0, 90) || approvedTake.label,
+        subtitle: approvedTake.label,
+        updatedAt: record.updatedAt,
+      } satisfies ApprovedVoiceChoice;
+    })
+    .filter(Boolean) as ApprovedVoiceChoice[];
+}
+
 export function AvatarStudioWorkspace({
   project,
   onChange,
@@ -32,113 +418,456 @@ export function AvatarStudioWorkspace({
   onChange?: () => Promise<void>;
   onGo: (tab: EditorTab) => void;
 }) {
+  const openCoDirector = useOpenCoDirector();
+  const openSetup = (componentId?: string) => {
+    window.location.assign(
+      buildAiGuidedSetupPath({
+        projectId: project.id,
+        componentId,
+        source: "avatar_studio",
+      }),
+    );
+  };
+  useBindCoDirectorWorkspace({
+    projectId: project.id,
+    projectName: project.name,
+    primaryProjectType: "talking_avatar",
+    workspaceTab: "avatar",
+    onGoTab: (tab) => onGo(tab as EditorTab),
+  });
   const [params] = useSearchParams();
   const [sessions, setSessions] = useState<AvatarSession[]>([]);
   const [session, setSession] = useState<AvatarSession | null>(null);
   const [characters, setCharacters] = useState<ProfileItem[]>([]);
-  const [voices, setVoices] = useState<ProfileItem[]>([]);
   const [audioAssets, setAudioAssets] = useState<any[]>([]);
   const [videoAssets, setVideoAssets] = useState<any[]>([]);
   const [imageAssets, setImageAssets] = useState<any[]>([]);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [issues, setIssues] = useState<{ level: string; text: string }[]>([]);
-  const [tab, setTab] = useState<"script" | "voice" | "motion" | "lipsync" | "preview" | "generate">("script");
-  const [jobId, setJobId] = useState<string | null>(null);
+  const [avatarJobs, setAvatarJobs] = useState<AvatarProjectJob[]>([]);
+  const [activeJob, setActiveJob] = useState<AvatarProjectJob | null>(null);
+  const [needsCharacter, setNeedsCharacter] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [reviewTab, setReviewTab] = useState<ReviewTab>("sections");
+  const [runtimeComponents, setRuntimeComponents] = useState<SetupComponentStatus[]>([]);
+  const [voiceReadiness, setVoiceReadiness] = useState<VoiceReadiness | null>(null);
+  const [voiceRecords, setVoiceRecords] = useState<VoicePerformanceRecord[]>([]);
+  const [scriptDocuments, setScriptDocuments] = useState<ScriptDocumentChoice[]>([]);
+  const [scriptScenes, setScriptScenes] = useState<ScriptSceneChoice[]>([]);
 
   const loadLists = async () => {
-    const [chars, vox, lib, list] = await Promise.all([
+    const [chars, charProfiles, lib, list] = await Promise.all([
       api.listProfiles("character").catch(() => []),
-      api.listProfiles("voice").catch(() => []),
-      api.library(project.id).catch(() => []),
+      api.listCharacterProfiles(project.id).catch(() => ({ items: [] as any[] })),
+      api.library(project.id).catch(() => null),
       api.listAvatarSessions(project.id).catch(() => []),
     ]);
-    setCharacters(chars || []);
-    setVoices(vox || []);
-    const assets = lib || [];
-    setAudioAssets(assets.filter((a: any) => a.kind === "audio"));
-    setVideoAssets(assets.filter((a: any) => a.kind === "video"));
-    setImageAssets(assets.filter((a: any) => a.kind === "image"));
-    setSessions(list || []);
-    return list as AvatarSession[];
+    const fromProfiles = (chars || []) as ProfileItem[];
+    const fromCharacterProfiles = ((charProfiles as any)?.items || []).map((c: any) => ({
+      id: String(c.id),
+      name: String(c.name || "Character"),
+      kind: "character",
+    }));
+    const merged = new Map<string, ProfileItem>();
+    for (const item of [...fromProfiles, ...fromCharacterProfiles]) {
+      if (item?.id) merged.set(String(item.id), item);
+    }
+    const normalizedCharacters = [...merged.values()];
+    setCharacters(normalizedCharacters);
+    const assets = lib?.items || [];
+    setAudioAssets(assets.filter((asset: any) => asset.kind === "audio"));
+    setVideoAssets(assets.filter((asset: any) => asset.kind === "video"));
+    setImageAssets(assets.filter((asset: any) => asset.kind === "image"));
+    const normalized = (list || []).map((item: AvatarSession) => normalizeSession(item));
+    setSessions(normalized);
+    return { sessions: normalized, characters: normalizedCharacters };
+  };
+
+  const loadJobs = async (sessionId: string, preferredJobId?: string | null) => {
+    const jobs = await api.listAvatarJobs(project.id, sessionId).catch(() => [] as AvatarProjectJob[]);
+    setAvatarJobs(jobs);
+    const nextActive =
+      jobs.find((item) => item.id === preferredJobId) ||
+      jobs.find((item) => item.id === session?.active_job_id) ||
+      jobs[0] ||
+      null;
+    setActiveJob(nextActive);
+    return jobs;
+  };
+
+  const loadScriptSources = async (preferredDocumentId?: string | null) => {
+    try {
+      const docsPayload = await api.scriptwriter.documents(project.id).catch(() => ({ documents: [] as Record<string, unknown>[] }));
+      const documents = (docsPayload.documents || []).map((item) => ({
+        id: String(item.id || ""),
+        title: String(item.title || item.name || "Untitled Script"),
+        updatedAt: item.updatedAt ? String(item.updatedAt) : undefined,
+      }));
+      setScriptDocuments(documents.filter((item) => item.id));
+      const selectedDocumentId =
+        preferredDocumentId ||
+        session?.links?.script_document_id ||
+        documents[0]?.id ||
+        null;
+      if (!selectedDocumentId) {
+        setScriptScenes([]);
+        return;
+      }
+      const bundle = await api.scriptwriter.document(project.id, selectedDocumentId).catch(() => null);
+      const scenes = (((bundle as any)?.navigator || []) as Record<string, unknown>[]).map((item) => ({
+        sceneHeadingId: String(item.sceneHeadingId || ""),
+        sceneHeading: String(item.sceneHeading || item.title || "Scene"),
+        sceneNumber: item.sceneNumber ? String(item.sceneNumber) : undefined,
+        productionStatus: item.productionStatus ? String(item.productionStatus) : undefined,
+        sceneId: item.sceneId ? String(item.sceneId) : null,
+      }));
+      setScriptScenes(scenes.filter((item) => item.sceneHeadingId));
+    } catch {
+      setScriptDocuments([]);
+      setScriptScenes([]);
+    }
+  };
+
+  const refreshRuntimeStatus = async () => {
+    try {
+      const next = await api.setupStatus();
+      const avatarComponents = (next.components || [])
+        .filter((component) => PROVIDER_ORDER.includes(component.id as (typeof PROVIDER_ORDER)[number]))
+        .sort(
+          (a, b) =>
+            PROVIDER_ORDER.indexOf(a.id as (typeof PROVIDER_ORDER)[number]) -
+            PROVIDER_ORDER.indexOf(b.id as (typeof PROVIDER_ORDER)[number]),
+        );
+      setRuntimeComponents(avatarComponents);
+    } catch {
+      setRuntimeComponents([]);
+    }
+  };
+
+  const bindCharacterSession = async (
+    characterId: string,
+    seededSessions?: AvatarSession[],
+    seededCharacters?: ProfileItem[],
+  ) => {
+    const availableSessions = seededSessions || sessions;
+    const existing = availableSessions.find((item) => item.character_profile_id === characterId);
+    if (existing) {
+      setNeedsCharacter(false);
+      setSession(normalizeSession(existing));
+      await loadJobs(existing.id, existing.active_job_id);
+      return;
+    }
+    const availableCharacters = seededCharacters || characters;
+    const character = availableCharacters.find((item) => item.id === characterId);
+    if (!character) {
+      setNeedsCharacter(true);
+      setSession(null);
+      return;
+    }
+    const boot = normalizeSession(emptyAvatarSession(project.id, `${character.name} Presenter Session`));
+    boot.character_profile_id = characterId;
+    boot.character_name = character.name;
+    const created = normalizeSession(
+      await api.createAvatarSession(project.id, {
+        name: boot.name,
+        character_profile_id: boot.character_profile_id || undefined,
+        character_name: boot.character_name,
+        mode: boot.mode,
+        bootstrap: boot,
+      }),
+    );
+    setNeedsCharacter(false);
+    setSession(created);
+    setSessions((prev) => [created, ...prev]);
+    setAvatarJobs([]);
+    setActiveJob(null);
   };
 
   useEffect(() => {
     (async () => {
-      const list = await loadLists();
-      let profileQ = params.get("profile");
+      await refreshRuntimeStatus();
+      const loaded = await loadLists();
+      let profileQ = params.get("profile") || params.get("characterId");
       if (!profileQ) {
         try {
-          profileQ = sessionStorage.getItem("adept_avatar_profile");
-          if (profileQ) sessionStorage.removeItem("adept_avatar_profile");
+          profileQ =
+            sessionStorage.getItem("adept_avatar_profile") ||
+            sessionStorage.getItem("adept_selected_character") ||
+            "";
+          if (sessionStorage.getItem("adept_avatar_profile")) {
+            sessionStorage.removeItem("adept_avatar_profile");
+          }
         } catch {
           /* ignore */
         }
       }
-      if (list?.length) {
-        let pick = list[0];
-        if (profileQ) {
-          const hit = list.find((s) => s.character_profile_id === profileQ);
-          if (hit) pick = hit;
-        }
-        setSession(pick);
-      } else {
-        const boot = emptyAvatarSession(project.id, "New Avatar Session");
-        if (profileQ) {
-          boot.character_profile_id = profileQ;
-          const chars = await api.listProfiles("character").catch(() => []);
-          const c = (chars || []).find((x: any) => x.id === profileQ);
-          if (c) boot.character_name = c.name;
-        }
-        const created = await api.createAvatarSession(project.id, {
-          name: boot.name,
-          character_profile_id: boot.character_profile_id || undefined,
-          character_name: boot.character_name,
-          mode: boot.mode,
-          bootstrap: boot,
-        });
-        setSession(created);
-        setSessions([created]);
+      if (!profileQ) {
+        setNeedsCharacter(true);
+        setSession(null);
+        return;
       }
-    })().catch(console.error);
+      await bindCharacterSession(profileQ, loaded.sessions, loaded.characters);
+    })().catch((error) => {
+      console.error(error);
+      setMsg(error instanceof Error ? error.message : String(error));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.id]);
+  }, [project.id, params]);
 
-  const dur = useMemo(
-    () => estimateDialogueSeconds(session?.dialogue_spoken || session?.dialogue_original || ""),
-    [session?.dialogue_spoken, session?.dialogue_original]
-  );
+  useEffect(() => {
+    const characterId = session?.character_profile_id;
+    if (!characterId) {
+      setVoiceReadiness(null);
+      setVoiceRecords([]);
+      return;
+    }
+    (async () => {
+      try {
+        const [readiness, records] = await Promise.all([
+          api.voicePerformanceReadiness(characterId, project.id).catch(() => null),
+          api.voicePerformanceM410
+            .listProjectRecords(project.id)
+            .then((payload) => payload.records || [])
+            .catch(() => [] as VoicePerformanceRecord[]),
+        ]);
+        setVoiceReadiness(readiness as VoiceReadiness | null);
+        setVoiceRecords(records);
+      } catch {
+        setVoiceReadiness(null);
+        setVoiceRecords([]);
+      }
+    })().catch(() => {
+      setVoiceReadiness(null);
+      setVoiceRecords([]);
+    });
+  }, [project.id, session?.character_profile_id]);
 
-  const save = async (next: AvatarSession) => {
+  useEffect(() => {
+    void loadScriptSources(session?.links?.script_document_id).catch(() => {
+      setScriptDocuments([]);
+      setScriptScenes([]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, session?.id, session?.links?.script_document_id]);
+
+  useEffect(() => {
+    if (!session?.id) {
+      setAvatarJobs([]);
+      setActiveJob(null);
+      return;
+    }
+    void loadJobs(session.id, session.active_job_id).catch(() => {
+      setAvatarJobs([]);
+      setActiveJob(null);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id, session?.id, session?.active_job_id]);
+
+  const patchSession = (patch: Partial<AvatarSession>) => {
+    if (!session) return;
+    setSession({
+      ...session,
+      ...patch,
+      updated_at: new Date().toISOString(),
+    });
+  };
+
+  const patchSessionLinks = (patch: Record<string, unknown>) => {
+    if (!session) return;
+    patchSession({
+      links: {
+        ...session.links,
+        ...patch,
+      },
+    });
+  };
+
+  const patchPresentationPlan = (patch: Partial<AvatarPresentationPlan>) => {
+    if (!session) return;
+    patchSession({
+      presentation_plan: {
+        ...(session.presentation_plan || {
+          version: "m4.12",
+          summary: "",
+          sectioningStrategy: "",
+          sectionTargetSeconds: 6,
+          deliveryStyle: "",
+          gazeStyle: "",
+          gestureStyle: "",
+          pacingStyle: "",
+          chapterTransitionStyle: "",
+          emphasisNotes: "",
+          postureNotes: "",
+          pronunciationNotes: "",
+          backgroundRecommendation: "",
+          framingRecommendation: "",
+          continuityChecklist: "",
+          retakeGuidance: "",
+          sections: [],
+        }),
+        ...patch,
+      },
+    });
+  };
+
+  const patchPresentationSection = (sectionId: string, patch: Record<string, string>) => {
+    if (!session?.presentation_plan) return;
+    patchPresentationPlan({
+      sections: session.presentation_plan.sections.map((item) =>
+        item.id === sectionId ? { ...item, ...patch } : item,
+      ),
+    });
+  };
+
+  const persistSession = async (next: AvatarSession) => {
+    const prompts = buildAvatarPrompt(next);
+    const payload = {
+      ...next,
+      prompt: next.prompt || prompts.prompt,
+      negative_prompt: next.negative_prompt || prompts.negative_prompt,
+    };
+    const saved = normalizeSession(await api.patchAvatarSession(project.id, next.id, payload));
+    setSession(saved);
+    setSessions((prev) => prev.map((item) => (item.id === saved.id ? saved : item)));
+    await onChange?.();
+    return saved;
+  };
+
+  const useScriptScene = async () => {
+    const documentId = session?.links?.script_document_id;
+    const sceneHeadingId = session?.links?.script_scene_heading_id;
+    if (!session || !documentId || !sceneHeadingId) return;
     setBusy(true);
     try {
-      const prompts = buildAvatarPrompt(next);
-      const payload = {
-        ...next,
-        prompt: next.prompt || prompts.prompt,
-        negative_prompt: next.negative_prompt || prompts.negative_prompt,
-      };
-      const saved = await api.patchAvatarSession(project.id, next.id, payload);
-      setSession(saved);
-      setSessions((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
-      await onChange?.();
+      const prepared = await api.scriptwriter.prepareTimeline(project.id, documentId, sceneHeadingId);
+      const proposal = (prepared.proposal || {}) as Record<string, unknown>;
+      const dialogue = Array.isArray(proposal.dialogue)
+        ? proposal.dialogue
+            .map((item) => String((item as Record<string, unknown>).text || "").trim())
+            .filter(Boolean)
+            .join("\n\n")
+        : "";
+      const selectedScene = scriptScenes.find((item) => item.sceneHeadingId === sceneHeadingId);
+      patchSession({
+        dialogue_original: dialogue || session.dialogue_original,
+        links: {
+          ...session.links,
+          script_document_id: documentId,
+          script_scene_heading_id: sceneHeadingId,
+          script_scene_id: selectedScene?.sceneId || null,
+          script_source_label: String(proposal.sceneHeading || selectedScene?.sceneHeading || ""),
+        },
+      });
+      setMsg(
+        dialogue
+          ? "Scene dialogue linked from Scriptwriter."
+          : "Scene linked for provenance. Add or refine the exact performance lines here if needed.",
+      );
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
   };
 
-  const patch = (p: Partial<AvatarSession>) => {
+  const syncJobState = async (job: AvatarProjectJob, nextSession?: AvatarSession | null) => {
+    setActiveJob(job);
+    setAvatarJobs((prev) => {
+      const next = prev.filter((item) => item.id !== job.id);
+      return [job, ...next];
+    });
+    if (nextSession) {
+      const normalizedSession = normalizeSession({ ...nextSession, active_job_id: job.id });
+      setSession(normalizedSession);
+      setSessions((prev) =>
+        prev.map((item) => (item.id === normalizedSession.id ? normalizedSession : item)),
+      );
+    }
+  };
+
+  const saveDraft = async () => {
     if (!session) return;
-    const next = { ...session, ...p, updated_at: new Date().toISOString() };
-    setSession(next);
+    setBusy(true);
+    try {
+      await persistSession(session);
+      setMsg("Presenter setup saved.");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const askCoDirectorForPlan = () => {
+    if (!session) return;
+    openCoDirector(
+      `Plan this Avatar Studio presentation for ${session.character_name || "this presenter"}. ` +
+        "Use the avatar presentation tools to inspect the session, section the script, " +
+        "and propose creator-facing notes for delivery, gaze, gesture, pacing, chapter transitions, " +
+        "emphasis, posture, pronunciation, background, framing, continuity, and section retakes.",
+      { fullscreen: true },
+    );
+  };
+
+  const createPlanProposal = async () => {
+    if (!session?.presentation_plan) return;
+    setBusy(true);
+    try {
+      const plan = session.presentation_plan;
+      const proposal = await api.proposeCoDirectorToolCall(project.id, {
+        toolId: "avatar.create_plan",
+        createdBy: "user",
+        arguments: {
+          sessionId: session.id,
+          summary: plan.summary,
+          sectioningStrategy: plan.sectioningStrategy,
+          targetSectionDurationMs: planSectionDurationMs(plan),
+          deliveryStyle: plan.deliveryStyle,
+          gazeStyle: plan.gazeStyle,
+          gestureStyle: plan.gestureStyle,
+          pacingStyle: plan.pacingStyle,
+          chapterTransitionStyle: plan.chapterTransitionStyle,
+          emphasisNotes: plan.emphasisNotes,
+          postureNotes: plan.postureNotes,
+          pronunciationNotes: plan.pronunciationNotes,
+          backgroundRecommendation: plan.backgroundRecommendation,
+          framingRecommendation: plan.framingRecommendation,
+          continuityChecklist: plan.continuityChecklist,
+          retakeGuidance: plan.retakeGuidance,
+        },
+      });
+      setMsg(`Presentation plan proposal ${proposal.id} is ready in Co-Director Approvals.`);
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const createNew = async () => {
+    if (!session) return;
     setBusy(true);
     try {
-      const created = await api.createAvatarSession(project.id, { name: `Avatar ${sessions.length + 1}` });
+      const boot = normalizeSession(emptyAvatarSession(project.id, `Presenter ${sessions.length + 1}`));
+      boot.character_profile_id = session.character_profile_id;
+      boot.character_name = session.character_name;
+      const created = normalizeSession(
+        await api.createAvatarSession(project.id, {
+          name: boot.name,
+          character_profile_id: boot.character_profile_id || undefined,
+          character_name: boot.character_name,
+          mode: boot.mode,
+          bootstrap: boot,
+        }),
+      );
       setSession(created);
       setSessions((prev) => [created, ...prev]);
+      setAvatarJobs([]);
+      setActiveJob(null);
+      setMsg("New presenter session ready.");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -146,70 +875,14 @@ export function AvatarStudioWorkspace({
 
   const runValidate = async () => {
     if (!session) return;
-    await save(session);
-    const res = await api.validateAvatarSession(project.id, session.id);
-    setIssues(res.issues || validateAvatarSession(session));
-    setMsg(res.ok ? "Validation passed (warnings may remain)." : "Validation found blocking issues.");
-  };
-
-  const uploadAudio = async (file: File | null) => {
-    if (!file || !session) return;
     setBusy(true);
     try {
-      const asset = (await api.uploadAsset(project.id, file, `avatar-voice-${session.character_name || "line"}`, "audio")) as {
-        id: string;
-      };
-      const next = {
-        ...session,
-        voice: { ...session.voice, audio_asset_id: asset.id, provider: "upload" },
-      };
-      await save(next);
-      await loadLists();
-      setMsg("Audio attached.");
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const createVoiceProfile = async () => {
-    if (!session) return;
-    const name = window.prompt("Voice profile name", `${session.character_name || "Character"} Voice`);
-    if (!name) return;
-    await api.createProfile("voice", {
-      name,
-      description: session.voice.pronunciation_notes || "",
-      data: session.voice,
-    } as any);
-    await loadLists();
-    setMsg("Voice Profile saved.");
-  };
-
-  const generateStill = async () => {
-    if (!session) return;
-    setBusy(true);
-    setMsg("Queuing ImageGen…");
-    try {
-      const { prompt, negative_prompt } = buildAvatarPrompt(session);
-      const job = await api.imagegen(project.id, {
-        prompt,
-        negative_prompt,
-        aspect: session.camera.aspect || session.look.aspect || "16:9",
-      });
-      setJobId(job.id);
-      setMsg(`ImageGen queued (${job.id.slice(0, 8)}…).`);
-      await pollJob(job.id, async (done) => {
-        if (done.output_path || (done as any).asset_id) {
-          const assetId = (done as any).asset_id;
-          if (assetId) {
-            await save({ ...session, source_still_asset_id: assetId, prompt, negative_prompt });
-            setMsg("Still ready — continue to video or lip sync.");
-          }
-        }
-      });
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const saved = await persistSession(session);
+      const response = await api.validateAvatarSession(project.id, saved.id);
+      setIssues(response.issues || validateAvatarSession(saved));
+      setMsg(response.ok ? "Presenter setup looks ready." : "A few setup items still need attention.");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -217,118 +890,305 @@ export function AvatarStudioWorkspace({
 
   const generateVideo = async () => {
     if (!session) return;
-    if (session.mode === "existing_video_lipsync") {
-      setTab("lipsync");
-      setMsg("Source video mode — prepare mouth mask, then apply lip sync in Director.");
-      return;
-    }
     setBusy(true);
-    setMsg("Queuing Txt2Vid…");
+    setMsg("");
     try {
-      const { prompt, negative_prompt } = buildAvatarPrompt(session);
-      const job = await api.txt2vid(project.id, {
-        prompt,
-        negative_prompt,
-        aspect: session.camera.aspect || "16:9",
-        duration_sec: Math.min(8, Math.max(3, dur || 4)),
-        start_asset_id: session.source_still_asset_id || undefined,
-      });
-      setJobId(job.id);
-      setMsg(`Video job queued (${job.id.slice(0, 8)}…).`);
-      await pollJob(job.id, async (done) => {
-        const assetId = (done as any).asset_id;
-        if (assetId || done.output_path) {
-          const take = await api.addAvatarTake(project.id, session.id, {
-            asset_id: assetId,
-            label: `Take ${(session.takes?.length || 0) + 1}`,
-            status: "preview",
-            performance_note: session.performance.tone,
-          });
-          const refreshed = await api.getAvatarSession(project.id, session.id);
-          setSession(refreshed);
-          setMsg(`Take registered: ${take.label}. Prepare mouth mask next.`);
-          setTab("lipsync");
+      const saved = await persistSession(session);
+      const validation = await api.validateAvatarSession(project.id, saved.id);
+      setIssues(validation.issues || validateAvatarSession(saved));
+      if (!validation.ok) {
+        setMsg("Complete the blocked items before generating.");
+        return;
+      }
+      if (saved.mode === "existing_video_lipsync") {
+        if (!museTalkProvider || runtimeStatus(museTalkProvider).label === "Not Installed") {
+          setMsg("MuseTalk 1.5 is not installed yet, so Lip-Sync Repair cannot be prepared.");
+          return;
         }
+        const nextJob = await api.createAvatarJob(project.id, saved.id, {
+          providerId: "musetalk-1-5-local",
+          startImmediately: false,
+        });
+        const refreshedSession = normalizeSession(await api.getAvatarSession(project.id, saved.id));
+        await syncJobState(nextJob, refreshedSession);
+        setReviewTab("sections");
+        setMsg(
+          `Lip-Sync Repair plan ready with ${nextJob.sections.length} section${
+            nextJob.sections.length === 1 ? "" : "s"
+          }. Review the section plan before proposing repair actions.`,
+        );
+        return;
+      }
+      const nextJob = await api.createAvatarJob(project.id, saved.id, {
+        providerId: selectedProvider?.id || saved.provider_choice || saved.model_id,
+        startImmediately: true,
       });
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const refreshedSession = normalizeSession(await api.getAvatarSession(project.id, saved.id));
+      await syncJobState(nextJob, refreshedSession);
+      setReviewTab("sections");
+      setMsg(
+        nextJob.status === "failed"
+          ? nextJob.lastError?.message || "Section generation stopped on an honest runtime error."
+          : `Long-form plan ready with ${nextJob.sections.length} section${
+              nextJob.sections.length === 1 ? "" : "s"
+            }.`,
+      );
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
   };
 
-  const pollJob = async (id: string, onDone: (j: any) => Promise<void>) => {
-    for (let i = 0; i < 90; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      try {
-        const j = await api.getJob(id);
-        if (j.status === "done") {
-          await onDone(j);
-          return;
-        }
-        if (j.status === "failed") {
-          setMsg(j.message || "Job failed");
-          return;
-        }
-      } catch {
-        /* keep polling */
-      }
+  const runJobAction = async (
+    action: () => Promise<AvatarProjectJob>,
+    successMessage?: string,
+    nextTab?: ReviewTab,
+  ) => {
+    if (!session || !activeJob) return;
+    setBusy(true);
+    try {
+      const updated = await action();
+      const refreshedSession = normalizeSession(await api.getAvatarSession(project.id, session.id));
+      await syncJobState(updated, refreshedSession);
+      if (nextTab) setReviewTab(nextTab);
+      if (successMessage) setMsg(successMessage);
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
     }
-    setMsg("Job still running — check Jobs panel.");
   };
 
-  const markMouthMask = async () => {
-    if (!session) return;
-    await save({ ...session, mouth_mask: { ...session.mouth_mask, placed: true } });
-    setMsg("Mouth mask marked confirmed. Apply lip sync from Director when ready.");
+  const pauseActiveJob = async () => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.pauseAvatarJob(project.id, activeJob.id),
+      "Section generation paused. Resume when you are ready.",
+      "progress",
+    );
   };
 
-  const sendTakeToDirector = async (takeId: string) => {
+  const resumeActiveJob = async () => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.resumeAvatarJob(project.id, activeJob.id),
+      "Section generation resumed.",
+      "progress",
+    );
+  };
+
+  const cancelActiveJob = async () => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.cancelAvatarJob(project.id, activeJob.id),
+      "This long-form pass was cancelled. You can retry only the sections you need later.",
+      "progress",
+    );
+  };
+
+  const retrySection = async (sectionId: string) => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.retryAvatarSection(project.id, activeJob.id, sectionId),
+      "Retry requested for the failed section only.",
+      "sections",
+    );
+  };
+
+  const proposeRetake = async (sectionId: string, action: RetakeActionChoice) => {
+    if (!activeJob) return;
+    setBusy(true);
+    try {
+      const proposal = await api.proposeCoDirectorToolCall(project.id, {
+        toolId: action.toolId || "avatar.request_retake",
+        createdBy: "user",
+        arguments: {
+          jobId: activeJob.id,
+          sectionId,
+          actionType: action.id,
+          reason: action.label,
+          note: action.note,
+        },
+      });
+      setMsg(`Retake proposal ${proposal.id} is ready in Co-Director Approvals.`);
+      setReviewTab("sections");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const proposeReplaceVoice = async () => {
     if (!session) return;
-    const take = session.takes.find((t) => t.id === takeId);
-    if (!take?.asset_id) {
-      setMsg("Take has no asset yet.");
+    if (!selectedApprovedVoice) {
+      setMsg("Choose an approved Voice Studio take before replacing the voice performance.");
       return;
     }
     setBusy(true);
     try {
-      await api.promote(project.id, { asset_id: take.asset_id, target: "scene_new", name: `${session.character_name || "Avatar"} — ${take.label}` });
+      const proposal = await api.proposeCoDirectorToolCall(project.id, {
+        toolId: "avatar.replace_voice",
+        createdBy: "user",
+        arguments: {
+          sessionId: session.id,
+          audioAssetId: selectedApprovedVoice.audioAssetId,
+          approvedRecordId: selectedApprovedVoice.recordId,
+          approvedTakeId: selectedApprovedVoice.takeId,
+          profileId: selectedApprovedVoice.voiceIdentityId,
+          providerId: "voice-performance-m410",
+          modelId: selectedApprovedVoice.providerId,
+          pronunciationNotes: activeSession.voice.pronunciation_notes || "",
+        },
+      });
+      setMsg(`Voice replacement proposal ${proposal.id} is ready in Co-Director Approvals.`);
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const proposeTimelineHandoff = async (
+    placementMode: "full_presentation" | "selected_section" | "replace_section" | "create_alternate_take",
+    sectionId?: string,
+  ) => {
+    if (!activeJob) return;
+    setBusy(true);
+    try {
+      const proposal = await api.proposeCoDirectorToolCall(project.id, {
+        toolId: "avatar.prepare_timeline",
+        createdBy: "user",
+        arguments: {
+          jobId: activeJob.id,
+          placementMode,
+          sectionId: placementMode === "selected_section" ? sectionId : undefined,
+          replaceSectionId: placementMode === "replace_section" ? sectionId : undefined,
+          trackId: placementMode === "create_alternate_take" ? "avatar-alternates" : "avatar-presenter",
+        },
+      });
+      setMsg(`Timeline handoff proposal ${proposal.id} is ready in Co-Director Approvals.`);
+      setReviewTab("completed");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const approveSection = async (sectionId: string) => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.approveAvatarSection(project.id, activeJob.id, sectionId),
+      "Section approved for assembly.",
+      "sections",
+    );
+  };
+
+  const validateTransitions = async () => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.validateAvatarTransitions(project.id, activeJob.id, { validated: true }),
+      "Transition validation hook recorded.",
+      "progress",
+    );
+  };
+
+  const assembleActiveJob = async () => {
+    if (!activeJob) return;
+    await runJobAction(
+      () => api.assembleAvatarJob(project.id, activeJob.id),
+      "Assembly contract completed. Final composite rendering remains a stub in this pass.",
+      "completed",
+    );
+  };
+
+  const sendTakeToDirector = async (takeId: string) => {
+    if (!session) return;
+    const take = session.takes.find((item) => item.id === takeId);
+    if (!take?.asset_id) {
+      setMsg("This take does not have a video asset yet.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.promote(project.id, {
+        asset_id: take.asset_id,
+        target: "scene_new",
+        name: `${session.character_name || "Avatar"} — ${take.label}`,
+      });
       await api.addAvatarTake(project.id, session.id, {
-        asset_id: take.asset_id ?? undefined,
-        scene_id: take.scene_id ?? undefined,
+        asset_id: take.asset_id || undefined,
+        scene_id: take.scene_id || undefined,
         approved: true,
         status: "final",
         label: take.label,
         performance_note: take.performance_note,
         favorite: take.favorite,
       });
-      setMsg("Sent to Director as new scene.");
-      onGo("director");
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      const refreshed = normalizeSession(await api.getAvatarSession(project.id, session.id));
+      setSession(refreshed);
+      setSessions((prev) => prev.map((item) => (item.id === refreshed.id ? refreshed : item)));
+      setMsg("Video sent to Timeline as a new scene.");
+      setReviewTab("completed");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
   };
 
-  const applyPreset = (presetId: string) => {
-    if (!session) return;
-    const preset = AVATAR_PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
-    const next: AvatarSession = {
-      ...session,
-      preset_id: presetId,
-      background_mode: preset.background_mode || session.background_mode,
-      camera: preset.camera || session.camera,
-      look: {
-        ...session.look,
-        framing: preset.camera?.shot_size || session.look.framing,
-        lens: preset.camera?.lens || session.look.lens,
-        camera_angle: preset.camera?.angle || session.look.camera_angle,
-      },
-    };
-    setSession(next);
-  };
+  const approvedVoices = useMemo(
+    () => approvedVoiceOptions(voiceRecords, session?.character_profile_id),
+    [voiceRecords, session?.character_profile_id],
+  );
+
+  if (needsCharacter) {
+    return (
+      <div className="page" data-testid="avatar-requires-character">
+        <header className="hero" style={{ paddingTop: "1rem" }}>
+          <h1>Avatar Studio</h1>
+          <p>Choose a character to open a long-form presenter workspace.</p>
+        </header>
+        <div className="row-actions" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+          <button type="button" data-testid="avatar-choose-character" onClick={() => onGo("characters")}>
+            Choose Avatar
+          </button>
+          <button type="button" data-testid="avatar-open-character-profiles" onClick={() => onGo("characters")}>
+            Open Character Profiles
+          </button>
+        </div>
+        {characters.length ? (
+          <label style={{ display: "block", marginTop: "1.25rem", maxWidth: "24rem" }}>
+            Or pick from this project
+            <select
+              data-testid="avatar-character-select"
+              defaultValue=""
+              onChange={(event) => {
+                const nextId = event.target.value;
+                if (!nextId) return;
+                try {
+                  sessionStorage.setItem("adept_selected_character", nextId);
+                  sessionStorage.setItem("adept_avatar_profile", nextId);
+                } catch {
+                  /* ignore */
+                }
+                void bindCharacterSession(nextId).catch(console.error);
+              }}
+            >
+              <option value="">Select character…</option>
+              {characters.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+    );
+  }
 
   if (!session) {
     return (
@@ -338,488 +1198,1501 @@ export function AvatarStudioWorkspace({
     );
   }
 
-  const previewSrc =
-    (session.source_still_asset_id && api.assetUrl(session.source_still_asset_id)) ||
-    (session.takes.find((t) => t.asset_id)?.asset_id && api.assetUrl(session.takes.find((t) => t.asset_id)!.asset_id!)) ||
+  const activeSession = normalizeSession(session);
+  const presentationPlan = activeSession.presentation_plan;
+  const previewAssetId =
+    activeSession.source_still_asset_id ||
+    activeSession.takes.find((item) => item.asset_id)?.asset_id ||
     null;
+  const previewSrc = previewAssetId ? api.assetUrl(previewAssetId) : null;
+  const scriptText = activeSession.dialogue_spoken || activeSession.dialogue_original || "";
+  const estimatedSeconds = estimateDialogueSeconds(scriptText);
+  const bestProvider = bestMatchProvider(activeSession, runtimeComponents);
+  const selectedProvider =
+    activeSession.provider_mode === "choose_provider"
+      ? runtimeComponents.find((item) => item.id === activeSession.provider_choice) || bestProvider
+      : bestProvider;
+  const selectedApprovedVoice = approvedVoices.find(
+    (item) => item.audioAssetId === activeSession.voice.audio_asset_id,
+  );
+  const resolvedAudioAssetId =
+    activeSession.input_mode === "approved_voice"
+      ? activeSession.voice.audio_asset_id
+      : activeSession.voice.fallback_audio_asset_id || activeSession.voice.audio_asset_id;
+  const museTalkProvider = runtimeComponents.find((item) => item.id === "musetalk-1-5-local") || null;
+  const canGenerate =
+    !!activeSession.character_profile_id &&
+    (activeSession.input_mode === "approved_voice"
+      ? !!activeSession.voice.audio_asset_id &&
+        !!activeSession.voice.approved_record_id &&
+        !!activeSession.voice.approved_take_id &&
+        (activeSession.mode !== "existing_video_lipsync" || !!activeSession.source_video_asset_id)
+      : !!scriptText.trim() &&
+        (activeSession.mode !== "existing_video_lipsync" || !!activeSession.source_video_asset_id));
+  const completedTakes = activeSession.takes.filter(
+    (item) => item.approved || item.status === "final" || !!item.scene_id,
+  );
+  const activeSections = activeJob?.sections || [];
+  const completedSections = activeSections.filter(
+    (item) => item.status === "completed" || item.status === "approved",
+  );
+  const failedSections = activeSections.filter((item) => item.status === "failed");
+  const approvedSections = activeSections.filter((item) => item.status === "approved");
+  const canPauseJob = activeJob?.status === "queued" || activeJob?.status === "generating";
+  const canResumeJob =
+    activeJob?.status === "paused" || activeJob?.status === "failed" || activeJob?.status === "queued";
+  const canAssembleJob =
+    !!activeJob &&
+    activeSections.length > 0 &&
+    failedSections.length === 0 &&
+    completedSections.length === activeSections.length;
 
   return (
-    <div className="page avatar-studio">
-      <header className="avatar-studio-head">
+    <div className="page avatar-studio avatar-studio-v2" data-testid="avatar-studio-workspace">
+      <header className="avatar-studio-head avatar-studio-head--presenter">
         <div>
           <p className="eyebrow">Avatar Studio</p>
           <h1>
-            {session.character_name || "Character"}{" "}
-            <span className="muted" style={{ fontSize: "0.85rem", fontWeight: 400 }}>
-              · {session.name}
-            </span>
+            {activeSession.character_name || "Presenter"}
+            <span className="muted avatar-session-name"> · {activeSession.name}</span>
           </h1>
-          <p className="muted">Character → Appearance → Voice → Performance → Lip Sync → Director</p>
+          <p className="muted">
+            Select Avatar → Script or Approved Voice → Presentation Style → Framing → Background →
+            Generate → Review → Timeline
+          </p>
         </div>
-        <div className="row" style={{ flexWrap: "wrap", gap: "0.4rem" }}>
+        <div className="row avatar-head-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
           <select
             aria-label="Avatar session"
-            value={session.id}
-            onChange={async (e) => {
-              const s = await api.getAvatarSession(project.id, e.target.value);
-              setSession(s);
+            value={activeSession.id}
+            onChange={async (event) => {
+              const next = normalizeSession(
+                await api.getAvatarSession(project.id, event.target.value),
+              );
+              setSession(next);
+              await loadJobs(next.id, next.active_job_id);
             }}
           >
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            {sessions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
               </option>
             ))}
           </select>
           <button type="button" onClick={createNew} disabled={busy}>
             New Session
           </button>
-          <button type="button" className="primary" onClick={() => save(session)} disabled={busy}>
-            Save
+          <button type="button" onClick={() => openSetup()}>
+            Open Setup
+          </button>
+          <button type="button" className="primary" onClick={saveDraft} disabled={busy}>
+            Save Draft
           </button>
         </div>
       </header>
 
-      <div className="type-chips" role="listbox" aria-label="Avatar mode">
-        {AVATAR_MODES.map((m) => (
-          <button
-            key={m.id}
-            type="button"
-            role="option"
-            aria-selected={session.mode === m.id}
-            className={session.mode === m.id ? "primary" : ""}
-            title={m.blurb}
-            onClick={() => patch({ mode: m.id as AvatarMode })}
-          >
-            {m.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="avatar-layout">
-        <section className="dash-card avatar-preview-pane">
-          <p className="eyebrow">Avatar Preview</p>
-          <div className={`cinematic-media motif-imagegen avatar-preview-media`}>
+      <div className="avatar-hero-layout">
+        <section className="dash-card avatar-preview-pane avatar-preview-pane--large">
+          <div className="avatar-preview-pane__header">
+            <div>
+              <p className="eyebrow">Avatar Preview</p>
+              <h2>{MODE_CARDS.find((item) => item.id === activeSession.mode)?.label || "Presenter"}</h2>
+            </div>
+            <div className="avatar-preview-pane__chips">
+              <span className="pill">{FRAMING_CARDS.find((item) => item.id === activeSession.framing_choice)?.label || activeSession.camera.shot_size}</span>
+              <span className="pill">{STYLE_CARDS.find((item) => item.id === activeSession.presentation_style)?.label || "Style"}</span>
+              <span className="pill">{selectedProvider ? runtimeStatus(selectedProvider).label : "Choose Runtime"}</span>
+            </div>
+          </div>
+          <div className="cinematic-media motif-imagegen avatar-preview-media avatar-preview-media--workspace">
             <div className="cinematic-media-fallback" aria-hidden="true" />
-            {previewSrc && (
+            {previewSrc ? (
               <img
                 src={previewSrc}
-                alt={`${session.character_name || "Avatar"} preview`}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                alt={`${activeSession.character_name || "Avatar"} preview`}
+                onError={(event) => {
+                  (event.currentTarget as HTMLImageElement).style.display = "none";
                 }}
               />
+            ) : (
+              <div className="avatar-preview-empty">
+                <strong>{activeSession.character_name || "Presenter"}</strong>
+                <span>
+                  Preview grows here after you choose a reference image or generate a take.
+                </span>
+              </div>
             )}
             <div className="cinematic-media-overlay" />
             <span className="hero-media-caption">
-              {session.camera.shot_size} · {session.performance.tone}
+              {activeSession.background_notes || "Ready for a presenter background"} · ~
+              {Math.max(estimatedSeconds, 0)}s script estimate
             </span>
           </div>
-          {msg && <p className="pill" style={{ marginTop: "0.75rem" }}>{msg}</p>}
-          {jobId && <p className="scene-meta">Last job: {jobId}</p>}
+          <div className="avatar-preview-pane__footer">
+            {msg ? <p className="pill avatar-preview-message">{msg}</p> : null}
+            {activeJob ? (
+              <p className="scene-meta">
+                Active job: {activeJob.id} · {sectionStatusLabel(activeJob.status)}
+              </p>
+            ) : null}
+            {avatarJobs.length ? (
+              <p className="scene-meta">
+                {avatarJobs.length} long-form job{avatarJobs.length === 1 ? "" : "s"} in this presenter history
+              </p>
+            ) : null}
+            <div className="avatar-preview-summary">
+              <div>
+                <span className="avatar-summary-label">Voice</span>
+                <strong>
+                  {activeSession.input_mode === "approved_voice"
+                    ? selectedApprovedVoice
+                      ? "Approved voice attached"
+                      : "Approved voice needed"
+                    : scriptText.trim()
+                      ? "Script ready"
+                      : "Script needed"}
+                </strong>
+              </div>
+              <div>
+                <span className="avatar-summary-label">Timeline</span>
+                <strong>
+                  {activeJob
+                    ? `${completedSections.length}/${activeSections.length || 0} sections ready`
+                    : completedTakes.length
+                      ? `${completedTakes.length} ready`
+                      : "No completed videos yet"}
+                </strong>
+              </div>
+            </div>
+          </div>
         </section>
 
-        <aside className="dash-card avatar-inspector">
-          <p className="eyebrow">Avatar Inspector</p>
-
-          <div className="field">
-            <label>Character Profile</label>
-            <select
-              value={session.character_profile_id || ""}
-              onChange={(e) => {
-                const id = e.target.value || null;
-                const c = characters.find((x) => x.id === id);
-                patch({ character_profile_id: id, character_name: c?.name || session.character_name });
-              }}
-            >
-              <option value="">— Select —</option>
-              {characters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Display name</label>
-            <input value={session.character_name} onChange={(e) => patch({ character_name: e.target.value })} />
-          </div>
-          <label className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
-            <input
-              type="checkbox"
-              checked={session.continuity_lock}
-              onChange={(e) => patch({ continuity_lock: e.target.checked })}
-            />
-            Continuity lock
-          </label>
-
-          <div className="field">
-            <label>Look name</label>
-            <input
-              value={session.look.name}
-              onChange={(e) => patch({ look: { ...session.look, name: e.target.value } })}
-            />
-          </div>
-          <div className="gen-grid">
-            <div className="field">
-              <label>Wardrobe</label>
-              <input
-                value={session.look.wardrobe}
-                onChange={(e) => patch({ look: { ...session.look, wardrobe: e.target.value } })}
-              />
+        <aside className="dash-card avatar-create-panel" data-testid="avatar-create-panel">
+          <div className="avatar-create-panel__heading">
+            <div>
+              <p className="eyebrow">Create</p>
+              <h2>Long-Form Presenter</h2>
             </div>
-            <div className="field">
-              <label>Expression</label>
-              <input
-                value={session.look.expression}
-                onChange={(e) => patch({ look: { ...session.look, expression: e.target.value } })}
-              />
+            <div className="avatar-provider-glance">
+              <span className="scene-meta">Provider Mode</span>
+              <strong>
+                {activeSession.provider_mode === "best_match"
+                  ? "Best Match"
+                  : activeSession.provider_mode === "choose_provider"
+                    ? "Choose Provider"
+                    : "Compare"}
+              </strong>
             </div>
           </div>
 
-          <div className="field">
-            <label>Voice Profile</label>
-            <select
-              value={session.voice.profile_id || ""}
-              onChange={(e) => patch({ voice: { ...session.voice, profile_id: e.target.value || null } })}
-            >
-              <option value="">— Optional —</option>
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Dialogue audio (required for lip sync)</label>
-            <select
-              value={session.voice.audio_asset_id || ""}
-              onChange={(e) => patch({ voice: { ...session.voice, audio_asset_id: e.target.value || null } })}
-            >
-              <option value="">— Select audio —</option>
-              {audioAssets.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.tag || a.filename}
-                </option>
-              ))}
-            </select>
-            <input
-              type="file"
-              accept="audio/*"
-              style={{ marginTop: "0.35rem" }}
-              onChange={(e) => uploadAudio(e.target.files?.[0] || null)}
-            />
-            <button type="button" className="ghost" style={{ marginTop: "0.35rem" }} onClick={createVoiceProfile}>
-              Save as Voice Profile
-            </button>
-          </div>
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Select Avatar</h3>
+              <Tip text="Pick the presenter you want to perform this section. Each character keeps their own avatar session history." />
+            </div>
+            <div className="avatar-card-grid avatar-card-grid--avatars">
+              {characters.map((item) => {
+                const selected = activeSession.character_profile_id === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() => {
+                      try {
+                        sessionStorage.setItem("adept_selected_character", item.id);
+                        sessionStorage.setItem("adept_avatar_profile", item.id);
+                      } catch {
+                        /* ignore */
+                      }
+                      void bindCharacterSession(item.id).catch(console.error);
+                    }}
+                  >
+                    <span className="avatar-choice-card__art" aria-hidden="true">
+                      {item.name.slice(0, 1).toUpperCase()}
+                    </span>
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.name}</strong>
+                      <span>{selected ? "Current presenter" : "Open this presenter"}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
-          <div className="field">
-            <label>Dialogue (original script — never silently changed)</label>
-            <textarea
-              rows={2}
-              value={session.dialogue_original}
-              onChange={(e) => patch({ dialogue_original: e.target.value })}
-              placeholder="BARNES&#10;Now you have me curious, Doctor."
-            />
-          </div>
-          <div className="field">
-            <label>Spoken adaptation</label>
-            <textarea
-              rows={2}
-              value={session.dialogue_spoken}
-              onChange={(e) => patch({ dialogue_spoken: e.target.value })}
-              placeholder="Optional performance rewrite"
-            />
-            <div className="row" style={{ marginTop: "0.35rem", gap: "0.35rem" }}>
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Mode</h3>
+              <Tip text="Choose the kind of presenter performance you want to build. More stylized looks stay tucked inside Advanced." />
+            </div>
+            <div className="avatar-card-grid" data-testid="avatar-mode-cards">
+              {MODE_CARDS.map((item) => {
+                const selected = activeSession.mode === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() =>
+                      patchSession({
+                        mode: item.id,
+                        camera: {
+                          ...activeSession.camera,
+                          shot_size: item.shotSize,
+                        },
+                      })
+                    }
+                  >
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Script or Approved Voice</h3>
+              <Tip text="Use Script when you are still writing the section. Use Approved Voice when Voice Studio already has the take you trust." />
+            </div>
+            <div className="avatar-toggle-row">
               <button
                 type="button"
-                onClick={() =>
-                  patch({
-                    dialogue_spoken: session.dialogue_spoken || session.dialogue_original,
-                    dialogue_adaptation_accepted: true,
-                  })
-                }
+                className={activeSession.input_mode === "script" ? "primary" : ""}
+                onClick={() => patchSession({ input_mode: "script" })}
               >
-                Accept
+                Script
               </button>
-              <button type="button" onClick={() => patch({ dialogue_spoken: "", dialogue_adaptation_accepted: false })}>
-                Reject
+              <button
+                type="button"
+                className={activeSession.input_mode === "approved_voice" ? "primary" : ""}
+                onClick={() => patchSession({ input_mode: "approved_voice" })}
+              >
+                Approved Voice
               </button>
-              <span className="scene-meta">~{dur}s</span>
             </div>
-          </div>
+            {activeSession.input_mode === "script" ? (
+              <>
+                <div className="gen-grid">
+                  <div className="field">
+                    <label>Script Document</label>
+                    <select
+                      value={activeSession.links.script_document_id || ""}
+                      onChange={(event) => {
+                        const nextId = event.target.value || null;
+                        patchSessionLinks({
+                          script_document_id: nextId,
+                          script_scene_heading_id: null,
+                          script_scene_id: null,
+                          script_source_label: "",
+                        });
+                        void loadScriptSources(nextId).catch(() => {
+                          setScriptScenes([]);
+                        });
+                      }}
+                    >
+                      <option value="">Select document…</option>
+                      {scriptDocuments.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>Scene Source</label>
+                    <select
+                      value={activeSession.links.script_scene_heading_id || ""}
+                      onChange={(event) => {
+                        const sceneHeadingId = event.target.value || null;
+                        const selectedScene = scriptScenes.find((item) => item.sceneHeadingId === sceneHeadingId);
+                        patchSessionLinks({
+                          script_scene_heading_id: sceneHeadingId,
+                          script_scene_id: selectedScene?.sceneId || null,
+                          script_source_label: selectedScene?.sceneHeading || "",
+                        });
+                      }}
+                    >
+                      <option value="">Select scene…</option>
+                      {scriptScenes.map((item) => (
+                        <option key={item.sceneHeadingId} value={item.sceneHeadingId}>
+                          {item.sceneNumber ? `${item.sceneNumber} · ` : ""}
+                          {item.sceneHeading}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="avatar-inline-actions" style={{ marginBottom: "0.65rem" }}>
+                  <button
+                    type="button"
+                    onClick={() => void useScriptScene()}
+                    disabled={busy || !activeSession.links.script_document_id || !activeSession.links.script_scene_heading_id}
+                  >
+                    Use Scene Dialogue
+                  </button>
+                  <button type="button" onClick={() => onGo("scriptwriter")}>
+                    Open Scriptwriter
+                  </button>
+                  <span className="scene-meta">
+                    {activeSession.links.script_source_label
+                      ? `Linked: ${activeSession.links.script_source_label}`
+                      : "Link a Scriptwriter scene to keep provenance with this presenter pass."}
+                  </span>
+                </div>
+                <div className="field">
+                  <label>Presenter Script</label>
+                  <textarea
+                    data-testid="avatar-script-input"
+                    rows={5}
+                    value={activeSession.dialogue_original}
+                    onChange={(event) => patchSession({ dialogue_original: event.target.value })}
+                    placeholder="Write the section exactly as the presenter should deliver it."
+                  />
+                  <div className="avatar-inline-actions">
+                    <span className="scene-meta">~{estimatedSeconds || 0}s speaking estimate</span>
+                    <span className="scene-meta">
+                      Need the voice performance first? Open Voice Studio and approve a take there.
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : approvedVoices.length ? (
+              <div className="avatar-approved-voice-list">
+                {approvedVoices.map((item) => {
+                  const selected = activeSession.voice.approved_take_id === item.takeId;
+                  return (
+                    <button
+                      key={item.takeId}
+                      type="button"
+                      className={`avatar-approved-voice-card${selected ? " is-selected" : ""}`}
+                      onClick={() =>
+                        patchSession({
+                          input_mode: "approved_voice",
+                          voice: {
+                            ...activeSession.voice,
+                            provider: "voice-performance-m410",
+                            audio_asset_id: item.audioAssetId,
+                            approved_record_id: item.recordId,
+                            approved_take_id: item.takeId,
+                            profile_id: item.voiceIdentityId,
+                            model: item.providerId,
+                          },
+                          links: {
+                            ...activeSession.links,
+                            voice_record_id: item.recordId,
+                            voice_take_id: item.takeId,
+                          },
+                        })
+                      }
+                    >
+                      <strong>{item.title}</strong>
+                      <span>{item.subtitle}</span>
+                      <span className="scene-meta">Updated {displayTime(item.updatedAt)}</span>
+                    </button>
+                  );
+                })}
+                <div className="avatar-inline-actions">
+                  <span className="scene-meta">
+                    {voiceReadiness?.pronunciationCount || 0} pronunciations · {voiceReadiness?.reactionReadyCount || 0} reactions ready
+                  </span>
+                  <span className="scene-meta">Approved takes stay source-of-truth in Voice Studio.</span>
+                  <button type="button" onClick={() => onGo("voicestudio")}>
+                    Open Voice Studio
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="avatar-blocked-card">
+                <strong>No approved voice take yet</strong>
+                <p>
+                  Build and approve a performance in Voice Studio, then come back here to attach it
+                  to the presenter section.
+                </p>
+                <div className="avatar-inline-actions">
+                  <button type="button" className="primary" onClick={() => onGo("voicestudio")}>
+                    Open Voice Studio
+                  </button>
+                  <span className="scene-meta">
+                    {voiceReadiness?.approvedVoice
+                      ? "Voice identity approved, but no take is attached yet."
+                      : "Voice identity approval still needed."}
+                  </span>
+                </div>
+              </div>
+            )}
+            {activeSession.mode === "existing_video_lipsync" ? (
+              <>
+                <div className="field" style={{ marginTop: "0.85rem" }}>
+                  <label>Existing Video</label>
+                  <select
+                    value={activeSession.source_video_asset_id || ""}
+                    onChange={(event) =>
+                      patchSession({ source_video_asset_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">Select video…</option>
+                    {videoAssets.map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.tag || asset.filename}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="scene-meta" style={{ marginTop: "0.5rem" }}>
+                  MuseTalk 1.5 is used here as a Lip-Sync Repair and dubbing path, not a full avatar generation path.
+                </p>
+              </>
+            ) : null}
+          </section>
 
-          <div className="field">
-            <label>Performance tone</label>
-            <select
-              value={session.performance.tone}
-              onChange={(e) =>
-                patch({ performance: { ...session.performance, tone: e.target.value as PerformanceTone } })
-              }
-            >
-              {(
-                [
-                  "calm",
-                  "friendly",
-                  "serious",
-                  "excited",
-                  "suspicious",
-                  "angry",
-                  "sad",
-                  "confident",
-                  "nervous",
-                  "restrained",
-                  "custom",
-                ] as PerformanceTone[]
-              ).map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="gen-grid">
-            <div className="field">
-              <label>Eye line</label>
-              <input
-                value={session.performance.eye_contact}
-                onChange={(e) => patch({ performance: { ...session.performance, eye_contact: e.target.value } })}
-              />
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Presentation Style</h3>
+              <Tip text="This shapes how the presenter feels on camera. It affects the mood and visual style notes saved with the section." />
             </div>
-            <div className="field">
-              <label>Gesture intensity</label>
-              <input
-                value={session.performance.gesture_intensity}
-                onChange={(e) =>
-                  patch({ performance: { ...session.performance, gesture_intensity: e.target.value } })
-                }
-              />
+            <div className="avatar-card-grid">
+              {STYLE_CARDS.map((item) => {
+                const selected = activeSession.presentation_style === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() =>
+                      patchSession({
+                        presentation_style: item.id,
+                        performance: { ...activeSession.performance, tone: item.tone as any },
+                        camera: { ...activeSession.camera, angle: item.angle },
+                        look: { ...activeSession.look, style: item.style },
+                      })
+                    }
+                  >
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          </section>
 
-          <div className="field">
-            <label>Background mode</label>
-            <select value={session.background_mode} onChange={(e) => patch({ background_mode: e.target.value })}>
-              {["solid", "transparent", "uploaded", "environment", "generated", "master_sheet", "spatial", "video"].map(
-                (b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                )
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Framing</h3>
+              <Tip text="Use framing to decide how close the camera feels to the performer. It is separate from Mode so you can keep the same workflow while changing the shot." />
+            </div>
+            <div className="avatar-card-grid">
+              {FRAMING_CARDS.map((item) => {
+                const selected = activeSession.framing_choice === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() =>
+                      patchSession({
+                        framing_choice: item.id,
+                        camera: {
+                          ...activeSession.camera,
+                          shot_size: item.shotSize,
+                          lens: item.lens,
+                        },
+                        look: {
+                          ...activeSession.look,
+                          framing: item.shotSize,
+                          lens: item.lens,
+                        },
+                      })
+                    }
+                  >
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Background</h3>
+              <Tip text="Pick the environment the presenter should feel grounded in. Keep it simple in the main flow and move detailed notes into Advanced when needed." />
+            </div>
+            <div className="avatar-card-grid">
+              {BACKGROUND_CARDS.map((item) => {
+                const selected = activeSession.background_choice === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() =>
+                      patchSession({
+                        background_choice: item.id,
+                        background_mode: item.backgroundMode,
+                        background_notes: item.notes,
+                        look: {
+                          ...activeSession.look,
+                          background: item.label,
+                        },
+                      })
+                    }
+                  >
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="avatar-create-section">
+            <div className="avatar-section-title-row">
+              <h3>Duration</h3>
+              <Tip text="This is a section-size planning choice for long-form work. It helps you decide how much to pack into the current presenter pass." />
+            </div>
+            <div className="avatar-card-grid">
+              {DURATION_CARDS.map((item) => {
+                const selected = activeSession.duration_class === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    onClick={() => patchSession({ duration_class: item.id })}
+                  >
+                    <span className="avatar-choice-card__copy">
+                      <strong>{item.label}</strong>
+                      <span>{item.blurb}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          {presentationPlan ? (
+            <section className="avatar-create-section" data-testid="avatar-presentation-plan">
+              <div className="avatar-section-title-row">
+                <h3>Presentation Plan</h3>
+                <Tip text="This is your creator-facing direction plan for sectioning, delivery, gaze, gesture, pacing, transitions, pronunciation, and continuity. Save the draft anytime, or ask Co-Director to turn it into an approval-ready plan." />
+              </div>
+              <div className="field">
+                <label>Plan Summary</label>
+                <textarea
+                  rows={3}
+                  value={presentationPlan.summary}
+                  onChange={(event) => patchPresentationPlan({ summary: event.target.value })}
+                  placeholder="Describe how this presenter section should feel overall."
+                />
+              </div>
+              <div className="gen-grid">
+                <div className="field">
+                  <label>Sectioning Strategy</label>
+                  <textarea
+                    rows={3}
+                    value={presentationPlan.sectioningStrategy}
+                    onChange={(event) => patchPresentationPlan({ sectioningStrategy: event.target.value })}
+                    placeholder="How should this long-form pass break into reviewable sections?"
+                  />
+                </div>
+                <div className="field">
+                  <label>Section Length (seconds)</label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={30}
+                    step={0.5}
+                    value={presentationPlan.sectionTargetSeconds}
+                    onChange={(event) =>
+                      patchPresentationPlan({
+                        sectionTargetSeconds: Math.max(2, Number(event.target.value || 6)),
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="avatar-inline-actions" style={{ flexWrap: "wrap" }}>
+                <button type="button" onClick={askCoDirectorForPlan} disabled={busy}>
+                  Ask Co-Director to Plan
+                </button>
+                <button type="button" className="primary" onClick={() => void createPlanProposal()} disabled={busy}>
+                  Create Plan Proposal
+                </button>
+                <span className="scene-meta">
+                  Proposal approval writes the plan back to this session. Save Draft keeps your edits locally in Avatar Studio now.
+                </span>
+              </div>
+              <details className="avatar-advanced-panel" open>
+                <summary>Direction Notes</summary>
+                <div className="avatar-advanced-panel__body">
+                  <div className="gen-grid">
+                    <div className="field">
+                      <label>Delivery</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.deliveryStyle}
+                        onChange={(event) => patchPresentationPlan({ deliveryStyle: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Gaze</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.gazeStyle}
+                        onChange={(event) => patchPresentationPlan({ gazeStyle: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Gesture</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.gestureStyle}
+                        onChange={(event) => patchPresentationPlan({ gestureStyle: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Pacing</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.pacingStyle}
+                        onChange={(event) => patchPresentationPlan({ pacingStyle: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Chapter Transitions</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.chapterTransitionStyle}
+                        onChange={(event) => patchPresentationPlan({ chapterTransitionStyle: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Posture</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.postureNotes}
+                        onChange={(event) => patchPresentationPlan({ postureNotes: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Emphasis</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.emphasisNotes}
+                        onChange={(event) => patchPresentationPlan({ emphasisNotes: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Pronunciation</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.pronunciationNotes}
+                        onChange={(event) => patchPresentationPlan({ pronunciationNotes: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Background Recommendation</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.backgroundRecommendation}
+                        onChange={(event) => patchPresentationPlan({ backgroundRecommendation: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Framing Recommendation</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.framingRecommendation}
+                        onChange={(event) => patchPresentationPlan({ framingRecommendation: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Continuity Checklist</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.continuityChecklist}
+                        onChange={(event) => patchPresentationPlan({ continuityChecklist: event.target.value })}
+                      />
+                    </div>
+                    <div className="field">
+                      <label>Retake Guidance</label>
+                      <textarea
+                        rows={2}
+                        value={presentationPlan.retakeGuidance}
+                        onChange={(event) => patchPresentationPlan({ retakeGuidance: event.target.value })}
+                      />
+                    </div>
+                  </div>
+                  {presentationPlan.sections.length ? (
+                    <div className="avatar-take-list">
+                      {presentationPlan.sections.map((section) => (
+                        <article key={section.id} className="avatar-take-card">
+                          <div>
+                            <h3>{section.label}</h3>
+                            <p className="muted">
+                              {section.excerpt || section.summary}
+                              {section.startMs != null && section.endMs != null
+                                ? ` · ${formatDurationMs(section.endMs - section.startMs)}`
+                                : ""}
+                            </p>
+                          </div>
+                          <div className="gen-grid">
+                            <div className="field">
+                              <label>Section Summary</label>
+                              <textarea
+                                rows={2}
+                                value={section.summary}
+                                onChange={(event) =>
+                                  patchPresentationSection(section.id, { summary: event.target.value })
+                                }
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Delivery</label>
+                              <textarea
+                                rows={2}
+                                value={section.delivery}
+                                onChange={(event) =>
+                                  patchPresentationSection(section.id, { delivery: event.target.value })
+                                }
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Emphasis</label>
+                              <textarea
+                                rows={2}
+                                value={section.emphasis}
+                                onChange={(event) =>
+                                  patchPresentationSection(section.id, { emphasis: event.target.value })
+                                }
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Transition</label>
+                              <textarea
+                                rows={2}
+                                value={section.transition}
+                                onChange={(event) =>
+                                  patchPresentationSection(section.id, { transition: event.target.value })
+                                }
+                              />
+                            </div>
+                            <div className="field">
+                              <label>Retake Focus</label>
+                              <textarea
+                                rows={2}
+                                value={section.retakeFocus}
+                                onChange={(event) =>
+                                  patchPresentationSection(section.id, { retakeFocus: event.target.value })
+                                }
+                              />
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty">Add script or approved voice to preview presentation sections.</p>
+                  )}
+                </div>
+              </details>
+            </section>
+          ) : null}
+
+          <details
+            className="avatar-advanced-panel"
+            data-testid="avatar-advanced-panel"
+            open={advancedOpen}
+            onToggle={(event) => setAdvancedOpen((event.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary data-testid="avatar-advanced-toggle">
+              Advanced
+              <Tip text="This is where provider choice, fallback assets, and deeper creative notes live. The main workspace stays focused on the presenter flow." />
+            </summary>
+            <div className="avatar-advanced-panel__body">
+              <div className="field">
+                <label>
+                  Provider Mode
+                  <Tip text="Best Match lets the studio suggest a runtime. Choose Provider saves one yourself. Compare shows the current avatar runtimes side by side." />
+                </label>
+                <div className="avatar-toggle-row">
+                  <button
+                    type="button"
+                    className={activeSession.provider_mode === "best_match" ? "primary" : ""}
+                    onClick={() => patchSession({ provider_mode: "best_match", provider_choice: null })}
+                  >
+                    Best Match
+                  </button>
+                  <button
+                    type="button"
+                    className={activeSession.provider_mode === "choose_provider" ? "primary" : ""}
+                    onClick={() => patchSession({ provider_mode: "choose_provider" })}
+                  >
+                    Choose Provider
+                  </button>
+                  <button
+                    type="button"
+                    className={activeSession.provider_mode === "compare" ? "primary" : ""}
+                    onClick={() => patchSession({ provider_mode: "compare" })}
+                  >
+                    Compare
+                  </button>
+                </div>
+              </div>
+
+              {bestProvider ? (
+                <div className="avatar-provider-highlight">
+                  <span className={`status-badge ${runtimeStatus(bestProvider).tone}`}>
+                    {runtimeStatus(bestProvider).label}
+                  </span>
+                  <div>
+                    <strong>{bestProvider.name}</strong>
+                    <p className="muted">
+                      {activeSession.provider_mode === "best_match"
+                        ? "Recommended for this presenter setup."
+                        : "Saved provider labels stay Experimental until live benchmarks are available."}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="avatar-blocked-card">
+                  <strong>No avatar runtime found yet</strong>
+                  <p>Open Setup to review avatar runtimes, then let Source Manager run the approved install or repair.</p>
+                  <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")}>
+                    Open Setup
+                  </button>
+                </div>
               )}
-            </select>
-          </div>
-          <div className="field">
-            <label>Background notes</label>
-            <input value={session.background_notes} onChange={(e) => patch({ background_notes: e.target.value })} />
-          </div>
 
-          {session.mode === "existing_video_lipsync" && (
-            <div className="field">
-              <label>Source video</label>
-              <select
-                value={session.source_video_asset_id || ""}
-                onChange={(e) => patch({ source_video_asset_id: e.target.value || null })}
-              >
-                <option value="">— Select —</option>
-                {videoAssets.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.tag || a.filename}
-                  </option>
-                ))}
-              </select>
+              {(activeSession.provider_mode === "choose_provider" ||
+                activeSession.provider_mode === "compare") && runtimeComponents.length ? (
+                <div className="avatar-provider-grid" data-testid="avatar-provider-status">
+                  {runtimeComponents.map((component) => {
+                    const status = runtimeStatus(component);
+                    const selected = activeSession.provider_choice === component.id;
+                    return (
+                      <button
+                        key={component.id}
+                        type="button"
+                        className={`avatar-provider-card${selected ? " is-selected" : ""}`}
+                        onClick={() =>
+                          patchSession({
+                            provider_mode: "choose_provider",
+                            provider_choice: component.id,
+                            model_id: component.id,
+                          })
+                        }
+                      >
+                        <div className="avatar-provider-card__header">
+                          <strong>{component.name}</strong>
+                          <span className={`status-badge ${status.tone}`}>{status.label}</span>
+                        </div>
+                        <span>{component.purpose || "Avatar runtime"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <div className="gen-grid">
+                <div className="field">
+                  <label>Reference Image</label>
+                  <select
+                    value={activeSession.source_still_asset_id || ""}
+                    onChange={(event) =>
+                      patchSession({ source_still_asset_id: event.target.value || null })
+                    }
+                  >
+                    <option value="">Optional still…</option>
+                    {imageAssets.map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.tag || asset.filename}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Fallback Audio</label>
+                  <select
+                    value={activeSession.voice.fallback_audio_asset_id || ""}
+                    onChange={(event) =>
+                      patchSession({
+                        voice: {
+                          ...activeSession.voice,
+                          fallback_audio_asset_id: event.target.value || null,
+                        },
+                      })
+                    }
+                  >
+                    <option value="">Optional fallback audio…</option>
+                    {audioAssets.map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.tag || asset.filename}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="field">
+                <label>Spoken Rewrite</label>
+                <textarea
+                  rows={3}
+                  value={activeSession.dialogue_spoken}
+                  onChange={(event) => patchSession({ dialogue_spoken: event.target.value })}
+                  placeholder="Optional performance rewrite for the presenter."
+                />
+              </div>
+
+              <div className="field">
+                <label>Creative Notes</label>
+                <textarea
+                  rows={3}
+                  value={activeSession.prompt}
+                  onChange={(event) => patchSession({ prompt: event.target.value })}
+                  placeholder="Extra notes for the visual performance."
+                />
+              </div>
+
+              <div className="field">
+                <label>Exclude Notes</label>
+                <textarea
+                  rows={2}
+                  value={activeSession.negative_prompt}
+                  onChange={(event) => patchSession({ negative_prompt: event.target.value })}
+                  placeholder="What should the avatar avoid?"
+                />
+              </div>
+
+              <label className="row avatar-check-row">
+                <input
+                  type="checkbox"
+                  checked={activeSession.continuity_lock}
+                  onChange={(event) => patchSession({ continuity_lock: event.target.checked })}
+                />
+                Keep this presenter locked to the same identity choices.
+              </label>
+
+              <div className="avatar-inline-actions">
+                <button type="button" onClick={() => void refreshRuntimeStatus()}>
+                  Refresh Runtime Status
+                </button>
+                <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")}>
+                  Open Setup
+                </button>
+              </div>
             </div>
-          )}
+          </details>
 
-          <div className="field">
-            <label>Source still (optional)</label>
-            <select
-              value={session.source_still_asset_id || ""}
-              onChange={(e) => patch({ source_still_asset_id: e.target.value || null })}
-            >
-              <option value="">— Select —</option>
-              {imageAssets.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.tag || a.filename}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Preset</label>
-            <select value={session.preset_id || ""} onChange={(e) => applyPreset(e.target.value)}>
-              <option value="">— Apply preset —</option>
-              {AVATAR_PRESETS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <p className="eyebrow" style={{ marginTop: "1rem" }}>
-            Lip Sync
-          </p>
-          <p className="scene-meta">
-            Method: {session.lip_sync_method} · Mask: {session.mouth_mask.placed ? "confirmed" : "needs user"}
-          </p>
-          <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
+          <div className="avatar-create-panel__cta">
             <button
               type="button"
-              onClick={() => {
-                onGo("director");
-                setMsg("Place the black rectangle over the mouth in Director Lip Sync, then return and confirm.");
-              }}
+              className="primary avatar-generate-button"
+              onClick={() => void generateVideo()}
+              disabled={busy || !canGenerate}
             >
-              Open Lip Sync (Director)
+              {busy
+                ? "Working..."
+                : activeSession.mode === "existing_video_lipsync"
+                  ? "Prepare Lip-Sync Repair"
+                  : "Generate Avatar Video"}
             </button>
-            <button type="button" onClick={markMouthMask}>
-              Confirm mouth mask
-            </button>
+            <p className="muted">
+              {canGenerate
+                ? activeSession.mode === "existing_video_lipsync"
+                  ? "Plan the Lip-Sync Repair, review the section, then send the approved handoff to Timeline."
+                  : "Review sections, retake the performance, then send the best result to Timeline."
+                : activeSession.input_mode === "approved_voice"
+                  ? "Attach an approved Voice Studio take before you generate."
+                  : "Add the script for this presenter section before you generate."}
+            </p>
           </div>
         </aside>
       </div>
 
-      <nav className="avatar-tool-tabs" role="tablist" aria-label="Avatar tools">
-        {(["script", "voice", "motion", "lipsync", "preview", "generate"] as const).map((t) => (
-          <button key={t} type="button" role="tab" aria-selected={tab === t} className={tab === t ? "primary" : ""} onClick={() => setTab(t)}>
-            {t === "lipsync" ? "Lip Sync" : t[0].toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </nav>
-
-      <section className="dash-card avatar-tool-panel">
-        {tab === "script" && (
-          <>
-            <h2>Script</h2>
-            <p className="muted">Original dialogue is preserved. Spoken adaptation is optional performance rewrite.</p>
-            <button type="button" onClick={() => onGo("script")}>
-              Open Script / Storyboard
+      <section className="dash-card avatar-review-panel">
+        <nav className="avatar-review-tabs" role="tablist" aria-label="Avatar review tabs" data-testid="avatar-review-tabs">
+          {REVIEW_TABS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="tab"
+              aria-selected={reviewTab === item}
+              className={reviewTab === item ? "primary" : ""}
+              onClick={() => setReviewTab(item)}
+            >
+              {item === "completed"
+                ? "Completed Videos"
+                : item[0].toUpperCase() + item.slice(1)}
             </button>
-          </>
-        )}
-        {tab === "voice" && (
+          ))}
+        </nav>
+
+        {reviewTab === "sections" ? (
           <>
-            <h2>Voice</h2>
-            <p className="muted">TTS providers are stored as metadata; execute path is uploaded audio this pass.</p>
-            <div className="gen-grid">
-              <div className="field">
-                <label>Provider</label>
-                <input
-                  value={session.voice.provider}
-                  onChange={(e) => patch({ voice: { ...session.voice, provider: e.target.value } })}
-                />
-              </div>
-              <div className="field">
-                <label>Language</label>
-                <input
-                  value={session.voice.language}
-                  onChange={(e) => patch({ voice: { ...session.voice, language: e.target.value } })}
-                />
-              </div>
-            </div>
-          </>
-        )}
-        {tab === "motion" && (
-          <>
-            <h2>Motion & Camera</h2>
-            <div className="gen-grid">
-              {(["shot_size", "lens", "height", "angle", "movement", "aspect"] as const).map((k) => (
-                <div className="field" key={k}>
-                  <label>{k.replace("_", " ")}</label>
-                  <input
-                    value={session.camera[k]}
-                    onChange={(e) => patch({ camera: { ...session.camera, [k]: e.target.value } })}
-                  />
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        {tab === "lipsync" && (
-          <>
-            <h2>Lip Sync checkpoint</h2>
-            <p className="muted">
-              Place the black rectangle over the character’s mouth in Director, then select Continue / Confirm here.
-            </p>
-            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-              <button type="button" className="primary" onClick={() => onGo("director")}>
-                Prepare mouth mask
-              </button>
-              <button type="button" onClick={markMouthMask}>
-                Continue — mask confirmed
-              </button>
-            </div>
-          </>
-        )}
-        {tab === "preview" && (
-          <>
-            <h2>Takes</h2>
-            {!session.takes.length ? (
-              <p className="empty">No takes yet — Generate a clip first.</p>
-            ) : (
-              <ul className="home-list">
-                {session.takes.map((t) => (
-                  <li key={t.id}>
-                    {t.label} · {t.status}
-                    {t.performance_note ? ` · ${t.performance_note}` : ""}
-                    <button type="button" style={{ marginLeft: 8 }} onClick={() => sendTakeToDirector(t.id)}>
-                      Send to Director
+            {!activeJob ? (
+              <div className="avatar-review-grid">
+                <article className="avatar-review-card">
+                  <h3>Section Plan</h3>
+                  <p>
+                    Generate a long-form job to turn this presenter setup into persistent sections
+                    with overlap, continuity hooks, and retryable status.
+                  </p>
+                </article>
+                <article className="avatar-review-card">
+                  <h3>Current Setup</h3>
+                  <ul className="home-list">
+                    <li>Avatar: {activeSession.character_name || "Not selected"}</li>
+                    <li>
+                      Input:{" "}
+                      {activeSession.input_mode === "approved_voice"
+                        ? selectedApprovedVoice
+                          ? "Approved voice attached"
+                          : "Approved voice still needed"
+                        : scriptText.trim()
+                          ? "Script ready"
+                          : "Script still empty"}
+                    </li>
+                    <li>
+                      Style:{" "}
+                      {STYLE_CARDS.find((item) => item.id === activeSession.presentation_style)?.label ||
+                        "Not chosen"}
+                    </li>
+                    <li>
+                      Framing:{" "}
+                      {FRAMING_CARDS.find((item) => item.id === activeSession.framing_choice)?.label ||
+                        activeSession.camera.shot_size}
+                    </li>
+                  </ul>
+                </article>
+                <article className="avatar-review-card">
+                  <h3>Next Best Step</h3>
+                  <div className="avatar-inline-actions avatar-inline-actions--stack">
+                    <button type="button" onClick={() => onGo("voicestudio")}>
+                      Open Voice Studio
                     </button>
-                  </li>
-                ))}
-              </ul>
+                    <button type="button" onClick={() => onGo("scriptwriter")}>
+                      Open Scriptwriter
+                    </button>
+                    <button type="button" onClick={() => void generateVideo()} disabled={busy || !canGenerate}>
+                      Plan Sections
+                    </button>
+                  </div>
+                </article>
+              </div>
+            ) : (
+              <div className="avatar-take-list">
+                {activeSections.map((item) => {
+                  const sectionPlan = (item.presentationPlan || {}) as Record<string, unknown>;
+                  return (
+                  <article key={item.id} className="avatar-take-card">
+                    <div>
+                      <h3>
+                        Section {item.order + 1}
+                        {item.attempt && item.attempt > 1 ? ` · Attempt ${item.attempt}` : ""}
+                      </h3>
+                      <p className="muted">
+                        {sectionStatusLabel(item.status)} · {formatDurationMs(item.audioEndMs - item.audioStartMs)}
+                        {item.overlapBeforeMs ? ` · +${Math.round(item.overlapBeforeMs / 1000)}s overlap in` : ""}
+                        {item.overlapAfterMs ? ` · +${Math.round(item.overlapAfterMs / 1000)}s overlap out` : ""}
+                      </p>
+                      <p>{item.scriptText}</p>
+                      <span className="scene-meta">
+                        {item.errorMessage ||
+                          `Continuity hook: ${
+                            item.continuationFrameAssetId ? "Continuation frame linked" : "Waiting for continuation frame"
+                          }`}
+                      </span>
+                      {sectionPlan.delivery || sectionPlan.transition || sectionPlan.retakeFocus ? (
+                        <details className="setup-ready-details">
+                          <summary>Presentation notes</summary>
+                          {sectionPlan.delivery ? <div><span>Delivery</span><code>{String(sectionPlan.delivery)}</code></div> : null}
+                          {sectionPlan.gaze ? <div><span>Gaze</span><code>{String(sectionPlan.gaze)}</code></div> : null}
+                          {sectionPlan.gesture ? <div><span>Gesture</span><code>{String(sectionPlan.gesture)}</code></div> : null}
+                          {sectionPlan.pacing ? <div><span>Pacing</span><code>{String(sectionPlan.pacing)}</code></div> : null}
+                          {sectionPlan.transition ? <div><span>Transition</span><code>{String(sectionPlan.transition)}</code></div> : null}
+                          {sectionPlan.retakeFocus ? <div><span>Retake Focus</span><code>{String(sectionPlan.retakeFocus)}</code></div> : null}
+                        </details>
+                      ) : null}
+                      {Array.isArray(item.versionHistory) && item.versionHistory.length ? (
+                        <p className="scene-meta">
+                          {item.versionHistory.length} prior version{item.versionHistory.length === 1 ? "" : "s"} preserved for localized retakes
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="avatar-inline-actions avatar-inline-actions--stack">
+                      {item.status === "failed" ? (
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={busy}
+                          onClick={() => void retrySection(item.id)}
+                        >
+                          Retry Section
+                        </button>
+                      ) : null}
+                      {(item.status === "completed" || item.status === "approved") && (
+                        <>
+                          <details className="setup-ready-details">
+                            <summary>Retake Actions</summary>
+                            <div className="avatar-inline-actions avatar-inline-actions--stack">
+                              {RETAKE_ACTIONS.map((action) => (
+                                <button
+                                  key={`${item.id}-${action.id}`}
+                                  type="button"
+                                  disabled={
+                                    busy ||
+                                    (action.id === "repair_lip_sync" &&
+                                      (!museTalkProvider || runtimeStatus(museTalkProvider).label === "Not Installed"))
+                                  }
+                                  onClick={() => void proposeRetake(item.id, action)}
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                              <button type="button" disabled={busy} onClick={() => void proposeReplaceVoice()}>
+                                Replace Voice Performance
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void proposeTimelineHandoff("selected_section", item.id)}
+                              >
+                                Send Selected Section
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void proposeTimelineHandoff("replace_section", item.id)}
+                              >
+                                Replace Section
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => void proposeTimelineHandoff("create_alternate_take", item.id)}
+                              >
+                                Create Alternate Take
+                              </button>
+                            </div>
+                          </details>
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy || item.status === "approved"}
+                            onClick={() => void approveSection(item.id)}
+                          >
+                            {item.status === "approved" ? "Approved" : "Approve Section"}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                )})}
+              </div>
             )}
           </>
-        )}
-        {tab === "generate" && (
+        ) : null}
+
+        {reviewTab === "takes" ? (
           <>
-            <h2>Generate</h2>
-            <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-              <button type="button" onClick={runValidate} disabled={busy}>
-                Validate
-              </button>
-              <button type="button" onClick={generateStill} disabled={busy}>
-                Generate still
-              </button>
-              <button type="button" className="primary" onClick={generateVideo} disabled={busy}>
-                {session.mode === "existing_video_lipsync" ? "Skip to lip sync prep" : "Generate video"}
-              </button>
-              <button type="button" onClick={() => save({ ...session, look: emptyLook(session.look.name) })}>
-                Reset look
-              </button>
-              <button
-                type="button"
-                onClick={() => save({ ...session, performance: emptyPerformance() })}
-              >
-                Reset performance
-              </button>
-            </div>
-            {!!issues.length && (
-              <ul className="health-list">
-                {issues.map((i, idx) => (
-                  <li key={idx}>
-                    <span className={`status-badge ${i.level === "bad" ? "bad" : i.level === "warn" ? "warn" : "ok"}`}>
-                      {i.level}
-                    </span>{" "}
-                    {i.text}
-                  </li>
-                ))}
-              </ul>
+            {activeJob && activeSections.length ? (
+              <div className="avatar-take-list">
+                {activeSections
+                  .slice()
+                  .sort((a, b) => a.order - b.order)
+                  .map((item) => (
+                    <article key={`${item.id}-attempt`} className="avatar-take-card">
+                      <div>
+                        <h3>Section {item.order + 1}</h3>
+                        <p className="muted">
+                          {sectionStatusLabel(item.status)}
+                          {item.retryCount ? ` · ${item.retryCount} retr${item.retryCount === 1 ? "y" : "ies"}` : ""}
+                        </p>
+                        <span className="scene-meta">
+                          Audio window {formatDurationMs(item.audioStartMs)} → {formatDurationMs(item.audioEndMs)}
+                        </span>
+                      </div>
+                      <div className="avatar-inline-actions">
+                        {item.status === "failed" ? (
+                          <button
+                            type="button"
+                            className="primary"
+                            disabled={busy}
+                            onClick={() => void retrySection(item.id)}
+                          >
+                            Retry Only This Section
+                          </button>
+                        ) : item.status === "completed" || item.status === "approved" ? (
+                          <div className="avatar-inline-actions">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                void proposeRetake(
+                                  item.id,
+                                  RETAKE_ACTIONS.find((choice) => choice.id === "regenerate_section") || RETAKE_ACTIONS[0],
+                                )
+                              }
+                            >
+                              Regenerate Section
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void proposeTimelineHandoff("selected_section", item.id)}
+                            >
+                              Send Selected Section
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            ) : !activeSession.takes.length ? (
+              <p className="empty">No takes yet. Generate the presenter section to start review.</p>
+            ) : (
+              <div className="avatar-take-list">
+                {activeSession.takes
+                  .slice()
+                  .reverse()
+                  .map((item) => (
+                    <article key={item.id} className="avatar-take-card">
+                      <div>
+                        <h3>{item.label}</h3>
+                        <p className="muted">
+                          {item.status}
+                          {item.performance_note ? ` · ${item.performance_note}` : ""}
+                        </p>
+                        <span className="scene-meta">{displayTime(item.created_at)}</span>
+                      </div>
+                      <div className="avatar-inline-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.scrollTo({ top: 0, behavior: "smooth" });
+                            setMsg("Adjust the section if you want, then generate another take.");
+                          }}
+                        >
+                          Retake
+                        </button>
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={!item.asset_id || busy}
+                          onClick={() => void sendTakeToDirector(item.id)}
+                        >
+                          Send to Timeline
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+              </div>
             )}
-            <div className="field">
-              <label>Prompt</label>
-              <textarea rows={3} value={session.prompt || buildAvatarPrompt(session).prompt} onChange={(e) => patch({ prompt: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>Negative</label>
-              <textarea rows={2} value={session.negative_prompt} onChange={(e) => patch({ negative_prompt: e.target.value })} />
-            </div>
           </>
-        )}
+        ) : null}
+
+        {reviewTab === "progress" ? (
+          <div className="avatar-review-grid">
+            <article className="avatar-review-card">
+              <h3>Voice Readiness</h3>
+              <p>
+                {voiceReadiness?.approvedVoice
+                  ? "Voice identity is approved."
+                  : "Voice identity still needs approval in Voice Studio."}
+              </p>
+              <p className="muted">
+                {approvedVoices.length
+                  ? `${approvedVoices.length} approved take${approvedVoices.length === 1 ? "" : "s"} available for this presenter.`
+                  : "No approved voice takes attached to this presenter yet."}
+              </p>
+              {resolvedAudioAssetId ? (
+                <p className="muted">
+                  Audio Mix can use the dialogue stem without overwriting the Voice Studio master.
+                </p>
+              ) : null}
+            </article>
+            <article className="avatar-review-card">
+              <h3>Long-Form Job</h3>
+              {activeJob ? (
+                <>
+                  <p>
+                    {sectionStatusLabel(activeJob.status)} · {activeJob.progress?.completedSections || 0}/
+                    {activeJob.progress?.totalSections || activeSections.length} sections ready
+                  </p>
+                  <p className="muted">
+                    Assembly: {activeJob.assemblyState.replace(/_/g, " ")} · Completed{" "}
+                    {formatDurationMs(activeJob.completedDurationMs || 0)} of{" "}
+                    {formatDurationMs(activeJob.requestedDurationMs || 0)}
+                  </p>
+                  {activeJob.lastError?.message ? (
+                    <p className="muted">{activeJob.lastError.message}</p>
+                  ) : null}
+                </>
+              ) : (
+                <p>No long-form job has been planned yet.</p>
+              )}
+            </article>
+            <article className="avatar-review-card">
+              <h3>Controls</h3>
+              {issues.length ? (
+                <ul className="health-list">
+                  {issues.map((item, index) => (
+                    <li key={`${item.text}-${index}`}>
+                      <span
+                        className={`status-badge ${
+                          item.level === "bad" ? "bad" : item.level === "warn" ? "warn" : "ok"
+                        }`}
+                      >
+                        {item.level}
+                      </span>{" "}
+                      {item.text}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">
+                  {activeJob
+                    ? "Pause, resume, validate transitions, or assemble from this real job state."
+                    : "Run a quick validation check before planning sections."}
+                </p>
+              )}
+              <div className="avatar-inline-actions">
+                <button type="button" onClick={() => void runValidate()} disabled={busy}>
+                  Validate Setup
+                </button>
+                {activeJob ? (
+                  <>
+                    <button type="button" onClick={() => void pauseActiveJob()} disabled={busy || !canPauseJob}>
+                      Pause
+                    </button>
+                    <button type="button" onClick={() => void resumeActiveJob()} disabled={busy || !canResumeJob}>
+                      Resume
+                    </button>
+                    <button type="button" onClick={() => void cancelActiveJob()} disabled={busy}>
+                      Cancel
+                    </button>
+                    <button type="button" onClick={() => void validateTransitions()} disabled={busy}>
+                      Validate Transitions
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => void assembleActiveJob()}
+                      disabled={busy || !canAssembleJob}
+                    >
+                      Assemble
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || !completedSections.length}
+                      onClick={() => void proposeTimelineHandoff("full_presentation")}
+                    >
+                      Full Presentation
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" onClick={() => onGo("voicestudio")}>
+                  Open Audio Mix
+                </button>
+                <button type="button" onClick={() => openSetup("musetalk-1-5-local")}>
+                  Open Setup
+                </button>
+              </div>
+            </article>
+          </div>
+        ) : null}
+
+        {reviewTab === "completed" ? (
+          <>
+            {activeJob ? (
+              activeJob.status !== "completed" ? (
+                <p className="empty">
+                  Final assembly is not complete yet. Finish the remaining sections and run transition
+                  validation before assembling.
+                </p>
+              ) : (
+                <div className="avatar-review-grid">
+                  <article className="avatar-review-card">
+                    <h3>Assembly Status</h3>
+                    <p>{activeJob.assembly?.message || "Assembly stub completed."}</p>
+                    <p className="muted">
+                      Transition validation recorded {displayTime(activeJob.transitionValidation?.updatedAt || null)}.
+                    </p>
+                    <div className="avatar-inline-actions">
+                      <button type="button" disabled={busy} onClick={() => void proposeTimelineHandoff("full_presentation")}>
+                        Full Presentation
+                      </button>
+                      <button type="button" onClick={() => onGo("voicestudio")}>
+                        Open Audio Mix
+                      </button>
+                    </div>
+                  </article>
+                  <article className="avatar-review-card">
+                    <h3>Approved Sections</h3>
+                    <p>
+                      {approvedSections.length
+                        ? `${approvedSections.length} section${approvedSections.length === 1 ? "" : "s"} approved for final assembly.`
+                        : "No sections were explicitly approved before assembly."}
+                    </p>
+                    <p className="muted">
+                      This pass keeps final compositor output honest: no composite video asset is claimed yet.
+                    </p>
+                    {activeJob.timelineProposal ? (
+                      <p className="scene-meta">
+                        Latest handoff: {String(activeJob.timelineProposal.placementMode || "full_presentation").replace(/_/g, " ")}
+                      </p>
+                    ) : null}
+                  </article>
+                </div>
+              )
+            ) : !completedTakes.length ? (
+              <p className="empty">
+                No completed videos yet. Send a reviewed take to Timeline to keep the presenter
+                workflow moving.
+              </p>
+            ) : (
+              <div className="avatar-take-list">
+                {completedTakes
+                  .slice()
+                  .reverse()
+                  .map((item) => (
+                    <article key={`${item.id}-complete`} className="avatar-take-card">
+                      <div>
+                        <h3>{item.label}</h3>
+                        <p className="muted">
+                          {item.status === "final" || item.approved ? "Ready for Timeline" : item.status}
+                        </p>
+                        <span className="scene-meta">{displayTime(item.created_at)}</span>
+                      </div>
+                      <div className="avatar-inline-actions">
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={!item.asset_id || busy}
+                          onClick={() => void sendTakeToDirector(item.id)}
+                        >
+                          Open in Timeline
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+              </div>
+            )}
+          </>
+        ) : null}
       </section>
     </div>
   );

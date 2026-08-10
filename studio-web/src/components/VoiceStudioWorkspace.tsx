@@ -37,6 +37,11 @@ import {
   type StructuredVoiceFields,
   type VoicePromptDocument,
 } from "./voiceStudio/promptDocument";
+import {
+  VOICE_STUDIO_STAGE_ORDER,
+  type VoiceStudioWorkspaceTab,
+} from "../contracts/voiceEnvironment";
+import { VoiceEnvironmentPanel } from "./voiceStudio/environment/VoiceEnvironmentPanel";
 
 const DEFAULT_DIALOGUE = `Light circuitry, not tattoos, doofus.
 I developed them with my sister in the Abode.`;
@@ -50,8 +55,6 @@ type Props = {
   initialPhase?: StudioPhase | "voice" | "voicePerformance";
 };
 
-type WorkspaceTab = "identity" | "performance" | "sceneDialogue" | "takes";
-
 function mapInitialPhase(p?: Props["initialPhase"]): StudioPhase | undefined {
   if (!p) return undefined;
   if (p === "voice") return "create";
@@ -59,7 +62,7 @@ function mapInitialPhase(p?: Props["initialPhase"]): StudioPhase | undefined {
   return p;
 }
 
-function mapInitialWorkspaceTab(p?: Props["initialPhase"]): WorkspaceTab {
+function mapInitialWorkspaceTab(p?: Props["initialPhase"]): VoiceStudioWorkspaceTab {
   if (p === "performance" || p === "voicePerformance") return "performance";
   return "identity";
 }
@@ -125,7 +128,7 @@ export function VoiceStudioWorkspace({
 
   const [ws, setWs] = useState<any | null>(null);
   const [phase, setPhase] = useState<StudioPhase>("create");
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => mapInitialWorkspaceTab(initialPhase));
+  const [workspaceTab, setWorkspaceTab] = useState<VoiceStudioWorkspaceTab>(() => mapInitialWorkspaceTab(initialPhase));
   const [method, setMethod] = useState<StudioMethod>("create");
   const [busy, setBusy] = useState(false);
   const [readinessLabel, setReadinessLabel] = useState<keyof typeof READINESS_LABELS>("none");
@@ -822,39 +825,40 @@ export function VoiceStudioWorkspace({
         </div>
       )}
 
-      <div className="workspace-tabs" role="tablist" data-testid="voice-studio-ia">
-        {(
-          [
-            ["identity", "Voice Identity"],
-            ["performance", "Voice Performance"],
-            ["sceneDialogue", "Scene Dialogue"],
-            ["takes", "Takes"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={workspaceTab === id}
-            className={workspaceTab === id ? "primary" : ""}
-            data-testid={
-              id === "identity"
-                ? "voice-identity-tab"
-                : id === "performance"
-                  ? "voice-performance-tab"
-                  : id === "sceneDialogue"
-                    ? "voice-scene-dialogue-tab"
-                    : "voice-takes-tab"
-            }
-            onClick={() => {
-              setWorkspaceTab(id);
-              if (id === "identity" && (phase === "performance" || phase === "approve")) {
-                setPhase(testingCandidateId ? "select" : "create");
-              }
-            }}
+      <div className="workspace-tabs voice-studio-stage-tabs" role="tablist" data-testid="voice-studio-ia">
+        {VOICE_STUDIO_STAGE_ORDER.map((stage) => (
+          <div
+            key={stage.id}
+            className="voice-studio-stage-tab"
+            data-testid={stage.id === "environment" ? "voice-environment-stage" : `voice-studio-stage-${stage.id}`}
           >
-            {label}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workspaceTab === stage.id}
+              className={workspaceTab === stage.id ? "primary" : ""}
+              data-testid={
+                stage.id === "identity"
+                  ? "voice-identity-tab"
+                  : stage.id === "performance"
+                    ? "voice-performance-tab"
+                    : stage.id === "environment"
+                      ? "voice-environment-tab"
+                      : stage.id === "sceneDialogue"
+                        ? "voice-scene-dialogue-tab"
+                        : "voice-takes-tab"
+              }
+              onClick={() => {
+                setWorkspaceTab(stage.id);
+                if (stage.id === "identity" && (phase === "performance" || phase === "approve")) {
+                  setPhase(testingCandidateId ? "select" : "create");
+                }
+              }}
+            >
+              {stage.label}
+            </button>
+            <HelpTip label={stage.label} content={stage.tip} />
+          </div>
         ))}
       </div>
 
@@ -1645,6 +1649,23 @@ export function VoiceStudioWorkspace({
           </div>
         </details>
           </>
+        ) : workspaceTab === "environment" ? (
+          <VoiceEnvironmentPanel
+            projectId={projectId}
+            characterId={characterId}
+            characterName={characterName}
+            approvedVoiceIdentity={
+              approvedVoice?.id
+                ? {
+                    id: String(approvedVoice.id),
+                    name: String(approvedVoice.name || `${characterName} Voice`),
+                    version: approvedVoice.version_number ?? approvedVoice.versionNumber ?? null,
+                  }
+                : null
+            }
+            onMsg={onMsg}
+            onSelectStage={setWorkspaceTab}
+          />
         ) : (
           <VoicePerformanceStudio
             projectId={projectId}

@@ -1,8 +1,10 @@
 """ToolExecutionService: run read tools, propose mutating tools, execute approved proposals.
 
-Three entry points, and the asymmetry between them is the whole security model:
+Entry points and the asymmetry between them is the whole security model:
 
 - `execute_read` runs immediately, because read handlers have no write path.
+- `execute_audited` runs immediate audited writes that opt out of human proposal
+  (Wave 4 `production_plan.create_draft` only — drafts stay non-authoritative).
 - `propose` never executes anything. It validates arguments, computes a server-side preview,
   pins the resource versions it was built against, and hands a durable `tool_call` proposal to
   `ProposalService`.
@@ -17,6 +19,7 @@ the database alone.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import time
@@ -31,12 +34,14 @@ from ..errors import (
     PROJECT_NOT_FOUND,
     TOOL_EXECUTION_FAILED,
     TOOL_PAYLOAD_INVALID,
+    TOOL_VERSION_UNSUPPORTED,
     CoDirectorError,
 )
 from . import sanitize
 from . import registry as tool_registry
 from .capabilities import CapabilityAdapter, CapabilityState
 from .definitions import (
+    TOOL_SCHEMA_VERSION,
     ToolAvailability,
     ToolCallPayload,
     ToolContext,
@@ -44,6 +49,8 @@ from .definitions import (
     ToolInvocationOut,
     ToolPreview,
 )
+from .read_cache import clear_project, get_cached, put_cached
+from .read_envelope import wrap_handler_result
 
 MAX_INVOCATION_PAGE = 100
 
@@ -64,7 +71,19 @@ def _e2e_execution_fault() -> bool:
     return (os.environ.get("ADEPT_CODIRECTOR_MOCK_SCENARIO") or "").strip().lower() == "mutation_tool_execution_failure"
 
 
-def _require_project(db: Session, project_id: str) -> Project:
+# Ambient unlock grant token for the current Co-Director request (never a password).
+_UNLOCK_TOKEN: contextvars.ContextVar[str] = contextvars.ContextVar("adept_project_unlock_token", default="")
+
+
+def set_request_unlock_token(token: str | None) -> contextvars.Token:
+    return _UNLOCK_TOKEN.set((token or "").strip())
+
+
+def reset_request_unlock_token(tok: contextvars.Token) -> None:
+    _UNLOCK_TOKEN.reset(tok)
+
+
+def _require_project(db: Session, project_id: str, *, unlock_token: str | None = None) -> Project:
     project = db.get(Project, project_id)
     if not project:
         raise CoDirectorError(
@@ -74,6 +93,23 @@ def _require_project(db: Session, project_id: str) -> Project:
             recoverable=False,
             recommended_action="none",
         )
+    try:
+        from ...project_security import service as project_security
+
+        if project_security.is_protected(db, project_id):
+            token = (unlock_token if unlock_token is not None else _UNLOCK_TOKEN.get()).strip()
+            if not project_security.is_unlocked(db, project_id, token):
+                raise CoDirectorError(
+                    "PROJECT_LOCKED",
+                    "This project is password protected. Unlock it before I access its production data.",
+                    details={"projectId": project_id, "messageKey": "PROJECT_LOCKED"},
+                    recoverable=True,
+                    recommended_action="unlock_project_in_ui",
+                )
+    except CoDirectorError:
+        raise
+    except Exception:
+        pass
     return project
 
 
@@ -197,15 +233,51 @@ class ToolExecutionService:
         request_id: Optional[str] = None,
         created_by: str = "assistant",
         adapter: Optional[CapabilityAdapter] = None,
+        tool_schema_version: Optional[int] = None,
     ) -> ToolInvocationOut:
         """Run a read tool now. Raises `CoDirectorError` for anything the caller must surface.
 
         A capability block and a handler failure are both logged as invocations before the error
         propagates, so a blocked tool leaves the same audit trail as a successful one.
+
+        Handler return values stay typed domain dicts; this boundary wraps the canonical
+        retrieval envelope for conversational + Project Content consumers.
         """
 
         _require_project(db, project_id)
         definition = tool_registry.require_kind(tool_id, "read")
+
+        if tool_schema_version is not None and int(tool_schema_version) != int(definition.schema_version):
+            raise CoDirectorError(
+                TOOL_VERSION_UNSUPPORTED,
+                f"Tool schema version {tool_schema_version} is unsupported for '{definition.tool_id}'.",
+                details={
+                    "toolId": definition.tool_id,
+                    "requestedVersion": tool_schema_version,
+                    "supportedVersion": definition.schema_version,
+                    "registrySchemaVersion": TOOL_SCHEMA_VERSION,
+                },
+                recoverable=False,
+                recommended_action="none",
+            )
+
+        # Reconnect / client retry: same requestId must not re-execute a successful read.
+        if request_id:
+            prior = (
+                db.query(CoDirectorToolInvocation)
+                .filter(
+                    CoDirectorToolInvocation.project_id == project_id,
+                    CoDirectorToolInvocation.tool_id == definition.tool_id,
+                    CoDirectorToolInvocation.request_id == request_id,
+                    CoDirectorToolInvocation.status == "succeeded",
+                    CoDirectorToolInvocation.kind == "read",
+                )
+                .order_by(CoDirectorToolInvocation.created_at.desc())
+                .first()
+            )
+            if prior is not None:
+                return _row_to_out(prior)
+
         adapter = adapter or CapabilityAdapter(db, project_id)
 
         state = await adapter.state_for(definition.capability)
@@ -235,6 +307,23 @@ class ToolExecutionService:
         )
 
         started = time.monotonic()
+        cached = get_cached(project_id, definition.tool_id, clean_args)
+        if cached is not None:
+            result, truncated = sanitize.sanitize_result(cached, char_budget=definition.result_char_budget)
+            return _log_invocation(
+                db,
+                project_id=project_id,
+                definition=definition,
+                status="succeeded",
+                arguments=clean_args,
+                capability_snapshot=snapshot,
+                result=result,
+                result_truncated=truncated,
+                request_id=request_id,
+                created_by=created_by,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+
         try:
             raw = await tool_registry.read_handler(definition.tool_id)(ctx, clean_args)
         except CoDirectorError as err:
@@ -273,7 +362,15 @@ class ToolExecutionService:
             )
             raise err from exc
 
-        result, truncated = sanitize.sanitize_result(raw, char_budget=definition.result_char_budget)
+        enveloped = wrap_handler_result(
+            tool_id=definition.tool_id,
+            tool_version=definition.schema_version,
+            project_id=project_id,
+            request_id=request_id,
+            raw=raw,
+        )
+        put_cached(project_id, definition.tool_id, clean_args, enveloped)
+        result, truncated = sanitize.sanitize_result(enveloped, char_budget=definition.result_char_budget)
         return _log_invocation(
             db,
             project_id=project_id,
@@ -323,7 +420,150 @@ class ToolExecutionService:
                     except CapabilityError:
                         scene = None
                 versions[f"scene:{scene_id}"] = scene_helpers.scene_fingerprint(scene) if scene else None
+            elif resource == "plan":
+                plan_id = str(arguments.get("planId") or "")
+                token = None
+                if plan_id:
+                    try:
+                        from ..plans.service import PlanService
+
+                        plan = PlanService.get(db, project_id, plan_id)
+                        token = str(plan.version)
+                    except CoDirectorError:
+                        token = None
+                versions[f"plan:{plan_id}"] = token
         return versions
+
+    @staticmethod
+    async def execute_audited(
+        db: Session,
+        *,
+        project_id: str,
+        tool_id: str,
+        arguments: Any,
+        scene_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+        created_by: str = "assistant",
+        adapter: Optional[CapabilityAdapter] = None,
+    ) -> ToolInvocationOut:
+        """Run an audited mutating tool that does not require human proposal approval.
+
+        Only tools with `requires_approval=False` are accepted. Wave 4 uses this for
+        `production_plan.create_draft` so conversational drafting stays fluid while remaining
+        durable, idempotent, and non-authoritative.
+        """
+
+        _require_project(db, project_id)
+        definition = tool_registry.require_kind(tool_id, "mutating")
+        if definition.requires_approval:
+            raise CoDirectorError(
+                TOOL_EXECUTION_FAILED,
+                f"'{definition.tool_id}' requires an approved proposal.",
+                details={"toolId": definition.tool_id},
+                recoverable=False,
+                recommended_action="none",
+            )
+
+        if request_id:
+            prior = (
+                db.query(CoDirectorToolInvocation)
+                .filter(
+                    CoDirectorToolInvocation.project_id == project_id,
+                    CoDirectorToolInvocation.tool_id == definition.tool_id,
+                    CoDirectorToolInvocation.request_id == request_id,
+                    CoDirectorToolInvocation.status == "succeeded",
+                    CoDirectorToolInvocation.kind == "mutating",
+                )
+                .order_by(CoDirectorToolInvocation.created_at.desc())
+                .first()
+            )
+            if prior is not None:
+                return _row_to_out(prior)
+
+        adapter = adapter or CapabilityAdapter(db, project_id)
+        state = await adapter.state_for(definition.capability)
+        snapshot = {definition.capability: state.to_dict()}
+        if not state.available:
+            error = state.as_error(definition.tool_id)
+            _log_invocation(
+                db,
+                project_id=project_id,
+                definition=definition,
+                status="blocked",
+                arguments={},
+                capability_snapshot=snapshot,
+                error=error,
+                request_id=request_id,
+                created_by=created_by,
+            )
+            raise error
+
+        clean_args = sanitize.sanitize_arguments(definition, arguments)
+        if request_id and "requestId" not in clean_args:
+            clean_args["requestId"] = request_id
+        ctx = ToolContext(
+            db=db,
+            project_id=project_id,
+            scene_id=scene_id,
+            request_id=request_id,
+            capabilities=adapter.cached_states(),
+        )
+        started = time.monotonic()
+        try:
+            raw = tool_registry.mutation_handler(definition.tool_id).apply(ctx, clean_args)
+        except CoDirectorError as err:
+            _log_invocation(
+                db,
+                project_id=project_id,
+                definition=definition,
+                status="failed",
+                arguments=clean_args,
+                capability_snapshot=snapshot,
+                error=err,
+                request_id=request_id,
+                created_by=created_by,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise
+        except Exception as exc:  # noqa: BLE001
+            err = CoDirectorError(
+                TOOL_EXECUTION_FAILED,
+                f"The '{definition.tool_id}' tool couldn't complete.",
+                details={"toolId": definition.tool_id, "reason": sanitize.scrub_text(str(exc))[:200]},
+                recoverable=True,
+                recommended_action="retry",
+            )
+            _log_invocation(
+                db,
+                project_id=project_id,
+                definition=definition,
+                status="failed",
+                arguments=clean_args,
+                capability_snapshot=snapshot,
+                error=err,
+                request_id=request_id,
+                created_by=created_by,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            raise err from exc
+
+        # A successful write invalidates the project's short-lived read cache so the model's
+        # next read reflects authoritative post-mutation state, not a pre-write snapshot.
+        clear_project(project_id)
+        result, truncated = sanitize.sanitize_result(raw, char_budget=definition.result_char_budget)
+        return _log_invocation(
+            db,
+            project_id=project_id,
+            definition=definition,
+            status="succeeded",
+            arguments=clean_args,
+            capability_snapshot=snapshot,
+            result=result,
+            result_truncated=truncated,
+            request_id=request_id,
+            created_by=created_by,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
     @staticmethod
     async def propose(
@@ -522,6 +762,9 @@ class ToolExecutionService:
             )
             raise err from exc
 
+        # A successful write invalidates the project's short-lived read cache so the model's
+        # next read reflects authoritative post-mutation state, not a pre-write snapshot.
+        clear_project(proposal.project_id)
         result, truncated = sanitize.sanitize_result(raw, char_budget=definition.result_char_budget)
         invocation = _log_invocation(
             db,

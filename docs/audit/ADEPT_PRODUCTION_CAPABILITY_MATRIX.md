@@ -33,9 +33,14 @@ To regenerate the rows: `python studio-api/scripts/dump_capability_matrix.py`
 | `degraded` | Usable with reduced function or a documented fallback. | yes |
 | `not_configured` | Implemented, but required configuration is absent. | no |
 | `unknown` | Not yet probed in this environment. | no |
+| `deferred_version_1_2` | Intentionally out of Version 1.1 scope; planned for Version 1.2. Not a failure. | no |
 
 `available: true` in the API payload is exactly `status ∈ {locally_verified, production_ready,
 degraded}`. Nothing else is offered to a caller, including Co-Director.
+
+`deferred_version_1_2` rows are excluded from the Version 1.1 readiness denominator
+(`readinessTotal` / health `registry.total`). They must never be counted as Failed, Missing,
+Blocked, Partial, or Install Required.
 
 ## What "locally_verified" required in this branch
 
@@ -109,6 +114,7 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `workflows.image.ready` | workflows | `backend_only` | read | no | `workflows.validate`, `comfyui.health` | `-` |
 | `workflows.video.ready` | workflows | `backend_only` | read | no | `workflows.validate`, `comfyui.health` | `-` |
 | `models.image.ready` | models | `locally_verified` | read | no | - | `-` |
+| `models.image.krea2.ready` | models | `backend_only` | read | no | - | `-` |
 | `models.video.ready` | models | `backend_only` | read | no | - | `-` |
 | `extensions.comfyui.ready` | extensions | `backend_only` | read | no | `comfyui.health` | `-` |
 | `source_manager.read` | source_manager | `locally_verified` | read | no | - | `GET /api/source-manager/overview` |
@@ -201,4 +207,12 @@ developed:
 `storyteller.character.interpret`, `storyteller.environment.interpret`, `storyteller.media.review`, `storyteller.handoff.create`, `sound_producer.concept.create`, `sound_producer.score_brief.create`,
 `sound_producer.ambience.plan`, `sound_producer.cue.plan`, `sound_producer.dialogue.plan`, `sound_producer.mix_intent.create`, `production_team.message.send`, `production_team.message.respond`,
 `production_team.handoff.create`, `production_team.meeting.convene`, `production_team.meeting.synthesize`, `production_team.conflict.detect`, `production_team.conflict.resolve`, `production_team.decision.propagate`,
-`production_team.impact.calculate`, `production_team.state.revalidate`, `production_team.brief.update`, `production_team.readiness.evaluate`, `production_team.final_review`
+`production_team.impact.calculate`, `production_team.state.revalidate`, `production_team.brief.update`, `production_team.readiness.evaluate`, `production_team.final_review`,
+`3d.mesh`, `3d.character_models`, `3d.environment_models`, `3d.texture_baking`, `3d.rigging`, `3d.animation`, `3d.mocap_import`,
+`audio.character_voice.design`, `audio.character_voice.clone`, `audio.character_voice.generate_dialogue`, `character.profile.manage`
+
+### Version 1.1 native-3D deferral
+
+The following capabilities report baseline `deferred_version_1_2` and are excluded from the
+Version 1.1 readiness denominator: `virtual_stage.render`, all `ve.*` Environment Studio rows,
+and the explicit `3d.*` native-3D product matrix rows. User-facing label: **Coming in Version 1.2**.

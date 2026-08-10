@@ -70,6 +70,56 @@ def _run(cmd: list[str], *, timeout: float = 12.0) -> tuple[int, str, str]:
         return 1, "", str(exc)[:200]
 
 
+def _studio_api_venv_scripts() -> Path | None:
+    """studio-api/.venv/{Scripts|bin} even when the API was launched with another Python."""
+    # cli_detect.py -> download_sources -> setup -> app -> studio-api
+    studio_api = Path(__file__).resolve().parents[3]
+    scripts = studio_api / ".venv" / ("Scripts" if os.name == "nt" else "bin")
+    return scripts if scripts.is_dir() else None
+
+
+def _common_cli_candidates(name: str) -> list[Path]:
+    """Known install locations when PATH is incomplete (common on Windows services)."""
+    candidates: list[Path] = []
+    if name == "gh":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local = os.environ.get("LOCALAPPDATA", "")
+        candidates.extend(
+            [
+                Path(pf) / "GitHub CLI" / "gh.exe",
+                Path(pf86) / "GitHub CLI" / "gh.exe",
+            ]
+        )
+        if local:
+            candidates.append(Path(local) / "Programs" / "GitHub CLI" / "gh.exe")
+    if name in {"hf", "huggingface-cli"}:
+        # Check Adept UI venv first (canonical install), then the running interpreter's Scripts.
+        script_dirs: list[Path] = []
+        venv_scripts = _studio_api_venv_scripts()
+        if venv_scripts is not None:
+            script_dirs.append(venv_scripts)
+        script_dirs.append(Path(sys.executable).resolve().parent)
+        seen: set[str] = set()
+        for scripts in script_dirs:
+            key = str(scripts).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if os.name == "nt":
+                candidates.extend(
+                    [
+                        scripts / f"{name}.exe",
+                        scripts / f"{name}.cmd",
+                        scripts / "hf.exe",
+                        scripts / "huggingface-cli.exe",
+                    ]
+                )
+            else:
+                candidates.extend([scripts / name, scripts / "hf", scripts / "huggingface-cli"])
+    return candidates
+
+
 def _which_many(names: list[str]) -> tuple[str | None, str | None]:
     override_key = {
         "gh": "ADEPT_GITHUB_CLI_PATH",
@@ -88,6 +138,9 @@ def _which_many(names: list[str]) -> tuple[str | None, str | None]:
         found = shutil.which(name)
         if found:
             return found, name
+        for candidate in _common_cli_candidates(name):
+            if candidate.is_file():
+                return str(candidate), name
     return None, None
 
 
@@ -197,6 +250,60 @@ def detect_github_cli() -> CliDetection:
     )
 
 
+def _hf_cache_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            dirs.append(Path(raw))
+    home = Path.home()
+    dirs.extend(
+        [
+            home / ".cache" / "huggingface",
+            home / ".huggingface",
+        ]
+    )
+    # De-dupe while preserving order
+    seen: set[str] = set()
+    out: list[Path] = []
+    for d in dirs:
+        key = str(d).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(d)
+    return out
+
+
+def _hf_local_token_present() -> bool:
+    """True when a local HF token/env credential exists. Never returns token values."""
+    if os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"):
+        return True
+    for base in _hf_cache_dirs():
+        for candidate in (base / "token", base / "stored_tokens"):
+            try:
+                if candidate.is_file() and candidate.stat().st_size > 0:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _parse_hf_account(who_text: str) -> str | None:
+    for line in who_text.splitlines():
+        line = line.strip()
+        if not line or line.lower().startswith("traceback"):
+            continue
+        if "token" in line.lower() or "http" in line.lower():
+            continue
+        # hf auth whoami prints `user=<name>`
+        if line.lower().startswith("user="):
+            name = line.split("=", 1)[1].strip().strip("'\"")
+            return name or None
+        return line.split()[-1].strip("'\"") or None
+    return None
+
+
 def detect_huggingface_cli() -> CliDetection:
     mock = _e2e_mock()
     if mock and "huggingface" in mock:
@@ -254,28 +361,61 @@ def detect_huggingface_cli() -> CliDetection:
     version_match = VERSION_RE.search(out or err or "")
     version = version_match.group(1) if version_match else None
 
-    # whoami is non-destructive when available
+    # Local credentials first. `hf auth whoami` hits the network and can fail even when
+    # a valid token is stored (flaky TLS / WinError 10054), which must not look signed-out.
+    token_available = _hf_local_token_present()
     who_code, who_out, who_err = _run([path, "auth", "whoami"])
-    if who_code != 0:
+    if who_code != 0 and not token_available:
+        # Legacy binary only; skip when we already know a local token exists.
         who_code, who_out, who_err = _run([path, "whoami"])
     who_text = f"{who_out}\n{who_err}".strip()
-    authenticated = who_code == 0 and bool(who_text) and "not logged in" not in who_text.lower()
-    account = None
-    if authenticated:
-        # Prefer first non-empty line that looks like a username
-        for line in who_text.splitlines():
-            line = line.strip()
-            if line and "token" not in line.lower() and "http" not in line.lower():
-                account = line.split()[-1].strip("'\"")
-                break
+    who_lower = who_text.lower()
+    explicitly_logged_out = any(
+        marker in who_lower
+        for marker in (
+            "not logged in",
+            "not authenticated",
+            "no token",
+            "token is required",
+            "please login",
+            "please log in",
+        )
+    )
+    network_error = who_code != 0 and any(
+        marker in who_lower
+        for marker in (
+            "connecterror",
+            "connectionerror",
+            "timeout",
+            "temporarily unavailable",
+            "winerror",
+            "connection reset",
+            "forcibly closed",
+            "name or service not known",
+            "getaddrinfo",
+        )
+    )
+    online_ok = (
+        who_code == 0
+        and bool(who_text)
+        and not explicitly_logged_out
+        and "traceback" not in who_lower
+    )
+    authenticated = online_ok or (token_available and not explicitly_logged_out)
+    account = _parse_hf_account(who_text) if online_ok else None
 
-    token_env = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
-    # Never read or return token values — only availability.
-    token_available = authenticated or token_env
-
-    if authenticated:
+    if online_ok:
         status = "Ready"
         message = "Hugging Face CLI is ready and authenticated."
+    elif authenticated and network_error:
+        status = "Ready"
+        message = (
+            "Hugging Face CLI has local credentials. Online account check failed; "
+            "downloads may still work."
+        )
+    elif authenticated:
+        status = "Ready"
+        message = "Hugging Face CLI has local credentials configured."
     elif Path(path).exists() or shutil.which(path):
         status = "Installed but not authenticated"
         message = "The CLI is installed, but this source may require you to sign in."
@@ -292,7 +432,7 @@ def detect_huggingface_cli() -> CliDetection:
         version=version,
         authenticated=authenticated,
         account_name=account,
-        token_available=token_available and authenticated,
+        token_available=bool(token_available or authenticated),
         last_verified_at=_now(),
         message=message,
         diagnostics={
@@ -300,6 +440,9 @@ def detect_huggingface_cli() -> CliDetection:
             "command": f"{name} auth whoami",
             "sanitized_summary": f"{name} auth whoami (output redacted)",
             "python": sys.executable,
+            "local_token": token_available,
+            "online_verified": online_ok,
+            "network_error": network_error,
         },
     )
 

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import type { MusicStemSet } from "../audioStudio/contracts";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
 import { PanelHeading } from "./HelpTip";
+import type { AudioMixerClipDescriptor } from "./audio-studio/AudioMixerPanel";
+import { AudioMixerWorkspace } from "./audio-studio/AudioMixerWorkspace";
 
 export type EditorClip = {
   id: string;
@@ -53,6 +56,19 @@ const TRACK_META: { key: keyof EditorTracks; label: string }[] = [
   { key: "music", label: "Music" },
 ];
 
+const AUDIO_TRACK_KEYS: Array<keyof EditorTracks> = ["dialogue", "sfx", "ambience", "music"];
+
+const TRACK_LABELS: Record<keyof EditorTracks, string> = {
+  video: "Video 1",
+  video_b: "Video 2",
+  placeholder: "Placeholder",
+  titles: "Titles",
+  dialogue: "Dialogue",
+  sfx: "SFX",
+  ambience: "Ambience",
+  music: "Music",
+};
+
 const EDITORIAL_CTX_KEY = "adept_editorial_context";
 
 export type EditorialContext = {
@@ -69,6 +85,80 @@ export type EditorialContext = {
 
 function nid() {
   return `clip-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function parseJsonRecord(raw?: string | null) {
+  if (!raw) return {} as Record<string, unknown>;
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeStemSet(raw: unknown): MusicStemSet | null {
+  if (!raw || typeof raw !== "object") return null;
+  const value = raw as Record<string, unknown>;
+  const stems = Array.isArray(value.stems)
+    ? value.stems
+        .map((stem) => {
+          if (!stem || typeof stem !== "object") return null;
+          const item = stem as Record<string, unknown>;
+          const role = typeof item.role === "string" ? item.role : "";
+          const assetId = typeof item.assetId === "string" ? item.assetId : typeof item.asset_id === "string" ? item.asset_id : "";
+          if (!role || !assetId) return null;
+          return {
+            role: role as MusicStemSet["stems"][number]["role"],
+            assetId,
+            muted: Boolean(item.muted),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  return {
+    parentVersionId:
+      typeof value.parentVersionId === "string"
+        ? value.parentVersionId
+        : typeof value.parent_version_id === "string"
+          ? value.parent_version_id
+          : "",
+    stems: stems as MusicStemSet["stems"],
+    stemsSupported: Boolean(value.stemsSupported ?? value.stems_supported ?? stems.length),
+  };
+}
+
+function resolveMixerStemInfo(asset?: Project["assets"][number] | null) {
+  if (!asset) {
+    return { stemsSupported: false, musicStemSet: null as MusicStemSet | null };
+  }
+  const promptMeta = parseJsonRecord(asset.prompt_meta_json);
+  const lineage = promptMeta.lineage && typeof promptMeta.lineage === "object" ? (promptMeta.lineage as Record<string, unknown>) : {};
+  const audioLineage =
+    promptMeta.audioLineage && typeof promptMeta.audioLineage === "object"
+      ? (promptMeta.audioLineage as Record<string, unknown>)
+      : promptMeta.audio_lineage && typeof promptMeta.audio_lineage === "object"
+        ? (promptMeta.audio_lineage as Record<string, unknown>)
+        : {};
+  const musicStemSet =
+    normalizeStemSet(promptMeta.musicStemSet) ||
+    normalizeStemSet(promptMeta.music_stem_set) ||
+    normalizeStemSet(promptMeta.stemSet) ||
+    normalizeStemSet(promptMeta.stem_set) ||
+    normalizeStemSet(promptMeta.stems) ||
+    normalizeStemSet(lineage.stems) ||
+    normalizeStemSet(audioLineage.stems);
+  const stemsSupported = Boolean(
+    promptMeta.stemsSupported ??
+      promptMeta.stems_supported ??
+      lineage.stemsSupported ??
+      lineage.stems_supported ??
+      audioLineage.stemsSupported ??
+      audioLineage.stems_supported ??
+      musicStemSet?.stemsSupported ??
+      musicStemSet?.stems.length
+  );
+  return { stemsSupported, musicStemSet };
 }
 
 /**
@@ -155,6 +245,29 @@ export function EditorWorkspace({
     return out;
   }, [editor]);
 
+  const audioMixerClips = useMemo<AudioMixerClipDescriptor[]>(() => {
+    if (!editor) return [];
+    const assetById = new Map((project.assets || []).map((asset) => [asset.id, asset]));
+    return AUDIO_TRACK_KEYS.flatMap((trackKey) =>
+      (editor.tracks[trackKey] || []).map((clip) => {
+        const asset = clip.asset_id ? assetById.get(clip.asset_id) : undefined;
+        const stemInfo = resolveMixerStemInfo(asset);
+        return {
+          clipId: clip.id,
+          label: clip.label || `${TRACK_LABELS[trackKey]} clip`,
+          category: trackKey,
+          assetId: clip.asset_id,
+          previewUrl: clip.asset_id ? api.assetUrl(clip.asset_id) : clip.output_path ? api.mediaUrl(clip.output_path) : "",
+          startSeconds: clip.start,
+          durationSeconds: clip.length,
+          defaultTrackRoute: trackKey,
+          stemsSupported: stemInfo.stemsSupported,
+          musicStemSet: stemInfo.musicStemSet,
+        };
+      })
+    );
+  }, [editor, project.assets]);
+
   const addSequenceToVideo = async (seq: any) => {
     if (!editor) return;
     setBusy(true);
@@ -195,7 +308,7 @@ export function EditorWorkspace({
         /* ignore */
       }
     }
-    onGo("director");
+    onGo("timeline");
   };
 
   const generateReplacement = (track: keyof EditorTracks, clip: EditorClip) => {
@@ -397,7 +510,7 @@ export function EditorWorkspace({
                         type="button"
                         onClick={() => {
                           onSelectScene?.(s.scene_id);
-                          onGo("director");
+                          onGo("timeline");
                         }}
                       >
                         Open in Director
@@ -410,7 +523,7 @@ export function EditorWorkspace({
           )}
           <div className="row-actions" style={{ marginTop: "1rem" }}>
             <button type="button" onClick={() => void buildAudioFromDirector()}>
-              Build Audio from Director Sequence
+              Build Audio from Timeline Sequence
             </button>
           </div>
         </aside>
@@ -476,6 +589,25 @@ export function EditorWorkspace({
               </div>
             ))}
           </div>
+
+          {audioMixerClips.length ? (
+            <div style={{ marginTop: "1rem" }}>
+              <AudioMixerWorkspace
+                projectId={project.id}
+                clips={audioMixerClips}
+                emptyMessage="Add dialogue, music, ambience, or sound effects to the timeline to unlock the mixer."
+                onAfterSave={load}
+                onRequestStemReplace={(clip, stemRole) => {
+                  setMsg(
+                    stemRole
+                      ? `Open Project Library to replace the ${stemRole} stem for “${clip.label}”.`
+                      : `Open Project Library to replace stems for “${clip.label}”.`
+                  );
+                  onGo("library");
+                }}
+              />
+            </div>
+          ) : null}
 
           {selectedClip && activeClip && (
             <div className="segment-editor" style={{ marginTop: "1rem" }}>

@@ -14,11 +14,11 @@ type ProposalScene = {
 export function GenerateTimelinePanel({
   project,
   onChange,
-  onOpenDirector,
+  onOpenTimeline,
 }: {
   project: Project;
   onChange: () => void;
-  onOpenDirector: () => void;
+  onOpenTimeline: () => void;
 }) {
   const [brief, setBrief] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,7 +61,7 @@ export function GenerateTimelinePanel({
       );
       setScenes(null);
       await onChange();
-      onOpenDirector();
+      onOpenTimeline();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -157,8 +157,11 @@ export function GenerateTimelinePanel({
                       }}
                     >
                       <option value="auto">Auto</option>
-                      <option value="ltx">LTX</option>
-                      <option value="wan">WAN</option>
+                      <option value="minimax-h3">MiniMax H3 (Default)</option>
+                      <option value="ltx">LTX Video</option>
+                      <option value="hunyuan15">HunyuanVideo 1.5</option>
+                      <option value="hunyuan13b">HunyuanVideo 13B</option>
+                      <option value="wan">WAN (Optional)</option>
                       <option value="fal_seedance">Seedance</option>
                       <option value="fal_kling">Kling</option>
                       <option value="fal_veo">Veo</option>

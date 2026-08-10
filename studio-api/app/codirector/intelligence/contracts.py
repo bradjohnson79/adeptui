@@ -284,6 +284,29 @@ CONTRACTS: dict[str, SpecialistContract] = {
         output_keys=("castingNotes", "identityRefs", "risks"),
         escalation_path="Missing identity refs → Asset Manager",
     ),
+    "character-creator": SpecialistContract(
+        specialist_id="character-creator",
+        product_role="Character Creator",
+        responsibilities=(
+            "Develop production-ready Character Profiles from briefs",
+            "Build reference, expression, pose, voice, wardrobe, and continuity plans",
+            "Propose traits and relationships with provenance labels",
+            "Report category readiness; submit for review without self-approval",
+        ),
+        input_keys=("characters", "references", "story", "continuity", "userBrief"),
+        output_keys=(
+            "readinessReport",
+            "proposedTraits",
+            "plans",
+            "questions",
+            "blockers",
+            "nextActions",
+            "honestyNotes",
+        ),
+        approval_required=True,
+        escalation_path="Canon conflicts → Bible Manager; missing refs → Casting Director",
+        aliases=("character_creator",),
+    ),
     "virtual-production-coordinator": SpecialistContract(
         specialist_id="virtual-production-coordinator",
         product_role="Virtual Production Coordinator",
@@ -327,6 +350,23 @@ CONTRACTS: dict[str, SpecialistContract] = {
         output_keys=("sonicConcept", "scoreBrief", "ambience", "cues", "mixIntent", "honestyNotes"),
         aliases=("sound_producer", "sonic-producer"),
     ),
+    "story-summary-editor": SpecialistContract(
+        specialist_id="story-summary-editor",
+        product_role="Story Summary Editor",
+        responsibilities=(
+            "Maintain creator-facing Logline / Short / Long Story summaries as editorial prose",
+            "Presentation, not invention; write less when project knowledge is sparse",
+            "Revise rather than blindly regenerate when evidence changes are minor",
+            "Keep facts and interpretations distinct; never drift into pitch/marketing voice",
+        ),
+        input_keys=("project_overview", "story", "characters", "canon", "continuity"),
+        output_keys=("logline", "shortSummary", "longSummary", "themes", "centralConflicts", "revisionDelta"),
+        confidence_required=False,
+        reasoning_required=False,
+        approval_required=False,
+        escalation_path="Canon conflicts → Bible Manager; insufficient evidence → omit section",
+        aliases=("story_summary_editor", "wiki-story-editor"),
+    ),
 }
 
 
@@ -350,9 +390,8 @@ PRODUCT_ROLE_MAP: dict[str, str] = {
     "Music Supervisor": "music-supervisor",
     "Editor": "editor",
     "Cinematographer": "cinematographer",
-
-
-
+    "Character Creator": "character-creator",
+    "Casting Director": "casting-director",
 }
 
 

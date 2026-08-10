@@ -3,9 +3,18 @@ import {
   createTempProject,
   deleteProject,
   openSetup,
+  resetLiveBetaTestSurface,
   waitForAppReady,
 } from "../helpers/app";
 import { AuditObserver } from "../helpers/observer";
+
+test.beforeEach(async ({ page, request }) => {
+  await waitForAppReady(request);
+  await resetLiveBetaTestSurface(request, page);
+});
+test.afterEach(async ({ page, request }) => {
+  await resetLiveBetaTestSurface(request, page);
+});
 
 test.describe("@critical @isolated setup page", () => {
   test("setup cards render and details expand", async ({ page, request }) => {
@@ -34,10 +43,12 @@ test.describe("@critical @isolated setup page", () => {
         await details.locator("summary").click({ timeout: 5_000 }).catch(() => undefined);
       }
 
-      const checkAgain = card.getByRole("button", { name: /check again/i });
-      await expect(checkAgain).toBeVisible();
-      await checkAgain.focus();
-      await expect(checkAgain).toBeFocused();
+      // Live Beta may surface retry/recovery controls instead of "Check Again" when a pack has an
+      // interrupted install record. The creator-stable source actions must still remain visible.
+      const addSource = card.getByTestId("add-source-url-pack_essential_photoreal");
+      await expect(addSource).toBeVisible();
+      await addSource.focus();
+      await expect(addSource).toBeFocused();
 
       observer.assertHealthyBrowser();
     } finally {

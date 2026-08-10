@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -108,6 +109,10 @@ def _e2e_mode() -> bool:
     return os.environ.get("STUDIO_E2E", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def hashlib_sha(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:24]
+
+
 async def resolve_provider_for_specialists(
     provider: Optional[CoDirectorProvider] = None,
     *,
@@ -172,6 +177,9 @@ class SpecialistRunner:
         model_id: Optional[str] = None,
         request_id: Optional[str] = None,
         use_provider: bool = False,
+        attachment_ids: Optional[list[str]] = None,
+        recent_messages: Optional[list[dict[str, Any]]] = None,
+        conversation_plan: Optional[dict[str, Any]] = None,
     ) -> tuple[list[SpecialistFinding], list[CoDirectorError]]:
         definitions = [self.registry.require(sid) for sid in specialist_ids]
         package = await self.context_compiler.compile(
@@ -180,10 +188,21 @@ class SpecialistRunner:
             user_message=user_message,
             scene_id=scene_id,
             specialists=definitions,
+            attachment_ids=attachment_ids,
+            recent_messages=recent_messages,
+            conversation_plan=conversation_plan,
         )
         findings: list[SpecialistFinding] = []
         errors: list[CoDirectorError] = []
         for definition in definitions:
+            if request_id:
+                try:
+                    from ..service import is_cancelled
+
+                    if is_cancelled(request_id):
+                        break
+                except Exception:
+                    pass
             scoped = self.context_compiler.filter_for_specialist(package, definition)
             try:
                 finding = await self.run_one(
@@ -211,6 +230,21 @@ class SpecialistRunner:
         request_id: Optional[str] = None,
         use_provider: bool = False,
     ) -> SpecialistFinding:
+        if request_id:
+            try:
+                from ..service import is_cancelled
+
+                if is_cancelled(request_id):
+                    raise CoDirectorError(
+                        SPECIALIST_TIMEOUT,
+                        f"Specialist '{definition.id}' cancelled.",
+                        details={"specialistId": definition.id, "cancelled": True},
+                        recoverable=True,
+                    )
+            except CoDirectorError:
+                raise
+            except Exception:
+                pass
         if use_provider and provider is not None:
             try:
                 raw = await asyncio.wait_for(
@@ -225,7 +259,12 @@ class SpecialistRunner:
                     timeout=min(self.timeout_sec, definition.timeout_ms / 1000.0),
                 )
                 finding = self._validate_or_repair(definition, raw)
-                finding.status = "validated"
+                # c2/D15: do not overwrite a `failed` (repaired-after-validation-
+                # error) finding with `validated`. The repair path marks the
+                # finding `failed` and records the original error so it is not
+                # silently fabricated; only a clean validation becomes `validated`.
+                if finding.status != "failed":
+                    finding.status = "validated"
                 finding.promptVersion = definition.prompt_version
                 finding.modelId = model_id
                 return finding
@@ -246,9 +285,33 @@ class SpecialistRunner:
                     recoverable=True,
                 ) from exc
 
+        from .specialist_cache import get_cached_specialist, put_cached_specialist, specialist_cache_key
+
+        cache_key = specialist_cache_key(
+            project_id=getattr(package, "projectId", "") or "",
+            specialist_id=definition.id,
+            task="heuristic",
+            source_revisions={"contextHash": getattr(package, "contextHash", "")},
+            request_hash=hashlib_sha(user_message),
+        )
+        cached = get_cached_specialist(cache_key)
+        if cached and cached.get("finding"):
+            try:
+                return SpecialistFinding.model_validate(cached["finding"])
+            except Exception:
+                pass
         finding = self._heuristic_finding(definition, package, user_message)
         finding.status = "validated"
         finding.promptVersion = definition.prompt_version
+        put_cached_specialist(
+            cache_key,
+            {
+                "projectId": getattr(package, "projectId", "") or "",
+                "specialistId": definition.id,
+                "finding": finding.model_dump(mode="json"),
+            },
+            ttl_seconds=600,
+        )
         return finding
 
     async def _provider_structured(
@@ -261,10 +324,15 @@ class SpecialistRunner:
         model_id: Optional[str],
         request_id: str,
     ) -> dict[str, Any]:
+        from .specialist_policies import domain_hard_rules_for
+
+        hard_rules = domain_hard_rules_for(definition.id)
         system = (
-            f"You are the {definition.display_name} specialist. "
+            f"You are the {definition.display_name} specialist — a subordinate department. "
+            "You never speak as Co-Director and never address the creator directly. "
             "Return ONLY JSON matching specialist-finding-v1 inside a ```json fence. "
             "Never execute tools."
+            + (f" Hard rules: {hard_rules}" if hard_rules else "")
         )
         user = (
             f"User request:\n{package.userMessageDelimited}\n\n"
@@ -285,7 +353,15 @@ class SpecialistRunner:
         normalized.setdefault("specialistId", definition.id)
         try:
             return SpecialistFinding.model_validate(normalized)
-        except ValidationError:
+        except ValidationError as first_error:
+            # c2/D15: surface the original validation failure instead of silently
+            # fabricating a clean finding. We still attempt a repair so a
+            # partially-shaped provider payload does not hard-fail the whole
+            # specialist turn, but the original error is recorded on the finding
+            # (assumptions) and the finding is marked `failed` so downstream
+            # synthesis cannot treat it as fully validated. If the repair itself
+            # fails, re-raise the original error so the caller surfaces
+            # SPECIALIST_OUTPUT_INVALID with the real cause.
             repaired = dict(normalized)
             content_dropped = not self._has_substantive_content(normalized)
             repaired["summary"] = str(repaired.get("summary") or definition.display_name)
@@ -298,7 +374,28 @@ class SpecialistRunner:
             repaired["proposedToolActions"] = list(repaired.get("proposedToolActions") or [])
             repaired["productionBibleReferences"] = list(repaired.get("productionBibleReferences") or [])
             repaired["contentDropped"] = content_dropped
-            return SpecialistFinding.model_validate(repaired)
+            repaired["status"] = "failed"
+            # c2/D15: also sanitize confidence so an out-of-range/invalid value
+            # does not make the repair itself fail (which would re-raise the
+            # original error and hide the finding). Clamp into the valid band.
+            try:
+                conf = float(repaired.get("confidence") or 0.7)
+            except (TypeError, ValueError):
+                conf = 0.7
+            repaired["confidence"] = max(0.0, min(1.0, conf))
+            # Record the original validation error verbatim (truncated) so it is
+            # visible to synthesis and the creator, not silently dropped.
+            validation_note = (
+                f"LIMITED_ANALYSIS_ASSUMPTION: provider output failed schema "
+                f"validation for specialist '{definition.id}' and was repaired. "
+                f"Original error: {str(first_error)[:300]}"
+            )
+            if validation_note not in repaired["assumptions"]:
+                repaired["assumptions"].append(validation_note)
+            try:
+                return SpecialistFinding.model_validate(repaired)
+            except ValidationError:
+                raise first_error
 
     @staticmethod
     def _unwrap_provider_payload(raw: Any) -> dict[str, Any]:

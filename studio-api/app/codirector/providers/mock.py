@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import Any, AsyncIterator
 
 from app.codirector.errors import (
@@ -21,6 +22,120 @@ def _scenario() -> str:
     return (os.environ.get("ADEPT_CODIRECTOR_MOCK_SCENARIO") or "healthy").strip().lower()
 
 
+# ---------------------------------------------------------------------------
+# Scripted mode (test-only)
+# ---------------------------------------------------------------------------
+# A script is an ordered list of steps. When the ``scripted`` scenario is
+# active AND a script is installed, ``generate`` matches the last user message
+# against each step's ``match`` regex (first match wins) and emits the step's
+# reply and/or a ```tool fence built from the step's tool spec. On follow-up
+# turns (post-tool) the matched step's ``followUpReply`` is emitted if given,
+# else a neutral prose acknowledgment. Unknown/missing script = ordinary chat
+# reply (never silently emit fences). The store is module-level so the e2e
+# router can install/clear it for the running process; it is unreachable when
+# e2e is disabled because the e2e router itself is gated.
+
+_SCRIPTED_STEPS: list[dict[str, Any]] = []
+
+
+class ScriptValidationError(ValueError):
+    """Raised when a scripted step fails validation on install."""
+
+
+def _validate_scripted_step(step: Any) -> dict[str, Any]:
+    if not isinstance(step, dict):
+        raise ScriptValidationError(f"each step must be an object, got {type(step).__name__}")
+    match = step.get("match")
+    if not isinstance(match, str) or not match:
+        raise ScriptValidationError("step.match must be a non-empty regex string")
+    try:
+        re.compile(match)
+    except re.error as exc:
+        raise ScriptValidationError(f"step.match regex is invalid: {exc}") from exc
+    reply = step.get("reply")
+    if reply is not None and not isinstance(reply, str):
+        raise ScriptValidationError("step.reply must be a string when provided")
+    follow_up = step.get("followUpReply")
+    if follow_up is not None and not isinstance(follow_up, str):
+        raise ScriptValidationError("step.followUpReply must be a string when provided")
+    tool = step.get("tool")
+    if tool is not None:
+        if not isinstance(tool, dict):
+            raise ScriptValidationError("step.tool must be an object when provided")
+        tool_id = tool.get("toolId")
+        if not isinstance(tool_id, str) or not tool_id.strip():
+            raise ScriptValidationError("step.tool.toolId must be a non-empty string")
+        arguments = tool.get("arguments")
+        if not isinstance(arguments, dict):
+            raise ScriptValidationError("step.tool.arguments must be an object")
+        response_type = tool.get("responseType")
+        if response_type is not None and not isinstance(response_type, str):
+            raise ScriptValidationError("step.tool.responseType must be a string when provided")
+    return step
+
+
+def set_scripted_steps(steps: list[dict[str, Any]] | None) -> int:
+    """Install a validated script for the ``scripted`` scenario.
+
+    Returns the number of installed steps. Passing ``None`` or an empty list
+    clears the script (equivalent to ``clear_scripted_steps``).
+    """
+
+    if not steps:
+        _SCRIPTED_STEPS.clear()
+        return 0
+    if not isinstance(steps, list):
+        raise ScriptValidationError(f"steps must be a list, got {type(steps).__name__}")
+    validated = [_validate_scripted_step(step) for step in steps]
+    _SCRIPTED_STEPS.clear()
+    _SCRIPTED_STEPS.extend(validated)
+    return len(_SCRIPTED_STEPS)
+
+
+def clear_scripted_steps() -> None:
+    _SCRIPTED_STEPS.clear()
+
+
+def get_scripted_steps() -> list[dict[str, Any]]:
+    return [dict(step) for step in _SCRIPTED_STEPS]
+
+
+def _scripted_reply(request: ChatRequest) -> str | None:
+    """Return the scripted reply for the last user message, or None to fall through."""
+
+    if not _SCRIPTED_STEPS:
+        return None
+    user_messages = [m for m in request.messages if m.get("role") == "user"]
+    follow_up = _is_follow_up_turn(request)
+    if follow_up:
+        # On a follow-up turn the last user message is the tool result, not the
+        # original request — re-derive the matched step from the original (first)
+        # user message so the followUpReply stays tied to the request that started
+        # the tool loop.
+        target = ((user_messages[0].get("content") or "").strip() if user_messages else "")
+    else:
+        target = ((user_messages[-1].get("content") or "").strip() if user_messages else "")
+    for step in _SCRIPTED_STEPS:
+        if re.search(step["match"], target):
+            if follow_up:
+                fu = step.get("followUpReply")
+                if fu:
+                    return fu
+                return "[mock-scripted] Noted — moving on from that lookup."
+            parts: list[str] = []
+            reply = step.get("reply")
+            if reply:
+                parts.append(reply)
+            tool = step.get("tool")
+            if tool is not None:
+                response_type = tool.get("responseType") or "read_tool_call"
+                parts.append(_tool_fence(response_type, tool["toolId"], tool.get("arguments") or {}))
+            if not parts:
+                return "[mock-scripted] (scripted step matched but emitted nothing.)"
+            return "\n\n".join(parts)
+    return None
+
+
 # Scenarios that exercise the M2.2 tool registry. Kept explicit so an unknown scenario name
 # falls through to the ordinary chat reply instead of silently emitting a tool fence.
 _TOOL_SCENARIOS = frozenset(
@@ -35,6 +150,15 @@ _TOOL_SCENARIOS = frozenset(
         "tool_loop_limit",
         "intelligence_storyboard",
         "intelligence_simple_qa",
+        # c2-routing: audited-write routing drift regression scenarios. Each
+        # emits a fence for one of the four audited (requires_approval=False)
+        # mutating tools so the chat path can be proven to route via
+        # execute_audited (tool_completed/tool_failed) instead of being
+        # silently re-gated as an approval proposal (tool_proposal_created).
+        "audited_create_draft",
+        "audited_audio_cancel",
+        "audited_minimax_fallback",
+        "audited_minimax_cancel",
     }
 )
 
@@ -95,6 +219,8 @@ class MockCoDirectorProvider:
         scenario = _scenario()
         models = await self.list_models()
         selected = "mock-model"
+        # Always mark mock health as test-only so UI never treats it as production Ready.
+        mock_flags = {"test_only": True, "honesty": "mocked"}
 
         if scenario == "connection_refused":
             return ProviderHealthResult(
@@ -109,6 +235,7 @@ class MockCoDirectorProvider:
                 message="Co-Director could not reach the mock provider (simulated connection refused).",
                 code=CONNECTION_REFUSED,
                 recommended_action="retry_or_check_service",
+                **mock_flags,
             )
         if scenario == "no_models":
             return ProviderHealthResult(
@@ -123,6 +250,7 @@ class MockCoDirectorProvider:
                 message="Provider is running, but no compatible models are installed.",
                 code=NO_MODELS_INSTALLED,
                 recommended_action="install_or_select_model",
+                **mock_flags,
             )
         if scenario == "model_missing":
             return ProviderHealthResult(
@@ -137,6 +265,7 @@ class MockCoDirectorProvider:
                 message="The selected model 'missing-model' is not installed.",
                 code=MODEL_NOT_FOUND,
                 recommended_action="select_model",
+                **mock_flags,
             )
         return ProviderHealthResult(
             provider_id=self.id,
@@ -147,7 +276,8 @@ class MockCoDirectorProvider:
             selected_model=selected,
             model_available=True,
             models=models,
-            message="Mock Co-Director is ready.",
+            message="Mock Co-Director is ready (test-only).",
+            **mock_flags,
         )
 
     async def generate(self, request: ChatRequest) -> ChatResult:
@@ -191,6 +321,22 @@ class MockCoDirectorProvider:
                 details={"provider": "mock", "model": model},
                 recommended_action="select_model",
             )
+
+        # Scripted scenario: emit a script-driven reply/fence when a script is
+        # installed; otherwise fall through to the ordinary chat reply so an
+        # unknown/missing script never silently emits a tool fence.
+        if scenario == "scripted":
+            scripted = _scripted_reply(request)
+            if scripted is not None:
+                if scenario == "slow":
+                    await asyncio.sleep(0.35)
+                return ChatResult(
+                    request_id=request.request_id,
+                    reply=scripted,
+                    model_id=model,
+                    provider_id=self.id,
+                    raw={"mock": True, "scenario": scenario, "scripted": True},
+                )
 
         last_user = ""
         for m in reversed(request.messages):
@@ -324,6 +470,36 @@ class MockCoDirectorProvider:
                     "create_scene",
                     {"name": "Rooftop Standoff", "prompt": "Slow push-in on the rooftop at dusk.", "durationSec": 6.0},
                 )
+            )
+        # c2-routing: audited-write scenarios. These emit a mutation_proposal
+        # fence whose tool is an audited (requires_approval=False) mutating tool.
+        # The chat path must route them through execute_audited (immediate execute)
+        # rather than re-gating them as an approval proposal.
+        if scenario == "audited_create_draft":
+            return (
+                "[mock] I'll draft a production plan now. This creates an unapproved draft only.\n\n"
+                + _tool_fence(
+                    "mutation_proposal",
+                    "production_plan.create_draft",
+                    {"title": "Mock Draft", "objective": "Exercise the audited routing path."},
+                )
+            )
+        if scenario == "audited_audio_cancel":
+            return (
+                "[mock] I'll cancel the audio batch now.\n\n"
+                + _tool_fence("mutation_proposal", "audio.cancel_batch", {"batchId": "mock-batch"})
+            )
+        if scenario == "audited_minimax_fallback":
+            return (
+                "[mock] I'll offer the LTX fallback for the MiniMax H3 plan.\n\n"
+                + _tool_fence(
+                    "mutation_proposal", "minimax_h3.offer_ltx_fallback", {"planId": "mock-plan"}
+                )
+            )
+        if scenario == "audited_minimax_cancel":
+            return (
+                "[mock] I'll cancel the MiniMax H3 request now.\n\n"
+                + _tool_fence("mutation_proposal", "minimax_h3.cancel", {"requestId": "mock-req"})
             )
         return None
 

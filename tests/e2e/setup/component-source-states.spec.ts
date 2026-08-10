@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   API,
+  clearActiveInstallJobs,
   createTempProject,
   deleteProject,
   openSetup,
@@ -16,6 +17,14 @@ test.describe("@critical @isolated component source states", () => {
     const observer = new AuditObserver(page, test.info());
     observer.attach();
     await waitForAppReady(request);
+    await request.post(`${API}/api/e2e/recover-operations`);
+    for (const packId of [
+      "pack_essential_photoreal",
+      "pack_essential_anime",
+      "pack_essential_cinematic",
+    ]) {
+      await clearActiveInstallJobs(request, packId);
+    }
 
     // Clear any prior fixture release cache bias by checking API status shape first.
     const statusRes = await request.get(`${API}/api/setup/status`);

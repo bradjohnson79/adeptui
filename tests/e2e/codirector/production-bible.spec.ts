@@ -65,15 +65,17 @@ test.describe("@critical @isolated codirector production bible", () => {
 
     try {
       await openBibleWorkspace(page, project.id);
-      await expect(page.getByText("This project doesn't have a Production Bible yet.")).toBeVisible();
+      await expect(page.getByText("Build the trusted memory of your project")).toBeVisible();
 
-      await page.getByRole("button", { name: "Import from project" }).click();
-      await expect(page.getByRole("heading", { name: "Create Production Bible — Preview" })).toBeVisible({
+      await page.getByRole("button", { name: "Create from Project" }).click();
+      await expect(page.getByRole("heading", { name: "Create Production Bible" })).toBeVisible({
         timeout: 15_000,
       });
-      await expect(page.locator(".ms-list").first()).toContainText(/project_profile/i);
+      await expect(page.getByText("Review discoveries")).toBeVisible();
 
-      await page.getByRole("button", { name: "Confirm — create version 1" }).click();
+      await page.getByRole("button", { name: "Choose what belongs" }).click();
+      await page.getByRole("button", { name: "Organize and confirm" }).click();
+      await page.getByTestId("bible-create-version-one").click();
       await expect(page.getByRole("heading", { name: "Production Bible" })).toBeVisible({ timeout: 15_000 });
       await expect(page.getByText(/Version 1 of 1/)).toBeVisible({ timeout: 15_000 });
 
@@ -141,26 +143,25 @@ test.describe("@isolated codirector production bible secondary flows", () => {
     await setMockScenario(request, null);
   });
 
-  test("manually adding an entity in the Bible workspace creates a new version", async ({ page, request }) => {
+  test("starting the Bible manually creates version 1", async ({ page, request }) => {
     const observer = new AuditObserver(page, test.info());
     observer.attach();
     await waitForAppReady(request);
     const project = await createTempProject(request, `Bible Manual ${Date.now()}`);
 
     try {
-      await createBibleViaApi(request, project.id);
       await openBibleWorkspace(page, project.id);
+      await page.getByRole("button", { name: "Start Manually" }).click();
+      await page.getByLabel("Story premise").fill("A runaway courier uncovers a buried conspiracy.");
+      await page.getByLabel("Characters").fill("Nova");
+      await page.getByRole("button", { name: "Build starter Bible" }).click();
+      await page.getByRole("button", { name: "Choose what belongs" }).click();
+      await page.getByRole("button", { name: "Organize and confirm" }).click();
+      await page.getByTestId("bible-create-version-one").click();
+
       await expect(page.getByText(/Version 1 of 1/)).toBeVisible({ timeout: 15_000 });
-
-      await page.locator(".page select").first().selectOption("character");
-      await page.getByPlaceholder("key (e.g. ava)").fill("nova");
-      await page.getByPlaceholder("Display name").fill("Nova");
-      await page.getByPlaceholder("Description").fill("A new supporting character.");
-      await page.getByRole("button", { name: "Add (new version)" }).click();
-
-      await expect(page.getByText("New Bible version created.")).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByText(/Version 2 of 2/)).toBeVisible({ timeout: 15_000 });
-      await expect(page.locator(".ms-list strong", { hasText: "Nova" })).toBeVisible();
+      await page.locator("nav").getByRole("button", { name: "Characters" }).click();
+      await expect(page.getByRole("button", { name: "Nova" })).toBeVisible();
 
       observer.assertHealthyBrowser();
     } finally {

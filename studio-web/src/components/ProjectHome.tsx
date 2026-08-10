@@ -3,6 +3,7 @@ import { api, isAbortError, isNavigationFetchFailure } from "../api";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
 import { loadLastWorkspace } from "../workspacePrefs";
+import { WORKSPACES } from "../core/workspaces";
 import { dashboardImages, relativeTime } from "../dashboardImages";
 import { CinematicEmptyState } from "./dashboard/CinematicHero";
 import {
@@ -17,13 +18,14 @@ import {
 } from "./dashboard/DashboardCards";
 
 const TAB_LABELS: Partial<Record<EditorTab, string>> = {
-  director: "Director",
-  editor: "Editor",
+  director: "Timeline Generator",
+  timeline: "Timeline Generator",
+  editor: "MAGI Editor",
   audiostudio: "Audio Studio",
-  script: "Script / Storyboard",
+  script: "Storyboard",
   spatial: "Spatial Map",
-  imagegen: "ImageGen",
-  txt2vid: "Txt2Vid",
+  imagegen: "Image Generation",
+  txt2vid: "Text to Video",
   library: "Library",
   mastersheet: "Scene Master Sheet",
   avatar: "Avatar Studio",
@@ -64,8 +66,11 @@ export function ProjectHome({
   const counts = dash?.counts || {};
   const progress = dash?.progress || { pct: 0 };
   const coverUrl = dash?.cover_asset_id ? api.assetUrl(dash.cover_asset_id) : null;
-  const lastTab = loadLastWorkspace(project.id) || "director";
-  const lastLabel = TAB_LABELS[lastTab] || "Director";
+  const coverKind = dash?.cover_kind === "video" ? "video" : coverUrl ? "image" : null;
+  // Prefer last creative workspace (Setup Wizard is excluded from resume prefs).
+  const lastTab = loadLastWorkspace(project.id) || "timeline";
+  const resumeTab = lastTab === "home" ? "director" : lastTab;
+  const lastLabel = TAB_LABELS[lastTab] || "Timeline Generator";
   const status = project.status_label || "Active";
 
   const suggestionItems = useMemo(() => {
@@ -90,24 +95,20 @@ export function ProjectHome({
     description: string;
     image: (typeof dashboardImages)[keyof typeof dashboardImages];
     tab: EditorTab;
+    badges: readonly string[];
   }[] = [
-    { title: "Director", description: "Build timed prompts, camera direction, and model-ready sequences.", image: dashboardImages.director, tab: "director" },
-    { title: "Editor", description: "Assemble approved sequences into complete scenes.", image: dashboardImages.director, tab: "editor" },
-    { title: "Script / Storyboard", description: "Write scenes and board panels.", image: dashboardImages.script, tab: "script" },
-    { title: "Spatial Map", description: "Block cameras and continuity.", image: dashboardImages.spatial, tab: "spatial" },
-    { title: "ImageGen", description: "Stills, keyframes, references.", image: dashboardImages.imagegen, tab: "imagegen" },
-    { title: "Txt2Vid", description: "Motion clips from prompts.", image: dashboardImages.video, tab: "txt2vid" },
-    {
-      title: "Avatar Studio",
-      description: "Talking portraits and cinematic dialogue with lip sync.",
-      image: dashboardImages.avatar,
-      tab: "avatar",
-    },
-    { title: "Library", description: "Assets and approved frames.", image: dashboardImages.library, tab: "library" },
+    { title: WORKSPACES.timeline.label, description: WORKSPACES.timeline.description, image: dashboardImages.timeline, tab: "timeline", badges: WORKSPACES.timeline.capabilityBadges },
+    { title: WORKSPACES.magi.label, description: WORKSPACES.magi.description, image: dashboardImages.magi, tab: "magi", badges: WORKSPACES.magi.capabilityBadges },
+    { title: WORKSPACES.script.label, description: WORKSPACES.script.description, image: dashboardImages.script, tab: "script", badges: WORKSPACES.script.capabilityBadges },
+    { title: WORKSPACES.spatial.label, description: WORKSPACES.spatial.description, image: dashboardImages.spatial, tab: "spatial", badges: WORKSPACES.spatial.capabilityBadges },
+    { title: WORKSPACES.imagegen.label, description: WORKSPACES.imagegen.description, image: dashboardImages.imagegen, tab: "imagegen", badges: WORKSPACES.imagegen.capabilityBadges },
+    { title: WORKSPACES.txt2vid.label, description: WORKSPACES.txt2vid.description, image: dashboardImages.video, tab: "txt2vid", badges: WORKSPACES.txt2vid.capabilityBadges },
+    { title: WORKSPACES.avatar.label, description: WORKSPACES.avatar.description, image: dashboardImages.avatar, tab: "avatar", badges: WORKSPACES.avatar.capabilityBadges },
+    { title: WORKSPACES.library.label, description: WORKSPACES.library.description, image: dashboardImages.library, tab: "library", badges: WORKSPACES.library.capabilityBadges },
   ];
 
   const continueBullets = [
-    dash?.last_scene_name ? `Last scene: ${dash.last_scene_name}` : "No scenes yet — start in Script or ImageGen.",
+    dash?.last_scene_name ? `Last scene: ${dash.last_scene_name}` : "No scenes yet — start in Storyboard or Image Generation.",
     suggestionItems[0]?.text || "Ask Co-Director for the next production step.",
     `${progress.scenes_with_output || 0}/${progress.scenes_total || 0} scenes with output`,
   ];
@@ -117,15 +118,29 @@ export function ProjectHome({
       <section className="project-dash-hero" aria-label={`${project.name} cover`}>
         <div className="cinematic-media motif-set">
           <div className="cinematic-media-fallback" aria-hidden="true" />
-          {coverUrl && (
+          {coverUrl && coverKind === "video" ? (
+            <video
+              src={coverUrl}
+              muted
+              playsInline
+              loop
+              autoPlay
+              preload="metadata"
+              aria-label={`Video cover for ${project.name}`}
+              onError={(e) => {
+                (e.currentTarget as HTMLVideoElement).style.display = "none";
+              }}
+            />
+          ) : null}
+          {coverUrl && coverKind === "image" ? (
             <img
               src={coverUrl}
-              alt=""
+              alt={`Cover image for ${project.name}`}
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).style.display = "none";
               }}
             />
-          )}
+          ) : null}
           <div className="cinematic-media-overlay" />
         </div>
         <div className="project-dash-hero-inner">
@@ -139,13 +154,13 @@ export function ProjectHome({
             Scenes rendered {progress.scenes_with_output || 0}/{progress.scenes_total || 0}
           </p>
           <div className="project-dash-actions">
-            <button type="button" className="primary" onClick={() => onGo(lastTab === "home" ? "director" : lastTab)}>
+            <button type="button" className="primary" onClick={() => onGo(resumeTab)}>
               Continue Production
             </button>
-            <button type="button" onClick={() => onAskCoDirector?.("What should we do next on this production?")}>
+            <button type="button" onClick={() => onAskCoDirector?.()}>
               Ask Co-Director
             </button>
-            <button type="button" onClick={() => onGo("director")}>
+            <button type="button" onClick={() => onGo("timeline")}>
               View Timeline
             </button>
           </div>
@@ -164,7 +179,7 @@ export function ProjectHome({
         title={lastLabel}
         subtitle={`Resume in ${lastLabel}${dash?.last_scene_name ? ` · ${dash.last_scene_name}` : ""}`}
         bullets={continueBullets}
-        onContinue={() => onGo(lastTab === "home" ? "director" : lastTab)}
+        onContinue={() => onGo(resumeTab)}
         imageSrc={coverUrl}
       />
 
@@ -186,7 +201,7 @@ export function ProjectHome({
             title={w.title}
             description={w.description}
             image={w.image}
-            status="Continue"
+            badges={w.badges}
             onContinue={() => onGo(w.tab)}
           />
         ))}
@@ -199,7 +214,7 @@ export function ProjectHome({
             <CinematicEmptyState
               title="No assets yet"
               body="Generate stills or import references — they’ll show up here."
-              actionLabel="Open ImageGen"
+              actionLabel="Open Image Generation"
               onAction={() => onGo("imagegen")}
             />
           ) : (
@@ -222,9 +237,9 @@ export function ProjectHome({
           {!dash?.recent_jobs?.length ? (
             <CinematicEmptyState
               title="No jobs yet"
-              body="Queue a render from Director, ImageGen, or Txt2Vid."
-              actionLabel="Open Director"
-              onAction={() => onGo("director")}
+              body="Queue a render from Timeline Generator, Image Generation, or Text to Video."
+              actionLabel="Open Timeline"
+              onAction={() => onGo("timeline")}
             />
           ) : (
             <div className="render-jobs-panel">
@@ -235,7 +250,7 @@ export function ProjectHome({
                   status={j.status}
                   progress={typeof j.progress === "number" ? j.progress : 0}
                   message={j.message}
-                  onOpen={() => onGo("director")}
+                  onOpen={() => onGo("timeline")}
                 />
               ))}
             </div>

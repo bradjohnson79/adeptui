@@ -3,18 +3,18 @@ import { CoDirectorShell } from "./CoDirectorShell";
 import { useCoDirectorSession } from "./CoDirectorSession";
 
 export function CoDirectorFullScreen() {
-  const { collapseToPopup, setDisplayMode, setOpen } = useCoDirectorSession();
+  const { collapseToPopup, setDisplayMode, setOpen, setContextPanelOpen } = useCoDirectorSession();
 
   useEffect(() => {
     setDisplayMode("fullscreen");
     setOpen(true);
-  }, [setDisplayMode, setOpen]);
+    setContextPanelOpen(true);
+  }, [setDisplayMode, setOpen, setContextPanelOpen]);
 
   return (
-    <div className="codirector-fullscreen-page app-shell atmosphere">
+    <div className="codirector-fullscreen-page" data-testid="codirector-fullscreen">
       <CoDirectorShell
         mode="fullscreen"
-        showContextPanel
         onClose={() => {
           setOpen(false);
           setDisplayMode("popup");

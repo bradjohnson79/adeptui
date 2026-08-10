@@ -1,7 +1,10 @@
 export type EngineName =
   | "auto"
+  | "minimax-h3"
   | "ltx"
   | "wan"
+  | "hunyuan15"
+  | "hunyuan13b"
   | "fal_seedance"
   | "fal_kling"
   | "fal_veo"
@@ -79,6 +82,11 @@ export interface Project {
   archived?: number;
   defaults_json?: string;
   settings_json?: string;
+  /** M3.1a primary project type slug (source of truth when templates_presets_v1 is on). */
+  primary_project_type?: string;
+  project_traits_json?: string;
+  resolved_profile_json?: string;
+  project_type_version?: number;
   created_at: string;
   updated_at: string;
   scenes: Scene[];
@@ -88,7 +96,12 @@ export interface Project {
   asset_count?: number;
   render_pct?: number;
   cover_asset_id?: string | null;
+  /** Present when cover_asset_id is set: "image" | "video". */
+  cover_kind?: string | null;
   status_label?: string;
+  /** Server-side password protection (never includes hash). */
+  password_protected?: boolean;
+  password_locked?: boolean;
 }
 
 export interface Job {
@@ -138,6 +151,18 @@ export interface Health {
   recommended_action?: string | null;
   missing_models: string[];
   message: string;
+  comfy?: {
+    reachable?: boolean;
+    models?: Array<{
+      componentId?: string;
+      name?: string;
+      required?: boolean;
+      present?: boolean;
+      issueCode?: string | null;
+      summary?: string | null;
+    }>;
+    missingModelComponentIds?: string[];
+  };
   operator?: {
     api?: string;
     comfy?: string;
@@ -158,6 +183,7 @@ export interface Health {
     virtualStageEnabled?: boolean;
     virtualEnvironmentStudioEnabled?: boolean;
     unifiedExperienceEnabled?: boolean;
+    templatesPresetsEnabled?: boolean;
     shotProfilesEnabled?: boolean;
     productionRecipeEnabled?: boolean;
     locationSpinEnabled?: boolean;
@@ -175,6 +201,7 @@ export interface Health {
     registry?: { callable?: number; blocked?: number; total?: number; counts?: Record<string, number> };
     packBlockers?: { capabilityId: string; message: string; recommendedAction?: string | null; componentIds?: string[] }[];
     visualValidationPendingNote?: string;
+    partialErrors?: string[];
   };
 }
 

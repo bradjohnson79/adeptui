@@ -7,6 +7,8 @@ status a Co-Director read tool reports can never drift apart.
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -14,6 +16,45 @@ from sqlalchemy.orm import Session
 from .db import Asset, Job, Project, Scene
 
 ACTIVE_JOB_STATUSES = ("queued", "running", "pending")
+
+_IMAGE_KINDS = frozenset({"image", "imagegen_edit"})
+_VIDEO_KINDS = frozenset({"video", "video_upscale"})
+_IMAGE_EXTS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"})
+_VIDEO_EXTS = frozenset({".mp4", ".webm", ".mov", ".mkv", ".m4v"})
+
+
+def _asset_created(asset: Asset) -> datetime:
+    return getattr(asset, "created_at", None) or datetime.min
+
+
+def _ext_of(asset: Asset) -> str:
+    raw = (getattr(asset, "filename", None) or getattr(asset, "path", None) or "").strip()
+    return Path(raw).suffix.lower()
+
+
+def cover_media_kind(asset: Asset | None) -> str | None:
+    """Normalize an asset to `image` / `video` for library card rendering."""
+    if asset is None:
+        return None
+    kind = (asset.kind or "").strip().lower()
+    if kind in _IMAGE_KINDS or _ext_of(asset) in _IMAGE_EXTS:
+        return "image"
+    if kind in _VIDEO_KINDS or _ext_of(asset) in _VIDEO_EXTS:
+        return "video"
+    return None
+
+
+def pick_cover_asset(assets: list[Asset]) -> Asset | None:
+    """Prefer the newest image still; otherwise the newest video clip."""
+    if not assets:
+        return None
+    images = [a for a in assets if cover_media_kind(a) == "image"]
+    if images:
+        return max(images, key=_asset_created)
+    videos = [a for a in assets if cover_media_kind(a) == "video"]
+    if videos:
+        return max(videos, key=_asset_created)
+    return None
 
 
 def status_label(*, archived: bool, active_jobs: int, scene_count: int, scenes_with_output: int) -> str:
@@ -47,6 +88,21 @@ def _parse_tags(raw: str) -> list[str]:
 def project_profile(project: Project) -> dict[str, Any]:
     """Identity/format metadata for a project — the model-facing project profile."""
 
+    traits: list[str] = []
+    try:
+        raw_traits = json.loads(getattr(project, "project_traits_json", None) or "[]")
+        if isinstance(raw_traits, list):
+            traits = [str(t) for t in raw_traits]
+    except Exception:
+        traits = []
+    resolved: dict[str, Any] = {}
+    try:
+        raw_profile = json.loads(getattr(project, "resolved_profile_json", None) or "{}")
+        if isinstance(raw_profile, dict):
+            resolved = raw_profile
+    except Exception:
+        resolved = {}
+
     return {
         "projectId": project.id,
         "name": project.name,
@@ -65,6 +121,23 @@ def project_profile(project: Project) -> dict[str, Any]:
         "negativePrompt": project.negative_prompt or "",
         "archived": bool(getattr(project, "archived", 0)),
         "updatedAt": project.updated_at.isoformat() if project.updated_at else None,
+        # M3.1a Project Types / Project Profile (Co-Director awareness)
+        "primaryProjectType": getattr(project, "primary_project_type", None) or "custom",
+        "projectTraits": traits,
+        "projectTypeVersion": int(getattr(project, "project_type_version", 1) or 1),
+        "resolvedProfile": {
+            "projectType": resolved.get("projectType"),
+            "displayName": resolved.get("displayName"),
+            "libraryEmphasis": resolved.get("libraryEmphasis") or [],
+            "recommendedTemplates": resolved.get("recommendedTemplates") or [],
+            "recommendedCameraPresets": resolved.get("recommendedCameraPresets") or [],
+            "recommendedLightingPresets": resolved.get("recommendedLightingPresets") or [],
+            "recommendedColorPresets": resolved.get("recommendedColorPresets") or [],
+            "coDirectorContext": resolved.get("coDirectorContext") or {},
+            "structure": resolved.get("structure") or {},
+            "delivery": resolved.get("delivery") or [],
+            "defaults": resolved.get("defaults") or {},
+        },
     }
 
 

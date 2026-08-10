@@ -13,7 +13,7 @@ test.describe("@critical @isolated startup", () => {
 
     await page.goto("/");
     await expect(page.locator("body")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Create New Project" })).toBeVisible({
+    await expect(page.getByTestId("create-project-open")).toBeVisible({
       timeout: 30_000,
     });
 

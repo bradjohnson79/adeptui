@@ -6,6 +6,8 @@ const PHASE_LABEL: Record<CoDirectorToolActivity["phase"], string> = {
   completed: "Checked",
   failed: "Couldn't check",
   blocked: "Couldn't check",
+  operator_pending: "Opening",
+  operator_timeout: "Not confirmed",
 };
 
 /**

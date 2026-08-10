@@ -37,6 +37,16 @@ USER_MESSAGE_END = "<<<END_USER_MESSAGE>>>"
 
 DEFAULT_CHAR_BUDGET = 12_000
 
+# Categories that may never enter a compiled context package, even when a
+# specialist explicitly declares them in `allowed_context`. Kept as a frozen
+# set (module-level) so the runtime allowlist is the single source of truth.
+FORBIDDEN_CONTEXT_CATEGORIES: frozenset[str] = frozenset(
+    {
+        "full_tool_registry",
+        "full_marketing_plan",
+    }
+)
+
 
 
 
@@ -173,23 +183,42 @@ class ContextCompiler:
 
         specialists: Iterable[SpecialistDefinition] = (),
 
+        attachment_ids: Optional[list[str]] = None,
+
+        recent_messages: Optional[list[dict[str, Any]]] = None,
+
+        conversation_plan: Optional[dict[str, Any]] = None,
+
     ) -> ContextPackage:
 
-        allowed: set[str] = set()
+        requested_by_specialists: set[str] = set()
 
         for specialist in specialists:
 
-            allowed.update(specialist.allowed_context)
+            requested_by_specialists.update(specialist.allowed_context)
 
-        if not allowed:
+        forbidden_applied: frozenset[str] = (
+            FORBIDDEN_CONTEXT_CATEGORIES & requested_by_specialists
+        )
 
-            allowed.update(self.CATEGORY_PRIORITY)
+        allowed: set[str] = requested_by_specialists - forbidden_applied
+
+        if not allowed and not requested_by_specialists:
+
+            # Backward-compatible fallback: no selected specialists means the
+            # union of all known categories, still filtered by the forbidden
+            # set. If a specialist set was provided but every declared
+            # category was forbidden, keep the empty allowlist and assemble
+            # only the always-on user message.
+            allowed = set(self.CATEGORY_PRIORITY) - set(FORBIDDEN_CONTEXT_CATEGORIES)
 
 
 
         facts: list[ContextFact] = []
 
         omitted: list[str] = []
+
+        denied_categories: list[str] = []
 
 
 
@@ -353,7 +382,96 @@ class ContextCompiler:
 
         )
 
+        if recent_messages and "project_overview" in allowed:
+            recent_window: list[dict[str, str]] = []
+            for item in recent_messages[-12:]:
+                if not isinstance(item, dict):
+                    continue
+                role = str(item.get("role") or "user")
+                content = str(item.get("content") or "").strip()
+                if not content:
+                    continue
+                if len(content) > 280:
+                    content = content[:277].rstrip() + "..."
+                recent_window.append({"role": role, "content": content})
+            if recent_window:
+                facts.append(
+                    _fact(
+                        "conversation.recent",
+                        recent_window,
+                        category="project_overview",
+                        authority="unverified",
+                        source_type="conversation",
+                    )
+                )
 
+        if conversation_plan and "project_overview" in allowed:
+            facts.append(
+                _fact(
+                    "conversation.plan",
+                    {
+                        "primaryIntent": conversation_plan.get("primaryIntent"),
+                        "responseMode": conversation_plan.get("responseMode"),
+                        "creativeStage": conversation_plan.get("creativeStage"),
+                        "creativeSubstate": conversation_plan.get("creativeSubstate"),
+                        "shouldAskQuestion": conversation_plan.get("shouldAskQuestion"),
+                        "selectedQuestion": conversation_plan.get("selectedQuestion"),
+                        "recommendedNextStep": conversation_plan.get("recommendedNextStep"),
+                    },
+                    category="project_overview",
+                    authority="proposed",
+                    source_type="conversation_plan",
+                )
+            )
+
+        # Project Wiki snapshot + honest attachment metadata (no invented perception).
+        # Import helpers lazily from a leaf module path to avoid service↔intelligence cycles.
+        try:
+            from ..context_enrichment import attachment_context_block, compact_wiki_context
+
+            if "project_overview" in allowed:
+                wiki_block = compact_wiki_context(db, project_id)
+                if wiki_block:
+                    facts.append(
+                        _fact(
+                            "project.wiki_snapshot",
+                            wiki_block,
+                            category="project_overview",
+                            authority="proposed",
+                            source_type="project_wiki",
+                        )
+                    )
+            if attachment_ids and ("references" in allowed or "project_overview" in allowed):
+                attachment_block = attachment_context_block(
+                    db, project_id=project_id, attachment_ids=attachment_ids
+                )
+                if attachment_block:
+                    facts.append(
+                        _fact(
+                            "turn.attachments",
+                            attachment_block,
+                            category="references" if "references" in allowed else "project_overview",
+                            authority="unverified",
+                            source_type="asset_metadata",
+                        )
+                    )
+        except Exception:
+            pass
+
+        # Hard allowlist: strip any fact whose category is forbidden regardless
+        # of the assembled facts, then dedupe omitted categories before the
+        # budget pass records them in diagnostics.
+        facts = [
+            fact
+            for fact in facts
+            if fact.key == "user.message" or fact.category not in FORBIDDEN_CONTEXT_CATEGORIES
+        ]
+
+        reconciled_omitted: list[str] = []
+        for entry in omitted:
+            if entry not in reconciled_omitted:
+                reconciled_omitted.append(entry)
+        omitted = reconciled_omitted
 
         selected, omitted_categories = self._apply_budget(facts, allowed)
 
@@ -373,6 +491,23 @@ class ContextCompiler:
 
         }
 
+        diagnostics: dict[str, Any] = {
+            "allowedCategories": sorted(allowed),
+            "charBudget": self.char_budget,
+        }
+        for entry in sorted(forbidden_applied):
+            if entry not in denied_categories:
+                denied_categories.append(entry)
+        diagnostics["forbiddenCategories"] = sorted(denied_categories)
+
+        final_omitted: list[str] = list(omitted)
+        for entry in omitted_categories:
+            if entry not in final_omitted:
+                final_omitted.append(entry)
+        for entry in denied_categories:
+            if entry not in final_omitted:
+                final_omitted.append(entry)
+
         return ContextPackage(
 
             schemaVersion=CONTEXT_PACKAGE_VERSION,
@@ -383,7 +518,7 @@ class ContextCompiler:
 
             facts=selected,
 
-            omittedCategories=omitted + omitted_categories,
+            omittedCategories=final_omitted,
 
             tokenEstimate=_estimate_tokens(json.dumps(payload, default=str)),
 
@@ -393,7 +528,7 @@ class ContextCompiler:
 
             capabilities=capabilities,
 
-            diagnostics={"allowedCategories": sorted(allowed), "charBudget": self.char_budget},
+            diagnostics=diagnostics,
 
         )
 

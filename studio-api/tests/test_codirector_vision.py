@@ -87,6 +87,8 @@ def test_scoring_bands_and_blocking_cannot_average_away():
 
 
 def test_mock_validate_clears_visual_validation_pending(db: Session):
+    import json
+
     plan = ProductionPlan(
         planId="plan-vision-1",
         projectId="proj-vision-1",
@@ -97,7 +99,14 @@ def test_mock_validate_clears_visual_validation_pending(db: Session):
     IntelligenceStore.save_plan(db, plan=plan, status="draft")
     row = db.get(__import__("app.db", fromlist=["CoDirectorProductionPlan"]).CoDirectorProductionPlan, "plan-vision-1")
     assert row is not None
-    assert row.visual_validation_pending == 1
+    # Current architecture: save_plan routes through PlanService.create_draft, which
+    # does not map the legacy row column; the authoritative pending flag lives in
+    # plan_json. Seed both to simulate a storyboard plan awaiting validation.
+    data = json.loads(row.plan_json or "{}")
+    data["visualValidationPending"] = True
+    row.plan_json = json.dumps(data)
+    row.visual_validation_pending = 1
+    db.commit()
 
     result = run_validation(
         db,

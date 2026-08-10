@@ -124,7 +124,7 @@ def _write_scene_clip(
     from ....db import Scene
     from ....director_timeline import (
         TimelineClip,
-        dumps_director_timeline,
+        dumps_director_timeline_preserving_embedded,
         parse_director_timeline,
     )
 
@@ -155,7 +155,7 @@ def _write_scene_clip(
                 label=clip_label or kind,
             )
         )
-    scene.director_json = dumps_director_timeline(tl)
+    scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
     db.commit()
     return True
 
@@ -304,8 +304,15 @@ class AudioService:
             )
             return result
 
-        # M2.10b sandbox: sync generate via registry when flag + registryId authorize.
+        # M2.10b / M3.0i: sync generate via capability-specific registry adapters.
         registry_id = payload.get("registryId") or payload.get("providerKey")
+        if not registry_id:
+            try:
+                from ...native_audio.registry import resolve_native_audio_provider
+
+                registry_id = resolve_native_audio_provider(kind).get("registryId")
+            except Exception:
+                registry_id = None
         if registry_id:
             try:
                 from ...m210b.flags import m210b_audio_sandbox_enabled
@@ -465,8 +472,18 @@ class AudioService:
         if wants_fixture(payload):
             return fixture_audio_result(payload)
 
-        # M2.10b sandbox audio: try registry adapter when flag + execution lock authorize.
+        # M2.10b / M3.0i native audio: capability-specific registry adapters.
+        kind = str(payload.get("kind") or "dialogue")
         registry_id = payload.get("registryId") or payload.get("providerKey")
+        route_meta: dict[str, Any] = {}
+        if not registry_id:
+            try:
+                from ...native_audio.registry import resolve_native_audio_provider
+
+                route_meta = resolve_native_audio_provider(kind)
+                registry_id = route_meta.get("registryId")
+            except Exception:
+                registry_id = None
         if registry_id:
             try:
                 from ...m210b.flags import m210b_audio_sandbox_enabled
@@ -478,16 +495,17 @@ class AudioService:
                 if m210b_audio_sandbox_enabled():
                     adapter = get_adapter(str(registry_id))
                     if adapter is not None:
-                        kind = str(payload.get("kind") or "dialogue")
                         cap_map = {
                             "dialogue": "audio.dialogue.generate",
                             "sfx": "audio.sfx.generate",
                             "ambience": "audio.sfx.generate",
+                            "foley": "audio.sfx.generate",
                             "music": "audio.music.generate",
                         }
                         req = AudioGenerateRequest(
                             capabilityId=str(
-                                payload.get("capabilityId") or cap_map.get(kind, "audio.dialogue.generate")
+                                payload.get("capabilityId")
+                                or cap_map.get(kind, "audio.dialogue.generate")
                             ),
                             projectId=project_id,
                             sceneId=payload.get("sceneId"),
@@ -505,6 +523,9 @@ class AudioService:
                         )
                         result = adapter.generate(req)
                         asset_id = result.assetId or f"m210b-{registry_id}-{uuid.uuid4().hex[:10]}"
+                        provenance = dict(result.provenance or {})
+                        if route_meta:
+                            provenance["nativeAudioRoute"] = route_meta
                         ver = create_asset_version(
                             db,
                             project_id=project_id,
@@ -516,10 +537,11 @@ class AudioService:
                                 "sandboxOnly": True,
                                 "productionApproved": False,
                                 "m210b": True,
+                                "m30iNativeAudio": True,
                                 "registryId": registry_id,
                                 "assetPath": result.assetPath,
                                 "sha256": result.sha256,
-                                "provenance": result.provenance,
+                                "provenance": provenance,
                                 "fixture": bool(result.fixture),
                                 "prompt": req.prompt,
                             },
@@ -537,7 +559,7 @@ class AudioService:
                             "sha256": result.sha256,
                             "durationSec": result.durationSec,
                             "sampleRate": result.sampleRate,
-                            "provenance": result.provenance,
+                            "provenance": provenance,
                             "projectId": project_id,
                         }
 

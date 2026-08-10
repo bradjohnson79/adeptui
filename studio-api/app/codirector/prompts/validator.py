@@ -17,6 +17,7 @@ KNOWN_OUTPUT_SCHEMAS: frozenset[str] = frozenset(
         "specialist-finding-v1",
         "playbook-v1",
         "standard-v1",
+        "story-summary-v1",
     }
 )
 KNOWN_CONTEXT_KEYS: frozenset[str] = frozenset(

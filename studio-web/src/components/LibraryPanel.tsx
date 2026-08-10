@@ -1,10 +1,103 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
 
 const DIR_STATUS = ["draft", "generating", "variations", "approved", "used_in_editor"] as const;
 const ED_STATUS = ["animatic", "rough_cut", "scene_cut", "alternate", "approved", "master"] as const;
+const MODEL_FAMILIES = ["all", "zimage", "flux", "qwen", "imagen", "krea2"] as const;
+
+function favoritesKey(projectId: string) {
+  return `adept-library-favorites:${projectId}`;
+}
+
+function loadFavorites(projectId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(favoritesKey(projectId));
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveFavorites(projectId: string, ids: Set<string>) {
+  localStorage.setItem(favoritesKey(projectId), JSON.stringify([...ids]));
+}
+
+function parsePromptMeta(item: any): Record<string, unknown> {
+  try {
+    return JSON.parse(item?.prompt_meta_json || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function assetThumbUrl(item: any): string {
+  const meta = parsePromptMeta(item);
+  const gate = (meta.gate || {}) as Record<string, unknown>;
+  const thumb = (gate.thumbnailPath || gate.previewPath || meta.previewPath) as string | undefined;
+  if (thumb) return api.mediaUrl(thumb);
+  return item.kind === "image" ? api.assetUrl(item.id) : "";
+}
+
+function assetModelFamily(item: any): string | null {
+  const meta = parsePromptMeta(item);
+  const prov = (meta.provenance || {}) as Record<string, unknown>;
+  const settings = (prov.settings || {}) as Record<string, unknown>;
+  const rec = (meta.recommendation || {}) as Record<string, unknown>;
+  const model = String(settings.model || meta.model || "");
+  if (rec.executionFamily) return String(rec.executionFamily);
+  if (/krea/i.test(model)) return "krea2";
+  if (/zimage|z-image/i.test(model)) return "zimage";
+  if (/flux/i.test(model)) return "flux";
+  if (/qwen/i.test(model)) return "qwen";
+  if (/imagen/i.test(model)) return "imagen";
+  return model ? model.split("/")[0].toLowerCase() : null;
+}
+
+function assetHasReferences(item: any): boolean {
+  const meta = parsePromptMeta(item);
+  const prov = (meta.provenance || {}) as Record<string, unknown>;
+  const refs = (prov.references || []) as unknown[];
+  const parents = (prov.parentImages || []) as unknown[];
+  return refs.length > 0 || parents.length > 0;
+}
+
+function ImageProvenanceBlock({ item }: { item: any }) {
+  const meta = parsePromptMeta(item);
+  const prov = (meta.provenance || null) as Record<string, unknown> | null;
+  if (!prov) {
+    return <p className="empty">No ImageProvenance on this asset.</p>;
+  }
+  const fields: [string, unknown][] = [
+    ["workflow", prov.workflow],
+    ["workflowVersion", prov.workflowVersion],
+    ["runtime", prov.runtime],
+    ["provider", prov.provider],
+    ["prompt", prov.prompt],
+    ["seed", prov.seed],
+    ["intentId", prov.intentId],
+    ["generationTime", prov.generationTime],
+  ];
+  return (
+    <div data-testid="library-provenance" style={{ fontSize: "0.82rem" }}>
+      {fields.map(([k, v]) =>
+        v != null && v !== "" ? (
+          <p key={k} style={{ margin: "0.15rem 0" }}>
+            <strong>{k}</strong>: {String(v).slice(0, 120)}
+            {String(v).length > 120 ? "…" : ""}
+          </p>
+        ) : null,
+      )}
+      {(prov.references as unknown[])?.length ? (
+        <p className="muted">References: {(prov.references as unknown[]).length}</p>
+      ) : null}
+      {(prov.parentImages as unknown[])?.length ? (
+        <p className="muted">Parent images: {(prov.parentImages as string[]).join(", ")}</p>
+      ) : null}
+    </div>
+  );
+}
 
 function ReferencesUsedBlock({ projectId, assetId }: { projectId: string; assetId: string }) {
   const [data, setData] = useState<any>(null);
@@ -48,6 +141,10 @@ export function LibraryPanel({
 }) {
   const [scope, setScope] = useState<"project" | "global">("project");
   const [q, setQ] = useState("");
+  const [folderFilter, setFolderFilter] = useState<{ folderId?: string; systemKey?: string; label?: string } | null>(
+    null
+  );
+  const [treeFolders, setTreeFolders] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [graph, setGraph] = useState<any>(null);
@@ -58,13 +155,41 @@ export function LibraryPanel({
   const [dirSeqs, setDirSeqs] = useState<any[]>([]);
   const [editor, setEditor] = useState<any>(null);
   const [dirFilter, setDirFilter] = useState<string>("all");
+  const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites(project.id));
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [modelFamilyFilter, setModelFamilyFilter] = useState<string>("all");
+  const [refsFilter, setRefsFilter] = useState<"all" | "has" | "none">("all");
+  const [collectionFilter, setCollectionFilter] = useState<string>("");
+  const [collections, setCollections] = useState<any[]>([]);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [genHistory, setGenHistory] = useState<any[]>([]);
+
+  useEffect(() => {
+    setFavorites(loadFavorites(project.id));
+  }, [project.id]);
+
+  useEffect(() => {
+    api.imageProductCollections(project.id).then((r) => setCollections(r.collections || [])).catch(() => setCollections([]));
+    api.imageProductHistory(project.id, 20).then((r) => setGenHistory(r.entries || [])).catch(() => setGenHistory([]));
+  }, [project.id, project.assets.length]);
 
   const refresh = () =>
-    api.library(project.id, { q, scope }).then(setItems).catch(console.error);
+    api
+      .library(project.id, {
+        q,
+        scope,
+        folder: folderFilter?.folderId,
+        system_key: folderFilter?.systemKey,
+      })
+      .then((payload) => {
+        setItems(payload.items || []);
+        setTreeFolders(payload.tree?.folders || []);
+      })
+      .catch(console.error);
 
   useEffect(() => {
     refresh();
-  }, [project.id, q, scope, project.assets.length]);
+  }, [project.id, q, scope, folderFilter, project.assets.length]);
 
   useEffect(() => {
     api.listMasterSheets(project.id).then(setSheets).catch(() => setSheets([]));
@@ -89,6 +214,51 @@ export function LibraryPanel({
     await onChange();
     refresh();
   };
+
+  const toggleFavorite = (assetId: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      saveFavorites(project.id, next);
+      return next;
+    });
+  };
+
+  const createCollection = async () => {
+    const name = newCollectionName.trim();
+    if (!name) return;
+    const col = await api.imageProductCreateCollection(project.id, { name });
+    setCollections((prev) => [...prev, col]);
+    setNewCollectionName("");
+    setMsg(`Collection “${name}” created`);
+  };
+
+  const addSelectedToCollection = async (collectionId: string) => {
+    if (!selected) return;
+    await api.imageProductAddCollectionAssets(project.id, collectionId, [selected]);
+    const r = await api.imageProductCollections(project.id);
+    setCollections(r.collections || []);
+    setMsg("Added to collection");
+  };
+
+  const filteredItems = useMemo(() => {
+    let rows = items;
+    if (showFavoritesOnly) rows = rows.filter((a) => favorites.has(a.id));
+    if (modelFamilyFilter !== "all") {
+      rows = rows.filter((a) => assetModelFamily(a) === modelFamilyFilter);
+    }
+    if (refsFilter === "has") rows = rows.filter((a) => assetHasReferences(a));
+    if (refsFilter === "none") rows = rows.filter((a) => !assetHasReferences(a));
+    if (collectionFilter) {
+      const col = collections.find((c) => c.collectionId === collectionFilter);
+      const ids = new Set(col?.assetIds || []);
+      rows = rows.filter((a) => ids.has(a.id));
+    }
+    return rows;
+  }, [items, showFavoritesOnly, favorites, modelFamilyFilter, refsFilter, collectionFilter, collections]);
+
+  const selectedItem = useMemo(() => items.find((a) => a.id === selected) || null, [items, selected]);
 
   const filteredDir = dirFilter === "all" ? dirSeqs : dirSeqs.filter((s) => s.status === dirFilter);
   const clipCount = editor
@@ -121,7 +291,7 @@ export function LibraryPanel({
 
       <section className="dash-card" style={{ margin: "1rem 0" }}>
         <h2 className="section-heading" style={{ fontSize: "1.15rem" }}>
-          Director Sequences
+          Timeline Sequences
         </h2>
         <p className="muted">Prompt Timeline packages — draft through approved / used in Editor.</p>
         <div className="row" style={{ flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem" }}>
@@ -140,7 +310,7 @@ export function LibraryPanel({
           ))}
         </div>
         {!filteredDir.length ? (
-          <p className="empty">No Director sequences yet. Send from Director Prompt Timeline.</p>
+          <p className="empty">No Timeline sequences yet. Send from Timeline Prompt.</p>
         ) : (
           <ul className="ms-list">
             {filteredDir.map((s) => (
@@ -152,8 +322,8 @@ export function LibraryPanel({
                   {s.scene_id ? ` · scene ${String(s.scene_id).slice(0, 8)}` : ""}
                 </span>
                 {onGo && (
-                  <button type="button" style={{ marginLeft: 8 }} onClick={() => onGo("director")}>
-                    Open Director
+                  <button type="button" style={{ marginLeft: 8 }} onClick={() => onGo("timeline")}>
+                    Open Timeline
                   </button>
                 )}
               </li>
@@ -188,8 +358,8 @@ export function LibraryPanel({
               {clipCount === 1 ? "" : "s"}
             </span>
             {onGo && (
-              <button type="button" style={{ marginLeft: 8 }} onClick={() => onGo("editor")}>
-                Open Editor
+              <button type="button" style={{ marginLeft: 8 }} onClick={() => onGo("magi")}>
+                Open MAGI Editor
               </button>
             )}
           </p>
@@ -238,12 +408,156 @@ export function LibraryPanel({
         )}
       </section>
 
+      <section className="dash-card" style={{ margin: "1rem 0" }} data-testid="library-collections">
+        <h2 className="section-heading" style={{ fontSize: "1.15rem" }}>
+          Production Collections
+        </h2>
+        <p className="muted">Image-product collections — group assets for production handoff.</p>
+        <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          <input
+            value={newCollectionName}
+            onChange={(e) => setNewCollectionName(e.target.value)}
+            placeholder="New collection name"
+            data-testid="library-new-collection"
+          />
+          <button type="button" onClick={() => void createCollection()} disabled={!newCollectionName.trim()}>
+            Create
+          </button>
+        </div>
+        {!collections.length ? (
+          <p className="empty">No collections yet.</p>
+        ) : (
+          <ul className="ms-list">
+            {collections.map((c) => (
+              <li key={c.collectionId}>
+                <button
+                  type="button"
+                  className={collectionFilter === c.collectionId ? "primary" : "linkish"}
+                  onClick={() =>
+                    setCollectionFilter((prev) => (prev === c.collectionId ? "" : c.collectionId))
+                  }
+                >
+                  {c.name}
+                </button>
+                <span className="scene-meta"> · {(c.assetIds || []).length} assets</span>
+                {selected && (
+                  <button
+                    type="button"
+                    style={{ marginLeft: 8 }}
+                    onClick={() => void addSelectedToCollection(c.collectionId)}
+                  >
+                    + selected
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap", marginBottom: "0.75rem" }} data-testid="library-filters">
+        <button
+          type="button"
+          className={showFavoritesOnly ? "primary" : ""}
+          onClick={() => setShowFavoritesOnly((v) => !v)}
+        >
+          ★ Favorites{favorites.size ? ` (${favorites.size})` : ""}
+        </button>
+        {MODEL_FAMILIES.map((f) => (
+          <button
+            key={f}
+            type="button"
+            className={modelFamilyFilter === f ? "primary" : ""}
+            onClick={() => setModelFamilyFilter(f)}
+          >
+            {f === "all" ? "All models" : f === "krea2" ? "Krea 2" : f}
+          </button>
+        ))}
+        {(["all", "has", "none"] as const).map((r) => (
+          <button
+            key={r}
+            type="button"
+            className={refsFilter === r ? "primary" : ""}
+            onClick={() => setRefsFilter(r)}
+          >
+            {r === "all" ? "Any refs" : r === "has" ? "Has refs" : "No refs"}
+          </button>
+        ))}
+        {collectionFilter && (
+          <button type="button" className="ghost" onClick={() => setCollectionFilter("")}>
+            Clear collection filter
+          </button>
+        )}
+      </div>
+
       <div className="library-layout">
-        <div className="library-grid">
-          {!items.length ? (
-            <p className="empty">No assets in this scope.</p>
+        <aside className="library-inspector" style={{ maxWidth: 220 }}>
+          <h2>Folders</h2>
+          <button
+            type="button"
+            className={!folderFilter ? "primary" : ""}
+            style={{ display: "block", marginBottom: "0.35rem", width: "100%", textAlign: "left" }}
+            onClick={() => setFolderFilter(null)}
+          >
+            All assets
+          </button>
+          {!treeFolders.length ? (
+            <p className="empty">No folder tree.</p>
           ) : (
-            items.map((a) => (
+            <ul className="home-list" style={{ fontSize: "0.85rem" }}>
+              {treeFolders.map((f) => (
+                <li key={f.folderId || f.systemKey}>
+                  <button
+                    type="button"
+                    className={
+                      folderFilter?.systemKey === f.systemKey || folderFilter?.folderId === f.folderId
+                        ? "linkish primary"
+                        : "linkish"
+                    }
+                    onClick={() =>
+                      setFolderFilter({
+                        folderId: f.folderId,
+                        systemKey: f.systemKey,
+                        label: f.displayName,
+                      })
+                    }
+                  >
+                    {f.displayName}
+                  </button>
+                  {(f.children || []).slice(0, 6).map((child: any) => (
+                    <button
+                      key={child.folderId || child.systemKey}
+                      type="button"
+                      className={
+                        folderFilter?.systemKey === child.systemKey ? "linkish primary" : "linkish"
+                      }
+                      style={{ display: "block", marginLeft: "0.75rem", fontSize: "0.8rem" }}
+                      onClick={() =>
+                        setFolderFilter({
+                          folderId: child.folderId,
+                          systemKey: child.systemKey,
+                          label: child.displayName,
+                        })
+                      }
+                    >
+                      {child.displayName}
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          )}
+          {folderFilter?.label && (
+            <p className="muted" style={{ fontSize: "0.75rem" }}>
+              Filter: {folderFilter.label}
+            </p>
+          )}
+        </aside>
+        <div className="library-grid">
+          {!filteredItems.length ? (
+            <p className="empty">No assets match filters.</p>
+          ) : (
+            filteredItems.map((a) => (
               <button
                 key={a.id}
                 type="button"
@@ -251,11 +565,19 @@ export function LibraryPanel({
                 onClick={() => setSelected(a.id)}
               >
                 {a.kind === "image" ? (
-                  <img src={api.assetUrl(a.id)} alt={a.filename} />
+                  <img src={assetThumbUrl(a)} alt={a.filename} loading="lazy" />
                 ) : (
                   <div className="library-card-fallback">{a.kind}</div>
                 )}
-                <span>{a.tag || a.filename}</span>
+                <span>
+                  {favorites.has(a.id) ? "★ " : ""}
+                  {a.tag || a.filename}
+                </span>
+                {assetModelFamily(a) && (
+                  <span className="pill" style={{ fontSize: "0.65rem" }}>
+                    {assetModelFamily(a)}
+                  </span>
+                )}
               </button>
             ))
           )}
@@ -274,6 +596,9 @@ export function LibraryPanel({
                 <button type="button" onClick={() => suggestLabel(selected)}>
                   AI categorize (confirm)
                 </button>
+                <button type="button" onClick={() => toggleFavorite(selected)}>
+                  {favorites.has(selected) ? "Unfavorite" : "Favorite"}
+                </button>
                 <button
                   type="button"
                   onClick={() =>
@@ -286,6 +611,21 @@ export function LibraryPanel({
                   Promote to Global
                 </button>
               </div>
+              <h3>ImageProvenance</h3>
+              {selectedItem ? <ImageProvenanceBlock item={selectedItem} /> : null}
+              <h3>Generation history</h3>
+              {!genHistory.length ? (
+                <p className="empty">No image-product history yet.</p>
+              ) : (
+                <ul className="home-list" style={{ fontSize: "0.8rem" }}>
+                  {genHistory.slice(0, 8).map((h, i) => (
+                    <li key={h.jobId || i}>
+                      {String(h.purpose || "generate")} · {String(h.prompt || "").slice(0, 48)}
+                      {h.jobId ? ` · ${String(h.jobId).slice(0, 8)}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              )}
               <h3>References used</h3>
               <ReferencesUsedBlock projectId={project.id} assetId={selected} />
               <h3>Related / lineage</h3>

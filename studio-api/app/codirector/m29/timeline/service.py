@@ -170,7 +170,7 @@ class TimelineService:
             from ....db import Scene
             from ....director_timeline import (
                 TimelineClip,
-                dumps_director_timeline,
+                dumps_director_timeline_preserving_embedded,
                 parse_director_timeline,
             )
 
@@ -226,7 +226,7 @@ class TimelineService:
                         )
                     else:
                         tl.video_clips.append(clip)
-                scene.director_json = dumps_director_timeline(tl)
+                scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
                 scene.continuity_json = json.dumps(cont)
                 db.commit()
                 applied_scene = scene_id

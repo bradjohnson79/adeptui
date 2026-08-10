@@ -57,7 +57,28 @@ CHARACTER_SHEET_VIEWS: list[dict[str, str]] = [
             "same face identity as the reference image, sharp details, no text, no watermark"
         ),
     },
+    {
+        "key": "back_closeup",
+        "tag_suffix": "back_closeup",
+        "label": "Back close-up",
+        "prompt": (
+            "clean character portrait close-up from behind, rear head and shoulders, "
+            "show hair construction and ear silhouette, soft studio lighting, "
+            "plain light gray background, same identity as the reference image, "
+            "sharp details, no text, no watermark"
+        ),
+    },
 ]
+
+# Map character_sheet view keys → Character Identity reference roles
+CHARACTER_SHEET_ROLE_MAP: dict[str, str] = {
+    "front": "full_body_front",
+    "side": "full_body_side_left",
+    "back": "full_body_back",
+    "front_closeup": "closeup_front",
+    "side_closeup": "closeup_side_left",
+    "back_closeup": "closeup_back",
+}
 
 
 CAMERA_ANGLE_VIEWS: list[dict[str, str]] = [
@@ -195,12 +216,22 @@ def build_zimage_ref_workflow(
     cfg: float = 1.0,
     filename_prefix: str = "studio/zimg",
     use_clip_vision: bool = True,
+    denoise: float = 0.72,
 ) -> dict[str, Any]:
     """
-    Z-Image Turbo + TextEncodeZImageOmni reference workflow.
-    Generates one image guided by a reference still.
+    Z-Image Turbo reference-guided generation (img2img latent path).
+
+    Do NOT feed the reference into TextEncodeZImageOmni alongside EmptyLatentImage —
+    that combination produces latent shape mismatches
+    (e.g. shape '[1, 14, 14, 1280]' is invalid for input of size 328960).
+
+    Production path:
+      LoadImage → ImageScale → VAEEncode → KSampler(denoise<1)
+      TextEncodeZImageOmni with text only (no image1) for positive conditioning.
     """
-    wf: dict[str, Any] = {
+    _ = use_clip_vision, clip_vision_name  # reserved; CLIP-vision path optional later
+    d = max(0.35, min(0.95, float(denoise)))
+    return {
         "1": {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
@@ -217,18 +248,27 @@ def build_zimage_ref_workflow(
             "class_type": "LoadImage",
             "inputs": {"image": reference_image},
         },
+        "4b": {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["4", 0],
+                "upscale_method": "lanczos",
+                "width": width,
+                "height": height,
+                "crop": "center",
+            },
+        },
         "5": {
             "class_type": "ModelSamplingAuraFlow",
             "inputs": {"model": ["1", 0], "shift": 3.0},
         },
+        # Text-only Omni — avoids Omni+image latent geometry mismatch with EmptyLatent
         "7": {
             "class_type": "TextEncodeZImageOmni",
             "inputs": {
                 "clip": ["2", 0],
                 "prompt": prompt,
                 "auto_resize_images": True,
-                "vae": ["3", 0],
-                "image1": ["4", 0],
             },
         },
         "8": {
@@ -236,22 +276,22 @@ def build_zimage_ref_workflow(
             "inputs": {"text": negative, "clip": ["2", 0]},
         },
         "9": {
-            "class_type": "EmptyLatentImage",
-            "inputs": {"width": width, "height": height, "batch_size": 1},
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["4b", 0], "vae": ["3", 0]},
         },
         "10": {
             "class_type": "KSampler",
             "inputs": {
                 "model": ["5", 0],
                 "seed": seed if seed >= 0 else 42,
-                "steps": steps,
+                "steps": max(4, steps),
                 "cfg": cfg,
                 "sampler_name": "euler",
                 "scheduler": "simple",
                 "positive": ["7", 0],
                 "negative": ["8", 0],
                 "latent_image": ["9", 0],
-                "denoise": 1.0,
+                "denoise": d,
             },
         },
         "11": {
@@ -263,15 +303,6 @@ def build_zimage_ref_workflow(
             "inputs": {"images": ["11", 0], "filename_prefix": filename_prefix},
         },
     }
-
-    if use_clip_vision and clip_vision_name:
-        wf["6"] = {
-            "class_type": "CLIPVisionLoader",
-            "inputs": {"clip_name": clip_vision_name},
-        }
-        wf["7"]["inputs"]["image_encoder"] = ["6", 0]
-
-    return wf
 
 
 def views_for_tool(tool: str) -> list[dict[str, str]]:

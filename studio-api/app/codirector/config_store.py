@@ -27,6 +27,7 @@ _CONFIG_KEYS = (
     "primaryModel",
     "fallbackModel",
     "allowAutomaticModelDownload",
+    "allowMockProvider",
     "timeoutSec",
 )
 
@@ -43,6 +44,11 @@ def _defaults() -> dict[str, Any]:
         "primaryModel": primary,
         "fallbackModel": "gemma4:12b",
         "allowAutomaticModelDownload": False,
+        # c2/D17: mock provider is opt-in by config key (default False). The
+        # service-layer guard additionally requires STUDIO_E2E, so the mock
+        # provider is never selectable in a production run even if this key is
+        # somehow flipped. See service._mock_provider_allowed().
+        "allowMockProvider": False,
         "timeoutSec": settings.ollama_timeout_sec,
     }
 
@@ -61,6 +67,7 @@ def _normalize(cfg: dict[str, Any]) -> dict[str, Any]:
     if "fallbackModel" not in cfg or cfg.get("fallbackModel") is None:
         cfg["fallbackModel"] = "gemma4:12b"
     cfg["allowAutomaticModelDownload"] = bool(cfg.get("allowAutomaticModelDownload", False))
+    cfg["allowMockProvider"] = bool(cfg.get("allowMockProvider", False))
     return cfg
 
 

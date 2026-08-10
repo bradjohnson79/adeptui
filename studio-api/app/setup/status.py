@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from ..avatar_runtimes import component_metadata as avatar_component_metadata, is_avatar_runtime_component
 from .catalog import COMPONENTS, ComponentDefinition
 from .diagnostics import Verification, utc_now, verify_component
 from .state import load_state, update_state
@@ -13,6 +16,8 @@ CANONICAL_STATUSES = {
     "download_unavailable",
     "source_pending",
 }
+_STATUS_CACHE_TTL_SEC = 2.0
+_STATUS_CACHE: tuple[float, dict[str, Any]] | None = None
 
 _RECOMMENDATION_LABELS = {
     "none": "No Action Required",
@@ -270,6 +275,32 @@ def _pack_source_fields(definition: ComponentDefinition) -> dict[str, Any]:
     }
 
 
+def _avatar_runtime_fields(definition: ComponentDefinition, verification: Verification) -> dict[str, Any]:
+    if not is_avatar_runtime_component(definition.id):
+        return {}
+    meta = avatar_component_metadata(definition.id)
+    env = dict(meta.get("environment") or {})
+    return {
+        "source_valid": True,
+        "source_available": True,
+        "source_state": "ready_to_download",
+        "provider_id": env.get("providerId"),
+        "expected_download_bytes": definition.download_bytes,
+        "expected_installed_bytes": definition.installed_bytes,
+        "secondary_action": {"action": "link_existing", "label": "Link Existing Folder"},
+        "tertiary_action": {"action": "choose_install_location", "label": "Choose Install Location"},
+        "purpose": meta.get("purpose"),
+        "min_vram_gb": meta.get("min_vram_gb"),
+        "recommended_vram_gb": meta.get("recommended_vram_gb"),
+        "source_repo": meta.get("source_repo"),
+        "license": meta.get("license"),
+        "logs": list(meta.get("logs") or []),
+        "environment": env,
+        "available_version": env.get("codeRevision"),
+        "installed_version_override": verification.version,
+    }
+
+
 def _custom_source_active(component_id: str) -> bool:
     try:
         from .download_sources.overrides import get_override
@@ -291,6 +322,12 @@ def _record_pack_attempt_cleanup(state: dict[str, Any], component_id: str) -> No
 
 
 def build_status(*, persist: bool = True) -> dict[str, Any]:
+    global _STATUS_CACHE
+    if persist and _STATUS_CACHE is not None:
+        cached_at, cached_payload = _STATUS_CACHE
+        if (time.monotonic() - cached_at) < _STATUS_CACHE_TTL_SEC:
+            return deepcopy(cached_payload)
+
     state = load_state()
     previous_status = state.get("status", {})
     components: list[dict[str, Any]] = []
@@ -306,6 +343,17 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         )
         state = load_state()
 
+    jobs_by_component: dict[str, list[dict]] = {}
+    try:
+        from ..source_manager.install_jobs.service import list_jobs as list_install_jobs
+
+        for install_job in list_install_jobs(active_only=False):
+            component_id = str(install_job.get("componentId") or "")
+            if component_id:
+                jobs_by_component.setdefault(component_id, []).append(install_job)
+    except Exception:
+        jobs_by_component = {}
+
     for definition in COMPONENTS:
         active = registry.active_for_component(definition.id)
         old = previous_status.get(definition.id, {})
@@ -316,8 +364,31 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             verification,
             raw_diagnostic if isinstance(raw_diagnostic, dict) else None,
         )
+        try:
+            from .lifecycle.service import component_metadata, lifecycle_state, recipe_for_component
+
+            component_jobs = jobs_by_component.get(definition.id) or []
+            lifecycle = lifecycle_state(
+                definition.id,
+                verification=verification,
+                job=component_jobs[-1] if component_jobs else None,
+            )
+            lifecycle_meta = component_metadata(definition.id)
+            lifecycle_recipe = recipe_for_component(definition.id)
+        except Exception:
+            lifecycle = None
+            lifecycle_meta = {}
+            lifecycle_recipe = None
         pack_fields = _pack_source_fields(definition)
-        source_valid = pack_fields.get("source_valid") if pack_fields else None
+        runtime_fields = _avatar_runtime_fields(definition, verification)
+        extra_fields = {
+            **pack_fields,
+            **runtime_fields,
+            **lifecycle_meta,
+            "lifecycle": lifecycle.model_dump(mode="json") if lifecycle else None,
+            "certified_recipe": lifecycle_recipe.model_dump(mode="json") if lifecycle_recipe else None,
+        }
+        source_valid = extra_fields.get("source_valid") if extra_fields else None
 
         # Phase 1B: prefer Source Manager download-queue ops when present
         download_op = None
@@ -362,7 +433,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             elif verification.issue_code in (
                 "source_not_published",
             ):
-                if pack_fields.get("source_available"):
+                if extra_fields.get("source_available"):
                     canonical = "not_installed"
                 else:
                     canonical = "source_pending"
@@ -373,7 +444,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
                 "pack_release_not_found",
             ):
                 # A cached / available source means Install can proceed even if files are absent.
-                if pack_fields.get("source_available"):
+                if extra_fields.get("source_available"):
                     canonical = "not_installed"
                 elif verification.issue_code in (
                     "pack_provider_not_configured",
@@ -427,7 +498,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
                 canonical = "not_installed"
             elif verification.issue_code in ("credential_unverified", "credential_invalid"):
                 canonical = "error"
-        source_state = pack_fields.get("source_state")
+        source_state = extra_fields.get("source_state")
         item = {
             "component_id": definition.id,
             "id": definition.id,
@@ -471,22 +542,40 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             "path_selector": path_selector,
             "verifier": definition.verifier,
             "show_download_sizes": kind != KIND_CREDENTIAL,
-            **pack_fields,
+            **extra_fields,
         }
+        if lifecycle is not None:
+            item["lifecycle_status_label"] = lifecycle.statusLabel
+            item["lifecycle_chain_state"] = lifecycle.chainState
+            item["lifecycle_attention_state"] = lifecycle.attentionState
+            item["monitor_findings"] = [finding.model_dump(mode="json") for finding in lifecycle.monitorFindings]
+            item["certified"] = lifecycle.certified
+            item["certified_version"] = lifecycle.certifiedVersion
+            item["certified_date"] = lifecycle.certifiedDate
+            item["calibration"] = lifecycle.calibration.model_dump(mode="json") if lifecycle.calibration else None
+        if runtime_fields.get("available_version"):
+            item["available_version"] = runtime_fields["available_version"]
+        if runtime_fields.get("installed_version_override"):
+            item["installed_version"] = runtime_fields["installed_version_override"]
         # Install must stay disabled when no download source exists.
-        if canonical in ("download_unavailable", "source_pending") and not pack_fields.get("source_available"):
+        if canonical in ("download_unavailable", "source_pending") and not extra_fields.get("source_available"):
             item["install_disabled"] = True
-        elif pack_fields.get("source_available") and canonical in (
+        elif extra_fields.get("source_available") and canonical in (
             "not_installed",
             "error",
             "update_available",
         ):
             item["install_disabled"] = False
+        if is_avatar_runtime_component(definition.id):
+            env = dict(item.get("environment") or {})
+            if verification.healthy and env.get("updateAvailable"):
+                canonical = "update_available"
+                item["status"] = canonical
         components.append(item)
         previous_status[definition.id] = {
             "status": canonical,
-            "installed_version": verification.version,
-            "available_version": old.get("available_version"),
+            "installed_version": item.get("installed_version") or verification.version,
+            "available_version": item.get("available_version") or old.get("available_version"),
             "installation_path": verification.path,
             "last_verified_at": last_verified,
             "diagnostic": diagnostic,
@@ -523,7 +612,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
             item["status"] == "download_unavailable" for item in components
         ),
     }
-    return {
+    payload = {
         "schema_version": 2,
         "overall_status": overall,
         "overall_label": overall_label,
@@ -536,3 +625,11 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
         ),
         "checked_at": utc_now(),
     }
+    has_active_work = bool(payload["active_operation"]) or any(
+        item["status"] in ("installing", "checking") for item in components
+    )
+    if persist and not has_active_work:
+        _STATUS_CACHE = (time.monotonic(), deepcopy(payload))
+    else:
+        _STATUS_CACHE = None
+    return payload

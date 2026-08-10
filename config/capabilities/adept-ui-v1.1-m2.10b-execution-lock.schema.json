@@ -52,7 +52,9 @@
       "required": [
         "audio.dialogue.generate",
         "audio.sfx.generate",
-        "audio.music.generate"
+        "audio.music.generate",
+        "audio.character_voice.design",
+        "audio.character_voice.clone"
       ]
     },
     "productionAuthorized": {

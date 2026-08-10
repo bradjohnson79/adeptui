@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 from .lipsync_tracks import LipSyncTracks, parse_lipsync_tracks
+from .director_timeline_w46.camera_catalog import describe_camera_clip
 
 
 def _nid() -> str:
@@ -53,6 +54,8 @@ class PromptSegment(BaseModel):
     scene_state_id: Optional[str] = None
     model_prompt: Optional[str] = None
     negative_prompt: Optional[str] = None
+    # W46: when set, this is an Image-Attached Prompt bound to a Timeline image clip.
+    bound_image_clip_id: Optional[str] = None
 
 
 CameraMotionType = Literal[
@@ -88,12 +91,20 @@ class CameraClip(BaseModel):
     start: float = 0.0
     length: float = 2.0
     motion_type: CameraMotionType = "static"
+    motion_id: Optional[str] = None
     speed: float = 1.0
     distance: float = 1.0
     ease: str = "ease_in_out"
     shake: float = 0.0
     blend: float = 0.5
+    intensity: Optional[float] = None
+    subject_lock: Optional[float] = None
+    stabilization: Optional[str] = None
     rig: CameraRig = "tripod"
+    rig_id: Optional[str] = None
+    custom_motion_label: Optional[str] = None
+    custom_rig_label: Optional[str] = None
+    execution_strategy: Optional[str] = None
     label: str = ""
     preset_id: Optional[str] = None
 
@@ -108,7 +119,7 @@ class DirectorTimeline(BaseModel):
       - camera motion
       - audio (music / dialogue bed)
       - sfx
-      - lip sync 1 / lip sync 2 (via lipsync_tracks)
+      - one or more lip sync tracks (via lipsync_tracks)
 
     Director creates shots. Editor assembles the film.
     """
@@ -124,21 +135,25 @@ class DirectorTimeline(BaseModel):
     lipsync: LipSyncTracks = Field(default_factory=LipSyncTracks.default)
     playhead: float = 0.0
     next_image_tag_number: int = 1
+    # W46 SA40 — compilation/provenance preference (never mutates already-generated assets).
+    guidance_priority: Literal["visual_first", "prompt_first", "balanced", "custom"] = "visual_first"
 
     @classmethod
     def default(cls, duration_sec: float = 5.0, prompt: str = "") -> "DirectorTimeline":
-        segs = []
-        if prompt.strip():
-            segs.append(PromptSegment(start=0.0, length=duration_sec, text=prompt))
+        """True-empty tracks by default; lip sync starts with one empty track."""
+        _ = prompt  # kept for API compat; does not invent Timeline items
         return cls(
             media_mode="image",
             duration_sec=duration_sec,
             image_clips=[],
-            prompt_segments=segs or [PromptSegment(start=0.0, length=duration_sec, text="")],
-            camera_clips=[
-                CameraClip(start=0.0, length=duration_sec, motion_type="static", rig="tripod", label="Static")
-            ],
+            prompt_segments=[],
+            camera_clips=[],
+            audio_clips=[],
+            sfx_clips=[],
+            video_clips=[],
             lipsync=LipSyncTracks.default(),
+            playhead=0.0,
+            guidance_priority="visual_first",
         )
 
 
@@ -147,9 +162,20 @@ def camera_prompt_hint(clips: list[CameraClip]) -> str:
         return ""
     bits = []
     for c in sorted(clips, key=lambda x: x.start):
+        summary = describe_camera_clip(c)
+        motion_label = summary.get("motionLabel") or c.motion_type.replace("_", " ")
+        rig_label = summary.get("rigLabel") or c.rig.replace("_", " ")
+        extras = []
+        if c.intensity is not None:
+            extras.append(f"intensity {c.intensity:.2f}")
+        if c.subject_lock is not None:
+            extras.append(f"subject lock {c.subject_lock:.2f}")
+        if c.stabilization:
+            extras.append(f"stabilization {c.stabilization}")
         bits.append(
-            f"{c.motion_type.replace('_', ' ')} on {c.rig} "
-            f"(speed {c.speed:.2f}, distance {c.distance:.2f}, ease {c.ease}, shake {c.shake:.2f})"
+            f"{motion_label} on {rig_label} "
+            f"(speed {c.speed:.2f}, distance {c.distance:.2f}, ease {c.ease}, shake {c.shake:.2f}"
+            f"{', ' + ', '.join(extras) if extras else ''})"
         )
     return "Camera: " + "; ".join(bits)
 
@@ -163,8 +189,8 @@ def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, 
         if isinstance(data.get("lipsync"), dict):
             data["lipsync"] = parse_lipsync_tracks(json.dumps(data["lipsync"])).model_dump()
         tl = DirectorTimeline.model_validate(data)
-        if not tl.prompt_segments:
-            tl.prompt_segments = [PromptSegment(start=0.0, length=tl.duration_sec, text=fallback_prompt)]
+        # Do not invent empty prompt segments — true empty tracks (W46).
+        _ = fallback_prompt
         return tl
     except Exception:
         return DirectorTimeline.default(fallback_duration, fallback_prompt)
@@ -172,6 +198,33 @@ def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, 
 
 def dumps_director_timeline(tl: DirectorTimeline) -> str:
     return tl.model_dump_json()
+
+
+def dumps_director_timeline_preserving_embedded(
+    tl: DirectorTimeline, existing_raw: str | None
+) -> str:
+    """Serialize ``tl`` to director_json while preserving any embedded
+    ``timelineMaster`` / ``timelineWorkspace`` and other non-DirectorTimeline
+    keys that lived in the existing blob.
+
+    This is the merge path used by ``PUT /director`` so that legacy track
+    updates never erase the W46 master/workspace (PUT_DIRECTOR_PRESERVES_MASTER).
+    The DirectorTimeline fields are fully replaced by ``tl``; only the keys
+    that are NOT part of DirectorTimeline are carried over from the existing
+    blob.
+    """
+    base = json.loads(dumps_director_timeline(tl))
+    if existing_raw and str(existing_raw).strip():
+        try:
+            parsed = json.loads(existing_raw)
+            if isinstance(parsed, dict):
+                director_keys = set(base.keys())
+                for k, v in parsed.items():
+                    if k not in director_keys:
+                        base[k] = v
+        except Exception:
+            pass
+    return json.dumps(base)
 
 
 def migrate_scene_to_director(
@@ -184,14 +237,21 @@ def migrate_scene_to_director(
     audio_asset_id: str | None,
     lipsync_tracks_json: str | None,
 ) -> DirectorTimeline:
+    """COW migrate legacy scene slots onto a true-empty DirectorTimeline (only real content)."""
     tl = DirectorTimeline.default(duration_sec, prompt)
-    for clip in tl.image_clips:
-        if clip.role == "start":
-            clip.asset_id = start_asset_id
-        elif clip.role == "middle":
-            clip.asset_id = middle_asset_id
-        elif clip.role == "end":
-            clip.asset_id = end_asset_id
+    images: list[ImageClip] = []
+    if start_asset_id:
+        images.append(ImageClip(asset_id=start_asset_id, start=0.0, length=duration_sec, role="start", label="Start"))
+    if middle_asset_id:
+        images.append(ImageClip(asset_id=middle_asset_id, start=0.0, length=duration_sec, role="middle", label="Middle"))
+    if end_asset_id:
+        images.append(ImageClip(asset_id=end_asset_id, start=0.0, length=duration_sec, role="end", label="End"))
+    tl.image_clips = images
+    # Preserve creator prompt as an independent timed segment only when legacy prompt exists.
+    if (prompt or "").strip():
+        tl.prompt_segments = [
+            PromptSegment(start=0.0, length=duration_sec, text=prompt.strip())
+        ]
     if audio_asset_id:
         tl.audio_clips = [
             TimelineClip(asset_id=audio_asset_id, start=0.0, length=duration_sec, label="Audio")
@@ -214,7 +274,16 @@ def sync_legacy_fields_from_director(tl: DirectorTimeline) -> dict[str, Any]:
     segs = sorted(tl.prompt_segments, key=lambda s: s.start)
     prompt = " | ".join(s.text.strip() for s in segs if s.text.strip())
     ls = tl.lipsync
-    enabled_audio = next((t.audio_asset_id for t in ls.tracks if t.enabled and t.audio_asset_id), None)
+    enabled_audio = None
+    for track in ls.tracks:
+        if not track.enabled:
+            continue
+        enabled_audio = track.audio_asset_id or next(
+            (clip.audio_asset_id for clip in track.clips if clip.audio_asset_id),
+            None,
+        )
+        if enabled_audio:
+            break
     return {
         "duration_sec": tl.duration_sec,
         "prompt": prompt,

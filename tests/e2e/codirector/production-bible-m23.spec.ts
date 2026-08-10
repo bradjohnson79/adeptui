@@ -82,9 +82,9 @@ test.describe("@isolated codirector m2.3 production bible vertical slice", () =>
       await expect(page.getByText(new RegExp(`Version ${currentVersion} of`))).toBeVisible({
         timeout: 15_000,
       });
-      await page.getByRole("button", { name: "Characters" }).click();
-      await expect(page.getByText("Elena Voss")).toBeVisible();
-      await page.getByRole("button", { name: "Export JSON" }).click();
+      await page.locator("nav").getByRole("button", { name: "Characters" }).click();
+      await expect(page.getByRole("button", { name: "Elena Voss" })).toBeVisible();
+      await page.getByRole("button", { name: "Export" }).click();
 
       observer.assertHealthyBrowser();
     } finally {

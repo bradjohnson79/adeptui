@@ -51,6 +51,9 @@ class ProviderHealthResult:
     virtual_environment_studio_enabled: bool = False
     audio_production_enabled: bool = False
     director_timeline_enabled: bool = False
+    # M41 Wave 1: mock/E2E doubles must be explicitly identified (never silent production Ready).
+    test_only: bool = False
+    honesty: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +78,10 @@ class ProviderHealthResult:
             "virtualEnvironmentStudioEnabled": self.virtual_environment_studio_enabled,
             "audioProductionEnabled": self.audio_production_enabled,
             "directorTimelineEnabled": self.director_timeline_enabled,
+            "testOnly": self.test_only,
+            "honesty": self.honesty,
+            # `ok` remains readiness for the active provider (including E2E mock).
+            # Production UI must also check testOnly/honesty before claiming Connected.
             "ok": self.status == "Ready",
         }
 

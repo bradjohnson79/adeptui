@@ -1,5 +1,11 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { DirectorSelection, WorkspaceTab } from "../directorSelection";
+import {
+  TIMELINE_LAYOUT_EVENT,
+  loadTimelineWorkspaceLayout,
+  saveTimelineWorkspaceLayout,
+  type TimelineWorkspaceLayout,
+} from "../timelineMaster/workspaceLayout";
 
 type Ctx = {
   selection: DirectorSelection;
@@ -16,10 +22,33 @@ type Ctx = {
 const DirectorSelectionContext = createContext<Ctx | null>(null);
 
 export function DirectorSelectionProvider({ children }: { children: ReactNode }) {
+  const initialLayout = loadTimelineWorkspaceLayout();
   const [selection, setSelection] = useState<DirectorSelection>({ kind: null });
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("timeline");
-  const [snap, setSnap] = useState(true);
-  const [zoom, setZoom] = useState(1);
+  const [snapState, setSnapState] = useState(initialLayout.snapEnabled);
+  const [zoomState, setZoomState] = useState(initialLayout.zoom ?? 1);
+
+  useEffect(() => {
+    const onLayout = (event: Event) => {
+      const detail = (event as CustomEvent<TimelineWorkspaceLayout>).detail;
+      const next = detail || loadTimelineWorkspaceLayout();
+      setSnapState(Boolean(next.snapEnabled));
+      setZoomState(next.zoom ?? 1);
+    };
+    window.addEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
+    return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
+  }, []);
+
+  const setSnap = (value: boolean) => {
+    setSnapState(value);
+    saveTimelineWorkspaceLayout({ snapEnabled: value });
+  };
+
+  const setZoom = (value: number) => {
+    const next = Math.min(3, Math.max(0.5, value));
+    setZoomState(next);
+    saveTimelineWorkspaceLayout({ zoom: next });
+  };
 
   const value = useMemo(
     () => ({
@@ -28,12 +57,12 @@ export function DirectorSelectionProvider({ children }: { children: ReactNode })
       clearSelection: () => setSelection({ kind: null }),
       workspaceTab,
       setWorkspaceTab,
-      snap,
+      snap: snapState,
       setSnap,
-      zoom,
+      zoom: zoomState,
       setZoom,
     }),
-    [selection, workspaceTab, snap, zoom]
+    [selection, workspaceTab, snapState, zoomState]
   );
 
   return <DirectorSelectionContext.Provider value={value}>{children}</DirectorSelectionContext.Provider>;

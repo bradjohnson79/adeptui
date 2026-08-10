@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { buildHomeCreateProjectPath } from "../projectEntry";
 import {
   appendAudit,
   getAction,
@@ -20,15 +21,22 @@ export type ExecuteContext = {
 async function assetFirst(projectId: string | undefined, q: string) {
   if (!projectId) return [];
   try {
-    const assets = await api.library(projectId, { q });
-    return (assets || []).slice(0, 6).map((a: any) => ({
+    const entityMatch = /(?:find|search|locate|get)\s+(?:(character|prop|scene)\s+)?(.+)/i.exec(q);
+    const searchQuery = entityMatch?.[2]?.trim() || q;
+    const res = await api.library(projectId, { q: searchQuery });
+    return (res.items || []).slice(0, 6).map((a: any) => ({
       id: a.id,
       tag: a.tag || a.filename || "asset",
       kind: a.kind || "file",
+      libraryPath: a.libraryPath,
     }));
   } catch {
     return [];
   }
+}
+
+function looksLikeLibraryPath(q: string): boolean {
+  return q.includes("/") || /^put (?:this|it) in /i.test(q) || /^store (?:this|it) in /i.test(q);
 }
 
 export async function executeAction(
@@ -71,9 +79,24 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
 
   switch (def.id) {
     case "createProject": {
-      const p = await api.createProject(String(inputs.name || "Untitled Project"));
-      ctx.navigate?.(`/project/${p.id}`);
-      return p;
+      const suggestedName = String(inputs.name || "").trim() || undefined;
+      const returnTo =
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}${window.location.hash}`
+          : undefined;
+      ctx.navigate?.(
+        buildHomeCreateProjectPath({
+          suggestedName,
+          pendingEntry: {
+            kind: "co-director",
+            returnTo,
+          },
+        }),
+      );
+      return {
+        redirected: true,
+        suggestedName: suggestedName || null,
+      };
     }
     case "openProject": {
       ctx.navigate?.(`/project/${inputs.projectId}`);
@@ -96,18 +119,48 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       ctx.goTab?.(String(inputs.tab || "home"));
       return { tab: inputs.tab };
     case "searchLibrary": {
-      const reuseAssets = await assetFirst(projectId, String(inputs.q || ""));
+      const q = String(inputs.q || "");
+      if (looksLikeLibraryPath(q)) {
+        const resolved = await api.libraryResolve(projectId, { query: q, path: q.includes("/") ? q : undefined });
+        if (resolved?.ambiguous) {
+          return { reuseAssets: [], count: 0, ambiguous: true, choices: resolved.candidates || [] };
+        }
+        if (resolved?.match?.libraryPath) {
+          const scoped = await api.library(projectId, { q: "" });
+          const folderId = resolved.match.folderId;
+          const items = (scoped.items || []).filter((a: any) => a.canonicalFolderId === folderId).slice(0, 6);
+          return { reuseAssets: items, count: items.length, resolvedFolder: resolved.match };
+        }
+      }
+      const reuseAssets = await assetFirst(projectId, q);
       return { reuseAssets, count: reuseAssets.length };
     }
+    case "resolveLibraryLocation": {
+      const q = String(inputs.query || inputs.path || inputs.q || "");
+      return api.libraryResolve(projectId, {
+        query: q,
+        path: inputs.path ? String(inputs.path) : undefined,
+        systemKey: inputs.systemKey ? String(inputs.systemKey) : undefined,
+      });
+    }
+    case "planLibraryStorage":
+      return api.libraryPreflight(projectId, {
+        task: String(inputs.task || "store_asset"),
+        path: inputs.path,
+        systemKey: inputs.systemKey,
+        entityType: inputs.entityType,
+        entityName: inputs.entityName,
+        entityId: inputs.entityId,
+        filenameHint: inputs.filenameHint || inputs.expectedName,
+      });
     case "queueImageGeneration": {
       const reuseAssets = await assetFirst(projectId, String(inputs.prompt || "").slice(0, 24));
-      if (reuseAssets.length) {
-        // Still queue — but surface reuse in plan UI
-      }
-      const job = await api.imagegen(projectId, {
+      const result = await api.imageProduct.generate(projectId, {
         prompt: String(inputs.prompt || ""),
-        mode: "txt2img",
+        operation: "image.generate",
+        purpose: String(inputs.purpose || ""),
       });
+      const job = result.jobId ? await api.getJob(result.jobId) : result;
       return { job, reuseAssets };
     }
     case "queueVideoGeneration": {
@@ -192,7 +245,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       });
     }
     case "prepareAvatarLipSync": {
-      ctx.goTab?.("director");
+      ctx.goTab?.("timeline");
       return {
         checkpoint: true,
         message: "Place the black rectangle over the character’s mouth, then select Continue.",
@@ -200,10 +253,12 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
     }
     case "queueAvatarGeneration": {
       const reuseAssets = await assetFirst(projectId, "character");
-      const job = await api.imagegen(projectId, {
+      const result = await api.imageProduct.generate(projectId, {
         prompt: String(inputs.prompt || "cinematic talking portrait, stable identity"),
-        mode: "txt2img",
+        operation: "image.generate",
+        purpose: "avatar",
       });
+      const job = result.jobId ? await api.getJob(result.jobId) : result;
       return { job, reuseAssets };
     }
     case "approveAvatarTake": {
@@ -228,7 +283,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       if (!sceneId) throw new Error("sceneId required");
       return api.directorSequenceFromScene(projectId, {
         scene_id: sceneId,
-        name: String(inputs.name || "Director Sequence"),
+        name: String(inputs.name || "Timeline Sequence"),
         status: "draft",
       });
     }
@@ -246,7 +301,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       const res = await api.sendDirectorToEditor(projectId, seqId, {
         include_audio: inputs.include_audio !== false,
       });
-      ctx.goTab?.("editor");
+      ctx.goTab?.("magi");
       return res;
     }
     case "compileDirectorPrompt": {
@@ -264,11 +319,11 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       const seqId = String(inputs.sequenceId || "");
       if (!seqId) throw new Error("sequenceId required");
       const res = await api.sendDirectorToEditor(projectId, seqId, { track: "video" });
-      ctx.goTab?.("editor");
+      ctx.goTab?.("magi");
       return res;
     }
     case "assembleSceneFromApproved": {
-      ctx.goTab?.("editor");
+      ctx.goTab?.("magi");
       const seqs = await api.listDirectorSequences(projectId, "approved").catch(() => []);
       const used = await api.listDirectorSequences(projectId, "used_in_editor").catch(() => []);
       const all = [...(seqs || []), ...(used || [])].filter(
@@ -295,8 +350,8 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
           /* ignore */
         }
       }
-      ctx.goTab?.("director");
-      return { tab: "director", sceneId: inputs.sceneId };
+      ctx.goTab?.("timeline");
+      return { tab: "timeline", sceneId: inputs.sceneId };
     }
     case "applyEditorialContextToDirector": {
       const ctxPayload = {
@@ -313,7 +368,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       } catch {
         /* ignore */
       }
-      ctx.goTab?.("director");
+      ctx.goTab?.("timeline");
       return ctxPayload;
     }
     case "saveMemorySuggestion":

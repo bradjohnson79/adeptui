@@ -3,14 +3,16 @@ import path from "node:path";
 import { test, expect } from "@playwright/test";
 import {
   API,
-  browseForcedFolder,
+  clearActiveInstallJobs,
+  clearComponentLocation,
   clearPackOverrides,
-  confirmCheckpoint,
+  confirmInstallPreflight,
   createTempProject,
   deleteProject,
   ensurePackSource,
   makeTempDir,
   openSetup,
+  setInstallPreflightDestination,
   setFixtureScenario,
   waitForAppReady,
 } from "../helpers/app";
@@ -28,6 +30,9 @@ test.describe("@critical @isolated pack install", () => {
     await waitForAppReady(request);
     await setFixtureScenario(request, { mode: "valid" });
     await clearPackOverrides(request);
+    await request.post(`${API}/api/e2e/recover-operations`);
+    await clearActiveInstallJobs(request, PACK);
+    await clearComponentLocation(request, PACK);
     await ensurePackSource(request, PACK);
 
     const project = await createTempProject(request, `Pack Install ${Date.now()}`);
@@ -35,12 +40,12 @@ test.describe("@critical @isolated pack install", () => {
     try {
       await openSetup(page, project.id);
       const card = page.getByTestId(`setup-card-${PACK}`);
-      const installBtn = card.getByRole("button", { name: /Download and Install/i });
+      const installBtn = card.getByRole("button", { name: /^(Download and Install|Install|Continue Install)$/i });
       await expect(installBtn).toBeEnabled({ timeout: 30_000 });
       await installBtn.click();
 
-      await browseForcedFolder(page, dest);
-      await confirmCheckpoint(page);
+      await setInstallPreflightDestination(page, dest);
+      await confirmInstallPreflight(page);
 
       await expect
         .poll(async () => {
