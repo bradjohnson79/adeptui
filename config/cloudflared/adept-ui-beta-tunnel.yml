@@ -11,8 +11,8 @@
 # DO NOT commit tunnel credentials (cert.pem, <tunnel-id>.json).
 # Those live in %USERPROFILE%\.cloudflared\ and are gitignored.
 
-tunnel: <TUNNEL_ID>
-credentials-file: C:\Users\bradj\.cloudflared\<TUNNEL_ID>.json
+tunnel: 822658ce-2057-4250-bb70-eb36dded0630
+credentials-file: C:\Users\bradj\.cloudflared\822658ce-2057-4250-bb70-eb36dded0630.json
 
 ingress:
   - hostname: api-beta.adeptui.org
