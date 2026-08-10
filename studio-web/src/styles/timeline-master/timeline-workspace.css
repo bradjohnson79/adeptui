@@ -1,0 +1,167 @@
+.timeline-workspace-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  gap: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.timeline-workspace-monitor {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: var(--preview-min-height, 260px);
+  overflow: hidden;
+  background: var(--timeline-surface, var(--surface-primary, #0d1218));
+  border-bottom: 1px solid var(--timeline-grid-line, rgba(148, 220, 255, 0.12));
+}
+
+.timeline-workspace-monitor__controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.timeline-workspace-monitor__controls-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.timeline-workspace-monitor__controls button,
+.timeline-workspace-monitor__controls select {
+  font-size: 0.7rem;
+  padding: 0.22rem 0.52rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-default, rgba(148, 220, 255, 0.2));
+  background: var(--surface-secondary, rgba(0, 0, 0, 0.25));
+  color: inherit;
+  white-space: nowrap;
+}
+
+.timeline-workspace-monitor__controls button {
+  cursor: pointer;
+}
+
+.timeline-workspace-monitor__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: rgba(214, 226, 240, 0.84);
+  white-space: nowrap;
+}
+
+.timeline-workspace-monitor__select span {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.timeline-workspace-monitor__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 0.35rem 0.35rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-workspace-monitor__body > *,
+.timeline-workspace-monitor__body .live-preview-monitor {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.timeline-workspace-monitor__body .live-preview-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  aspect-ratio: auto !important;
+  overflow: hidden;
+}
+
+.timeline-workspace-stack.is-fullscreen-viewer .timeline-workspace-monitor {
+  flex: 1 1 auto;
+  height: auto !important;
+}
+
+.timeline-workspace-divider {
+  flex: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+  background: color-mix(in srgb, var(--timeline-track-surface, #151c26) 80%, transparent);
+  border-top: 1px solid var(--timeline-grid-line, rgba(148, 220, 255, 0.14));
+  border-bottom: 1px solid var(--timeline-grid-line, rgba(148, 220, 255, 0.14));
+  outline: none;
+  z-index: 2;
+}
+
+.timeline-workspace-divider:hover,
+.timeline-workspace-divider:focus-visible,
+.timeline-workspace-divider.is-active {
+  background: color-mix(in srgb, var(--timeline-selection, #2dd4bf) 22%, var(--timeline-track-surface, #151c26));
+}
+
+.timeline-workspace-divider.is-active .timeline-workspace-divider__grip,
+.timeline-workspace-divider:hover .timeline-workspace-divider__grip,
+.timeline-workspace-divider:focus-visible .timeline-workspace-divider__grip {
+  background: var(--timeline-selection, #2dd4bf);
+}
+
+.timeline-workspace-divider__grip {
+  width: 44px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--timeline-muted, rgba(180, 200, 220, 0.45));
+  pointer-events: none;
+}
+
+.timeline-workspace-tracks {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--timeline-surface, var(--surface-primary, #0d1218));
+}
+
+.timeline-workspace-tracks > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 1280px) {
+  .timeline-workspace-monitor__controls {
+    gap: 0.35rem;
+    padding-inline: 0.4rem;
+  }
+
+  .timeline-workspace-monitor__controls button,
+  .timeline-workspace-monitor__controls select {
+    font-size: 0.68rem;
+    padding: 0.2rem 0.45rem;
+  }
+}

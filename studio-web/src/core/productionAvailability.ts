@@ -1,0 +1,101 @@
+/**
+ * Named Production menu availability — resolved outside the declarative catalog.
+ * Each key maps to a concrete dependency; never blanket one signal onto unrelated tools.
+ */
+import type { Health } from "../types";
+
+export type ProductAvailabilityStatus =
+  | "Available"
+  | "Requires setup"
+  | "Provider unavailable"
+  | "Local runtime offline"
+  | "Draft"
+  | "Blocked"
+  | "Deferred";
+
+export type ProductAvailability = {
+  status: ProductAvailabilityStatus;
+  /** Creator-facing dependency explanation for the badge */
+  reason?: string;
+};
+
+export type ProductionAvailabilityKey =
+  | "textToVideo"
+  | "imageGeneration"
+  | "oneFrame"
+  | "threeFrame"
+  | "timeline"
+  | "audioStudio";
+
+export type ProductionAvailability = Record<ProductionAvailabilityKey, ProductAvailability>;
+
+const AVAILABLE: ProductAvailability = { status: "Available" };
+
+function comfyOffline(health: Health | null, healthError: unknown): ProductAvailability | null {
+  if (healthError) {
+    return { status: "Local runtime offline", reason: "Studio API unreachable" };
+  }
+  if (!health) {
+    return { status: "Requires setup", reason: "Checking local runtime…" };
+  }
+  if (!health.comfy_reachable) {
+    return {
+      status: "Local runtime offline",
+      reason: "ComfyUI is offline — start ComfyUI for local generation",
+    };
+  }
+  const missing = health.missing_model_component_ids?.length || health.missing_models?.length || 0;
+  if (missing > 0) {
+    return {
+      status: "Requires setup",
+      reason: "Required generation models are missing — open Source Manager",
+    };
+  }
+  return null;
+}
+
+function audioAvailability(health: Health | null, healthError: unknown): ProductAvailability {
+  if (healthError) {
+    return { status: "Local runtime offline", reason: "Studio API unreachable" };
+  }
+  if (!health) {
+    return { status: "Requires setup", reason: "Checking audio providers…" };
+  }
+  const audioOk = health.operator?.audioProductionEnabled;
+  if (audioOk === false) {
+    return {
+      status: "Requires setup",
+      reason: "Requires audio provider setup",
+    };
+  }
+  return AVAILABLE;
+}
+
+/**
+ * Resolve per-tool availability from health/operator signals.
+ * Image and video tools that need Comfy share that dependency; timeline/audio do not.
+ */
+export function resolveProductionAvailability(
+  health: Health | null,
+  healthError: unknown = null,
+): ProductionAvailability {
+  const comfy = comfyOffline(health, healthError);
+  const comfyOrAvailable = comfy || AVAILABLE;
+
+  return {
+    // Local diffusion / video paths that enqueue through Comfy
+    textToVideo: comfyOrAvailable,
+    imageGeneration: comfyOrAvailable,
+    oneFrame: comfyOrAvailable,
+    threeFrame: comfyOrAvailable,
+    // Timeline planning UI is available without Comfy; generation steps gate later
+    timeline: healthError
+      ? { status: "Local runtime offline", reason: "Studio API unreachable" }
+      : AVAILABLE,
+    audioStudio: audioAvailability(health, healthError),
+  };
+}
+
+export function defaultProductionAvailability(): ProductionAvailability {
+  return resolveProductionAvailability(null, null);
+}

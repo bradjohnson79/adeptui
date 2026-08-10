@@ -1,0 +1,591 @@
+.posecraft-shell {
+  /* Production shell height/overflow owned by posecraft-workspace.css.
+     Avoid min-height: 100vh here — it forced page-level scrolling.
+     Dark studio surface — matches Adept cinematic dark UI. Token-based so
+     aurora-day theme still renders coherently. */
+  background:
+    radial-gradient(1100px 520px at 6% -8%, rgba(45, 212, 191, 0.10), transparent 60%),
+    radial-gradient(820px 460px at 94% 2%, rgba(56, 189, 248, 0.08), transparent 56%),
+    linear-gradient(180deg, var(--bg1, #070b14) 0%, var(--bg0, #050914) 100%);
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-topbar {
+  padding-inline: clamp(18px, 4vw, 54px);
+}
+.posecraft-lab {
+  width: min(1680px, calc(100% - 1.25rem));
+  margin: 0 auto;
+  padding: 0.65rem 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.posecraft-toolbar-card {
+  padding-bottom: 0.8rem;
+}
+.posecraft-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.1fr) minmax(320px, 1.4fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+.posecraft-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+/* Master Program layout: ~19% / 62% / 19% (left cast / center viewport / right
+   inspector). fr units keep the proportions while minmax guards prevent
+   collapse on narrow viewports; the center stays dominant (~60-64%). */
+.posecraft-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 19fr) minmax(0, 62fr) minmax(260px, 19fr);
+  gap: 0.75rem;
+  min-height: 0;
+}
+.posecraft-pane {
+  min-height: 0;
+  /* Scroll is on .posecraft-pane-scroll (independent left/right panes). */
+  overflow: hidden;
+  background: var(--panel-solid, rgba(10, 16, 28, 0.92));
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-archetype-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+.posecraft-archetype-grid button,
+.posecraft-pose-list button,
+.posecraft-version-card {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: start;
+  text-align: left;
+  border-radius: 16px;
+}
+.posecraft-archetype-grid button span,
+.posecraft-pose-list button span,
+.posecraft-figure-card span,
+.posecraft-version-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.posecraft-figure-list,
+.posecraft-pose-list,
+.posecraft-version-list,
+.posecraft-primitive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* Master Program: scrollable pose pane so the 50+ catalog doesn't overflow
+   the viewport. Independent scroll, lazy-rendered thumbnails (inline SVG,
+   no live Babylon thumbnail scenes). */
+.posecraft-pose-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+.posecraft-pose-controls {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+.posecraft-pose-controls input,
+.posecraft-pose-controls select,
+.posecraft-pose-controls button {
+  margin: 0;
+}
+.posecraft-pose-count {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0 0 0.4rem;
+}
+.posecraft-pose-card {
+  display: grid;
+  grid-template-columns: 48px 1fr auto auto;
+  gap: 0.6rem;
+  align-items: center;
+  text-align: left;
+  border-radius: 14px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-pose-card:hover {
+  border-color: rgba(13, 148, 136, 0.4);
+}
+.posecraft-pose-thumb {
+  width: 48px;
+  height: 48px;
+  display: block;
+}
+.posecraft-pose-thumb svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.posecraft-pose-meta {
+  display: grid;
+  gap: 0.15rem;
+}
+.posecraft-pose-meta strong {
+  font-size: 0.9rem;
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-pose-meta span {
+  font-size: 0.8rem;
+  color: var(--muted, #9db0c3);
+  line-height: 1.3;
+}
+.posecraft-pose-fav {
+  cursor: pointer;
+  font-size: 1rem;
+  color: #ca8a04;
+  user-select: none;
+}
+.posecraft-pose-del {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #dc2626;
+  user-select: none;
+}
+.posecraft-figure-card {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  align-items: center;
+  border-radius: 16px;
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+}
+.posecraft-figure-card.selected,
+.posecraft-version-card {
+  border-color: rgba(13, 148, 136, 0.35);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.14), rgba(56, 189, 248, 0.08));
+}
+.posecraft-color-dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.75);
+}
+.posecraft-inline-actions,
+.posecraft-lens-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+/* Viewport toolbar — compact single row (gizmos + staging actions). */
+.posecraft-stage-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.28rem;
+  margin: 0.25rem 0 0.4rem;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.1rem;
+}
+.posecraft-stage-actions > button,
+.posecraft-stage-actions .posecraft-gizmo-group button {
+  margin: 0;
+  flex: 0 0 auto;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.posecraft-gizmo-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 0.18rem;
+  align-items: center;
+}
+.posecraft-gizmo-group button {
+  margin: 0;
+}
+.posecraft-viewport-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Master Program: gray matte stage with ~5% internal margins so the Babylon
+   canvas dominates the center pane. The aspect frame (rule-of-thirds etc.)
+   is preserved via .posecraft-frame inside the overlay. */
+.posecraft-viewport-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  /* Gray matte stage — neutral, non-distracting, lets colored figures read. */
+  background: linear-gradient(180deg, #c9ced4 0%, #b6bcc3 100%);
+  padding: 5%;
+  box-sizing: border-box;
+}
+.posecraft-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 12px;
+}
+/* Overlay (aspect frame + guides) is inset to match the canvas content box
+   (the shell has 5% padding), so the rule-of-thirds/safe/center guides align
+   with the rendered Babylon stage, not the shell chrome. */
+.posecraft-overlay {
+  position: absolute;
+  inset: 5%;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.posecraft-frame {
+  position: relative;
+  max-width: calc(100% - 2.25rem);
+  max-height: calc(100% - 2.25rem);
+  border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 0 0 900px rgba(15, 23, 42, 0.08);
+}
+.posecraft-guide-safe,
+.posecraft-guide-center,
+.posecraft-guide-thirds {
+  position: absolute;
+  inset: 0;
+}
+.posecraft-guide-safe::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  border: 1px dashed rgba(255,255,255,0.82);
+}
+.posecraft-guide-center::before,
+.posecraft-guide-center::after,
+.posecraft-guide-thirds::before,
+.posecraft-guide-thirds::after {
+  content: "";
+  position: absolute;
+  background: rgba(255,255,255,0.7);
+}
+.posecraft-guide-center::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+.posecraft-guide-center::after {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+.posecraft-guide-thirds::before {
+  top: 0;
+  bottom: 0;
+  left: 33.333%;
+  width: 1px;
+  box-shadow: calc(33.333% * 1.01) 0 0 rgba(255,255,255,0.7);
+}
+.posecraft-guide-thirds::after {
+  left: 0;
+  right: 0;
+  top: 33.333%;
+  height: 1px;
+  box-shadow: 0 calc(33.333% * 1.01) 0 rgba(255,255,255,0.7);
+}
+.posecraft-stage-caption {
+  margin-top: 0.55rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.posecraft-inspector-stack,
+.posecraft-export-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.posecraft-field {
+  display: grid;
+  gap: 0.3rem;
+}
+.posecraft-field span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.posecraft-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.posecraft-slider-stack {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+}
+.posecraft-slider-stack input[type="range"] {
+  padding: 0;
+}
+.posecraft-guide-checks {
+  display: grid;
+  gap: 0.35rem;
+}
+.posecraft-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+}
+.posecraft-check input {
+  width: auto;
+}
+.posecraft-export-panel {
+  overflow: hidden;
+}
+/* Export accordion: Version Label on top, actions full-width below (one column). */
+.posecraft-export-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+}
+.posecraft-export-grid > * {
+  width: 100%;
+  min-width: 0;
+}
+.posecraft-export-actions button {
+  width: 100%;
+}
+/* Co-Director is the lead export action — distinct emerald gradient so the
+   creator sees it first without burying Image Generation (which keeps its
+   existing primary styling directly below). */
+.posecraft-export-actions .posecraft-send-codirector.primary {
+  background: linear-gradient(135deg, #2dd4bf 0%, #14b8a6 55%, #0d9488 100%);
+  color: #042f2e;
+  border: 1px solid rgba(45, 212, 191, 0.55);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.posecraft-export-actions .posecraft-send-codirector.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5eead4 0%, #2dd4bf 55%, #14b8a6 100%);
+}
+.posecraft-export-actions .posecraft-send-codirector.primary:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+.posecraft-version-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-version-card-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+  justify-items: start;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.posecraft-version-card-main strong { font-size: 0.95rem; color: var(--ink, #f3f7fb); }
+.posecraft-version-card-main span { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+.posecraft-version-card-main input {
+  width: 100%;
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass-active, rgba(45, 212, 191, 0.55));
+  background: var(--panel-elevated, rgba(14, 22, 38, 0.96));
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-version-card-menu {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 8px;
+  padding: 0.15rem 0.45rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-version-card-menu:hover {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: var(--border-glass-active, rgba(45, 212, 191, 0.55));
+}
+/* Version ⋯ popover reuses the shared dark-theme figure menu popover. Pin
+   it to the right edge of the card beneath the ⋯ button. */
+.posecraft-version-menu-popover {
+  right: 0.6rem;
+  top: 2.4rem;
+  left: auto;
+}
+.posecraft-primitive-card {
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+  color: var(--ink, #f3f7fb);
+  display: grid;
+  gap: 0.5rem;
+}
+@media (max-width: 1280px) {
+  .posecraft-layout {
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  }
+  .posecraft-layout > .posecraft-pane:last-child {
+    grid-column: span 2;
+  }
+}
+@media (max-width: 1100px) {
+  .posecraft-toolbar,
+  .posecraft-layout {
+    grid-template-columns: 1fr;
+  }
+  .posecraft-layout > .posecraft-pane:last-child {
+    grid-column: auto;
+  }
+  .posecraft-viewport-shell {
+    min-height: 420px;
+  }
+}
+
+/* Final Mandatory GO (D5–D6): cast three-dot menu + figure rows. */
+.posecraft-figure-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem;
+  align-items: center;
+  border-radius: 14px;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+  margin-bottom: 0.5rem;
+}
+.posecraft-figure-row.selected {
+  border-color: rgba(13, 148, 136, 0.4);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.14), rgba(56, 189, 248, 0.08));
+}
+.posecraft-figure-row-main {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: 100%;
+}
+.posecraft-figure-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.posecraft-figure-row-text strong { font-size: 0.95rem; color: var(--ink, #f3f7fb); }
+.posecraft-figure-row-text span { font-size: 0.78rem; color: var(--muted, #9db0c3); }
+.posecraft-figure-row-menu {
+  background: transparent;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 8px;
+  padding: 0.15rem 0.45rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--ink, #f3f7fb);
+}
+.posecraft-figure-row-menu:hover {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: var(--border-glass-active, rgba(45, 212, 191, 0.55));
+}
+/* Shared dark-theme popover — used by Cast ⋯ menu and any Pose Library menu.
+   Uses theme tokens so it adapts to aurora-day as well as the default dark UI. */
+.posecraft-figure-menu-popover {
+  position: absolute;
+  right: 0.7rem;
+  top: 2.6rem;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  background: var(--panel-elevated, rgba(14, 22, 38, 0.96));
+  border: 1px solid var(--border-glass, rgba(148, 220, 255, 0.18));
+  border-radius: var(--radius-menu, 12px);
+  padding: 0.35rem;
+  box-shadow: var(--shadow-lift, 0 20px 48px rgba(0, 0, 0, 0.55));
+  min-width: 9rem;
+}
+.posecraft-figure-menu-popover button {
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ink, #f3f7fb);
+  font: inherit;
+}
+.posecraft-figure-menu-popover button:hover { background: rgba(45, 212, 191, 0.14); }
+.posecraft-figure-menu-popover button.danger { color: var(--danger, #f87171); }
+.posecraft-figure-menu-popover button.danger:hover { background: rgba(248, 113, 113, 0.16); }
+.posecraft-primitive-card.selected {
+  border-color: rgba(13, 148, 136, 0.4);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(56, 189, 248, 0.06));
+  cursor: pointer;
+}
+.posecraft-custom-figures-section {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+}
+
+/* Co-Director scene labels — floating viewport convenience (not SoT). */
+.posecraft-viewport-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: hidden;
+}
+.posecraft-viewport-label {
+  position: absolute;
+  transform: translate(-50%, -120%);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25);
+}
+.posecraft-viewport-label.selected {
+  background: rgba(13, 148, 136, 0.92);
+}

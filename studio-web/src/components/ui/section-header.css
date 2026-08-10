@@ -1,0 +1,6 @@
+.ds-section-header { margin-block: 1rem; }
+.ds-section-header__eyebrow { color: var(--accent, #0d9488); font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.ds-section-header__row { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.ds-section-header h2 { margin: .2rem 0; }
+.ds-section-header p { margin: .25rem 0 0; color: var(--muted, #64748b); }
+.ds-section-header__actions { display: flex; gap: .5rem; flex-wrap: wrap; }

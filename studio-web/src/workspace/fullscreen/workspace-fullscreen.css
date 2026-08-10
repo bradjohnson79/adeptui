@@ -1,0 +1,123 @@
+.workspace-fs-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.workspace-fs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 28, 40, 0.72);
+  color: #e8eef7;
+  border-radius: 0.4rem;
+  padding: 0.28rem 0.55rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.workspace-fs-btn:hover {
+  background: rgba(40, 56, 78, 0.9);
+}
+
+.workspace-fs-btn[aria-pressed="true"] {
+  border-color: #7eb6ff;
+  color: #cfe4ff;
+}
+
+.workspace-fs-btn__label {
+  white-space: nowrap;
+}
+
+.workspace-fs-error {
+  font-size: 0.75rem;
+  color: #ffb4a8;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.workspace-fs-retry {
+  border: none;
+  background: transparent;
+  color: #9ec5ff;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+}
+
+.workspace-fs-banner {
+  position: absolute;
+  top: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.55rem;
+  background: rgba(12, 18, 28, 0.88);
+  color: #eef4ff;
+  font-size: 0.8rem;
+  pointer-events: none;
+  animation: workspace-fs-banner-fade 3.2s ease forwards;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.workspace-fs-banner strong {
+  font-size: 0.85rem;
+}
+
+@keyframes workspace-fs-banner-fade {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+[data-workspace-fullscreen] {
+  position: relative;
+  background: #0b1018;
+  width: 100%;
+  height: 100%;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+/* Hide global Adept chrome while a workspace owns the physical display */
+body.adept-workspace-fullscreen .studio-chrome,
+body.adept-workspace-fullscreen .app-chrome,
+body.adept-workspace-fullscreen .production-dock-root,
+body.adept-workspace-fullscreen [data-testid="studio-chrome"],
+body.adept-workspace-fullscreen [data-testid="production-control-dock"] {
+  display: none !important;
+}
+
+body.adept-workspace-fullscreen .app-shell,
+body.adept-workspace-fullscreen .app-shell-fixed {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+body.adept-workspace-fullscreen .timeline-editor-shell,
+body.adept-workspace-fullscreen .magi-shell,
+body.adept-workspace-fullscreen .codirector-shell {
+  height: 100vh !important;
+  max-height: 100vh !important;
+  min-height: 100vh !important;
+}

@@ -1,0 +1,63 @@
+:root {
+  --status-positive: #34d399;
+  --status-warning: #fbbf24;
+  --status-danger: #f87171;
+  --status-neutral: #9db0c3;
+  --status-info: #38bdf8;
+  --status-muted: #6b7c8f;
+}
+.ds-status-badge { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid currentColor; border-radius: 999px; padding: .25rem .6rem; font-size: .8rem; line-height: 1; }
+.ds-status-badge--compact { padding: .18rem .45rem; }
+.ds-tone-positive { color: var(--status-positive); }
+.ds-tone-warning { color: var(--status-warning); }
+.ds-tone-danger { color: var(--status-danger); }
+.ds-tone-neutral { color: var(--status-neutral); }
+.ds-tone-info { color: var(--status-info); }
+.ds-tone-muted { color: var(--status-muted); }
+.ds-status-dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: currentColor; }
+.ds-status-badge {
+  background: rgba(8, 14, 24, 0.55);
+  font-weight: 650;
+}
+button.ds-status-badge,
+a.ds-status-badge {
+  cursor: pointer;
+  font: inherit;
+  text-decoration: none;
+  appearance: none;
+  transform: none;
+  box-shadow: none;
+  background: rgba(8, 14, 24, 0.55);
+}
+button.ds-status-badge:hover,
+a.ds-status-badge:hover {
+  filter: brightness(1.12);
+  transform: none;
+  box-shadow: none;
+}
+.ds-status-badge--interactive:focus-visible {
+  outline: 2px solid var(--aurora-teal, #2dd4bf);
+  outline-offset: 2px;
+}
+.ds-status-panel {
+  padding: var(--space-4, 1rem);
+  border: 1px solid var(--border-glass, var(--line));
+  border-radius: var(--radius-card, .75rem);
+  background: var(--panel-solid, var(--surface-glass-strong));
+  color: var(--ink);
+}
+.ds-status-panel > header, .ds-status-panel__actions, .ds-readiness-meter__header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.ds-status-panel h2 { margin: 0; color: var(--ink); font-family: var(--font-display); }
+.ds-status-panel__error { color: var(--status-danger); }
+.ds-status-panel small { color: var(--muted); }
+.ds-readiness-meter progress { display: block; width: 100%; accent-color: var(--status-positive); }
+.ds-surface {
+  border: 1px solid var(--border-glass, var(--line));
+  border-radius: var(--radius-card, 18px);
+  background:
+    linear-gradient(165deg, rgba(14, 22, 36, 0.96) 0%, rgba(10, 16, 28, 0.9) 100%),
+    var(--panel-solid, var(--surface-glass-strong));
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.ds-surface button:not(.ui-btn):not(.ds-table__sort) { appearance: none; transform: none; box-shadow: none; }

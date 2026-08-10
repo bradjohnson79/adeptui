@@ -1,0 +1,303 @@
+/**
+ * Adept UI Design System — SINGLE SOURCE OF COLOR/TYPE/SPACE LITERALS
+ * Law: docs/design/ADEPT_UI_DESIGN_SYSTEM.md
+ * No other stylesheet may introduce hex/rgb color literals.
+ */
+
+:root {
+  /* —— Surfaces —— */
+  --bg0: #050914;
+  --bg1: #070b14;
+  --panel: rgba(12, 20, 34, 0.62);
+  --panel-solid: rgba(10, 16, 28, 0.92);
+  --panel-elevated: rgba(14, 22, 38, 0.96);
+  --line: rgba(148, 220, 255, 0.18);
+  --surface-cinematic: #070b14;
+  --surface-glass: rgba(12, 20, 34, 0.62);
+  --surface-glass-strong: rgba(10, 16, 28, 0.82);
+  --border-glass: rgba(148, 220, 255, 0.18);
+  --border-glass-active: rgba(45, 212, 191, 0.55);
+
+  /* —— Text —— */
+  --ink: #f3f7fb;
+  --muted: #9db0c3;
+  --disabled: #6b7c8f;
+  --text-primary-dark: #f3f7fb;
+  --text-secondary-dark: #9db0c3;
+
+  /* —— Brand / Aurora —— */
+  --aurora-teal: #2dd4bf;
+  --aurora-green: #34d399;
+  --aurora-cyan: #22d3ee;
+  --aurora-blue: #38bdf8;
+  --aurora-violet: #a78bfa;
+  --aurora-gold: #fbbf24;
+  --accent: #2dd4bf;
+  --accent-soft: #34d399;
+  --accent-deep: #0f766e;
+  --accent-2: #38bdf8;
+  --aurora-1: rgba(45, 212, 191, 0.22);
+  --aurora-2: rgba(56, 189, 248, 0.18);
+  --aurora-3: rgba(167, 139, 250, 0.14);
+
+  /* —— Semantic —— */
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --info: #38bdf8;
+  --status-positive: #34d399;
+  --status-warning: #fbbf24;
+  --status-danger: #f87171;
+  --status-neutral: #9db0c3;
+  --status-info: #38bdf8;
+  --status-muted: #6b7c8f;
+
+  /* —— Controls —— */
+  --btn-fg: var(--ink);
+  --btn-bg: var(--panel-solid);
+  --btn-border: var(--line);
+  --btn-primary-fg: #06201c;
+  --btn-primary-bg: var(--accent);
+  --btn-danger-fg: #fecaca;
+  --btn-danger-bg: rgba(127, 29, 29, 0.45);
+  --focus-ring: 0 0 0 3px rgba(45, 212, 191, 0.4);
+
+  /* —— Elevation / glow —— */
+  --shadow: 0 12px 36px rgba(0, 0, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.28);
+  --shadow-lift: 0 20px 48px rgba(0, 0, 0, 0.55), 0 4px 14px rgba(0, 0, 0, 0.32);
+  --glow-cyan: 0 0 28px rgba(34, 211, 238, 0.28);
+  --glow-violet: 0 0 32px rgba(167, 139, 250, 0.28);
+
+  /* —— Hero overlays —— */
+  --hero-overlay: linear-gradient(
+    180deg,
+    rgba(4, 8, 16, 0.18) 0%,
+    rgba(4, 10, 20, 0.28) 45%,
+    rgba(5, 10, 18, 0.72) 100%
+  );
+  --hero-vignette: radial-gradient(
+    120% 90% at 50% 40%,
+    transparent 40%,
+    rgba(2, 6, 14, 0.55) 100%
+  );
+
+  /* —— Radius —— */
+  --radius: 20px;
+  --radius-control: 10px;
+  --radius-chip: 999px;
+  --radius-menu: 12px;
+
+  /* —— Spacing —— */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-8: 3rem;
+
+  /* —— Motion (100–250ms) —— */
+  --motion-fast: 100ms;
+  --motion-base: 160ms;
+  --motion-slow: 250ms;
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* —— Z-index —— */
+  --z-toolbar: 40;
+  --z-menubar: 50;
+  --z-dropdown: 60;
+  --z-modal: 80;
+  --z-toast: 90;
+  --z-command: 100;
+
+  /* —— Media monitor —— */
+  --media-monitor-bg: #0a0c10;
+  --media-monitor-chrome: #111318;
+
+  /* —— Timeline Master (W46) —— */
+  --timeline-surface: #0b1018;
+  --timeline-track-surface: #121a24;
+  --timeline-track-alt: #161f2c;
+  --timeline-grid-line: rgba(148, 220, 255, 0.14);
+  --timeline-ruler-text: #9db0c3;
+  --timeline-playhead: #2dd4bf;
+  --timeline-selection: #2dd4bf;
+  --timeline-hover: rgba(45, 212, 191, 0.16);
+  --timeline-muted: rgba(157, 176, 195, 0.55);
+  --timeline-track-label-text: rgba(238, 246, 255, 0.92);
+  --timeline-track-label-muted: rgba(188, 205, 224, 0.72);
+  --timeline-track-label-icon: rgba(164, 228, 236, 0.9);
+  --timeline-track-header-bg: rgba(7, 15, 27, 0.96);
+  --timeline-track-header-border: rgba(60, 196, 205, 0.18);
+  --track-image: color-mix(in srgb, #0e7490 55%, #0b1220);
+  --track-prompt: color-mix(in srgb, #b45309 40%, #141018);
+  --track-camera: color-mix(in srgb, #4c1d95 45%, #10141f);
+  --track-audio: color-mix(in srgb, #065f46 50%, #0c1412);
+  --track-sfx: color-mix(in srgb, #9a3412 45%, #16120e);
+  --track-lipsync: color-mix(in srgb, #9d174d 40%, #161018);
+  --track-video: color-mix(in srgb, #1d4ed8 45%, #0c1220);
+  --track-repair: color-mix(in srgb, #6d28d9 50%, #120f1c);
+  --track-mask: color-mix(in srgb, #7c3aed 40%, #121018);
+  --production-dock-safe-area: 4.75rem;
+
+  /* —— Co-Director aliases —— */
+  --codirector-bg: var(--surface-cinematic);
+  --codirector-surface: var(--surface-glass-strong);
+  --codirector-surface-raised: rgba(16, 24, 40, 0.94);
+  --codirector-border: var(--border-glass);
+  --codirector-text: var(--text-primary-dark);
+  --codirector-text-muted: var(--text-secondary-dark);
+  --codirector-accent: var(--aurora-teal);
+  --codirector-accent-soft: rgba(45, 212, 191, 0.14);
+  --codirector-danger: var(--danger);
+  --codirector-radius: 14px;
+  --codirector-shadow: var(--shadow-lift);
+
+  /* —— Semantic aliases (Production Dock) —— */
+  --surface-primary: var(--panel, rgba(12, 20, 34, 0.62));
+  --surface-secondary: var(--panel-solid, rgba(10, 16, 28, 0.92));
+  --surface-elevated: var(--panel-elevated, rgba(14, 22, 38, 0.96));
+  --text-primary: var(--ink, #f3f7fb);
+  --text-secondary: var(--muted, #9db0c3);
+  --border-default: var(--line, rgba(148, 220, 255, 0.18));
+  --accent-primary: var(--accent, #2dd4bf);
+  --accent-secondary: var(--accent-2, #38bdf8);
+  --field-background: rgba(8, 14, 24, 0.72);
+  --success: var(--ok, #34d399);
+  --warning: var(--warn, #fbbf24);
+  --danger: var(--status-danger, #f87171);
+
+  /* —— Typography families —— */
+  --font-display: "Fraunces", "Noto Serif", "Songti SC", "Hiragino Mincho ProN", Georgia, serif;
+  --font-body: "Manrope", "Noto Sans", "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans",
+    "Noto Sans Devanagari", "Noto Sans Arabic", "Noto Sans Bengali", "Noto Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", Consolas, monospace;
+
+  /* —— Type sizes —— */
+  --text-display: clamp(2rem, 3vw, 2.75rem);
+  --text-h1: 1.75rem;
+  --text-h2: 1.35rem;
+  --text-h3: 1.125rem;
+  --text-body: 0.95rem;
+  --text-label: 0.875rem;
+  --text-helper: 0.8rem;
+}
+
+[data-theme="aurora-day"] {
+  --bg0: #eef4fb;
+  --bg1: #e4edf8;
+  --panel: rgba(255, 255, 255, 0.78);
+  --panel-solid: rgba(248, 251, 255, 0.96);
+  --panel-elevated: rgba(255, 255, 255, 0.98);
+  --line: rgba(30, 58, 95, 0.18);
+  --surface-cinematic: #eef4fb;
+  --surface-glass: rgba(255, 255, 255, 0.78);
+  --surface-glass-strong: rgba(248, 251, 255, 0.94);
+  --border-glass: rgba(30, 58, 95, 0.16);
+  --border-glass-active: rgba(13, 148, 136, 0.55);
+
+  --ink: #0f172a;
+  --muted: #475569;
+  --disabled: #94a3b8;
+  --text-primary-dark: #0f172a;
+  --text-secondary-dark: #475569;
+
+  --aurora-teal: #0d9488;
+  --aurora-green: #059669;
+  --aurora-cyan: #0891b2;
+  --aurora-blue: #0284c7;
+  --aurora-violet: #7c3aed;
+  --aurora-gold: #d97706;
+  --accent: #0d9488;
+  --accent-soft: #059669;
+  --accent-deep: #115e59;
+  --accent-2: #0284c7;
+  --aurora-1: rgba(13, 148, 136, 0.12);
+  --aurora-2: rgba(2, 132, 199, 0.1);
+  --aurora-3: rgba(124, 58, 237, 0.08);
+
+  --ok: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --info: #0284c7;
+  --status-positive: #059669;
+  --status-warning: #d97706;
+  --status-danger: #dc2626;
+  --status-neutral: #475569;
+  --status-info: #0284c7;
+  --status-muted: #94a3b8;
+
+  --btn-fg: var(--ink);
+  --btn-bg: var(--panel-solid);
+  --btn-border: var(--line);
+  --btn-primary-fg: #f0fdfa;
+  --btn-primary-bg: var(--accent);
+  --btn-danger-fg: #7f1d1d;
+  --btn-danger-bg: rgba(254, 226, 226, 0.92);
+  --focus-ring: 0 0 0 3px rgba(13, 148, 136, 0.28);
+
+  --shadow: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 8px rgba(15, 23, 42, 0.08);
+  --shadow-lift: 0 18px 40px rgba(15, 23, 42, 0.16), 0 4px 12px rgba(15, 23, 42, 0.1);
+  --glow-cyan: none;
+  --glow-violet: none;
+
+  --hero-overlay: linear-gradient(
+    180deg,
+    rgba(238, 244, 251, 0.08) 0%,
+    rgba(228, 237, 248, 0.22) 45%,
+    rgba(226, 232, 240, 0.72) 100%
+  );
+  --hero-vignette: radial-gradient(
+    120% 90% at 50% 40%,
+    transparent 42%,
+    rgba(148, 163, 184, 0.22) 100%
+  );
+
+  --surface-primary: var(--panel);
+  --surface-secondary: var(--panel-solid);
+  --surface-elevated: var(--panel-elevated);
+  --text-primary: var(--ink);
+  --text-secondary: var(--muted);
+  --border-default: var(--line);
+  --accent-primary: var(--accent);
+  --accent-secondary: var(--accent-2);
+  --field-background: rgba(241, 245, 249, 0.96);
+  --success: var(--ok);
+  --warning: var(--warn);
+  --danger: var(--status-danger);
+
+  --codirector-bg: var(--surface-cinematic);
+  --codirector-surface: var(--surface-glass-strong);
+  --codirector-surface-raised: rgba(255, 255, 255, 0.98);
+  --codirector-border: var(--border-glass);
+  --codirector-text: var(--text-primary-dark);
+  --codirector-text-muted: var(--text-secondary-dark);
+  --codirector-accent: var(--aurora-teal);
+  --codirector-accent-soft: rgba(13, 148, 136, 0.12);
+  --codirector-danger: var(--danger);
+  --codirector-shadow: var(--shadow-lift);
+
+  /* Timeline Master — day theme */
+  --timeline-surface: #eef4fb;
+  --timeline-track-surface: #e2eaf4;
+  --timeline-track-alt: #d8e3ef;
+  --timeline-grid-line: rgba(30, 58, 95, 0.14);
+  --timeline-ruler-text: #475569;
+  --timeline-playhead: #0d9488;
+  --timeline-selection: #0d9488;
+  --timeline-hover: rgba(13, 148, 136, 0.12);
+  --timeline-muted: rgba(71, 85, 105, 0.65);
+  --timeline-track-label-text: rgba(18, 31, 45, 0.94);
+  --timeline-track-label-muted: rgba(55, 75, 94, 0.72);
+  --timeline-track-label-icon: rgba(0, 112, 126, 0.9);
+  --timeline-track-header-bg: rgba(235, 244, 248, 0.96);
+  --timeline-track-header-border: rgba(0, 119, 135, 0.2);
+  --track-image: color-mix(in srgb, #0d9488 28%, #e8f0f8);
+  --track-prompt: color-mix(in srgb, #d97706 22%, #eef2f8);
+  --track-camera: color-mix(in srgb, #7c3aed 20%, #eef0f8);
+  --track-audio: color-mix(in srgb, #059669 24%, #e8f4ef);
+  --track-sfx: color-mix(in srgb, #ea580c 22%, #f5efe8);
+  --track-lipsync: color-mix(in srgb, #db2777 20%, #f5e8ef);
+  --track-video: color-mix(in srgb, #2563eb 24%, #e8eef8);
+  --production-dock-safe-area: 5rem;
+}

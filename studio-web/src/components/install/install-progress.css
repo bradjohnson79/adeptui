@@ -1,0 +1,389 @@
+.install-progress-card,
+.install-inline-card,
+.install-error-panel,
+.install-source-workflow__result,
+.install-preflight-dialog__summary {
+  border: 1px solid rgba(148, 220, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(8, 14, 24, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.install-progress-card {
+  margin-top: 0.9rem;
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.install-progress-card--ready {
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.install-progress-card--error {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.install-progress-card__header,
+.install-inline-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.install-progress-card__eyebrow {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.install-progress-card__header h4,
+.install-inline-card h3 {
+  margin: 0.2rem 0 0;
+  color: var(--ink);
+}
+
+.install-progress-card__pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.24rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(45, 212, 191, 0.12);
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  color: var(--aurora-cyan);
+  font-size: 0.74rem;
+  text-transform: capitalize;
+}
+
+.install-progress-card__track-wrap {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.install-progress-card__track-copy {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.install-progress-card__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(45, 212, 191, 0.12);
+}
+
+.install-progress-card__track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-deep), var(--accent-soft) 60%, var(--accent-2));
+}
+
+.install-progress-card__track.is-indeterminate > span {
+  width: 34%;
+  animation: setup-indeterminate 1.35s ease-in-out infinite;
+}
+
+.install-progress-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.install-progress-card__stats > span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(8, 14, 24, 0.52);
+  border: 1px solid rgba(148, 220, 255, 0.12);
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.install-progress-card__file {
+  margin: 0;
+  color: var(--text-secondary-dark);
+  font-size: 0.84rem;
+}
+
+.install-progress-card__actions,
+.install-inline-card__actions,
+.install-error-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.install-error-panel {
+  padding: 0.85rem;
+  color: var(--ink);
+}
+
+.install-error-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.install-error-panel__details {
+  margin: 0.55rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+}
+
+.install-preflight-dialog,
+.install-source-workflow {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.install-preflight-dialog__summary,
+.install-source-workflow__result {
+  padding: 0.85rem 0.95rem;
+}
+
+.install-preflight-dialog__browse {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.install-preflight-dialog__check {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 220, 255, 0.14);
+  background: rgba(8, 14, 24, 0.32);
+  color: var(--ink);
+}
+
+.install-source-workflow__lead {
+  color: var(--text-secondary-dark);
+}
+
+.install-source-workflow__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.required-components-panel {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.required-components-panel__list,
+.required-components-panel__blockers {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.required-components-panel__nodes {
+  list-style: none;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.required-components-panel__nodes li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.45rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #445) 75%, transparent);
+  font-size: 0.82rem;
+}
+
+.install-inline-card {
+  padding: 0.95rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.install-inline-card p {
+  color: var(--text-secondary-dark);
+}
+
+.install-progress-card--attention {
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.install-progress-card__step {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.install-progress-card__phases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.install-progress-card__phases li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.install-progress-card__phases li.is-complete {
+  color: var(--ink);
+}
+
+.install-progress-card__phases li.is-active {
+  color: var(--aurora-cyan);
+}
+
+.install-progress-card__phases li.is-failed {
+  color: #f87171;
+}
+
+.install-progress-card__phase-mark {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(148, 220, 255, 0.25);
+}
+
+.install-progress-card__phases li.is-complete .install-progress-card__phase-mark {
+  background: rgba(52, 211, 153, 0.85);
+}
+
+.install-progress-card__phases li.is-active .install-progress-card__phase-mark {
+  background: var(--aurora-cyan);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.18);
+}
+
+.install-progress-card__stall {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(120, 80, 10, 0.18);
+}
+
+.install-progress-card__stall p {
+  margin: 0.35rem 0 0.65rem;
+  color: var(--text-secondary-dark);
+  font-size: 0.86rem;
+}
+
+.install-progress-card__details {
+  padding: 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 220, 255, 0.14);
+  background: rgba(8, 14, 24, 0.45);
+}
+
+.install-progress-card__details dl {
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.install-progress-card__details dl > div {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+
+.install-progress-card__details dt {
+  color: var(--muted);
+}
+
+.install-progress-card__details dd {
+  margin: 0;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.install-error-panel__code {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.install-error-panel__files ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.install-error-panel__suggest {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.install-error-panel__tech {
+  margin-top: 0.65rem;
+  padding: 0.65rem;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.install-error-panel__tech pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.capability-readiness-help {
+  margin-top: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 220, 255, 0.14);
+  background: rgba(8, 14, 24, 0.35);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.capability-readiness-help ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.install-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  border: 1px solid rgba(148, 220, 255, 0.18);
+  background: rgba(8, 14, 24, 0.45);
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.install-status-chip--downloading,
+.install-status-chip--installing {
+  color: var(--aurora-cyan);
+  border-color: rgba(45, 212, 191, 0.3);
+}
+
+.install-status-chip--ready {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.install-status-chip--repair,
+.install-status-chip--failed,
+.install-status-chip--blocked {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}

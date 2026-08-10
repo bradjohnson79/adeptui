@@ -1,0 +1,97 @@
+.ds-workspace-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform var(--motion-base) var(--ease-standard), box-shadow var(--motion-base) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+  cursor: pointer;
+  min-height: 100%;
+}
+
+.ds-workspace-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  border-color: var(--border-glass-active);
+}
+
+.ds-workspace-card__media {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: var(--bg0);
+}
+
+.ds-workspace-card__media img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  z-index: 1;
+}
+
+.ds-workspace-card__plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+.ds-workspace-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  flex: 1;
+}
+
+.ds-workspace-card__title {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  margin: 0;
+}
+
+.ds-workspace-card__desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-helper);
+  line-height: 1.45;
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ds-workspace-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.ds-workspace-card__badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--aurora-cyan);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-chip);
+  padding: 2px 8px;
+  background: var(--aurora-2);
+}
+
+.ds-workspace-card__open {
+  margin-top: var(--space-2);
+  color: var(--aurora-teal);
+  font-size: var(--text-label);
+  font-weight: 600;
+}

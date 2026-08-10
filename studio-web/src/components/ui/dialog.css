@@ -1,0 +1,53 @@
+.ds-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 14, 0.55);
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  overscroll-behavior: none;
+  animation: ds-fade-in var(--motion-fast) var(--ease-standard);
+}
+
+.ds-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+  background: var(--panel-elevated);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lift);
+  padding: var(--space-5);
+  color: var(--ink);
+  animation: ds-menu-in var(--motion-base) var(--ease-standard);
+}
+
+.ds-dialog__title {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  margin: 0 0 var(--space-3);
+}
+
+.ds-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  font-size: var(--text-body);
+  color: var(--muted);
+  margin-bottom: var(--space-5);
+}
+
+.ds-dialog__actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

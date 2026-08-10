@@ -1,0 +1,189 @@
+.sw-studio {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: #0e141c;
+  color: #e8eef5;
+}
+
+.sw-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid rgba(122, 153, 182, 0.2);
+}
+
+.sw-toolbar__title {
+  font-weight: 650;
+  margin-right: 0.5rem;
+}
+
+.sw-toolbar__save {
+  margin-left: auto;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+.sw-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.sw-studio.is-focus .sw-body,
+.sw-studio.is-distraction .sw-body {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+.sw-studio.is-focus .sw-nav,
+.sw-studio.is-focus .sw-inspector,
+.sw-studio.is-distraction .sw-nav,
+.sw-studio.is-distraction .sw-inspector {
+  display: none;
+}
+
+.sw-nav,
+.sw-inspector {
+  overflow: auto;
+  padding: 0.55rem;
+  border-right: 1px solid rgba(122, 153, 182, 0.15);
+  font-size: 0.78rem;
+}
+
+.sw-inspector {
+  border-right: 0;
+  border-left: 1px solid rgba(122, 153, 182, 0.15);
+}
+
+.sw-page-wrap {
+  overflow: auto;
+  padding: 1rem 1.25rem 2rem;
+  display: flex;
+  justify-content: center;
+  background: linear-gradient(180deg, #121a24, #0c1118);
+}
+
+.sw-page {
+  width: min(100%, 720px);
+  min-height: 900px;
+  background: #f7f4ea;
+  color: #111;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  padding: 72px 72px 72px 96px;
+}
+
+.sw-page .ProseMirror {
+  outline: none;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 12pt;
+  line-height: 1.15;
+  min-height: 700px;
+}
+
+.sw-page .sp-el--scene_heading {
+  text-transform: uppercase;
+  font-weight: 700;
+  margin: 1.2em 0 0.6em;
+}
+
+.sw-page .sp-el--action {
+  margin: 0.55em 0;
+}
+
+.sw-page .sp-el--character {
+  text-transform: uppercase;
+  margin: 0.9em 0 0;
+  padding-left: 2.4in;
+}
+
+.sw-page .sp-el--parenthetical {
+  padding-left: 1.8in;
+  margin: 0;
+}
+
+.sw-page .sp-el--dialogue {
+  padding-left: 1.1in;
+  padding-right: 1.2in;
+  margin: 0 0 0.55em;
+}
+
+.sw-page .sp-el--transition {
+  text-transform: uppercase;
+  text-align: right;
+  margin: 0.9em 0;
+}
+
+.sw-studio.is-dialogue .sp-el--action {
+  opacity: 0.35;
+}
+
+.sw-nav button,
+.sw-inspector button,
+.sw-toolbar button {
+  font-size: 0.75rem;
+}
+
+.sw-nav__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sw-nav__item.is-active,
+.sw-nav__item:hover {
+  background: rgba(80, 120, 160, 0.2);
+  border-color: rgba(122, 153, 182, 0.25);
+}
+
+.sw-status {
+  display: flex;
+  gap: 1rem;
+  padding: 0.35rem 0.65rem;
+  border-top: 1px solid rgba(122, 153, 182, 0.15);
+  font-size: 0.72rem;
+  opacity: 0.9;
+}
+
+.sw-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.sw-card {
+  border: 1px solid rgba(122, 153, 182, 0.25);
+  border-radius: 8px;
+  padding: 0.55rem;
+  background: rgba(20, 30, 42, 0.7);
+}
+
+.sw-proposal {
+  border: 1px solid rgba(180, 150, 80, 0.35);
+  border-radius: 8px;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+  background: rgba(60, 48, 20, 0.35);
+}
+
+.sw-command {
+  position: fixed;
+  inset: 15% 20% auto;
+  z-index: 40;
+  background: #152030;
+  border: 1px solid rgba(122, 153, 182, 0.35);
+  border-radius: 10px;
+  padding: 0.75rem;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}

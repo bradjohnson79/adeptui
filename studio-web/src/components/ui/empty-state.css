@@ -1,0 +1,71 @@
+.ds-inline-notice,
+.ds-empty-state {
+  padding: var(--space-5);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  color: var(--ink);
+}
+
+.ds-inline-notice--loading,
+.ds-inline-notice--info {
+  color: var(--status-info);
+  background: color-mix(in srgb, var(--status-info) 8%, var(--panel-solid));
+}
+
+.ds-inline-notice--error,
+.ds-inline-notice--blocked {
+  color: var(--status-danger);
+  background: color-mix(in srgb, var(--status-danger) 8%, var(--panel-solid));
+}
+
+.ds-inline-notice--install-required {
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 8%, var(--panel-solid));
+}
+
+.ds-empty-state {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ds-empty-state__art {
+  width: min(220px, 70%);
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  border: 1px solid var(--border-glass);
+  background: var(--bg0);
+}
+
+.ds-empty-state__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ds-empty-state h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  color: var(--ink);
+}
+
+.ds-empty-state p {
+  margin: 0;
+  max-width: 36ch;
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+
+.ds-empty-state__actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}

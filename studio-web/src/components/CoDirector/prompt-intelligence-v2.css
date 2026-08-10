@@ -1,0 +1,72 @@
+.pi-bench-dashboard {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+}
+
+.pi-bench-dashboard__header h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+}
+
+.pi-bench-dashboard__controls,
+.pi-bench-dashboard__columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.pi-bench-dashboard__columns > div {
+  flex: 1 1 280px;
+  min-width: 260px;
+}
+
+.pi-bench-dashboard__controls label,
+.pi-bench-compare__slot label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+}
+
+.pi-bench-dashboard__message {
+  margin-top: 0.65rem;
+  color: #d8e7f7;
+}
+
+.pi-bench-dashboard__status pre {
+  max-height: 160px;
+  overflow: auto;
+  font-size: 0.72rem;
+}
+
+.pi-bench-compare {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.55rem;
+  border: 1px solid rgba(122, 153, 182, 0.18);
+  border-radius: 10px;
+}
+
+.prompt-intelligence-panel__axes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  font-size: 0.72rem;
+}
+
+.prompt-intelligence-panel__axes span {
+  display: block;
+  padding: 0.35rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(20, 32, 48, 0.75);
+}
+
+.prompt-intelligence-panel__strategy-banner {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(36, 58, 84, 0.55);
+}
