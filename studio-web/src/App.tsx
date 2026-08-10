@@ -9,6 +9,7 @@ import ProductionSuiteWorkspace from "./components/ProductionSuiteWorkspace";
 import VideoRuntimeDiagnostics from "./pages/VideoRuntimeDiagnostics";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage";
 import RuntimeManager from "./components/docker-runtime/RuntimeManager";
+import { LocalRuntimeSettings } from "./components/Settings/LocalRuntime";
 // M2.8 / M2.13 workspace foundations retained for Version 1.2; V1.1 routes show deferral pages.
 import { CoDirectorHost, CoDirectorSessionProvider } from "./components/CoDirector";
 import { ProductionControlDock } from "./components/production-dock";
@@ -71,6 +72,7 @@ export default function App() {
               <Route path="/diagnostics/video-runtime" element={<VideoRuntimeDiagnostics />} />
               <Route path="/diagnostics" element={<DiagnosticsPage />} />
               <Route path="/runtime-manager" element={<RuntimeManager />} />
+              <Route path="/settings/local-runtime" element={<LocalRuntimeSettings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             <CoDirectorHost />

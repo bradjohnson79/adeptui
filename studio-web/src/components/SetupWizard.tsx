@@ -589,6 +589,145 @@ function SetupAdvancedPanel({
   );
 }
 
+function BackgroundServicesSection({
+  comfyuiReady,
+}: {
+  comfyuiReady: boolean;
+}) {
+  const [comfyuiEnabled, setComfyuiEnabled] = useState(false);
+  const [localhostEnabled, setLocalhostEnabled] = useState(false);
+  const [startWithWindows, setStartWithWindows] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [activeStatus, setActiveStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleEnableRecommended = async () => {
+    setActivating(true);
+    setError(null);
+    setActiveStatus("Preparing background services...");
+    setComfyuiEnabled(true);
+    setLocalhostEnabled(true);
+
+    try {
+      await api.runtimeManagerSavePreferences({
+        comfyuiBackgroundManagerEnabled: true,
+        localhostBackgroundManagerEnabled: true,
+        startWithWindows: false,
+        remoteAccessEnabled: false,
+      });
+      setActiveStatus("Starting ComfyUI...");
+      const res = await api.runtimeManagerStart();
+      if (res.success) {
+        setActiveStatus("Starting local services...");
+        setActiveStatus("Checking runtime...");
+        setActiveStatus("Ready");
+        setTimeout(() => setActiveStatus(null), 2000);
+      } else {
+        setError("Failed to start background services. Check Local Runtime settings for details.");
+        setActiveStatus(null);
+      }
+    } catch {
+      setError("Could not enable background services.");
+      setActiveStatus(null);
+    }
+    setActivating(false);
+  };
+
+  const hosted = !!import.meta.env.VITE_API_BASE;
+
+  return (
+    <section className="setup-component-section" aria-labelledby="background-services-heading">
+      <div className="setup-section-heading">
+        <div>
+          <h2 id="background-services-heading">Background Services</h2>
+          <p>
+            Adept UI can keep your local AI services running quietly in the background
+            so you don't have to launch them manually each time.
+          </p>
+        </div>
+      </div>
+
+      <div className="setup-component-card" data-testid="comfyui-background-card">
+        <div className="setup-component-card__header">
+          <span className="setup-component-card__title">
+            ComfyUI Background Manager
+            <span className="setup-component-card__badge setup-component-card__badge--recommended">Recommended</span>
+          </span>
+          {comfyuiReady ? (
+            <span className="setup-component-card__status setup-component-card__status--ready">Detected</span>
+          ) : (
+            <span className="setup-component-card__status setup-component-card__status--missing">Not Installed</span>
+          )}
+        </div>
+        <p className="muted">
+          Run ComfyUI quietly in the background whenever Adept UI needs it.
+          No ComfyUI Desktop window required.
+        </p>
+        {comfyuiReady && (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={comfyuiEnabled}
+              disabled={hosted || activating}
+              onChange={(e) => setComfyuiEnabled(e.target.checked)}
+            />
+            Enable Background Manager
+          </label>
+        )}
+      </div>
+
+      <div className="setup-component-card" data-testid="localhost-background-card">
+        <div className="setup-component-card__header">
+          <span className="setup-component-card__title">
+            Localhost Background Manager
+            <span className="setup-component-card__badge setup-component-card__badge--recommended">Recommended</span>
+          </span>
+          <span className="setup-component-card__status setup-component-card__status--ready">Available</span>
+        </div>
+        <p className="muted">
+          Keep Adept Studio Runtime, Local AI Services, and Runtime Health available
+          without starting backend terminals manually.
+        </p>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={localhostEnabled}
+            disabled={hosted || activating}
+            onChange={(e) => setLocalhostEnabled(e.target.checked)}
+          />
+          Enable Background Manager
+        </label>
+      </div>
+
+      <div className="setup-component-section__actions">
+        <button
+          type="button"
+          className="primary"
+          onClick={handleEnableRecommended}
+          disabled={hosted || activating || !comfyuiReady}
+        >
+          {activating
+            ? activeStatus ?? "Preparing..."
+            : "Enable Recommended Background Services"}
+        </button>
+
+        <label className="toggle-row" style={{ marginTop: "0.5rem" }}>
+          <input
+            type="checkbox"
+            checked={startWithWindows}
+            disabled={hosted || activating}
+            onChange={(e) => setStartWithWindows(e.target.checked)}
+          />
+          Start automatically when Windows starts
+        </label>
+      </div>
+
+      {error && <div className="setup-message setup-message--error" role="alert">{error}</div>}
+      {activeStatus && <div className="setup-message" role="status">{activeStatus}</div>}
+    </section>
+  );
+}
+
 function SetupDialogShell({
   titleId,
   title,
@@ -1536,6 +1675,15 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
           ))}
         </div>
       </section>
+
+          {/* Background Services (shown when ComfyUI is detected) */}
+          {(() => {
+            const comfyuiComponent = status?.components?.find((c: { id: string }) => c.id === "comfyui");
+            const comfyuiReady = comfyuiComponent?.status === "ready";
+            if (!comfyuiReady) return null;
+            return <BackgroundServicesSection comfyuiReady={comfyuiReady} />;
+          })()}
+
           <SetupAdvancedPanel
             status={status}
             legacy={legacyDetection}

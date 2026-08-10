@@ -1158,6 +1158,66 @@ export interface DirectorTimelineCameraCatalog {
   mock: boolean;
 }
 
+// --- runtime manager types ------------------------------------------------
+
+export type ServiceOwnership = "owned" | "reused" | "external";
+export type ServiceStatusValue = "running" | "stopped" | "error" | "not_configured" | "starting";
+
+export interface ComfyUiStatus {
+  status: ServiceStatusValue;
+  ownership: ServiceOwnership;
+  version?: string;
+  device?: string;
+  vram_total?: number;
+}
+
+export interface StudioApiStatus {
+  status: ServiceStatusValue;
+  ownership: ServiceOwnership;
+  workers?: number;
+}
+
+export interface OllamaStatus {
+  status: ServiceStatusValue;
+  ownership: ServiceOwnership;
+  version?: string;
+}
+
+export interface TunnelStatus {
+  status: ServiceStatusValue;
+  ownership: ServiceOwnership;
+  hostname?: string;
+}
+
+export interface GpuInfo {
+  detected: boolean;
+  name?: string;
+  driver?: string;
+  vram_total_mib?: number;
+}
+
+export interface RuntimeManagerPreferences {
+  comfyuiBackgroundManagerEnabled: boolean;
+  localhostBackgroundManagerEnabled: boolean;
+  startWithWindows: boolean;
+  remoteAccessEnabled: boolean;
+}
+
+export interface RuntimeManagerStatus {
+  comfyui: ComfyUiStatus;
+  studioApi: StudioApiStatus;
+  ollama: OllamaStatus;
+  tunnel: TunnelStatus;
+  gpu: GpuInfo;
+  preferences: RuntimeManagerPreferences;
+}
+
+export interface RuntimeActionResponse {
+  success: boolean;
+  message: string;
+  status?: RuntimeManagerStatus;
+}
+
 export const api = {
   health: () => req<Health>("/api/health"),
   betaRuntimeStatus: () =>
@@ -2484,6 +2544,23 @@ export const api = {
   setupClearSourceOverride: (componentId: string) =>
     req<{ ok: boolean }>(`/api/setup/components/${encodeURIComponent(componentId)}/source-override`, {
       method: "DELETE",
+    }),
+  // --- runtime manager (Background Services) -------------------------------
+  runtimeManagerStatus: () =>
+    req<RuntimeManagerStatus>("/api/runtime-manager/status"),
+  runtimeManagerStart: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/start", { method: "POST" }),
+  runtimeManagerStop: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/stop", { method: "POST" }),
+  runtimeManagerRestart: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/restart", { method: "POST" }),
+  runtimeManagerPreferences: () =>
+    req<RuntimeManagerPreferences>("/api/runtime-manager/preferences"),
+  runtimeManagerSavePreferences: (prefs: RuntimeManagerPreferences) =>
+    req<RuntimeManagerPreferences>("/api/runtime-manager/preferences", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefs),
     }),
   // --- capability registry ------------------------------------------------
   // The truth source for "can this be used right now?". Read-only; `refreshCapabilities`

@@ -110,6 +110,16 @@ export function SettingsDrawer({
         </Button>
         <Button
           variant="secondary"
+          aria-label="Open local runtime settings"
+          onClick={() => {
+            navigate("/settings/local-runtime");
+            onClose();
+          }}
+        >
+          Local Runtime
+        </Button>
+        <Button
+          variant="secondary"
           aria-label="Set up hosted provider"
           onClick={() => {
             dock.setProviderModalOpen(true);
