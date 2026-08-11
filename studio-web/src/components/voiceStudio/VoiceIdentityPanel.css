@@ -1,0 +1,272 @@
+.voice-identity-panel {
+  display: grid;
+  gap: 1.25rem;
+  padding: 1rem 0;
+}
+
+.vip-section {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.vip-label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.vip-select {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+.vip-input {
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.vip-textarea {
+  width: 100%;
+  min-height: 5rem;
+  padding: 0.7rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.vip-inline-create {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vip-method-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+.vip-method-card {
+  display: grid;
+  gap: 0.3rem;
+  text-align: start;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-2, rgba(255,255,255,0.03)) 100%, transparent);
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  min-height: 5rem;
+}
+
+.vip-method-card:hover {
+  border-color: color-mix(in srgb, var(--accent, #6cf) 55%, var(--border, #333));
+}
+
+.vip-method-card.selected {
+  border-color: var(--accent, #6cf);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6cf) 40%, transparent);
+}
+
+.vip-method-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.vip-toggle-group {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.vip-toggle {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.vip-toggle.selected {
+  border-color: var(--accent, #6cf);
+  background: color-mix(in srgb, var(--accent, #6cf) 15%, transparent);
+}
+
+.vip-sample-toolbar {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.vip-accordion {
+  border-top: 1px solid color-mix(in srgb, var(--border, #333) 55%, transparent);
+  padding-top: 0.75rem;
+}
+
+.vip-accordion > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: disclosure-closed;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.vip-accordion[open] > summary {
+  list-style: disclosure-open;
+  margin-bottom: 0.75rem;
+}
+
+.vip-gauge {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.vip-gauge-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.vip-gauge input[type="range"] {
+  width: 100%;
+}
+
+.vip-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  gap: 0.25rem;
+}
+
+.vip-gauge-labels--numeric {
+  justify-content: space-between;
+}
+
+.vip-gauge-labels--numeric span {
+  flex: 1;
+  text-align: center;
+}
+
+.vip-sample-count-selector {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.vip-sample-count-btn {
+  flex: 1;
+  padding: 0.5rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+  font-weight: 600;
+}
+
+.vip-sample-count-btn.selected {
+  border-color: var(--accent, #6cf);
+  background: color-mix(in srgb, var(--accent, #6cf) 15%, transparent);
+}
+
+.vip-generate-btn {
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1.05rem;
+}
+
+.vip-samples-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.vip-sample-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border, #333) 70%, transparent);
+  background: color-mix(in srgb, var(--panel-2, rgba(255,255,255,0.03)) 100%, transparent);
+}
+
+.vip-sample-card audio {
+  width: 100%;
+}
+
+.vip-approved-banner {
+  padding: 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent, #6cf) 40%, transparent);
+  background: color-mix(in srgb, var(--accent, #6cf) 8%, transparent);
+  display: grid;
+  gap: 0.4rem;
+}
+
+.vip-approved-banner__header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vip-approved-banner audio {
+  width: 100%;
+  max-width: 36rem;
+}
+
+.vip-errors {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--error, #f44) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error, #f44) 30%, transparent);
+}
+
+.vip-error {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--error, #f44);
+}
+
+.vip-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.vip-refine-preview {
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #6cf) 25%, transparent);
+  background: color-mix(in srgb, var(--panel-2, #111) 80%, transparent);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.vip-refine-preview__text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}

@@ -83,6 +83,52 @@ KORRI_REACTIONS = [
     {"id": "grunt", "label": "effort grunt", "text": "*effort grunt*"},
 ]
 
+DEFAULT_DESIGN_BRIEF = {
+    "perceivedAge": "",
+    "vocalRegister": "",
+    "pitchRange": "",
+    "timbre": "",
+    "texture": "",
+    "resonance": "",
+    "brightness": "",
+    "warmth": "",
+    "breathiness": "",
+    "clarity": "",
+    "gender": "",
+    "language": "English",
+    "accent": "",
+    "speakingPace": "",
+    "energy": "",
+    "vocalWeight": "",
+    "confidence": "",
+    "playfulness": "",
+    "sarcasm": "",
+    "tenderness": "",
+    "authority": "",
+    "rebelliousness": "",
+    "emotionalVolatility": "",
+    "comedicTiming": "",
+    "intensity": "",
+    "restraint": "",
+    "delivery": "",
+    "additionalDirection": "",
+}
+
+DEFAULT_AUDITION_LINES = [
+    {"id": "neutral", "category": "Neutral introduction", "text": "Hello. I'm a character in this story."},
+    {"id": "fast", "category": "Fast dialogue", "text": "Let's go — there's no time to waste."},
+    {"id": "serious", "category": "Serious line", "text": "This is important. We need to get it right."},
+    {"id": "warm", "category": "Warm line", "text": "Don't worry. I'll be right here."},
+]
+
+DEFAULT_REACTIONS = [
+    {"id": "laugh", "label": "short amused laugh", "text": "*short amused laugh*"},
+    {"id": "sigh", "label": "thoughtful sigh", "text": "*thoughtful sigh*"},
+    {"id": "exhale", "label": "frustrated exhale", "text": "*frustrated exhale*"},
+    {"id": "gasp", "label": "surprised gasp", "text": "*surprised gasp*"},
+    {"id": "breath", "label": "quiet breath", "text": "*quiet breath*"},
+]
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -189,7 +235,7 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
     if profile.active_voice_profile_id:
         active = next((v for v in voices if v["id"] == profile.active_voice_profile_id), None)
     methods = _methods_catalog(readiness)
-    design_brief = KORRI_DESIGN_BRIEF if (profile.slug or "").lower() == "korri" else dict(KORRI_DESIGN_BRIEF)
+    design_brief = KORRI_DESIGN_BRIEF if (profile.slug or "").lower() == "korri" else dict(DEFAULT_DESIGN_BRIEF)
     prompt_document = None
     # Prefer stored brief from latest DESIGN voice
     for v in reversed(voices):
@@ -224,8 +270,8 @@ def get_voice_workspace(db: Session, project_id: str, character_id: str) -> dict
         "personality": getattr(profile, "personality", None),
         "performance": getattr(profile, "performance", None),
         "emotion": getattr(profile, "emotion", None),
-        "auditionLines": KORRI_AUDITION_LINES if (profile.slug or "").lower() == "korri" else KORRI_AUDITION_LINES,
-        "reactionCatalog": KORRI_REACTIONS,
+        "auditionLines": KORRI_AUDITION_LINES if (profile.slug or "").lower() == "korri" else DEFAULT_AUDITION_LINES,
+        "reactionCatalog": KORRI_REACTIONS if (profile.slug or "").lower() == "korri" else DEFAULT_REACTIONS,
         "candidateBatches": batches,
         "voiceStudioDraft": draft,
         "testingSelection": testing,
@@ -341,7 +387,7 @@ def preview_voice_design(
     db: Session, project_id: str, character_id: str, *, brief: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     profile = service.get_profile(db, project_id, character_id)
-    b = brief or (KORRI_DESIGN_BRIEF if (profile.slug or "").lower() == "korri" else KORRI_DESIGN_BRIEF)
+    b = brief or (KORRI_DESIGN_BRIEF if (profile.slug or "").lower() == "korri" else DEFAULT_DESIGN_BRIEF)
     prompt = compile_design_prompt(b, character_name=profile.name)
     readiness = provider_readiness()
     design = readiness.get("qwenVoiceDesign") or {}
@@ -378,9 +424,10 @@ def generate_voice_candidates(
     append_to_voice_id: str | None = None,
 ) -> dict[str, Any]:
     profile = service.get_profile(db, project_id, character_id)
-    b = brief or KORRI_DESIGN_BRIEF
+    is_korri = (profile.slug or "").lower() == "korri"
+    b = brief or (KORRI_DESIGN_BRIEF if is_korri else DEFAULT_DESIGN_BRIEF)
     prompt = (master_prompt or "").strip() or compile_design_prompt(b, character_name=profile.name)
-    line = test_line or KORRI_AUDITION_LINES[2]["text"]  # sarcastic line for Korri fit
+    line = test_line or (KORRI_AUDITION_LINES[2]["text"] if is_korri else DEFAULT_AUDITION_LINES[0]["text"])
     wanted = max(1, min(int(candidate_count), 6))
     body = type(
         "Body",
@@ -529,8 +576,9 @@ def retry_failed_candidate(
     cand = next((c for c in meta if c.get("id") == candidate_id), None)
     if not cand:
         raise _err("NOT_FOUND", "Candidate not found.", 404)
-    brief = dict(lineage.get("designBrief") or KORRI_DESIGN_BRIEF)
     profile = service.get_profile(db, project_id, character_id)
+    is_korri = (profile.slug or "").lower() == "korri"
+    brief = dict(lineage.get("designBrief") or (KORRI_DESIGN_BRIEF if is_korri else DEFAULT_DESIGN_BRIEF))
     prompt = str(lineage.get("compiledPrompt") or compile_design_prompt(brief, character_name=profile.name))
     readiness = provider_readiness()
     if not (readiness.get("qwenVoiceDesign") or {}).get("ready"):
@@ -538,7 +586,7 @@ def retry_failed_candidate(
     from .voice_runtime import _register_asset, _try_m210b_generate, _project_audio_dir
     import shutil
 
-    line = test_line or KORRI_AUDITION_LINES[2]["text"]
+    line = test_line or (KORRI_AUDITION_LINES[2]["text"] if is_korri else DEFAULT_AUDITION_LINES[0]["text"])
     try:
         src = _try_m210b_generate(
             registry_id="m2101-voice-design-021",
@@ -763,11 +811,12 @@ def refine_candidate(
     parent = next((c for c in meta if c.get("id") == candidate_id), None)
     if not parent:
         raise _err("NOT_FOUND", "Parent candidate not found.", 404)
-    brief = dict(lineage.get("designBrief") or KORRI_DESIGN_BRIEF)
+    profile = service.get_profile(db, project_id, character_id)
+    is_korri = (profile.slug or "").lower() == "korri"
+    brief = dict(lineage.get("designBrief") or (KORRI_DESIGN_BRIEF if is_korri else DEFAULT_DESIGN_BRIEF))
     brief["additionalDirection"] = (
         f"{brief.get('additionalDirection') or ''} Refinement: {refinement}".strip()
     )
-    profile = service.get_profile(db, project_id, character_id)
     prompt = compile_design_prompt(brief, character_name=profile.name)
     from .voice_runtime import _register_asset, _try_m210b_generate, _project_audio_dir
     import shutil
@@ -776,7 +825,7 @@ def refine_candidate(
     readiness = provider_readiness()
     if not (readiness.get("qwenVoiceDesign") or {}).get("ready"):
         raise _err("MODEL_NOT_INSTALLED", "Qwen Voice Design not ready.", 503)
-    line = test_line or KORRI_AUDITION_LINES[2]["text"]
+    line = test_line or (KORRI_AUDITION_LINES[2]["text"] if is_korri else DEFAULT_AUDITION_LINES[0]["text"])
     src = _try_m210b_generate(
         registry_id="m2101-voice-design-021",
         text=line,
@@ -856,7 +905,7 @@ def generate_reactions(
     # Reaction packs are production metadata — allowed on approved voices (voice identity stays locked).
     row = _voice(db, project_id, character_id, voice_id)
     results = []
-    for r in KORRI_REACTIONS:
+    for r in DEFAULT_REACTIONS:
         try:
             out = run_generate_dialogue(
                 db,

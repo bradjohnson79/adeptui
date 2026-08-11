@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..db import Project, get_db
 from .. import feature_flags as feature_flags_mod
 from . import service
+from .models import VoiceProfileRow
 from .schemas import (
     CharacterProfileCreate,
     CharacterProfileUpdate,
@@ -210,6 +211,49 @@ def approve_voice(project_id: str, character_id: str, voice_id: str, db: Session
     _require_flag()
     _project(db, project_id)
     return service.approve_voice_profile(db, project_id, character_id, voice_id)
+
+
+@router.get("/projects/{project_id}/voice/approved-status")
+def get_voice_approved_status(project_id: str, db: Session = Depends(get_db)):
+    """Return approved voice status for all characters in a project."""
+    _require_flag()
+    _project(db, project_id)
+    from .service import list_profiles
+    profiles = list_profiles(db, project_id)
+    result = []
+    for p in profiles:
+        if p.active_voice_profile_id:
+            vp = db.query(VoiceProfileRow).filter(
+                VoiceProfileRow.id == p.active_voice_profile_id
+            ).first()
+            if vp and vp.approval_status == "approved":
+                result.append({
+                    "characterId": p.id,
+                    "characterName": p.name,
+                    "voiceProfileId": vp.id,
+                    "voiceProfileName": vp.name,
+                    "approvedAt": vp.approved_at if vp.approved_at else None,
+                    "previewAssetId": vp.approved_preview_asset_id,
+                })
+    return {"items": result}
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/voice/approved-status")
+def get_character_voice_approved_status(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    """Check if a specific character has an approved voice."""
+    _require_flag()
+    _project(db, project_id)
+    from .service import get_profile
+    p = get_profile(db, project_id, character_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Character not found")
+    if p.active_voice_profile_id:
+        vp = db.query(VoiceProfileRow).filter(
+            VoiceProfileRow.id == p.active_voice_profile_id
+        ).first()
+        if vp and vp.approval_status == "approved":
+            return {"hasApprovedVoice": True, "voiceProfileId": vp.id, "previewAssetId": vp.approved_preview_asset_id}
+    return {"hasApprovedVoice": False}
 
 
 class ValidateReferenceBody(BaseModel):

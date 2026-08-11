@@ -6637,6 +6637,10 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/clone/generate`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  voiceApprovedStatus: (projectId: string) =>
+    req<{ items: any[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/voice/approved-status`,
+    ),
   voicePerformanceGate: () => req<any>("/api/voice-performance/gate/wave44"),
   voicePerformanceTags: () => req<any>("/api/voice-performance/tags"),
   voicePerformanceProviders: () => req<any>("/api/voice-performance/providers"),
@@ -7367,3 +7371,10 @@ export const api = {
   // Phase CK — Available video generators for project preferences
   videoGenerators: () => req<Array<{ id: string; label: string; available: boolean }>>(`${BASE}/api/knowledge-cards/video-generators`),
 };
+
+/** Standalone export for dynamic import — checks if any character in the project has an approved voice. */
+export async function voiceApprovedStatus(projectId: string): Promise<{ items: any[] }> {
+  return req<{ items: any[] }>(
+    `/api/projects/${encodeURIComponent(projectId)}/characters/voice/approved-status`,
+  );
+}
