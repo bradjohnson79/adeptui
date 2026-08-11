@@ -14,6 +14,10 @@ import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { EnvironmentReferenceSheetPanel } from "./EnvironmentReferenceSheetPanel";
 import { PlanWorkspacePanel } from "./plans";
 import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
+import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
+import { ScriptwriterCompactView } from "./scriptwriter/ScriptwriterCompactView";
+import { StoryboardCompactView } from "./storyboard/StoryboardCompactView";
+import { CharacterCreatorEmbedded } from "./CharacterCreatorEmbedded";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -237,9 +241,11 @@ function pillarLabel(pillar: FoundationPillar, isCount: boolean): string {
 function FoundationStatusBar({
   projectId,
   onPillarSelect,
+  onGoTab,
 }: {
   projectId: string;
   onPillarSelect: (tab: ContentTab) => void;
+  onGoTab?: (tab: string) => void;
 }) {
   const [status, setStatus] = useState<FoundationStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -295,7 +301,13 @@ function FoundationStatusBar({
               key={p.key}
               type="button"
               data-testid={`codirector-foundation-${p.key}`}
-              onClick={() => onPillarSelect(p.tab)}
+              onClick={() => {
+                if (p.tab === "characters" && onGoTab) {
+                  onGoTab("characters");
+                } else {
+                  onPillarSelect(p.tab);
+                }
+              }}
               style={{
                 display: "inline-flex",
                 flexDirection: "column",
@@ -339,16 +351,9 @@ export function CoDirectorProjectContent({
 
   const handleTabChange = useCallback(
     (id: ContentTab) => {
-      if (id === "scriptwriter") {
-        onGoTab?.("scriptwriter");
-      } else if (id === "script") {
-        onGoTab?.("script");
-      } else if (id === "characters") {
-        onGoTab?.("characters");
-      }
       onTabChange(id);
     },
-    [onTabChange, onGoTab],
+    [onTabChange],
   );
 
   useEffect(() => {
@@ -471,7 +476,7 @@ export function CoDirectorProjectContent({
             </h3>
             {projectId ? (
               <>
-                <FoundationStatusBar projectId={projectId} onPillarSelect={handleTabChange} />
+                <FoundationStatusBar projectId={projectId} onPillarSelect={handleTabChange} onGoTab={onGoTab} />
                 <ProjectWikiPanel
                   projectId={projectId}
                   refreshToken={wikiRefreshToken}
@@ -515,21 +520,48 @@ export function CoDirectorProjectContent({
             )}
           </div>
         )}
+        {tab === "scriptwriter" && (
+          <div data-testid="codirector-content-scriptwriter">
+            {projectId ? (
+              <ScriptwriterCompactView
+                projectId={projectId}
+                onOpenFull={() => onGoTab?.("scriptwriter")}
+              />
+            ) : (
+              <p className="muted">Select a project to open Script Writer.</p>
+            )}
+          </div>
+        )}
+        {tab === "script" && (
+          <div data-testid="codirector-content-script">
+            {projectId ? (
+              <StoryboardCompactView
+                projectId={projectId}
+                onOpenFull={() => onGoTab?.("script")}
+              />
+            ) : (
+              <p className="muted">Select a project to open Storyboard.</p>
+            )}
+          </div>
+        )}
+        {tab === "characters" && (
+          <div data-testid="codirector-content-characters">
+            {projectId ? (
+              <CharacterCreatorEmbedded projectId={projectId} />
+            ) : (
+              <p className="muted">Select a project to open Character Creator.</p>
+            )}
+          </div>
+        )}
         {tab === "library" && (
           <div data-testid="codirector-content-library">
             {projectId ? (
-              <ProjectRetrievalPanel
-                projectId={projectId}
-                tools={RETRIEVAL_TOOL_SETS.library}
-                emptyTitle="No library assets"
-                emptyDescription="Assets appear here when the project library has records."
-                testId="codirector-retrieval-library"
-              />
+              <LibraryMediaGrid projectId={projectId} onGoTab={onGoTab} />
             ) : (
               <CoDirectorEmptyState
                 testId="codirector-library-empty"
                 title="Project library"
-                description="Select a project to retrieve library assets."
+                description="Select a project to browse library assets."
               />
             )}
           </div>
