@@ -2,6 +2,30 @@
  * Dark Adept UI theme. No fake progress — all states reflect real job state.
  */
 
+/* Overlay container — sits above the right-pane tab content during execution. */
+.agent-operation-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 20, 30, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 10;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Wrapper for normal tab content — dimmed while overlay is present. */
+.project-pane-content {
+  min-height: 0;
+}
+
+.project-pane--dimmed {
+  opacity: 0.25;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
 .agent-work-surface {
   display: flex;
   flex-direction: column;
@@ -91,10 +115,21 @@
   gap: 12px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 600px) {
   .agent-work-surface__storyboard-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Prevent horizontal overflow at any width. */
+.agent-work-surface__storyboard-grid,
+.agent-work-surface__image-view,
+.agent-work-surface__candidates,
+.agent-work-surface__generic-list,
+.agent-work-surface__voice-view {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .agent-work-surface__image-view,
@@ -196,4 +231,107 @@
   background: rgba(240, 160, 160, 0.08);
   color: #f0a0a0;
   font-size: 0.8rem;
+}
+
+/* Task checklist — real backend step list, no fake progress. */
+.agent-work-surface__checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+}
+
+.agent-work-surface__checklist-title {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a94a6;
+  margin-bottom: 4px;
+}
+
+.agent-work-surface__checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c9d2e0;
+}
+
+.agent-work-surface__checklist-item .agent-work-surface__check-icon {
+  width: 14px;
+  text-align: center;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.agent-work-surface__checklist-item.completed .agent-work-surface__check-icon {
+  color: #7ec97e;
+}
+
+.agent-work-surface__checklist-item.running .agent-work-surface__check-icon {
+  color: #6b8afd;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-work-surface__checklist-item.queued .agent-work-surface__check-icon {
+  color: #6a7080;
+}
+
+.agent-work-surface__checklist-item.failed .agent-work-surface__check-icon {
+  color: #f0a0a0;
+}
+
+.agent-work-surface__checklist-item.running .agent-work-surface__check-label {
+  color: #e8edf6;
+}
+
+.agent-work-surface__checklist-item.queued .agent-work-surface__check-label {
+  color: #8a94a6;
+}
+
+.agent-work-surface__checklist-item .agent-work-surface__check-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(107, 138, 253, 0.25);
+  border-top-color: #6b8afd;
+  border-radius: 50%;
+  animation: agent-spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+/* Voice generation view — sample slots with audio players. */
+.agent-work-surface__voice-view {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-work-surface__voice-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(20, 26, 38, 0.6);
+}
+
+.agent-work-surface__voice-slot-label {
+  font-size: 0.8rem;
+  color: #c9d2e0;
+}
+
+.agent-work-surface__voice-slot-status {
+  font-size: 0.72rem;
+  color: #6b8afd;
+}
+
+.agent-work-surface__voice-slot-status.failed {
+  color: #f0a0a0;
+}
+
+.agent-work-surface__voice-audio {
+  width: 100%;
 }

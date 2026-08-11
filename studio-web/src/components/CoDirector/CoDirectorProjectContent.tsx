@@ -468,11 +468,18 @@ export function CoDirectorProjectContent({
           );
         })}
       </div>
-      <div className="codirector-content-body" role="tabpanel">
-        {isAgentWork(activeExecution) ? (
-          <AgentWorkSurface />
-        ) : (
-        <>
+      <div
+        className="codirector-content-body"
+        role="tabpanel"
+        style={{ position: "relative" }}
+      >
+        <div
+          className={
+            isAgentWork(activeExecution)
+              ? "project-pane-content project-pane--dimmed"
+              : "project-pane-content"
+          }
+        >
         {tab === "wiki" && (
           <div data-testid="codirector-content-wiki">
             <h3 style={{ marginTop: 0, fontSize: "0.95rem" }}>
@@ -640,7 +647,16 @@ export function CoDirectorProjectContent({
         {tab === "development" && <CoDirectorDevelopmentPanel />}
         {tab === "vision" && <CoDirectorVisionPanel />}
         {tab === "pitch" && <CoDirectorPitchLaunchPanel />}
-        </>
+        </div>
+        {isAgentWork(activeExecution) && (
+          <div
+            className="agent-operation-overlay"
+            role="dialog"
+            aria-label="Co-Director working"
+            data-testid="agent-operation-overlay"
+          >
+            <AgentWorkSurface />
+          </div>
         )}
       </div>
     </aside>

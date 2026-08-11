@@ -27,12 +27,25 @@ _NAVIGATE_PATTERN = re.compile(
 )
 
 _APPROVE_PATTERN = re.compile(
-    r"\b(?:approve|accept(?: this)?|use this|looks good|confirmed|that works|go ahead|sounds? good|perfect)\b",
+    r"\b(?:approve|accept(?: this)?|use this|looks good|confirmed|that works|go ahead|sounds? good|perfect"
+    r"|proceed|yes|yep|yeah|sure|ok|okay|please proceed|do it|continue|start|approved|alright|let'?s do it"
+    r"|that'?s fine|please continue|generate it)\b",
+    re.I,
+)
+
+# Execution-specific confirmation pattern (spec §4) — affirmative responses that
+# resolve a PENDING EXECUTION (not a Wiki/Bible proposal). Checked BEFORE generic
+# intent classification so the LLM cannot hijack a confirmation turn (spec §35).
+_EXECUTION_CONFIRMATION_PATTERN = re.compile(
+    r"\b(?:yes|yep|yeah|sure|ok|okay|please|proceed|go ahead|do it|continue|start|generate it"
+    r"|approved|sounds? good|let'?s do it|that'?s fine|alright|please proceed|please continue"
+    r"|looks good|confirmed|perfect|that works|that'?ll do)\b",
     re.I,
 )
 
 _REJECT_PATTERN = re.compile(
-    r"\b(?:reject|decline|don't use|keep mine|keep what I|revert|undo|discard|no[,.] keep|that's? not right|that's? wrong)\b",
+    r"\b(?:reject|decline|don't use|keep mine|keep what I|revert|undo|discard|no[,.] keep|that's? not right|that's? wrong"
+    r"|nope|no thanks|don't|stop|cancel|never mind)\b",
     re.I,
 )
 
@@ -176,6 +189,33 @@ def _has_negated_action(message: str) -> bool:
         _READ_INSPECT_PATTERN,
     ]
     return any(p.search(message) for p in action_patterns)
+
+
+def is_execution_confirmation(message: str) -> bool:
+    """Return True if `message` is an affirmative confirmation of a pending execution.
+
+    Spec §4 + §35: this is checked BEFORE generic intent classification so the LLM
+    cannot hijack a confirmation turn. Returns False for negated/reject responses.
+    """
+    if not message:
+        return False
+    # "not sure", "don't proceed", "no, don't" etc. are rejections, not confirmations.
+    if _NEGATION_PATTERN.search(message):
+        return False
+    if _REJECT_PATTERN.search(message):
+        return False
+    return bool(_EXECUTION_CONFIRMATION_PATTERN.search(message))
+
+
+def is_execution_rejection(message: str) -> bool:
+    """Return True if `message` rejects a pending execution."""
+    if not message:
+        return False
+    lower = message.lower().strip()
+    # Standalone "no" is a rejection.
+    if lower in ("no", "nope", "n", "no.", "no,", "cancel", "stop"):
+        return True
+    return bool(_REJECT_PATTERN.search(message))
 
 
 def _extract_navigate_target(

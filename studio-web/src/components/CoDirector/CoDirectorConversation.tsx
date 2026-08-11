@@ -13,6 +13,7 @@ import { CoDirectorProcessingStatus } from "./CoDirectorProcessingStatus";
 import { CoDirectorNextStepChips } from "./CoDirectorNextStepChips";
 import { CoDirectorMomentumCard } from "./CoDirectorMomentumCard";
 import { CoDirectorDeliverableReview } from "./CoDirectorPartnershipPanels";
+import { isAgentWork, isTerminal } from "./AgentWorkSurface/types";
 import { summarizeSetup } from "./types";
 
 /**
@@ -47,8 +48,16 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
     retryLastSend,
     openSettings,
     uiContext,
+    activeExecution,
   } = useCoDirectorSession();
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Spec §9/§30: when an agent execution is in flight (terminal or not),
+  // suppress generic conversational chips/cards. The AgentWorkSurface footer
+  // owns contextual result actions (e.g. "Regenerate Frame", "Open in Library")
+  // when the execution is terminal.
+  const executionActive = isAgentWork(activeExecution) && !isTerminal(activeExecution);
+  const agentWorkPresent = isAgentWork(activeExecution);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -117,7 +126,7 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
                     : undefined
                 }
               />
-              {isLatestAssistant ? <CoDirectorNextStepChips /> : null}
+              {isLatestAssistant && !agentWorkPresent ? <CoDirectorNextStepChips /> : null}
             </div>
           );
         })}
@@ -159,20 +168,21 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
         </div>
       )}
 
-      {plan && <CoDirectorTaskStatus />}
+      {plan && !executionActive && <CoDirectorTaskStatus />}
 
-      {proposals.map((proposal) => (
-        <CoDirectorProposalCard
-          key={proposal.id}
-          proposal={proposal}
-          busy={proposalActingId === proposal.id}
-          productionCapable={productionCapable}
-          onApprove={() => void approveProposal(proposal.id)}
-          onReject={(note) => void rejectProposal(proposal.id, note)}
-          onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
-          onCancel={() => void cancelProposal(proposal.id)}
-        />
-      ))}
+      {!executionActive &&
+        proposals.map((proposal) => (
+          <CoDirectorProposalCard
+            key={proposal.id}
+            proposal={proposal}
+            busy={proposalActingId === proposal.id}
+            productionCapable={productionCapable}
+            onApprove={() => void approveProposal(proposal.id)}
+            onReject={(note) => void rejectProposal(proposal.id, note)}
+            onRequestRevision={(note) => void requestProposalRevision(proposal.id, note)}
+            onCancel={() => void cancelProposal(proposal.id)}
+          />
+        ))}
 
       {setup && (
         <div className="codirector-action-card" data-testid="codirector-setup-card">

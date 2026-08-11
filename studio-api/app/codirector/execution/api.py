@@ -122,3 +122,48 @@ async def list_executions(
     """List execution packs for a project."""
     packs = list_packs(db, project_id, active_only=active)
     return {"executions": [p.model_dump(mode="json") for p in packs]}
+
+
+@router.get("/active/latest")
+async def get_active_execution(project_id: str, db: Session = Depends(get_db)) -> dict:
+    """Return the most recent non-terminal execution pack for refresh recovery (spec §18)."""
+    from .pack_store import get_active_execution_for_project
+    plan = get_active_execution_for_project(db, project_id)
+    if not plan:
+        return {"execution": None}
+    return {"execution": plan.model_dump(mode="json")}
+
+
+class RegenerateFrameRequest(BaseModel):
+    """Request body for targeted frame regeneration (spec §43)."""
+
+    child_index: int
+    user_instructions: str = ""
+
+
+@router.post("/{execution_id}/regenerate-frame")
+async def regenerate_frame(
+    project_id: str,
+    execution_id: str,
+    body: RegenerateFrameRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Submit a targeted new job for a single frame (spec §43).
+
+    Other frames remain unchanged. Returns the updated plan.
+    """
+    from .regenerate import regenerate_child_job
+
+    plan = regenerate_child_job(
+        db,
+        project_id,
+        execution_id,
+        child_index=body.child_index,
+        user_instructions=body.user_instructions,
+    )
+    if not plan:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "EXECUTION_NOT_FOUND", "message": "Execution or child job not found."},
+        )
+    return plan.model_dump(mode="json")

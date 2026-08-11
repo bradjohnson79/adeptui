@@ -1405,6 +1405,95 @@ def _build_execution_context(
     return ctx
 
 
+def _enrich_execution_context(
+    db: Any,
+    project_id: str,
+    ctx: dict[str, Any],
+    unified_intent: Any,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Enrich the execution context with project-resolved references (spec §12, §13, §32).
+
+    Resolves:
+    - character_names from the message (for storyboard + image generation)
+    - attachment_asset_ids from the most recent user message attachments
+    - reference_asset_ids from the Character Profile Approved Casting Image
+    - visual_style / project_style from the project foundation
+    """
+    import re as _re
+
+    capability = getattr(unified_intent, "capability", "") or ""
+    user_text = ctx.get("prompt", "")
+
+    # Resolve character names from the message.
+    char_names: list[str] = []
+    if capability in ("storyboard.generate", "image.generate"):
+        # "using Korri's reference" / "image of Mieke" / "with Korri"
+        name_match = _re.search(
+            r"\b(?:using|with|image of|of)\s+([A-Z][a-zA-Z]+)", user_text
+        )
+        if name_match:
+            char_names.append(name_match.group(1))
+        # Also pass character_name if extracted earlier.
+        if ctx.get("character_name") and ctx["character_name"] not in char_names:
+            char_names.append(ctx["character_name"])
+        if char_names:
+            ctx["character_names"] = char_names
+
+    # Resolve the approved casting image for the primary character (spec §13).
+    if char_names:
+        try:
+            from .character_identity.service import (
+                resolve_character_by_name,
+                resolve_approved_reference,
+            )
+            ref_ids: list[str] = []
+            for name in char_names:
+                profile = resolve_character_by_name(db, project_id, name)
+                if profile:
+                    approved = resolve_approved_reference(db, profile.id, "hero_portrait")
+                    if approved:
+                        ref_ids.append(approved)
+            if ref_ids:
+                ctx.setdefault("reference_asset_ids", []).extend(ref_ids)
+        except Exception:
+            logger.debug("Character reference resolution failed", exc_info=True)
+
+    # Resolve attachments from the most recent user message (spec §12).
+    try:
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                att_ids = msg.get("attachment_ids") or []
+                if att_ids:
+                    ctx.setdefault("attachment_asset_ids", []).extend(att_ids)
+                break
+    except Exception:
+        logger.debug("Attachment resolution failed", exc_info=True)
+
+    # Style propagation (spec §32): "Photorealistic environment" + "high-quality anime character".
+    style = _detect_visual_style(user_text)
+    if style:
+        ctx.setdefault("visual_style", style)
+        ctx.setdefault("project_style", style)
+
+    return ctx
+
+
+def _detect_visual_style(user_text: str) -> str:
+    """Detect style hints from the user message (spec §32)."""
+    import re as _re
+    parts: list[str] = []
+    if _re.search(r"\bphotorealistic\b", user_text, _re.I):
+        parts.append("Photorealistic environment")
+    if _re.search(r"\banime\b", user_text, _re.I):
+        parts.append("high-quality anime character")
+    if _re.search(r"\bcinematic\b", user_text, _re.I):
+        parts.append("cinematic lighting")
+    if _re.search(r"\bstylized\b", user_text, _re.I):
+        parts.append("stylized rendering")
+    return ", ".join(parts)
+
+
 def _execution_status_text(plan: Any) -> str:
     """Build a short human-readable status text from an ExecutionPlan."""
     status = getattr(plan, "status", None)
@@ -1426,6 +1515,121 @@ def _execution_status_text(plan: Any) -> str:
     if total:
         return f"{label} — {completed}/{total} in progress."
     return f"{label} — working…"
+
+
+def _emit_execution_status_event(plan: Any, request_id: str) -> dict:
+    """Build an SSE execution_status event dict from an ExecutionPlan."""
+    return {
+        "type": "execution_status",
+        "requestId": request_id,
+        "messageType": "execution_status",
+        "content": _execution_status_text(plan),
+        "execution": {
+            "execution_id": plan.execution_id,
+            "capability": plan.capability,
+            "status": plan.status.value,
+            "progress": plan.progress,
+            "completed": plan.completed_children,
+            "total": plan.total_children,
+            "surface_type": plan.surface_type,
+            "collection_id": plan.collection_id,
+            "result_asset_ids": list(plan.result_asset_ids),
+            "child_jobs": [
+                {
+                    "job_id": cj.job_id,
+                    "child_index": cj.child_index,
+                    "label": cj.label,
+                    "status": cj.status.value,
+                    "asset_id": cj.asset_id,
+                    "error": cj.error,
+                    "progress": cj.progress,
+                    "stage": cj.stage,
+                }
+                for cj in plan.child_jobs
+            ],
+        },
+    }
+
+
+async def _handle_pending_execution_confirmation(
+    db: Session,
+    project_id: str,
+    request_id: str,
+    user_text: str,
+):
+    """Confirmation-first router (spec §35).
+
+    If there is a pending execution in AWAITING_CONFIRMATION and the user's message
+    is an affirmative confirmation, dispatch the pending execution directly — NOT a
+    new creative turn.
+
+    Returns a tuple (handled: bool, events: list[dict]). When handled is True, the
+    caller should yield the events and return (do NOT fall through to the LLM).
+    """
+    from .execution.pending_store import get_active_pending, clear_pending
+    from .routing.deterministic import is_execution_confirmation, is_execution_rejection
+
+    events: list[dict] = []
+
+    pending = get_active_pending(db, project_id)
+    if pending is None or pending.state != "AWAITING_CONFIRMATION":
+        return (False, events)
+
+    if is_execution_confirmation(user_text):
+        # Dispatch the pending execution directly (spec §4, §5).
+        from .execution.dispatcher import dispatch as dispatch_execution
+        from .routing.unified_intent import DispatchStrategy, UnifiedIntent, UnifiedIntentKind
+
+        # Reconstruct the UnifiedIntent from the snapshot.
+        ui_snap = pending.unified_intent or {}
+        unified_intent = UnifiedIntent(
+            intent=UnifiedIntentKind(ui_snap.get("intent", "EXECUTION")),
+            capability=ui_snap.get("capability", pending.capability) or "",
+            confidence=ui_snap.get("confidence", 1.0),
+            dispatch=DispatchStrategy(ui_snap.get("dispatch", "DETERMINISTIC")),
+            classifier_source=ui_snap.get("classifier_source", "deterministic"),
+        )
+
+        plan = dispatch_execution(
+            db,
+            project_id,
+            unified_intent,
+            pending.resolved_context,
+            pre_approved=True,
+        )
+        clear_pending(db, project_id)
+
+        events.append(_emit_execution_status_event(plan, request_id))
+
+        # Emit honest completion status from the pack store.
+        try:
+            from .execution.status_messenger import emit_execution_status_events
+            for _ev in list(
+                emit_execution_status_events(
+                    db,
+                    project_id=project_id,
+                    request_id=request_id,
+                    execution_id=plan.execution_id,
+                )
+            ):
+                events.append(_ev)
+        except Exception:
+            logger.warning("status_messenger emit failed for confirmed dispatch", exc_info=True)
+
+        return (True, events)
+
+    if is_execution_rejection(user_text):
+        clear_pending(db, project_id)
+        events.append({
+            "type": "assistant",
+            "requestId": request_id,
+            "content": "Okay, I won't proceed with that. What would you like instead?",
+        })
+        return (True, events)
+
+    # Not a clear confirmation or rejection — fall through to normal classification
+    # (the user may have added new information that changes the plan).
+    return (False, events)
 
 
 async def _handle_approve_reject(
@@ -2138,6 +2342,22 @@ async def _stream_for_project_inner(
         "requestId": chat_request.request_id,
         "stage": "ASSEMBLING_PROMPT",
     }
+    # Confirmation-first router (spec §35) — check for a pending execution
+    # AWAITING_CONFIRMATION BEFORE running the generic classifier. This prevents
+    # the LLM from hijacking a "Yes, proceed" turn and returning to conversation.
+    try:
+        _user_text_for_confirm = _last_user_message(messages)
+        if _user_text_for_confirm and project_id:
+            handled, _confirm_events = await _handle_pending_execution_confirmation(
+                db, project_id, chat_request.request_id, _user_text_for_confirm,
+            )
+            if handled:
+                for _ev in _confirm_events:
+                    yield _ev
+                return
+    except Exception:
+        logger.warning("Confirmation-first router failed", exc_info=True)
+
     # Phase 3 — canonical RouteDecision from message + production state
     route_decision: Optional[Any] = None
     route_event: Optional[dict[str, Any]] = None
@@ -2204,6 +2424,7 @@ async def _stream_for_project_inner(
             # Build the execution context from the user message + chat state.
             user_text = _last_user_message(messages)
             ctx_dict = _build_execution_context(user_text, unified_intent, messages)
+            ctx_dict = _enrich_execution_context(db, project_id, ctx_dict, unified_intent, messages)
 
             plan = dispatch_execution(
                 db,
@@ -2212,40 +2433,71 @@ async def _stream_for_project_inner(
                 ctx_dict,
             )
 
-            dispatched_execution_id = plan.execution_id
+            # If the capability requires confirmation (APPROVAL_REQUIRED), persist
+            # a PendingExecution so a future "Yes, proceed" can resolve it (spec §4).
+            if plan.status == ExecutionStatus.PREVIEW and plan.error == "APPROVAL_REQUIRED":
+                from .execution.pending_store import PendingExecution, save_pending
 
-            # Yield an SSE event so the frontend activates the Agent Work Surface.
-            yield {
-                "type": "execution_status",
-                "requestId": chat_request.request_id,
-                "messageType": "execution_status",
-                "content": _execution_status_text(plan),
-                "execution": {
-                    "execution_id": plan.execution_id,
-                    "capability": plan.capability,
-                    "status": plan.status.value,
-                    "progress": plan.progress,
-                    "completed": plan.completed_children,
-                    "total": plan.total_children,
-                    "surface_type": plan.surface_type,
-                    "collection_id": plan.collection_id,
-                    "result_asset_ids": list(plan.result_asset_ids),
-                    "child_jobs": [
-                        {
-                            "job_id": cj.job_id,
-                            "child_index": cj.child_index,
-                            "label": cj.label,
-                            "status": cj.status.value,
-                            "asset_id": cj.asset_id,
-                            "error": cj.error,
-                            "progress": cj.progress,
-                            "stage": cj.stage,
-                        }
-                        for cj in plan.child_jobs
-                    ],
-                },
-            }
-            dispatched = True
+                pending = PendingExecution(
+                    execution_id=plan.execution_id,
+                    capability=plan.capability,
+                    project_id=project_id,
+                    intent=unified_intent.intent.value,
+                    unified_intent=unified_intent.model_dump(mode="json"),
+                    requested_parameters=ctx_dict,
+                    resolved_context=ctx_dict,
+                    attachment_asset_ids=ctx_dict.get("attachment_asset_ids", []),
+                    reference_asset_ids=ctx_dict.get("reference_asset_ids", []),
+                    requested_output_count=ctx_dict.get("count", 1),
+                    missing_required_fields=[],
+                    confirmation_required=True,
+                    confirmation_question="Shall I proceed with this generation?",
+                    state="AWAITING_CONFIRMATION",
+                )
+                save_pending(db, project_id, pending)
+
+                # Emit the confirmation question — do NOT claim execution.
+                yield {
+                    "type": "assistant",
+                    "requestId": chat_request.request_id,
+                    "content": "I'm ready to create that. Shall I proceed?",
+                }
+                dispatched = True
+            else:
+                dispatched_execution_id = plan.execution_id
+
+                # Yield an SSE event so the frontend activates the Agent Work Surface.
+                yield {
+                    "type": "execution_status",
+                    "requestId": chat_request.request_id,
+                    "messageType": "execution_status",
+                    "content": _execution_status_text(plan),
+                    "execution": {
+                        "execution_id": plan.execution_id,
+                        "capability": plan.capability,
+                        "status": plan.status.value,
+                        "progress": plan.progress,
+                        "completed": plan.completed_children,
+                        "total": plan.total_children,
+                        "surface_type": plan.surface_type,
+                        "collection_id": plan.collection_id,
+                        "result_asset_ids": list(plan.result_asset_ids),
+                        "child_jobs": [
+                            {
+                                "job_id": cj.job_id,
+                                "child_index": cj.child_index,
+                                "label": cj.label,
+                                "status": cj.status.value,
+                                "asset_id": cj.asset_id,
+                                "error": cj.error,
+                                "progress": cj.progress,
+                                "stage": cj.stage,
+                            }
+                            for cj in plan.child_jobs
+                        ],
+                    },
+                }
+                dispatched = True
         except Exception:
             logger.warning(
                 "ExecutionDispatcher failed — falling back to LLM path", exc_info=True

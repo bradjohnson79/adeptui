@@ -1003,6 +1003,50 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         if (local && local.length) setMessages(local);
         conversationHydratedRef.current = true;
       }
+
+      // Restore active execution overlay after refresh (spec §18). The
+      // `activeExecution` state resets to null on every reload, so without
+      // this the AgentWorkSurface overlay disappears even while the backend
+      // still has an in-flight execution for this project. We only rehydrate
+      // non-terminal executions — a terminal execution from before the
+      // refresh does not need to reclaim the right pane.
+      if (projectId) {
+        try {
+          const activeRes = await api.getActiveExecution(projectId);
+          if (cancelled || lastLoadedProjectIdRef.current !== projectId) return;
+          const exec = activeRes?.execution;
+          if (exec && !["completed", "failed", "cancelled"].includes(exec.status)) {
+            setActiveExecution({
+              mode: "agent_work",
+              execution_id: exec.execution_id,
+              capability: exec.capability || "",
+              surface_type: exec.surface_type || "",
+              status: exec.status,
+              progress: exec.progress || 0,
+              focused_artifact_ids: exec.result_asset_ids || [],
+              child_jobs: (exec.child_jobs || []).map((c: any) => ({
+                job_id: c.job_id,
+                label: c.label || `Item ${(c.child_index ?? 0) + 1}`,
+                status: (c.status as WorkSurfaceState["child_jobs"][number]["status"]) || "queued",
+                asset_id: c.asset_id ?? null,
+                error: c.error ?? null,
+                progress: c.progress || 0,
+                stage: c.stage || "",
+                child_index: c.child_index ?? 0,
+                metadata: c.metadata || {},
+              })),
+              result_asset_ids: exec.result_asset_ids || [],
+              collection_id: exec.collection_id ?? null,
+              error: exec.error ?? null,
+              project_id: projectId,
+            });
+          }
+        } catch (err) {
+          // Recovery is best-effort — a missing/empty active execution just
+          // means there is nothing to restore; the right pane stays normal.
+          console.warn("Active execution recovery failed:", err);
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -1667,7 +1711,16 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           // an execution_status event arrives with an execution_id. This switches
           // the right pane from normal tabs to the live work surface so the user
           // can see real execution progress (spec §18, §21, §24).
-          if (execPayload?.execution_id) {
+          //
+          // PREVIEW guard: a `status: "preview"` event means the capability is
+          // awaiting user confirmation (e.g. an APPROVAL_REQUIRED step). The
+          // execution has NOT actually started — the chat surface shows the
+          // confirmation question and we must NOT steal the right pane yet.
+          // Once the user confirms, a new execution_status event with a
+          // non-preview status (e.g. "queued") arrives and activates the
+          // overlay. This also prevents a stale preview from overwriting a
+          // legitimately active (non-preview) execution in `activeExecution`.
+          if (execPayload?.execution_id && execPayload.status !== "preview") {
             const execProjectId = b.projectId || "";
             const surfaceType = (execPayload.surface_type as WorkSurfaceState["surface_type"]) || "";
             setActiveExecution({

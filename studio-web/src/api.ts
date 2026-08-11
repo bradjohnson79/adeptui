@@ -6983,6 +6983,19 @@ export const api = {
     req<any>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/executions${activeOnly ? "?active=true" : ""}`,
     ),
+  getActiveExecution: (projectId: string) =>
+    req<{ execution: any | null }>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/active/latest`,
+    ),
+  regenerateFrame: (
+    projectId: string,
+    executionId: string,
+    body: { child_index: number; user_instructions?: string },
+  ) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/regenerate-frame`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   ownerApproveCharacterVisualSheet: (
     projectId: string,
     characterId: string,
