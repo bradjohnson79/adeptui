@@ -6392,6 +6392,40 @@ READ_TOOLS = READ_TOOLS + (
             ),
         ),
     ),
+    ToolDefinition(
+        tool_id="script.estimate_timing",
+        kind="read",
+        title="Estimate script timing",
+        description=(
+            "Estimate script runtime and per-scene timing from the project's "
+            "script document. Uses the industry guideline of ~1 page = ~1 minute. "
+            "READ-only — no writes or proposals."
+        ),
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="storyboard.estimate_runtime",
+        kind="read",
+        title="Estimate storyboard runtime",
+        description=(
+            "Estimate storyboard runtime from panel durations. Reports per-panel "
+            "timing and flags panels missing explicit durations. READ-only — "
+            "no writes or proposals."
+        ),
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="foundation.compare_pillars",
+        kind="read",
+        title="Compare project pillars",
+        description=(
+            "Compare project pillars (story, script, storyboard, characters, "
+            "foundation) for consistency and coverage: script/storyboard scene "
+            "coverage, runtime mismatch, unmapped characters, and foundation "
+            "readiness. READ-only — no writes or proposals."
+        ),
+        capability="project",
+    ),
 )
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = READ_TOOLS + MUTATING_TOOLS

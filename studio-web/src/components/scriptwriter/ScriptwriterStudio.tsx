@@ -1,7 +1,7 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../../api";
+import { api, ApiError } from "../../api";
 import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import { docJsonToElements, elementsToDocJson, ScreenplayKeys, ScreenplayParagraph } from "./screenplayExtension";
@@ -20,7 +20,6 @@ type NavScene = {
 
 export function ScriptwriterStudio({
   project,
-  onGo,
   onActiveDocumentId,
 }: {
   project: Project;
@@ -54,11 +53,15 @@ export function ScriptwriterStudio({
   const [codirectorOpen, setCodirectorOpen] = useState(true);
   const saveTimer = useRef<number | null>(null);
   const hydrating = useRef(false);
+  const latestRevisionRef = useRef<number | null>(null);
+  const latestDocIdRef = useRef<string | null>(null);
 
   const applyBundle = useCallback(
     (bundle: Awaited<ReturnType<typeof api.scriptwriter.studio>>) => {
       const d = bundle.document as unknown as ScriptDocument;
       setDoc(d);
+      latestRevisionRef.current = d.revision;
+      latestDocIdRef.current = d.id;
       onActiveDocumentId?.(d.id);
       setNav((bundle.navigator || []) as NavScene[]);
       setStats(bundle.stats || {});
@@ -69,6 +72,12 @@ export function ScriptwriterStudio({
     },
     [onActiveDocumentId],
   );
+
+  const setDocTracked = useCallback((d: ScriptDocument) => {
+    setDoc(d);
+    latestRevisionRef.current = d.revision;
+    latestDocIdRef.current = d.id;
+  }, []);
 
   useEffect(() => () => onActiveDocumentId?.(undefined), [onActiveDocumentId]);
 
@@ -86,23 +95,44 @@ export function ScriptwriterStudio({
     ],
     content: elementsToDocJson([]),
     onUpdate: ({ editor: ed }) => {
-      if (hydrating.current || !doc) return;
+      if (hydrating.current || !latestDocIdRef.current) return;
       setSaveState("unsaved");
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(() => {
         void (async () => {
+          const docId = latestDocIdRef.current;
+          if (!docId) return;
           try {
             setSaveState("saving");
             const elements = docJsonToElements(ed.getJSON() as { content?: Array<Record<string, unknown>> });
-            const res = await api.scriptwriter.autosave(project.id, doc.id, {
+            const res = await api.scriptwriter.autosave(project.id, docId, {
               elements,
-              expectedRevision: doc.revision,
+              expectedRevision: latestRevisionRef.current,
             });
-            setDoc(res.document as unknown as ScriptDocument);
+            const d = res.document as unknown as ScriptDocument;
+            setDocTracked(d);
             setSaveState((res.saveState as SaveState) || "saved");
           } catch (e) {
-            setSaveState("save_failed");
-            setMessage(e instanceof Error ? e.message : "Save failed");
+            if (e instanceof ApiError && e.status === 400 && (e.code === "SCRIPT_CONFLICT" || (e.message || "").includes("CONFLICT"))) {
+              try {
+                const fresh = await api.scriptwriter.studio(project.id);
+                const d = fresh.document as unknown as ScriptDocument;
+                setDocTracked(d);
+                if (editor) {
+                  hydrating.current = true;
+                  editor.commands.setContent(elementsToDocJson(d.elements || []));
+                  hydrating.current = false;
+                }
+                setSaveState("save_failed");
+                setMessage("Document was updated elsewhere. Reloaded latest version — your recent edit was not saved. Please reapply.");
+              } catch {
+                setSaveState("save_failed");
+                setMessage("Save failed: document was updated elsewhere and reload also failed. Please refresh the page.");
+              }
+            } else {
+              setSaveState("save_failed");
+              setMessage(e instanceof Error ? e.message : "Save failed");
+            }
           }
         })();
       }, 700);
@@ -149,7 +179,7 @@ export function ScriptwriterStudio({
       heading: "INT. NEW LOCATION - DAY",
     });
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     await refreshNav();
   };
@@ -158,7 +188,7 @@ export function ScriptwriterStudio({
     if (!doc) return;
     const res = await api.scriptwriter.undo(project.id, doc.id);
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     await refreshNav();
   };
@@ -216,7 +246,7 @@ export function ScriptwriterStudio({
     }
     const res = await api.scriptwriter.applyProposal(project.id, doc.id, proposal);
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     setProposal(null);
     setMessage("Co-Director proposal applied via transaction.");
@@ -275,7 +305,7 @@ export function ScriptwriterStudio({
     if (!doc || !importText.trim()) return;
     const res = await api.scriptwriter.importText(project.id, doc.id, importText);
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     setImportText("");
     await refreshNav();
@@ -288,7 +318,7 @@ export function ScriptwriterStudio({
       { title: "INCITING INCIDENT", description: "Disrupt the status quo." },
     ]);
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     await refreshNav();
   };
@@ -312,7 +342,7 @@ export function ScriptwriterStudio({
       replace: replaceText,
     });
     const d = res.document as unknown as ScriptDocument;
-    setDoc(d);
+    setDocTracked(d);
     syncEditorFromDoc(d);
     setMessage(`Search/replace applied for “${findText}”.`);
   };
@@ -368,9 +398,6 @@ export function ScriptwriterStudio({
         <button type="button" className={view === "compare" ? "primary" : "ghost"} onClick={() => setView("compare")}>
           Compare
         </button>
-        <button type="button" className={view === "storyboard" ? "primary" : "ghost"} onClick={() => setView("storyboard")}>
-          Storyboard
-        </button>
         <button type="button" className="ghost" data-testid="scriptwriter-insert-scene" onClick={() => void insertScene()}>
           Insert scene
         </button>
@@ -388,9 +415,6 @@ export function ScriptwriterStudio({
         </button>
         <button type="button" className="ghost" data-testid="scriptwriter-command" onClick={() => setCommandOpen(true)}>
           Command
-        </button>
-        <button type="button" className="ghost" onClick={() => onGo("timeline")}>
-          Timeline
         </button>
         <span className="sw-toolbar__save" data-testid="scriptwriter-save-state">
           {saveState.replace("_", " ")}
@@ -490,18 +514,6 @@ export function ScriptwriterStudio({
                 Compare
               </button>
               <pre>{compareResult ? JSON.stringify(compareResult.slice(0, 20), null, 2) : "No comparison yet"}</pre>
-            </div>
-          ) : null}
-          {view === "storyboard" ? (
-            <div data-testid="scriptwriter-storyboard-view">
-              <p className="eyebrow">Storyboard view</p>
-              <p className="muted">
-                Storyboard panels remain linked to legacy segments during migration. Open the dedicated Storyboard
-                workspace for panel editing.
-              </p>
-              <button type="button" className="primary" onClick={() => onGo("script")}>
-                Open Storyboard workspace
-              </button>
             </div>
           ) : null}
         </main>

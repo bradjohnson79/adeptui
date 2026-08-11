@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Placeholder } from "@tiptap/extension-placeholder";
 import { api } from "../../api";
 import "./story-editor.css";
 
@@ -8,33 +11,11 @@ interface StoryEditorProps {
 }
 
 export function StoryEditor({ projectId, embedded = false }: StoryEditorProps) {
-  const [content, setContent] = useState("");
   const [title, setTitle] = useState("Untitled Story");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [wordCount, setWordCount] = useState(0);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const doc = await api.storyGet(projectId);
-        if (!cancelled) {
-          setContent(doc.content || "");
-          setTitle(doc.title || "Untitled Story");
-          setWordCount(doc.wordCount || 0);
-          loadedRef.current = true;
-        }
-      } catch {
-        loadedRef.current = true;
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
 
   const scheduleSave = useCallback(
     (newContent: string, newTitle?: string) => {
@@ -54,16 +35,60 @@ export function StoryEditor({ projectId, embedded = false }: StoryEditorProps) {
     [projectId, title],
   );
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setContent(val);
-    if (loadedRef.current) scheduleSave(val);
-  };
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        codeBlock: false,
+        strike: false,
+        code: false,
+        blockquote: false,
+        horizontalRule: false,
+      }),
+      Placeholder.configure({
+        placeholder:
+          "Write your story here...\n\nDescribe what your film is about. The concept, the characters, the setting, what happens, and how it feels.",
+      }),
+    ],
+    content: "",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const doc = await api.storyGet(projectId);
+        if (!cancelled && editor) {
+          editor.commands.setContent(doc.content || "");
+          setTitle(doc.title || "Untitled Story");
+          setWordCount(doc.wordCount || 0);
+          loadedRef.current = true;
+        }
+      } catch {
+        loadedRef.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const onUpdate = () => {
+      if (!loadedRef.current) return;
+      scheduleSave(editor.getHTML());
+    };
+    editor.on("update", onUpdate);
+    return () => {
+      editor.off("update", onUpdate);
+      editor.destroy();
+    };
+  }, [editor, scheduleSave]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setTitle(val);
-    if (loadedRef.current) scheduleSave(content, val);
+    if (loadedRef.current) scheduleSave(editor?.getHTML() || "", val);
   };
 
   const baseClass = embedded ? "story-editor story-editor--embedded" : "story-editor";
@@ -90,14 +115,85 @@ export function StoryEditor({ projectId, embedded = false }: StoryEditorProps) {
         </span>
         <span className="story-editor__wordcount">{wordCount} words</span>
       </div>
-      <textarea
-        ref={editorRef}
-        className="story-editor__content"
-        value={content}
-        onChange={handleChange}
-        placeholder={"Write your story here...\n\nDescribe what your film is about. The concept, the characters, the setting, what happens, and how it feels."}
-        data-testid="story-content"
-      />
+      {editor ? (
+        <div className="story-editor__toolbar" data-testid="story-toolbar">
+          <button
+            type="button"
+            className={editor.isActive("bold") ? "is-active" : ""}
+            data-testid="story-btn-bold"
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            aria-label="Bold"
+          >
+            B
+          </button>
+          <button
+            type="button"
+            className={editor.isActive("italic") ? "is-active" : ""}
+            data-testid="story-btn-italic"
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            aria-label="Italic"
+          >
+            I
+          </button>
+          <button
+            type="button"
+            className={editor.isActive("heading", { level: 1 }) ? "is-active" : ""}
+            data-testid="story-btn-h1"
+            onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+            aria-label="Heading 1"
+          >
+            H1
+          </button>
+          <button
+            type="button"
+            className={editor.isActive("heading", { level: 2 }) ? "is-active" : ""}
+            data-testid="story-btn-h2"
+            onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+            aria-label="Heading 2"
+          >
+            H2
+          </button>
+          <button
+            type="button"
+            className={editor.isActive("bulletList") ? "is-active" : ""}
+            data-testid="story-btn-bullet"
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            aria-label="Bullet list"
+          >
+            •
+          </button>
+          <button
+            type="button"
+            className={editor.isActive("orderedList") ? "is-active" : ""}
+            data-testid="story-btn-numbered"
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            aria-label="Numbered list"
+          >
+            1.
+          </button>
+          <button
+            type="button"
+            disabled={!editor.can().undo()}
+            data-testid="story-btn-undo"
+            onClick={() => editor.chain().focus().undo().run()}
+            aria-label="Undo"
+          >
+            ↶
+          </button>
+          <button
+            type="button"
+            disabled={!editor.can().redo()}
+            data-testid="story-btn-redo"
+            onClick={() => editor.chain().focus().redo().run()}
+            aria-label="Redo"
+          >
+            ↷
+          </button>
+        </div>
+      ) : null}
+      <div className="story-editor__content" data-testid="story-content">
+        <EditorContent editor={editor} />
+      </div>
     </div>
   );
 }

@@ -57,6 +57,9 @@ from .handlers import (
     docker_runtime_tools,
     wave3_reads,
     wave4_plans,
+    script_timing,
+    storyboard_timing,
+    pillar_comparison,
 )
 
 ReadHandler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -327,6 +330,9 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "magi.inspect_timeline_lineage": magi.inspect_timeline_lineage,
     "magi.readiness": magi.readiness,
     "project.read_context": project_context.read_project_context,
+    "script.estimate_timing": script_timing.read_script_timing,
+    "storyboard.estimate_runtime": storyboard_timing.read_storyboard_timing,
+    "foundation.compare_pillars": pillar_comparison.read_pillar_comparison,
 }
 
 _MUTATION_HANDLERS: dict[str, MutationHandler] = {

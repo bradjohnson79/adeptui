@@ -53,8 +53,7 @@ export type StudioView =
   | "cards"
   | "beats"
   | "compare"
-  | "production"
-  | "storyboard";
+  | "production";
 
 export type WritingMode =
   | "standard"

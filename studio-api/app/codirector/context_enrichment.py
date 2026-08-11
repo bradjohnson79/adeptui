@@ -25,6 +25,9 @@ _CONTENT_TAB_LABELS: dict[str, str] = {
     "vision": "the Vision document",
     "pitch": "the Pitch & Launch document",
     "scriptwriter": "the Script document",
+    "story": "the Story document",
+    "script": "the Storyboard",
+    "characters": "the Character Creator",
     "development": "Development",
     "production": "Production",
 }

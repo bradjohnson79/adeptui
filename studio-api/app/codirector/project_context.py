@@ -179,21 +179,18 @@ def _get_characters(db: Session, project_id: str) -> Optional[dict[str, Any]]:
 
 
 def _get_foundation(db: Session, project_id: str) -> Optional[dict[str, Any]]:
-    """Get project foundation/status.
+    """Get foundation status for all four pillars.
 
-    There is no dedicated ``project_foundation`` module; the authoritative
-    project status (counts, render progress, status label) is produced by
-    ``app.project_service.project_status``, shared by the HTTP router and
-    Co-Director read tools so the two can never drift apart.
+    The authoritative Foundation Status (story/script/storyboard/characters
+    pillar readiness, missing pillars, ready-for-timeline flag) is produced by
+    ``app.project_foundation.service.get_foundation_status``, shared by the
+    HTTP router and Co-Director read tools so the two can never drift apart.
     """
     try:
-        from app.db import Project
-        from app.project_service import project_status
+        from app.project_foundation.service import get_foundation_status
 
-        project = db.get(Project, project_id)
-        if not project:
-            return None
-        return project_status(db, project)
+        status = get_foundation_status(db, project_id)
+        return status.model_dump()
     except Exception:
         pass
     return None
