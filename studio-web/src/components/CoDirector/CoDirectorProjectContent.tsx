@@ -6,6 +6,7 @@ import { CONTENT_NAV } from "./navEntries";
 import { ProjectWikiPanel } from "./ProjectWikiPanel";
 import { NotesPanel } from "./NotesPanel";
 import { CastingPanel } from "./CastingPanel";
+import { StoryEditor } from "../story/StoryEditor";
 import { SceneReadinessMatrix } from "./SceneReadinessMatrix";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import { CoDirectorEmptyState } from "./cards";
@@ -207,6 +208,116 @@ function ApprovalsList({ projectId }: { projectId: string }) {
   );
 }
 
+type FoundationPillar = {
+  status: string;
+  exists: boolean;
+  last_updated: string | null;
+  item_count: number;
+};
+
+type FoundationStatus = {
+  story: FoundationPillar;
+  script: FoundationPillar;
+  storyboard: FoundationPillar;
+  characters: FoundationPillar;
+  ready_for_timeline: boolean;
+  missing_pillars: string[];
+};
+
+function pillarLabel(pillar: FoundationPillar, isCount: boolean): string {
+  if (!pillar.exists) return "Not Started";
+  if (isCount) {
+    return pillar.item_count > 0 ? String(pillar.item_count) : "Not Started";
+  }
+  const status = (pillar.status || "").replace(/_/g, " ").trim();
+  if (!status) return "Ready";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function FoundationStatusBar({
+  projectId,
+  onPillarSelect,
+}: {
+  projectId: string;
+  onPillarSelect: (tab: ContentTab) => void;
+}) {
+  const [status, setStatus] = useState<FoundationStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!projectId) {
+      setStatus(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    api
+      .foundationStatus(projectId)
+      .then((res) => {
+        if (!cancelled) {
+          setStatus(res as FoundationStatus);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus(null);
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  if (loading || !status) {
+    return null;
+  }
+
+  const pillars: { key: keyof Pick<FoundationStatus, "story" | "script" | "storyboard" | "characters">; label: string; tab: ContentTab; isCount: boolean }[] = [
+    { key: "story", label: "Story", tab: "story", isCount: false },
+    { key: "script", label: "Script", tab: "scriptwriter", isCount: false },
+    { key: "storyboard", label: "Storyboard", tab: "script", isCount: false },
+    { key: "characters", label: "Characters", tab: "characters", isCount: true },
+  ];
+
+  return (
+    <div className="codirector-content-card" data-testid="codirector-foundation-status" style={{ marginBottom: "0.5rem" }}>
+      <p className="eyebrow" style={{ margin: 0 }}>Project Foundation</p>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.35rem" }}>
+        {pillars.map((p) => {
+          const pillar = status[p.key];
+          const label = pillarLabel(pillar, p.isCount);
+          const ready = pillar.exists && (p.isCount ? pillar.item_count > 0 : true);
+          return (
+            <button
+              key={p.key}
+              type="button"
+              data-testid={`codirector-foundation-${p.key}`}
+              onClick={() => onPillarSelect(p.tab)}
+              style={{
+                display: "inline-flex",
+                flexDirection: "column",
+                alignItems: "flex-start",
+                padding: "0.3rem 0.5rem",
+                background: ready ? "color-mix(in srgb, var(--accent, #4a8) 14%, transparent)" : "transparent",
+                border: "1px solid color-mix(in srgb, currentColor 18%, transparent)",
+                borderRadius: "0.35rem",
+                cursor: "pointer",
+                minWidth: "5.5rem",
+              }}
+            >
+              <span style={{ fontSize: "0.7rem", opacity: 0.8 }}>{p.label}</span>
+              <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function CoDirectorProjectContent({
   tab,
   onTabChange,
@@ -230,6 +341,10 @@ export function CoDirectorProjectContent({
     (id: ContentTab) => {
       if (id === "scriptwriter") {
         onGoTab?.("scriptwriter");
+      } else if (id === "script") {
+        onGoTab?.("script");
+      } else if (id === "characters") {
+        onGoTab?.("characters");
       }
       onTabChange(id);
     },
@@ -355,18 +470,30 @@ export function CoDirectorProjectContent({
               {uiContext.projectName || "No Project Selected"}
             </h3>
             {projectId ? (
-              <ProjectWikiPanel
-                projectId={projectId}
-                refreshToken={wikiRefreshToken}
-                wikiUiMessage={activity?.wikiUiMessage || null}
-                wikiVerification={activity?.wikiVerification || null}
-                onOpenCasting={(name) => {
-                  setCastingFocus(name);
-                  onTabChange("casting");
-                }}
-              />
+              <>
+                <FoundationStatusBar projectId={projectId} onPillarSelect={handleTabChange} />
+                <ProjectWikiPanel
+                  projectId={projectId}
+                  refreshToken={wikiRefreshToken}
+                  wikiUiMessage={activity?.wikiUiMessage || null}
+                  wikiVerification={activity?.wikiVerification || null}
+                  onOpenCasting={(name) => {
+                    setCastingFocus(name);
+                    onTabChange("casting");
+                  }}
+                />
+              </>
             ) : (
               <p className="muted">Select a project to open the Project Wiki.</p>
+            )}
+          </div>
+        )}
+        {tab === "story" && (
+          <div data-testid="codirector-content-story">
+            {projectId ? (
+              <StoryEditor projectId={projectId} embedded />
+            ) : (
+              <p className="muted">Select a project to write your Story.</p>
             )}
           </div>
         )}

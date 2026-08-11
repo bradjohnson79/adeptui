@@ -41,7 +41,10 @@ function normalizeContentTab(value: string | null | undefined): ContentTab {
     value === "jobs" ||
     value === "vision" ||
     value === "pitch" ||
-    value === "scriptwriter"
+    value === "scriptwriter" ||
+    value === "story" ||
+    value === "script" ||
+    value === "characters"
   ) {
     return value as ContentTab;
   }
@@ -87,6 +90,7 @@ export function CoDirectorShell({
     showReconnectAction,
     reconnect,
     uiContext,
+    setActiveContentTab,
   } = useCoDirectorSession();
   const [navOpen, setNavOpen] = useState(false);
   const [contentTabState, setContentTabState] = useState<ContentTab>(() => loadContentTab());
@@ -133,6 +137,14 @@ export function CoDirectorShell({
   }, [uiContext.projectId, setContentTab]);
 
   const contentTab = contentTabState;
+
+  // Push the active Project Content tab into the Co-Director session as a
+  // contextual pillar hint (story/script/notes/wiki/...). This is a HINT only —
+  // Co-Director still uses its own judgment. Sent to the backend in the chat
+  // request body and surfaced in the session-context contract.
+  useEffect(() => {
+    setActiveContentTab(contentTab);
+  }, [contentTab, setActiveContentTab]);
 
   const applyLayoutPreset = useCallback(
     (preset: CoDirectorLayoutPreset) => {

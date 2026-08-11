@@ -1232,6 +1232,32 @@ export const api = {
       updatedAt?: string;
     }>("/api/runtime/beta"),
   listProjects: (init?: RequestInit) => req<Project[]>("/api/projects", init),
+  storyGet: (projectId: string) =>
+    req<{ id: string; projectId: string; title: string; content: string; wordCount: number; createdAt: string; updatedAt: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/story`,
+    ),
+  storySave: (projectId: string, body: { content: string; title?: string }) =>
+    req<{ id: string; projectId: string; title: string; content: string; wordCount: number; createdAt: string; updatedAt: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/story`,
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  storyStatus: (projectId: string) =>
+    req<{ exists: boolean; wordCount: number; updatedAt: string | null }>(
+      `/api/projects/${encodeURIComponent(projectId)}/story/status`,
+    ),
+  foundationStatus: (projectId: string) =>
+    req<{
+      story: { status: string; exists: boolean; last_updated: string | null; item_count: number };
+      script: { status: string; exists: boolean; last_updated: string | null; item_count: number };
+      storyboard: { status: string; exists: boolean; last_updated: string | null; item_count: number };
+      characters: { status: string; exists: boolean; last_updated: string | null; item_count: number };
+      ready_for_timeline: boolean;
+      missing_pillars: string[];
+    }>(`/api/projects/${encodeURIComponent(projectId)}/foundation`),
+  projectContext: (projectId: string, pillars?: string[]) =>
+    req<Record<string, unknown>>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/context${pillars ? `?pillars=${pillars.join(",")}` : ""}`,
+    ),
   createProject: (
     name: string,
     opts?: {
@@ -1865,11 +1891,12 @@ export const api = {
       honesty?: string | null;
       ok: boolean;
     }>(`/api/codirector/providers/${encodeURIComponent(providerId)}/health`),
-  codirectorSessionContext: (opts?: { projectId?: string; sceneId?: string; workspace?: string }) => {
+  codirectorSessionContext: (opts?: { projectId?: string; sceneId?: string; workspace?: string; contentTab?: string }) => {
     const params = new URLSearchParams();
     if (opts?.projectId) params.set("project_id", opts.projectId);
     if (opts?.sceneId) params.set("scene_id", opts.sceneId);
     if (opts?.workspace) params.set("workspace", opts.workspace);
+    if (opts?.contentTab) params.set("content_tab", opts.contentTab);
     const q = params.toString();
     return req<{
       projectId?: string | null;
@@ -1877,6 +1904,7 @@ export const api = {
       activeDocumentId?: string | null;
       activeSceneId?: string | null;
       activeWorkspace?: string | null;
+      activeContentTab?: string | null;
       selectedAssets: string[];
       provider?: string | null;
       model?: string | null;
@@ -1960,6 +1988,7 @@ export const api = {
       mode?: "chat" | "prompt" | "guide" | "setup";
       request_id?: string;
       attachment_ids?: string[];
+      active_content_tab?: string;
     },
     opts?: { signal?: AbortSignal },
   ) =>
@@ -1987,6 +2016,7 @@ export const api = {
       request_id?: string;
       origin_session_id?: string;
       attachment_ids?: string[];
+      active_content_tab?: string;
     },
     opts: { signal?: AbortSignal; onEvent: (event: CoDirectorStreamEvent) => void },
   ): Promise<void> => {

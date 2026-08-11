@@ -39,6 +39,7 @@ from .handlers import (
     multi_shot_tools,
     posecraft,
     project,
+    project_context,
     project_decisions,
     system_status,
     prompt_intelligence,
@@ -325,6 +326,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "magi.inspect_selection": magi.inspect_selection,
     "magi.inspect_timeline_lineage": magi.inspect_timeline_lineage,
     "magi.readiness": magi.readiness,
+    "project.read_context": project_context.read_project_context,
 }
 
 _MUTATION_HANDLERS: dict[str, MutationHandler] = {

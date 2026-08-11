@@ -2852,7 +2852,11 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         tool_id="character_creator.propose_visual_sheet",
         kind="mutating",
         title="Character Creator: generate visual sheet",
-        description="Enqueue real Generated Character Image Profile via Z-Image / character-sheet (does not owner-approve).",
+        description=(
+            "Enqueue real Generated Character Image Profile via certified Qwen-Image-2512 / character-sheet "
+            "(does not owner-approve). Defaults to 4 candidates when 'candidates' or 'options' is requested "
+            "without a specific number; requires a usable character description (>= 20 chars) or asks for one honestly."
+        ),
         capability="project",
         pinned_resources=("project",),
         parameters=(
@@ -2860,6 +2864,9 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("heroAssetId", "string", required=False, max_length=36),
             ToolParameter("includeDetails", "boolean", required=False),
             ToolParameter("includePerformance", "boolean", required=False),
+            ToolParameter("candidateCount", "integer", required=False, minimum=1, maximum=12, description="Number of hero casting candidates to generate. Defaults to 4 when 'candidates'/'options' is requested without a number."),
+            ToolParameter("candidates", "boolean", required=False, description="Set true when the user asks for 'candidates' or 'options' without a count; defaults candidateCount to 4."),
+            ToolParameter("options", "boolean", required=False, description="Alias for candidates=true."),
         ),
     ),
     ToolDefinition(
@@ -6359,6 +6366,31 @@ READ_TOOLS = READ_TOOLS + (
             "W46 Timeline. READ-only — no mutation or regeneration."
         ),
         capability="project",
+    ),
+    ToolDefinition(
+        tool_id="project.read_context",
+        kind="read",
+        title="Read project context",
+        description=(
+            "Retrieve the latest saved versions of this project's pillars "
+            "(story, script, storyboard, characters, foundation status) in a "
+            "single read. Always reads the authoritative source — no cache. "
+            "Pass `pillars` to select a subset; omit it to read all available. "
+            "Absent pillars resolve to null rather than raising. READ-only — "
+            "no writes or proposals."
+        ),
+        capability="project",
+        parameters=(
+            ToolParameter(
+                "pillars",
+                "array",
+                required=False,
+                description=(
+                    "Which pillars to retrieve. Omit for all available. "
+                    "Allowed values: story, script, storyboard, characters, foundation."
+                ),
+            ),
+        ),
     ),
 )
 

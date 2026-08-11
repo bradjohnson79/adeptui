@@ -11,7 +11,10 @@ export type ContentTab =
   | "pitch"
   | "scriptwriter"
   | "development"
-  | "production";
+  | "production"
+  | "story"
+  | "script"
+  | "characters";
 
 export type NavTarget =
   | { kind: "content"; tab: ContentTab }
@@ -37,33 +40,15 @@ export type ContentNavItem =
       children: { id: ContentTab; label: string }[];
     };
 
-/** Creator-facing content navigation — Story/Production are groups, not pages. */
+/** Creator-facing content navigation — Four Pillars Project Building. */
 export const CONTENT_NAV: ContentNavItem[] = [
   { kind: "tab", id: "wiki", label: "Wiki" },
   { kind: "tab", id: "notes", label: "Notes" },
-  { kind: "tab", id: "casting", label: "Casting" },
-  {
-    kind: "group",
-    id: "story",
-    label: "Story",
-    children: [
-      { id: "vision", label: "Vision" },
-      { id: "pitch", label: "Pitch & Launch" },
-      { id: "bible", label: "Bible" },
-      { id: "scriptwriter", label: "Script Writer" },
-    ],
-  },
+  { kind: "tab", id: "story", label: "Story" },
+  { kind: "tab", id: "scriptwriter", label: "Script Writer" },
+  { kind: "tab", id: "script", label: "Storyboard" },
+  { kind: "tab", id: "characters", label: "Character Creator" },
   { kind: "tab", id: "library", label: "Library" },
-  {
-    kind: "group",
-    id: "production",
-    label: "Production",
-    children: [
-      { id: "plans", label: "Plans" },
-      { id: "approvals", label: "Approvals" },
-      { id: "jobs", label: "Jobs" },
-    ],
-  },
 ];
 
 export function buildNavEntries(projectId: string | undefined): NavEntry[] {

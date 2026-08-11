@@ -84,6 +84,8 @@ class CoDirectorChatBody(BaseModel):
     origin_session_id: Optional[str] = Field(default=None, alias="originSessionId")
     attachment_ids: list[str] = Field(default_factory=list)
     attachmentIds: list[str] = Field(default_factory=list)
+    active_content_tab: Optional[str] = None
+    activeContentTab: Optional[str] = None
 
 
 class CoDirectorCancelBody(BaseModel):
@@ -197,6 +199,7 @@ async def session_context(
     project_id: Optional[str] = None,
     scene_id: Optional[str] = None,
     workspace: Optional[str] = None,
+    content_tab: Optional[str] = None,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Canonical session-context contract (composed from existing stores)."""
@@ -207,7 +210,26 @@ async def session_context(
         project_id=project_id,
         active_scene_id=scene_id,
         active_workspace=workspace,
+        active_content_tab=content_tab,
     )
+
+
+@router.get("/projects/{project_id}/context")
+async def get_project_context(
+    project_id: str,
+    pillars: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Retrieve project pillar content for Co-Director context.
+
+    Query param ``pillars`` is an optional comma-separated subset
+    (e.g. ``story,script``). Omit to read all available pillars. Absent
+    pillars resolve to ``null`` rather than raising.
+    """
+    from ..codirector.project_context import retrieve_project_context
+
+    pillar_list = [p.strip() for p in pillars.split(",") if p.strip()] if pillars else None
+    return retrieve_project_context(db, project_id, pillar_list)
 
 
 @router.put("/config")
@@ -269,6 +291,7 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
             request_id=body.request_id,
             conversation_locale=body.conversation_locale or body.conversationLocale,
             attachment_ids=body.attachment_ids or body.attachmentIds,
+            active_content_tab=body.active_content_tab,
         )
     except CoDirectorError as err:
         raise _http_error(err) from err
@@ -313,6 +336,7 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
                 conversation_locale=body.conversation_locale or body.conversationLocale,
                 origin_session_id=body.origin_session_id,
                 attachment_ids=body.attachment_ids or body.attachmentIds,
+                active_content_tab=body.active_content_tab,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
                 if codirector_service.is_cancelled(request_id):

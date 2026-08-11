@@ -32,6 +32,8 @@ export interface CoDirectorUIContext {
   activeGenerationId?: string;
   /** Active script/document id when known (session-context contract). */
   activeDocumentId?: string;
+  /** Active Co-Director Project Content tab (wiki|notes|casting|library|...|scriptwriter). */
+  activeContentTab?: string | null;
   /** Navigate to a project workspace tab. */
   onGoTab?: (tab: string) => void;
 }
@@ -43,6 +45,8 @@ export interface CoDirectorSessionContext {
   activeDocumentId?: string | null;
   activeSceneId?: string | null;
   activeWorkspace?: string | null;
+  /** Active Co-Director Project Content tab — lightweight pillar hint. */
+  activeContentTab?: string | null;
   selectedAssets: string[];
   provider?: string | null;
   model?: string | null;

@@ -24,7 +24,11 @@ from .. import assistant as assistant_module
 from ..assistant import SceneSetupProposal
 from ..config import settings
 from ..db import CoDirectorConversation, CoDirectorConversationEvent, Project, Scene
-from .context_enrichment import attachment_context_block, compact_wiki_context
+from .context_enrichment import (
+    attachment_context_block,
+    compact_wiki_context,
+    content_tab_hint_block,
+)
 from ..feature_flags import feature_flags
 from ..learning import adaptive_lessons_block, learning_context_block, parse_learning
 from . import config_store
@@ -562,6 +566,7 @@ async def _prepare_chat_request(
     request_id: str | None,
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
+    active_content_tab: str | None = None,
 ) -> tuple[CoDirectorProvider, ChatRequest, ContextManifest]:
     request_id = request_id or new_request_id()
     context = ""
@@ -625,6 +630,11 @@ async def _prepare_chat_request(
         )
         if attachment_block:
             context = (context or "") + "\n\n" + attachment_block
+
+    # Active Project Content tab — lightweight pillar hint (not a hard filter).
+    content_tab_hint = content_tab_hint_block(active_content_tab)
+    if content_tab_hint:
+        context = (context or "") + "\n\n" + content_tab_hint
 
     chat_messages = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -1134,6 +1144,7 @@ async def chat_for_project(
     request_id: str | None = None,
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
+    active_content_tab: str | None = None,
 ) -> tuple[
     ChatResult,
     SceneSetupProposal | None,
@@ -1156,6 +1167,7 @@ async def chat_for_project(
         request_id=request_id,
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
+        active_content_tab=active_content_tab,
     )
     # Sync chat shares the stream defer/budget path — Wiki is not on the critical path.
     core = run_conversation_core_turn(
@@ -1914,6 +1926,7 @@ async def stream_for_project(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
+    active_content_tab: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .inference_activity import begin_inference, end_inference
 
@@ -1931,6 +1944,7 @@ async def stream_for_project(
             conversation_locale=conversation_locale,
             attachment_ids=attachment_ids,
             origin_session_id=origin_session_id,
+            active_content_tab=active_content_tab,
         ):
             yield event
     finally:
@@ -1950,6 +1964,7 @@ async def _stream_for_project_inner(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
+    active_content_tab: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .conversation import run_conversation_core_turn
 
@@ -1976,6 +1991,7 @@ async def _stream_for_project_inner(
         request_id=request_id,
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
+        active_content_tab=active_content_tab,
     )
     timing.requestId = chat_request.request_id
     user_message = _last_user_message(messages)

@@ -168,6 +168,7 @@ type SessionValue = {
   dismissPlan: () => void;
   bindWorkspace: (bindings: CoDirectorWorkspaceBindings) => void;
   unbindWorkspace: () => void;
+  setActiveContentTab: (tab: string | null) => void;
   send: (text?: string, mode?: ChatMode) => Promise<void>;
   retryLastSend: () => void;
   cancelSend: () => void;
@@ -510,6 +511,7 @@ function mergeOntoServer(
 export function CoDirectorSessionProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const bindingsRef = useRef<CoDirectorWorkspaceBindings>({});
+  const activeContentTabRef = useRef<string | null>(null);
   const [open, setOpenState] = useState(false);
   const [displayMode, setDisplayModeState] = useState<CoDirectorDisplayMode>(() => loadDisplayMode());
   const [draft, setDraftState] = useState(() => loadPersistedDraft());
@@ -1162,6 +1164,16 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     bindingsRef.current = {};
     setUiContext({});
   }, [cancelInFlightForProjectSwitch]);
+
+  const setActiveContentTab = useCallback((tab: string | null) => {
+    setUiContext((prev) =>
+      prev.activeContentTab === tab ? prev : { ...prev, activeContentTab: tab },
+    );
+  }, []);
+
+  useEffect(() => {
+    activeContentTabRef.current = uiContext.activeContentTab ?? null;
+  }, [uiContext.activeContentTab]);
 
   const selectProject = useCallback(() => {
     navigate("/#projects-library");
@@ -1992,6 +2004,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             request_id: requestId,
             origin_session_id: getTabSessionId(),
             attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
+            active_content_tab: activeContentTabRef.current || undefined,
           },
           { signal: controller.signal, onEvent },
         );
@@ -2114,6 +2127,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               mode,
               request_id: requestId,
               attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
+              active_content_tab: activeContentTabRef.current || undefined,
             },
             { signal: controller.signal },
           );
@@ -3003,6 +3017,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       activeDocumentId: uiContext.activeDocumentId ?? null,
       activeSceneId: uiContext.sceneId ?? null,
       activeWorkspace: uiContext.workspaceId ?? null,
+      activeContentTab: uiContext.activeContentTab ?? null,
       selectedAssets: uiContext.selectedAssetIds || [],
       provider: providerHealth?.providerId ?? null,
       model: selectedModelId || providerModel,
@@ -3104,6 +3119,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       dismissPlan,
       bindWorkspace,
       unbindWorkspace,
+      setActiveContentTab,
       send,
       retryLastSend,
       cancelSend,
@@ -3212,6 +3228,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       dismissPlan,
       bindWorkspace,
       unbindWorkspace,
+      setActiveContentTab,
       send,
       retryLastSend,
       cancelSend,

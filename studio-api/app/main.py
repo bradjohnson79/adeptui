@@ -314,6 +314,18 @@ try:
 except Exception:
     logger.exception("Scriptwriter M4.7 router failed to load")
 try:
+    from .story.api import router as story_router
+
+    app.include_router(story_router, prefix="/api")
+except Exception:
+    logger.exception("Story router failed to load")
+try:
+    from .project_foundation.api import router as foundation_router
+
+    app.include_router(foundation_router, prefix="/api")
+except Exception:
+    logger.exception("Project Foundation router failed to load")
+try:
     from .docker_runtime.api import router as docker_runtime_router
 
     app.include_router(docker_runtime_router, prefix="/api")
