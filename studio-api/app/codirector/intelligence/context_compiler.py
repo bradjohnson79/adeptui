@@ -455,6 +455,25 @@ class ContextCompiler:
                             source_type="asset_metadata",
                         )
                     )
+            # Workstream H, spec §42 — result-aware context so "number 3"
+            # resolves to Frame 3 of the most recent completed execution.
+            if "references" in allowed or "project_overview" in allowed:
+                try:
+                    from ..context_enrichment import execution_result_context_block
+
+                    exec_result_block = execution_result_context_block(db, project_id)
+                    if exec_result_block:
+                        facts.append(
+                            _fact(
+                                "project.execution_result",
+                                exec_result_block,
+                                category="references" if "references" in allowed else "project_overview",
+                                authority="verified",
+                                source_type="execution_pack",
+                            )
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
         except Exception:
             pass
 

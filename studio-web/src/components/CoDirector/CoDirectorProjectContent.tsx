@@ -9,14 +9,15 @@ import { CastingPanel } from "./CastingPanel";
 import { StoryEntryEditor } from "../story/StoryEntryEditor";
 import { SceneReadinessMatrix } from "./SceneReadinessMatrix";
 import { useCoDirectorSession } from "./CoDirectorSession";
+import { AgentWorkSurface } from "./AgentWorkSurface/AgentWorkSurface";
+import { isAgentWork } from "./AgentWorkSurface/types";
 import { CoDirectorEmptyState } from "./cards";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { EnvironmentReferenceSheetPanel } from "./EnvironmentReferenceSheetPanel";
 import { PlanWorkspacePanel } from "./plans";
 import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
 import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
-import { ScriptwriterCompactView } from "./scriptwriter/ScriptwriterCompactView";
-import { StoryboardCompactView } from "./storyboard/StoryboardCompactView";
+import { ScriptwriterInlineEditor } from "./scriptwriter/ScriptwriterInlineEditor";
 import { CharacterCompactView } from "./characters/CharacterCompactView";
 import {
   CoDirectorDevelopmentPanel,
@@ -222,7 +223,7 @@ type FoundationPillar = {
 type FoundationStatus = {
   story: FoundationPillar;
   script: FoundationPillar;
-  storyboard: FoundationPillar;
+  storyboard?: FoundationPillar;
   characters: FoundationPillar;
   ready_for_timeline: boolean;
   missing_pillars: string[];
@@ -281,10 +282,9 @@ function FoundationStatusBar({
     return null;
   }
 
-  const pillars: { key: keyof Pick<FoundationStatus, "story" | "script" | "storyboard" | "characters">; label: string; tab: ContentTab; isCount: boolean }[] = [
+  const pillars: { key: keyof Pick<FoundationStatus, "story" | "script" | "characters">; label: string; tab: ContentTab; isCount: boolean }[] = [
     { key: "story", label: "Story", tab: "story", isCount: false },
     { key: "script", label: "Script", tab: "scriptwriter", isCount: false },
-    { key: "storyboard", label: "Storyboard", tab: "script", isCount: false },
     { key: "characters", label: "Characters", tab: "characters", isCount: true },
   ];
 
@@ -339,7 +339,7 @@ export function CoDirectorProjectContent({
   onTabChange: (tab: ContentTab) => void;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
-  const { uiContext, messages, activity } = useCoDirectorSession();
+  const { uiContext, messages, activity, activeExecution } = useCoDirectorSession();
   const projectId = uiContext.projectId || "";
   const lastUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id || "";
   const wikiRefreshToken = `${uiContext.projectName || ""}:${lastUserMessageId}:${messages.length}:${activity?.wikiRefreshNonce || 0}`;
@@ -469,6 +469,10 @@ export function CoDirectorProjectContent({
         })}
       </div>
       <div className="codirector-content-body" role="tabpanel">
+        {isAgentWork(activeExecution) ? (
+          <AgentWorkSurface />
+        ) : (
+        <>
         {tab === "wiki" && (
           <div data-testid="codirector-content-wiki">
             <h3 style={{ marginTop: 0, fontSize: "0.95rem" }}>
@@ -523,24 +527,12 @@ export function CoDirectorProjectContent({
         {tab === "scriptwriter" && (
           <div data-testid="codirector-content-scriptwriter">
             {projectId ? (
-              <ScriptwriterCompactView
+              <ScriptwriterInlineEditor
                 projectId={projectId}
                 onOpenFull={() => onGoTab?.("scriptwriter")}
               />
             ) : (
               <p className="muted">Select a project to open Script Writer.</p>
-            )}
-          </div>
-        )}
-        {tab === "script" && (
-          <div data-testid="codirector-content-script">
-            {projectId ? (
-              <StoryboardCompactView
-                projectId={projectId}
-                onOpenFull={() => onGoTab?.("script")}
-              />
-            ) : (
-              <p className="muted">Select a project to open Storyboard.</p>
             )}
           </div>
         )}
@@ -648,6 +640,8 @@ export function CoDirectorProjectContent({
         {tab === "development" && <CoDirectorDevelopmentPanel />}
         {tab === "vision" && <CoDirectorVisionPanel />}
         {tab === "pitch" && <CoDirectorPitchLaunchPanel />}
+        </>
+        )}
       </div>
     </aside>
   );

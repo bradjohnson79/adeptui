@@ -428,6 +428,16 @@ class JobQueue:
             if output:
                 job.output_path = output
             db.commit()
+            # Bridge Studio JobQueue completion → Co-Director SSE job.* events.
+            # No-op for non-Co-Director jobs (no executionId in params). All
+            # failures are swallowed inside the bridge so the completion path
+            # never breaks. The pack store remains the source of truth.
+            try:
+                from .codirector.execution.events import bridge_job_status_change
+
+                bridge_job_status_change(db, job_id, status, stage=stage or "", message=message)
+            except Exception:
+                pass
         finally:
             db.close()
 

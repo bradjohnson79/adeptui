@@ -31,6 +31,7 @@ Active Co-Director / Director gates include:
 * ``STUDIO_FEATURE_CODIRECTOR_UNIFIED_EXPERIENCE_V1`` (M2.14)
 * ``STUDIO_FEATURE_TEMPLATES_PRESETS_V1`` (M3.1a)
 * ``STUDIO_FEATURE_CHARACTER_IDENTITY_V1`` (M3.3)
+* ``STUDIO_FEATURE_CODIRECTOR_OPERATIONAL_AGENT_V1`` (Co-Director Operational Agent)
 """
 
 from __future__ import annotations
@@ -88,6 +89,7 @@ class FeatureFlags:
     templates_presets_v1: bool = False
     character_identity_v1: bool = False
     minimax_h3_private_local: bool = False
+    codirector_operational_agent_v1: bool = False
 
     @classmethod
     def from_env(

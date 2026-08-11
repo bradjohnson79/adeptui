@@ -86,6 +86,7 @@ import {
   type CoDirectorIntelligenceProgress,
   type CoDirectorMessageAttachment,
   type CoDirectorMessage,
+  type CoDirectorMessageExecution,
   type CoDirectorProductionAnalysis,
   type CoDirectorSessionContext,
   type CoDirectorToolActivity,
@@ -96,6 +97,7 @@ import {
   type PromptMode,
   type WelcomeSuggestion,
 } from "./types";
+import type { WorkSurfaceState } from "./AgentWorkSurface/types";
 
 const PROMPT_VERSIONS_KEY = "adept_prompt_versions";
 
@@ -144,6 +146,8 @@ type SessionValue = {
   contextPanelOpen: boolean;
   assetPickerOpen: boolean;
   uiContext: CoDirectorUIContext;
+  activeExecution: WorkSurfaceState | null;
+  setActiveExecution: (state: WorkSurfaceState | null) => void;
   conversationStarted: boolean;
   policies: Record<ActionCategory, PermissionPolicy>;
   kbModels: { id: string; label?: string }[];
@@ -574,6 +578,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   }, []);
   const [suggestedPrompt, setSuggestedPrompt] = useState<string | null>(null);
   const [setup, setSetup] = useState<SceneSetup | null>(null);
+  const [activeExecution, setActiveExecution] = useState<WorkSurfaceState | null>(null);
   const [proposals, setProposals] = useState<CoDirectorProposal[]>([]);
   const [proposalActingId, setProposalActingId] = useState<string | null>(null);
   const [toolActivity, setToolActivity] = useState<CoDirectorToolActivity | null>(null);
@@ -1625,6 +1630,38 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             const next = [...prev];
             next[idx] = { ...next[idx], content: snapshot };
             return next;
+          });
+        } else if (event.type === "execution_status") {
+          // Workstream H — honest execution state. Either update the streaming
+          // assistant bubble in place (when the dispatch path streams) or insert
+          // a dedicated execution_status message. The execution payload is
+          // attached so CoDirectorMessage can render the compact progress card.
+          const execPayload = (event.execution as CoDirectorMessageExecution | undefined) || undefined;
+          const execMessageType = (event.messageType as CoDirectorAssistantMessageType | undefined) || "execution_status";
+          const execContent = (event.content as string | undefined) || "";
+          setMessages((prev) => {
+            const existingIdx = prev.findIndex(
+              (m) =>
+                m.role === "assistant" &&
+                m.id === `exec-${requestId}` &&
+                (m.messageType === "execution_status" ||
+                  m.messageType === "completion" ||
+                  m.messageType === "error"),
+            );
+            const message: CoDirectorMessage = {
+              id: `exec-${requestId}`,
+              role: "assistant",
+              content: execContent,
+              createdAt: new Date().toISOString(),
+              messageType: execMessageType,
+              execution: execPayload,
+            };
+            if (existingIdx !== -1) {
+              const next = [...prev];
+              next[existingIdx] = { ...prev[existingIdx], ...message };
+              return next;
+            }
+            return [...prev, message];
           });
         } else if (event.type === "completed") {
           updateActivityForRequest((prev) =>
@@ -3101,6 +3138,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       contextPanelOpen,
       assetPickerOpen,
       uiContext,
+      activeExecution,
+      setActiveExecution,
       conversationStarted,
       policies,
       kbModels,
@@ -3216,6 +3255,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       contextPanelOpen,
       assetPickerOpen,
       uiContext,
+      activeExecution,
       conversationStarted,
       policies,
       kbModels,

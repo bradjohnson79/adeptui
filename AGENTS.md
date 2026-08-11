@@ -1,1083 +1,827 @@
 # Adept UI — Agent Standing Instructions
 
-This file defines the standing operating contract for all AI engineering agents
-working on Adept UI, including OpenCode, Qwen Coder, Cursor, Grok, Claude,
-primary agents, delegated agents, reviewers, and subagents.
+These instructions govern ALL primary agents, coding agents, reviewers,
+subagents, and autonomous implementation work performed on Adept UI.
 
-These instructions are always active when working in the Adept UI repository.
+They apply regardless of model:
 
-They supplement — and never replace — the canonical Adept UI Build Memory Layer.
+- DeepSeek
+- Qwen
+- GLM
+- Kimi
+- Grok
+- OpenAI
+- Claude
+- or any other agent/model
 
----
+Adept UI is a production software system.
 
-# 1. Canonical Authority
-
-All primary agents and subagents must follow the **Adept UI Build Memory Layer**.
-
-Canonical sources:
-
-- **Canonical laws:** `docs/ADEPT_UI_BUILD_MEMORY_LAYER.md`
-- **Always-on Cursor rule:** `.cursor/rules/adept-ui-build-laws.mdc`
-- **Beta refresh after build:** `.cursor/rules/beta-refresh-after-build.mdc`
-
-Before substantial implementation, agents must inspect the relevant canonical
-documents rather than relying on remembered summaries.
-
-If this file conflicts with the canonical Build Memory Layer, the canonical
-Build Memory Layer wins.
-
-Do not silently reinterpret or weaken existing Adept UI laws.
+Do not optimize for appearing complete.
+Optimize for actually being complete.
 
 ---
 
-# 2. Agent Role
+# 1. Authority
 
-Act as a senior autonomous software engineer working on a production application.
+All agents must follow the Adept UI Build Memory Layer.
 
-The objective is not to produce code as quickly as possible.
+Canonical laws:
 
-The objective is to:
+`docs/ADEPT_UI_BUILD_MEMORY_LAYER.md`
 
-1. understand the real repository,
-2. understand the existing architecture,
-3. identify authoritative sources of truth,
-4. identify root causes rather than symptoms,
-5. make the smallest coherent architectural change,
-6. preserve working behavior,
-7. verify the implementation through the real Adept UI Beta runtime,
-8. independently challenge the implementation,
-9. and report the result truthfully.
+Always-on Cursor rule:
 
-Never fabricate repository knowledge.
+`.cursor/rules/adept-ui-build-laws.mdc`
 
-Never claim to have inspected, executed, tested, measured, or verified something
-that was not actually inspected, executed, tested, measured, or verified.
+Beta/runtime refresh law:
+
+`.cursor/rules/beta-refresh-after-build.mdc`
+
+Architecture and milestone-specific governing documents take precedence over
+older implementation reports.
+
+If two documents conflict:
+
+1. identify the conflict;
+2. determine the current authoritative source;
+3. do not silently choose whichever instruction is easier;
+4. reconcile before certification.
 
 ---
 
-# 3. Inspect Before Editing
+# 2. Product Law
 
-Do not begin substantial implementation from filenames, architecture, or behavior
-guessed from the prompt.
+Adept UI is the product.
 
-Inspect the repository first.
+Underlying runtimes are implementation details.
 
-For the affected system, locate as applicable:
+Creators should not be required to manually operate:
 
-- entry points,
-- routes,
-- components,
-- services,
-- stores,
-- schemas,
-- models,
-- adapters,
-- providers,
-- configuration,
-- feature flags,
-- persistence,
-- tests,
-- consumers,
-- background workers,
-- polling,
-- health systems,
-- runtime ownership,
-- and existing documentation.
+- ComfyUI
+- Python
+- Uvicorn
+- Ollama
+- Cloudflare
+- local ports
+- runtime terminals
+- node graphs
+- lifecycle scripts
 
-Trace the actual execution path.
-
-Example:
-
-```text
-UI
-→ frontend client
-→ proxy
-→ API route
-→ service
-→ state/store
-→ provider/runtime
-→ persistence
-→ response
-→ UI
-
-For state/data defects, trace both:
-
-WRITE PATH
-
-and:
-
-READ / PROJECTION PATH
-
-Do not infer the architecture when repository inspection can establish it.
-
-4. Evidence Classification
-
-Maintain a strict distinction between:
-
-CONFIRMED
-
-Directly established by:
-
-source inspection,
-runtime behavior,
-logs,
-tests,
-API responses,
-database/state inspection,
-Playwright,
-or reproducible measurements.
-INFERENCE
-
-A plausible explanation supported by incomplete evidence.
-
-PROPOSAL
-
-A recommended implementation or architectural change.
-
-Never promote INFERENCE into CONFIRMED without evidence.
-
-If new evidence contradicts the current plan, revise the plan.
-
-5. Plan → Inspect → Replan → Execute
-
-For substantial work:
-
-Parse the requested behavior.
-Read governing documentation.
-Inspect the repository.
-Map the existing architecture.
-Identify authoritative sources of truth.
-Reproduce or trace the defect.
-Determine the root cause.
-Classify the affected architecture.
-Produce a focused implementation plan.
-Inspect deeper where the plan contains assumptions.
-Correct the plan when repository evidence requires it.
-Implement.
-Self-review.
-Test.
-Verify against Beta.
-Independently challenge the result.
-Issue the appropriate verdict.
-
-Do not preserve an incorrect initial plan merely because work has already begun.
-
-6. Self-Correction Protocol
-
-Before finalizing meaningful code changes, perform a deliberate internal review.
-
-Ask:
-
-Did I solve the proven root cause?
-Did I accidentally solve only the visible symptom?
-Did I introduce another source of truth?
-Did I duplicate existing infrastructure?
-Did I break lifecycle ownership?
-Did I weaken an invariant?
-Did I introduce timing dependence?
-Did I silently alter user data?
-Did I create an unbounded retry or polling loop?
-Did I leave dead compatibility code active?
-Did I make tests pass by weakening them?
-Did I wire the implementation into the actual Beta runtime?
-Can I explain the resulting architecture deterministically?
-
-If a defect is found during review, correct it before presenting completion.
-
-7. Root-Cause-First Law
-
-Do not patch symptoms by default.
-
-For defects:
-
-SYMPTOM
-↓
-REPRODUCTION / TRACE
-↓
-ACTUAL FAILURE POINT
-↓
-STATE / DEPENDENCY CAUSING FAILURE
-↓
-ARCHITECTURAL REASON FAILURE WAS POSSIBLE
-↓
-ROOT-CAUSE REPAIR
-↓
-REGRESSION PROTECTION
-
-Do not blindly use:
-
-arbitrary timeout increases,
-arbitrary retries,
-sleeps,
-catch-and-ignore,
-console suppression,
-error hiding,
-weakened health checks,
-polling multiplication,
-fallback behavior that masks failure,
-or test modifications that merely accept broken behavior.
-
-Temporary instrumentation is acceptable for diagnosis.
-
-Diagnostic instrumentation must not become an accidental architectural dependency.
-
-8. Repair / Rebuild Protocol
-
-Classify the affected subsystem as:
-
-HEALTHY
-REPAIRABLE
-REBUILD REQUIRED
-REPAIRABLE
-
-Prefer repair when:
-
-ownership is coherent,
-authoritative state is identifiable,
-public contracts remain sound,
-the defect is localized,
-and the system can be made deterministic with a focused change.
-REBUILD REQUIRED
-
-Escalate to selective rebuild when evidence shows:
-
-repeated failures from the same architectural defect,
-contradictory state ownership,
-multiple competing sources of truth,
-uncontrolled compatibility layering,
-lifecycle ownership cannot be determined,
-timing behavior is fundamental to correctness,
-repairs repeatedly destabilize adjacent systems,
-or the existing implementation cannot satisfy the product contract cleanly.
-
-Never rebuild merely because a defect is difficult.
-
-Never continue layering patches onto an architecture proven unsound.
-
-If rebuilding:
-
-identify the authoritative replacement,
-preserve legitimate user data,
-preserve stable contracts where appropriate,
-preserve correct behavioral tests,
-implement the replacement,
-migrate callers,
-verify the replacement,
-remove the obsolete active path,
-prove only one authoritative implementation remains.
-9. Minimal Coherent Change
-
-Prefer the smallest coherent change, not merely the smallest diff.
-
-A tiny patch that preserves a broken architecture is not preferred over a
-slightly larger repair that restores correct ownership.
-
-Avoid unrelated refactors during focused repairs.
-
-Preserve where possible:
-
-user data,
-project compatibility,
-public APIs,
-schemas,
-stable behavioral contracts,
-working providers,
-working workflows,
-and existing project isolation.
-
-Do not introduce new stores, schemas, services, migrations, enums, or provenance
-systems unless repository evidence demonstrates that existing architecture cannot
-safely represent the required behavior.
-
-10. Single Source of Truth
-
-Every important state domain must have an identifiable authoritative owner.
-
-Avoid:
-
-Source A
-+
-Source B
-+
-compatibility cache
-+
-UI reconstruction
-+
-conversation inference
-
-all pretending to represent the same canonical state.
-
-Derived state must be recognizable as derived state.
-
-Caches are not canonical state.
-
-Conversation is not canonical project state.
-
-Diagnostics are not canonical state.
-
-UI placeholders are not canonical state.
-
-11. Adept UI Beta Law
-
-The authoritative Adept UI development runtime is:
-
-Web:
-http://127.0.0.1:8760
-
-Studio API:
-http://127.0.0.1:8758
-
-Completed work must be tied into the Adept UI Beta dev server.
-
-Source completion alone is not product completion.
-
-Where applicable:
-
-implementation
-→ registration
-→ integration
-→ Beta wiring
-→ live execution
-→ focused tests
-→ regression
-→ Playwright
-→ independent verification
-→ verdict
-
-If the implementation exists in source but is not active through the authoritative
-Beta runtime, it is not complete.
-
-12. Runtime Product Abstraction — Law 29
-
-Adept UI is the product; underlying runtimes are implementation details.
-
-Creators must not be required to manually:
-
-launch runtimes,
-configure runtimes,
-reconnect runtimes,
-diagnose runtimes,
-discover ports,
-manage runtime processes,
-or understand implementation-specific infrastructure.
+unless they explicitly enter an Advanced/Developer workflow.
 
 Adept UI owns:
 
-discovery,
-startup,
-readiness,
-recovery,
-reconnect,
-reuse,
-shutdown,
-and creator-facing failure semantics.
+- discovery
+- startup
+- readiness
+- reconnect
+- recovery
+- reuse
+- shutdown
+- dependency visibility
+- creator-facing status
 
-Workflows begin and end inside Adept UI.
+This is Build Law #29.
 
-Developer/operator diagnostics may expose underlying infrastructure where necessary,
-but normal creator workflows must not depend upon it.
+---
 
-13. API Resilience Law
+# 3. Investigate Before Modifying
 
-Distinguish:
+Do not begin implementation from assumptions.
 
-LIVENESS
+Before changing a subsystem:
 
-from:
+1. inspect the current implementation;
+2. identify the actual authoritative branch;
+3. inspect related tests;
+4. inspect existing abstractions;
+5. inspect recent relevant implementation;
+6. identify ownership boundaries;
+7. identify whether the requested capability already partially exists.
 
-READINESS
+Do not create duplicate systems simply because an existing system was not
+immediately discovered.
 
-Liveness asks whether the Studio API process is alive.
+Prefer:
 
-Readiness asks whether required capabilities and dependencies are available.
+`inspect → understand → reuse → extend → certify`
 
-A provider or capability failure must not automatically become a global API
-liveness failure.
+over:
 
-A slow resolver must not automatically mark the Studio API OFFLINE.
+`guess → rebuild → patch`
 
-A missing optional provider must not automatically make Adept UI unhealthy.
+---
 
-Use accurate states such as:
+# 4. Repository Truth
 
-HEALTHY
-DEGRADED
-OFFLINE
-DISABLED
-DEFERRED
-OPTIONAL_NOT_INSTALLED
-NOT_CONFIGURED
-BLOCKED
-NOT_FOUND
-FILE_MISSING
-TIMEOUT
-INTERNAL_ERROR
+Never assume the current working tree is equivalent to the deployed product.
 
-Do not collapse these states into generic failure.
+Before milestone or deployment work, establish:
 
-14. Expensive Read Path Law
+- current branch;
+- HEAD SHA;
+- git status;
+- authoritative branch;
+- remote SHA;
+- deployed SHA where applicable;
+- whether required files are tracked by Git.
 
-Creator-facing read requests should not synchronously perform expensive,
-unbounded discovery when avoidable.
+Local filesystem existence is NOT proof that a file exists in Git.
 
-For expensive read-mostly state, consider:
+A clean deployment must be reproducible from a clean checkout.
 
-cached snapshots,
-stale-while-revalidate,
-background refresh,
-single-flight refresh,
-atomic cache replacement,
-bounded initialization,
-and explicit readiness semantics.
+Untracked or ignored source required by the product is a release blocker.
 
-A cache expiration must not automatically convert a fast endpoint into a
-long-running synchronous discovery operation.
+---
 
-Caches must never become competing canonical state.
+# 5. Preserve Working Architecture
 
-15. Polling and Lifecycle Safety
+Do not broadly rewrite working systems when a localized repair is sufficient.
 
-Every recurring process must have one identifiable owner.
+Before introducing a new:
 
-Inspect:
+- manager
+- router
+- store
+- provider
+- supervisor
+- polling system
+- cache
+- runtime abstraction
+- API layer
 
-timer ownership,
-cadence,
-cleanup,
-AbortController usage,
-in-flight guards,
-retries,
-backoff,
-offline suspension,
-remount behavior,
-navigation behavior,
-and dependency changes.
+prove that an existing one cannot be safely extended.
 
-Prevent:
+Favor the smallest architecture that solves the verified problem while
+remaining suitable for:
 
-duplicate pollers,
-overlapping refreshes,
-retry amplification,
-request storms,
-timer multiplication,
-stale requests after navigation,
-and multiple components independently polling the same authoritative state.
+- Open Source / Electron
+- Hosted Beta
+- Adept UI Cloud
 
-One logical background service should normally have one authoritative lifecycle owner.
+Avoid environment-specific hacks when a transport-independent solution is
+practical.
 
-16. React Safety
+---
 
-When modifying React, explicitly inspect:
+# 6. Never Hide Failures
 
-useEffect dependencies,
-cleanup functions,
-subscriptions,
-listeners,
-timers,
-AbortController,
-stale closures,
-StrictMode behavior,
-component remounts,
-duplicate state writes,
-derived-state loops,
-and repeated fetches.
+Do not make a failing system appear healthy by:
 
-A component remount must not accidentally create duplicate persistent infrastructure.
+- suppressing an error;
+- converting failure to warning;
+- returning fake readiness;
+- adding placeholder modules;
+- using mock success in production paths;
+- disabling checks;
+- weakening TypeScript;
+- adding arbitrary `any`;
+- bypassing certification;
+- silently falling back to another runtime/model.
 
-17. GPU Execution Law — Law 26
+Fix the underlying cause.
+
+If the cause cannot be fixed within scope, return NO-GO with the exact blocker.
+
+---
+
+# 7. Completion Means End-to-End Completion
+
+Code existence does not equal feature completion.
+
+A capability is complete only when applicable stages have passed:
+
+1. implementation;
+2. integration;
+3. persistence;
+4. UI wiring;
+5. runtime wiring;
+6. error handling;
+7. recovery behavior;
+8. regression tests;
+9. Playwright;
+10. live environment verification;
+11. evidence;
+12. independent review;
+13. binary verdict.
+
+Missing evidence = incomplete.
+
+This is Build Law #31.
+
+---
+
+# 8. Do Not Stop at "Implemented"
+
+If the requested task includes implementation AND verification, continue through
+verification.
+
+Do not stop merely because:
+
+- code compiles;
+- unit tests pass;
+- files exist;
+- the endpoint exists;
+- the UI renders;
+- the agent believes the fix is logically correct.
+
+If the task explicitly requires Playwright, live certification, a soak test,
+runtime verification, or deployment verification, those are part of the task.
+
+Do not report:
+
+`GO`
+
+while simultaneously saying:
+
+`Playwright not run`
+`live verification pending`
+`deployment not tested`
+
+That is:
+
+`READY FOR PRIMARY REVIEW`
+
+or:
+
+`NO-GO`
+
+depending on the governing gate.
+
+---
+
+# 9. Evidence Must Be Observed, Not Predicted
+
+Never substitute predicted results for measured evidence.
+
+Invalid:
+
+`Expected request count: ~30`
+
+when the required test has not run.
+
+Valid:
+
+`Measured request count over 10 minutes: 43`
+
+If a value is predicted, label it clearly:
+
+`PREDICTED`
+
+Never use predicted values to satisfy a certification gate.
+
+---
+
+# 10. Binary Certification
+
+Final milestone certification is binary:
+
+`GO`
+
+or:
+
+`NO-GO`
+
+Subagents may return only:
+
+`READY FOR PRIMARY REVIEW`
+
+unless explicitly authorized to issue the governing final verdict.
+
+A GO requires every mandatory criterion to pass.
+
+One mandatory blocker = NO-GO.
+
+Never use:
+
+- mostly GO
+- near GO
+- practical GO
+- implementation GO
+
+as a substitute for the governing binary gate.
+
+Sub-gates may be reported individually, but the overall verdict remains binary.
+
+---
+
+# 11. Failure Handling
+
+When a test fails:
+
+1. capture the exact failure;
+2. determine whether it is new or pre-existing;
+3. reproduce it independently where possible;
+4. identify root cause;
+5. repair if within scope;
+6. rerun the affected test;
+7. rerun relevant regression;
+8. update evidence.
+
+Do not classify a failure as "pre-existing" merely because it appears unrelated.
+
+Prove baseline reproduction before excluding it.
+
+---
+
+# 12. Root Cause Before Patch
+
+Do not patch symptoms before identifying root cause.
+
+For runtime/network/UI failures, trace the entire chain:
+
+`UI → hook/store → API client → transport → API → runtime → dependency`
+
+For deployment failures:
+
+`working tree → Git → build → deployment → browser → backend`
+
+For lifecycle failures:
+
+`creator action → control layer → supervisor → process → health probe → UI state`
+
+Repair the earliest incorrect layer practical.
+
+---
+
+# 13. Request Stability Law
+
+Adept UI frontend components must not independently create uncontrolled backend
+traffic.
+
+Shared runtime information should use shared state wherever practical.
+
+Required principles:
+
+- single-flight requests;
+- bounded concurrency;
+- TTL caching for read-mostly state;
+- centralized connection health;
+- polling suspension during outages;
+- exponential/bounded retry;
+- cleanup on unmount;
+- no recursive emit→fetch loops;
+- no request creation during render;
+- no accumulating timers;
+- no duplicated recovery engines.
+
+A successful health response must never recursively cause an uncontrolled new
+health request.
+
+Live soak testing is required for networking fixes that can degrade over time.
+
+---
+
+# 14. Runtime Ownership Law
+
+Adept UI may stop or restart only processes it owns.
+
+Processes must be distinguishable internally as appropriate:
+
+- OWNED
+- REUSED
+- EXTERNAL
+
+If Adept UI discovers an already-running healthy ComfyUI, Ollama, Studio API, or
+other runtime:
+
+reuse it when safe.
+
+Do not kill unrelated:
+
+- Python
+- Node
+- Ollama
+- ComfyUI
+- cloudflared
+- user processes
+
+based solely on executable name.
+
+---
+
+# 15. Local Runtime Architecture
+
+Current hosted Beta runtime architecture is:
+
+`Vercel frontend`
+→ `Cloudflare secure endpoint`
+→ `Studio API :8758`
+→ `Localhost Background Manager`
+→ `ComfyUI / Ollama / GPU`
+
+The old local frontend Beta server on:
+
+`:8760`
+
+is retired from the normal hosted Beta path.
+
+Do NOT resurrect the old :8760 stack unless a specific test explicitly requires
+that legacy environment.
+
+Use the current Localhost/Background Runtime Manager for backend lifecycle.
+
+---
+
+# 16. Background Manager Product Terminology
+
+Creator-facing terminology:
+
+- ComfyUI Background Manager
+- Localhost Background Manager
+- Local Runtime
+- Background Services
+- Remote Runtime Access
+
+Do not expose normal creators to:
+
+- Beta Backend Manager
+- Uvicorn
+- PID
+- PowerShell
+- internal ports
+- cloudflared
+
+except inside Advanced Diagnostics where technically appropriate.
+
+---
+
+# 17. GPU Law
 
 GPU-designated work must:
 
-preflight the accelerator,
-verify the intended GPU,
-execute on GPU,
-verify that execution actually used the GPU.
+1. preflight accelerator availability;
+2. verify the expected GPU;
+3. execute on GPU;
+4. record accelerator provenance where required.
 
 Never silently fall back to CPU.
 
 CPU fallback requires:
 
-explicit user approval,
-disclosed performance/behavior impact,
-and provenance explaining why fallback occurred.
+- explicit user approval;
+- disclosed performance impact;
+- recorded provenance.
 
-A task designed to validate GPU behavior cannot pass using CPU execution.
+This is Build Law #26.
 
-18. Co-Director Continuous Quality Gate — Law 28
+---
 
-No new Co-Director capability is complete until it survives autonomous Playwright
-certification against a brand-new disposable project.
+# 18. Model/Provider Law
 
-Unit tests alone are insufficient.
+Never silently substitute:
 
-API tests alone are insufficient.
+- generation model;
+- provider;
+- runtime;
+- checkpoint;
+- workflow;
+- accelerator.
 
-Existing-project success alone is insufficient.
+If certification requires a specific model, use that model.
 
-See:
+Example:
 
-docs/architecture/codirector/CODIRECTOR_FOUNDATION_CONTRACTS.md
+MiniMax H3 certification means MiniMax H3.
 
-Certification must test real creator behavior through the Beta product.
+Do not silently substitute LTX, WAN, or another generator because it is easier.
 
-19. Co-Director User Authority Law
+---
 
-Permanent product law:
+# 19. Co-Director Continuous Quality Gate
 
-CONVERSATION != WIKI TRUTH
+No new Co-Director capability is complete until it survives autonomous
+Playwright certification against a brand-new disposable project.
 
-ASSISTANT OUTPUT != PROJECT FACT
+Unit/API green alone is insufficient.
 
-INFERENCE != SAVED PROJECT DATA
+Reference:
 
-SUGGESTION != AUTHORITATIVE CARD CONTENT
+`docs/architecture/codirector/CODIRECTOR_FOUNDATION_CONTRACTS.md`
 
-USER-SAVED / USER-APPROVED / VALID PROJECT IMPORT
-=
-CANONICAL PROJECT DATA
+This is Build Law #28.
 
-Co-Director may:
+---
 
-brainstorm,
-reason,
-ask questions,
-propose,
-summarize,
-extract candidates,
-suggest edits,
-identify possibilities,
-and prepare structured content for approval.
+# 20. Co-Director User Authority
 
-Co-Director must not silently promote these into canonical project truth.
+Conversation understanding is not automatically canonical project data.
 
-20. Story / Character Authority Boundary
+Do not silently convert:
 
-For Story and Character information, prefer:
+- assistant onboarding;
+- generic conversation;
+- questions;
+- scaffolding;
+- inferred names;
+- accidental capitalized words
 
-Conversation
-→ understanding / suggestions / candidates
-→ explicit creator save or approval
-→ canonical Story / Character state
-→ Wiki projection
+into canonical Wiki Story or Character data.
 
-Do not prefer:
+Canonical project mutation requires an authorized save/approval path according
+to current Co-Director contracts.
 
-Conversation
-→ heuristic extraction
-→ canonical Wiki mutation
+User-created project truth takes precedence over agent inference.
 
-A fresh project must begin with:
+---
 
-Story = empty
-Characters = empty
+# 21. Co-Director Intelligence Law
 
-unless legitimate imported or explicitly created canonical project data exists.
-
-Assistant onboarding such as:
-
-Tell me about the story however you want...
-
-must never become:
-
-Logline,
-Short Summary,
-Long Summary,
-Story Principle,
-Character,
-Character Description,
-or other canonical project content.
-
-A user casually saying:
-
-My protagonist is Maya.
-
-may inform Co-Director's reasoning.
-
-It does not automatically create a canonical Character card unless the established
-product contract explicitly defines that user action as a save/approval operation.
-
-An assistant saying:
-
-Perhaps Maya is a detective.
-
-must never silently mutate canonical Story or Character data.
-
-21. Wiki Projection Law
-
-Where the architecture supports it, Wiki Story and Character sections should
-project from canonical Story and Character state.
-
-The Wiki must not become an independent competing source of truth.
-
-Changes to canonical cards should propagate appropriately:
-
-create
-→ Wiki reflects create
-
-rename
-→ Wiki reflects rename
-
-edit
-→ Wiki reflects edit
-
-delete
-→ Wiki reflects deletion
-
-Operations such as:
-
-Refine Wiki,
-Rebuild Wiki,
-Reorganize Wiki,
-
-must respect creator authority.
-
-They must not fabricate missing canonical information merely to make sections
-look complete.
-
-Empty authoritative sections are valid.
-
-22. AI Edit Preview Law
-
-When AI proposes changing creator-authored canonical material:
-
-AI proposal
-→ preview
-→ creator accepts OR rejects
-
-If accepted:
-
-proposal → canonical update
-
-If rejected:
-
-original creator content remains authoritative
-
-Rejected AI content must not later reappear through rebuild, refinement,
-reorganization, caching, or conversation extraction.
-
-23. Co-Director Intelligence — Law 32
-
-Co-Director improves through evidence-backed experience, not conversation history alone.
+Co-Director improves through evidence-backed experience, not conversation
+history alone.
 
 Learning must be:
 
-transparent,
-reviewable,
-versioned,
-creator-controlled,
-reversible,
-project-isolated,
-and independently certifiable.
+- transparent;
+- reviewable;
+- versioned;
+- creator-controlled;
+- reversible;
+- project-isolated;
+- independently certifiable.
 
-No learning mechanism may silently alter creator projects.
+No learning may silently alter creator projects.
 
-Do not turn accumulated conversation history into hidden canonical project mutation.
+This is Build Law #32.
 
-24. Project Isolation
+---
 
-Project A must never contaminate Project B.
+# 22. Documentation Canon
 
-Inspect project identifiers through:
-
-UI
-→ request
-→ API
-→ service
-→ cache
-→ persistence
-→ background tasks
-
-Global caches may cache reusable infrastructure.
-
-They must not accidentally merge project-specific canonical state.
-
-Tests must include project isolation where the affected feature is project-scoped.
-
-25. Human Authority
-
-AI-generated validation, recommendations, and suggestions are advisory unless
-the product contract explicitly states otherwise.
-
-Never silently:
-
-delete creator generations,
-replace creator data,
-approve creator decisions,
-trigger expensive retakes,
-change canonical cards,
-or override explicit creator rejection.
-
-Human authority is absolute for creator-controlled project state.
-
-26. Error Semantics
-
-Expected conditions must use appropriate error semantics.
-
-Examples:
-
-resource does not exist
-→ 404
-
-known backing file missing
-→ controlled FILE_MISSING / 404-style domain response
-
-optional provider absent
-→ OPTIONAL_NOT_INSTALLED
-
-feature intentionally deferred
-→ DEFERRED
-
-feature flag disabled
-→ DISABLED
-
-dependency temporarily unavailable
-→ DEGRADED / dependency-specific state
-
-unexpected server defect
-→ 500
-
-Do not convert known expected conditions into generic 500 errors.
-
-Do not hide real internal errors behind misleading success responses.
-
-27. Diagnostics Law
-
-Diagnostics must help identify the failing layer.
-
-Where appropriate distinguish:
-
-Browser/UI
-Proxy
-Studio API process
-Studio API liveness
-Studio API readiness
-Route
-Service
-Provider registry
-Runtime
-GPU
-Persistence
-Asset storage
-Background worker
-
-Diagnostics should answer:
-
-WHAT failed?
-WHERE did it fail?
-WHY is it classified that way?
-WHAT remains healthy?
-WHAT action is appropriate?
-
-Diagnostics must not report planned/nonexistent/optional functionality as though
-the product is broken.
-
-28. Testing Law
-
-Tests are behavioral contracts.
-
-Never weaken tests merely to obtain green output.
-
-For every meaningful defect repair, add regression coverage capable of detecting
-the previous defect where practical.
-
-Use the appropriate layers:
-
-unit,
-service,
-API,
-integration,
-regression,
-Playwright,
-runtime verification.
-
-Passing unit tests do not prove product completion.
-
-29. Playwright Standard
-
-For critical user-facing work, Playwright should monitor where applicable:
-
-console.error,
-pageerror,
-requestfailed,
-unexpected 4xx,
-unexpected 5xx,
-unhandled promise rejection,
-navigation failures,
-repeated network storms,
-and visible degraded/offline states.
-
-Exercise actual creator workflows rather than merely checking that a page renders.
-
-Use brand-new disposable projects when required by Co-Director Law 28.
-
-Do not silently ignore unexpected network failures.
-
-30. Timeline Certification Standard
-
-When Timeline is affected, verify the relevant implemented capabilities including:
-
-project load,
-track load,
-clip load,
-image tracks,
-image preview,
-video preview,
-prompt tracks,
-prompt lower-third behavior,
-playback,
-scrubbing,
-generation routing,
-generation progress,
-low-quality preview where implemented,
-retake,
-batch generation,
-persistence,
-reload,
-project isolation,
-provider failure,
-provider recovery,
-and network cleanliness.
-
-Timeline must not create:
-
-duplicate polling,
-hidden API storms,
-repeated resolver calls,
-uncontrolled retries,
-or stale generation state.
-31. Model / Provider Safety
-
-Do not silently downgrade a requested generation path.
-
-Examples:
-
-I2V request
-must not silently become
-T2V
-
-requested provider
-must not silently become
-different provider
-
-Fallback behavior must follow the explicit product contract.
-
-Generation lineage must remain inspectable where required.
-
-32. Documentation Canon — Law 30
-
-Exactly one governing document exists per milestone.
+Exactly one governing document per milestone.
 
 Superseded reports must be clearly marked.
 
-Implementers may not cite superseded reports as current truth.
+Do not cite obsolete reports as current truth.
 
-Primary agents must reconcile documentation conflicts before review.
+If implementation changes invalidate evidence:
 
-Do not create another "final" report when an authoritative milestone document
-already exists unless the milestone contract requires it.
+update the evidence.
 
-33. Evidence Before Completion — Law 31
+This is Build Law #30.
 
-Code existence alone does not complete a capability.
+---
 
-Completion requires as applicable:
+# 23. Playwright Law
 
-implementation,
-integration,
-registration,
-Beta wiring,
-live execution,
-automated tests,
-regression,
-Playwright certification,
-evidence artifacts,
-independent verification,
-and binary GO.
+When Playwright is required:
 
-Missing required evidence equals NO-GO.
+- run it;
+- do not substitute unit tests;
+- use the actual requested environment;
+- create disposable projects where required;
+- capture browser console;
+- capture page errors;
+- capture request failures;
+- capture unexpected 4xx/5xx;
+- verify persistence/reload;
+- verify recovery where applicable.
 
-Do not infer success from code inspection alone.
+For time-dependent defects, run an appropriate soak duration.
 
-34. Subagent Law
+A 30-second test does not certify a defect known to appear after five minutes.
 
-Subagents may investigate, implement bounded tasks, test, or independently verify.
+---
 
-Subagents may only return:
+# 24. Hosted Beta Certification
 
-READY FOR PRIMARY REVIEW
+For hosted Beta work, distinguish:
 
-They may not issue final milestone GO.
+BUILD GO
 
-The primary agent owns:
+from:
 
-reconciliation,
-final verification,
-conflicting evidence,
-and final verdict.
+RUNTIME GO
 
-Independent verification must challenge the implementation rather than merely
-repeat the implementing agent's conclusions.
+from:
 
-35. No False Completion
+HOSTED PRODUCT GO
 
-Never claim:
+A successful Vercel build proves only deployment/build integrity.
 
-PASS
-GO
-FIXED
-CERTIFIED
-COMPLETE
-PRODUCTION READY
+Hosted product certification requires actual browser/runtime functionality.
 
-unless the required evidence actually exists.
+---
 
-If a required test could not run, report that explicitly.
+# 25. Clean-Clone Law
 
-If Beta could not be verified, report that explicitly.
+Before declaring deployment readiness, ensure the product can be built from a
+clean checkout of the authoritative branch.
 
-If Playwright was required but did not run successfully:
+Do not rely on:
 
-NO-GO
+- untracked source;
+- ignored source;
+- local-only generated files;
+- machine-specific paths;
+- caches;
+- manually copied assets.
 
-or the appropriate incomplete status must remain.
+---
 
-36. Final Milestone Verdict
+# 26. Security
 
-Final milestone certification is binary:
+Never commit:
 
-GO
+- API keys;
+- tokens;
+- tunnel credentials;
+- private keys;
+- passwords;
+- local secret files.
 
-or:
+Never place secrets into browser-visible `VITE_*` values.
 
-NO-GO
+Do not expose raw local runtime ports to the public Internet when a secure
+transport is required.
 
-Subagents may only return:
+Use explicit CORS origins when credentials are enabled.
 
-READY FOR PRIMARY REVIEW
+---
 
-Do not invent intermediate language that weakens a required binary gate.
+# 27. User Experience Law
 
-37. Final Systems & Resilience — LOCKED
+Normal creators should receive creator language.
 
-Product Law and MiniMax Timeline Re-take are mandatory highest-priority gates.
+Prefer:
 
-Product Law includes:
+`Runtime Ready`
 
-100% creator actions inside Adept UI
+over:
 
-and is also governed by Build Law #29.
+`Uvicorn process PID 1234 listening on 8758`
+
+Prefer:
+
+`ComfyUI needs attention`
+
+over raw Python exceptions.
+
+Technical details belong in Diagnostics.
+
+Do not require technical knowledge to use normal product workflows.
+
+---
+
+# 28. Branch Discipline
+
+Do not:
+
+- force push without explicit authorization;
+- rewrite shared history;
+- merge unrelated branches casually;
+- modify unrelated features during focused repair;
+- deploy from the wrong branch.
+
+Before deployment, report:
+
+BRANCH
+HEAD SHA
+REMOTE SHA
+DEPLOYMENT SHA
+
+They must be intentionally aligned.
+
+---
+
+# 29. Scope Discipline
+
+Fix everything necessary to complete the requested capability.
+
+Do not use "scope" as an excuse to stop before required integration or
+certification.
+
+But also do not expand into unrelated redesign.
+
+Use:
+
+`necessary for completion`
+
+as the boundary.
+
+---
+
+# 30. Subagent Law
+
+Subagents are specialists.
+
+Give subagents narrow, verifiable tasks.
+
+They may:
+
+- investigate;
+- audit;
+- implement scoped work;
+- test;
+- review.
+
+They may not independently redefine product law or issue the final milestone GO
+unless explicitly authorized.
+
+Primary agent must reconcile subagent findings.
+
+---
+
+# 31. Autonomous Continuation
+
+Do not stop for user confirmation when:
+
+- the next step is already authorized by the governing prompt;
+- required information can be discovered from the repository/runtime;
+- testing is part of the task;
+- a safe repair is clearly within scope.
+
+Ask the user only when:
+
+- credentials/user interaction are genuinely required;
+- destructive/risky action requires approval;
+- product intent is genuinely ambiguous;
+- an external manual action cannot be performed autonomously.
+
+---
+
+# 32. No Premature Handoff
+
+Do not return:
+
+`No further action needed`
+
+while mandatory work remains.
+
+If work remains, explicitly state:
+
+`REMAINING`
+
+and continue where authorized.
+
+A task that requires implementation + Playwright + live verification is not
+complete after implementation.
+
+---
+
+# 33. Final Report Standard
+
+Certification reports must distinguish:
+
+IMPLEMENTED
+TESTED
+LIVE VERIFIED
+NOT VERIFIED
+BLOCKED
+DEFERRED
+OPTIONAL
+
+Reports must contain exact test counts where available.
+
+Example:
+
+`134 passed, 2 failed, 4 skipped`
+
+not:
+
+`tests mostly passed`
+
+For live measurements, report observed numbers.
+
+---
+
+# 34. Final Systems & Resilience Gate
+
+Product Law and MiniMax Timeline Re-take remain mandatory highest-priority gates
+for Final Systems & Resilience.
 
 Canonical prompt:
 
-docs/release-gate/final-systems/ADEPT_UI_FINAL_SYSTEMS_AND_RESILIENCE_CERTIFICATION_PROMPT.md
+`docs/release-gate/final-systems/ADEPT_UI_FINAL_SYSTEMS_AND_RESILIENCE_CERTIFICATION_PROMPT.md`
 
-Overall:
+Overall final certification remains blocked until its mandatory gates pass.
 
-GO — ADEPT UI FINAL SYSTEMS AND RESILIENCE CERTIFICATION PASSED
+Required final verdict:
 
-is blocked until all mandatory gates pass.
+`GO — ADEPT UI FINAL SYSTEMS AND RESILIENCE CERTIFICATION PASSED`
 
-38. Completion Report Contract
+Anything less is not final release certification.
 
-For substantial implementation or repair work, report:
+---
 
-Root Cause
+# 35. Definition of Done
 
-What actually caused the defect?
+Before saying DONE, ask:
 
-Evidence
+- Is it implemented?
+- Is it wired?
+- Can the creator reach it?
+- Does it persist?
+- Does it recover?
+- Does it work in the intended environment?
+- Did the required tests run?
+- Did Playwright run where required?
+- Did live certification run where required?
+- Is evidence current?
+- Are there zero unresolved mandatory blockers?
 
-How was the root cause confirmed?
+If any required answer is NO:
 
-Architecture Before
+the task is not done.
 
-What execution/data path existed before the repair?
-
-Architecture After
-
-What is authoritative after the repair?
-
-Files Changed
-
-List exact files and purpose.
-
-Tests
-
-List exact commands/tests and actual results.
-
-Regression
-
-Report actual regression count/result.
-
-Beta Verification
-
-Report actual behavior through:
-
-http://127.0.0.1:8760
-http://127.0.0.1:8758
-
-where applicable.
-
-Playwright
-
-Report scenarios exercised and actual result.
-
-Network / Console
-
-Report unexpected errors observed.
-
-Remaining Risks
-
-List anything not fully verified.
-
-Verdict
-
-Return the verdict allowed by the governing milestone.
-
-Do not hide unresolved issues inside prose.
-
-39. Prime Engineering Principle
-
-When choosing between:
-
-making the report green
-
-and:
-
-making the product correct
-
-always choose product correctness.
-
-When choosing between:
-
-preserving an earlier implementation
-
-and:
-
-repairing a proven architectural defect
-
-repair the defect.
-
-When choosing between:
-
-guessing
-
-and:
-
-inspecting
-
-inspect.
-
-When choosing between:
-
-claiming completion
-
-and:
-
-admitting evidence is incomplete
-
-report the evidence truthfully.
-
-The purpose of the agent is not to produce reassuring output.
-
-The purpose of the agent is to help build a reliable Adept UI.
+Continue or return NO-GO with the exact blocker.

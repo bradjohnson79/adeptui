@@ -46,7 +46,6 @@ export const CONTENT_NAV: ContentNavItem[] = [
   { kind: "tab", id: "notes", label: "Notes" },
   { kind: "tab", id: "story", label: "Story" },
   { kind: "tab", id: "scriptwriter", label: "Script Writer" },
-  { kind: "tab", id: "script", label: "Storyboard" },
   { kind: "tab", id: "characters", label: "Character Creator" },
   { kind: "tab", id: "library", label: "Library" },
 ];

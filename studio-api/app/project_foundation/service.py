@@ -16,6 +16,12 @@ Pillar detection rules
 
 ``ready_for_timeline`` is True when either Story or Script is complete — the
 timeline can operate with an incomplete foundation.
+
+Note: Storyboard is still computed by ``_storyboard_pillar`` and surfaced on the
+response as informational metadata (consumed by Co-Director generation), but it
+is no longer treated as a creator-facing foundation pillar: it is excluded from
+``missing_pillars`` and the user-facing foundation status bar. The standalone
+StoryboardStudio workspace remains accessible via its deep-link.
 """
 
 from __future__ import annotations
@@ -188,7 +194,15 @@ def get_foundation_status(db: Session, project_id: str) -> FoundationStatus:
         "storyboard": storyboard,
         "characters": characters,
     }
-    missing_pillars = [name for name, info in pillars.items() if info.status == "not_started"]
+    # Storyboard remains available as informational metadata (used by
+    # Co-Director generation), but is no longer a creator-facing foundation
+    # pillar. `missing_pillars` only tracks the user-facing pillars:
+    # story, script, characters.
+    missing_pillars = [
+        name
+        for name, info in pillars.items()
+        if name != "storyboard" and info.status == "not_started"
+    ]
     ready_for_timeline = story.status == "complete" or script.status == "complete"
 
     return FoundationStatus(

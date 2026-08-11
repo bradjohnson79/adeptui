@@ -1225,6 +1225,27 @@ def all_definitions() -> tuple[ToolDefinition, ...]:
     return TOOL_DEFINITIONS
 
 
+def get_definitions(tool_ids: list[str]) -> list[ToolDefinition]:
+    """Resolve a curated list of tool IDs to their definitions.
+
+    Unknown IDs are skipped (not raised) — callers curating a tool catalog
+    should not crash the turn because one ID drifted. Used by the unified
+    intent dispatcher to inject a compact tool catalog into the LLM prompt.
+    """
+    out: list[ToolDefinition] = []
+    seen: set[str] = set()
+    for tid in tool_ids or []:
+        if not tid or tid in seen:
+            continue
+        resolved = resolve_tool_id(tid)
+        definition = _BY_ID.get(tid) or _BY_ID.get(resolved)
+        if definition is None:
+            continue
+        seen.add(tid)
+        out.append(definition)
+    return out
+
+
 def catalog() -> list[dict[str, Any]]:
     return [t.to_dict() for t in TOOL_DEFINITIONS]
 

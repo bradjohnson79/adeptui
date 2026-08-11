@@ -223,6 +223,29 @@ export interface CoDirectorProductionAnalysis {
   recommendation?: Record<string, unknown> | null;
 }
 
+export interface CoDirectorMessageExecutionChild {
+  job_id?: string;
+  child_index?: number;
+  label?: string;
+  status?: string;
+  asset_id?: string | null;
+  error?: string | null;
+  progress?: number;
+  stage?: string;
+}
+
+export interface CoDirectorMessageExecution {
+  execution_id: string;
+  capability?: string;
+  status?: string;
+  progress?: number;
+  completed?: number;
+  total?: number;
+  collection_id?: string | null;
+  result_asset_ids?: string[];
+  child_jobs?: CoDirectorMessageExecutionChild[];
+}
+
 export interface CoDirectorMessage {
   id: string;
   role: "user" | "assistant";
@@ -234,6 +257,8 @@ export interface CoDirectorMessage {
   status?: CoDirectorMessageStatus;
   /** M2.4 structured assistant message kind. */
   messageType?: CoDirectorAssistantMessageType;
+  /** Workstream H — execution payload for execution_status / completion messages. */
+  execution?: CoDirectorMessageExecution;
 }
 
 /**
@@ -336,27 +361,60 @@ const ACTIVITY_PREFERENCE_KEY = "adept_codirector_activity_preference";
 
 /** Safe message fields only — never tokens, tool payloads, or technical_evidence. */
 function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMessage[] {
-  return messages.slice(-80).map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: typeof m.content === "string" ? m.content.slice(0, 20_000) : "",
-    attachmentIds: Array.isArray(m.attachmentIds) ? m.attachmentIds.slice(0, 12) : undefined,
-    attachments: Array.isArray(m.attachments)
-      ? m.attachments
-          .filter((item) => item && typeof item.assetId === "string" && typeof item.name === "string")
-          .slice(0, 12)
-          .map((item) => ({
-            assetId: item.assetId,
-            name: item.name.slice(0, 300),
-            mimeType: typeof item.mimeType === "string" ? item.mimeType.slice(0, 120) : undefined,
-            source: item.source === "library" ? "library" : "file",
-            mediaKind: typeof item.mediaKind === "string" ? item.mediaKind.slice(0, 32) : undefined,
-          }))
-      : undefined,
-    createdAt: m.createdAt,
-    status: m.status,
-    messageType: m.messageType,
-  }));
+  return messages.slice(-80).map((m) => {
+    const sanitized: CoDirectorMessage = {
+      id: m.id,
+      role: m.role,
+      content: typeof m.content === "string" ? m.content.slice(0, 20_000) : "",
+      attachmentIds: Array.isArray(m.attachmentIds) ? m.attachmentIds.slice(0, 12) : undefined,
+      attachments: Array.isArray(m.attachments)
+        ? m.attachments
+            .filter((item) => item && typeof item.assetId === "string" && typeof item.name === "string")
+            .slice(0, 12)
+            .map((item) => ({
+              assetId: item.assetId,
+              name: item.name.slice(0, 300),
+              mimeType: typeof item.mimeType === "string" ? item.mimeType.slice(0, 120) : undefined,
+              source: item.source === "library" ? "library" : "file",
+              mediaKind: typeof item.mediaKind === "string" ? item.mediaKind.slice(0, 32) : undefined,
+            }))
+        : undefined,
+      createdAt: m.createdAt,
+      status: m.status,
+      messageType: m.messageType,
+    };
+    // Workstream H — preserve execution payload for execution_status / completion
+    // messages so the compact progress card survives reload. Bound child_jobs to
+    // avoid unbounded payloads; never carry arbitrary nested technical_evidence.
+    const exec = m.execution;
+    if (exec && typeof exec === "object" && typeof exec.execution_id === "string") {
+      sanitized.execution = {
+        execution_id: exec.execution_id.slice(0, 120),
+        capability: typeof exec.capability === "string" ? exec.capability.slice(0, 80) : undefined,
+        status: typeof exec.status === "string" ? exec.status.slice(0, 40) : undefined,
+        progress: typeof exec.progress === "number" ? Math.max(0, Math.min(1, exec.progress)) : undefined,
+        completed: typeof exec.completed === "number" ? Math.max(0, Math.min(9999, Math.floor(exec.completed))) : undefined,
+        total: typeof exec.total === "number" ? Math.max(0, Math.min(9999, Math.floor(exec.total))) : undefined,
+        collection_id: typeof exec.collection_id === "string" ? exec.collection_id.slice(0, 120) : null,
+        result_asset_ids: Array.isArray(exec.result_asset_ids)
+          ? exec.result_asset_ids.filter((id) => typeof id === "string").slice(0, 64)
+          : undefined,
+        child_jobs: Array.isArray(exec.child_jobs)
+          ? exec.child_jobs.slice(0, 64).map((c) => ({
+              job_id: typeof c.job_id === "string" ? c.job_id.slice(0, 120) : undefined,
+              child_index: typeof c.child_index === "number" ? c.child_index : undefined,
+              label: typeof c.label === "string" ? c.label.slice(0, 120) : undefined,
+              status: typeof c.status === "string" ? c.status.slice(0, 40) : undefined,
+              asset_id: typeof c.asset_id === "string" ? c.asset_id.slice(0, 120) : null,
+              error: typeof c.error === "string" ? c.error.slice(0, 240) : null,
+              progress: typeof c.progress === "number" ? Math.max(0, Math.min(1, c.progress)) : undefined,
+              stage: typeof c.stage === "string" ? c.stage.slice(0, 80) : undefined,
+            }))
+          : undefined,
+      };
+    }
+    return sanitized;
+  });
 }
 
 function draftStorageKey(projectId?: string | null): string {

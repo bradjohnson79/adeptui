@@ -766,6 +766,36 @@ export type CoDirectorStreamEvent =
       type: "intelligence_proposal";
       requestId: string;
       proposal: CoDirectorProposal;
+    }
+  // Workstream H — honest execution status with real job state. Carries an
+  // execution payload that the message renderer turns into a compact progress
+  // card. messageType disambiguates "Working" (execution_status) vs "Done"
+  // (completion) vs "Error" (failed/cancelled).
+  | {
+      type: "execution_status";
+      requestId: string;
+      messageType?: string;
+      content?: string;
+      execution?: {
+        execution_id: string;
+        capability?: string;
+        status?: string;
+        progress?: number;
+        completed?: number;
+        total?: number;
+        collection_id?: string | null;
+        result_asset_ids?: string[];
+        child_jobs?: {
+          job_id?: string;
+          child_index?: number;
+          label?: string;
+          status?: string;
+          asset_id?: string | null;
+          error?: string | null;
+          progress?: number;
+          stage?: string;
+        }[];
+      };
     };
 
 /**
@@ -1323,7 +1353,7 @@ export const api = {
     req<{
       story: { status: string; exists: boolean; last_updated: string | null; item_count: number };
       script: { status: string; exists: boolean; last_updated: string | null; item_count: number };
-      storyboard: { status: string; exists: boolean; last_updated: string | null; item_count: number };
+      storyboard?: { status: string; exists: boolean; last_updated: string | null; item_count: number };
       characters: { status: string; exists: boolean; last_updated: string | null; item_count: number };
       ready_for_timeline: boolean;
       missing_pillars: string[];
@@ -6926,6 +6956,32 @@ export const api = {
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/approve-candidate`,
       { method: "POST", body: JSON.stringify(body) },
+    ),
+  startExecution: (
+    projectId: string,
+    body: { capability: string; context?: Record<string, unknown>; characterName?: string; count?: number; sceneId?: string; prompt?: string; visualStyle?: string; attachmentAssetIds?: string[]; userInstructions?: string; frameIndex?: number; frameMetadata?: Record<string, unknown> },
+  ) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  advanceExecution: (projectId: string, executionId: string) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/advance`,
+      { method: "POST" },
+    ),
+  cancelExecution: (projectId: string, executionId: string) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/cancel`,
+      { method: "POST" },
+    ),
+  getExecution: (projectId: string, executionId: string) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}`,
+    ),
+  listExecutions: (projectId: string, activeOnly = false) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions${activeOnly ? "?active=true" : ""}`,
     ),
   ownerApproveCharacterVisualSheet: (
     projectId: string,

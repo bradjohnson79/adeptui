@@ -949,3 +949,23 @@ class ReferencePresetBinding(Base):
     label: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ProjectTraitRow(Base):
+    """Generic project-scoped trait store (mirrors CharacterTraitRow).
+
+    Used by the Co-Director execution pack store to persist ExecutionPlan packs
+    as JSON values keyed by `category`/`key`. The pack pattern is the same as
+    the visual_sheet pack (character_identity/visual_sheet.py:_save_pack), but
+    scoped to the project rather than the character profile.
+    """
+
+    __tablename__ = "project_traits"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(String(36), index=True)
+    category: Mapped[str] = mapped_column(String(64), default="", index=True)
+    key: Mapped[str] = mapped_column(String(160), default="", index=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    provenance: Mapped[str] = mapped_column(String(64), default="CODEX_EXECUTION_DISPATCHER")
+    created_at: Mapped[str] = mapped_column(String(64), default="")

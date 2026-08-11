@@ -165,6 +165,25 @@ def compact_wiki_context(db: Session, project_id: str, *, limit: int = 12) -> st
     return "\n".join(lines) if count or overview else ""
 
 
+def execution_result_context_block(db: Session, project_id: str | None) -> str:
+    """Inject a short result-aware context block for the next conversation turn.
+
+    Workstream H, spec §42: after an execution completes, Co-Director must
+    know that "number 3" refers to Frame 3 of the current result set. This
+    reads the most recent completed execution pack and returns a compact,
+    indexed summary. Empty string when no completed execution exists or the
+    pack store (Workstream C) is unavailable. Never raises.
+    """
+    if not project_id:
+        return ""
+    try:
+        from .execution.result_context import result_context_block
+
+        return result_context_block(db, project_id)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def attachment_context_block(
     db: Session,
     *,

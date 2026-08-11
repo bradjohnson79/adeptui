@@ -28,6 +28,7 @@ from .context_enrichment import (
     attachment_context_block,
     compact_wiki_context,
     content_tab_hint_block,
+    execution_result_context_block,
 )
 from ..feature_flags import feature_flags
 from ..learning import adaptive_lessons_block, learning_context_block, parse_learning
@@ -630,6 +631,12 @@ async def _prepare_chat_request(
         )
         if attachment_block:
             context = (context or "") + "\n\n" + attachment_block
+        # Workstream H, spec §42 — result-aware context so "number 3" resolves
+        # to Frame 3 of the most recent completed execution. Best-effort: empty
+        # when no completed execution exists or the pack store is unavailable.
+        execution_result_block = execution_result_context_block(db, project_id)
+        if execution_result_block:
+            context = (context or "") + "\n\n" + execution_result_block
 
     # Active Project Content tab — lightweight pillar hint (not a hard filter).
     content_tab_hint = content_tab_hint_block(active_content_tab)
@@ -2048,13 +2055,15 @@ async def _stream_for_project_inner(
     # Phase 3 — canonical RouteDecision from message + production state
     route_decision: Optional[Any] = None
     route_event: Optional[dict[str, Any]] = None
+    unified_intent: Optional[Any] = None
     try:
         text = _last_user_message(messages)
         if text and project_id:
-            from .routing.orchestrator import route_turn
+            from .routing.orchestrator import route_turn_with_unified
             from .routing.contracts import RouteActionClass
+            from .routing.unified_intent import DispatchStrategy, UnifiedIntent
 
-            route_decision, route_event = await route_turn(
+            route_decision, unified_intent, route_event = await route_turn_with_unified(
                 text,
                 db,
                 project_id,
@@ -2064,6 +2073,7 @@ async def _stream_for_project_inner(
     except Exception:
         logger.warning("Phase 3 router failed, falling back to legacy path", exc_info=True)
         route_decision = None
+        unified_intent = None
 
     if route_event:
         yield route_event
@@ -2082,6 +2092,93 @@ async def _stream_for_project_inner(
             yield event
         return
 
+    # Workstream B — unified intent dispatch branches.
+    # EXECUTION + DETERMINISTIC: bypass the LLM and dispatch directly to the
+    # capability handler (Workstream C). When the dispatcher is not yet
+    # available, fall back to CURATED_TOOLS.
+    # EXECUTION + CURATED_TOOLS: pass curated tool IDs to build_generation_messages
+    # so the model emits ```tool blocks.
+    # All other intents: existing foundation LLM path (unchanged).
+    unified_dispatch_handled = False
+    if (
+        feature_flags.codirector_operational_agent_v1
+        and unified_intent is not None
+        and getattr(unified_intent, "is_high_confidence_execution", False)
+    ):
+        dispatched = False
+        # Workstream H — capture the execution_id yielded by the dispatcher so
+        # we can emit an honest execution_status message with REAL job state
+        # (never a fake "I've created your storyboard" claim). Agent Execution
+        # Law: conversation alone is not fulfillment.
+        dispatched_execution_id: str | None = None
+        try:
+            # Workstream C — ExecutionDispatcher may live in routing/ or
+            # capabilities/. Try both; the ImportError falls back cleanly.
+            try:
+                from .routing.execution_dispatcher import ExecutionDispatcher  # type: ignore
+            except ImportError:
+                from .capabilities.execution_dispatcher import ExecutionDispatcher  # type: ignore
+
+            dispatcher = ExecutionDispatcher()
+            async for event in dispatcher.dispatch(unified_intent, {
+                "db": db,
+                "project_id": project_id,
+                "request_id": chat_request.request_id,
+                "messages": list(messages),
+            }):
+                # Capture execution_id from any event that carries it
+                # (execution.started / execution.updated / execution.completed).
+                eid = event.get("execution_id") if isinstance(event, dict) else None
+                if eid and not dispatched_execution_id:
+                    dispatched_execution_id = str(eid)
+                yield event
+            dispatched = True
+        except ImportError:
+            logger.info(
+                "ExecutionDispatcher unavailable — falling back to CURATED_TOOLS dispatch"
+            )
+        except Exception:
+            logger.warning(
+                "ExecutionDispatcher failed — falling back to LLM path", exc_info=True
+            )
+        if dispatched:
+            unified_dispatch_handled = True
+            # Workstream H — honest completion. After the deterministic dispatch
+            # has advanced the execution pack, emit an execution_status assistant
+            # message with REAL job state from the pack store. This never claims
+            # completion unless every child job is done. When the pack store is
+            # unavailable (Workstream C not landed), this is a safe no-op.
+            try:
+                from .execution.status_messenger import emit_execution_status_events
+
+                for _ev in list(
+                    emit_execution_status_events(
+                        db,
+                        project_id=project_id,
+                        request_id=chat_request.request_id,
+                        execution_id=dispatched_execution_id,
+                    )
+                ):
+                    yield _ev
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "execution_status emit failed (non-fatal)", exc_info=True
+                )
+
+    if unified_dispatch_handled:
+        return
+
+    # Carry the curated tool IDs into the conversation core turn so the
+    # generation messages get a compact tool catalog (CURATED_TOOLS branch).
+    curated_tool_ids_for_turn: list[str] = []
+    if (
+        feature_flags.codirector_operational_agent_v1
+        and unified_intent is not None
+        and unified_intent.intent.value == "EXECUTION"
+        and unified_intent.dispatch == DispatchStrategy.CURATED_TOOLS
+    ):
+        curated_tool_ids_for_turn = list(unified_intent.curated_tool_ids or [])
+
     # Response-first: defer Wiki / Living Brief / pitch / research until after streaming begins.
     core = run_conversation_core_turn(
         db,
@@ -2090,6 +2187,7 @@ async def _stream_for_project_inner(
         user_message=user_message,
         mode=mode,
         defer_enrichment=True,
+        curated_tool_ids=curated_tool_ids_for_turn or None,
     )
     timing.deferEnrichment = True
     gen_msgs = list(getattr(core, "generationMessages", None) or [])

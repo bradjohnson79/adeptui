@@ -648,6 +648,82 @@ def list_references(db: Session, project_id: str, character_id: str) -> list[dic
     ]
 
 
+def resolve_character_by_name(
+    db: Session, project_id: str, name: str
+) -> CharacterProfileRow | None:
+    """Resolve a character profile by display name or slug (case-insensitive).
+
+    Centralizes the name→character resolution that was previously duplicated
+    inline in codirector/wiki.py and wiki_intelligence/compiled/page_compiler.py.
+    Returns None if no match. Tries exact name, then slug, then case-insensitive.
+    """
+    if not name or not name.strip():
+        return None
+    clean = name.strip()
+    lowered = clean.lower()
+
+    # Exact name match first.
+    row = (
+        db.query(CharacterProfileRow)
+        .filter(
+            CharacterProfileRow.project_id == project_id,
+            CharacterProfileRow.name == clean,
+        )
+        .first()
+    )
+    if row:
+        return row
+
+    # Slug match.
+    row = (
+        db.query(CharacterProfileRow)
+        .filter(
+            CharacterProfileRow.project_id == project_id,
+            CharacterProfileRow.slug == _slugify(clean),
+        )
+        .first()
+    )
+    if row:
+        return row
+
+    # Case-insensitive name match.
+    rows = (
+        db.query(CharacterProfileRow)
+        .filter(CharacterProfileRow.project_id == project_id)
+        .all()
+    )
+    for r in rows:
+        if r.name and r.name.lower() == lowered:
+            return r
+        if r.slug and r.slug.lower() == lowered:
+            return r
+
+    return None
+
+
+def resolve_approved_reference(
+    db: Session,
+    character_id: str,
+    role: str = "hero_portrait",
+) -> str | None:
+    """Resolve the canonical/approved reference asset_id for a character role.
+
+    Centralizes the predicate `reference_role == role and (canonical or
+    approval_status == "approved")` that was duplicated inline in
+    codirector/wiki.py:392 and wiki_intelligence/compiled/page_compiler.py:163.
+    Returns the asset_id or None.
+    """
+    refs = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
+        .all()
+    )
+    for ref in refs:
+        if ref.reference_role == role and (ref.canonical or ref.approval_status == "approved"):
+            return ref.asset_id
+    return None
+
+
 def coverage(db: Session, project_id: str, character_id: str):
     profile = db.get(CharacterProfileRow, character_id)
     if not profile or profile.project_id != project_id:

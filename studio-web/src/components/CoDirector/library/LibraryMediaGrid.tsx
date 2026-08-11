@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../../api";
+import { useCoDirectorSession } from "../CoDirectorSession";
 import {
   FILTERS,
   getAssetName,
@@ -197,6 +198,7 @@ function SkeletonGrid() {
 
 export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   void onGoTab;
+  const { activeExecution } = useCoDirectorSession();
   const [filter, setFilter] = useState<AssetFilterId>("all");
   const [query, setQuery] = useState("");
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
@@ -216,6 +218,17 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
       setBusy(false);
     }
   }, [projectId, query]);
+
+  // Live update: refresh when an execution completes or produces new assets.
+  useEffect(() => {
+    if (!activeExecution) return;
+    // Only refresh if this execution belongs to the current project.
+    if (activeExecution.project_id && activeExecution.project_id !== projectId) return;
+    // Refresh when execution status changes to completed (new assets in Library).
+    if (activeExecution.status === "completed" || activeExecution.result_asset_ids?.length) {
+      void refresh();
+    }
+  }, [activeExecution?.status, activeExecution?.result_asset_ids?.length, activeExecution?.execution_id, projectId, refresh]);
 
   useEffect(() => {
     let cancelled = false;
