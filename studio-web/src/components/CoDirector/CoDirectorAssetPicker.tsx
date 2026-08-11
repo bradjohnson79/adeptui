@@ -2,98 +2,17 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { api } from "../../api";
 import { useCoDirectorSession } from "./CoDirectorSession";
+import {
+  FILTERS,
+  getAssetIcon,
+  getAssetKindText,
+  getAssetName,
+  getCardPreviewUrl,
+  matchesFilter,
+  type AssetFilterId,
+  type LibraryAsset,
+} from "./library/assetModel";
 import "./codirector-library-browser.css";
-
-type LibraryAsset = {
-  id: string;
-  tag?: string;
-  title?: string;
-  filename?: string;
-  kind?: string;
-  mime_type?: string;
-  url?: string;
-  file_url?: string;
-  previewUrl?: string;
-  preview_url?: string;
-  thumb_url?: string;
-  libraryPath?: string;
-};
-
-type AssetFilterId = "all" | "images" | "video" | "audio" | "documents";
-
-type AssetFilter = {
-  id: AssetFilterId;
-  label: string;
-};
-
-const FILTERS: AssetFilter[] = [
-  { id: "all", label: "All" },
-  { id: "images", label: "Images" },
-  { id: "video", label: "Video" },
-  { id: "audio", label: "Audio" },
-  { id: "documents", label: "Documents" },
-];
-
-function getAssetName(asset: LibraryAsset) {
-  return asset.tag || asset.title || asset.filename || asset.id;
-}
-
-function getAssetKindText(asset: LibraryAsset) {
-  const haystack = `${asset.kind || ""} ${asset.mime_type || ""}`.toLowerCase();
-  if (haystack.includes("image")) return "Image";
-  if (haystack.includes("video")) return "Video";
-  if (haystack.includes("audio")) return "Audio";
-  if (haystack.includes("application") || haystack.includes("text") || haystack.includes("document")) return "Document";
-  return "Library item";
-}
-
-function isImageAsset(asset: LibraryAsset) {
-  const haystack = `${asset.kind || ""} ${asset.mime_type || ""}`.toLowerCase();
-  return haystack.includes("image");
-}
-
-function isVideoAsset(asset: LibraryAsset) {
-  const haystack = `${asset.kind || ""} ${asset.mime_type || ""}`.toLowerCase();
-  return haystack.includes("video");
-}
-
-function isAudioAsset(asset: LibraryAsset) {
-  const haystack = `${asset.kind || ""} ${asset.mime_type || ""}`.toLowerCase();
-  return haystack.includes("audio");
-}
-
-function isDocumentAsset(asset: LibraryAsset) {
-  const haystack = `${asset.kind || ""} ${asset.mime_type || ""}`.toLowerCase();
-  return (
-    haystack.includes("document") ||
-    haystack.includes("application/") ||
-    haystack.includes("text/") ||
-    haystack.includes("pdf") ||
-    haystack.includes("json")
-  );
-}
-
-function matchesFilter(asset: LibraryAsset, filter: AssetFilterId) {
-  if (filter === "all") return true;
-  if (filter === "images") return isImageAsset(asset);
-  if (filter === "video") return isVideoAsset(asset);
-  if (filter === "audio") return isAudioAsset(asset);
-  if (filter === "documents") return isDocumentAsset(asset);
-  return true;
-}
-
-function getCardPreviewUrl(asset: LibraryAsset) {
-  if (asset.thumb_url) return asset.thumb_url;
-  if (isImageAsset(asset)) return api.assetUrl(asset.id);
-  return undefined;
-}
-
-function getAssetIcon(asset: LibraryAsset) {
-  if (isVideoAsset(asset)) return "Vid";
-  if (isAudioAsset(asset)) return "Aud";
-  if (isDocumentAsset(asset)) return "Doc";
-  return "Lib";
-}
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
