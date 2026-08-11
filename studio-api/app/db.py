@@ -732,6 +732,12 @@ def init_db() -> None:
     except Exception:
         pass
     try:
+        from .story_entries.store import ensure_story_entries_tables
+
+        ensure_story_entries_tables()
+    except Exception:
+        pass
+    try:
         from .image_pipeline.multi_shot.service import ensure_tables as ensure_multi_shot_tables
 
         ensure_multi_shot_tables()

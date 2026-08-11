@@ -45,23 +45,34 @@ def _info(status: PillarStatus, *, exists: bool, last_updated: str | None, item_
 
 def _story_pillar(db: Session, project_id: str) -> PillarInfo:
     try:
-        from ..story.store import load_document
+        from ..story_entries.store import list_entries, migrate_from_legacy
 
-        row = load_document(db, project_id)
-        if not row:
+        migrate_from_legacy(db, project_id)
+        rows = list_entries(db, project_id)
+        if not rows:
             return _empty()
-        word_count = int(getattr(row, "word_count", 0) or 0)
-        content = getattr(row, "content", "") or ""
         exists = True
-        status: PillarStatus = "complete" if (word_count > 0 or bool(content.strip())) else "in_progress"
-        updated = getattr(row, "updated_at", None)
-        if updated is not None and hasattr(updated, "isoformat"):
-            last_updated = updated.isoformat()
-        elif updated:
-            last_updated = str(updated)
-        else:
-            last_updated = None
-        return _info(status, exists=exists, last_updated=last_updated, item_count=word_count)
+        item_count = len(rows)
+        has_content = any(
+            bool(getattr(r, "title", "") or "")
+            or bool(getattr(r, "logline", "") or "")
+            or bool(getattr(r, "short_summary", "") or "")
+            or bool(getattr(r, "long_summary", "") or "")
+            for r in rows
+        )
+        status: PillarStatus = "complete" if has_content else "in_progress"
+        last_updated = None
+        for r in rows:
+            updated = getattr(r, "updated_at", None)
+            if updated is not None and hasattr(updated, "isoformat"):
+                updated_str = updated.isoformat()
+            elif updated:
+                updated_str = str(updated)
+            else:
+                continue
+            if last_updated is None or updated_str > last_updated:
+                last_updated = updated_str
+        return _info(status, exists=exists, last_updated=last_updated, item_count=item_count)
     except Exception:
         logger.exception("Foundation: story pillar inspection failed")
         return _empty()

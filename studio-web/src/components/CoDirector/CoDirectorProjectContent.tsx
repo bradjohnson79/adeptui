@@ -6,7 +6,7 @@ import { CONTENT_NAV } from "./navEntries";
 import { ProjectWikiPanel } from "./ProjectWikiPanel";
 import { NotesPanel } from "./NotesPanel";
 import { CastingPanel } from "./CastingPanel";
-import { StoryEditor } from "../story/StoryEditor";
+import { StoryEntryEditor } from "../story/StoryEntryEditor";
 import { SceneReadinessMatrix } from "./SceneReadinessMatrix";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import { CoDirectorEmptyState } from "./cards";
@@ -17,7 +17,7 @@ import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
 import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
 import { ScriptwriterCompactView } from "./scriptwriter/ScriptwriterCompactView";
 import { StoryboardCompactView } from "./storyboard/StoryboardCompactView";
-import { CharacterCompactView } from "./characters/CharacterCompactView";
+import { CharacterCreatorEmbedded } from "./CharacterCreatorEmbedded";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -245,7 +245,7 @@ function FoundationStatusBar({
 }: {
   projectId: string;
   onPillarSelect: (tab: ContentTab) => void;
-  onGoTab?: (tab: string) => void;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const [status, setStatus] = useState<FoundationStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -337,7 +337,7 @@ export function CoDirectorProjectContent({
 }: {
   tab: ContentTab;
   onTabChange: (tab: ContentTab) => void;
-  onGoTab?: (tab: string) => void;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const { uiContext, messages, activity } = useCoDirectorSession();
   const projectId = uiContext.projectId || "";
@@ -496,7 +496,7 @@ export function CoDirectorProjectContent({
         {tab === "story" && (
           <div data-testid="codirector-content-story">
             {projectId ? (
-              <StoryEditor projectId={projectId} embedded />
+              <StoryEntryEditor projectId={projectId} embedded />
             ) : (
               <p className="muted">Select a project to write your Story.</p>
             )}
@@ -547,10 +547,7 @@ export function CoDirectorProjectContent({
         {tab === "characters" && (
           <div data-testid="codirector-content-characters">
             {projectId ? (
-              <CharacterCompactView
-                projectId={projectId}
-                onOpenFull={() => onGoTab?.("characters")}
-              />
+              <CharacterCreatorEmbedded projectId={projectId} />
             ) : (
               <p className="muted">Select a project to open Character Creator.</p>
             )}

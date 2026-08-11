@@ -4236,6 +4236,113 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .codirector-project-wiki select {
   width: 100%;
 }
+
+/* Wiki Story Entries */
+.wiki-story-entry {
+  margin-bottom: 0.5rem;
+}
+.wiki-story-entry__title {
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.25rem 0;
+}
+.wiki-story-entry__type {
+  font-weight: 400;
+  opacity: 0.7;
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+}
+.wiki-story-entry__section {
+  margin: 0.5rem 0;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--border-color, #333);
+}
+.wiki-story-entry__section strong {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted, #888);
+  margin-bottom: 0.15rem;
+}
+.wiki-story-entry__section p {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* Wiki Character Cards */
+.wiki-character-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.wiki-character-card {
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: var(--surface-color, rgba(255,255,255,0.03));
+}
+.wiki-character-card__header {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.wiki-character-card__image {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.wiki-character-card__placeholder {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-muted, #2a4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: white;
+}
+.wiki-character-card__info h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+.wiki-character-card__role {
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+}
+.wiki-character-card__description {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0.5rem 0;
+}
+.wiki-character-card__keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.wiki-character-card__keyword {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  background: var(--accent-muted, #2a4);
+  color: white;
+}
+.wiki-character-card__details {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  margin-bottom: 0.5rem;
+}
+.wiki-character-card__actions {
+  display: flex;
+  gap: 0.5rem;
+}
 @media (max-width: 1439px) {
   .codirector-fullscreen-page {
     padding-inline: clamp(0.75rem, 3vw, 2rem);

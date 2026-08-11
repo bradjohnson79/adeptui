@@ -193,6 +193,37 @@ export interface ProjectWikiSection {
   emptyState?: string;
 }
 
+export interface CoDirectorStoryEntry {
+  entryId: string;
+  title: string;
+  entryType: string;
+  logline: string;
+  shortSummary: string;
+  longSummary: string;
+  sortOrder: number;
+}
+
+export interface CoDirectorCharacterProfile {
+  profileId: string;
+  name: string;
+  role: string;
+  description: string;
+  status: string;
+  personality?: Record<string, any>;
+  approvedCastingImageAssetId?: string;
+  approvedVoiceAssetId?: string;
+  apparentAge?: string;
+  speciesOrType?: string;
+  visualDescription?: string;
+  visualStyle?: string;
+}
+
+export interface CoDirectorSuggestedCharacter {
+  suggestedName: string;
+  source: string;
+  context: string;
+}
+
 export interface CoDirectorProjectWiki {
   projectId: string;
   title: string;
@@ -201,6 +232,9 @@ export interface CoDirectorProjectWiki {
   overview: string;
   hasContent?: boolean;
   emptyState?: string;
+  storyEntries?: CoDirectorStoryEntry[];
+  characterProfiles?: CoDirectorCharacterProfile[];
+  suggestedCharacters?: CoDirectorSuggestedCharacter[];
   sections: {
     knownDetails: ProjectWikiSection;
     creativeFoundation: ProjectWikiSection;
@@ -1245,6 +1279,46 @@ export const api = {
     req<{ exists: boolean; wordCount: number; updatedAt: string | null }>(
       `/api/projects/${encodeURIComponent(projectId)}/story/status`,
     ),
+  storyEntriesList: (projectId: string) =>
+    req<Array<{
+      id: string; projectId: string; title: string; entryType: string;
+      logline: string; shortSummary: string; longSummary: string;
+      sortOrder: number; createdAt: string; updatedAt: string;
+    }>>(`/api/projects/${encodeURIComponent(projectId)}/story-entries`),
+
+  storyEntriesCreate: (projectId: string, body: {
+    title?: string; entryType?: string; logline?: string;
+    shortSummary?: string; longSummary?: string;
+  }) =>
+    req<any>(`/api/projects/${encodeURIComponent(projectId)}/story-entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  storyEntriesUpdate: (projectId: string, entryId: string, body: {
+    title?: string; entryType?: string; logline?: string;
+    shortSummary?: string; longSummary?: string; sortOrder?: number;
+  }) =>
+    req<any>(`/api/projects/${encodeURIComponent(projectId)}/story-entries/${encodeURIComponent(entryId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  storyEntriesDelete: (projectId: string, entryId: string) =>
+    req<{ ok: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/story-entries/${encodeURIComponent(entryId)}`,
+      { method: "DELETE" },
+    ),
+
+  storyEntriesReorder: (projectId: string, entryIds: string[]) =>
+    req<Array<any>>(`/api/projects/${encodeURIComponent(projectId)}/story-entries/reorder`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryIds }),
+    }),
+
   foundationStatus: (projectId: string) =>
     req<{
       story: { status: string; exists: boolean; last_updated: string | null; item_count: number };
@@ -6819,7 +6893,13 @@ export const api = {
   startCharacterVisualSheet: (
     projectId: string,
     characterId: string,
-    body?: { includeDetails?: boolean; includePerformance?: boolean; heroAssetId?: string },
+    body?: {
+      includeDetails?: boolean;
+      includePerformance?: boolean;
+      heroAssetId?: string;
+      candidateCount?: number;
+      visualStyle?: string;
+    },
   ) =>
     req<{ ok: boolean; pack: any }>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet/generate`,
@@ -6833,6 +6913,15 @@ export const api = {
   getCharacterVisualSheet: (projectId: string, characterId: string) =>
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet`,
+    ),
+  approveCharacterCandidate: (
+    projectId: string,
+    characterId: string,
+    body: { assetId: string; referenceRole?: string; sourceType?: string; notes?: string },
+  ) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/approve-candidate`,
+      { method: "POST", body: JSON.stringify(body) },
     ),
   ownerApproveCharacterVisualSheet: (
     projectId: string,

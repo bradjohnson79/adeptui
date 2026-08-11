@@ -34,6 +34,7 @@ from .codirector.vision.router import router as vision_router
 from .codirector.vision.engine import set_engine_enabled
 from .posecraft.router import router as posecraft_router
 from .runtime_manager.router import router as runtime_manager_router
+from .story_entries.api import router as story_entries_router
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +321,10 @@ try:
     app.include_router(story_router, prefix="/api")
 except Exception:
     logger.exception("Story router failed to load")
+try:
+    app.include_router(story_entries_router, prefix="/api")
+except Exception:
+    logger.exception("Story entries router failed to load")
 try:
     from .project_foundation.api import router as foundation_router
 

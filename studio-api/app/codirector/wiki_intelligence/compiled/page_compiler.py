@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -113,13 +114,121 @@ def compile_wiki_bundle(
         story_summary, episode_children=[{"pageId": c["pageId"], "label": c["label"]} for c in episode_children]
     )
 
-    char_texts = [t for _, t, s in entries if s == "characters"]
-    characters = resolve_characters(
-        char_texts,
-        alias_map=alias_map,
-        key_characters=list(getattr(snapshot, "keyCharacters", None) or []),
-        entity_type_overrides=entity_overrides,
-    )
+    # Authoritative story entries — enrich story page sections.
+    try:
+        from ....story_entries.store import list_entries as _list_story_entries
+
+        _story_rows = _list_story_entries(db, project_id)
+        if _story_rows:
+            story_entry_sections = []
+            for _se in _story_rows:
+                _body_parts = []
+                if _se.logline:
+                    _body_parts.append(f"Logline: {_se.logline}")
+                if _se.short_summary:
+                    _body_parts.append(f"Short Summary: {_se.short_summary}")
+                if _se.long_summary:
+                    _body_parts.append(_se.long_summary[:800])
+                story_entry_sections.append({
+                    "id": f"sec-story-entry-{_se.id}",
+                    "title": _se.title or _se.entry_type.replace("_", " ").title(),
+                    "body": "\n\n".join(_body_parts),
+                    "bullets": [],
+                })
+            # Append authoritative sections after default story sections
+            existing_ids = {s["id"] for s in story_page.get("sections") or []}
+            for _sec in story_entry_sections:
+                if _sec["id"] not in existing_ids:
+                    story_page.setdefault("sections", []).append(_sec)
+                    existing_ids.add(_sec["id"])
+    except Exception:
+        pass
+
+    # Authoritative character profiles — replace conversation-derived characters.
+    characters: list[dict[str, Any]] = []
+    try:
+        from ....character_identity.models import CharacterReferenceAssetRow as _RefRow
+        from ....character_identity.service import list_profiles as _list_char_profiles
+
+        _profiles = _list_char_profiles(db, project_id)
+        if _profiles:
+            for _prof in _profiles:
+                _cid = re.sub(r"[^a-z0-9]+", "-", _prof.name.lower()).strip("-")[:40]
+                _page_id = f"page-character-{_cid}"
+                _refs = (
+                    db.query(_RefRow)
+                    .filter(_RefRow.character_profile_id == _prof.id)
+                    .all()
+                )
+                _hero_portrait = None
+                for _ref in _refs:
+                    if _ref.reference_role == "hero_portrait" and (_ref.canonical or _ref.approval_status == "approved"):
+                        _hero_portrait = _ref.asset_id
+                        break
+                _personality = _prof.personality if hasattr(_prof, 'personality') else {}
+                _summary_parts = [_prof.description] if _prof.description else []
+                if _prof.role:
+                    _summary_parts.append(f"Role: {_prof.role}")
+                _summary = "; ".join(_summary_parts)[:200] if _summary_parts else f"{_prof.name} has been created."
+                _sections = [
+                    {
+                        "id": f"sec-{_page_id}-overview",
+                        "title": "Overview",
+                        "body": _prof.description or "",
+                        "bullets": [],
+                    },
+                    {
+                        "id": f"sec-{_page_id}-details",
+                        "title": "Details",
+                        "body": "",
+                        "bullets": [
+                            b for b in [
+                                f"Role: {_prof.role}" if _prof.role else "",
+                                f"Age: {_prof.apparent_age}" if _prof.apparent_age else "",
+                                f"Species: {_prof.species_or_type}" if _prof.species_or_type else "",
+                            ] if b
+                        ],
+                    },
+                ]
+                if _personality:
+                    _personality_bullets = [
+                        v for k, v in _personality.items()
+                        if isinstance(v, str) and v.strip() and k != "model_config"
+                    ][:6]
+                    if _personality_bullets:
+                        _sections.append({
+                            "id": f"sec-{_page_id}-personality",
+                            "title": "Personality",
+                            "body": "",
+                            "bullets": _personality_bullets,
+                        })
+                characters.append({
+                    "pageId": _page_id,
+                    "pageType": "CHARACTER",
+                    "title": _prof.name,
+                    "summary": _summary,
+                    "sections": _sections,
+                    "relatedPageIds": ["page-story"],
+                    "sourceRecordIds": [_prof.id],
+                    "canonState": "CONFIRMED",
+                    "questionsToExplore": [
+                        f"What does {_prof.name.split()[-1]} want most deeply right now?",
+                        f"How does {_prof.name.split()[-1]} relate to the central conflict?",
+                    ][:2],
+                    "profileId": _prof.id,
+                    "approvedCastingImageAssetId": _hero_portrait,
+                })
+    except Exception:
+        pass
+
+    if not characters:
+        char_texts = [t for _, t, s in entries if s == "characters"]
+        characters = resolve_characters(
+            char_texts,
+            alias_map=alias_map,
+            key_characters=list(getattr(snapshot, "keyCharacters", None) or []),
+            entity_type_overrides=entity_overrides,
+        )
 
     # World / locations light pages when material exists
     world_bits = [t for _, t, s in entries if s == "worldAndSetting"]

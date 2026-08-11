@@ -143,12 +143,14 @@ export function ProjectWikiPanel({
   wikiUiMessage,
   wikiVerification,
   onOpenCasting,
+  onGoTab,
 }: {
   projectId: string;
   refreshToken: string;
   wikiUiMessage?: string | null;
   wikiVerification?: { persistenceState?: string; presentationState?: string; finalState?: string; error?: string | null } | null;
   onOpenCasting?: (characterName: string) => void;
+  onGoTab?: (tab: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [wiki, setWiki] = useState<CoDirectorProjectWiki | null>(null);
@@ -892,6 +894,110 @@ export function ProjectWikiPanel({
             openRefine();
           }}
         />
+        {(() => {
+          const se = wiki.storyEntries;
+          if (!se?.length) return null;
+          return (
+            <div className="wiki-section" data-testid="wiki-story-entries">
+              <h3>Story</h3>
+              {se.map((entry, i) => (
+                <details key={entry.entryId || i} className="wiki-story-entry" data-testid={`wiki-story-entry-${i}`}>
+                  <summary className="wiki-story-entry__title">
+                    {entry.title || "Untitled"}
+                    {entry.entryType !== "project_story" && entry.entryType ? (
+                      <span className="wiki-story-entry__type">({entry.entryType})</span>
+                    ) : null}
+                  </summary>
+                  {entry.logline && (
+                    <div className="wiki-story-entry__section">
+                      <strong>Logline</strong>
+                      <p>{entry.logline}</p>
+                    </div>
+                  )}
+                  {entry.shortSummary && (
+                    <div className="wiki-story-entry__section">
+                      <strong>Short Summary</strong>
+                      <p>{entry.shortSummary}</p>
+                    </div>
+                  )}
+                  {entry.longSummary && (
+                    <div className="wiki-story-entry__section">
+                      <strong>Long Summary</strong>
+                      <p>{entry.longSummary}</p>
+                    </div>
+                  )}
+                </details>
+              ))}
+            </div>
+          );
+        })()}
+        {(() => {
+          const cp = wiki.characterProfiles;
+          if (!cp?.length) return null;
+          return (
+            <div className="wiki-section" data-testid="wiki-character-profiles">
+              <h3>Characters</h3>
+              <div className="wiki-character-grid">
+                {cp.map((char, i) => (
+                  <div key={char.profileId || i} className="wiki-character-card" data-testid={`wiki-character-card-${i}`}>
+                    <div className="wiki-character-card__header">
+                      {char.approvedCastingImageAssetId ? (
+                        <img
+                          src={`/api/assets/${char.approvedCastingImageAssetId}/file`}
+                          alt={char.name}
+                          className="wiki-character-card__image"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : (
+                        <div className="wiki-character-card__placeholder">
+                          <span>{char.name?.charAt(0)?.toUpperCase() || "?"}</span>
+                        </div>
+                      )}
+                      <div className="wiki-character-card__info">
+                        <h4>{char.name}</h4>
+                        {char.role && <span className="wiki-character-card__role">{char.role}</span>}
+                      </div>
+                    </div>
+                    {char.description && (
+                      <p className="wiki-character-card__description">{char.description}</p>
+                    )}
+                    {char.personality?.keywords?.length > 0 && (
+                      <div className="wiki-character-card__keywords">
+                        {(char.personality as any).keywords.map((kw: string, ki: number) => (
+                          <span key={ki} className="wiki-character-card__keyword">{kw}</span>
+                        ))}
+                      </div>
+                    )}
+                    {char.apparentAge || char.speciesOrType ? (
+                      <div className="wiki-character-card__details">
+                        {char.apparentAge && <span>Age: {char.apparentAge}</span>}
+                        {char.speciesOrType && <span>Species: {char.speciesOrType}</span>}
+                      </div>
+                    ) : null}
+                    <div className="wiki-character-card__actions">
+                      <button type="button" className="ghost" onClick={() => onGoTab?.("characters")}>
+                        Open Character
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      {(wiki.suggestedCharacters || []).length > 0 && (
+        <div className="wiki-section" data-testid="wiki-suggested-characters">
+          <details>
+            <summary>Suggested Characters ({(wiki.suggestedCharacters || []).length})</summary>
+            {(wiki.suggestedCharacters || []).map((sc, i) => (
+              <p key={i} className="muted">
+                &ldquo;{sc.suggestedName}&rdquo; &mdash; Create a Character Profile?
+              </p>
+            ))}
+          </details>
+
+        </div>
+      )}
         {wikiFooter}
       </div>
     );
@@ -1173,6 +1279,105 @@ export function ProjectWikiPanel({
           </aside>
         ) : null}
       </div>
+      {(wiki.storyEntries || []).length > 0 && (
+        <div className="wiki-section" data-testid="wiki-story-entries">
+          <h3>Story</h3>
+          {(wiki.storyEntries || []).map((entry, i) => (
+            <details key={entry.entryId || i} className="wiki-story-entry" data-testid={`wiki-story-entry-${i}`}>
+              <summary className="wiki-story-entry__title">
+                {entry.title || "Untitled"}
+                {entry.entryType !== "project_story" && entry.entryType ? (
+                  <span className="wiki-story-entry__type">({entry.entryType})</span>
+                ) : null}
+              </summary>
+              {entry.logline && (
+                <div className="wiki-story-entry__section">
+                  <strong>Logline</strong>
+                  <p>{entry.logline}</p>
+                </div>
+              )}
+              {entry.shortSummary && (
+                <div className="wiki-story-entry__section">
+                  <strong>Short Summary</strong>
+                  <p>{entry.shortSummary}</p>
+                </div>
+              )}
+              {entry.longSummary && (
+                <div className="wiki-story-entry__section">
+                  <strong>Long Summary</strong>
+                  <p>{entry.longSummary}</p>
+                </div>
+              )}
+            </details>
+          ))}
+        </div>
+      )}
+      {(wiki.characterProfiles || []).length > 0 && (
+        <div className="wiki-section" data-testid="wiki-character-profiles">
+          <h3>Characters</h3>
+          <div className="wiki-character-grid">
+            {(wiki.characterProfiles || []).map((char, i) => (
+              <div key={char.profileId || i} className="wiki-character-card" data-testid={`wiki-character-card-${i}`}>
+                <div className="wiki-character-card__header">
+                  {char.approvedCastingImageAssetId ? (
+                    <img
+                      src={`/api/assets/${char.approvedCastingImageAssetId}/file`}
+                      alt={char.name}
+                      className="wiki-character-card__image"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="wiki-character-card__placeholder">
+                      <span>{char.name?.charAt(0)?.toUpperCase() || "?"}</span>
+                    </div>
+                  )}
+                  <div className="wiki-character-card__info">
+                    <h4>{char.name}</h4>
+                    {char.role && <span className="wiki-character-card__role">{char.role}</span>}
+                  </div>
+                </div>
+                {char.description && (
+                  <p className="wiki-character-card__description">{char.description}</p>
+                )}
+                {(char.personality as any)?.keywords?.length > 0 && (
+                  <div className="wiki-character-card__keywords">
+                    {(char.personality as any).keywords.map((kw: string, ki: number) => (
+                      <span key={ki} className="wiki-character-card__keyword">{kw}</span>
+                    ))}
+                  </div>
+                )}
+                {char.apparentAge || char.speciesOrType ? (
+                  <div className="wiki-character-card__details">
+                    {char.apparentAge && <span>Age: {char.apparentAge}</span>}
+                    {char.speciesOrType && <span>Species: {char.speciesOrType}</span>}
+                  </div>
+                ) : null}
+                <div className="wiki-character-card__actions">
+                  <button type="button" className="ghost" onClick={() => onGoTab?.("characters")}>
+                    Open Character
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {(() => {
+        const sc = wiki.suggestedCharacters;
+        if (!sc?.length) return null;
+        return (
+          <div className="wiki-section" data-testid="wiki-suggested-characters">
+            <details>
+              <summary>Suggested Characters ({sc.length})</summary>
+              {sc.map((s, i) => (
+                <p key={i} className="muted">
+                  &ldquo;{s.suggestedName}&rdquo; &mdash; Create a Character Profile?
+                </p>
+              ))}
+            </details>
+          </div>
+        );
+      })()}
       {wikiFooter}
     </div>
   );
