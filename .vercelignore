@@ -1,0 +1,13 @@
+# Vercel deployment ignore — exclude local-only runtime, backups, and dev tooling
+backups/
+.runtime/
+data/
+*.pid
+*.log
+docs/
+scripts/
+.cursor/
+tests/e2e/
+studio-api/tests/
+node_modules/
+.cache/
