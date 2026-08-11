@@ -209,9 +209,16 @@ export function useProductionDock() {
 
   useEffect(() => {
     void refresh();
-    const id = window.setInterval(() => void refresh(), 20_000);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 20_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      window.clearInterval(id);
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
       if (refreshAbort.current) refreshAbort.current.abort();
     };
   }, [refresh]);

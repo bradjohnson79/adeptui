@@ -19,6 +19,12 @@ const GET_TTL_MS: Record<string, number> = {
   "/api/capabilities": 15_000,
   "/api/runtime/beta": 10_000,
   "/api/gpu/stats": 5_000,
+  "/api/production-control/status": 15_000,
+  "/api/production-control/preferences": 30_000,
+  "/api/production-control/gate": 15_000,
+  "/api/production-control/models": 30_000,
+  "/api/production-control/resolved": 15_000,
+  "/api/production-control/queue": 10_000,
 };
 
 function cacheKey(method: string, path: string): string {

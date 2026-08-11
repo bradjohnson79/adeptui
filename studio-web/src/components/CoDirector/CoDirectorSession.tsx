@@ -664,7 +664,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     [syncProjectIdentity],
   );
 
-  const refreshProviderHealth = useCallback(async () => {
+  const refreshProviderHealth = useCallback(async (opts?: { force?: boolean }) => {
+    if (!opts?.force) {
+      const { shouldSuspendDependentPolling } = await import("../../runtime/studioApiConnection");
+      if (shouldSuspendDependentPolling()) {
+        setHealthPending(false);
+        return;
+      }
+    }
     setHealthPending(true);
     try {
       const health = await api.codirectorHealth("active");
@@ -702,7 +709,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setShowReconnectAction(false);
     setReconnecting(true);
     reconnectAttemptsRef.current = 0;
-    await refreshProviderHealth();
+    await refreshProviderHealth({ force: true });
   }, [refreshProviderHealth]);
 
   useEffect(() => {

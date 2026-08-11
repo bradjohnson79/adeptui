@@ -275,6 +275,13 @@ if _extra_origins.strip():
         [o.strip() for o in _extra_origins.split(",") if o.strip()]
     )
 
+try:
+    from .project_security.middleware import ProjectPasswordLockMiddleware
+
+    app.add_middleware(ProjectPasswordLockMiddleware)
+except Exception:
+    logger.exception("Project password lock middleware failed to load")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_default_cors_origins,
@@ -282,12 +289,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-try:
-    from .project_security.middleware import ProjectPasswordLockMiddleware
-
-    app.add_middleware(ProjectPasswordLockMiddleware)
-except Exception:
-    logger.exception("Project password lock middleware failed to load")
 
 
 @app.exception_handler(CapabilityError)

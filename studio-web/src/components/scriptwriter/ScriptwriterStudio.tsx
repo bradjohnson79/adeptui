@@ -107,7 +107,7 @@ export function ScriptwriterStudio({
             const elements = docJsonToElements(ed.getJSON() as { content?: Array<Record<string, unknown>> });
             const res = await api.scriptwriter.autosave(project.id, docId, {
               elements,
-              expectedRevision: latestRevisionRef.current,
+              expectedRevision: latestRevisionRef.current ?? undefined,
             });
             const d = res.document as unknown as ScriptDocument;
             setDocTracked(d);
