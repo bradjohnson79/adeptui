@@ -562,7 +562,7 @@ export default function ProjectEditor() {
   }, [id, tab, workspaceProjectId]);
 
   const go = useCallback(
-    (next: string) => {
+    (next: string, extra?: Record<string, string>) => {
       if (!id) return;
       const resolved = resolveWorkspace(next);
       if (!resolved) return;
@@ -572,7 +572,14 @@ export default function ProjectEditor() {
       // User-initiated switches PUSH history so Back/Forward stays coherent
       // (View Timeline → Back returns to the landing). Only the legacy-alias
       // canonicalization above uses replace.
-      const search = resolved === "home" ? "" : `?workspace=${encodeURIComponent(resolved)}`;
+      const params = new URLSearchParams();
+      if (resolved !== "home") params.set("workspace", resolved);
+      if (extra) {
+        for (const [k, v] of Object.entries(extra)) {
+          if (v) params.set(k, v);
+        }
+      }
+      const search = params.toString() ? `?${params.toString()}` : "";
       if (locationSearch === search) return;
       navigate({ pathname: `/project/${id}`, search });
     },
@@ -848,7 +855,7 @@ function ProjectCoDirectorBridge({
   sceneName?: string;
   workspaceTab: string;
   activeDocumentId?: string;
-  onGoTab: (tab: string) => void;
+  onGoTab: (tab: string, extra?: Record<string, string>) => void;
   onApplyPrompt: (prompt: string) => void;
   onAppliedSetup: () => void | Promise<void>;
 }) {

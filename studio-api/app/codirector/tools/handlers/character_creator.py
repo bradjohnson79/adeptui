@@ -513,9 +513,13 @@ def apply_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         candidate_count = 1
 
     # Check for a usable description before generating visual candidates.
-    # Honest guard — do not fabricate visuals from an empty brief.
+    # Honest guard — do not fabricate visuals from an empty brief. The bio
+    # (description) and the visual_description (appearance) both count.
     profile = _profile_or_raise(ctx, character_id)
-    if not profile.description or len(profile.description.strip()) < 20:
+    bio = (profile.description or "").strip()
+    visual_desc = (getattr(profile, "visual_description", "") or "").strip()
+    combined = f"{bio} {visual_desc}".strip()
+    if len(combined) < 20:
         return {
             "status": "missing_description",
             "message": (
@@ -536,6 +540,7 @@ def apply_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         include_performance=bool(args.get("includePerformance", True)),
         hero_asset_id=hero,
         candidate_count=candidate_count,
+        visual_style=getattr(profile, "visual_style", "") or "",
     )
     # Advance once in case hero was provided (sheet can enqueue immediately)
     pack = advance_visual_sheet_pack(ctx.db, ctx.project_id, character_id)

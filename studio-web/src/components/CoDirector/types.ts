@@ -35,7 +35,7 @@ export interface CoDirectorUIContext {
   /** Active Co-Director Project Content tab (wiki|notes|casting|library|...|scriptwriter). */
   activeContentTab?: string | null;
   /** Navigate to a project workspace tab. */
-  onGoTab?: (tab: string) => void;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }
 
 /** M41 Wave 1 canonical session-context contract (composed; not a second store). */
@@ -285,7 +285,7 @@ export interface CoDirectorWorkspaceBindings {
   workspaceTab?: string;
   /** Active ScriptDocument id when Scriptwriter Studio is open. */
   activeDocumentId?: string;
-  onGoTab?: (tab: string) => void;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
   onApplyPrompt?: (prompt: string) => void;
   onAppliedSetup?: () => void | Promise<void>;
 }

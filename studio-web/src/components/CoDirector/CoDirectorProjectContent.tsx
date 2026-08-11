@@ -17,7 +17,7 @@ import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
 import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
 import { ScriptwriterCompactView } from "./scriptwriter/ScriptwriterCompactView";
 import { StoryboardCompactView } from "./storyboard/StoryboardCompactView";
-import { CharacterCreatorEmbedded } from "./CharacterCreatorEmbedded";
+import { CharacterCompactView } from "./characters/CharacterCompactView";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -547,7 +547,15 @@ export function CoDirectorProjectContent({
         {tab === "characters" && (
           <div data-testid="codirector-content-characters">
             {projectId ? (
-              <CharacterCreatorEmbedded projectId={projectId} />
+              <CharacterCompactView
+                projectId={projectId}
+                onOpenFull={(characterId) =>
+                  onGoTab?.(
+                    "characters",
+                    characterId ? { characterId, returnWorkspace: "codirector" } : { returnWorkspace: "codirector" },
+                  )
+                }
+              />
             ) : (
               <p className="muted">Select a project to open Character Creator.</p>
             )}

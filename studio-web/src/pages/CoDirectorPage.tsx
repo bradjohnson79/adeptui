@@ -59,8 +59,23 @@ export default function CoDirectorPage() {
       projectId,
       projectName: projectName || "Project",
       primaryProjectType: primaryProjectType || "custom",
+      // Allow embedded Project Building panes (Character Creator, Scriptwriter, etc.)
+      // to deep-link into the standalone project workspaces, preserving extra params
+      // such as characterId / returnWorkspace. Without this, onGoTab is undefined in
+      // fullscreen Co-Director and "Open Full Character Creator" is a no-op.
+      onGoTab: (tab: string, extra?: Record<string, string>) => {
+        const params = new URLSearchParams();
+        if (tab && tab !== "home") params.set("workspace", tab);
+        if (extra) {
+          for (const [k, v] of Object.entries(extra)) {
+            if (v) params.set(k, v);
+          }
+        }
+        const search = params.toString() ? `?${params.toString()}` : "";
+        navigate({ pathname: `/project/${projectId}`, search });
+      },
     });
-  }, [bindWorkspace, unbindWorkspace, projectId, projectName, primaryProjectType]);
+  }, [bindWorkspace, unbindWorkspace, navigate, projectId, projectName, primaryProjectType]);
 
   return (
     <div className="app-shell atmosphere app-shell-fixed">

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Project } from "../types";
 import { PanelHeading } from "./HelpTip";
 import { Button } from "./ui";
+import { useOpenCoDirector } from "./CoDirector";
 import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
 import { IdentityRegistryWorkspace } from "./continuity/IdentityRegistryWorkspace";
 
@@ -255,6 +257,8 @@ export function CharacterProfileWorkspace({
   initialIdentityId?: string;
   returnWorkspace?: string;
 }) {
+  const navigate = useNavigate();
+  const openCoDirector = useOpenCoDirector();
   const [tab, setTab] = useState<TabId>(() => {
     if (initialTab === "voice" || initialTab === "voicePerformance") return "voiceStudio";
     return initialTab || "overview";
@@ -487,6 +491,22 @@ export function CharacterProfileWorkspace({
         title="Character Profile"
         tip="Canonical Character Identity System for this project. Generated sheets, voice, and assets stay in this project’s Library — never a new project per image."
       />
+      {returnWorkspace === "codirector" ? (
+        <div className="row-actions" style={{ marginBottom: "0.75rem" }}>
+          <Button
+            variant="ghost"
+            data-testid="character-back-to-codirector"
+            onClick={() => {
+              // Re-open the Co-Director session (it is an overlay, not a routed
+              // workspace) and return to the project landing page.
+              openCoDirector();
+              navigate(`/project/${project.id}`);
+            }}
+          >
+            ← Back to Co-Director
+          </Button>
+        </div>
+      ) : null}
       <p className="scene-meta">
         All generations for this character stay in this project’s Library. Creating a profile or sheet never opens a new project.
       </p>
@@ -549,6 +569,72 @@ export function CharacterProfileWorkspace({
                 Active wardrobe: {profile?.active_wardrobe_id || "none"} · Active voice:{" "}
                 {profile?.active_voice_profile_id || "none"}
               </p>
+              <div className="character-overview__fields">
+                <label className="character-overview__field">
+                  <span>Bio &amp; Personality</span>
+                  <textarea
+                    rows={4}
+                    data-testid="character-overview-bio"
+                    placeholder="Who is this character? Temperament, motivations, background…"
+                    value={profile?.description || ""}
+                    onChange={async (e) => {
+                      if (!selectedId || !profile) return;
+                      try {
+                        const updated = await api.patchCharacterProfile(project.id, selectedId, { description: e.target.value });
+                        setProfile(updated);
+                      } catch (err) {
+                        setMsg(err instanceof Error ? err.message : "Save failed");
+                      }
+                    }}
+                  />
+                </label>
+                <label className="character-overview__field">
+                  <span>Visual Description</span>
+                  <textarea
+                    rows={4}
+                    data-testid="character-overview-visual-desc"
+                    placeholder="Visual appearance: age, facial features, hair, eyes, build, clothing…"
+                    value={profile?.visual_description || ""}
+                    onChange={async (e) => {
+                      if (!selectedId || !profile) return;
+                      try {
+                        const updated = await api.patchCharacterProfile(project.id, selectedId, { visual_description: e.target.value });
+                        setProfile(updated);
+                      } catch (err) {
+                        setMsg(err instanceof Error ? err.message : "Save failed");
+                      }
+                    }}
+                  />
+                </label>
+                <label className="character-overview__field">
+                  <span>Visual Style</span>
+                  <select
+                    data-testid="character-overview-style"
+                    value={profile?.visual_style || ""}
+                    onChange={async (e) => {
+                      if (!selectedId || !profile) return;
+                      try {
+                        const updated = await api.patchCharacterProfile(project.id, selectedId, { visual_style: e.target.value });
+                        setProfile(updated);
+                      } catch (err) {
+                        setMsg(err instanceof Error ? err.message : "Save failed");
+                      }
+                    }}
+                  >
+                    <option value="">Default cinematic</option>
+                    <option value="live_action">Live Action</option>
+                    <option value="anime">Anime</option>
+                    <option value="realistic_anime">Realistic Anime</option>
+                    <option value="stylized_3d_animation">Stylized 3D</option>
+                    <option value="stop_motion">Stop Motion</option>
+                    <option value="claymation">Claymation</option>
+                    <option value="graphic_novel">Comic / Graphic Novel</option>
+                    <option value="watercolor">Watercolor</option>
+                    <option value="oil_painting">Oil Painting</option>
+                    <option value="documentary_realism">Photorealistic</option>
+                  </select>
+                </label>
+              </div>
               {(coverage?.missing_roles || []).length > 0 && (
                 <div data-testid="character-missing-guidance">
                   <h4>Missing required references</h4>
