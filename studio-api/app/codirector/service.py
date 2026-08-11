@@ -1342,6 +1342,92 @@ def _last_user_message(messages: list[dict[str, str]]) -> str:
     return ""
 
 
+def _build_execution_context(
+    user_text: str,
+    unified_intent: Any,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Extract execution parameters from the user message.
+
+    Parses the natural-language request into the context dict that the
+    capability handler expects (prompt, character_name, count, etc.).
+    This is intentionally simple — it extracts the most common parameters
+    so the handler can submit a real job without an LLM round-trip.
+    """
+    import re as _re
+
+    ctx: dict[str, Any] = {"prompt": user_text}
+    capability = getattr(unified_intent, "capability", "") or ""
+
+    # Extract character name from "image of [Name]" or "Create an image of [Name]".
+    char_match = _re.search(r"\bimage of\s+([A-Z][a-zA-Z]+)", user_text)
+    if char_match:
+        ctx["character_name"] = char_match.group(1)
+
+    # Extract count from "four-image", "4 image", "six-frame", etc.
+    count_match = _re.search(r"\b(\d+)\s*(?:image|frame|shot|panel)", user_text, _re.I)
+    if count_match:
+        ctx["count"] = int(count_match.group(1))
+    else:
+        word_map = {
+            "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+            "seven": 7, "eight": 8,
+        }
+        for word, num in word_map.items():
+            if _re.search(rf"\b{word}\s*(?:image|frame|shot|panel)", user_text, _re.I):
+                ctx["count"] = num
+                break
+
+    # For storyboard, default count=4 if not specified.
+    if capability == "storyboard.generate" and "count" not in ctx:
+        ctx["count"] = 4
+
+    # Extract aspect ratio hints.
+    if _re.search(r"\b16\s*[:x]\s*9\b", user_text, _re.I):
+        ctx["aspect_ratio"] = "16:9"
+    elif _re.search(r"\b9\s*[:x]\s*16\b", user_text, _re.I):
+        ctx["aspect_ratio"] = "9:16"
+    elif _re.search(r"\b1\s*[:x]\s*1\b", user_text, _re.I):
+        ctx["aspect_ratio"] = "1:1"
+
+    # For regenerate_frame, extract the frame number.
+    if capability == "storyboard.regenerate_frame":
+        frame_match = _re.search(r"\bframe\s*(\d+)\b", user_text, _re.I)
+        if frame_match:
+            ctx["frame_index"] = int(frame_match.group(1)) - 1  # 0-indexed
+        # Pass user instructions for the regeneration prompt.
+        ctx["user_instructions"] = user_text
+
+    # Pass user_instructions for storyboard too (shot preferences).
+    if capability == "storyboard.generate":
+        ctx["user_instructions"] = user_text
+
+    return ctx
+
+
+def _execution_status_text(plan: Any) -> str:
+    """Build a short human-readable status text from an ExecutionPlan."""
+    status = getattr(plan, "status", None)
+    status_val = status.value if status else ""
+    capability = getattr(plan, "capability", "") or ""
+    completed = getattr(plan, "completed_children", 0) or 0
+    total = getattr(plan, "total_children", 0) or 0
+    label = capability.split(".")[-1].replace("_", " ").capitalize() if capability else "Working"
+
+    if status_val == "completed":
+        if total:
+            return f"{label} — {completed}/{total} complete. Done."
+        return f"{label} — Done."
+    if status_val == "failed":
+        error = getattr(plan, "error", "") or ""
+        return f"{label} — failed. {error}"
+    if status_val == "cancelled":
+        return f"{label} — stopped."
+    if total:
+        return f"{label} — {completed}/{total} in progress."
+    return f"{label} — working…"
+
+
 async def _handle_approve_reject(
     db: Session,
     project_id: str,
@@ -2112,31 +2198,54 @@ async def _stream_for_project_inner(
         # Law: conversation alone is not fulfillment.
         dispatched_execution_id: str | None = None
         try:
-            # Workstream C — ExecutionDispatcher may live in routing/ or
-            # capabilities/. Try both; the ImportError falls back cleanly.
-            try:
-                from .routing.execution_dispatcher import ExecutionDispatcher  # type: ignore
-            except ImportError:
-                from .capabilities.execution_dispatcher import ExecutionDispatcher  # type: ignore
+            from .execution.dispatcher import dispatch as dispatch_execution
+            from .execution.contracts import ExecutionStatus
 
-            dispatcher = ExecutionDispatcher()
-            async for event in dispatcher.dispatch(unified_intent, {
-                "db": db,
-                "project_id": project_id,
-                "request_id": chat_request.request_id,
-                "messages": list(messages),
-            }):
-                # Capture execution_id from any event that carries it
-                # (execution.started / execution.updated / execution.completed).
-                eid = event.get("execution_id") if isinstance(event, dict) else None
-                if eid and not dispatched_execution_id:
-                    dispatched_execution_id = str(eid)
-                yield event
-            dispatched = True
-        except ImportError:
-            logger.info(
-                "ExecutionDispatcher unavailable — falling back to CURATED_TOOLS dispatch"
+            # Build the execution context from the user message + chat state.
+            user_text = _last_user_message(messages)
+            ctx_dict = _build_execution_context(user_text, unified_intent, messages)
+
+            plan = dispatch_execution(
+                db,
+                project_id,
+                unified_intent,
+                ctx_dict,
             )
+
+            dispatched_execution_id = plan.execution_id
+
+            # Yield an SSE event so the frontend activates the Agent Work Surface.
+            yield {
+                "type": "execution_status",
+                "requestId": chat_request.request_id,
+                "messageType": "execution_status",
+                "content": _execution_status_text(plan),
+                "execution": {
+                    "execution_id": plan.execution_id,
+                    "capability": plan.capability,
+                    "status": plan.status.value,
+                    "progress": plan.progress,
+                    "completed": plan.completed_children,
+                    "total": plan.total_children,
+                    "surface_type": plan.surface_type,
+                    "collection_id": plan.collection_id,
+                    "result_asset_ids": list(plan.result_asset_ids),
+                    "child_jobs": [
+                        {
+                            "job_id": cj.job_id,
+                            "child_index": cj.child_index,
+                            "label": cj.label,
+                            "status": cj.status.value,
+                            "asset_id": cj.asset_id,
+                            "error": cj.error,
+                            "progress": cj.progress,
+                            "stage": cj.stage,
+                        }
+                        for cj in plan.child_jobs
+                    ],
+                },
+            }
+            dispatched = True
         except Exception:
             logger.warning(
                 "ExecutionDispatcher failed — falling back to LLM path", exc_info=True
@@ -2146,8 +2255,7 @@ async def _stream_for_project_inner(
             # Workstream H — honest completion. After the deterministic dispatch
             # has advanced the execution pack, emit an execution_status assistant
             # message with REAL job state from the pack store. This never claims
-            # completion unless every child job is done. When the pack store is
-            # unavailable (Workstream C not landed), this is a safe no-op.
+            # completion unless every child job is done.
             try:
                 from .execution.status_messenger import emit_execution_status_events
 

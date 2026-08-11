@@ -1663,6 +1663,37 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             }
             return [...prev, message];
           });
+          // Gap 3 fix — activate the Agent Work Surface in the right pane when
+          // an execution_status event arrives with an execution_id. This switches
+          // the right pane from normal tabs to the live work surface so the user
+          // can see real execution progress (spec §18, §21, §24).
+          if (execPayload?.execution_id) {
+            const execProjectId = b.projectId || "";
+            const surfaceType = (execPayload.surface_type as WorkSurfaceState["surface_type"]) || "";
+            setActiveExecution({
+              mode: "agent_work",
+              execution_id: execPayload.execution_id,
+              capability: execPayload.capability || "",
+              surface_type: surfaceType,
+              status: execPayload.status || "",
+              progress: execPayload.progress || 0,
+              focused_artifact_ids: execPayload.result_asset_ids || [],
+              child_jobs: (execPayload.child_jobs || []).map((c) => ({
+                job_id: c.job_id || "",
+                label: c.label || `Item ${(c.child_index ?? 0) + 1}`,
+                status: (c.status as WorkSurfaceState["child_jobs"][number]["status"]) || "queued",
+                asset_id: c.asset_id ?? null,
+                error: c.error ?? null,
+                progress: c.progress || 0,
+                stage: c.stage || "",
+                child_index: c.child_index ?? 0,
+                metadata: {},
+              })),
+              result_asset_ids: execPayload.result_asset_ids || [],
+              collection_id: execPayload.collection_id ?? null,
+              project_id: execProjectId,
+            });
+          }
         } else if (event.type === "completed") {
           updateActivityForRequest((prev) =>
             upsertStage(prev, {

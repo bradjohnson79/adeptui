@@ -5,7 +5,7 @@ not duplicate media."
 
 When a child job completes, this module:
 1. Ensures an `Asset` row exists (the imagegen job already creates one — verify).
-2. Writes `AssetLibraryMeta` if missing.
+2. Writes metadata into `Asset.prompt_meta_json` if provided.
 3. Adds the asset to the execution's collection (if storyboard/casting).
 
 Reuses existing `image_product` asset creation — does not duplicate it.
@@ -13,6 +13,7 @@ Reuses existing `image_product` asset creation — does not duplicate it.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -37,34 +38,32 @@ def ensure_asset_persisted(
     if confirmed, None if the asset doesn't actually exist.
     """
     try:
-        from ...assets.service import get_asset
-        from ...assets.models import AssetLibraryMetaRow
+        from ...db import Asset as AssetRow
 
-        asset = get_asset(db, project_id, asset_id)
+        asset = (
+            db.query(AssetRow)
+            .filter(
+                AssetRow.id == asset_id,
+                AssetRow.project_id == project_id,
+            )
+            .first()
+        )
         if not asset:
             logger.warning("Asset %s not found for project %s", asset_id, project_id)
             return None
 
-        # Enrich metadata if provided.
+        # Enrich metadata if provided (merge into prompt_meta_json).
         if metadata:
-            meta = (
-                db.query(AssetLibraryMetaRow)
-                .filter(AssetLibraryMetaRow.asset_id == asset_id)
-                .first()
-            )
-            if meta:
-                # Merge — don't overwrite existing keys.
-                existing = meta.meta_json or {}
-                for k, v in metadata.items():
-                    if k not in existing:
-                        existing[k] = v
-                meta.meta_json = existing
-            else:
-                meta = AssetLibraryMetaRow(
-                    asset_id=asset_id,
-                    meta_json=metadata,
-                )
-                db.add(meta)
+            existing: dict = {}
+            if asset.prompt_meta_json:
+                try:
+                    existing = json.loads(asset.prompt_meta_json) or {}
+                except Exception:
+                    existing = {}
+            for k, v in metadata.items():
+                if k not in existing:
+                    existing[k] = v
+            asset.prompt_meta_json = json.dumps(existing)
             db.commit()
 
         return asset_id

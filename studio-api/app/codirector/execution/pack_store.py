@@ -133,3 +133,62 @@ def delete_pack(db: Session, project_id: str, execution_id: str) -> bool:
     db.delete(row)
     db.commit()
     return True
+
+
+def get_execution(db: Session, execution_id: str) -> ExecutionPlan | None:
+    """Load an ExecutionPlan by execution_id without requiring project_id.
+
+    Queries ProjectTraitRow across all projects by key (execution_id).
+    Used by status_messenger which may not have the project_id available.
+    """
+    from ...db import ProjectTraitRow
+
+    row = (
+        db.query(ProjectTraitRow)
+        .filter(
+            ProjectTraitRow.category == PACK_CATEGORY,
+            ProjectTraitRow.key == execution_id,
+        )
+        .first()
+    )
+    if not row:
+        return None
+    try:
+        data = json.loads(row.value)
+        return ExecutionPlan(**data)
+    except Exception as exc:
+        logger.error("Failed to load execution pack %s: %s", execution_id, exc)
+        return None
+
+
+def get_active_execution_for_project(db: Session, project_id: str) -> ExecutionPlan | None:
+    """Return the most recent non-terminal execution pack for a project."""
+    packs = list_packs(db, project_id, active_only=True)
+    if not packs:
+        return None
+    # Return the most recently updated.
+    return max(packs, key=lambda p: p.updated_at or p.created_at or "")
+
+
+def get_last_completed_execution_for_project(db: Session, project_id: str) -> ExecutionPlan | None:
+    """Return the most recent completed (terminal) execution pack for a project."""
+    from ...db import ProjectTraitRow
+
+    rows = (
+        db.query(ProjectTraitRow)
+        .filter(
+            ProjectTraitRow.project_id == project_id,
+            ProjectTraitRow.category == PACK_CATEGORY,
+        )
+        .order_by(ProjectTraitRow.id.desc())
+        .all()
+    )
+    for row in rows:
+        try:
+            data = json.loads(row.value)
+            pack = ExecutionPlan(**data)
+            if pack.is_terminal:
+                return pack
+        except Exception:
+            continue
+    return None

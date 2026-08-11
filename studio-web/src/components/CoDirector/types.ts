@@ -241,6 +241,7 @@ export interface CoDirectorMessageExecution {
   progress?: number;
   completed?: number;
   total?: number;
+  surface_type?: string;
   collection_id?: string | null;
   result_asset_ids?: string[];
   child_jobs?: CoDirectorMessageExecutionChild[];
@@ -395,6 +396,7 @@ function sanitizeMessagesForCache(messages: CoDirectorMessage[]): CoDirectorMess
         progress: typeof exec.progress === "number" ? Math.max(0, Math.min(1, exec.progress)) : undefined,
         completed: typeof exec.completed === "number" ? Math.max(0, Math.min(9999, Math.floor(exec.completed))) : undefined,
         total: typeof exec.total === "number" ? Math.max(0, Math.min(9999, Math.floor(exec.total))) : undefined,
+        surface_type: typeof exec.surface_type === "string" ? exec.surface_type.slice(0, 40) : undefined,
         collection_id: typeof exec.collection_id === "string" ? exec.collection_id.slice(0, 120) : null,
         result_asset_ids: Array.isArray(exec.result_asset_ids)
           ? exec.result_asset_ids.filter((id) => typeof id === "string").slice(0, 64)
