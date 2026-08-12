@@ -42,9 +42,13 @@ function normalizeContentTab(value: string | null | undefined): ContentTab {
     value === "vision" ||
     value === "pitch" ||
     value === "scriptwriter" ||
+    value === "development" ||
+    value === "production" ||
     value === "story" ||
     value === "script" ||
-    value === "characters"
+    value === "characters" ||
+    value === "spatial_map" ||
+    value === "scene_creator"
   ) {
     return value as ContentTab;
   }
