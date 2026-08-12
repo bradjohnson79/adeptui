@@ -91,7 +91,7 @@ def handle(
         profile = resolve_character_by_name(db, project_id, name)
         if profile:
             character_refs.append({"id": profile.id, "name": profile.name})
-            approved = resolve_approved_reference(db, profile.id, "hero_portrait")
+            approved = resolve_approved_reference(db, profile.id, "hero_identity")
             if approved:
                 reference_asset_ids.append(approved)
 

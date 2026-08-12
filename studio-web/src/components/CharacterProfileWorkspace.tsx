@@ -71,7 +71,7 @@ const REQUIRED_ROLES = [
 /** Role → Character Profile tab mapping for generated visual-sheet assets. */
 const TAB_ROLES: Partial<Record<TabId, string[]>> = {
   sheet: [
-    "hero_portrait",
+    "hero_identity",
     "full_body_front",
     "full_body_side_left",
     "full_body_side_right",
@@ -85,7 +85,7 @@ const TAB_ROLES: Partial<Record<TabId, string[]>> = {
     "closeup_side_right",
     "closeup_back",
     "neutral_portrait",
-    "hero_portrait",
+    "hero_identity",
   ],
   poses: ["pose_sheet", "hands_reference", "feet_reference"],
   expressions: ["expression_sheet"],
@@ -96,7 +96,7 @@ const TAB_ROLES: Partial<Record<TabId, string[]>> = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
-  hero_portrait: "Hero portrait",
+  hero_identity: "Hero identity",
   full_body_front: "Full body · front",
   full_body_side_left: "Full body · left",
   full_body_side_right: "Full body · right",

@@ -27,7 +27,7 @@ OPTIONAL_CLOSEUP = (
 )
 
 ADDITIONAL_ROLES = (
-    "hero_portrait",
+    "hero_identity",
     "neutral_portrait",
     "expression_sheet",
     "pose_sheet",
@@ -60,6 +60,22 @@ SIDE_ALIASES = {
     "full_body_side": ("full_body_side_left", "full_body_side_right"),
     "closeup_side": ("closeup_side_left", "closeup_side_right"),
 }
+
+# Amendment 2b: hero_portrait → hero_identity rename.
+# Legacy rows persisted with reference_role="hero_portrait" (before the rename)
+# still resolve to hero_identity for reads, so existing approved characters
+# continue to work during the migration window. The one-time data migration
+# (migrations/hero_identity_rename.py) rewrites rows to hero_identity.
+ROLE_ALIASES: dict[str, str] = {
+    "hero_portrait": "hero_identity",
+}
+
+
+def canonical_role(role: str | None) -> str:
+    """Resolve a reference role to its canonical name, applying legacy aliases."""
+    if not role:
+        return ""
+    return ROLE_ALIASES.get(role, role)
 
 ROLE_GUIDANCE = {
     "full_body_front": "Add a full-body front reference before generating full-body walking or establishing shots.",

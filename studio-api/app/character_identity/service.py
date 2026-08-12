@@ -533,7 +533,7 @@ def approve_character_candidate(
     character_id: str,
     *,
     asset_id: str,
-    reference_role: str = "hero_portrait",
+    reference_role: str = "hero_identity",
     source_type: str = "generation",
     notes: str = "Approved casting candidate",
 ) -> dict[str, Any]:
@@ -704,7 +704,7 @@ def resolve_character_by_name(
 def resolve_approved_reference(
     db: Session,
     character_id: str,
-    role: str = "hero_portrait",
+    role: str = "hero_identity",
 ) -> str | None:
     """Resolve the canonical/approved reference asset_id for a character role.
 
@@ -1177,7 +1177,7 @@ def prompt_hints(db: Session, project_id: str, character_id: str, *, shot_kind: 
         "closeup_front": ["closeup_front", "closeup_three_quarter_front", "skin_closeup", "hair_front"],
         "rear": ["full_body_back", "closeup_back", "hair_back", "wardrobe_reference"],
         "full_body_walk": ["full_body_front", "full_body_side_left", "pose_sheet", "wardrobe_reference"],
-    }.get(shot_kind, ["hero_portrait", "closeup_front"])
+    }.get(shot_kind, ["hero_identity", "closeup_front"])
     selected = [r for r in refs if r["reference_role"] in preferred_roles]
     perf = out.performance or {}
     bits = []

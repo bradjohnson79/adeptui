@@ -9,6 +9,7 @@ import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
 
 const SELECTED_CHARACTER_KEY = "adept_selected_character";
 const PORTRAIT_ROLE_PRIORITY = [
+  "hero_identity",
   "hero_portrait",
   "neutral_portrait",
   "closeup_front",

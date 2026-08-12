@@ -114,7 +114,7 @@ def attach_reference(project_id: str, character_id: str, body: ReferenceAttach, 
 
 class ApproveCandidateBody(BaseModel):
     assetId: str
-    referenceRole: str = "hero_portrait"
+    referenceRole: str = "hero_identity"
     sourceType: str = "generation"
     notes: str = "Approved casting candidate"
 

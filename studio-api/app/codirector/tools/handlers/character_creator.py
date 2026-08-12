@@ -75,7 +75,7 @@ async def build_reference_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         }
         for role in missing
     ]
-    optional = [r for r in ADDITIONAL_ROLES if r in ("expression_sheet", "pose_sheet", "hero_portrait")]
+    optional = [r for r in ADDITIONAL_ROLES if r in ("expression_sheet", "pose_sheet", "hero_identity")]
     return {
         "ok": True,
         "characterId": character_id,

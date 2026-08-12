@@ -147,7 +147,7 @@ def test_promote_freezes_prompt_package(db):
         db,
         "proj-w43",
         profile.id,
-        ReferenceAttach(asset_id="asset-hero", reference_role="hero_portrait", canonical=True),
+        ReferenceAttach(asset_id="asset-hero", reference_role="hero_identity", canonical=True),
     )
     result = promote_canonical(db, "proj-w43", profile.id, approved_by="owner")
     assert result["ok"] is True

@@ -162,7 +162,8 @@ def compile_wiki_bundle(
                 )
                 _hero_portrait = None
                 for _ref in _refs:
-                    if _ref.reference_role == "hero_portrait" and (_ref.canonical or _ref.approval_status == "approved"):
+                    from app.character_identity.roles import canonical_role
+                    if canonical_role(_ref.reference_role) == "hero_identity" and (_ref.canonical or _ref.approval_status == "approved"):
                         _hero_portrait = _ref.asset_id
                         break
                 _personality = _prof.personality if hasattr(_prof, 'personality') else {}

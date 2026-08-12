@@ -52,6 +52,19 @@ def compile_composition_block(composition: Mapping[str, Any] | None) -> str:
         text = _text(composition.get(key))
         if text:
             parts.append(f"{key.replace('_', ' ')}: {text}")
+    # Amendment 2: when full_body composition is requested, emit a canonical
+    # full-body casting composition block so any caller (not just visual_sheet)
+    # enforces the rule. This makes the requirement structural, not prompt-prose.
+    if composition.get("full_body"):
+        full_body_block = (
+            "full body casting composition: full-body character casting image; "
+            "show the complete character from head to feet; "
+            "entire body visible inside the frame; standing or naturally posed; "
+            "clear readable silhouette; character centered with enough space around the body; "
+            "do not crop the head, arms, hands, legs, or feet; "
+            "no close-up, no headshot, no bust portrait, no waist-up framing"
+        )
+        parts.append(full_body_block)
     return "; ".join(parts) if parts else "Single-subject composition with the character clearly readable."
 
 

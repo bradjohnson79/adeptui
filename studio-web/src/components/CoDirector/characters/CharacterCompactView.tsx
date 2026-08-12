@@ -31,10 +31,12 @@ type CharacterProfile = {
   description?: string;
   visual_description?: string;
   visual_style?: string;
+  gender_presentation?: string;
   apparent_age?: string;
   species_or_type?: string;
   body_type?: string;
   height_description?: string;
+  active_voice_profile_id?: string | null;
   hair?: {
     primary_color?: string;
     canonical_style?: string;
@@ -134,10 +136,10 @@ function toArray(value: string | string[] | undefined): string[] {
 
 function getApprovedImage(refs: CharacterReference[]): CharacterReference | undefined {
   return (
-    refs.find((r) => r.canonical && r.approval_status === "approved") ||
-    refs.find((r) => r.canonical) ||
-    refs.find((r) => r.approval_status === "approved") ||
-    refs.find((r) => r.reference_role === "hero_portrait")
+    refs.find((r) => (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") && r.canonical && r.approval_status === "approved") ||
+    refs.find((r) => (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") && r.canonical) ||
+    refs.find((r) => (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") && r.approval_status === "approved") ||
+    refs.find((r) => r.reference_role === "hero_identity" || r.reference_role === "hero_portrait")
   );
 }
 
@@ -243,8 +245,94 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   const [assetFilter, setAssetFilter] = useState<(typeof ASSET_FILTERS)[number]["id"]>("images");
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [refImageBusy, setRefImageBusy] = useState(false);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const patcher = useDebouncedPatch();
+
+  // Amendment 3: Voice Studio navigation draft preservation.
+  // Before navigating to Voice Studio, serialize the current draft to
+  // sessionStorage so creator-authored Profile text is not lost. On return,
+  // restore the draft + refresh available voices.
+  const draftKey = `adept.character.draft.${projectId}.${characterId}`;
+  const saveDraftToSession = useCallback(() => {
+    try {
+      sessionStorage.setItem(
+        draftKey,
+        JSON.stringify({
+          name: profile?.name || "",
+          gender_presentation: (profile as CharacterProfile & { gender_presentation?: string })?.gender_presentation || "",
+          visual_description: profile?.visual_description || "",
+          description: profile?.description || "",
+          visual_style: profile?.visual_style || "",
+          active_voice_profile_id: (profile as CharacterProfile & { active_voice_profile_id?: string })?.active_voice_profile_id || "",
+          candidates,
+          savedAt: new Date().toISOString(),
+        }),
+      );
+    } catch {
+      // sessionStorage may be unavailable; best-effort
+    }
+  }, [draftKey, profile, candidates]);
+
+  const restoreDraftFromSession = useCallback((): boolean => {
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      if (!raw) return false;
+      const draft = JSON.parse(raw);
+      if (draft?.visual_description && profile) {
+        setProfile((prev) =>
+          prev
+            ? {
+                ...prev,
+                visual_description: draft.visual_description,
+                description: draft.description || draft.visual_description,
+                name: draft.name || prev.name,
+                visual_style: draft.visual_style || prev.visual_style,
+                active_voice_profile_id: draft.active_voice_profile_id || prev.active_voice_profile_id,
+                gender_presentation: draft.gender_presentation || (prev as CharacterProfile & { gender_presentation?: string }).gender_presentation,
+              } as CharacterProfile
+            : prev,
+        );
+        if (draft.candidates?.length) {
+          setCandidates(draft.candidates);
+        }
+        return true;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    return false;
+  }, [draftKey, profile]);
+
+  // On mount, check for a saved draft (Amendment 3 — return from Voice Studio)
+  useEffect(() => {
+    void (async () => {
+      const restored = restoreDraftFromSession();
+      if (restored) {
+        // Refresh voices so newly-created voice is available for selection
+        try {
+          const v = await api.listCharacterVoiceProfiles(projectId, characterId).catch(() => ({ items: [] }));
+          setVoices(Array.isArray((v as { items?: VoiceProfile[] }).items) ? (v as { items: VoiceProfile[] }).items : []);
+        } catch {
+          // best-effort
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleOpenVoiceStudio = useCallback(async () => {
+    // Amendment 3: preserve draft before navigation (do NOT require Save)
+    await patcher.flush();
+    saveDraftToSession();
+    // Deep-link to Voice Studio with return route
+    const params = new URLSearchParams({
+      workspace: "voicestudio",
+      characterId,
+      returnWorkspace: "codirector",
+    });
+    window.location.assign(`/project/${projectId}?${params.toString()}`);
+  }, [patcher, saveDraftToSession, projectId, characterId]);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -290,6 +378,28 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const handleAttachLibraryRef = useCallback(
+    async (asset: LibraryAsset) => {
+      setRefImageBusy(true);
+      setGenMsg("");
+      try {
+        await api.attachCharacterReference(projectId, characterId, {
+          asset_id: asset.id,
+          reference_role: "reference_image",
+          source_type: "upload",
+          canonical: false,
+        });
+        await refresh();
+        setLibraryPickerOpen(false);
+      } catch (e) {
+        setGenMsg(e instanceof Error ? e.message : "Attach failed");
+      } finally {
+        setRefImageBusy(false);
+      }
+    },
+    [projectId, characterId, refresh],
+  );
 
   const approvedImage = getApprovedImage(refs);
   const referenceImage = getReferenceImage(refs);
@@ -445,7 +555,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       try {
         await api.approveCharacterCandidate(projectId, characterId, {
           assetId: candidate.assetId,
-          referenceRole: "hero_portrait",
+          referenceRole: "hero_identity",
           sourceType: "generation",
           notes: `Approved casting candidate ${candidate.label || ""}`.trim(),
         });
@@ -521,26 +631,41 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       </div>
 
       <div className="character-compact__field">
-        <label htmlFor="character-bio">Bio &amp; Personality</label>
-        <textarea
-          id="character-bio"
-          data-testid="character-compact-bio"
-          rows={4}
-          placeholder="Who is this character? Temperament, motivations, background…"
-          value={profile.description || ""}
-          onChange={(e) => handleFieldChange("description", e.target.value)}
-        />
+        <label htmlFor="character-gender">Character Gender</label>
+        <select
+          id="character-gender"
+          data-testid="character-compact-gender"
+          className="character-compact__select"
+          value={(profile as CharacterProfile & { gender_presentation?: string }).gender_presentation || ""}
+          onChange={(e) => handleFieldChange("gender_presentation" as keyof CharacterProfile, e.target.value)}
+        >
+          <option value="">Select a gender presentation…</option>
+          <option value="female">Female</option>
+          <option value="male">Male</option>
+          <option value="nonbinary">Non-binary</option>
+          <option value="androgynous">Androgynous</option>
+          <option value="unspecified">Prefer not to specify</option>
+        </select>
       </div>
 
       <div className="character-compact__field">
-        <label htmlFor="character-visual-desc">Character Description</label>
+        <label htmlFor="character-profile">Character Profile</label>
         <textarea
-          id="character-visual-desc"
-          data-testid="character-compact-visual-desc"
-          rows={4}
-          placeholder="Visual appearance: age, facial features, hair, eyes, build, clothing…"
-          value={profile.visual_description || ""}
-          onChange={(e) => handleFieldChange("visual_description", e.target.value)}
+          id="character-profile"
+          data-testid="character-compact-profile"
+          rows={6}
+          placeholder="Who is this character? Appearance, personality, wardrobe, background… This is the primary source for casting image generation."
+          value={profile.visual_description || profile.description || ""}
+          onChange={(e) => {
+            const val = e.target.value;
+            setProfile((prev) =>
+              prev ? { ...prev, visual_description: val, description: val } : prev,
+            );
+            patcher.schedule(projectId, characterId, { visual_description: val, description: val }, () => {
+              setSavedMsg("Saved");
+              setTimeout(() => setSavedMsg(""), 1500);
+            });
+          }}
         />
       </div>
 
@@ -562,7 +687,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       </div>
 
       <div className="character-compact__field">
-        <label>Reference Image — Optional</label>
+        <label>Character Reference — Optional</label>
         <div className="character-compact__ref-row">
           <button
             type="button"
@@ -571,7 +696,16 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
             disabled={refImageBusy}
             onClick={() => fileInputRef.current?.click()}
           >
-            {refImageBusy ? "Adding…" : "Add Image"}
+            {refImageBusy ? "Adding…" : "Upload Image"}
+          </button>
+          <button
+            type="button"
+            className="character-compact__actions-button"
+            data-testid="character-compact-add-ref-library"
+            disabled={refImageBusy}
+            onClick={() => setLibraryPickerOpen(true)}
+          >
+            Choose from Library
           </button>
           {referenceImage?.asset_id ? (
             <div className="character-compact__ref-thumb" data-testid="character-compact-ref-thumb">
@@ -589,10 +723,10 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
           disabled={!canGenerate || generating}
           onClick={() => void handleGenerate(false)}
         >
-          {generating ? "Generating…" : "Generate 4 Candidates"}
+          {generating ? "Generating…" : candidates.length > 0 ? "Re-generate Images" : "Generate Images"}
         </button>
         {!canGenerate && !generating ? (
-          <p className="character-compact__hint">Add a name, description, and style to enable generation.</p>
+          <p className="character-compact__hint">Add a name, profile, and style to enable generation.</p>
         ) : null}
         {genMsg ? (
           <p className="character-compact__hint" data-testid="character-compact-gen-msg">
@@ -603,43 +737,42 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
 
       {candidates.length > 0 ? (
         <div className="character-compact__section">
-          <h4>Casting Candidates</h4>
+          <h4>CASTING IMAGES</h4>
           <div className="character-compact__candidates" data-testid="character-compact-candidates">
-            {candidates.map((c, i) => (
-              <div
-                key={c.assetId || c.jobId || i}
-                className={`character-compact__candidate${approvedImage?.asset_id === c.assetId ? " is-approved" : ""}`}
-                data-testid="character-compact-candidate"
-              >
-                {c.assetId ? (
-                  <img src={api.assetUrl(c.assetId)} alt={c.label || `Candidate ${i + 1}`} />
-                ) : (
-                  <div className="character-compact__candidate-placeholder">
-                    {c.status === "failed" ? "Failed" : "Generating…"}
-                  </div>
-                )}
-                <span>{c.label || `Candidate ${i + 1}`}</span>
-                <button
-                  type="button"
-                  className="character-compact__actions-button primary"
-                  data-testid="character-compact-approve"
-                  disabled={!c.assetId || approvingId === c.assetId}
-                  onClick={() => void handleApprove(c)}
+            {candidates.map((c, i) => {
+              const isApproved = approvedImage?.asset_id === c.assetId && !!c.assetId;
+              return (
+                <div
+                  key={c.assetId || c.jobId || i}
+                  className={`character-compact__candidate${isApproved ? " is-approved" : ""}`}
+                  data-testid="character-compact-candidate"
                 >
-                  {approvingId === c.assetId ? "Approving…" : "Approve"}
-                </button>
-              </div>
-            ))}
+                  {c.assetId ? (
+                    <img src={api.assetUrl(c.assetId)} alt={c.label || `Candidate ${i + 1}`} />
+                  ) : (
+                    <div className="character-compact__candidate-placeholder">
+                      {c.status === "failed" ? "Failed" : "Generating…"}
+                    </div>
+                  )}
+                  <span>{c.label || `Candidate ${i + 1}`}</span>
+                  <label className="character-compact__radio">
+                    <input
+                      type="radio"
+                      name="character-candidate-approval"
+                      data-testid="character-compact-approve-radio"
+                      checked={isApproved}
+                      disabled={!c.assetId || approvingId === c.assetId}
+                      onChange={() => void handleApprove(c)}
+                    />
+                    {approvingId === c.assetId ? "Approving…" : isApproved ? "Active Identity ✓" : "Approve"}
+                  </label>
+                </div>
+              );
+            })}
           </div>
-          <button
-            type="button"
-            className="character-compact__actions-button"
-            data-testid="character-compact-regenerate"
-            disabled={generating}
-            onClick={() => void handleGenerate(true)}
-          >
-            Regenerate 4
-          </button>
+          <p className="character-compact__hint">
+            Not satisfied? Adjust the Character Profile, then re-generate for better results. Casting images are full-body by default.
+          </p>
         </div>
       ) : null}
 
@@ -674,18 +807,40 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       </div>
 
       <div className="character-compact__section">
-        <h4>Approved Voice</h4>
-        {approvedVoice ? (
-          <div className="character-compact__voice">
-            <strong>{getVoiceName(approvedVoice)}</strong>
-            {approvedVoice.approved_preview_asset_id ? (
-              <audio controls src={api.assetUrl(approvedVoice.approved_preview_asset_id)} />
-            ) : null}
-            <span className="character-compact__hint">Source: Voice Studio</span>
-          </div>
-        ) : (
-          <p className="character-compact__bio-text">No approved voice assigned.</p>
-        )}
+        <h4>Character Voice</h4>
+        <select
+          className="character-compact__select"
+          data-testid="character-compact-voice-select"
+          value={(profile as CharacterProfile & { active_voice_profile_id?: string }).active_voice_profile_id || ""}
+          onChange={(e) => {
+            const voiceId = e.target.value || null;
+            setProfile((prev) =>
+              prev ? { ...prev, active_voice_profile_id: voiceId } as CharacterProfile : prev,
+            );
+            patcher.schedule(projectId, characterId, { active_voice_profile_id: voiceId }, () => {
+              setSavedMsg("Saved");
+              setTimeout(() => setSavedMsg(""), 1500);
+            });
+          }}
+        >
+          <option value="">— No voice selected —</option>
+          {voices.map((v) => (
+            <option key={v.id} value={v.id}>
+              {getVoiceName(v)}{v.approval_status === "approved" ? " ✓" : ""}
+            </option>
+          ))}
+        </select>
+        {approvedVoice?.approved_preview_asset_id ? (
+          <audio controls src={api.assetUrl(approvedVoice.approved_preview_asset_id)} data-testid="character-compact-voice-preview" />
+        ) : null}
+        <button
+          type="button"
+          className="character-compact__actions-button"
+          data-testid="character-compact-create-voice"
+          onClick={() => void handleOpenVoiceStudio()}
+        >
+          Create Voice in Voice Studio →
+        </button>
       </div>
 
       <div className="character-compact__section">
@@ -756,6 +911,34 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         <button
           type="button"
           className="character-compact__actions-button primary"
+          data-testid="character-compact-save"
+          disabled={!profile.name?.trim()}
+          onClick={async () => {
+            await patcher.flush();
+            try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
+            setSavedMsg("Character Saved ✓");
+            setTimeout(() => setSavedMsg(""), 2500);
+          }}
+        >
+          Save Character
+        </button>
+        <button
+          type="button"
+          className="character-compact__actions-button"
+          data-testid="character-compact-reset"
+          onClick={() => {
+            if (window.confirm("Reset? This clears unsaved changes and reverts to the last saved state.")) {
+              try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
+              void refresh();
+              setCandidates([]);
+            }
+          }}
+        >
+          Reset
+        </button>
+        <button
+          type="button"
+          className="character-compact__actions-button"
           data-testid="character-compact-open-full"
           onClick={() => void handleOpenFull()}
         >
@@ -786,6 +969,39 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
             )}
             <button type="button" className="character-compact__actions-button" onClick={() => setPreviewAsset(null)}>
               Close
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {libraryPickerOpen ? (
+        <div
+          className="character-compact__preview"
+          role="dialog"
+          aria-label="Choose reference from Library"
+          onClick={() => setLibraryPickerOpen(false)}
+        >
+          <div className="character-compact__preview-body" onClick={(e) => e.stopPropagation()}>
+            <strong>Choose a Reference Image</strong>
+            <div className="character-compact__assets-grid">
+              {libraryAssets.filter(isImageAsset).map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="character-compact__asset is-media"
+                  onClick={() => void handleAttachLibraryRef(a)}
+                  aria-label={`Use ${a.tag || a.filename}`}
+                >
+                  <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
+                  <strong>{a.tag || a.filename}</strong>
+                </button>
+              ))}
+              {libraryAssets.filter(isImageAsset).length === 0 ? (
+                <p className="character-compact__bio-text">No images in your Library yet.</p>
+              ) : null}
+            </div>
+            <button type="button" className="character-compact__actions-button" onClick={() => setLibraryPickerOpen(false)}>
+              Cancel
             </button>
           </div>
         </div>

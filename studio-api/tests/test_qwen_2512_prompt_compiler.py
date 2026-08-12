@@ -34,7 +34,7 @@ def test_compile_korri_prompt_package_stable_order():
             "palette": "muted woodland neutrals with violet accents",
             "finish": "clean polished render",
         },
-        references=[{"reference_role": "hero_portrait"}, {"reference_role": "closeup_front"}],
+        references=[{"reference_role": "hero_identity"}, {"reference_role": "closeup_front"}],
         sheet_request={"enabled": True, "views": ["front", "side_left", "back_closeup"]},
     )
 

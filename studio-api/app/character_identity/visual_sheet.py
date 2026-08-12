@@ -32,6 +32,37 @@ DEFAULT_NEGATIVE_PROMPT = (
     "collage, grid, watermark, child, sexualized, anadriya, low quality"
 )
 
+# Hard full-body casting composition rule (Amendment 2).
+# Character Creator casting candidates are full-body character views by default.
+# This supplements (never rewrites) the user's Character Profile.
+FULL_BODY_CASTING_COMPOSITION: dict[str, Any] = {
+    "shot_type": "full body casting reference",
+    "framing": "head to feet, full character visible in frame",
+    "camera_angle": "eye level, slight 3/4",
+    "lens": "50mm, minimal perspective distortion",
+    "environment": "simple unobtrusive studio background",
+    "lighting": "soft studio light",
+    "pose": "standing, natural relaxed pose, readable hands and feet",
+    "expression": "neutral natural presence",
+    "focus": "full-body composition, character occupies most of frame without cropping",
+    "full_body": True,
+}
+
+# Explicit rejections appended to negative constraints so the model cannot drift
+# back to portrait/headshot framing even if a close-up reference is attached.
+FULL_BODY_CASTING_NEGATIVE_RULES: list[str] = [
+    "No close-up",
+    "No headshot",
+    "No bust portrait",
+    "No waist-up framing",
+    "Do not crop head, arms, hands, legs, or feet",
+]
+
+# Machine-readable composition intent persisted into prompt_metadata → creative_context
+# → Job lineage so Co-Director, retakes, and MAGI can determine framing without
+# parsing prompt text. Regeneration inherits this via the same endpoint.
+COMPOSITION_INTENT_FULL_BODY_CASTING = "full_body_casting"
+
 QWEN_VISUAL_SHEET_STYLE = {
     "medium": "photoreal cinematic character reference",
     "finish": "clean production-ready render",
@@ -83,7 +114,7 @@ ROLE_TO_SHEET_VIEW = {
 }
 
 GATE_ROLE_GROUPS: dict[str, tuple[str, ...]] = {
-    "hero_identity": ("hero_portrait",),
+    "hero_identity": ("hero_identity",),
     "turnaround": ("full_body_front", "full_body_side_left", "full_body_back"),
     "facial": ("closeup_front", "closeup_side_left", "closeup_back"),
     "detail": (
@@ -295,46 +326,48 @@ def start_visual_sheet_generation(
         asset = db.get(Asset, hero_asset_id)
         if not asset or asset.project_id != project_id or asset.kind != "image":
             raise ValueError("hero_asset_id must be an image asset in this project")
-        role_assets["hero_portrait"] = hero_asset_id
-        # Attach baseline as identity reference (canonical authority) if missing
+        role_assets["hero_identity"] = hero_asset_id
+        # Attach baseline as identity reference (canonical authority) if missing.
+        # Accept either the new hero_identity role or legacy hero_portrait rows
+        # (covered by the read-time alias in roles.py).
         existing = service.list_references(db, project_id, character_id)
-        if not any(r.get("reference_role") == "hero_portrait" for r in existing):
+        if not any(r.get("reference_role") in ("hero_identity", "hero_portrait") for r in existing):
             service.attach_reference(
                 db,
                 project_id,
                 character_id,
                 ReferenceAttach(
                     asset_id=hero_asset_id,
-                    reference_role="hero_portrait",
+                    reference_role="hero_identity",
                     source_type="upload",
                     canonical=True,
                     notes="Canonical identity authority sheet (user-approved baseline)",
                 ),
             )
     else:
-        # Enqueue hero candidate(s): N casting variations when candidate_count > 1,
-        # otherwise the legacy single hero portrait. jobs["hero"] stays a single
-        # dict (first candidate) so existing advance/coverage consumers keep working;
-        # the full set is mirrored in jobs["hero_candidates"] and pack["candidates"].
+        # Enqueue hero candidate(s): N full-body casting variations when
+        # candidate_count > 1, otherwise a single full-body casting image.
+        # jobs["hero"] stays a single dict (first candidate) so existing
+        # advance/coverage consumers keep working; the full set is mirrored in
+        # jobs["hero_candidates"] and pack["candidates"].
+        #
+        # Hard rule: Character Creator casting candidates are FULL-BODY by
+        # default (Amendment 2). The composition block below is authoritative;
+        # a close-up reference image will NOT force close-up framing because
+        # the composition block is explicit. The user's Character Profile
+        # (visual_description) is preserved as authoritative subject identity —
+        # the full-body instruction supplements, never rewrites.
         hero_candidate_jobs: list[dict[str, Any]] = []
         for _i in range(candidate_count):
+            composition = dict(FULL_BODY_CASTING_COMPOSITION)
+            composition["candidate_index"] = _i
             hero_prompt = _compile_visual_prompt(
                 profile,
-                prompt_goal="a cinematic hero portrait reference",
-                composition={
-                    "shot_type": "hero portrait",
-                    "framing": "face and shoulders",
-                    "camera_angle": "eye level",
-                    "lens": "50mm",
-                    "environment": "plain studio background",
-                    "lighting": "soft studio light",
-                    "pose": "front-facing shoulders squared to camera",
-                    "expression": "mischievous Sass Queen confidence with clean facial readability",
-                    "focus": "identity-safe facial clarity",
-                    "candidate_index": _i,
-                },
+                prompt_goal="a cinematic full-body character casting reference",
+                composition=composition,
                 references=service.list_references(db, project_id, character_id),
-                role="hero_portrait",
+                role="hero_identity",
+                extra_negative_constraints=FULL_BODY_CASTING_NEGATIVE_RULES,
                 style_profile=style_profile,
             )
             hero_job = _enqueue_txt2img(
@@ -343,8 +376,8 @@ def start_visual_sheet_generation(
                 character_id=character_id,
                 prompt=hero_prompt.prompt,
                 negative_prompt=hero_prompt.negative_prompt,
-                tag=f"{char_slug}_hero_portrait" + (f"_c{_i + 1}" if candidate_count > 1 else ""),
-                role="hero_portrait",
+                tag=f"{char_slug}_hero_identity" + (f"_c{_i + 1}" if candidate_count > 1 else ""),
+                role="hero_identity",
                 prompt_metadata={
                     "promptFamily": hero_prompt.prompt_family,
                     "promptModel": hero_prompt.model_key,
@@ -352,12 +385,17 @@ def start_visual_sheet_generation(
                     "sheetMode": hero_prompt.metadata.get("sheetMode"),
                     "candidateIndex": _i,
                     "candidateCount": candidate_count,
+                    # Amendment 2b: machine-readable composition intent for
+                    # lineage/retakes/MAGI. Regeneration inherits this via the
+                    # same endpoint. Do not rely on prompt-text parsing.
+                    "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
+                    "fullBody": True,
                 },
             )
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             entry = {
                 "jobId": hero_job.id,
-                "role": "hero_portrait",
+                "role": "hero_identity",
                 "status": hero_job.status,
                 "candidateIndex": _i,
                 "label": label,
@@ -428,8 +466,8 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 params = _job_params(job)
                 aid = params.get("output_asset_id")
                 if aid:
-                    role_assets["hero_portrait"] = aid
-                    _attach_role(db, project_id, character_id, aid, "hero_portrait")
+                    role_assets["hero_identity"] = aid
+                    _attach_role(db, project_id, character_id, aid, "hero_identity")
                     hero_meta["assetId"] = aid
             elif job.status == "failed":
                 pack["status"] = "FAILED"
@@ -463,7 +501,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             for item in hero_candidates
         ]
 
-    hero_id = role_assets.get("hero_portrait")
+    hero_id = role_assets.get("hero_identity") or role_assets.get("hero_portrait")
     if not hero_id:
         pack["jobs"] = jobs
         pack["roleAssets"] = role_assets

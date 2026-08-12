@@ -1451,7 +1451,7 @@ def _enrich_execution_context(
             for name in char_names:
                 profile = resolve_character_by_name(db, project_id, name)
                 if profile:
-                    approved = resolve_approved_reference(db, profile.id, "hero_portrait")
+                    approved = resolve_approved_reference(db, profile.id, "hero_identity")
                     if approved:
                         ref_ids.append(approved)
             if ref_ids:

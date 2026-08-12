@@ -62,7 +62,7 @@ def handle(
         if profile:
             resolved_character_id = profile.id
             resolved_character_name = profile.name
-            reference_asset_id = resolve_approved_reference(db, profile.id, "hero_portrait")
+            reference_asset_id = resolve_approved_reference(db, profile.id, "hero_identity")
 
     # User-supplied attachment takes precedence as a reference (spec §12).
     if attachment_asset_ids:

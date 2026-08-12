@@ -544,6 +544,41 @@
   100% { opacity: 0.4; }
 }
 
+/* ---- Radio candidate approval (Amendment 2b) ---- */
+.character-compact__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: rgba(201, 210, 224, 0.82);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.character-compact__radio input[type="radio"] {
+  accent-color: #8b5cf6;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.character-compact__candidate.is-approved .character-compact__radio {
+  color: #a78bfa;
+  font-weight: 600;
+}
+
+/* ---- Voice dropdown ---- */
+.character-compact__section .character-compact__select {
+  margin-bottom: 8px;
+}
+
+.character-compact__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 620px) {
   .character-compact__candidates {

@@ -14,7 +14,7 @@ const VOCABULARY_KEYWORDS = [
 
 function isImageRole(role: string): boolean {
   const imageRoles = [
-    "hero_portrait", "full_body_front", "full_body_back", "full_body_side",
+    "hero_identity", "full_body_front", "full_body_back", "full_body_side",
     "closeup_face", "closeup_eyes", "closeup_hands",
     "expression_sheet", "pose_sheet", "turnaround_sheet",
     "hair_front", "hair_back", "hair_side",
@@ -521,7 +521,10 @@ function KeywordsSection({
 /* ── Section 4: Approved Casting Image ── */
 
 function CastingImageSection({ references }: { references: any[] }) {
-  const heroRefs = references.filter((r) => String(r.reference_role || r.role || "") === "hero_portrait");
+  const heroRefs = references.filter((r) => {
+    const role = String(r.reference_role || r.role || "");
+    return role === "hero_identity" || role === "hero_portrait";
+  });
   const sorted = [...heroRefs].sort((a, b) => {
     const aCanon = a.canonical ? 1 : 0;
     const bCanon = b.canonical ? 1 : 0;

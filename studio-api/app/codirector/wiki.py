@@ -392,7 +392,8 @@ def build_project_wiki(db: Session, project_id: str) -> dict[str, Any]:
             hero_portrait = None
             approved_voice = None
             for ref in refs:
-                if ref.reference_role == "hero_portrait" and (ref.canonical or ref.approval_status == "approved"):
+                from app.character_identity.roles import canonical_role
+                if canonical_role(ref.reference_role) == "hero_identity" and (ref.canonical or ref.approval_status == "approved"):
                     hero_portrait = ref.asset_id
                 if ref.reference_role == "voice":
                     approved_voice = ref.asset_id

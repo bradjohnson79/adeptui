@@ -118,7 +118,7 @@ def resolve_character(
     profile = resolve_character_by_name(db, project_id, name)
     if profile is None:
         return None
-    casting_asset_id = resolve_approved_reference(db, profile.id, "hero_portrait")
+    casting_asset_id = resolve_approved_reference(db, profile.id, "hero_identity")
     return {
         "character_id": profile.id,
         "name": profile.name,
@@ -294,7 +294,7 @@ def _character_metadata(db: Session, project_id: str, character_ids: list[str]) 
             profile = get_profile(db, project_id, character_id)
         except Exception:
             continue
-        casting = resolve_approved_reference(db, character_id, "hero_portrait")
+        casting = resolve_approved_reference(db, character_id, "hero_identity")
         refs = list_references(db, project_id, character_id)
         out.append(
             {

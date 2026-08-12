@@ -202,6 +202,19 @@ async def lifespan(_: FastAPI):
         ensure_migrated()
     except Exception:
         logger.exception("Source Manager migration failed")
+    try:
+        from .character_identity.migrations.hero_identity_rename import run_for_all_projects
+        from .db import SessionLocal
+
+        with SessionLocal() as session:
+            result = run_for_all_projects(session)
+            if result.get("rewritten"):
+                logger.info(
+                    "hero_identity_rename migration: rewrote %s legacy hero_portrait rows",
+                    result["rewritten"],
+                )
+    except Exception:
+        logger.exception("hero_identity_rename migration failed")
     # Render jobs read the fal credential from the secret store only, so a key that lives
     # in .env has to be promoted before the queue starts consuming jobs.
     from .fal_env_bridge import bridge_fal_key_at_startup
