@@ -77,7 +77,7 @@ def _version(stats: dict[str, Any]) -> str | None:
 
 def model_component_states() -> list[dict[str, Any]]:
     """Verified state of each catalogued model component (no absolute paths for missing ones)."""
-    from .setup.catalog import get_component
+    from .setup.catalog import get_component, dependency_type_for
     from .setup.diagnostics import verify_component
 
     states: list[dict[str, Any]] = []
@@ -94,9 +94,13 @@ def model_component_states() -> list[dict[str, Any]]:
                     "present": False,
                     "issueCode": "verification_failed",
                     "summary": "Component verification could not be completed.",
+                    "dependencyType": "UNKNOWN",
+                    "filename": None,
+                    "expectedPath": None,
                 }
             )
             continue
+        meta = _component_filename_and_path(component_id, definition)
         states.append(
             {
                 "componentId": component_id,
@@ -106,9 +110,39 @@ def model_component_states() -> list[dict[str, Any]]:
                 "issueCode": verification.issue_code,
                 "summary": verification.summary,
                 "version": verification.version,
+                "dependencyType": dependency_type_for(component_id),
+                "filename": meta["filename"],
+                "expectedPath": meta["expectedPath"],
             }
         )
     return states
+
+
+def _component_filename_and_path(component_id: str, definition: Any) -> dict[str, Any]:
+    """Best-effort mapping of a catalogued component to its expected filename + subpath.
+
+    Used so the readiness contract can surface the exact missing dependency file
+    (e.g. `gemma4-12b-...safetensors` under `models/text_encoders/`) without the
+    frontend inferring from counts. Returns None when no static mapping is known
+    (e.g. composite components like `wan_models`).
+    """
+    from .config import settings
+
+    mapping = {
+        "ltx_checkpoint": (settings.ltx_checkpoint, ("checkpoints", "diffusion_models")),
+        "ltx_2_5_checkpoint": (settings.ltx_2_5_checkpoint, ("diffusion_models", "checkpoints")),
+        "ltx_2_5_text_encoder": (settings.ltx_2_5_text_encoder, ("text_encoders",)),
+        "ltx_2_5_video_vae": (settings.ltx_2_5_video_vae, ("vae",)),
+        "ltx_2_5_audio_vae": (settings.ltx_2_5_audio_vae, ("vae",)),
+        "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
+        "ltx_text_encoder": (settings.ltx_text_encoder, ("text_encoders",)),
+    }
+    spec = mapping.get(component_id)
+    if not spec:
+        return {"filename": None, "expectedPath": None}
+    filename, extra_dirs = spec
+    expected_path = "models/" + "/".join(extra_dirs) + "/"
+    return {"filename": filename, "expectedPath": expected_path}
 
 
 async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
@@ -140,6 +174,9 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
         payload["models"] = await asyncio.to_thread(model_component_states)
         payload["missingModelComponentIds"] = [
             item["componentId"] for item in payload["models"] if not item["present"]
+        ]
+        payload["missingRequiredModelComponentIds"] = [
+            item["componentId"] for item in payload["models"] if item["required"] and not item["present"]
         ]
         return payload
 
@@ -176,6 +213,10 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
     missing_required = [
         item["componentId"] for item in payload["models"] if item["required"] and not item["present"]
     ]
+    # Expose the required-only subset explicitly so downstream consumers (status probe,
+    # capability layer, UI) can distinguish "a required model is missing" (runtime-relevant)
+    # from "an optional/generator-specific component is missing" (generator-relevant only).
+    payload["missingRequiredModelComponentIds"] = missing_required
     if missing_required:
         payload["status"] = "degraded"
         payload["reasonCode"] = MODEL_MISSING

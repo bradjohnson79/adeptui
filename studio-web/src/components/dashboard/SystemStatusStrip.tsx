@@ -89,9 +89,25 @@ export function SystemStatusStrip({
   }, [projectId, queuedJobs]);
 
   const comfyModels = health?.comfy?.models;
-  const missingRequiredCount = Array.isArray(comfyModels)
-    ? comfyModels.filter((m) => m.required && !m.present).length
-    : health?.missing_model_component_ids?.length ?? health?.missing_models?.length ?? 0;
+  // REQUIRED-missing count drives runtime health (a missing optional/generator-specific
+  // component must NOT flip a reachable runtime to degraded). Optional-missing is surfaced
+  // separately as a "Models" badge so runtime health and model readiness are visibly distinct.
+  const missingRequiredFromComfy = Array.isArray(comfyModels)
+    ? comfyModels.filter((m) => m.required && !m.present)
+    : [];
+  const missingOptionalFromComfy = Array.isArray(comfyModels)
+    ? comfyModels.filter((m) => !m.required && !m.present)
+    : [];
+  const missingRequiredCount = missingRequiredFromComfy.length
+    || health?.comfy?.missingRequiredModelComponentIds?.length
+    || 0;
+  const missingOptionalCount = missingOptionalFromComfy.length
+    || Math.max(
+      0,
+      (health?.comfy?.missingModelComponentIds?.length ?? health?.missing_model_component_ids?.length ?? health?.missing_models?.length ?? 0) - missingRequiredCount,
+    );
+  const comfyReachable = Boolean(health?.comfy_reachable);
+  const comfyNodeCatalogOk = Boolean(health?.node_catalog_available);
   const op = health?.operator;
   const provider = op?.provider;
 
@@ -153,18 +169,59 @@ export function SystemStatusStrip({
         onClick={refreshApi}
       />
       <StatusBadge
-        kind={!health ? "Checking" : mapComfyHealth(Boolean(health.comfy_reachable), Boolean(missingRequiredCount))}
+        kind={!health ? "Checking" : mapComfyHealth(comfyReachable, Boolean(missingRequiredCount) || !comfyNodeCatalogOk)}
         label={
           !health
             ? "ComfyUI Checking…"
-            : !health.comfy_reachable
+            : !comfyReachable
               ? "ComfyUI Offline"
-              : missingRequiredCount
-                ? `ComfyUI · ${missingRequiredCount} models missing`
-                : "ComfyUI Connected"
+              : !comfyNodeCatalogOk
+                ? "ComfyUI Starting…"
+                : missingRequiredCount
+                  ? `ComfyUI · ${missingRequiredCount} required missing`
+                  : "ComfyUI Healthy"
         }
         data-testid="status-comfy"
-        title={health?.message || "Open Setup / Source Manager for model packs"}
+        title={
+          !health
+            ? "ComfyUI health probe in progress"
+            : !comfyReachable
+              ? health?.message || "ComfyUI is unreachable. Start ComfyUI, then refresh."
+              : !comfyNodeCatalogOk
+                ? "ComfyUI is reachable but its node catalogue is still loading."
+                : missingRequiredCount
+                  ? `${missingRequiredCount} required model component(s) missing. Runtime cannot generate until installed.`
+                  : health?.comfy_version
+                    ? `ComfyUI ${health.comfy_version} · node catalogue OK`
+                    : "ComfyUI reachable, node catalogue OK"
+        }
+        onClick={goSetupOrSourceManager}
+      />
+      <StatusBadge
+        kind={
+          !health
+            ? "Checking"
+            : !comfyReachable
+              ? "Checking"
+              : missingOptionalCount > 0
+                ? "NeedsAttention"
+                : "Ready"
+        }
+        label={
+          !health
+            ? "Models…"
+            : missingOptionalCount > 0
+              ? `Models · ${missingOptionalCount} incomplete`
+              : "Models Ready"
+        }
+        data-testid="status-models"
+        title={
+          !health
+            ? "Model readiness probe in progress"
+            : missingOptionalCount > 0
+              ? `${missingOptionalCount} optional/generator-specific component(s) incomplete. Affected generators are blocked; others remain usable. Open Model Readiness for details.`
+              : "All configured model components are present."
+        }
         onClick={goSetupOrSourceManager}
       />
       <StatusBadge

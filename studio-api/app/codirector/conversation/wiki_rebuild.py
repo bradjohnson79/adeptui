@@ -68,6 +68,10 @@ def rebuild_wiki_from_conversation(db: Session, project_id: str) -> dict[str, An
             content,
             project_id=project_id,
             source_id=mid or f"rebuild-{len(all_candidates)}",
+            # Explicit "Rebuild Wiki from conversation" opts into brainstorming
+            # material — the creator is intentionally asking us to mine the
+            # whole conversation. Story canon still wins per the classifier.
+            allow_brainstorming=True,
         )
         all_candidates.extend(doc.candidates or [])
 

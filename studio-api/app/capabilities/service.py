@@ -370,15 +370,30 @@ def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSn
 
 
 def _eval_models_video(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
-    ltx_variants = ("ltx_checkpoint", "ltx_2_5_checkpoint")
+    # An LTX variant counts as "ready" only when ALL of its required components are
+    # present. Previously, a present LTX 2.5 checkpoint alone satisfied `models.video.ready`
+    # even when the Gemma 4 text encoder and video VAE were missing — which then masked
+    # the LTX 2.5 generator as ready when it was actually incomplete.
+    ltx_23_required = ("ltx_checkpoint",)
+    ltx_25_required = ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae")
+    ltx_variants = (ltx_23_required, ltx_25_required)
     if snapshot.setup_components:
-        any_ltx_ready = any(snapshot.component_ready(cid) is True for cid in ltx_variants)
+        any_ltx_ready = any(
+            all(snapshot.component_ready(cid) is True for cid in variant)
+            for variant in ltx_variants
+        )
         if any_ltx_ready:
             return _model_component_eval(
                 definition, snapshot, required=(), optional=("wan_models",)
             )
+    # Flatten required ids for the blocked path (deduped, order-preserving).
+    flat_required: list[str] = []
+    for variant in ltx_variants:
+        for cid in variant:
+            if cid not in flat_required:
+                flat_required.append(cid)
     return _model_component_eval(
-        definition, snapshot, required=ltx_variants, optional=("wan_models",)
+        definition, snapshot, required=tuple(flat_required), optional=("wan_models",)
     )
 
 

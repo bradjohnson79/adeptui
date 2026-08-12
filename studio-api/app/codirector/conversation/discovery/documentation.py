@@ -5,7 +5,10 @@ from __future__ import annotations
 import re
 from uuid import uuid4
 
-from ...wiki_intelligence.classification import is_false_character_name
+from ...wiki_intelligence.classification import (
+    classify_conversation_turn,
+    is_false_character_name,
+)
 from ..relationship.schemas import CoDirectorRelationshipProfile
 from .schemas import (
     DiscoveryWikiCandidate,
@@ -43,6 +46,7 @@ def extract_documentation(
     project_id: str,
     source_id: str,
     relationship: CoDirectorRelationshipProfile | None = None,
+    allow_brainstorming: bool = False,
 ) -> DocumentationResult:
     text = (user_message or "").strip()
     rel = relationship or CoDirectorRelationshipProfile()
@@ -54,6 +58,37 @@ def extract_documentation(
             reason=DocumentationReason.DOCUMENTATION_DISABLED,
             summary_lines=["Documentation mode is manual-only; no automatic capture."],
         )
+
+    # Write-time turn classifier: a user-preference / production-request /
+    # meta-conversation / question turn must never produce Wiki candidates,
+    # even if it happens to be long or contains narrative-shaped keywords.
+    # `brainstorming` is skipped unless the caller explicitly opts in (the
+    # background path does NOT opt in; only a refine/rebuild operation may).
+    turn_type = classify_conversation_turn(text)
+    if turn_type in {"user_preference", "production_request", "meta_conversation", "question"}:
+        return DocumentationResult(
+            substantive=False,
+            candidate_count=0,
+            reason=DocumentationReason.NOT_SUBSTANTIVE,
+            summary_lines=[
+                f"Message classified as {turn_type}; not treated as narrative canon."
+            ],
+        )
+    if turn_type == "brainstorming" and not allow_brainstorming:
+        return DocumentationResult(
+            substantive=False,
+            candidate_count=0,
+            reason=DocumentationReason.NOT_SUBSTANTIVE,
+            summary_lines=[
+                "Message classified as brainstorming; not captured without an explicit "
+                "refine/rebuild operation."
+            ],
+        )
+    # `unknown` is allowed to fall through to the substantive gate — if it
+    # looks substantive by length/keyword, the regex pipeline below can still
+    # extract candidates. But the sync story_compiler's blank-when-unknown
+    # rule (story_compiler.py) ensures non-canon material never populates the
+    # Logline / Short / Long summaries.
 
     if not is_substantive_project_message(text):
         return DocumentationResult(

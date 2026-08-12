@@ -345,7 +345,12 @@ async def _probe_comfy(ctx: StatusContext) -> ProbeResult:
     payload = getattr(ctx.shared, "comfy_health", None) if ctx.shared is not None else None
     if not isinstance(payload, dict):
         payload = await comfy_health(include_nodes=True)
-    missing = list(payload.get("missingModelComponentIds") or [])
+    # Runtime health must reflect REQUIRED-core readiness, not optional/generator-
+    # specific components. A missing LTX 2.5 text encoder (optional at the runtime
+    # level; required only for the LTX 2.5 generator) must not flip a reachable,
+    # responding ComfyUI to "degraded". The capability layer owns per-generator
+    # readiness; this probe owns runtime reachability + core API health.
+    missing_required = list(payload.get("missingRequiredModelComponentIds") or [])
     if not payload.get("reachable"):
         return _result(
             "offline",
@@ -364,20 +369,45 @@ async def _probe_comfy(ctx: StatusContext) -> ProbeResult:
             warnings=["ComfyUI node catalogue is still loading."],
             recovery_actions=_setup_actions(),
         )
-    if missing:
+    # Only missing REQUIRED core components degrade runtime health. Missing
+    # optional/generator-specific components are reported to the capability layer
+    # and surfaced separately in the UI — they do not collapse into a runtime
+    # warning here.
+    missing_optional = [
+        cid for cid in (payload.get("missingModelComponentIds") or [])
+        if cid not in missing_required
+    ]
+    warnings: list[str] = []
+    if missing_required:
+        warnings.extend(missing_required[:8])
+    if missing_optional:
+        # Surface optional-missing as informational warnings only; runtime stays healthy.
+        warnings.extend(f"{cid} (optional / generator-specific)" for cid in missing_optional[:8])
+    if missing_required:
         return _result(
             "warning",
-            f"ComfyUI is reachable, but {len(missing)} required model components are missing.",
-            message=str(payload.get("message") or "ComfyUI reported missing model components."),
+            f"ComfyUI is reachable, but {len(missing_required)} required model components are missing.",
+            message=str(payload.get("message") or "ComfyUI reported missing required model components."),
             details=payload,
-            warnings=missing[:8],
+            warnings=warnings,
             recovery_actions=_setup_actions(),
         )
+    runtime_status = "healthy"
+    runtime_label = "ComfyUI is reachable and did not report missing required components."
+    if missing_optional:
+        # Healthy runtime, but some optional/generator components incomplete — note it
+        # without degrading the runtime verdict. Per-generator readiness is owned by
+        # the capability layer and the Model Readiness UI.
+        runtime_label = (
+            f"ComfyUI is reachable. {len(missing_optional)} optional/generator component(s) "
+            "incomplete — see Model Readiness."
+        )
     return _result(
-        "healthy",
-        "ComfyUI is reachable and did not report missing required components.",
+        runtime_status,
+        runtime_label,
         message=str(payload.get("status") or "ready"),
         details=payload,
+        warnings=warnings,
     )
 
 

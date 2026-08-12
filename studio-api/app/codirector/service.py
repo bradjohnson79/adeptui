@@ -1195,11 +1195,11 @@ async def chat_for_project(
         )
         if project_id:
             try:
-                from .conversation.deferred_enrichment import run_deferred_enrichment
+                from .conversation.deferred_enrichment import run_deferred_enrichment_async
                 from .conversation.momentum import update_momentum_from_turn
                 from .conversation.creative_confidence import update_confidence_from_turn
 
-                run_deferred_enrichment(
+                await run_deferred_enrichment_async(
                     db,
                     project_id=project_id,
                     user_message=user_message,
@@ -2992,9 +2992,9 @@ async def _stream_for_project_inner(
                 "stage": "UPDATING_WIKI",
             }
             try:
-                from .conversation.deferred_enrichment import run_deferred_enrichment
+                from .conversation.deferred_enrichment import run_deferred_enrichment_async
 
-                wiki_result = run_deferred_enrichment(
+                wiki_result = await run_deferred_enrichment_async(
                     db,
                     project_id=project_id,
                     user_message=user_message,

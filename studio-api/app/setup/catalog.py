@@ -22,6 +22,51 @@ class ComponentDefinition:
         return value
 
 
+# ── Dependency-type taxonomy ────────────────────────────────────────────
+# Coarse semantic classification of a setup component, derived from its
+# verifier. Exposed on the readiness contract so the frontend can render
+# type badges (MODEL / VAE / TEXT_ENCODER / UPSCALE_MODEL / CUSTOM_NODE /
+# RUNTIME / CREDENTIAL / WORKFLOW) instead of inferring from counts or
+# human-readable strings.
+DEPENDENCY_TYPE_MODEL = "MODEL"
+DEPENDENCY_TYPE_VAE = "VAE"
+DEPENDENCY_TYPE_TEXT_ENCODER = "TEXT_ENCODER"
+DEPENDENCY_TYPE_UPSCALE_MODEL = "UPSCALE_MODEL"
+DEPENDENCY_TYPE_CUSTOM_NODE = "CUSTOM_NODE"
+DEPENDENCY_TYPE_RUNTIME = "RUNTIME"
+DEPENDENCY_TYPE_CREDENTIAL = "CREDENTIAL"
+DEPENDENCY_TYPE_WORKFLOW = "WORKFLOW"
+DEPENDENCY_TYPE_UNKNOWN = "UNKNOWN"
+
+_VERIFIER_TO_DEP_TYPE: dict[str, str] = {
+    "ltx_file": DEPENDENCY_TYPE_MODEL,
+    "ltx_2_5_file": DEPENDENCY_TYPE_MODEL,
+    "text_encoder_file": DEPENDENCY_TYPE_TEXT_ENCODER,
+    "vae_file": DEPENDENCY_TYPE_VAE,
+    "latent_upscale_model_file": DEPENDENCY_TYPE_UPSCALE_MODEL,
+    "wan_files": DEPENDENCY_TYPE_MODEL,
+    "hunyuan_files": DEPENDENCY_TYPE_MODEL,
+    "zimage_files": DEPENDENCY_TYPE_MODEL,
+    "qwen_image_2512_files": DEPENDENCY_TYPE_MODEL,
+    "krea2_files": DEPENDENCY_TYPE_MODEL,
+    "linked_files": DEPENDENCY_TYPE_MODEL,
+    "ic_lora_file": DEPENDENCY_TYPE_MODEL,
+    "comfy_extension_nodes": DEPENDENCY_TYPE_CUSTOM_NODE,
+    "comfy_service": DEPENDENCY_TYPE_RUNTIME,
+    "ollama_service": DEPENDENCY_TYPE_RUNTIME,
+    "fal_key": DEPENDENCY_TYPE_CREDENTIAL,
+}
+
+
+def dependency_type_for(component_id: str) -> str:
+    """Return the semantic dependency type (MODEL / VAE / TEXT_ENCODER / ...) for a catalogued component."""
+    try:
+        definition = get_component(component_id)
+    except Exception:  # noqa: BLE001
+        return DEPENDENCY_TYPE_UNKNOWN
+    return _VERIFIER_TO_DEP_TYPE.get(definition.verifier, DEPENDENCY_TYPE_UNKNOWN)
+
+
 MB = 1024 * 1024
 
 COMPONENTS: tuple[ComponentDefinition, ...] = (

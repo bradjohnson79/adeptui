@@ -44,12 +44,29 @@ function comfyOffline(health: Health | null, healthError: unknown): ProductAvail
       reason: "ComfyUI is offline — start ComfyUI for local generation",
     };
   }
-  const missing = health.missing_model_component_ids?.length || health.missing_models?.length || 0;
-  if (missing > 0) {
+  // Use REQUIRED-missing count, not the total. A missing optional/generator-specific
+  // component (e.g. LTX 2.5 text encoder) must not block ALL generation — only the
+  // affected generator. Other generators remain available. The previous logic used
+  // the total missing count, which over-blocked when an optional component was missing.
+  const missingRequired =
+    health.comfy?.missingRequiredModelComponentIds?.length
+    || health.missing_model_component_ids?.length
+    || health.missing_models?.length
+    || 0;
+  const missingOptional =
+    (health.comfy?.missingModelComponentIds?.length || health.missing_model_component_ids?.length || health.missing_models?.length || 0)
+    - missingRequired;
+  if (missingRequired > 0) {
     return {
       status: "Requires setup",
       reason: "Required generation models are missing — open Source Manager",
     };
+  }
+  if (missingOptional > 0) {
+    // Runtime is online and all REQUIRED models are present, but some optional/
+    // generator-specific components are incomplete. Generation remains Available;
+    // the affected generator's preflight will block only that generator.
+    return null;
   }
   return null;
 }

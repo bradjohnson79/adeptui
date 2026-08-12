@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import type { ComfyHealth } from "../capabilities";
 
 type Diagnostics = {
   comfyui?: { connected?: boolean; version?: string | null; status?: string; message?: string };
@@ -22,12 +23,6 @@ type Diagnostics = {
   checkedAt?: string;
 };
 
-function mark(ok: boolean | undefined) {
-  if (ok === true) return "✓";
-  if (ok === false) return "✗";
-  return "—";
-}
-
 type CertifiedEntry = {
   workflowId?: string;
   workflowKey?: string;
@@ -36,9 +31,32 @@ type CertifiedEntry = {
   productionReady?: boolean;
 };
 
+/** Group LTX 2.5 model components by generator for the Model Readiness section. */
+function generatorReadiness(comfy: ComfyHealth | null) {
+  if (!comfy || !comfy.models) return [];
+  const byGen: Record<string, { id: string; label: string; missing: ComfyHealth["models"][number][]; ready: boolean }> = {};
+  const add = (id: string, label: string, componentId: string) => {
+    const m = comfy.models.find((x) => x.componentId === componentId);
+    if (!m) return;
+    if (!byGen[id]) byGen[id] = { id, label, missing: [], ready: true };
+    if (!m.present) {
+      byGen[id].missing.push(m);
+      byGen[id].ready = false;
+    }
+  };
+  add("ltx_2_5", "LTX 2.5", "ltx_2_5_checkpoint");
+  add("ltx_2_5", "LTX 2.5", "ltx_2_5_text_encoder");
+  add("ltx_2_5", "LTX 2.5", "ltx_2_5_video_vae");
+  add("wan", "WAN", "wan_models");
+  add("zimage", "Z-Image", "zimage_models");
+  add("ltx_23", "LTX 2.3", "ltx_checkpoint");
+  return Object.values(byGen);
+}
+
 export default function VideoRuntimeDiagnostics() {
   const [data, setData] = useState<Diagnostics | null>(null);
   const [registry, setRegistry] = useState<CertifiedEntry[]>([]);
+  const [comfy, setComfy] = useState<ComfyHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -46,13 +64,15 @@ export default function VideoRuntimeDiagnostics() {
     let cancelled = false;
     (async () => {
       try {
-        const [d, reg] = await Promise.all([
+        const [d, reg, ch] = await Promise.all([
           api.videoRuntimeDiagnostics() as Promise<Diagnostics>,
           api.videoRuntimeCertifiedRegistry().catch(() => ({ entries: [] as CertifiedEntry[] })),
+          api.comfyHealth().catch(() => null),
         ]);
         if (!cancelled) {
           setData(d);
           setRegistry((reg as { entries?: CertifiedEntry[] }).entries || []);
+          setComfy(ch as ComfyHealth | null);
           setError(null);
         }
       } catch (err) {
@@ -67,12 +87,28 @@ export default function VideoRuntimeDiagnostics() {
         .videoRuntimeCertifiedRegistry()
         .then((r) => setRegistry((r as { entries?: CertifiedEntry[] }).entries || []))
         .catch(() => undefined);
+      void api.comfyHealth().then((c) => setComfy(c as ComfyHealth | null)).catch(() => undefined);
     }, 8000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
   }, []);
+
+  // Layered overall verdict: Runtime healthy + no required-missing → HEALTHY;
+  // required-missing or runtime offline → DEGRADED/OFFLINE; optional-missing only → PARTIAL.
+  const runtimeOk = Boolean(data?.comfyui?.connected);
+  const requiredMissing = comfy?.missingRequiredModelComponentIds?.length ?? 0;
+  const optionalMissing = (comfy?.missingModelComponentIds?.length ?? 0) - requiredMissing;
+  const overallVerdict = !runtimeOk
+    ? "OFFLINE"
+    : requiredMissing > 0
+      ? "DEGRADED"
+      : optionalMissing > 0
+        ? "PARTIAL"
+        : "HEALTHY";
+  const verdictTone =
+    overallVerdict === "HEALTHY" ? "ok" : overallVerdict === "PARTIAL" ? "warn" : "bad";
 
   return (
     <main
@@ -114,17 +150,52 @@ export default function VideoRuntimeDiagnostics() {
             gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
           }}
         >
-          <section style={card}>
-            <h2 style={h2}>ComfyUI</h2>
-            <p>
-              {data.comfyui?.connected ? "✓ Connected" : "✗ Disconnected"}
-              {data.comfyui?.version ? ` · ${data.comfyui.version}` : ""}
+          {/* Overall verdict — creator-facing summary */}
+          <section
+            style={{ ...card, gridColumn: "1 / -1" }}
+            data-testid="runtime-overall-verdict"
+          >
+            <h2 style={h2}>Overall Studio Readiness</h2>
+            <p style={{ fontSize: "1.35rem", margin: 0 }}>
+              <span
+                data-testid="runtime-overall-verdict-status"
+                style={{
+                  color:
+                    verdictTone === "ok"
+                      ? "var(--aurora-success, #6c9)"
+                      : verdictTone === "warn"
+                        ? "var(--aurora-warn, #ec8)"
+                        : "var(--aurora-danger, #c45)",
+                }}
+              >
+                {overallVerdict}
+              </span>
             </p>
-            <p style={muted}>{data.comfyui?.message}</p>
+            <p style={muted}>
+              {overallVerdict === "HEALTHY" && "Runtime, hardware, and all configured generators are ready."}
+              {overallVerdict === "PARTIAL" && `Runtime is healthy, but ${optionalMissing} optional/generator component(s) incomplete. Affected generators are blocked; others remain usable.`}
+              {overallVerdict === "DEGRADED" && `${requiredMissing} required model component(s) missing. Runtime cannot generate until installed.`}
+              {overallVerdict === "OFFLINE" && "ComfyUI runtime is offline. Start ComfyUI, then refresh."}
+            </p>
           </section>
 
-          <section style={card}>
-            <h2 style={h2}>GPU</h2>
+          {/* RUNTIME — ComfyUI reachability + node catalog (NOT model readiness) */}
+          <section style={card} data-testid="runtime-comfyui">
+            <h2 style={h2}>Runtime · ComfyUI</h2>
+            <p>
+              {runtimeOk ? "● Healthy" : "● Offline"}
+              {data.comfyui?.version ? ` · v${data.comfyui.version}` : ""}
+            </p>
+            <p style={muted}>{data.comfyui?.message}</p>
+            <p style={muted}>
+              Node catalogue: {comfy?.nodeCatalogAvailable ? "available" : "loading/unavailable"}
+              {comfy?.nodeTypeCount != null ? ` · ${comfy.nodeTypeCount} types` : ""}
+            </p>
+          </section>
+
+          {/* HARDWARE — GPU + VRAM */}
+          <section style={card} data-testid="runtime-hardware">
+            <h2 style={h2}>Hardware · GPU</h2>
             <p>{data.gpu?.name || "Unknown"}</p>
             <p>
               {data.gpu?.availableGb != null
@@ -133,21 +204,60 @@ export default function VideoRuntimeDiagnostics() {
             </p>
           </section>
 
+          {/* MODEL READINESS — per-generator, expandable missing deps */}
+          <section style={{ ...card, gridColumn: "1 / -1" }} data-testid="runtime-model-readiness">
+            <h2 style={h2}>Model Readiness</h2>
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
+              {generatorReadiness(comfy).map((g) => (
+                <li key={g.id} data-testid={`generator-readiness-${g.id}`}>
+                  <details>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{g.label}</strong>{" "}
+                      {g.ready
+                        ? "✓ Ready"
+                        : `⚠ Incomplete · ${g.missing.length} missing`}
+                    </summary>
+                    {g.missing.length > 0 && (
+                      <ul style={{ listStyle: "none", padding: "0.5rem 0 0 1.25rem", margin: 0, lineHeight: 1.7 }}>
+                        {g.missing.map((m) => (
+                          <li key={m.componentId} data-testid={`missing-dep-${m.componentId}`}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                padding: "0.05rem 0.35rem",
+                                fontSize: "0.7rem",
+                                border: "1px solid rgba(255,255,255,0.2)",
+                                borderRadius: "0.25rem",
+                                marginRight: "0.4rem",
+                              }}
+                            >
+                              {m.dependencyType || "MODEL"}
+                            </span>
+                            <code>{m.filename || m.name}</code>
+                            {m.expectedPath && (
+                              <span style={muted}> · {m.expectedPath}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {g.missing.length > 0 && (
+                      <p style={{ marginTop: "0.4rem" }}>
+                        <Link to="/source-manager" style={{ color: "inherit" }}>
+                          [Open Model Manager]
+                        </Link>
+                      </p>
+                    )}
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           <section style={card}>
             <h2 style={h2}>Node Inventory</h2>
             <p>{data.nodeInventory?.installed ?? 0} installed</p>
             <p>{data.nodeInventory?.missingVsRegistry ?? 0} missing vs registry</p>
-          </section>
-
-          <section style={card}>
-            <h2 style={h2}>Model Inventory</h2>
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, lineHeight: 1.7 }}>
-              <li>WAN {mark(data.modelInventory?.wan)}</li>
-              <li>LTX {mark(data.modelInventory?.ltx)}</li>
-              <li>LTX 2.5 {mark(data.modelInventory?.ltx_2_5)}</li>
-              <li>Z-Image {mark(data.modelInventory?.zimage)}</li>
-              <li>IC-LoRA {mark(data.modelInventory?.icLora)}</li>
-            </ul>
           </section>
 
           <section style={card}>
@@ -185,8 +295,8 @@ export default function VideoRuntimeDiagnostics() {
           </section>
 
           <section style={card}>
-            <h2 style={h2}>Health</h2>
-            <p style={{ fontSize: "1.35rem" }}>{data.health || "Unknown"}</p>
+            <h2 style={h2}>Legacy Health</h2>
+            <p style={{ fontSize: "1.15rem" }}>{data.health || "Unknown"}</p>
             <p style={muted}>
               Wave 6 wiring:{" "}
               {data.wave6WiringUnlocked ? "unlocked" : "blocked"}
@@ -215,6 +325,16 @@ export default function VideoRuntimeDiagnostics() {
                 </li>
               ))}
             </ul>
+          </section>
+
+          {/* Technical Information — raw JSON behind expandable details */}
+          <section style={{ ...card, gridColumn: "1 / -1" }} data-testid="runtime-technical-details">
+            <details>
+              <summary style={{ cursor: "pointer", ...h2 }}>Technical Information</summary>
+              <pre style={{ fontSize: "0.75rem", overflowX: "auto", opacity: 0.85 }}>
+                {JSON.stringify({ diagnostics: data, comfyHealth: comfy }, null, 2)}
+              </pre>
+            </details>
           </section>
         </div>
       )}

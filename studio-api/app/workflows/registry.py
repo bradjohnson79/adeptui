@@ -12,7 +12,7 @@ from .lipsync_builder import build_latentsync_workflow
 from .hunyuan13b_builder import build_hunyuan13b_i2v, build_hunyuan13b_t2v
 from .hunyuan15_builder import build_hunyuan15_i2v, build_hunyuan15_t2v
 from .ltx_builder import build_ltx_scene_workflow, build_ltx_simple_i2v
-from .ltx_25_builder import build_ltx_25_t2v, build_ltx_25_i2v, build_ltx_25_flf2v
+from .ltx_25_builder import build_ltx_25_i2v, build_ltx_25_t2v
 from .ltx_ingredients_compiler import compile_ingredients_workflow
 from .wan_builder import build_wan_flf_workflow, build_wan_three_frame_workflow
 
@@ -199,7 +199,13 @@ WORKFLOW_INVENTORY = (
         builder_path="app.workflows.ltx_25_builder:build_ltx_25_t2v",
         capabilities=("text_to_video", "native_multishot", "audio_generation", "auto_duration", "fast_generation"),
         required_inputs=("settings", "execution_id", "prompt", "width", "height", "length_seconds", "fps", "seed"),
-        required_node_types=("LTXV2TextToVideo", "VAELoader", "VHS_VideoCombine", "LTXAVTextEncoderLoader"),
+        required_node_types=(
+            "UNETLoader", "VAELoader", "CLIPLoader",
+            "CLIPTextEncode", "LTXVConditioning", "EmptyLTXVLatentVideo",
+            "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+            "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
+            "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo",
+        ),
     ),
     _entry(
         key="ltx_25.i2v",
@@ -209,17 +215,13 @@ WORKFLOW_INVENTORY = (
         builder_path="app.workflows.ltx_25_builder:build_ltx_25_i2v",
         capabilities=("image_to_video", "audio_generation"),
         required_inputs=("settings", "execution_id", "prompt", "start_image_path", "width", "height", "length_seconds", "fps", "seed"),
-        required_node_types=("LTXV2ImgToVideo", "LoadImage", "VAELoader", "VHS_VideoCombine", "LTXAVTextEncoderLoader"),
-    ),
-    _entry(
-        key="ltx_25.flf2v",
-        family="ltx-2.5",
-        modality="video",
-        builder=build_ltx_25_flf2v,
-        builder_path="app.workflows.ltx_25_builder:build_ltx_25_flf2v",
-        capabilities=("image_to_video", "multi_keyframe", "audio_generation"),
-        required_inputs=("settings", "execution_id", "prompt", "start_image_path", "end_image_path", "width", "height", "length_seconds", "fps", "seed"),
-        required_node_types=("LTXV2FirstLastFrameToVideo", "LoadImage", "VAELoader", "VHS_VideoCombine", "LTXAVTextEncoderLoader"),
+        required_node_types=(
+            "UNETLoader", "VAELoader", "CLIPLoader",
+            "CLIPTextEncode", "LTXVConditioning", "LoadImage", "LTXVImgToVideo",
+            "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+            "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
+            "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo",
+        ),
     ),
     _entry(
         key="wan.first_last_frame",

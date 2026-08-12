@@ -98,10 +98,10 @@ function Get-MyProcess {
 
 # --- Helper: write PID file -----------------------------------------------
 function Save-PidFile {
-    param([string]$ServiceName, [int]$Pid, [string]$PidDir)
+    param([string]$ServiceName, [int]$ProcessId, [string]$PidDir)
     $null = New-Item -ItemType Directory -Path $PidDir -Force
     $path = Join-Path $PidDir "$ServiceName.pid"
-    Set-Content -Path $path -Value $Pid.ToString()
+    Set-Content -Path $path -Value $ProcessId.ToString()
 }
 
 # --- Helper: read PID file ------------------------------------------------
@@ -244,9 +244,10 @@ if ($apiStatus -eq "ONLINE") {
         Write-Error "Venv Python not found at $venvPython"
         $apiStatus = "FAILED"
     } else {
-        $apiArgs = "-m uvicorn $apiModule --host 127.0.0.1 --port $apiPort --workers 2"
-        $apiProc = Start-Process -FilePath $venvPython -ArgumentList $apiArgs -WindowStyle Hidden -PassThru -NoNewWindow
-        Save-PidFile -ServiceName "api" -Pid $apiProc.Id -PidDir $pidDir
+        $apiArgs = "-m uvicorn $apiModule --host 127.0.0.1 --port $apiPort"
+        $apiWorkingDir = Join-Path $RepoRoot "studio-api"
+        $apiProc = Start-Process -FilePath $venvPython -ArgumentList $apiArgs -PassThru -NoNewWindow -WorkingDirectory $apiWorkingDir
+        Save-PidFile -ServiceName "api" -ProcessId $apiProc.Id -PidDir $pidDir
         Write-ServiceLog $logDir "api" "Launching: $venvPython $apiArgs (PID $($apiProc.Id))"
         $ready = Wait-ForHealth -Url $apiHealthzUrl -TimeoutSeconds 30 -Label "Studio API"
         $apiStatus = if ($ready) { "ONLINE" } else { "TIMEOUT" }
@@ -291,8 +292,8 @@ if ($comfyStatus -ne "ONLINE") {
             $comfyStatus = "FAILED"
         } else {
             Write-Host "[START] Launching ComfyUI headlessly..." -ForegroundColor Yellow
-            $comfyProc = Start-Process -FilePath $pythonExe -ArgumentList $pythonArgs -WindowStyle Hidden -PassThru -NoNewWindow
-            Save-PidFile -ServiceName "comfy" -Pid $comfyProc.Id -PidDir $pidDir
+            $comfyProc = Start-Process -FilePath $pythonExe -ArgumentList $pythonArgs -PassThru -NoNewWindow
+            Save-PidFile -ServiceName "comfy" -ProcessId $comfyProc.Id -PidDir $pidDir
             Write-ServiceLog $logDir "comfy" "Launching: $pythonExe $pythonArgs (PID $($comfyProc.Id))"
             Write-Host "  Waiting up to 60s for ComfyUI to become ready..." -ForegroundColor Gray
             $ready = Wait-ForHealth -Url $comfyHealthUrl -TimeoutSeconds 60 -IntervalMs 3000 -Label "ComfyUI"
@@ -326,8 +327,8 @@ if ($tunnelAlreadyRunning) {
 } else {
     Write-Host "[START] Launching Cloudflare Tunnel..." -ForegroundColor Yellow
     $tunnelLog = Join-Path $logDir "tunnel.log"
-    $tunnelProc = Start-Process -FilePath "cloudflared" -ArgumentList "tunnel run $tunnelName" -WindowStyle Hidden -PassThru -NoNewWindow -RedirectStandardOutput $tunnelLog -RedirectStandardError "$tunnelLog.err"
-    Save-PidFile -ServiceName "tunnel" -Pid $tunnelProc.Id -PidDir $pidDir
+    $tunnelProc = Start-Process -FilePath "cloudflared" -ArgumentList "tunnel run $tunnelName" -PassThru -NoNewWindow -RedirectStandardOutput $tunnelLog -RedirectStandardError "$tunnelLog.err"
+    Save-PidFile -ServiceName "tunnel" -ProcessId $tunnelProc.Id -PidDir $pidDir
     Write-ServiceLog $logDir "tunnel" "Launching: cloudflared tunnel run $tunnelName (PID $($tunnelProc.Id))"
     Start-Sleep -Seconds 5
     $tunnelStatus = Test-ServiceHealth -Url $tunnelHealthUrl -TimeoutSeconds 10

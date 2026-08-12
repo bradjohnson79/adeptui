@@ -854,6 +854,94 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    # ── Generic single-file model verifiers keyed by component_id ──────────
+    # These cover LTX 2.5 text encoder / VAE / audio VAE / spatial upscaler,
+    # which the catalog declares with generic verifier names (text_encoder_file,
+    # vae_file, latent_upscale_model_file). Without these branches they fell
+    # through to `unsupported_verifier` and never reported the missing filename
+    # or expected path — surfacing only a vague "1 required model components
+    # are missing" count. Each branch maps component_id → config filename +
+    # expected subpath so the UI can show the exact missing dependency.
+
+    _TEXT_ENCODER_FILES = {
+        "ltx_2_5_text_encoder": (settings.ltx_2_5_text_encoder, ("text_encoders",)),
+    }
+    if component.verifier == "text_encoder_file":
+        spec = _TEXT_ENCODER_FILES.get(component_id)
+        if spec:
+            filename, extra_dirs = spec
+            path = _candidate_file(location, filename, extra_dirs)
+            if path:
+                if os.access(path, os.R_OK) and path.stat().st_size > 0:
+                    return Verification(
+                        True, False, None,
+                        f"The {component.name} is available and readable.", str(path),
+                    )
+                return Verification(
+                    False, False, "permission_denied", f"The {component.name} cannot be read.", str(path),
+                    recommendation="grant_permission", requires_user_interaction=True,
+                )
+            expected_subpath = "/".join(("models", *extra_dirs)) + "/"
+            return Verification(
+                False, True, "required_model_missing", f"The {component.name} was not found.",
+                location,
+                details=(f"Expected file: {filename}", f"Expected location: {expected_subpath}"),
+                recommendation="correct_path" if location else "install", requires_user_interaction=True,
+            )
+
+    _VAE_FILES = {
+        "ltx_2_5_video_vae": (settings.ltx_2_5_video_vae, ("vae",)),
+        "ltx_2_5_audio_vae": (settings.ltx_2_5_audio_vae, ("vae",)),
+    }
+    if component.verifier == "vae_file":
+        spec = _VAE_FILES.get(component_id)
+        if spec:
+            filename, extra_dirs = spec
+            path = _candidate_file(location, filename, extra_dirs)
+            if path:
+                if os.access(path, os.R_OK) and path.stat().st_size > 0:
+                    return Verification(
+                        True, False, None,
+                        f"The {component.name} is available and readable.", str(path),
+                    )
+                return Verification(
+                    False, False, "permission_denied", f"The {component.name} cannot be read.", str(path),
+                    recommendation="grant_permission", requires_user_interaction=True,
+                )
+            expected_subpath = "/".join(("models", *extra_dirs)) + "/"
+            return Verification(
+                False, True, "required_model_missing", f"The {component.name} was not found.",
+                location,
+                details=(f"Expected file: {filename}", f"Expected location: {expected_subpath}"),
+                recommendation="correct_path" if location else "install", requires_user_interaction=True,
+            )
+
+    _UPSCALE_FILES = {
+        "ltx_2_5_spatial_upscaler": (settings.ltx_2_5_spatial_upscaler, ("upscale_models",)),
+    }
+    if component.verifier == "latent_upscale_model_file":
+        spec = _UPSCALE_FILES.get(component_id)
+        if spec:
+            filename, extra_dirs = spec
+            path = _candidate_file(location, filename, extra_dirs)
+            if path:
+                if os.access(path, os.R_OK) and path.stat().st_size > 0:
+                    return Verification(
+                        True, False, None,
+                        f"The {component.name} is available and readable.", str(path),
+                    )
+                return Verification(
+                    False, False, "permission_denied", f"The {component.name} cannot be read.", str(path),
+                    recommendation="grant_permission", requires_user_interaction=True,
+                )
+            expected_subpath = "/".join(("models", *extra_dirs)) + "/"
+            return Verification(
+                False, True, "required_model_missing", f"The {component.name} was not found.",
+                location,
+                details=(f"Expected file: {filename}", f"Expected location: {expected_subpath}"),
+                recommendation="correct_path" if location else "install", requires_user_interaction=True,
+            )
+
     return Verification(False, False, "unsupported_verifier", "Verification is not supported.", recommendation="manual_help")
 
 

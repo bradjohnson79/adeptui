@@ -93,8 +93,16 @@ export interface ComfyHealth {
     issueCode?: string | null;
     summary?: string;
     version?: string | null;
+    /** Semantic dependency type (MODEL / VAE / TEXT_ENCODER / UPSCALE_MODEL / CUSTOM_NODE / ...). */
+    dependencyType?: string | null;
+    /** Expected filename (e.g. "gemma4-12b-...safetensors") when known. */
+    filename?: string | null;
+    /** Expected subpath (e.g. "models/text_encoders/") when known. */
+    expectedPath?: string | null;
   }[];
   missingModelComponentIds: string[];
+  /** Missing REQUIRED model components only (subset of missingModelComponentIds). */
+  missingRequiredModelComponentIds?: string[];
   checkedAt: string;
 }
 
@@ -118,8 +126,8 @@ export interface WorkflowReadiness extends WorkflowDescriptor {
   recommendedAction?: string | null;
   nodeCatalogAvailable: boolean;
   missingExtensions: string[];
-  missingModels: { componentId: string; name: string; issueCode?: string | null; summary?: string }[];
-  modelComponents: { componentId: string; name: string; present: boolean }[];
+  missingModels: { componentId: string; name: string; issueCode?: string | null; summary?: string; dependencyType?: string | null }[];
+  modelComponents: { componentId: string; name: string; present: boolean; dependencyType?: string | null }[];
   checkedAt: string;
 }
 

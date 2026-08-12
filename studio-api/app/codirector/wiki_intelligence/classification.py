@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from .contracts import FALSE_CHARACTER_TOKENS, PROFESSIONAL_TOC_ROOTS
 
@@ -12,6 +12,252 @@ _PREF_RE = re.compile(
     r"call me |address me as|skip the setup|relationship mode)\b",
     re.I,
 )
+
+# --- Conversation turn classification (write-time honesty gate) ----------------
+#
+# classify_conversation_turn returns a deterministic turn-type label so the
+# Wiki write path can decide whether a user message may contribute narrative
+# canon. It is intentionally a fast regex+heuristic classifier — no LLM calls.
+#
+# Labels:
+#   story_canon        — genuine in-world narrative description (characters,
+#                        plot, scene events, world rules, themes stated as canon)
+#   user_preference    — addressing/relationship/working-mode setup
+#                        ("please call me friend", "use balanced mode")
+#   production_request — imperative commands to produce/create assets
+#                        ("create the storyboard", "generate the image")
+#   meta_conversation  — acknowledgments, workflow talk, system-talk
+#                        ("let's get started", "thanks", "ok do it")
+#   question           — ends with "?" or asks for information
+#   brainstorming      — speculative options ("what if she…", "maybe the scene…")
+#   unknown            — does not match confidently
+#
+# CRITICAL: A production instruction that merely MENTIONS a character/scene/
+# location/storyboard must NOT be promoted to story_canon. Only genuine
+# narrative description of in-world events counts.
+
+TurnType = Literal[
+    "story_canon",
+    "user_preference",
+    "production_request",
+    "meta_conversation",
+    "question",
+    "brainstorming",
+    "unknown",
+]
+
+# Relationship / addressing / working-mode setup. Broadened beyond _PREF_RE so
+# the write path can quarantine all preference-style turns, not just the small
+# set used for entity classification.
+_TURN_PREF_RE = re.compile(
+    r"\b(?:please\s+call\s+me|call\s+me\s+\w+|address\s+me\s+as|"
+    r"i(?:'|’)?ll\s+call\s+you|you(?:'|’)?re\s+my\s+co[-\s]?director|"
+    r"be\s+my\s+co[-\s]?director|act\s+as\s+my\s+co[-\s]?director|"
+    r"use\s+(?:balanced|concise|detailed|creative|formal|casual)\s+mode|"
+    r"working\s+preference|collaboration\s+preference|relationship\s+mode|"
+    r"how\s+i(?:'|’)?d\s+like\s+(?:us\s+to\s+work|to\s+work)|"
+    r"skip\s+(?:the\s+)?setup|lets?\s+skip\s+onboarding|"
+    r"tone\s+(?:of\s+our\s+)?conversations?|friendly\s+tone|"
+    r"be\s+(?:more\s+)?(?:friendly|concise|verbose|formal|casual)\b)\b",
+    re.I,
+)
+
+# Imperative production commands — the verb list is deliberately concrete so a
+# sentence like "Barnes creates the dreamweaver" is NOT mis-flagged as a
+# production request (it reads as in-world narrative). We require an imperative
+# shape (sentence-initial verb, or "please <verb>", or "<verb> the <asset>").
+_TURN_PRODUCTION_RE = re.compile(
+    r"^(?:please\s+|kindly\s+|can\s+you\s+|could\s+you\s+|let'?s?\s+|i\s+want\s+(?:you\s+)?to\s+|"
+    r"go\s+ahead\s+and\s+|now\s+|next\s+|then\s+)?"
+    r"(?:create|generate|make|build|produce|render|animate|draw|paint|design|"
+    r"storyboard|compose|record|film|shoot|edit|export|save|approve|reject|"
+    r"delete|rename|update|set|open|navigate|show|start|run|"
+    r"place\s+(?:this|that|the)\s+(?:into|in)\s+(?:the\s+)?(?:wiki|story|logline|short\s+summary|long\s+summary)|"
+    r"put\s+(?:this|that|the)\s+(?:into|in)\s+(?:the\s+)?(?:wiki|story|logline|short\s+summary|long\s+summary)|"
+    r"summarize\s+|write\s+(?:a\s+)?(?:logline|short\s+summary|long\s+summary|synopsis|treatment))\b",
+    re.I,
+)
+
+# Production-asset nouns — used to confirm a production_request when the verb
+# shape is ambiguous. Mentions alone are NOT enough to promote to production.
+_PRODUCTION_ASSET_RE = re.compile(
+    r"\b(storyboard|image|video|clip|render|character\s+sheet|visual\s+sheet|"
+    r"voice\s+clip|voice\s+version|audio\s+bus|casting\s+image|hero\s+portrait|"
+    r"timeline|animatic|draft|outline|beat\s+sheet|scene\s+card)\b",
+    re.I,
+)
+
+# Meta-conversation: acknowledgments, workflow talk, system-talk.
+_TURN_META_RE = re.compile(
+    r"^(?:ok(?:ay)?|sure|yes|yeah|yep|no|nope|thanks|thank\s+you|got\s+it|"
+    r"understood|will\s+do|sounds\s+good|great|awesome|perfect|cool|nice|"
+    r"let'?s?\s+(?:get\s+started|start|begin|go|continue|move\s+on|do\s+it)|"
+    r"lets?\s+go|please\s+do|go\s+for\s+it|keep\s+going|continue|"
+    r"hi(?:\s+there)?|hello|hey|yo|good\s+morning|good\s+evening|"
+    r"(?:i\s+)?agree|exactly|right|correct|true|indeed|makes\s+sense|"
+    r"(?:that'?s\s+)?(?:a\s+)?good\s+(?:idea|point|question|thought)|"
+    r"(?:i\s+)?(?:don'?t|do\s+not)\s+(?:know|think)|let\s+me\s+think|"
+    r"what(?:'?s|s|\s+is)\s+next|what\s+now|how\s+(?:about|do\s+we)|"
+    r"that'?s\s+(?:fine|okay|great|enough))\b\.?!?",
+    re.I,
+)
+
+# Brainstorming: speculative / hypothetical / option-exploring phrasing.
+_TURN_BRAINSTORM_RE = re.compile(
+    r"\b(?:what\s+if\s+\w+|maybe\s+(?:she|he|they|it|the\s+\w+|we|i)|"
+    r"perhaps\s+(?:she|he|they|it|the\s+\w+|we)|"
+    r"could\s+(?:she|he|they|it|the\s+\w+|we)\s+(?:be|have|do|go)|"
+    r"how\s+about\s+(?:she|he|they|the\s+\w+|we|i)|"
+    r"alternative(?:ly)?[:\s]|option\s+\d|one\s+option\s+(?:is|could\s+be)|"
+    r"(?:a|another)\s+possibility\s+(?:is|could\s+be)|"
+    r"suppose\s+(?:she|he|they|the\s+\w+)|"
+    r"imagine\s+(?:if|she|he|they)|"
+    r"i\s+(?:wonder|imagine|am\s+thinking)|on\s+the\s+other\s+hand)\b",
+    re.I,
+)
+
+# Narrative canon signals: real in-world description of events / characters /
+# world rules / themes stated as canon. These are content patterns, not just
+# keyword mentions — they require a verb that describes in-world action or
+# definition so a production instruction that mentions a character cannot
+# masquerade as canon.
+_TURN_STORY_RE = re.compile(
+    r"\b("
+    # Character doing / being something in-world
+    r"(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?|she|he|they)"
+    r"\s+(?:is|are|was|were|enters?|exits?|arrives?|leaves?|discovers?|"
+    r"meets?|hears?|calls?|orders?|tastes?|reacts?|remembers?|"
+    r"wears?|carries?|holds?|speaks?|tells?|asks|answers|"
+    r"investigates?|interviews?|chases?|flees?|fights?|loves?|fears?|"
+    r"lives?|works?|dreams?|wakes?|dies?|kills?|saves?|finds?|loses?|"
+    r"builds?|destroys?|creates?|opens?|closes?|crosses?|watches?)\b"
+    r"|"
+    # Scene / setting description
+    r"(?:the\s+)?(?:scene|story|episode|film|series|chapter)\s+"
+    r"(?:opens|begins|starts|ends|follows|is\s+set|takes\s+place|"
+    r"cuts\s+to|fades\s+to|jumps\s+to)"
+    r"|"
+    # Stated world rule / continuity
+    r"(?:world\s+rule|continuity\s+rule|the\s+rule\s+is|rule:\s*|"
+    r"(?:every|always|never|must)\s+\w+\s+(?:costs?|requires?|stays?|remains?|holds?))"
+    r"|"
+    # Theme stated as canon ("the theme is…", "themes are…")
+    r"(?:the\s+)?theme(?:s)?\s+(?:is|are|:)\s+"
+    r"|"
+    # Logline / synopsis opening
+    r"(?:logline|synopsis|premise|treatment):\s*"
+    r"|"
+    # "Set in <place/time>" / "follows <character>"
+    r"(?:set\s+(?:in|across|during)|follows\s+(?:a|an|the)\s+)"
+    r")",
+    re.I,
+)
+
+# Short, low-information responses (≤3 words after stripping punctuation) are
+# almost never story canon — they're meta or unknown.
+_SHORT_TOKEN_THRESHOLD = 3
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b\w+\b", text))
+
+
+def classify_conversation_turn(text: str) -> TurnType:
+    """Deterministic conversation-turn classifier for the Wiki write path.
+
+    Returns one of: story_canon, user_preference, production_request,
+    meta_conversation, question, brainstorming, unknown.
+
+    The classifier is purposefully conservative: when in doubt it returns
+    `unknown` rather than `story_canon`, because the Wiki honesty rule is
+    "leave blank when insufficient" — never "promote anything plausible".
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return "unknown"
+
+    # Question: ends with "?" or starts with a question word and is short-ish.
+    if raw.endswith("?"):
+        # A brainstorming what-if that ends with "?" should still be
+        # brainstorming, not a question.
+        if _TURN_BRAINSTORM_RE.search(raw):
+            return "brainstorming"
+        return "question"
+    # Brainstorming check must run BEFORE the generic question-word check so
+    # "what if she orders espresso instead" (no "?") is classified as
+    # brainstorming, not question. A genuine question starting with a question
+    # word that is NOT a brainstorm ("what is the story about") still returns
+    # question because it doesn't match the brainstorm pattern.
+    if _TURN_BRAINSTORM_RE.search(raw):
+        return "brainstorming"
+    if re.match(
+        r"^(?:what|why|how|when|where|who|which|should|could|would|can|do|does|did|is|are)\b",
+        raw,
+        re.I,
+    ) and _word_count(raw) <= 24:
+        return "question"
+
+    # User preference: addressing / relationship / working-mode setup.
+    if _TURN_PREF_RE.search(raw):
+        return "user_preference"
+
+    # Production request: imperative verb shape OR verb + asset noun.
+    if _TURN_PRODUCTION_RE.match(raw):
+        return "production_request"
+    # Some production requests are framed as "let's make X" / "I want X" with
+    # the asset noun present; catch those without mis-flagging narrative.
+    if _PRODUCTION_ASSET_RE.search(raw) and re.match(
+        r"^(?:please\s+|kindly\s+|can\s+we\s+|could\s+we\s+|let'?s?\s+|"
+        r"i\s+(?:want|need|would\s+like)\s+(?:you\s+to\s+|to\s+)?)"
+        r"(?:create|generate|make|build|produce|render|design|"
+        r"compose|record|film|shoot|edit|export|draw|paint|animate)\b",
+        raw,
+        re.I,
+    ):
+        return "production_request"
+
+    # Meta-conversation: short acknowledgments / workflow talk.
+    if _TURN_META_RE.match(raw) and _word_count(raw) <= 12:
+        return "meta_conversation"
+
+    # Story canon: genuine in-world narrative description. Require the
+    # narrative-pattern match AND a minimum content length so a single
+    # capitalized sentence-fragment doesn't promote. The 40-char floor
+    # mirrors story_compiler's own `len(t) >= 40` narrative filter so the
+    # classifier and the compiler agree on what counts as a narrative sentence.
+    if _TURN_STORY_RE.search(raw) and len(raw) >= 40:
+        return "story_canon"
+
+    return "unknown"
+
+
+# Turn-types that must NEVER populate Logline / Short Summary / Long Summary
+# or contribute narrative canon to the Wiki.
+_NON_CANON_TURN_TYPES: frozenset[TurnType] = frozenset(
+    {
+        "user_preference",
+        "production_request",
+        "meta_conversation",
+        "question",
+        "unknown",
+    }
+)
+
+
+def is_canon_turn(text: str) -> bool:
+    """True if the turn may contribute narrative canon to the Wiki.
+
+    `story_canon` always qualifies. `brainstorming` qualifies only when an
+    explicit refine/rebuild operation has opted into it — that decision is
+    made by the caller, not by this predicate. `unknown` is treated as
+    non-canon so the write path leaves fields blank rather than guessing.
+    """
+    return classify_conversation_turn(text) == "story_canon"
+
+
+def is_non_canon_turn(text: str) -> bool:
+    """True if the turn must NOT contribute to Logline/Short/Long summaries."""
+    return classify_conversation_turn(text) in _NON_CANON_TURN_TYPES
 _LOC_HINT = re.compile(
     r"\b(location|room|set|harbor|archive|city|building|station|facility|anteroom|office|studio)\b",
     re.I,
@@ -44,7 +290,16 @@ _KNOWN_ORG_TOKENS = re.compile(
 
 
 def is_user_preference_not_canon(text: str) -> bool:
-    return bool(_PREF_RE.search(text or ""))
+    """True when the text is a user-preference / addressing turn, not canon.
+
+    Consults both the legacy `_PREF_RE` (used by entity classification to
+    quarantine preference-shaped candidates) and the new write-time
+    `classify_conversation_turn` so preference turns that phrased differently
+    than `_PREF_RE` are still caught.
+    """
+    if _PREF_RE.search(text or ""):
+        return True
+    return classify_conversation_turn(text or "") == "user_preference"
 
 
 def is_false_character_name(name: str) -> bool:

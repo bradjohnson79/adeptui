@@ -260,6 +260,155 @@
     },
     {
       "modality": "video",
+      "status": "Built",
+      "builder": "build_ltx_25_t2v",
+      "builderPath": "app.workflows.ltx_25_builder:build_ltx_25_t2v",
+      "requiredNodes": [
+        "UNETLoader", "VAELoader", "CLIPLoader",
+        "CLIPTextEncode", "LTXVConditioning",
+        "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+        "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
+        "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo"
+      ],
+      "requiredModels": [
+        "ltx_2_5_checkpoint",
+        "ltx_2_5_text_encoder",
+        "ltx_2_5_video_vae"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-LTXVideo"
+      ],
+      "supportedInputs": [
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps",
+        "audio"
+      ],
+      "unsupportedInputs": [
+        "start_frame",
+        "middle_frame",
+        "end_frame"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Local T2V only; uses LTXVBaseSampler topology. Live certification pending."
+      ],
+      "vramProfile": {
+        "minimumGb": 12,
+        "recommendedGb": 24,
+        "heavyGb": 20,
+        "peakGb": 20,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "txt2vid_local"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {},
+      "generationMode": "comfy",
+      "engine": "ltx-2.5",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-LTX-004",
+      "workflowKey": "ltx_25.t2v",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX 2.5",
+      "capabilityId": "video.ltx_25.t2v",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LTX-004-20260812-001"
+    },
+    {
+      "modality": "video",
+      "status": "Built",
+      "builder": "build_ltx_25_i2v",
+      "builderPath": "app.workflows.ltx_25_builder:build_ltx_25_i2v",
+      "requiredNodes": [
+        "UNETLoader", "VAELoader", "CLIPLoader",
+        "CLIPTextEncode", "LTXVConditioning", "LoadImage", "LTXVImgToVideo",
+        "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+        "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
+        "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo"
+      ],
+      "requiredModels": [
+        "ltx_2_5_checkpoint",
+        "ltx_2_5_text_encoder",
+        "ltx_2_5_video_vae"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-LTXVideo"
+      ],
+      "supportedInputs": [
+        "start_frame",
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps",
+        "audio"
+      ],
+      "unsupportedInputs": [
+        "middle_frame",
+        "end_frame"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "I2V only; requires start frame. Live certification pending."
+      ],
+      "vramProfile": {
+        "minimumGb": 12,
+        "recommendedGb": 24,
+        "heavyGb": 20,
+        "peakGb": 20,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "shot_render",
+          "scene_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {},
+      "generationMode": "comfy",
+      "engine": "ltx-2.5",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-LTX-005",
+      "workflowKey": "ltx_25.i2v",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX 2.5",
+      "capabilityId": "video.ltx_25.i2v",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LTX-005-20260812-001"
+    },
+    {
+      "modality": "video",
       "status": "Certified",
       "builder": "build_wan_flf_workflow",
       "builderPath": "app.workflows.wan_builder:build_wan_flf_workflow",

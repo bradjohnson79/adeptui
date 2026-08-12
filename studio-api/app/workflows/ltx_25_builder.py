@@ -1,14 +1,21 @@
-"""ComfyUI workflow builders for LTX 2.5 (Text-to-Video, Image-to-Video, First/Last-Frame I2V).
+"""ComfyUI workflow builders for LTX 2.5 (Text-to-Video, Image-to-Video).
 
-LTX 2.5 uses:
-  - Separate checkpoint, video VAE, audio VAE, and Gemma 4 text encoder
-  - LTXV2* generation node family (T2V, I2V, FLF2V)
-  - VAELoader for the video VAE (not extracted from CheckpointLoaderSimple)
-  - Optional audio VAE for audio generation
+Architecture follows the official Lightricks LTX 2.5 single-stage distilled
+workflow topology, verified against live ComfyUI /object_info at runtime:
 
-Default variant: Distilled BF16
-Fast mode: 8-step schedule
-Quality mode: 40-step schedule
+  UNETLoader + VAELoader(video) + CLIPLoader(type=ltxv)
+    → CLIPTextEncode → LTXVConditioning
+    → ModelSamplingLTXV → LTXVScheduler → RandomNoise → KSamplerSelect
+    → STGGuiderNode → LTXVBaseSampler
+    → LTXVSeparateAVLatent → LTXVTiledVAEDecode + LTXVAudioVAEDecode
+    → CreateVideo → SaveVideo
+
+No LTXV2* nodes exist in the official extension. The LTXV2TextToVideo,
+LTXV2ImgToVideo, and LTXV2FirstLastFrameToVideo class names used by the
+previous builder were invented and are NOT registered in the live ecosystem.
+
+Default variant: Distilled INT8 ConvRot.
+Fast mode: 8 steps. Quality mode: 40 steps.
 """
 
 from __future__ import annotations
@@ -25,8 +32,11 @@ def _resolve_steps(fast_mode: bool) -> int:
     return 8 if fast_mode else 40
 
 
-def _resolve_cfg() -> float:
-    return 3.0
+def _compute_frame_count(length_seconds: float, fps: int) -> int:
+    count = int(length_seconds * fps)
+    count = max(1, count)
+    count = ((count + 7) // 8) * 8 + 1
+    return count
 
 
 def build_ltx_25_t2v(
@@ -42,37 +52,207 @@ def build_ltx_25_t2v(
     generate_audio: bool = True,
     fast_mode: bool = True,
 ) -> dict[str, Any]:
-    """Build a ComfyUI workflow for LTX 2.5 Text-to-Video."""
+    """Build a ComfyUI workflow for LTX 2.5 Text-to-Video.
+
+    Uses the verified official topology:
+      UNETLoader → ModelSamplingLTXV → LTXVScheduler → LTXVBaseSampler
+      → LTXVTiledVAEDecode → CreateVideo → SaveVideo
+    """
     steps = _resolve_steps(fast_mode)
-    cfg = _resolve_cfg()
-    total_frames = max(1, int(length_seconds * fps))
+    total_frames = _compute_frame_count(length_seconds, fps)
 
-    n_ckpt = _nid(); n_vae = _nid(); n_te = _nid()
-    n_pos = _nid(); n_neg = _nid(); n_t2v = _nid()
-    n_noise = _nid(); n_sampler = _nid(); n_sched = _nid()
-    n_guider = _nid(); n_custom = _nid(); n_dec = _nid(); n_combine = _nid()
+    n_unet = _nid()
+    n_vae = _nid()
+    n_clip = _nid()
+    n_pos = _nid()
+    n_neg = _nid()
+    n_cond = _nid()
+    n_model_patch = _nid()
+    n_sched = _nid()
+    n_noise = _nid()
+    n_sampler = _nid()
+    n_guider = _nid()
+    n_base_sampler = _nid()
+    n_sep = _nid() if generate_audio else None
+    n_dec_video = _nid()
+    n_dec_audio = _nid() if generate_audio else None
+    n_avae = _nid() if generate_audio else None
+    n_create_video = _nid()
+    n_save = _nid()
 
-    wf: dict[str, Any] = {
-        n_ckpt: {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": settings.ltx_2_5_checkpoint}},
-        n_vae: {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_video_vae}},
-        n_te: {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": settings.ltx_2_5_text_encoder, "ckpt_name": settings.ltx_2_5_checkpoint, "device": "default"}},
-        n_pos: {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": [n_te, 0]}},
-        n_neg: {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt or "", "clip": [n_te, 0]}},
-        n_t2v: {"class_type": "LTXV2TextToVideo", "inputs": {"model": [n_ckpt, 0], "positive": [n_pos, 0], "negative": [n_neg, 0], "vae": [n_vae, 0], "width": width, "height": height, "length": total_frames, "batch_size": 1}},
-        n_noise: {"class_type": "RandomNoise", "inputs": {"noise_seed": seed if seed >= 0 else abs(hash(prompt)) % (2**31)}},
-        n_sampler: {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        n_sched: {"class_type": "BasicScheduler", "inputs": {"model": [n_t2v, 0], "scheduler": "normal", "steps": steps, "denoise": 1.0}},
-        n_guider: {"class_type": "CFGGuider", "inputs": {"model": [n_t2v, 0], "positive": [n_t2v, 1], "negative": [n_t2v, 2], "cfg": cfg}},
-        n_custom: {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [n_noise, 0], "guider": [n_guider, 0], "sampler": [n_sampler, 0], "sigmas": [n_sched, 0], "latent_image": [n_t2v, 3]}},
-        n_dec: {"class_type": "VAEDecode", "inputs": {"samples": [n_custom, 0], "vae": [n_vae, 0]}},
-        n_combine: {"class_type": "VHS_VideoCombine", "inputs": {"images": [n_dec, 0], "frame_rate": fps, "loop_count": 0, "filename_prefix": f"studio/ltx_25_t2v/{execution_id}", "format": "video/h264-mp4", "pingpong": False, "save_output": True}},
+    wf: dict[str, Any] = {}
+
+    wf[n_unet] = {
+        "class_type": "UNETLoader",
+        "inputs": {
+            "unet_name": settings.ltx_2_5_checkpoint,
+            "weight_dtype": "default",
+        },
+    }
+
+    wf[n_vae] = {
+        "class_type": "VAELoader",
+        "inputs": {"vae_name": settings.ltx_2_5_video_vae},
+    }
+
+    wf[n_clip] = {
+        "class_type": "CLIPLoader",
+        "inputs": {
+            "clip_name": settings.ltx_2_5_text_encoder,
+            "type": "ltxv",
+        },
+    }
+
+    wf[n_pos] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": prompt, "clip": [n_clip, 0]},
+    }
+
+    wf[n_neg] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": negative_prompt or "", "clip": [n_clip, 0]},
+    }
+
+    wf[n_cond] = {
+        "class_type": "LTXVConditioning",
+        "inputs": {
+            "positive": [n_pos, 0],
+            "negative": [n_neg, 0],
+            "frame_rate": float(fps),
+        },
+    }
+
+    wf[n_model_patch] = {
+        "class_type": "ModelSamplingLTXV",
+        "inputs": {
+            "model": [n_unet, 0],
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+        },
+    }
+
+    wf[n_sched] = {
+        "class_type": "LTXVScheduler",
+        "inputs": {
+            "steps": steps,
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+            "stretch": True,
+            "terminal": 0.1,
+        },
+    }
+
+    wf[n_noise] = {
+        "class_type": "RandomNoise",
+        "inputs": {
+            "noise_seed": seed if seed >= 0 else abs(hash(prompt)) % (2**31)
+        },
+    }
+
+    wf[n_sampler] = {
+        "class_type": "KSamplerSelect",
+        "inputs": {"sampler_name": "euler"},
+    }
+
+    wf[n_guider] = {
+        "class_type": "STGGuiderNode",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "positive": [n_cond, 0],
+            "negative": [n_cond, 1],
+            "cfg": 3.0,
+            "stg": 1.0,
+            "rescale": 0.7,
+        },
+    }
+
+    wf[n_base_sampler] = {
+        "class_type": "LTXVBaseSampler",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "vae": [n_vae, 0],
+            "width": width,
+            "height": height,
+            "num_frames": total_frames,
+            "guider": [n_guider, 0],
+            "sampler": [n_sampler, 0],
+            "sigmas": [n_sched, 0],
+            "noise": [n_noise, 0],
+        },
     }
 
     if generate_audio:
-        n_avae = _nid(); n_sep = _nid(); n_auddec = _nid()
-        wf[n_avae] = {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_audio_vae}}
-        wf[n_sep] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": [n_custom, 0]}}
-        wf[n_auddec] = {"class_type": "VAEDecode", "inputs": {"samples": [n_sep, 1], "vae": [n_avae, 0]}}
+        wf[n_avae] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
+        }
+
+        wf[n_sep] = {
+            "class_type": "LTXVSeparateAVLatent",
+            "inputs": {"av_latent": [n_base_sampler, 0]},
+        }
+
+        wf[n_dec_video] = {
+            "class_type": "LTXVTiledVAEDecode",
+            "inputs": {
+                "vae": [n_vae, 0],
+                "latents": [n_sep, 0],
+                "horizontal_tiles": 2,
+                "vertical_tiles": 2,
+                "overlap": 2,
+                "last_frame_fix": False,
+            },
+        }
+
+        wf[n_dec_audio] = {
+            "class_type": "LTXVAudioVAEDecode",
+            "inputs": {
+                "samples": [n_sep, 1],
+                "audio_vae": [n_avae, 0],
+            },
+        }
+
+        wf[n_create_video] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": [n_dec_video, 0],
+                "fps": float(fps),
+                "audio": [n_dec_audio, 0],
+                "bit_depth": 8,
+            },
+        }
+
+    else:
+        wf[n_dec_video] = {
+            "class_type": "LTXVTiledVAEDecode",
+            "inputs": {
+                "vae": [n_vae, 0],
+                "latents": [n_base_sampler, 0],
+                "horizontal_tiles": 2,
+                "vertical_tiles": 2,
+                "overlap": 2,
+                "last_frame_fix": False,
+            },
+        }
+
+        wf[n_create_video] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": [n_dec_video, 0],
+                "fps": float(fps),
+                "bit_depth": 8,
+            },
+        }
+
+    wf[n_save] = {
+        "class_type": "SaveVideo",
+        "inputs": {
+            "video": [n_create_video, 0],
+            "filename_prefix": f"studio/ltx_25_t2v/{execution_id}",
+            "format": "mp4",
+            "codec": "auto",
+        },
+    }
 
     return wf
 
@@ -91,91 +271,227 @@ def build_ltx_25_i2v(
     generate_audio: bool = True,
     fast_mode: bool = True,
 ) -> dict[str, Any]:
-    """Build a ComfyUI workflow for LTX 2.5 Image-to-Video."""
+    """Build a ComfyUI workflow for LTX 2.5 Image-to-Video.
+
+    Uses LTXVImgToVideo for image conditioning, then routes into the
+    standard LTX 2.5 sampler/decode/output pipeline.
+    """
     steps = _resolve_steps(fast_mode)
-    cfg = _resolve_cfg()
-    total_frames = max(1, int(length_seconds * fps))
+    total_frames = _compute_frame_count(length_seconds, fps)
 
-    n_ckpt = _nid(); n_vae = _nid(); n_te = _nid()
-    n_pos = _nid(); n_neg = _nid(); n_img = _nid()
-    n_i2v = _nid(); n_noise = _nid(); n_sampler = _nid()
-    n_sched = _nid(); n_guider = _nid(); n_custom = _nid()
-    n_dec = _nid(); n_combine = _nid()
+    n_unet = _nid()
+    n_vae = _nid()
+    n_clip = _nid()
+    n_pos = _nid()
+    n_neg = _nid()
+    n_cond = _nid()
+    n_img = _nid()
+    n_i2v = _nid()
+    n_model_patch = _nid()
+    n_sched = _nid()
+    n_noise = _nid()
+    n_sampler = _nid()
+    n_guider = _nid()
+    n_base_sampler = _nid()
+    n_sep = _nid() if generate_audio else None
+    n_dec_video = _nid()
+    n_dec_audio = _nid() if generate_audio else None
+    n_avae = _nid() if generate_audio else None
+    n_create_video = _nid()
+    n_save = _nid()
 
-    wf: dict[str, Any] = {
-        n_ckpt: {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": settings.ltx_2_5_checkpoint}},
-        n_vae: {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_video_vae}},
-        n_te: {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": settings.ltx_2_5_text_encoder, "ckpt_name": settings.ltx_2_5_checkpoint, "device": "default"}},
-        n_pos: {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": [n_te, 0]}},
-        n_neg: {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt or "", "clip": [n_te, 0]}},
-        n_img: {"class_type": "LoadImage", "inputs": {"image": start_image_path}},
-        n_i2v: {"class_type": "LTXV2ImgToVideo", "inputs": {"model": [n_ckpt, 0], "positive": [n_pos, 0], "negative": [n_neg, 0], "vae": [n_vae, 0], "image": [n_img, 0], "width": width, "height": height, "length": total_frames, "batch_size": 1, "strength": 0.95}},
-        n_noise: {"class_type": "RandomNoise", "inputs": {"noise_seed": seed if seed >= 0 else abs(hash(prompt)) % (2**31)}},
-        n_sampler: {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        n_sched: {"class_type": "BasicScheduler", "inputs": {"model": [n_i2v, 0], "scheduler": "normal", "steps": steps, "denoise": 1.0}},
-        n_guider: {"class_type": "CFGGuider", "inputs": {"model": [n_i2v, 0], "positive": [n_i2v, 1], "negative": [n_i2v, 2], "cfg": cfg}},
-        n_custom: {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [n_noise, 0], "guider": [n_guider, 0], "sampler": [n_sampler, 0], "sigmas": [n_sched, 0], "latent_image": [n_i2v, 3]}},
-        n_dec: {"class_type": "VAEDecode", "inputs": {"samples": [n_custom, 0], "vae": [n_vae, 0]}},
-        n_combine: {"class_type": "VHS_VideoCombine", "inputs": {"images": [n_dec, 0], "frame_rate": fps, "loop_count": 0, "filename_prefix": f"studio/ltx_25_i2v/{execution_id}", "format": "video/h264-mp4", "pingpong": False, "save_output": True}},
+    wf: dict[str, Any] = {}
+
+    wf[n_unet] = {
+        "class_type": "UNETLoader",
+        "inputs": {
+            "unet_name": settings.ltx_2_5_checkpoint,
+            "weight_dtype": "default",
+        },
+    }
+
+    wf[n_vae] = {
+        "class_type": "VAELoader",
+        "inputs": {"vae_name": settings.ltx_2_5_video_vae},
+    }
+
+    wf[n_clip] = {
+        "class_type": "CLIPLoader",
+        "inputs": {
+            "clip_name": settings.ltx_2_5_text_encoder,
+            "type": "ltxv",
+        },
+    }
+
+    wf[n_pos] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": prompt, "clip": [n_clip, 0]},
+    }
+
+    wf[n_neg] = {
+        "class_type": "CLIPTextEncode",
+        "inputs": {"text": negative_prompt or "", "clip": [n_clip, 0]},
+    }
+
+    wf[n_cond] = {
+        "class_type": "LTXVConditioning",
+        "inputs": {
+            "positive": [n_pos, 0],
+            "negative": [n_neg, 0],
+            "frame_rate": float(fps),
+        },
+    }
+
+    wf[n_img] = {
+        "class_type": "LoadImage",
+        "inputs": {"image": start_image_path},
+    }
+
+    wf[n_i2v] = {
+        "class_type": "LTXVImgToVideo",
+        "inputs": {
+            "positive": [n_cond, 0],
+            "negative": [n_cond, 1],
+            "vae": [n_vae, 0],
+            "image": [n_img, 0],
+            "width": width,
+            "height": height,
+            "length": total_frames,
+            "batch_size": 1,
+            "strength": 0.95,
+        },
+    }
+
+    wf[n_model_patch] = {
+        "class_type": "ModelSamplingLTXV",
+        "inputs": {
+            "model": [n_unet, 0],
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+        },
+    }
+
+    wf[n_sched] = {
+        "class_type": "LTXVScheduler",
+        "inputs": {
+            "steps": steps,
+            "max_shift": 2.05,
+            "base_shift": 0.95,
+            "stretch": True,
+            "terminal": 0.1,
+        },
+    }
+
+    wf[n_noise] = {
+        "class_type": "RandomNoise",
+        "inputs": {
+            "noise_seed": seed if seed >= 0 else abs(hash(prompt)) % (2**31)
+        },
+    }
+
+    wf[n_sampler] = {
+        "class_type": "KSamplerSelect",
+        "inputs": {"sampler_name": "euler"},
+    }
+
+    wf[n_guider] = {
+        "class_type": "STGGuiderNode",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "positive": [n_i2v, 0],
+            "negative": [n_i2v, 1],
+            "cfg": 3.0,
+            "stg": 1.0,
+            "rescale": 0.7,
+        },
+    }
+
+    wf[n_base_sampler] = {
+        "class_type": "LTXVBaseSampler",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "vae": [n_vae, 0],
+            "width": width,
+            "height": height,
+            "num_frames": total_frames,
+            "guider": [n_guider, 0],
+            "sampler": [n_sampler, 0],
+            "sigmas": [n_sched, 0],
+            "noise": [n_noise, 0],
+        },
     }
 
     if generate_audio:
-        n_avae = _nid(); n_sep = _nid(); n_auddec = _nid()
-        wf[n_avae] = {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_audio_vae}}
-        wf[n_sep] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": [n_custom, 0]}}
-        wf[n_auddec] = {"class_type": "VAEDecode", "inputs": {"samples": [n_sep, 1], "vae": [n_avae, 0]}}
+        wf[n_avae] = {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
+        }
 
-    return wf
+        wf[n_sep] = {
+            "class_type": "LTXVSeparateAVLatent",
+            "inputs": {"av_latent": [n_base_sampler, 0]},
+        }
 
+        wf[n_dec_video] = {
+            "class_type": "LTXVTiledVAEDecode",
+            "inputs": {
+                "vae": [n_vae, 0],
+                "latents": [n_sep, 0],
+                "horizontal_tiles": 2,
+                "vertical_tiles": 2,
+                "overlap": 2,
+                "last_frame_fix": False,
+            },
+        }
 
-def build_ltx_25_flf2v(
-    settings: Any,
-    execution_id: str,
-    prompt: str,
-    negative_prompt: str = "",
-    start_image_path: str = "",
-    end_image_path: str = "",
-    width: int = 1280,
-    height: int = 720,
-    length_seconds: float = 5.0,
-    fps: int = 24,
-    seed: int = 0,
-    generate_audio: bool = True,
-    fast_mode: bool = True,
-) -> dict[str, Any]:
-    """Build a ComfyUI workflow for LTX 2.5 First/Last-Frame Image-to-Video."""
-    steps = _resolve_steps(fast_mode)
-    cfg = _resolve_cfg()
-    total_frames = max(1, int(length_seconds * fps))
+        wf[n_dec_audio] = {
+            "class_type": "LTXVAudioVAEDecode",
+            "inputs": {
+                "samples": [n_sep, 1],
+                "audio_vae": [n_avae, 0],
+            },
+        }
 
-    n_ckpt = _nid(); n_vae = _nid(); n_te = _nid()
-    n_pos = _nid(); n_neg = _nid(); n_start_img = _nid()
-    n_end_img = _nid(); n_flf = _nid(); n_noise = _nid()
-    n_sampler = _nid(); n_sched = _nid(); n_guider = _nid()
-    n_custom = _nid(); n_dec = _nid(); n_combine = _nid()
+        wf[n_create_video] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": [n_dec_video, 0],
+                "fps": float(fps),
+                "audio": [n_dec_audio, 0],
+                "bit_depth": 8,
+            },
+        }
 
-    wf: dict[str, Any] = {
-        n_ckpt: {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": settings.ltx_2_5_checkpoint}},
-        n_vae: {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_video_vae}},
-        n_te: {"class_type": "LTXAVTextEncoderLoader", "inputs": {"text_encoder": settings.ltx_2_5_text_encoder, "ckpt_name": settings.ltx_2_5_checkpoint, "device": "default"}},
-        n_pos: {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": [n_te, 0]}},
-        n_neg: {"class_type": "CLIPTextEncode", "inputs": {"text": negative_prompt or "", "clip": [n_te, 0]}},
-        n_start_img: {"class_type": "LoadImage", "inputs": {"image": start_image_path}},
-        n_end_img: {"class_type": "LoadImage", "inputs": {"image": end_image_path}},
-        n_flf: {"class_type": "LTXV2FirstLastFrameToVideo", "inputs": {"model": [n_ckpt, 0], "positive": [n_pos, 0], "negative": [n_neg, 0], "vae": [n_vae, 0], "start_image": [n_start_img, 0], "end_image": [n_end_img, 0], "width": width, "height": height, "length": total_frames, "batch_size": 1, "strength": 0.95}},
-        n_noise: {"class_type": "RandomNoise", "inputs": {"noise_seed": seed if seed >= 0 else abs(hash(prompt)) % (2**31)}},
-        n_sampler: {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
-        n_sched: {"class_type": "BasicScheduler", "inputs": {"model": [n_flf, 0], "scheduler": "normal", "steps": steps, "denoise": 1.0}},
-        n_guider: {"class_type": "CFGGuider", "inputs": {"model": [n_flf, 0], "positive": [n_flf, 1], "negative": [n_flf, 2], "cfg": cfg}},
-        n_custom: {"class_type": "SamplerCustomAdvanced", "inputs": {"noise": [n_noise, 0], "guider": [n_guider, 0], "sampler": [n_sampler, 0], "sigmas": [n_sched, 0], "latent_image": [n_flf, 3]}},
-        n_dec: {"class_type": "VAEDecode", "inputs": {"samples": [n_custom, 0], "vae": [n_vae, 0]}},
-        n_combine: {"class_type": "VHS_VideoCombine", "inputs": {"images": [n_dec, 0], "frame_rate": fps, "loop_count": 0, "filename_prefix": f"studio/ltx_25_flf2v/{execution_id}", "format": "video/h264-mp4", "pingpong": False, "save_output": True}},
+    else:
+        wf[n_dec_video] = {
+            "class_type": "LTXVTiledVAEDecode",
+            "inputs": {
+                "vae": [n_vae, 0],
+                "latents": [n_base_sampler, 0],
+                "horizontal_tiles": 2,
+                "vertical_tiles": 2,
+                "overlap": 2,
+                "last_frame_fix": False,
+            },
+        }
+
+        wf[n_create_video] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": [n_dec_video, 0],
+                "fps": float(fps),
+                "bit_depth": 8,
+            },
+        }
+
+    wf[n_save] = {
+        "class_type": "SaveVideo",
+        "inputs": {
+            "video": [n_create_video, 0],
+            "filename_prefix": f"studio/ltx_25_i2v/{execution_id}",
+            "format": "mp4",
+            "codec": "auto",
+        },
     }
-
-    if generate_audio:
-        n_avae = _nid(); n_sep = _nid(); n_auddec = _nid()
-        wf[n_avae] = {"class_type": "VAELoader", "inputs": {"vae_name": settings.ltx_2_5_audio_vae}}
-        wf[n_sep] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": [n_custom, 0]}}
-        wf[n_auddec] = {"class_type": "VAEDecode", "inputs": {"samples": [n_sep, 1], "vae": [n_avae, 0]}}
 
     return wf

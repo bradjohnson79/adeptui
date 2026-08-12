@@ -229,32 +229,42 @@ export function CoDirectorStatusPanel() {
         <section>
           <p className="eyebrow">Category Readiness</p>
           <div className="codirector-status-categories">
-            {statusLatestRun.categories.map((category) => (
-              <details key={category.category} className="codirector-status-category" open={category.blocked > 0}>
-                <summary>
-                  <span>{category.label}</span>
-                  <span className="muted">
-                    {category.healthy}/{category.total} healthy
-                  </span>
-                </summary>
-                <ul className="activity-feed">
-                  {statusLatestRun.results
-                    .filter((result) => result.category === category.category)
-                    .map((result) => (
-                      <li key={result.checkId}>
-                        <strong>{result.title}</strong>
-                        <span>
-                          {result.status.replace(/_/g, " ")} · {result.summary}
-                        </span>
-                        <details>
-                          <summary>Technical Information</summary>
-                          <pre className="explain-panel">{JSON.stringify(result.details, null, 2)}</pre>
-                        </details>
-                      </li>
-                    ))}
-                </ul>
-              </details>
-            ))}
+            {statusLatestRun.categories.map((category) => {
+              // Domain-specific counter wording so unrelated concepts don't share one
+              // denominator. Runtime checks use "healthy"; generator/model checks use
+              // "ready"/"incomplete". Falls back to "healthy" for unknown categories.
+              const catKey = String(category.category || "").toLowerCase();
+              const isGenerators = catKey.includes("model") || catKey.includes("generator") || catKey.includes("video") || catKey.includes("image");
+              const readyWord = isGenerators ? "ready" : "healthy";
+              const incomplete = category.total - category.healthy;
+              const counterLabel = isGenerators && incomplete > 0
+                ? `${category.healthy}/${category.total} ready · ${incomplete} incomplete`
+                : `${category.healthy}/${category.total} ${readyWord}`;
+              return (
+                <details key={category.category} className="codirector-status-category" open={category.blocked > 0}>
+                  <summary>
+                    <span>{category.label}</span>
+                    <span className="muted">{counterLabel}</span>
+                  </summary>
+                  <ul className="activity-feed">
+                    {statusLatestRun.results
+                      .filter((result) => result.category === category.category)
+                      .map((result) => (
+                        <li key={result.checkId}>
+                          <strong>{result.title}</strong>
+                          <span>
+                            {result.status.replace(/_/g, " ")} · {result.summary}
+                          </span>
+                          <details>
+                            <summary>Technical Information</summary>
+                            <pre className="explain-panel">{JSON.stringify(result.details, null, 2)}</pre>
+                          </details>
+                        </li>
+                      ))}
+                  </ul>
+                </details>
+              );
+            })}
           </div>
         </section>
       )}

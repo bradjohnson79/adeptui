@@ -162,6 +162,7 @@ export interface Health {
       summary?: string | null;
     }>;
     missingModelComponentIds?: string[];
+    missingRequiredModelComponentIds?: string[];
   };
   operator?: {
     api?: string;

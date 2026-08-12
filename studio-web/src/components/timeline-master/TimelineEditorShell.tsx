@@ -84,6 +84,7 @@ export function TimelineEditorShell({
   const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [preflightSummary, setPreflightSummary] = useState("Not run yet");
+  const [preflightBlockingCount, setPreflightBlockingCount] = useState(0);
   const [rightTab, setRightTab] = useState<"inspector" | "codirector">("inspector");
   const [undoStack, setUndoStack] = useState<DirectorTimeline[]>([]);
   const [redoStack, setRedoStack] = useState<DirectorTimeline[]>([]);
@@ -580,7 +581,32 @@ export function TimelineEditorShell({
             aria-label="Run Co-Director Preflight for this Scene"
             onClick={() =>
               void api.directorTimelinePreflight(project.id, selected.id).then((result) => {
-                setPreflightSummary(result.findings.length ? `${result.findings.length} finding(s)` : "Ready");
+                // Surface severity/code from findings instead of just a count. Block only
+                // on blocking severities (error/critical); warnings/advisories do not block
+                // generation. This consumes the refined preflight contract directly rather
+                // than reconstructing readiness from a count.
+                const blocking = result.findings.filter((f) =>
+                  ["error", "critical", "blocker"].includes(String(f.severity || "").toLowerCase()),
+                );
+                setPreflightBlockingCount(blocking.length);
+                const advisories = result.findings.filter((f) =>
+                  ["warning", "advisory", "info"].includes(String(f.severity || "").toLowerCase()),
+                );
+                const summaryParts: string[] = [];
+                if (blocking.length) {
+                  const codes = [...new Set(blocking.map((f) => f.code || f.severity).filter(Boolean))];
+                  summaryParts.push(`${blocking.length} blocking (${codes.join(", ")})`);
+                }
+                if (advisories.length) {
+                  summaryParts.push(`${advisories.length} advisory`);
+                }
+                setPreflightSummary(
+                  blocking.length
+                    ? `Blocked: ${summaryParts.join(" · ")}`
+                    : result.findings.length
+                      ? `Ready with ${summaryParts.join(" · ") || `${result.findings.length} finding(s)`}`
+                      : "Ready",
+                );
                 void afterMutation();
               })
             }
@@ -590,8 +616,13 @@ export function TimelineEditorShell({
           <button
             type="button"
             className="timeline-scene-header__btn primary"
-            title="Generate the full Scene with the Timeline orchestrator"
+            title={
+              preflightBlockingCount > 0
+                ? `Blocked: ${preflightBlockingCount} blocking preflight finding(s). Run Preflight to see details.`
+                : "Generate the full Scene with the Timeline orchestrator"
+            }
             aria-label="Generate the full Scene with the Timeline orchestrator"
+            disabled={preflightBlockingCount > 0}
             onClick={() => void api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }).then(afterMutation)}
           >
             Generate Scene

@@ -28,6 +28,13 @@ WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
     "ltx.scene": ("ltx_checkpoint",),
     "ltx.simple_i2v": ("ltx_checkpoint",),
     "ltx.ingredients_ic_lora": ("ltx_checkpoint", "ltx23_ic_lora_ingredients"),
+    # LTX 2.5 needs the distilled transformer, the Gemma 4 text encoder, and
+    # the video VAE together. Audio VAE is only needed when generate_audio=True,
+    # and the spatial upscaler is optional (4K), so they are not in `required`
+    # here — workflow readiness reports them as optional via the capability layer.
+    "ltx_25.t2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
+    "ltx_25.i2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),
+    "ltx_25.flf2v": ("ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"),  # noqa: E501 — key preserved for compatibility; builder removed (FLF2V unsupported)
     "wan.first_last_frame": ("wan_models",),
     "wan.three_frame": ("wan_models",),
     "lipsync.latentsync": (),
@@ -94,7 +101,7 @@ def list_workflows() -> list[dict[str, Any]]:
 
 
 def _component_states(component_ids: Iterable[str]) -> list[dict[str, Any]]:
-    from ..setup.catalog import get_component
+    from ..setup.catalog import get_component, dependency_type_for
     from ..setup.diagnostics import verify_component
 
     states: list[dict[str, Any]] = []
@@ -109,6 +116,7 @@ def _component_states(component_ids: Iterable[str]) -> list[dict[str, Any]]:
                     "present": bool(verification.healthy),
                     "issueCode": verification.issue_code,
                     "summary": verification.summary,
+                    "dependencyType": dependency_type_for(component_id),
                 }
             )
         except Exception:  # noqa: BLE001
