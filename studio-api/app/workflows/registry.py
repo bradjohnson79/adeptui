@@ -201,8 +201,8 @@ WORKFLOW_INVENTORY = (
         required_inputs=("settings", "execution_id", "prompt", "width", "height", "length_seconds", "fps", "seed"),
         required_node_types=(
             "UNETLoader", "VAELoader", "CLIPLoader",
-            "CLIPTextEncode", "LTXVConditioning", "EmptyLTXVLatentVideo",
-            "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+            "CLIPTextEncode", "LTXVConditioning",
+            "ModelSamplingLTXV", "LTXVApplySTG", "LTXVScheduler", "RandomNoise",
             "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
             "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo",
         ),
@@ -218,7 +218,7 @@ WORKFLOW_INVENTORY = (
         required_node_types=(
             "UNETLoader", "VAELoader", "CLIPLoader",
             "CLIPTextEncode", "LTXVConditioning", "LoadImage", "LTXVImgToVideo",
-            "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
+            "ModelSamplingLTXV", "LTXVApplySTG", "LTXVScheduler", "RandomNoise",
             "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
             "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo",
         ),

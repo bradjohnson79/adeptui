@@ -68,6 +68,13 @@ def get_character(project_id: str, character_id: str, db: Session = Depends(get_
     return service.get_profile(db, project_id, character_id).model_dump()
 
 
+@router.delete("/projects/{project_id}/characters/{character_id}")
+def delete_character(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    return service.delete_profile(db, project_id, character_id)
+
+
 @router.patch("/projects/{project_id}/characters/{character_id}")
 def patch_character(
     project_id: str, character_id: str, body: CharacterProfileUpdate, db: Session = Depends(get_db)

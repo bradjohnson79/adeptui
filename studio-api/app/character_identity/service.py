@@ -1196,3 +1196,59 @@ def prompt_hints(db: Session, project_id: str, character_id: str, *, shot_kind: 
         "voice_profile_id": out.active_voice_profile_id,
         "coverage": out.coverage.model_dump() if out.coverage else None,
     }
+
+
+def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
+    """Permanently delete a character profile and all owned child records.
+
+    This deletes ONLY character-owned rows from the character_identity schema.
+    Shared project assets (Library images, Voice Studio voices) are NOT
+    automatically deleted — they remain as reusable project resources.
+
+    Returns the deleted character's name for confirmation UI.
+    """
+    row = db.get(CharacterProfileRow, character_id)
+    if not row or row.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+
+    name = row.name
+
+    voice_ids = [
+        vp[0]
+        for vp in db.query(VoiceProfileRow.id)
+        .filter(VoiceProfileRow.character_profile_id == character_id)
+        .all()
+    ]
+
+    if voice_ids:
+        db.query(VoiceConsentRecordRow).filter(
+            VoiceConsentRecordRow.voice_profile_id.in_(voice_ids)
+        ).delete(synchronize_session=False)
+
+    db.query(VoiceProfileRow).filter(
+        VoiceProfileRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.query(CharacterTraitRow).filter(
+        CharacterTraitRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.query(CharacterPropRow).filter(
+        CharacterPropRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.query(CharacterWardrobeRow).filter(
+        CharacterWardrobeRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.query(CharacterReferenceAssetRow).filter(
+        CharacterReferenceAssetRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.query(CharacterVersionRow).filter(
+        CharacterVersionRow.character_profile_id == character_id
+    ).delete(synchronize_session=False)
+
+    db.delete(row)
+    db.commit()
+    return {"deleted": True, "name": name}

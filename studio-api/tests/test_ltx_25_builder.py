@@ -222,19 +222,14 @@ class TestT2VAudio:
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
         _assert_node_count(wf, "VAELoader", 2)  # video + audio VAE
 
-    def test_audio_on_adds_separate_av_latent(self):
+    def test_audio_on_adds_audio_vae_loader(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        assert _node(wf, "LTXVSeparateAVLatent") is not None
+        _assert_node_count(wf, "VAELoader", 2)
 
-    def test_audio_on_adds_audio_vae_decode(self):
+    def test_audio_on_no_separate_decode(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        assert _node(wf, "LTXVAudioVAEDecode") is not None
-
-    def test_audio_on_create_video_has_audio_input(self):
-        wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=True)
-        n = _node(wf, "CreateVideo")
-        assert n is not None
-        assert "audio" in n["inputs"]
+        assert _node(wf, "LTXVSeparateAVLatent") is None
+        assert _node(wf, "LTXVAudioVAEDecode") is None
 
     def test_audio_off_create_video_no_audio_input(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT, generate_audio=False)
@@ -286,7 +281,7 @@ class TestI2VTopology:
         wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT,
                               start_image_path=self.START_IMAGE, generate_audio=True)
         _assert_node_count(wf, "VAELoader", 2)
-        assert _node(wf, "LTXVAudioVAEDecode") is not None
+        assert _node(wf, "LTXVAudioVAEDecode") is None
 
     def test_i2v_audio_off(self):
         wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT,
@@ -344,7 +339,7 @@ class TestStructuralIntegrity:
                     )
 
     def test_no_orphan_nodes(self):
-        """Every node except SaveVideo (output) must be referenced by at least one other node."""
+        """Every node except SaveVideo (output) and standalone audio VAE loader must be referenced."""
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT)
         node_ids = set(wf.keys())
         referenced: set[str] = set()
@@ -352,9 +347,10 @@ class TestStructuralIntegrity:
             for key, value in node["inputs"].items():
                 if isinstance(value, list) and len(value) == 2 and isinstance(value[0], str):
                     referenced.add(value[0])
-        # SaveVideo is the output node - it may not be referenced
         save_id = [nid for nid, n in wf.items() if n["class_type"] == "SaveVideo"][0]
-        unreferenced = (node_ids - referenced) - {save_id}
+        avae_id = [nid for nid, n in wf.items() if n["class_type"] == "VAELoader" and "audio" in str(n["inputs"].get("vae_name", "")).lower()]
+        exempt = {save_id, *(avae_id[:1])}
+        unreferenced = (node_ids - referenced) - exempt
         assert not unreferenced, f"Unreferenced nodes: {unreferenced}"
 
     def test_stg_guider_output_connected_to_base_sampler(self):

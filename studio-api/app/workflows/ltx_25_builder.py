@@ -68,6 +68,7 @@ def build_ltx_25_t2v(
     n_neg = _nid()
     n_cond = _nid()
     n_model_patch = _nid()
+    n_stg_apply = _nid()
     n_sched = _nid()
     n_noise = _nid()
     n_sampler = _nid()
@@ -131,6 +132,14 @@ def build_ltx_25_t2v(
         },
     }
 
+    wf[n_stg_apply] = {
+        "class_type": "LTXVApplySTG",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "block_indices": "14, 19",
+        },
+    }
+
     wf[n_sched] = {
         "class_type": "LTXVScheduler",
         "inputs": {
@@ -157,7 +166,7 @@ def build_ltx_25_t2v(
     wf[n_guider] = {
         "class_type": "STGGuiderNode",
         "inputs": {
-            "model": [n_model_patch, 0],
+            "model": [n_stg_apply, 0],
             "positive": [n_cond, 0],
             "negative": [n_cond, 1],
             "cfg": 3.0,
@@ -169,7 +178,7 @@ def build_ltx_25_t2v(
     wf[n_base_sampler] = {
         "class_type": "LTXVBaseSampler",
         "inputs": {
-            "model": [n_model_patch, 0],
+            "model": [n_stg_apply, 0],
             "vae": [n_vae, 0],
             "width": width,
             "height": height,
@@ -187,62 +196,26 @@ def build_ltx_25_t2v(
             "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
         }
 
-        wf[n_sep] = {
-            "class_type": "LTXVSeparateAVLatent",
-            "inputs": {"av_latent": [n_base_sampler, 0]},
-        }
+    wf[n_dec_video] = {
+        "class_type": "LTXVTiledVAEDecode",
+        "inputs": {
+            "vae": [n_vae, 0],
+            "latents": [n_base_sampler, 0],
+            "horizontal_tiles": 2,
+            "vertical_tiles": 2,
+            "overlap": 2,
+            "last_frame_fix": False,
+        },
+    }
 
-        wf[n_dec_video] = {
-            "class_type": "LTXVTiledVAEDecode",
-            "inputs": {
-                "vae": [n_vae, 0],
-                "latents": [n_sep, 0],
-                "horizontal_tiles": 2,
-                "vertical_tiles": 2,
-                "overlap": 2,
-                "last_frame_fix": False,
-            },
-        }
-
-        wf[n_dec_audio] = {
-            "class_type": "LTXVAudioVAEDecode",
-            "inputs": {
-                "samples": [n_sep, 1],
-                "audio_vae": [n_avae, 0],
-            },
-        }
-
-        wf[n_create_video] = {
-            "class_type": "CreateVideo",
-            "inputs": {
-                "images": [n_dec_video, 0],
-                "fps": float(fps),
-                "audio": [n_dec_audio, 0],
-                "bit_depth": 8,
-            },
-        }
-
-    else:
-        wf[n_dec_video] = {
-            "class_type": "LTXVTiledVAEDecode",
-            "inputs": {
-                "vae": [n_vae, 0],
-                "latents": [n_base_sampler, 0],
-                "horizontal_tiles": 2,
-                "vertical_tiles": 2,
-                "overlap": 2,
-                "last_frame_fix": False,
-            },
-        }
-
-        wf[n_create_video] = {
-            "class_type": "CreateVideo",
-            "inputs": {
-                "images": [n_dec_video, 0],
-                "fps": float(fps),
-                "bit_depth": 8,
-            },
-        }
+    wf[n_create_video] = {
+        "class_type": "CreateVideo",
+        "inputs": {
+            "images": [n_dec_video, 0],
+            "fps": float(fps),
+            "bit_depth": 8,
+        },
+    }
 
     wf[n_save] = {
         "class_type": "SaveVideo",
@@ -288,15 +261,14 @@ def build_ltx_25_i2v(
     n_img = _nid()
     n_i2v = _nid()
     n_model_patch = _nid()
+    n_stg_apply = _nid()
     n_sched = _nid()
     n_noise = _nid()
     n_sampler = _nid()
     n_guider = _nid()
     n_base_sampler = _nid()
-    n_sep = _nid() if generate_audio else None
-    n_dec_video = _nid()
-    n_dec_audio = _nid() if generate_audio else None
     n_avae = _nid() if generate_audio else None
+    n_dec_video = _nid()
     n_create_video = _nid()
     n_save = _nid()
 
@@ -371,6 +343,14 @@ def build_ltx_25_i2v(
         },
     }
 
+    wf[n_stg_apply] = {
+        "class_type": "LTXVApplySTG",
+        "inputs": {
+            "model": [n_model_patch, 0],
+            "block_indices": "14, 19",
+        },
+    }
+
     wf[n_sched] = {
         "class_type": "LTXVScheduler",
         "inputs": {
@@ -397,7 +377,7 @@ def build_ltx_25_i2v(
     wf[n_guider] = {
         "class_type": "STGGuiderNode",
         "inputs": {
-            "model": [n_model_patch, 0],
+            "model": [n_stg_apply, 0],
             "positive": [n_i2v, 0],
             "negative": [n_i2v, 1],
             "cfg": 3.0,
@@ -409,7 +389,7 @@ def build_ltx_25_i2v(
     wf[n_base_sampler] = {
         "class_type": "LTXVBaseSampler",
         "inputs": {
-            "model": [n_model_patch, 0],
+            "model": [n_stg_apply, 0],
             "vae": [n_vae, 0],
             "width": width,
             "height": height,
@@ -427,62 +407,26 @@ def build_ltx_25_i2v(
             "inputs": {"vae_name": settings.ltx_2_5_audio_vae},
         }
 
-        wf[n_sep] = {
-            "class_type": "LTXVSeparateAVLatent",
-            "inputs": {"av_latent": [n_base_sampler, 0]},
-        }
+    wf[n_dec_video] = {
+        "class_type": "LTXVTiledVAEDecode",
+        "inputs": {
+            "vae": [n_vae, 0],
+            "latents": [n_base_sampler, 0],
+            "horizontal_tiles": 2,
+            "vertical_tiles": 2,
+            "overlap": 2,
+            "last_frame_fix": False,
+        },
+    }
 
-        wf[n_dec_video] = {
-            "class_type": "LTXVTiledVAEDecode",
-            "inputs": {
-                "vae": [n_vae, 0],
-                "latents": [n_sep, 0],
-                "horizontal_tiles": 2,
-                "vertical_tiles": 2,
-                "overlap": 2,
-                "last_frame_fix": False,
-            },
-        }
-
-        wf[n_dec_audio] = {
-            "class_type": "LTXVAudioVAEDecode",
-            "inputs": {
-                "samples": [n_sep, 1],
-                "audio_vae": [n_avae, 0],
-            },
-        }
-
-        wf[n_create_video] = {
-            "class_type": "CreateVideo",
-            "inputs": {
-                "images": [n_dec_video, 0],
-                "fps": float(fps),
-                "audio": [n_dec_audio, 0],
-                "bit_depth": 8,
-            },
-        }
-
-    else:
-        wf[n_dec_video] = {
-            "class_type": "LTXVTiledVAEDecode",
-            "inputs": {
-                "vae": [n_vae, 0],
-                "latents": [n_base_sampler, 0],
-                "horizontal_tiles": 2,
-                "vertical_tiles": 2,
-                "overlap": 2,
-                "last_frame_fix": False,
-            },
-        }
-
-        wf[n_create_video] = {
-            "class_type": "CreateVideo",
-            "inputs": {
-                "images": [n_dec_video, 0],
-                "fps": float(fps),
-                "bit_depth": 8,
-            },
-        }
+    wf[n_create_video] = {
+        "class_type": "CreateVideo",
+        "inputs": {
+            "images": [n_dec_video, 0],
+            "fps": float(fps),
+            "bit_depth": 8,
+        },
+    }
 
     wf[n_save] = {
         "class_type": "SaveVideo",

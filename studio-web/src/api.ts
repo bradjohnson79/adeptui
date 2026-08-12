@@ -6556,6 +6556,11 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}`,
       { method: "PATCH", body: JSON.stringify(body) },
     ),
+  deleteCharacterProfile: (projectId: string, characterId: string) =>
+    req<{ deleted: boolean; name: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}`,
+      { method: "DELETE" },
+    ),
   listCharacterVersions: (projectId: string, characterId: string) =>
     req<{ items: any[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/versions`,

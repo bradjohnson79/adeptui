@@ -246,6 +246,9 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [refImageBusy, setRefImageBusy] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const patcher = useDebouncedPatch();
 
@@ -576,6 +579,21 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
     },
     [projectId, characterId, profile, approvedImage, refresh],
   );
+
+  const handleDelete = useCallback(async () => {
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await api.deleteCharacterProfile(projectId, characterId);
+      setDeleteConfirm(false);
+      setDeleteBusy(false);
+      try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
+      onOpenFull?.("__delete__");
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e));
+      setDeleteBusy(false);
+    }
+  }, [projectId, characterId, draftKey, onOpenFull]);
 
   const handleOpenFull = useCallback(async () => {
     await patcher.flush();
@@ -908,43 +926,92 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       ) : null}
 
       <div className="character-compact__actions">
-        <button
-          type="button"
-          className="character-compact__actions-button primary"
-          data-testid="character-compact-save"
-          disabled={!profile.name?.trim()}
-          onClick={async () => {
-            await patcher.flush();
-            try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
-            setSavedMsg("Character Saved ✓");
-            setTimeout(() => setSavedMsg(""), 2500);
-          }}
-        >
-          Save Character
-        </button>
-        <button
-          type="button"
-          className="character-compact__actions-button"
-          data-testid="character-compact-reset"
-          onClick={() => {
-            if (window.confirm("Reset? This clears unsaved changes and reverts to the last saved state.")) {
+        <div className="character-compact__actions-left">
+          <button
+            type="button"
+            className="character-compact__actions-button primary"
+            data-testid="character-compact-save"
+            disabled={!profile.name?.trim()}
+            onClick={async () => {
+              await patcher.flush();
               try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
-              void refresh();
-              setCandidates([]);
-            }
-          }}
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          className="character-compact__actions-button"
-          data-testid="character-compact-open-full"
-          onClick={() => void handleOpenFull()}
-        >
-          Open Full Character Creator
-        </button>
+              setSavedMsg("Character Saved ✓");
+              setTimeout(() => setSavedMsg(""), 2500);
+            }}
+          >
+            Save Character
+          </button>
+          <button
+            type="button"
+            className="character-compact__actions-button"
+            data-testid="character-compact-reset"
+            onClick={() => {
+              if (window.confirm("Reset? This clears unsaved changes and reverts to the last saved state.")) {
+                try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
+                void refresh();
+                setCandidates([]);
+              }
+            }}
+          >
+            Reset
+          </button>
+          <button
+            type="button"
+            className="character-compact__actions-button"
+            data-testid="character-compact-open-full"
+            onClick={() => void handleOpenFull()}
+          >
+            Open Full Character Creator
+          </button>
+        </div>
+        <div className="character-compact__actions-right">
+          <button
+            type="button"
+            className="character-compact__actions-button character-compact__actions-button--danger"
+            data-testid="character-compact-delete"
+            disabled={deleteBusy}
+            onClick={() => setDeleteConfirm(true)}
+          >
+            {deleteBusy ? "Deleting…" : "Delete Character"}
+          </button>
+        </div>
       </div>
+
+      {deleteConfirm ? (
+        <div className="character-compact__confirm-overlay" onClick={() => !deleteBusy && setDeleteConfirm(false)}>
+          <div className="character-compact__confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <strong>Delete Character?</strong>
+            <p>Are you sure you want to delete "{profile.name}"?</p>
+            <p className="character-compact__confirm-hint">
+              This will remove the character from this project.
+              This action cannot be undone.
+            </p>
+            {deleteError ? (
+              <p className="character-compact__confirm-error" data-testid="character-compact-delete-error">{deleteError}</p>
+            ) : null}
+            <div className="character-compact__confirm-actions">
+              <button
+                type="button"
+                className="character-compact__actions-button"
+                data-testid="character-compact-delete-cancel"
+                disabled={deleteBusy}
+                onClick={() => setDeleteConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="character-compact__actions-button character-compact__actions-button--danger"
+                data-testid="character-compact-delete-confirm"
+                disabled={deleteBusy}
+                onClick={() => void handleDelete()}
+              >
+                {deleteBusy ? "Deleting…" : "Delete Character"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {previewAsset ? (
         <div
@@ -1082,7 +1149,18 @@ export function CharacterCompactView({ projectId, onOpenFull }: Props) {
             </select>
           </div>
           {selectedId ? (
-            <CharacterDetail projectId={projectId} characterId={selectedId} onOpenFull={onOpenFull} />
+            <CharacterDetail
+              projectId={projectId}
+              characterId={selectedId}
+              onOpenFull={(id) => {
+                if (id === "__delete__") {
+                  void refresh();
+                  setSelectedId("");
+                } else {
+                  onOpenFull?.(id);
+                }
+              }}
+            />
           ) : (
             <div className="character-compact__state" data-testid="character-compact-empty">
               <strong>No characters have been created yet.</strong>
