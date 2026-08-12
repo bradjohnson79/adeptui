@@ -1,0 +1,15 @@
+{
+  "profileId": "series_web_series",
+  "displayName": "Series / Web Series",
+  "projectTypeSlugs": ["series", "web_series", "series_web_series", "series/web_series"],
+  "productionStages": ["development", "season_planning", "episode_production", "post"],
+  "specialistPriorities": ["showrunner", "story_editor", "producer", "editor"],
+  "knowledgePackIds": ["series_bible", "episode_pacing", "season_arc"],
+  "commonDeliverables": ["series bible", "episode outlines", "season look guide", "release package"],
+  "approvalPoints": ["series bible approval", "episode outline approval", "season continuity review"],
+  "qualityChecks": ["episode stands alone", "season arc keeps momentum", "repeatable production style"],
+  "commonRisks": ["arc drift between episodes", "format inconsistency", "backlog of unresolved notes"],
+  "terminology": {"storyUnit": "episode", "longArc": "season arc"},
+  "defaultPlanTemplate": ["Lock series premise", "Plan the season arc", "Outline episodes", "Produce episode assets", "Review continuity across releases"],
+  "recommendedWorkflows": ["project_readiness_audit", "continuity_scan", "plan_validation", "project_summary_refresh"]
+}

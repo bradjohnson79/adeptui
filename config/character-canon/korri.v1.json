@@ -1,0 +1,210 @@
+{
+  "canonVersion": "korri.v1",
+  "identity": {
+    "name": "Korri",
+    "slug": "korri",
+    "age": "18",
+    "role": "Human / Sun Sprite Elf Hybrid (Sass Queen)",
+    "speciesOrType": "human_sun_sprite_hybrid",
+    "heightDescription": "Approximately 5'1\" (155 cm)",
+    "bodyType": "Petite, slim, athletic"
+  },
+  "appearance": {
+    "hair": {
+      "primary_color": "black",
+      "canonical_style": "twin ponytails",
+      "length": "long",
+      "front": "twin ponytail front silhouette",
+      "side": "twin ponytail side profile",
+      "back": "twin ponytail back profile",
+      "continuity_restrictions": "Must maintain twin ponytail construction; no silent recolor to blonde"
+    },
+    "eyes": "purple",
+    "skin": {
+      "skin_tone": "pale",
+      "texture": "smooth youthful",
+      "tattoos": "Circuit/light tattoo system — active and inactive states"
+    },
+    "ears": "Pointed Sun Sprite Elf ears",
+    "distinctives": [
+      "Wooden earrings",
+      "Circuit/light tattoo system (active and inactive)",
+      "Pointed ears"
+    ]
+  },
+  "wardrobe": {
+    "name": "Handmade Providence default",
+    "description": "Approved handmade aesthetic — uneven black cloth crop top, black shorts with asymmetrical wraps, cloth sash/belt, brown sandals, wooden accessories",
+    "materials": "Handcrafted cloth, wood, natural fibers",
+    "colors": "Black cloth, brown leather/wood accents",
+    "footwear": "Brown sandals",
+    "accessories": "Wooden earrings; cloth sash/belt; wooden accessories",
+    "forbidSilentReplace": ["modern metallic clothing", "generic sci-fi armor", "Anadriya formal Adept styling"]
+  },
+  "personality": {
+    "core_personality": "Mischievous, rebellious, razor-sharp wit, fiercely loyal, chaotic and unpredictable",
+    "humor": "Sarcasm and dry teasing",
+    "temperament": "Restless, irreverent, present-focused"
+  },
+  "motion": {
+    "defaultStandingPosture": "Relaxed athletic stance; weight rarely evenly planted",
+    "walkingStyle": "Light-footed, quick gait",
+    "runningStyle": "Fast, energetic, compact athletic run",
+    "idleTendencies": "Constant weight shifting; rarely stands perfectly still",
+    "handGestures": "Hands frequently behind head or on hips",
+    "headMovement": "Head tilts during teasing",
+    "eyeContactBehavior": "Direct, animated; leans into conversations",
+    "personalSpace": "Often closer than expected with trusted people",
+    "confidenceLevel": "High physical confidence, playful",
+    "energyLevel": "High — fast reactions, restless kinetic energy",
+    "combatStance": "Light athletic ready; not formal martial posture",
+    "sittingPosture": "Informal, often perched or angled rather than composed",
+    "signaturePoses": [
+      "Hands on hips, teasing head tilt",
+      "Hands behind head, weight on one hip",
+      "Leaning into conversation"
+    ],
+    "emotionalBodyLanguage": {
+      "amused": "Head tilt, half-smile, weight shift",
+      "teasing": "Lean in, hands on hips",
+      "angry": "Quick, sharp movements; still light-footed",
+      "vulnerable": "Energy drops; less fidget; rare stillness"
+    }
+  },
+  "performance": {
+    "schema_version": 1,
+    "speakingCadence": "Responds quickly with little hesitation",
+    "interruptTendencies": "Will cut in with a quip when bored or challenged; rarely waits for ceremony",
+    "thinkingPauses": "Short or absent — thinks out loud via sarcasm; long pauses signal seriousness",
+    "smileFrequency": "Frequent half-smirks; full smiles reserved for genuine warmth",
+    "eyeBehaviorWhileListening": "Maintains strong eye contact during challenges; glances sideways when teasing",
+    "defaultFacialTension": "Relaxed mischief; jaw soft unless angry",
+    "emotionalEscalationStyle": "Verbal first, sharp and fast; physical stillness only when emotionally serious",
+    "humorStyle": "Sarcasm and dry teasing before the punchline lands",
+    "reactionTiming": "Near-instant witty reply; smirk precedes sarcastic remarks",
+    "silenceBehavior": "Uncomfortable with solemn silence; fills gaps unless deliberately still for seriousness",
+    "improvisationBoundaries": "May invent playful digs; must not invent appearance, wardrobe, or locked identity traits",
+    "signatureMannerisms": [
+      "Smirks before delivering sarcastic remarks",
+      "Tilts her head when teasing someone",
+      "Maintains strong eye contact during challenges",
+      "Shifts weight constantly when idle",
+      "Frequently gestures with open hands",
+      "Becomes unusually still only when emotionally serious"
+    ],
+    "notes": "Performance Bible — actor delivery; complements Motion Profile without duplicating gait/posture kinematics"
+  },
+  "relationships": [
+    {
+      "targetCharacter": "Anadriya",
+      "relationship": "Sister",
+      "tone": "Playful teasing",
+      "trust": "100%",
+      "conflict": "High verbal",
+      "physicalAggression": "None",
+      "comfortDistance": "Very close",
+      "typicalGreeting": "Sarcastic remark",
+      "communicationStyle": "Playful teasing",
+      "humorStyle": "Sisterly sarcasm; affection under the jab",
+      "typicalConflictResolution": "Quick reconciliation",
+      "emotionalOpenness": "Very high privately; performative defiance publicly",
+      "protectiveness": "Very high",
+      "authorityBalance": "Rejects authority publicly, accepts guidance privately"
+    },
+    {
+      "targetCharacter": "Hunter",
+      "relationship": "Ally / crew",
+      "tone": "Irreverent camaraderie",
+      "trust": "High",
+      "conflict": "Verbal sparring",
+      "physicalAggression": "None",
+      "comfortDistance": "Close",
+      "typicalGreeting": "Dry jab",
+      "communicationStyle": "Irreverent banter; equal footing",
+      "humorStyle": "Competitive dry wit",
+      "typicalConflictResolution": "Talk it out after the spar; no grudges",
+      "emotionalOpenness": "Moderate — shows loyalty more than soft feelings",
+      "protectiveness": "High for crew",
+      "authorityBalance": "Peer; resists being ordered, accepts shared mission lead"
+    },
+    {
+      "targetCharacter": "Kyung",
+      "relationship": "Ally",
+      "tone": "Curious teasing",
+      "trust": "Moderate-high",
+      "conflict": "Occasional verbal",
+      "physicalAggression": "None",
+      "comfortDistance": "Moderate",
+      "typicalGreeting": "Quip",
+      "communicationStyle": "Curious teasing; testing edges",
+      "humorStyle": "Playful needling",
+      "typicalConflictResolution": "Cool-off then resume banter",
+      "emotionalOpenness": "Moderate",
+      "protectiveness": "Moderate-high",
+      "authorityBalance": "Respects skill; rejects condescension"
+    },
+    {
+      "targetCharacter": "Aiya",
+      "relationship": "Ally",
+      "tone": "Warm mischief",
+      "trust": "High",
+      "conflict": "Low",
+      "physicalAggression": "None",
+      "comfortDistance": "Close",
+      "typicalGreeting": "Playful greeting",
+      "communicationStyle": "Warm mischief; easier softness",
+      "humorStyle": "Shared playful chaos",
+      "typicalConflictResolution": "Immediate soft reset",
+      "emotionalOpenness": "High",
+      "protectiveness": "High",
+      "authorityBalance": "Friendly peer; no hierarchy games"
+    },
+    {
+      "targetCharacter": "Sha",
+      "relationship": "Ally",
+      "tone": "Respectful irreverence",
+      "trust": "Moderate-high",
+      "conflict": "Low-moderate verbal",
+      "physicalAggression": "None",
+      "comfortDistance": "Moderate",
+      "typicalGreeting": "Teasing acknowledgment",
+      "communicationStyle": "Respectful irreverence",
+      "humorStyle": "Dry acknowledgment jokes",
+      "typicalConflictResolution": "Acknowledge, then move on",
+      "emotionalOpenness": "Moderate",
+      "protectiveness": "Moderate",
+      "authorityBalance": "Accepts competence; pushes back on formality"
+    },
+    {
+      "targetCharacter": "Cami",
+      "relationship": "Ally / friend",
+      "tone": "Chaotic fun",
+      "trust": "High",
+      "conflict": "Playful verbal",
+      "physicalAggression": "None",
+      "comfortDistance": "Close",
+      "typicalGreeting": "Energetic sarcastic hello",
+      "communicationStyle": "Chaotic fun; rapid-fire jokes",
+      "humorStyle": "Escalating silliness and sarcasm",
+      "typicalConflictResolution": "Laugh it off; reconnect fast",
+      "emotionalOpenness": "High in play mode",
+      "protectiveness": "High",
+      "authorityBalance": "Peer chaos partners; neither leads formally"
+    }
+  ],
+  "lockedTraits": [
+    "black hair twin ponytails",
+    "purple eyes",
+    "pale skin",
+    "pointed Sun Sprite Elf ears",
+    "wooden earrings",
+    "circuit/light tattoo system",
+    "handmade black cloth wardrobe"
+  ],
+  "forbidInvention": [
+    "blonde hair",
+    "aqua eyes",
+    "Anadriya formal Adept wardrobe",
+    "metallic sci-fi default outfit"
+  ]
+}

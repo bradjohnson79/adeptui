@@ -1,0 +1,29 @@
+{
+  "registryVersion": "1",
+  "aliases": {
+    "ltx": { "providerId": "ltx-local", "modelId": "ltx-video", "profileKey": "ltx-video@1.0" },
+    "ltx-local": { "providerId": "ltx-local", "modelId": "ltx-video", "profileKey": "ltx-video@1.0" },
+    "wan": { "providerId": "wan-local", "modelId": "wan-2.2", "profileKey": "wan-2.2@1.1" },
+    "wan-local": { "providerId": "wan-local", "modelId": "wan-2.2", "profileKey": "wan-2.2@1.1" },
+    "hunyuan15": { "providerId": "hunyuan-video-1.5-local", "modelId": "hunyuan-video-1.5", "profileKey": "hunyuan-video-1.5@1.0" },
+    "hunyuan-video-1.5-local": { "providerId": "hunyuan-video-1.5-local", "modelId": "hunyuan-video-1.5", "profileKey": "hunyuan-video-1.5@1.0" },
+    "hunyuan13b": { "providerId": "hunyuan-video-13b-local", "modelId": "hunyuan-video-13b", "profileKey": "hunyuan-video-13b@1.2" },
+    "hunyuan-video-13b-local": { "providerId": "hunyuan-video-13b-local", "modelId": "hunyuan-video-13b", "profileKey": "hunyuan-video-13b@1.2" },
+    "minimax-h3": { "providerId": "minimax-h3", "modelId": "minimax-h3", "profileKey": "minimax-h3@1.0" },
+    "flux": { "providerId": "comfyui", "modelId": "flux", "profileKey": "flux-image@1.0" },
+    "comfyui": { "providerId": "comfyui", "modelId": "flux", "profileKey": "flux-image@1.0" },
+    "audio-studio": { "providerId": "audio-studio", "modelId": "audio-studio", "profileKey": "audio-studio@1.0" },
+    "qwen3-tts": { "providerId": "qwen3-tts", "modelId": "qwen3-tts", "profileKey": "qwen3-tts@1.0" },
+    "kokoro": { "providerId": "kokoro", "modelId": "kokoro", "profileKey": "qwen3-tts@1.0" }
+  },
+  "profiles": [
+    "ltx-video@1.0",
+    "wan-2.2@1.1",
+    "hunyuan-video-1.5@1.0",
+    "hunyuan-video-13b@1.2",
+    "minimax-h3@1.0",
+    "flux-image@1.0",
+    "audio-studio@1.0",
+    "qwen3-tts@1.0"
+  ]
+}

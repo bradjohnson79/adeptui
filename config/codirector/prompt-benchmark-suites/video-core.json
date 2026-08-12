@@ -1,0 +1,48 @@
+{
+  "suiteId": "video-core",
+  "suiteVersion": "1",
+  "domain": "video",
+  "matrixMode": "reduced",
+  "matrixNote": "Reduced matrix for expensive video: creator, refined-english, bilingual-balanced.",
+  "strategies": ["creator", "refined-english", "bilingual-balanced"],
+  "samplesPerStrategy": 1,
+  "certificationSamplesRequired": 3,
+  "cases": [
+    {
+      "benchmarkId": "video-closeup-expression",
+      "category": "facial_micro_expression",
+      "creatorPrompt": "Close-up of Korri at sunset, subtle micro-expressions, soft cinematic light, restrained emotion",
+      "negativePrompt": "camera shake, facial distortion, extra fingers",
+      "continuityContext": "Character: Korri",
+      "expectedIntent": "facial performance close-up",
+      "lockedTerms": ["Korri"],
+      "providerEligibility": ["ltx-local", "wan-local", "hunyuan-video-1.5-local", "hunyuan-video-13b-local"],
+      "evaluationCriteria": ["promptAdherence", "facialPerformance", "lighting", "artifactControl"],
+      "controlSettings": { "seed": 42, "width": 848, "height": 480, "durationSec": 5, "fps": 24 }
+    },
+    {
+      "benchmarkId": "video-camera-motion",
+      "category": "camera_movement",
+      "creatorPrompt": "Wide shot of a mountain cliff path, slow push-in, gentle wind, golden hour",
+      "negativePrompt": "jitter, warped geometry",
+      "continuityContext": "",
+      "expectedIntent": "stable camera motion",
+      "lockedTerms": [],
+      "providerEligibility": ["ltx-local", "wan-local", "hunyuan-video-1.5-local", "hunyuan-video-13b-local"],
+      "evaluationCriteria": ["promptAdherence", "cameraAccuracy", "motionQuality", "lighting"],
+      "controlSettings": { "seed": 43, "width": 848, "height": 480, "durationSec": 5, "fps": 24 }
+    },
+    {
+      "benchmarkId": "video-fullbody-motion",
+      "category": "full_body_motion",
+      "creatorPrompt": "Korri walks along a ridge, natural body motion, medium-wide shot, soft daylight",
+      "negativePrompt": "limb distortion, duplicated subjects",
+      "continuityContext": "Character: Korri",
+      "expectedIntent": "full-body locomotion",
+      "lockedTerms": ["Korri"],
+      "providerEligibility": ["ltx-local", "wan-local", "hunyuan-video-1.5-local", "hunyuan-video-13b-local"],
+      "evaluationCriteria": ["promptAdherence", "motionQuality", "characterConsistency", "artifactControl"],
+      "controlSettings": { "seed": 44, "width": 848, "height": 480, "durationSec": 5, "fps": 24 }
+    }
+  ]
+}

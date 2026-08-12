@@ -1,0 +1,15 @@
+{
+  "profileId": "music_video",
+  "displayName": "Music Video",
+  "projectTypeSlugs": ["music_video", "performance_video", "artist_visual"],
+  "productionStages": ["concept", "preproduction", "production", "post"],
+  "specialistPriorities": ["director", "editor", "choreography_lead", "colorist"],
+  "knowledgePackIds": ["music_visual_pacing", "performance_coverage", "rhythm_editing"],
+  "commonDeliverables": ["concept treatment", "shot plan", "performance selects", "release master"],
+  "approvalPoints": ["concept approval", "artist look approval", "performance cut review", "final grade review"],
+  "qualityChecks": ["visual rhythm supports the track", "performance energy stays high", "hero moments are memorable"],
+  "commonRisks": ["coverage gaps on key moments", "visual ideas overpowering the song", "style inconsistency across setups"],
+  "terminology": {"storyUnit": "sequence", "syncMoment": "hero beat"},
+  "defaultPlanTemplate": ["Define the visual concept", "Plan coverage around song moments", "Build the performance cut", "Refine visual motifs", "Finish for release"],
+  "recommendedWorkflows": ["project_readiness_audit", "generation_preflight", "project_summary_refresh", "export_readiness_check"]
+}

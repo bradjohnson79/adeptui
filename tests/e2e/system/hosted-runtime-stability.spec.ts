@@ -39,10 +39,13 @@ function writeJson(name: string, data: unknown) {
 
 test.describe("Hosted runtime stability (delayed CORS + autosave)", () => {
   test("Co-Director stays healthy across polling thresholds without CORS failures", async ({ page, request }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(Math.max(120_000, Number(process.env.SOAK_MS || 0) + 60_000));
 
+    // Hosted soak (PLAYWRIGHT_BASE_URL points at a non-local URL) reuses a
+    // fixed existing project to avoid polluting hosted data with temp projects.
+    const isHostedSoak = !BETA_TARGET && /adeptui\.vercel\.app/i.test(WEB);
     let ownedProjectId: string | null = null;
-    if (!BETA_TARGET) {
+    if (!BETA_TARGET && !isHostedSoak) {
       const proj = await createTempProject(request, "Hosted Stability E2E");
       ownedProjectId = proj.id;
     }
@@ -78,19 +81,22 @@ test.describe("Hosted runtime stability (delayed CORS + autosave)", () => {
       timeout: 60_000,
     });
 
-    // Wait for the Co-Director surface to mount.
+    // Wait for the Co-Director surface to mount — the message composer is the
+    // stable anchor across beta deploys (no testid dependency).
     await expect
-      .poll(async () => page.locator("[data-testid='codirector-session'], .codirector-session, #codirector-session").count(), {
+      .poll(async () => page.getByPlaceholder("Ask Co-Director...").count(), {
         timeout: 30_000,
       })
       .toBeGreaterThan(0);
 
     // Cross the 20s production-control polling threshold at least 3 times.
-    // 70s of active session exercises several polling ticks + recovery paths.
-    await page.waitForTimeout(70_000);
+    // Default 70s exercises several polling ticks + recovery paths.
+    // SOAK_MS env extends the active session for full 15-minute hosted soak.
+    const soakMs = Number(process.env.SOAK_MS || 70_000);
+    await page.waitForTimeout(soakMs);
 
     // Exercise Script Writer tab (embedded) to surface autosave path.
-    const scriptwriterTab = page.getByTestId(/scriptwriter|script-writer/i).first();
+    const scriptwriterTab = page.getByRole("tab", { name: /Script Writer/i }).first();
     if (await scriptwriterTab.isVisible().catch(() => false)) {
       await scriptwriterTab.click({ force: true });
       await page.waitForTimeout(2_000);
@@ -113,5 +119,6 @@ test.describe("Hosted runtime stability (delayed CORS + autosave)", () => {
     expect(uniqueEndpoints.size, `Unexpected API failure spread: ${[...uniqueEndpoints].join(", ")}`).toBeLessThanOrEqual(8);
 
     if (ownedProjectId) await deleteProject(request, ownedProjectId);
+    void isHostedSoak;
   });
 });

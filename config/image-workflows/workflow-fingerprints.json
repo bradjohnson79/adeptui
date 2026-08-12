@@ -1,0 +1,17 @@
+{
+  "phase": "M42-W2",
+  "fingerprints": {
+    "zimage.txt2img": {
+      "graphHash": "sha256:0364d2ddaaf0cbd294a5834b1e4a2573ae0380081fcb043dc247a0bf6dd735da",
+      "builderHash": "sha256:f9cbea9a8f53308597af0b49942425fc797c5d4c67f71ae09de8a6a993f01aa4",
+      "nodeInventoryHash": "sha256:f425b8f3803b2d6bb4782d8951e34742556c723bf6ed6712d626efd478b848d1",
+      "modelInventoryHash": "sha256:d97372ae8b1672fb35db0790ccf05a6eff649c5342c81a82a49b9ac1229b4a97"
+    },
+    "zimage.ref_edit": {
+      "graphHash": "sha256:d7a2dcff4a87355d791f4e6d4cc31e07a1db843f635d70081c2f867db63c3ab8",
+      "builderHash": "sha256:f9cbea9a8f53308597af0b49942425fc797c5d4c67f71ae09de8a6a993f01aa4",
+      "nodeInventoryHash": "sha256:fff36fc283473875249186d320709ed56d28f8bbd8c75b3f624de627a943f753",
+      "modelInventoryHash": "sha256:d1423bc0aefc88090e23098100b0c3c4d9b48458a9c4462abf3830b394dfb98f"
+    }
+  }
+}

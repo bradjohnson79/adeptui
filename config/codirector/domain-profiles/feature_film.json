@@ -1,0 +1,15 @@
+{
+  "profileId": "feature_film",
+  "displayName": "Feature Film",
+  "projectTypeSlugs": ["feature_film", "feature", "narrative_feature"],
+  "productionStages": ["development", "preproduction", "production", "post"],
+  "specialistPriorities": ["story_editor", "director", "cinematographer", "editor"],
+  "knowledgePackIds": ["three_act", "feature_character_arc", "scene_objective"],
+  "commonDeliverables": ["locked script", "shot list", "look bible", "delivery master"],
+  "approvalPoints": ["script lock", "look approval", "picture lock", "final delivery review"],
+  "qualityChecks": ["clear protagonist objective", "earned act turns", "visual language stays consistent"],
+  "commonRisks": ["second-act drag", "scope creep in set pieces", "continuity drift across revisions"],
+  "terminology": {"storyUnit": "sequence", "reviewCut": "assembly"},
+  "defaultPlanTemplate": ["Refine story spine", "Lock script and scene goals", "Build visual plan", "Prepare production assets", "Review edit and finish"],
+  "recommendedWorkflows": ["project_readiness_audit", "continuity_scan", "plan_validation", "generation_preflight", "export_readiness_check"]
+}

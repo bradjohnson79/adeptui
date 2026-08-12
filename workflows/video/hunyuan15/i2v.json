@@ -1,0 +1,8 @@
+{
+  "workflowKey": "hunyuan15.i2v",
+  "providerId": "hunyuan-video-1.5-local",
+  "engine": "hunyuan15",
+  "source": "official tencent/HunyuanVideo-1.5",
+  "authority": "config/video-workflows/certified-registry.json + app.workflows.hunyuan15_builder",
+  "note": "Mirror only; runtime loads Python builder."
+}

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1.0.0",
+  "phase": "M42-W1",
+  "description": "Draft Identity Preservation Registry — approved wardrobes. Wave 1 defines schema only; Wave 5 enforces.",
+  "enforcementWave": "M42-W5",
+  "entries": []
+}

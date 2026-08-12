@@ -1,0 +1,329 @@
+{
+  "note": "Offline only — bilingualCertified requires generation evidence.",
+  "matrices": [
+    {
+      "prompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid",
+      "providerId": "ltx-local",
+      "domain": "video",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid.",
+          "chineseEnhancement": "",
+          "overallQuality": 82,
+          "profileId": "ltx-video",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.",
+          "chineseEnhancement": "",
+          "overallQuality": 82,
+          "profileId": "ltx-video",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演",
+          "overallQuality": 82,
+          "profileId": "ltx-video",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "overallQuality": 82,
+          "profileId": "ltx-video",
+          "profileVersion": "1.0"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    },
+    {
+      "prompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid",
+      "providerId": "wan-local",
+      "domain": "video",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "wan-2.2",
+          "profileVersion": "1.1"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "wan-2.2",
+          "profileVersion": "1.1"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演",
+          "overallQuality": 82,
+          "profileId": "wan-2.2",
+          "profileVersion": "1.1"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "overallQuality": 82,
+          "profileId": "wan-2.2",
+          "profileVersion": "1.1"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    },
+    {
+      "prompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid",
+      "providerId": "hunyuan-video-1.5-local",
+      "domain": "video",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "hunyuan-video-1.5",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "hunyuan-video-1.5",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演",
+          "overallQuality": 82,
+          "profileId": "hunyuan-video-1.5",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "overallQuality": 82,
+          "profileId": "hunyuan-video-1.5",
+          "profileVersion": "1.0"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    },
+    {
+      "prompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid",
+      "providerId": "hunyuan-video-13b-local",
+      "domain": "video",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "hunyuan-video-13b",
+          "profileVersion": "1.2"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.",
+          "chineseEnhancement": "",
+          "overallQuality": 81,
+          "profileId": "hunyuan-video-13b",
+          "profileVersion": "1.2"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演",
+          "overallQuality": 82,
+          "profileId": "hunyuan-video-13b",
+          "profileVersion": "1.2"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Korri stands on a cliff at sunset, wide shot, soft light, subtle wind in her braid. maintain visual coherence and production-ready clarity; preserve temporal continuity across the shot. stable, fluent camera motion; subtle natural facial micro-expressions when the face is visible. photorealistic detail with coherent lighting; precise production language suitable for the selected model.\n细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演，柔和电影光影，稳定流畅的镜头运动",
+          "overallQuality": 82,
+          "profileId": "hunyuan-video-13b",
+          "profileVersion": "1.2"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    },
+    {
+      "prompt": "Portrait of Korri in soft rim light, shallow depth of field",
+      "providerId": "comfyui",
+      "domain": "image",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Portrait of Korri in soft rim light, shallow depth of field.",
+          "chineseEnhancement": "",
+          "overallQuality": 83,
+          "profileId": "flux-image",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Portrait of Korri in soft rim light, shallow depth of field. maintain visual coherence and production-ready clarity. cinematic framing with clear visual hierarchy; balanced composition. clean subject separation and material detail.",
+          "chineseEnhancement": "",
+          "overallQuality": 83,
+          "profileId": "flux-image",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Portrait of Korri in soft rim light, shallow depth of field. maintain visual coherence and production-ready clarity. cinematic framing with clear visual hierarchy; balanced composition. clean subject separation and material detail.\n细腻的微表情，真实的人物表演",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演",
+          "overallQuality": 83,
+          "profileId": "flux-image",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Portrait of Korri in soft rim light, shallow depth of field. maintain visual coherence and production-ready clarity. cinematic framing with clear visual hierarchy; balanced composition. clean subject separation and material detail.\n细腻的微表情，真实的人物表演，柔和电影光影，清晰的空间层次",
+          "chineseEnhancement": "细腻的微表情，真实的人物表演，柔和电影光影，清晰的空间层次",
+          "overallQuality": 83,
+          "profileId": "flux-image",
+          "profileVersion": "1.0"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    },
+    {
+      "prompt": "Warm cinematic score with a gentle hopeful rise",
+      "providerId": "audio-studio",
+      "domain": "audio",
+      "variants": [
+        {
+          "variant": "original",
+          "ok": true,
+          "finalProviderPrompt": "Warm cinematic score with a gentle hopeful rise.",
+          "chineseEnhancement": "",
+          "overallQuality": 83,
+          "profileId": "audio-studio",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en",
+          "ok": true,
+          "finalProviderPrompt": "Warm cinematic score with a gentle hopeful rise. balanced dynamic range. clear spatial placement; rich but controlled texture.",
+          "chineseEnhancement": "",
+          "overallQuality": 83,
+          "profileId": "audio-studio",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_subtle",
+          "ok": true,
+          "finalProviderPrompt": "Warm cinematic score with a gentle hopeful rise. balanced dynamic range. clear spatial placement; rich but controlled texture.\n沉浸式环境音，细腻的声音层次",
+          "chineseEnhancement": "沉浸式环境音，细腻的声音层次",
+          "overallQuality": 83,
+          "profileId": "audio-studio",
+          "profileVersion": "1.0"
+        },
+        {
+          "variant": "refined_en_zh_balanced",
+          "ok": true,
+          "finalProviderPrompt": "Warm cinematic score with a gentle hopeful rise. balanced dynamic range. clear spatial placement; rich but controlled texture.\n沉浸式环境音，细腻的声音层次",
+          "chineseEnhancement": "沉浸式环境音，细腻的声音层次",
+          "overallQuality": 83,
+          "profileId": "audio-studio",
+          "profileVersion": "1.0"
+        }
+      ],
+      "note": "Offline prompt matrix only — bilingualCertified requires recorded generation evidence.",
+      "profilesAvailable": [
+        "ltx-video@1.0",
+        "wan-2.2@1.1",
+        "hunyuan-video-1.5@1.0",
+        "hunyuan-video-13b@1.2",
+        "minimax-h3@1.0",
+        "flux-image@1.0",
+        "audio-studio@1.0",
+        "qwen3-tts@1.0"
+      ]
+    }
+  ]
+}

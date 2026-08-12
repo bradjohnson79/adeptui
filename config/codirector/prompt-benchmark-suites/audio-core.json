@@ -1,0 +1,48 @@
+{
+  "suiteId": "audio-core",
+  "suiteVersion": "1",
+  "domain": "audio",
+  "matrixMode": "reduced",
+  "matrixNote": "Audio bilingual often adds little; reduced matrix focuses English refinement vs creator.",
+  "strategies": ["creator", "refined-english", "bilingual-subtle"],
+  "samplesPerStrategy": 1,
+  "certificationSamplesRequired": 3,
+  "cases": [
+    {
+      "benchmarkId": "audio-cinematic-cue",
+      "category": "emotional_music_cue",
+      "creatorPrompt": "Warm cinematic score with a gentle hopeful rise, restrained strings",
+      "negativePrompt": "",
+      "continuityContext": "",
+      "expectedIntent": "emotional music cue",
+      "lockedTerms": [],
+      "providerEligibility": ["audio-studio"],
+      "evaluationCriteria": ["promptAdherence", "audioFidelity", "artifactControl"],
+      "controlSettings": { "durationSec": 8, "kind": "music" }
+    },
+    {
+      "benchmarkId": "audio-ambient",
+      "category": "ambient_environment",
+      "creatorPrompt": "Quiet forest ambience with distant wind and soft birds, loopable bed",
+      "negativePrompt": "",
+      "continuityContext": "",
+      "expectedIntent": "ambient bed",
+      "lockedTerms": [],
+      "providerEligibility": ["audio-studio"],
+      "evaluationCriteria": ["promptAdherence", "audioFidelity", "artifactControl"],
+      "controlSettings": { "durationSec": 10, "kind": "ambience" }
+    },
+    {
+      "benchmarkId": "audio-sfx-mechanical",
+      "category": "mechanical_sfx",
+      "creatorPrompt": "Short metallic latch click with natural decay and clear attack",
+      "negativePrompt": "",
+      "continuityContext": "",
+      "expectedIntent": "mechanical sfx",
+      "lockedTerms": [],
+      "providerEligibility": ["audio-studio"],
+      "evaluationCriteria": ["promptAdherence", "audioFidelity", "artifactControl"],
+      "controlSettings": { "durationSec": 2, "kind": "sfx" }
+    }
+  ]
+}

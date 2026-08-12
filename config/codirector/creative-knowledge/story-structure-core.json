@@ -1,0 +1,205 @@
+[
+  {
+    "packId": "three_act",
+    "title": "Three-Act Structure",
+    "version": "1.0",
+    "domainTags": ["story", "structure", "screenwriting"],
+    "frames": [
+      {
+        "frameId": "three_act_spine",
+        "title": "Build a clear dramatic spine",
+        "summary": "Setup, confrontation, and resolution should each change the pressure on the protagonist.",
+        "principles": [
+          "Act One defines the normal world, goal, and inciting disruption.",
+          "Act Two escalates obstacles, reversals, and costly choices.",
+          "Act Three pays off the central question through decisive action.",
+          "Major turns should force a new strategy, not just a new location."
+        ],
+        "patterns": [
+          "Use an act break when the protagonist crosses a point of no return.",
+          "Track rising stakes across internal, interpersonal, and external lines."
+        ],
+        "antiPatterns": [
+          "Do not let the middle become repetitive problem solving.",
+          "Do not resolve the climax with information that was withheld from the audience."
+        ],
+        "tags": ["story", "structure", "beats", "arc"],
+        "evidenceRefs": ["pack:three_act", "tradition:screenwriting"]
+      }
+    ]
+  },
+  {
+    "packId": "five_act",
+    "title": "Five-Act Structure",
+    "version": "1.0",
+    "domainTags": ["story", "structure", "drama"],
+    "frames": [
+      {
+        "frameId": "five_act_escalation",
+        "title": "Escalate through linked movements",
+        "summary": "Five acts create finer escalation and recovery beats than a broad three-act sweep.",
+        "principles": [
+          "Separate exposition, complication, crisis, climax, and aftermath into distinct dramatic movements.",
+          "Let each act end on a sharper complication than the last.",
+          "Use the fourth act to compress inevitability before the climax.",
+          "Reserve the final act for consequence, not new premise-building."
+        ],
+        "patterns": [
+          "Use act outs to force audience anticipation into the next movement.",
+          "Pair each act with a specific tactical objective."
+        ],
+        "antiPatterns": [
+          "Do not split acts so finely that scenes feel arbitrary.",
+          "Do not repeat the same emotional beat at multiple act endings."
+        ],
+        "tags": ["story", "structure", "acts", "escalation"],
+        "evidenceRefs": ["pack:five_act", "tradition:dramatic_structure"]
+      }
+    ]
+  },
+  {
+    "packId": "heros_journey",
+    "title": "Hero's Journey",
+    "version": "1.0",
+    "domainTags": ["story", "mythic", "structure"],
+    "frames": [
+      {
+        "frameId": "heros_journey_transformation",
+        "title": "Use stages to externalize transformation",
+        "summary": "Mythic structure works best when each stage pressures identity, not just plot logistics.",
+        "principles": [
+          "The call should reveal what the hero lacks or resists.",
+          "Mentors and thresholds should change capability or worldview.",
+          "The ordeal must cost the old self something real.",
+          "The return matters only if the hero brings back usable change."
+        ],
+        "patterns": [
+          "Mirror an early fear with a late empowered choice.",
+          "Use allies and tests to make growth visible scene by scene."
+        ],
+        "antiPatterns": [
+          "Do not force every named stage if the story loses momentum.",
+          "Do not confuse spectacle with inner transformation."
+        ],
+        "tags": ["story", "structure", "mythic", "character_arc"],
+        "evidenceRefs": ["pack:heros_journey", "tradition:mythic_story"]
+      }
+    ]
+  },
+  {
+    "packId": "save_the_cat",
+    "title": "Save the Cat",
+    "version": "1.0",
+    "domainTags": ["story", "structure", "commercial"],
+    "frames": [
+      {
+        "frameId": "save_the_cat_beat_clarity",
+        "title": "Keep the audience oriented through beats",
+        "summary": "A beat sheet helps maintain momentum, tonal promise, and commercial readability.",
+        "principles": [
+          "Open with an image that frames the starting condition.",
+          "State the thematic argument early enough to track later payoffs.",
+          "Use the midpoint to reframe the promise or danger of the premise.",
+          "Drive the finale with an earned synthesis of character and plot."
+        ],
+        "patterns": [
+          "Give the protagonist an early empathy beat before asking for audience patience.",
+          "Use beat naming as a planning tool, not a performance requirement."
+        ],
+        "antiPatterns": [
+          "Do not treat timing targets as more important than scene truth.",
+          "Do not let familiar beat labels flatten originality."
+        ],
+        "tags": ["story", "structure", "beats", "audience_clarity"],
+        "evidenceRefs": ["pack:save_the_cat", "tradition:beat_sheet"]
+      }
+    ]
+  },
+  {
+    "packId": "kishotenketsu",
+    "title": "Kishotenketsu",
+    "version": "1.0",
+    "domainTags": ["story", "structure", "contrast"],
+    "frames": [
+      {
+        "frameId": "kishotenketsu_contrast",
+        "title": "Create momentum through contrast and reveal",
+        "summary": "This structure builds interest by juxtaposition and perspective shift rather than direct conflict alone.",
+        "principles": [
+          "Introduce the situation cleanly before complicating it.",
+          "Develop familiarity so the turn lands as meaningful contrast.",
+          "Let the twist reveal a new relationship, not random novelty.",
+          "Resolve by integrating the contrast into a richer understanding."
+        ],
+        "patterns": [
+          "Use the third movement to show the same material from a surprising angle.",
+          "Favor thematic resonance over adversarial escalation."
+        ],
+        "antiPatterns": [
+          "Do not mistake a twist for a disconnected gimmick.",
+          "Do not strip away all tension; curiosity still needs shape."
+        ],
+        "tags": ["story", "structure", "contrast", "twist"],
+        "evidenceRefs": ["pack:kishotenketsu", "tradition:east_asian_structure"]
+      }
+    ]
+  },
+  {
+    "packId": "story_circle",
+    "title": "Story Circle",
+    "version": "1.0",
+    "domainTags": ["story", "structure", "character"],
+    "frames": [
+      {
+        "frameId": "story_circle_need_change",
+        "title": "Center action on need-driven change",
+        "summary": "The circle keeps plot attached to a character leaving comfort, adapting, and returning altered.",
+        "principles": [
+          "Start by defining what feels normal for the character.",
+          "Move the character toward a want that exposes a deeper need.",
+          "Make adaptation costly enough to produce visible growth.",
+          "The return should show what has been gained and what cannot be regained."
+        ],
+        "patterns": [
+          "Use each circle step to test a different survival strategy.",
+          "Keep the emotional logic simple enough to pitch in one sentence."
+        ],
+        "antiPatterns": [
+          "Do not confuse motion with transformation.",
+          "Do not let the return simply reset the status quo."
+        ],
+        "tags": ["story", "structure", "character_arc", "change"],
+        "evidenceRefs": ["pack:story_circle", "tradition:character_structure"]
+      }
+    ]
+  },
+  {
+    "packId": "pixar_principles",
+    "title": "Pixar Story Principles",
+    "version": "1.0",
+    "domainTags": ["story", "development", "animation"],
+    "frames": [
+      {
+        "frameId": "pixar_clarity_and_causality",
+        "title": "Favor emotional clarity and causality",
+        "summary": "Audience engagement grows when events connect through desire, choice, and surprise that still feels inevitable.",
+        "principles": [
+          "Build around what the audience cares about, not what the writer knows.",
+          "Keep cause and effect legible even in imaginative worlds.",
+          "Let coincidence create problems more often than solutions.",
+          "Simplify until the heart of the scene becomes unavoidable."
+        ],
+        "patterns": [
+          "Pitch the story as 'once upon a time... until finally...' to test flow.",
+          "Use honesty in character reaction before adding cleverness."
+        ],
+        "antiPatterns": [
+          "Do not protect favorite ideas that stop the story moving.",
+          "Do not make exposition carry emotional work by itself."
+        ],
+        "tags": ["story", "development", "clarity", "cause_effect"],
+        "evidenceRefs": ["pack:pixar_principles", "tradition:story_notes"]
+      }
+    ]
+  }
+]

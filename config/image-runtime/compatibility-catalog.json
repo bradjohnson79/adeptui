@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "phase": "M42-W2",
+  "entries": [
+    {"workflowKey": "zimage.txt2img", "displayName": "Z-Image Turbo Text-to-Image", "category": "Generation", "status": "Certified", "compatibility": "local_comfy", "modelFamily": "zimage"},
+    {"workflowKey": "zimage.ref_edit", "displayName": "Z-Image Reference Guided", "category": "Reference", "status": "Certified", "compatibility": "local_comfy", "modelFamily": "zimage"},
+    {"workflowKey": "flux.txt2img", "displayName": "FLUX Text-to-Image", "category": "Generation", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "flux"},
+    {"workflowKey": "flux.img2img", "displayName": "FLUX Image-to-Image", "category": "Editing", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "flux"},
+    {"workflowKey": "flux.reference", "displayName": "FLUX Reference", "category": "Reference", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "flux"},
+    {"workflowKey": "flux.edit", "displayName": "FLUX Edit", "category": "Editing", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "flux"},
+    {"workflowKey": "qwen2512.txt2img", "displayName": "Qwen-Image-2512 Text-to-Image", "category": "Generation", "status": "Draft", "compatibility": "local_comfy_pending", "modelFamily": "qwen-image-2512"},
+    {"workflowKey": "qwen2512.character_concept", "displayName": "Qwen-Image-2512 Character Concept", "category": "Identity", "status": "Draft", "compatibility": "local_comfy_pending", "modelFamily": "qwen-image-2512"},
+    {"workflowKey": "qwen2512.character_profile", "displayName": "Qwen-Image-2512 Character Profile", "category": "Identity", "status": "Draft", "compatibility": "local_comfy_pending", "modelFamily": "qwen-image-2512"},
+    {"workflowKey": "qwen.txt2img", "displayName": "Qwen Image Text-to-Image", "category": "Generation", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "qwen"},
+    {"workflowKey": "qwen.edit", "displayName": "Qwen Image Edit", "category": "Editing", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "qwen"},
+    {"workflowKey": "qwen.reference", "displayName": "Qwen Image Reference", "category": "Reference", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "qwen"},
+    {"workflowKey": "imagen.txt2img", "displayName": "Google Imagen Text-to-Image", "category": "Generation", "status": "Blocked", "compatibility": "cloud_credentials_required", "modelFamily": "imagen"},
+    {"workflowKey": "imagen.edit", "displayName": "Google Imagen Edit", "category": "Editing", "status": "Blocked", "compatibility": "cloud_credentials_required", "modelFamily": "imagen"},
+    {"workflowKey": "imagen.reference", "displayName": "Google Imagen Reference", "category": "Reference", "status": "Blocked", "compatibility": "cloud_credentials_required", "modelFamily": "imagen"},
+    {"workflowKey": "checkpoint.txt2img", "displayName": "Checkpoint Text-to-Image (legacy)", "category": "Generation", "status": "Deferred", "compatibility": "local_comfy", "modelFamily": "checkpoint"},
+    {"workflowKey": "checkpoint.img2img", "displayName": "Checkpoint Image-to-Image (legacy)", "category": "Editing", "status": "Deferred", "compatibility": "local_comfy", "modelFamily": "checkpoint"},
+    {"workflowKey": "image.upscale", "displayName": "Image Upscale", "category": "Restoration", "status": "Deferred", "compatibility": "local_comfy_pending", "modelFamily": "utility"},
+    {"workflowKey": "image.chroma_key", "displayName": "Chroma Key", "category": "Utility", "status": "Deferred", "compatibility": "opencv_local", "modelFamily": "utility"}
+  ]
+}

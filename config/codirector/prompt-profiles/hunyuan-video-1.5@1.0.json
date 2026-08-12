@@ -1,0 +1,18 @@
+{
+  "profileId": "hunyuan-video-1.5",
+  "profileVersion": "1.0",
+  "providerId": "hunyuan-video-1.5-local",
+  "modelId": "hunyuan-video-1.5",
+  "generationDomain": "video",
+  "supportedLanguages": ["en", "zh"],
+  "defaultStrategy": "bilingual-balanced",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en", "zh"],
+  "recommendedBalance": "balanced",
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "motion", "continuity", "provider"],
+  "maxPromptLength": 2200,
+  "negativePromptSupport": true,
+  "certificationStatus": "experimental",
+  "notes": ["Balanced bilingual prompting recommended pending benchmark certification."]
+}

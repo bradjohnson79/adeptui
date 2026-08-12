@@ -99,3 +99,111 @@
 .story-editor--embedded .story-editor__content {
   font-size: 0.9rem;
 }
+
+/* Story Entry styles */
+.story-entry__selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color, #333);
+  margin-bottom: 0.75rem;
+}
+.story-entry__tab {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.story-entry__tab button {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: inherit;
+  font-size: 0.85rem;
+}
+.story-entry__tab.is-selected button {
+  background: var(--accent, #4a9);
+  color: white;
+}
+.story-entry__order-controls {
+  display: inline-flex;
+  flex-direction: column;
+  font-size: 0.6rem;
+}
+.story-entry__order-controls button {
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-muted, #888);
+  line-height: 1;
+}
+.story-entry__order-controls button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.story-entry__delete {
+  color: var(--danger, #c44);
+  border: none;
+  cursor: pointer;
+  background: transparent;
+  font-size: 1rem;
+  padding: 0 0.25rem;
+}
+.story-entry__add {
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed var(--border-color, #555);
+  border-radius: 4px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--accent, #4a9);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+.story-entry__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.story-entry__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.story-entry__field label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.story-entry__field input,
+.story-entry__field select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+}
+.story-entry__field textarea {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  font-family: inherit;
+  resize: vertical;
+}
+.story-editor__empty {
+  text-align: center;
+  padding: 2rem;
+  color: var(--text-muted, #888);
+}

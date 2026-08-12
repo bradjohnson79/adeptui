@@ -1,0 +1,30 @@
+{
+  "recipeId": "hunyuan_video_15.local.certified",
+  "componentId": "hunyuan_video_15",
+  "title": "HunyuanVideo 1.5 Certified Install",
+  "capabilityTags": ["video", "local", "hunyuan", "certified"],
+  "providerKind": "local",
+  "installStrategy": "huggingface_snapshot",
+  "certifiedVersion": "2026.08",
+  "certifiedDate": "2026-08-01",
+  "source": {
+    "providerId": "huggingface_snapshot",
+    "repository": "tencent/HunyuanVideo-1.5",
+    "trustBoundary": "source_manager"
+  },
+  "requirements": {
+    "dependencies": ["comfyui"],
+    "recommendedVramGb": 24
+  },
+  "calibrationDefaults": {
+    "preferredPrecision": "bf16",
+    "safeBatchSize": 1,
+    "recommendedScheduler": "flow_match_euler",
+    "defaultCfg": 4.0,
+    "optimalStepCount": 30
+  },
+  "notes": [
+    "Prefer the Adept-certified HunyuanVideo 1.5 recipe over uncertified upstream variants.",
+    "Do not silently replace HunyuanVideo 13B."
+  ]
+}

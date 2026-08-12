@@ -1,0 +1,205 @@
+{
+  "completed_utc": "2026-08-08T04:00:26.937078Z",
+  "deletion": {
+    "rows": [],
+    "summary": {
+      "total_ms": 0,
+      "count": 0,
+      "ok_count": 0,
+      "error_count": 0,
+      "p50_ms": 0,
+      "p95_ms": 0,
+      "max_ms": 0
+    }
+  },
+  "orphan_cleanup": {
+    "asset_versions_orphans": 0,
+    "asset_edges_orphans_from": 0,
+    "asset_edges_orphans_to": 0,
+    "codirector_approvals_orphans": 0,
+    "codirector_execution_receipts_orphans": 0,
+    "project_scoped_total": 164,
+    "project_scoped_by_table": {
+      "character_profiles": 22,
+      "codirector_conversation_events": 34,
+      "codirector_conversations": 25,
+      "codirector_proposals": 2,
+      "codirector_tool_invocations": 4,
+      "editor_projects": 3,
+      "m211_decision_records": 14,
+      "m29_asset_versions": 14,
+      "m29_audio_cues": 9,
+      "production_job_events": 1,
+      "script_docs": 4,
+      "script_documents_v2": 1,
+      "script_segments": 2,
+      "spatial_scenes": 4,
+      "storyboard_panels": 2,
+      "voice_performance_plans": 1,
+      "voice_performance_records": 7,
+      "voice_profiles": 15
+    }
+  },
+  "disk_cleanup": {
+    "projects": 0,
+    "assets": 0,
+    "audio_studio": 0,
+    "environment_reference_sheet": 0,
+    "image_pipeline": 0,
+    "image_product": 0,
+    "minimax_h3": 0,
+    "storyboard_studio": 0,
+    "visual_continuity": 0,
+    "timeline_retakes": 0,
+    "exports": 0
+  },
+  "integrity_gate": {
+    "passed": true,
+    "checks": {
+      "projects_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "scenes_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "jobs_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "assets_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "character_profiles_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "voice_profiles_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "asset_versions_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "asset_edges_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "codirector_approvals_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "codirector_execution_receipts_empty": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_scene_project": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_job_project": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_version_asset": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_edge_from": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_edge_to": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_approval_proposal": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "dangling_receipt_proposal": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "schema_migrations_present": {
+        "actual": 27,
+        "ok": true
+      },
+      "disk_projects_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_assets_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_audio_studio_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_environment_reference_sheet_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_image_pipeline_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_image_product_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_minimax_h3_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_storyboard_studio_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_visual_continuity_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_timeline_retakes_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      },
+      "disk_exports_clean": {
+        "actual": 0,
+        "expected": 0,
+        "ok": true
+      }
+    }
+  }
+}

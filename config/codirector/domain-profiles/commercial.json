@@ -1,0 +1,15 @@
+{
+  "profileId": "commercial",
+  "displayName": "Commercial",
+  "projectTypeSlugs": ["commercial", "ad", "brand_spot"],
+  "productionStages": ["brief", "preproduction", "production", "post"],
+  "specialistPriorities": ["creative_director", "brand_strategist", "director", "editor"],
+  "knowledgePackIds": ["brand_storytelling", "commercial_pacing", "call_to_action"],
+  "commonDeliverables": ["creative brief", "boards", "hero cut", "delivery variants"],
+  "approvalPoints": ["brief approval", "brand look approval", "legal review", "final cut signoff"],
+  "qualityChecks": ["brand message is clear", "opening hook lands fast", "call to action reads cleanly"],
+  "commonRisks": ["too many messages", "weak product read", "brand inconsistency across versions"],
+  "terminology": {"storyUnit": "spot", "heroVersion": "hero cut"},
+  "defaultPlanTemplate": ["Lock the audience promise", "Build the concept boards", "Create the hero spot", "Version for placements", "Review brand compliance"],
+  "recommendedWorkflows": ["project_readiness_audit", "plan_validation", "generation_preflight", "export_readiness_check"]
+}

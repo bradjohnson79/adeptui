@@ -1,0 +1,26 @@
+{
+  "source": "fixture",
+  "fixtureName": "posecraft_control_fixture.json",
+  "creatorModified": false,
+  "figures": [
+    {
+      "figureId": "figure-1",
+      "label": "Lead Figure",
+      "pose": "neutral standing",
+      "anchor": "center"
+    }
+  ],
+  "camera": {
+    "lens": "35mm",
+    "angle": "eye-level",
+    "distance": "medium"
+  },
+  "masks": [
+    {
+      "maskId": "mask-foreground",
+      "label": "Foreground holdout",
+      "placeholder": true
+    }
+  ],
+  "honestyNote": "Foundation fixture only. This is starting guidance, not creator-authored blocking."
+}

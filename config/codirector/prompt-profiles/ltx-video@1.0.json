@@ -1,0 +1,17 @@
+{
+  "profileId": "ltx-video",
+  "profileVersion": "1.0",
+  "providerId": "ltx-local",
+  "modelId": "ltx-video",
+  "generationDomain": "video",
+  "supportedLanguages": ["en"],
+  "defaultStrategy": "english-only",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en"],
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "motion", "continuity", "provider"],
+  "maxPromptLength": 1800,
+  "negativePromptSupport": true,
+  "certificationStatus": "supported",
+  "notes": ["English refinement supported. Chinese layer not tested for LTX."]
+}

@@ -1,0 +1,25 @@
+{
+  "phase": "M42-W4",
+  "description": "Image production gate. Exact inclusion for required local keys. Modern families are foundation-ready without forced certification.",
+  "requiredLocalProductionWorkflowKeys": [
+    "zimage.txt2img",
+    "zimage.ref_edit"
+  ],
+  "requiredLocalProductionEditWorkflowKeys": [
+    "zimage.ref_edit",
+    "zimage.inpaint",
+    "zimage.outpaint",
+    "image.upscale"
+  ],
+  "requiredCloudProductionWorkflowKeys": [],
+  "enabledCloudProductionWorkflowKeys": [],
+  "enabledCloudEditWorkflowKeys": [],
+  "optionalLocalWorkflowKeys": [],
+  "optionalLocalEditWorkflowKeys": [],
+  "wave1ArchitectureOnly": false,
+  "notes": [
+    "wave2Go requires dual-stage certification (leaf + production path) for requiredLocalProductionWorkflowKeys.",
+    "ModernModelFoundationReady does not require FLUX/Qwen/Imagen Certified unless live-proven.",
+    "Never use len(certified) >= 2 — use exact set inclusion."
+  ]
+}

@@ -14,7 +14,7 @@ test.describe("@critical @isolated codirector project building pane", () => {
     await waitForAppReady(request);
   });
 
-  test("every project building tab renders a real interface (Story, Script Writer, Storyboard, Character Creator, Library)", async ({
+  test("every project building tab renders a real interface (Story, Script Writer, Character Creator, Library)", async ({
     page,
     request,
   }) => {
@@ -65,20 +65,11 @@ test.describe("@critical @isolated codirector project building pane", () => {
       // No raw JSON dump in script writer
       await expect(page.getByTestId("codirector-content-scriptwriter")).not.toContainText('"document"');
 
-      // --- Storyboard tab (script) ---
-      await page.getByTestId("codirector-content-tab-script").click();
-      await expect(page.getByTestId("codirector-content-script")).toBeVisible({ timeout: 30_000 });
-      await expect(
-        page
-          .getByTestId("storyboard-compact")
-          .or(page.getByTestId("storyboard-compact-empty"))
-          .or(page.getByTestId("storyboard-compact-error"))
-          .first(),
-      ).toBeVisible({ timeout: 30_000 });
-      // No raw dark empty canvas (the compact view renders content or explicit empty state text)
-      await expect(page.getByTestId("codirector-content-script")).toContainText(
-        /Storyboard|Open Storyboard|No storyboard frames/i,
-      );
+      // Storyboard is intentionally removed from the Co-Director Project Building
+      // nav (Workstream F). The standalone StoryboardStudio workspace remains
+      // accessible via its deep-link (?workspace=script), but no
+      // `codirector-content-tab-script` tab should be present in the content nav.
+      await expect(page.getByTestId("codirector-content-tab-script")).toHaveCount(0);
 
       // --- Character Creator tab ---
       await page.getByTestId("codirector-content-tab-characters").click();

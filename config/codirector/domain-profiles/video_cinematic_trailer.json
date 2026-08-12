@@ -1,0 +1,15 @@
+{
+  "profileId": "video_cinematic_trailer",
+  "displayName": "Video Cinematic Trailer",
+  "projectTypeSlugs": ["video_cinematic_trailer", "trailer", "teaser", "cinematic_trailer"],
+  "productionStages": ["concept", "asset_prep", "cutting", "finish"],
+  "specialistPriorities": ["trailer_editor", "creative_director", "sound_designer", "motion_graphics_lead"],
+  "knowledgePackIds": ["trailer_structure", "tease_without_spoiling", "crescendo_editing"],
+  "commonDeliverables": ["trailer concept", "selects reel", "hero trailer cut", "delivery variants"],
+  "approvalPoints": ["concept approval", "music and pacing approval", "hero trailer review", "final delivery signoff"],
+  "qualityChecks": ["opening intrigue is immediate", "reveals escalate cleanly", "spoilers stay controlled"],
+  "commonRisks": ["showing the best beat too early", "confusing story setup", "overcutting without payoff"],
+  "terminology": {"storyUnit": "beat", "heroVersion": "hero trailer"},
+  "defaultPlanTemplate": ["Define the promise", "Select the hero moments", "Build escalation", "Refine audio and text cards", "Finish delivery variants"],
+  "recommendedWorkflows": ["project_readiness_audit", "plan_validation", "project_summary_refresh", "export_readiness_check"]
+}

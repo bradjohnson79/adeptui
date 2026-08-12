@@ -1,0 +1,11 @@
+# Adept UI Final All-GO Matrix
+
+> Canonical pointer. Full living matrix: [`ADEPT_UI_ALL_GO_REFINEMENT_MATRIX.md`](ADEPT_UI_ALL_GO_REFINEMENT_MATRIX.md)
+
+```text
+GO — ADEPT UI FINAL SYSTEMS AND RESILIENCE CERTIFICATION PASSED
+AUTOMATED BETA GATE COMPLETE — READY FOR HUMAN BETA
+RELEASE FREEZE — ACTIVE
+```
+
+Models/Hosted/Spend: **GO — PRIMARY ACCEPTED** (independent verifier `2026-08-05T04:10:31Z`; Finale spot-check `apiUsed=false`).

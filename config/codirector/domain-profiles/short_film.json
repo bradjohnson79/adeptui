@@ -1,0 +1,15 @@
+{
+  "profileId": "short_film",
+  "displayName": "Short Film",
+  "projectTypeSlugs": ["short_film", "short", "festival_short"],
+  "productionStages": ["development", "preproduction", "production", "post"],
+  "specialistPriorities": ["director", "story_editor", "producer"],
+  "knowledgePackIds": ["short_form_storytelling", "three_act", "scene_objective"],
+  "commonDeliverables": ["short script", "visual references", "festival-ready master"],
+  "approvalPoints": ["story concept approval", "animatic or board approval", "final export review"],
+  "qualityChecks": ["fast setup", "clean emotional turn", "ending lands quickly"],
+  "commonRisks": ["overexplaining backstory", "too many locations", "ending without payoff"],
+  "terminology": {"storyUnit": "beat", "finalCut": "festival cut"},
+  "defaultPlanTemplate": ["Clarify the core idea", "Trim to essential beats", "Assemble key references", "Produce the short", "Polish for release"],
+  "recommendedWorkflows": ["project_readiness_audit", "plan_validation", "generation_preflight", "export_readiness_check"]
+}

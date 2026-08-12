@@ -1,0 +1,31 @@
+[
+  {
+    "packId": "production_workflows",
+    "title": "Production Workflows",
+    "version": "1.0",
+    "domainTags": ["production", "workflow", "execution"],
+    "frames": [
+      {
+        "frameId": "production_pipeline_alignment",
+        "title": "Align creative ambition with executable workflow",
+        "summary": "A workflow is healthy when decisions, approvals, assets, and handoffs support the intended result without hidden chaos.",
+        "principles": [
+          "Define deliverables, owners, and approval points before heavy execution.",
+          "Keep source of truth visible so departments do not invent parallel states.",
+          "Translate creative intent into concrete references, constraints, and next actions.",
+          "Prefer reversible experiments before irreversible commitments."
+        ],
+        "patterns": [
+          "Use checklists at handoff boundaries to preserve context and continuity.",
+          "Document assumptions when a workflow depends on external timing or availability."
+        ],
+        "antiPatterns": [
+          "Do not start production with unresolved ownership of key decisions.",
+          "Do not hide workflow debt behind informal memory or chat history alone."
+        ],
+        "tags": ["production", "workflow", "handoff", "execution"],
+        "evidenceRefs": ["pack:production_workflows", "discipline:production_management"]
+      }
+    ]
+  }
+]

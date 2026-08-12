@@ -1,0 +1,13 @@
+{
+  "batchBlockId": "bb_6c7373d36bfb",
+  "generatorId": "ltx-local",
+  "workflowKey": "ltx.simple_i2v",
+  "topologyMatch": true,
+  "bindingsValid": true,
+  "artifacts": {
+    "workflow": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\runtime\\exports\\timeline_aaa23a7c-ba86-4dbe-b3dc-1e54482961ac_bb_6c737_ltx-local_workflow.json",
+    "api": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\runtime\\exports\\timeline_aaa23a7c-ba86-4dbe-b3dc-1e54482961ac_bb_6c737_ltx-local_api.json",
+    "bindings": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\runtime\\exports\\timeline_aaa23a7c-ba86-4dbe-b3dc-1e54482961ac_bb_6c737_ltx-local_bindings.json",
+    "fingerprints": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\runtime\\exports\\timeline_aaa23a7c-ba86-4dbe-b3dc-1e54482961ac_bb_6c737_ltx-local_fingerprints.json"
+  }
+}

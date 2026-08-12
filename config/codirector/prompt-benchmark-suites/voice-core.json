@@ -1,0 +1,35 @@
+{
+  "suiteId": "voice-core",
+  "suiteVersion": "1",
+  "domain": "voice",
+  "matrixMode": "reduced",
+  "strategies": ["creator", "refined-english", "bilingual-subtle"],
+  "samplesPerStrategy": 1,
+  "certificationSamplesRequired": 3,
+  "cases": [
+    {
+      "benchmarkId": "voice-restrained",
+      "category": "restrained_emotional_delivery",
+      "creatorPrompt": "Speak with restrained emotion and natural breath: I will wait for the light.",
+      "negativePrompt": "",
+      "continuityContext": "",
+      "expectedIntent": "restrained dialogue",
+      "lockedTerms": [],
+      "providerEligibility": ["qwen3-tts", "kokoro"],
+      "evaluationCriteria": ["promptAdherence", "voicePerformance", "artifactControl"],
+      "controlSettings": { "seed": 7 }
+    },
+    {
+      "benchmarkId": "voice-narration",
+      "category": "narration",
+      "creatorPrompt": "Calm narration, clear pacing: The valley held its breath as dawn arrived.",
+      "negativePrompt": "",
+      "continuityContext": "",
+      "expectedIntent": "narration",
+      "lockedTerms": [],
+      "providerEligibility": ["qwen3-tts", "kokoro"],
+      "evaluationCriteria": ["promptAdherence", "voicePerformance", "artifactControl"],
+      "controlSettings": { "seed": 8 }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "profileId": "documentary",
+  "displayName": "Documentary",
+  "projectTypeSlugs": ["documentary", "doc", "non_fiction"],
+  "productionStages": ["research", "preproduction", "production", "post"],
+  "specialistPriorities": ["research_producer", "story_producer", "editor", "fact_checker"],
+  "knowledgePackIds": ["documentary_narrative", "interview_storycraft", "evidence_driven_edit"],
+  "commonDeliverables": ["research brief", "interview selects", "story assembly", "fact-checked master"],
+  "approvalPoints": ["story framing approval", "rights and releases review", "fact check review", "final ethics review"],
+  "qualityChecks": ["claims are supported", "interviews serve the story", "tone respects the subject"],
+  "commonRisks": ["unsupported claims", "missing release coverage", "story bias hiding in the edit"],
+  "terminology": {"storyUnit": "segment", "onCameraVoice": "interview"},
+  "defaultPlanTemplate": ["Clarify the documentary question", "Gather research and interviews", "Shape the story spine", "Verify facts and rights", "Finish the master with context"],
+  "recommendedWorkflows": ["project_readiness_audit", "missing_asset_audit", "plan_validation", "project_summary_refresh"]
+}

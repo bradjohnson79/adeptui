@@ -1,0 +1,30 @@
+{
+  "recipeId": "index_tts2.local.certified",
+  "componentId": "index_tts2",
+  "title": "IndexTTS2 Local Certified Install",
+  "capabilityTags": ["voice", "character", "clone", "local"],
+  "providerKind": "local",
+  "installStrategy": "index_tts2",
+  "certifiedVersion": "2026.08",
+  "certifiedDate": "2026-08-01",
+  "source": {
+    "providerId": "index-tts2-local",
+    "trustBoundary": "source_manager",
+    "mode": "pinned_runtime"
+  },
+  "requirements": {
+    "dependencies": ["python", "ffmpeg"],
+    "recommendedVramGb": 12
+  },
+  "calibrationDefaults": {
+    "preferredPrecision": "fp16",
+    "safeBatchSize": 1,
+    "recommendedScheduler": "native_runtime",
+    "defaultCfg": 3.0,
+    "optimalStepCount": 24
+  },
+  "notes": [
+    "Use the pinned IndexTTS2 runtime installer only.",
+    "Model downloads require an explicit second confirmation."
+  ]
+}

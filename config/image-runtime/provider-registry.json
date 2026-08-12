@@ -1,0 +1,149 @@
+{
+  "version": "1.0.0",
+  "phase": "M42-W2",
+  "description": "Image providers interchangeable beneath the Unified Workflow Resolver.",
+  "providers": [
+    {
+      "providerId": "comfyui",
+      "displayName": "ComfyUI Local",
+      "kind": "local",
+      "runtime": "comfy",
+      "supportedModelFamilies": ["qwen2512", "zimage", "flux", "qwen", "hidream", "checkpoint", "sdxl", "krea2"],
+      "operations": ["image.generate", "image.edit", "image.reference", "image.upscale"]
+    },
+    {
+      "providerId": "local",
+      "displayName": "Local OpenCV / Utility",
+      "kind": "local",
+      "runtime": "opencv",
+      "supportedModelFamilies": ["utility"],
+      "operations": ["image.chroma_key"]
+    },
+    {
+      "providerId": "google_imagen",
+      "displayName": "Google Imagen",
+      "kind": "cloud",
+      "runtime": "google",
+      "supportedModelFamilies": ["imagen"],
+      "operations": ["image.generate", "image.edit", "image.reference"],
+      "credentialEnvKeys": ["GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "IMAGEN_API_KEY", "GCP_PROJECT"]
+    },
+    {
+      "providerId": "openai",
+      "displayName": "OpenAI Images",
+      "kind": "cloud",
+      "runtime": "openai",
+      "supportedModelFamilies": ["openai"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["OPENAI_API_KEY"]
+    },
+    {
+      "providerId": "replicate",
+      "displayName": "Replicate",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["flux", "sdxl", "stable"],
+      "operations": ["image.generate", "image.edit", "image.reference"],
+      "credentialEnvKeys": ["REPLICATE_API_TOKEN"]
+    },
+    {
+      "providerId": "ideogram",
+      "displayName": "Ideogram",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["ideogram"],
+      "operations": ["image.generate"],
+      "credentialEnvKeys": ["IDEOGRAM_API_KEY"]
+    },
+    {
+      "providerId": "recraft",
+      "displayName": "Recraft",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["recraft"],
+      "operations": ["image.generate"],
+      "credentialEnvKeys": ["RECRAFT_API_KEY"]
+    },
+    {
+      "providerId": "leonardo",
+      "displayName": "Leonardo",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["leonardo"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["LEONARDO_API_KEY"]
+    },
+    {
+      "providerId": "runware",
+      "displayName": "Runware",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["flux", "sdxl"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["RUNWARE_API_KEY"]
+    },
+    {
+      "providerId": "together",
+      "displayName": "Together AI",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "supportedModelFamilies": ["flux", "sdxl"],
+      "operations": ["image.generate"],
+      "credentialEnvKeys": ["TOGETHER_API_KEY"]
+    },
+    {
+      "providerId": "kie",
+      "displayName": "Kie.ai",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "tier": "primary",
+      "recommended": true,
+      "supportedModelFamilies": ["flux", "seedance", "kling"],
+      "operations": ["image.generate", "image.edit", "image.reference"],
+      "credentialEnvKeys": ["KIE_API_KEY", "KIE_KEY"],
+      "hostedProviderTier": "m42"
+    },
+    {
+      "providerId": "wavespeed",
+      "displayName": "WaveSpeed.ai",
+      "kind": "cloud",
+      "runtime": "hosted",
+      "tier": "secondary",
+      "recommended": false,
+      "supportedModelFamilies": ["flux", "seedance"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["WAVESPEED_API_KEY", "WAVESPEED_KEY"],
+      "hostedProviderTier": "m42"
+    },
+    {
+      "providerId": "fal",
+      "displayName": "fal.ai",
+      "kind": "cloud",
+      "runtime": "fal",
+      "tier": "third",
+      "recommended": false,
+      "supportedModelFamilies": ["flux", "sdxl"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["FAL_KEY", "FAL_API_KEY"],
+      "hostedProviderTier": "m42"
+    },
+    {
+      "providerId": "black_forest_labs",
+      "displayName": "Black Forest Labs",
+      "kind": "cloud",
+      "runtime": "bfl",
+      "supportedModelFamilies": ["flux"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["BFL_API_KEY"]
+    },
+    {
+      "providerId": "stability",
+      "displayName": "Stability AI",
+      "kind": "cloud",
+      "runtime": "stability",
+      "supportedModelFamilies": ["sdxl", "stable"],
+      "operations": ["image.generate", "image.edit"],
+      "credentialEnvKeys": ["STABILITY_API_KEY"]
+    }
+  ]
+}

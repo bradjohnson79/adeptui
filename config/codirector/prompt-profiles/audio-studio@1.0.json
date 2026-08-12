@@ -1,0 +1,17 @@
+{
+  "profileId": "audio-studio",
+  "profileVersion": "1.0",
+  "providerId": "audio-studio",
+  "modelId": "audio-studio",
+  "generationDomain": "audio",
+  "supportedLanguages": ["en"],
+  "defaultStrategy": "english-only",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en"],
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "audio", "provider"],
+  "maxPromptLength": 1200,
+  "negativePromptSupport": false,
+  "certificationStatus": "supported",
+  "notes": ["English audio refinement for music/SFX/ambience."]
+}

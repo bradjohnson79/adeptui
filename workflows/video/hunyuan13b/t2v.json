@@ -1,0 +1,8 @@
+{
+  "workflowKey": "hunyuan13b.t2v",
+  "providerId": "hunyuan-video-13b-local",
+  "engine": "hunyuan13b",
+  "source": "official tencent/HunyuanVideo",
+  "authority": "config/video-workflows/certified-registry.json + app.workflows.hunyuan13b_builder",
+  "note": "Mirror only; runtime loads Python builder. Official FP8 profile supported."
+}

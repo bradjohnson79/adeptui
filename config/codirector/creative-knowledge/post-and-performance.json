@@ -1,0 +1,89 @@
+[
+  {
+    "packId": "editing_rhythm",
+    "title": "Editing Rhythm",
+    "version": "1.0",
+    "domainTags": ["editing", "post", "rhythm"],
+    "frames": [
+      {
+        "frameId": "editing_pulse",
+        "title": "Cut to serve pulse, clarity, and revelation",
+        "summary": "Rhythm is not just speed; it is the felt timing of information, emotion, and momentum.",
+        "principles": [
+          "Cut when the audience needs a new idea, emphasis, or energy shift.",
+          "Hold longer when performance or tension is still evolving inside the shot.",
+          "Use variation in shot duration to create musical contrast.",
+          "Protect spatial and emotional continuity unless disorientation is intentional."
+        ],
+        "patterns": [
+          "Let reaction timing determine many of the strongest cuts.",
+          "Use montage compression when accumulation matters more than coverage detail."
+        ],
+        "antiPatterns": [
+          "Do not equate faster cutting with stronger intensity.",
+          "Do not flatten every scene into the same editorial tempo."
+        ],
+        "tags": ["editing", "rhythm", "post", "pacing"],
+        "evidenceRefs": ["pack:editing_rhythm", "discipline:editing"]
+      }
+    ]
+  },
+  {
+    "packId": "sound_design_principles",
+    "title": "Sound Design Principles",
+    "version": "1.0",
+    "domainTags": ["sound", "audio", "post"],
+    "frames": [
+      {
+        "frameId": "sound_worldbuilding",
+        "title": "Use sound to shape world, tension, and subjectivity",
+        "summary": "Sound design can carry emotional perspective, hidden threat, and scale long before the image states it plainly.",
+        "principles": [
+          "Decide what the audience should hear literally versus psychologically.",
+          "Build contrast between silence, ambience, and impact events.",
+          "Use sonic motifs to connect memory, threat, or character presence.",
+          "Layer detail according to story focus rather than maximum density."
+        ],
+        "patterns": [
+          "Introduce offscreen sound before visual reveal to create anticipation.",
+          "Use perspective shifts in sound field to signal subjectivity."
+        ],
+        "antiPatterns": [
+          "Do not fill every gap with undifferentiated texture.",
+          "Do not let music and effects fight for the same narrative job."
+        ],
+        "tags": ["sound", "audio", "design", "mood"],
+        "evidenceRefs": ["pack:sound_design_principles", "discipline:sound_design"]
+      }
+    ]
+  },
+  {
+    "packId": "performance_direction",
+    "title": "Performance Direction",
+    "version": "1.0",
+    "domainTags": ["performance", "direction", "actors"],
+    "frames": [
+      {
+        "frameId": "performance_playable_direction",
+        "title": "Give actors playable direction",
+        "summary": "Strong direction translates abstract intention into action, stakes, and relationship behavior.",
+        "principles": [
+          "Frame notes around verbs, objectives, and obstacles.",
+          "Protect the actor's inner logic even when adjusting tone or pace.",
+          "Give contradictions room when they make the moment human.",
+          "Align performance calibration with the camera's distance and scene purpose."
+        ],
+        "patterns": [
+          "Offer one note that changes behavior before offering several that change result.",
+          "Use specific image or relationship prompts when emotional labels are too vague."
+        ],
+        "antiPatterns": [
+          "Do not direct only by adjectives like 'more intense' or 'less flat'.",
+          "Do not chase line readings that erase truthful spontaneity."
+        ],
+        "tags": ["performance", "direction", "actors", "communication"],
+        "evidenceRefs": ["pack:performance_direction", "discipline:directing_actors"]
+      }
+    ]
+  }
+]

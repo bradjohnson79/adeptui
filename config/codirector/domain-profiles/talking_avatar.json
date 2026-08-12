@@ -1,0 +1,15 @@
+{
+  "profileId": "talking_avatar",
+  "displayName": "Talking Avatar",
+  "projectTypeSlugs": ["talking_avatar", "avatar", "presenter_avatar"],
+  "productionStages": ["script", "performance_prep", "generation", "post"],
+  "specialistPriorities": ["performance_director", "voice_director", "avatar_supervisor", "editor"],
+  "knowledgePackIds": ["avatar_performance", "voice_clarity", "talking_head_pacing"],
+  "commonDeliverables": ["avatar script", "voice direction", "approved avatar sections", "final delivery package"],
+  "approvalPoints": ["script approval", "voice approval", "avatar performance approval", "final export review"],
+  "qualityChecks": ["delivery feels human", "lip sync stays believable", "message stays concise"],
+  "commonRisks": ["flat delivery", "uncanny motion", "voice and facial intent mismatch"],
+  "terminology": {"storyUnit": "section", "heroTake": "approved delivery"},
+  "defaultPlanTemplate": ["Refine the script", "Direct the voice", "Review avatar sections", "Repair any weak delivery moments", "Export the final piece"],
+  "recommendedWorkflows": ["project_readiness_audit", "failed_job_review", "generation_preflight", "export_readiness_check"]
+}

@@ -1,0 +1,66 @@
+"""Studio Project Library — canonical taxonomy, classification, and asset placement."""
+
+from .classify import ClassifyInput, classify_asset
+from .schema import (
+    AssetLibraryMeta,
+    Classification,
+    FolderNode,
+    LIBRARY_SCHEMA_VERSION,
+    LibraryState,
+)
+from .service import (
+    assign_asset,
+    build_folder_map,
+    compute_content_hash,
+    enrich_library_item,
+    ensure_entity_folder,
+    filter_library_items,
+    find_duplicates_by_hash,
+    get_library_response,
+    get_tree,
+    init_project_library,
+    migrate_project_library,
+    read_asset_library_meta,
+    repair_library,
+    resolve_path,
+    write_asset_library_meta,
+)
+from .taxonomy import (
+    SUPPORTED_3D_EXTENSIONS,
+    SYSTEM_FOLDER_PREFIX,
+    UNSUPPORTED_3D_EXTENSIONS,
+    all_system_keys,
+    display_path_for_system_key,
+    system_folder_id,
+)
+
+__all__ = [
+    "AssetLibraryMeta",
+    "ClassifyInput",
+    "Classification",
+    "FolderNode",
+    "LIBRARY_SCHEMA_VERSION",
+    "LibraryState",
+    "SYSTEM_FOLDER_PREFIX",
+    "SUPPORTED_3D_EXTENSIONS",
+    "UNSUPPORTED_3D_EXTENSIONS",
+    "all_system_keys",
+    "assign_asset",
+    "build_folder_map",
+    "classify_asset",
+    "compute_content_hash",
+    "display_path_for_system_key",
+    "enrich_library_item",
+    "ensure_entity_folder",
+    "filter_library_items",
+    "find_duplicates_by_hash",
+    "get_library_response",
+    "get_tree",
+    "init_project_library",
+    "migrate_project_library",
+    "read_asset_library_meta",
+    "repair_library",
+    "resolve_path",
+    "system_folder_id",
+    "write_asset_library_meta",
+]

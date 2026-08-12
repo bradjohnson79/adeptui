@@ -1,0 +1,118 @@
+[
+  {
+    "packId": "cinematography_principles",
+    "title": "Cinematography Principles",
+    "version": "1.0",
+    "domainTags": ["cinematography", "visual", "camera"],
+    "frames": [
+      {
+        "frameId": "cinematography_intent",
+        "title": "Let camera choices express story intent",
+        "summary": "Framing, movement, and exposure should translate emotional and narrative priorities into visual behavior.",
+        "principles": [
+          "Choose the camera relationship that best reflects audience alignment.",
+          "Movement should reveal, pursue, or pressure something specific.",
+          "Protect spatial clarity before adding flourish.",
+          "Visual style should evolve with the story's changing emotional temperature."
+        ],
+        "patterns": [
+          "Use repeated camera grammar to establish a scene's rules before breaking them.",
+          "Tie lensing and movement to point of view shifts."
+        ],
+        "antiPatterns": [
+          "Do not move the camera just to announce production value.",
+          "Do not sacrifice geography for momentary coolness."
+        ],
+        "tags": ["cinematography", "visual", "camera", "storytelling"],
+        "evidenceRefs": ["pack:cinematography_principles", "discipline:cinematography"]
+      }
+    ]
+  },
+  {
+    "packId": "lens_characteristics",
+    "title": "Lens Characteristics",
+    "version": "1.0",
+    "domainTags": ["cinematography", "lens", "camera"],
+    "frames": [
+      {
+        "frameId": "lens_story_effect",
+        "title": "Pick lenses for felt perspective",
+        "summary": "Lens choice affects intimacy, distortion, depth, and how a space emotionally reads.",
+        "principles": [
+          "Wider lenses emphasize environment, proximity, and movement through space.",
+          "Longer lenses compress distance and isolate subjects through selective focus.",
+          "Changing focal length should reflect a storytelling reason, not indecision.",
+          "Lens consistency can unify a sequence's emotional texture."
+        ],
+        "patterns": [
+          "Use wider focal lengths when environment pressure is part of the beat.",
+          "Use longer focal lengths to flatten choice or trap attention."
+        ],
+        "antiPatterns": [
+          "Do not treat lenses as neutral coverage tools.",
+          "Do not mix incompatible lens logic without a visible point."
+        ],
+        "tags": ["lens", "cinematography", "perspective", "visual"],
+        "evidenceRefs": ["pack:lens_characteristics", "discipline:lensing"]
+      }
+    ]
+  },
+  {
+    "packId": "visual_composition",
+    "title": "Visual Composition",
+    "version": "1.0",
+    "domainTags": ["visual", "composition", "design"],
+    "frames": [
+      {
+        "frameId": "composition_attention_control",
+        "title": "Direct attention with deliberate composition",
+        "summary": "Composition should clarify what matters, how power flows, and what emotional tension lives in the frame.",
+        "principles": [
+          "Use balance, imbalance, and negative space to shape feeling.",
+          "Foreground, midground, and background should support readable depth of meaning.",
+          "Lines and blocking should guide the eye toward story information.",
+          "Change composition when power or perspective changes."
+        ],
+        "patterns": [
+          "Reserve centered symmetry for ritual, control, or destabilizing contrast.",
+          "Use occlusion when hiding is part of the tension."
+        ],
+        "antiPatterns": [
+          "Do not decorate the frame until the focal idea is clear.",
+          "Do not overfill every edge of the image."
+        ],
+        "tags": ["visual", "composition", "attention", "frame_design"],
+        "evidenceRefs": ["pack:visual_composition", "discipline:composition"]
+      }
+    ]
+  },
+  {
+    "packId": "blocking_theory",
+    "title": "Blocking Theory",
+    "version": "1.0",
+    "domainTags": ["staging", "blocking", "performance"],
+    "frames": [
+      {
+        "frameId": "blocking_relationships",
+        "title": "Stage relationships through movement and distance",
+        "summary": "Blocking makes status, attraction, conflict, and attention legible before a line is spoken.",
+        "principles": [
+          "Assign each movement a change in intention, status, or knowledge.",
+          "Use proximity and eye line to expose relationship dynamics.",
+          "Let performers discover beats through action, not marks alone.",
+          "Coordinate blocking with lensing so the audience reads the intended power shift."
+        ],
+        "patterns": [
+          "Crossing frame lines can signify challenge or takeover when motivated.",
+          "Use stillness as an active choice against surrounding motion."
+        ],
+        "antiPatterns": [
+          "Do not make actors wander without dramatic consequence.",
+          "Do not ignore the room's practical pathways and obstacles."
+        ],
+        "tags": ["blocking", "staging", "performance", "visual"],
+        "evidenceRefs": ["pack:blocking_theory", "discipline:staging"]
+      }
+    ]
+  }
+]

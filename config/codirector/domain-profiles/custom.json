@@ -1,0 +1,15 @@
+{
+  "profileId": "custom",
+  "displayName": "Custom",
+  "projectTypeSlugs": ["custom", "hybrid", "other"],
+  "productionStages": ["discovery", "planning", "production", "review"],
+  "specialistPriorities": ["producer", "director", "editor"],
+  "knowledgePackIds": ["creator_clarity", "scope_control", "review_readiness"],
+  "commonDeliverables": ["project brief", "working plan", "reviewable outputs"],
+  "approvalPoints": ["goal alignment approval", "scope approval", "final review"],
+  "qualityChecks": ["goal is clear", "plan is realistic", "next step is easy to approve"],
+  "commonRisks": ["unclear scope", "missing references", "stale decisions"],
+  "terminology": {"storyUnit": "work unit", "heroVersion": "approved version"},
+  "defaultPlanTemplate": ["Clarify the goal", "Gather references", "Build the safest next plan", "Review outputs", "Prepare the next approved step"],
+  "recommendedWorkflows": ["project_readiness_audit", "plan_validation", "project_summary_refresh"]
+}

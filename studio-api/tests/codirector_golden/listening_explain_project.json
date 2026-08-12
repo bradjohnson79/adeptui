@@ -1,0 +1,14 @@
+{
+  "id": "listening_explain_project_live_failure",
+  "user_message": "I will tell you all about The Dreamweaver as I’d like you to be familiar with the story before we move into production. Sound good?",
+  "expect": {
+    "primary_intent": "EXPLAIN_PROJECT",
+    "mode": "LISTENING",
+    "question_budget": 0,
+    "tool_policy": "NONE",
+    "workflow_advance_policy": "HOLD",
+    "uses_llm_primary": true,
+    "evidence_must_include_any": ["I will tell you", "before we move into production", "Sound good"],
+    "reply_must_not_match": ["clear project title", "one-sentence creative premise"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "pid": 42560,
+  "project_id": "b9fb10f2-20eb-4cf7-a420-786c1d155b1c",
+  "scene_id": "aaa23a7c-ba86-4dbe-b3dc-1e54482961ac",
+  "batch_id": "bb_6c7373d36bfb",
+  "selectedPath": "topology",
+  "topologyMatch": true,
+  "bindingsValid": true,
+  "legacyGraphHashCheck": "false",
+  "log_scan": {
+    "fingerprint_lines": 4,
+    "fingerprint_line": "[2026-08-08T04:28:47Z] workflowFingerprint workflow=ltx.simple_i2v@1.0.0 registryEntry=true topologyHashCertified=true legacyGraphHashCertified=true selectedPath=topology topologyMatch=true bindingsValid=true legacyGraphHashCheck=false reason=\"\" certifiedTopology=sha256:1bb8b7b42cf2afbee453b2511b2cbc00f45e9d6bf8e063ca9c198432f00f0ab6 actualTopology=sha256:1bb8b7b42cf2afbee453b2511b2cbc00f45e9d6bf8e063ca9c198432f00f0ab6 certifiedGraph=None actualGraph=None",
+    "selectedPath": "topology",
+    "legacyGraphHashCheck": "false",
+    "graphhash_mismatch_lines": []
+  }
+}

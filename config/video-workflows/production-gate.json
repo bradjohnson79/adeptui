@@ -1,0 +1,29 @@
+{
+  "version": "1.0.0",
+  "phase": "M41-4.1B-L",
+  "description": "Release-defined production workflow sets. Never shrink based on machine credentials.",
+  "requiredLocalProductionWorkflowKeys": [
+    "ltx.simple_i2v",
+    "ltx.scene",
+    "ltx.ingredients_ic_lora",
+    "wan.first_last_frame",
+    "wan.three_frame",
+    "director.shot_render",
+    "director.scene_render",
+    "director.timeline_render",
+    "director.batch_timeline",
+    "video.extend",
+    "lipsync.latentsync"
+  ],
+  "requiredCloudProductionWorkflowKeys": [
+    "fal.seedance",
+    "fal.kling",
+    "fal.veo",
+    "fal.runway"
+  ],
+  "enabledCloudProductionWorkflowKeys": [],
+  "notes": {
+    "enabledCloud": "Intersection of requiredCloud and providers advertised for production. Empty = cloud optional; local Wave 6 unlock does not require fal CERTIFIED.",
+    "wanThreeFrame": "Three-frame guided generation using first-to-middle and middle-to-last conditioned segments with validated stitching."
+  }
+}

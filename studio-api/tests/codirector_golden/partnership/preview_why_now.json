@@ -1,0 +1,10 @@
+{
+  "name": "preview_and_why_now",
+  "user_message": "A disgraced marine biologist discovers that the creature blamed for a coastal disaster is protecting the town from something worse. Tense thriller tone for festival audiences.",
+  "expect": {
+    "min_readiness": 1,
+    "require_why_now": true,
+    "require_preview_hook": true,
+    "recommended_action": "SHOW_PREVIEW"
+  }
+}

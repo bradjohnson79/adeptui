@@ -1,0 +1,47 @@
+{
+  "suiteId": "image-core",
+  "suiteVersion": "1",
+  "domain": "image",
+  "matrixMode": "full",
+  "strategies": ["creator", "refined-english", "bilingual-subtle", "bilingual-balanced", "bilingual-strong"],
+  "samplesPerStrategy": 1,
+  "certificationSamplesRequired": 3,
+  "cases": [
+    {
+      "benchmarkId": "image-portrait",
+      "category": "portrait",
+      "creatorPrompt": "Portrait of Korri, soft rim light, shallow depth of field, photorealistic",
+      "negativePrompt": "extra fingers, deformed face, text artifacts",
+      "continuityContext": "Character: Korri",
+      "expectedIntent": "character portrait",
+      "lockedTerms": ["Korri"],
+      "providerEligibility": ["comfyui"],
+      "evaluationCriteria": ["promptAdherence", "characterConsistency", "composition", "lighting", "artifactControl"],
+      "controlSettings": { "seed": 101, "width": 1024, "height": 1024, "aspectRatio": "1:1" }
+    },
+    {
+      "benchmarkId": "image-environment",
+      "category": "environment",
+      "creatorPrompt": "Vast mountain valley with waterfalls at sunset, cinematic composition, atmospheric depth",
+      "negativePrompt": "blurry, watermark",
+      "continuityContext": "",
+      "expectedIntent": "environment landscape",
+      "lockedTerms": [],
+      "providerEligibility": ["comfyui"],
+      "evaluationCriteria": ["promptAdherence", "composition", "lighting", "artifactControl"],
+      "controlSettings": { "seed": 102, "width": 1920, "height": 1080, "aspectRatio": "16:9" }
+    },
+    {
+      "benchmarkId": "image-material",
+      "category": "material_texture",
+      "creatorPrompt": "Close detail of weathered leather and metal clasp, sharp material texture, studio softbox",
+      "negativePrompt": "plastic look, blur",
+      "continuityContext": "",
+      "expectedIntent": "material texture study",
+      "lockedTerms": [],
+      "providerEligibility": ["comfyui"],
+      "evaluationCriteria": ["promptAdherence", "composition", "lighting", "artifactControl"],
+      "controlSettings": { "seed": 103, "width": 1024, "height": 1024, "aspectRatio": "1:1" }
+    }
+  ]
+}

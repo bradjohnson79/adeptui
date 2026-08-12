@@ -1,0 +1,9 @@
+{
+  "id": "companion_discouragement",
+  "user_message": "I don’t think this story works anymore.",
+  "expect": {
+    "support_needed": "REFRAME",
+    "forbid_reply_match": ["you are a genius", "everything is excellent"],
+    "uses_llm_primary": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "profileId": "social_media",
+  "displayName": "Social Media",
+  "projectTypeSlugs": ["social_media", "social", "short_vertical"],
+  "productionStages": ["concept", "capture_or_generate", "edit", "publish_prep"],
+  "specialistPriorities": ["content_strategist", "editor", "motion_designer"],
+  "knowledgePackIds": ["short_form_hook", "vertical_pacing", "creator_clarity"],
+  "commonDeliverables": ["short script", "caption package", "platform variants", "final export"],
+  "approvalPoints": ["hook approval", "caption review", "final post review"],
+  "qualityChecks": ["hook is immediate", "message is readable on mobile", "ending leaves a clear action"],
+  "commonRisks": ["crowded visuals", "caption overload", "platform mismatch"],
+  "terminology": {"storyUnit": "post beat", "heroVersion": "platform hero cut"},
+  "defaultPlanTemplate": ["Clarify the hook", "Build the short-form cut", "Adapt for each platform", "Review mobile readability", "Prep final exports"],
+  "recommendedWorkflows": ["project_readiness_audit", "missing_asset_audit", "generation_preflight", "export_readiness_check"]
+}

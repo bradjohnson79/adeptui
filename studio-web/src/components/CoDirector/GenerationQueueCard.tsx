@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../../../api";
+import { api } from "../../api";
 import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessageExecution as ExecPayload, GenerationPlan, GenerationOutputPlan } from "./types";
 import type { SurfaceType } from "./AgentWorkSurface/types";

@@ -1,0 +1,89 @@
+[
+  {
+    "packId": "documentary_narrative",
+    "title": "Documentary Narrative",
+    "version": "1.0",
+    "domainTags": ["documentary", "story", "structure"],
+    "frames": [
+      {
+        "frameId": "documentary_argument_flow",
+        "title": "Shape inquiry into a narrative argument",
+        "summary": "Documentary structure should reveal meaning through selection, contrast, and accumulation of evidence.",
+        "principles": [
+          "Define the central question early so viewers know what evidence matters.",
+          "Alternate exposition with lived moments that humanize the thesis.",
+          "Let contradictions stay visible when they deepen credibility.",
+          "End by widening implication, not merely restating facts."
+        ],
+        "patterns": [
+          "Use chapter turns when the question itself evolves.",
+          "Pair macro context with intimate witness detail."
+        ],
+        "antiPatterns": [
+          "Do not stack interviews without progression in viewpoint.",
+          "Do not force certainty where the material is meaningfully unresolved."
+        ],
+        "tags": ["documentary", "story", "structure", "evidence"],
+        "evidenceRefs": ["pack:documentary_narrative", "tradition:documentary"]
+      }
+    ]
+  },
+  {
+    "packId": "television_acts",
+    "title": "Television Act Design",
+    "version": "1.0",
+    "domainTags": ["television", "story", "structure"],
+    "frames": [
+      {
+        "frameId": "television_act_outs",
+        "title": "Use act outs to drive return behavior",
+        "summary": "Television pacing depends on mini-climaxes that reset curiosity without exhausting the main arc.",
+        "principles": [
+          "Each act should own a dramatic objective and reversal.",
+          "Act outs should sharpen a question, threat, or revelation.",
+          "A and B stories should trade momentum instead of peaking simultaneously.",
+          "Episode endings should satisfy the week while feeding the series engine."
+        ],
+        "patterns": [
+          "Use act boundaries to hand focus between plotlines.",
+          "Seed future payoff before the final button."
+        ],
+        "antiPatterns": [
+          "Do not make act outs feel like arbitrary ad-break spikes.",
+          "Do not starve the cold open of story purpose."
+        ],
+        "tags": ["television", "story", "structure", "pacing"],
+        "evidenceRefs": ["pack:television_acts", "tradition:tv_writing"]
+      }
+    ]
+  },
+  {
+    "packId": "anime_pacing",
+    "title": "Anime Pacing",
+    "version": "1.0",
+    "domainTags": ["anime", "story", "pacing"],
+    "frames": [
+      {
+        "frameId": "anime_emotional_buildup",
+        "title": "Balance momentum with emotional dwell time",
+        "summary": "Anime pacing often alternates propulsion with reflective beats that deepen attachment and anticipation.",
+        "principles": [
+          "Give climactic actions enough runway to feel ceremonial, not abrupt.",
+          "Use pauses, looks, and reaction chains to heighten emotional charge.",
+          "Escalate battles or reveals through changing meaning, not only scale.",
+          "Let episode endings crystallize feeling as much as plot."
+        ],
+        "patterns": [
+          "Use quiet aftermath scenes to convert spectacle into memory.",
+          "Employ recurring motifs to make build-up feel intentional."
+        ],
+        "antiPatterns": [
+          "Do not stretch repetition past emotional gain.",
+          "Do not speed through aftermath and expect impact to linger."
+        ],
+        "tags": ["anime", "pacing", "story", "emotion"],
+        "evidenceRefs": ["pack:anime_pacing", "tradition:anime_storytelling"]
+      }
+    ]
+  }
+]

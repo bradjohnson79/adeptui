@@ -1,0 +1,18 @@
+{
+  "profileId": "qwen3-tts",
+  "profileVersion": "1.0",
+  "providerId": "qwen3-tts",
+  "modelId": "qwen3-tts",
+  "generationDomain": "voice",
+  "supportedLanguages": ["en", "zh"],
+  "defaultStrategy": "english-primary-chinese-support",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en"],
+  "recommendedBalance": "subtle",
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "audio", "continuity", "provider"],
+  "maxPromptLength": 1000,
+  "negativePromptSupport": false,
+  "certificationStatus": "experimental",
+  "notes": ["Voice performance English refinement; Chinese layer experimental."]
+}

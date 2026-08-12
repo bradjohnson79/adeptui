@@ -1,0 +1,10 @@
+{
+  "id": "emergence_evidence_v1",
+  "user_message": "Mira maps tides that remember people. A lantern entity answers her charts and the city ages backward for those who hear it.",
+  "expect": {
+    "creative_stage": "EMERGENCE",
+    "response_evidence_min": 2,
+    "documentation_reason_one_of": ["OK", "NO_PROJECT_FACTS_FOUND", "AMBIGUOUS_CONTENT", "DOCUMENTATION_DISABLED", "EXTRACTION_FAILED"],
+    "forbid_reply_patterns": ["you are a genius", "groundbreaking"]
+  }
+}

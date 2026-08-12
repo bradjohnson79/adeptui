@@ -1,0 +1,8 @@
+﻿{
+    "ollama":  true,
+    "studio_api":  true,
+    "cloudflared":  true,
+    "comfyui":  true,
+    "gpu":  "cuda:0 NVIDIA GeForce RTX 5090",
+    "timestamp":  "2026-08-12T02:09:10.5074265Z"
+}

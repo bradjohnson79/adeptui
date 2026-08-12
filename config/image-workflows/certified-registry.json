@@ -1,0 +1,3157 @@
+{
+  "version": "2.0.0",
+  "phase": "M42-W2",
+  "description": "Adept UI Image Workflow Library \u2014 Wave 2. Certified only with live evidence. Modern families registered for discovery/routing.",
+  "statusEnum": [
+    "Draft",
+    "Built",
+    "SmokeTested",
+    "Certified",
+    "Deferred",
+    "Blocked",
+    "Retired"
+  ],
+  "categoryEnum": [
+    "Generation",
+    "Editing",
+    "Reference",
+    "Restoration",
+    "Utility",
+    "Training",
+    "Identity",
+    "Compositing",
+    "Publishing"
+  ],
+  "entries": [
+    {
+      "workflowId": "IMG-ZIMAGE-TXT2IMG-001",
+      "workflowKey": "zimage.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Certified",
+      "modelFamily": "zimage",
+      "modelVariant": "turbo",
+      "engine": "zimage",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_zimage_txt2img_workflow",
+      "builderPath": "app.workflows.image_tools:build_zimage_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Wave 2 \u2014 Certified only after dual-stage live evidence."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:0364d2ddaaf0cbd294a5834b1e4a2573ae0380081fcb043dc247a0bf6dd735da",
+        "builderHash": "sha256:f9cbea9a8f53308597af0b49942425fc797c5d4c67f71ae09de8a6a993f01aa4",
+        "nodeInventoryHash": "sha256:f425b8f3803b2d6bb4782d8951e34742556c723bf6ed6712d626efd478b848d1",
+        "modelInventoryHash": "sha256:d97372ae8b1672fb35db0790ccf05a6eff649c5342c81a82a49b9ac1229b4a97"
+      },
+      "certificationRecordId": "CERT-IMG-ZIMAGE-TXT2IMG-001-20260729-003"
+    },
+    {
+      "workflowId": "IMG-ZIMAGE-REF-001",
+      "workflowKey": "zimage.ref_edit",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Certified",
+      "modelFamily": "zimage",
+      "modelVariant": "turbo",
+      "engine": "zimage",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_zimage_ref_workflow",
+      "builderPath": "app.workflows.image_tools:build_zimage_ref_workflow",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit",
+        "image.reference",
+        "img2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "VAEEncode",
+        "ImageScale",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "reference_image"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "strength"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "references",
+          "parentImages"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "img2img",
+          "reference_guided",
+          "image.edit"
+        ],
+        "jobKinds": [
+          "imagegen",
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Reference path uses VAEEncode img2img latent (denoise<1). TextEncodeZImageOmni is text-only to avoid Omni+EmptyLatent shape crashes."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:c8c2c11cb8306b4dad0782aaa63e6e42a90d9863f016239950fb65a294298f51",
+        "builderHash": "sha256:aa9634a1bd895224a9952fe5acc3e69dd78dc3709fac5b64cf1af42c8eb33430",
+        "nodeInventoryHash": "sha256:534482a83cad566272ad342d0c80caf5df5d0ee8f505e9f59482f48554e1e5ad",
+        "modelInventoryHash": "sha256:d1423bc0aefc88090e23098100b0c3c4d9b48458a9c4462abf3830b394dfb98f"
+      },
+      "certificationRecordId": "CERT-IMG-ZIMAGE-REF-001-20260731-006"
+    },
+    {
+      "workflowId": "IMG-ZIMAGE-INPAINT-001",
+      "workflowKey": "zimage.inpaint",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Certified",
+      "modelFamily": "zimage",
+      "modelVariant": "turbo",
+      "engine": "zimage",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_zimage_inpaint_workflow",
+      "builderPath": "app.workflows.image_edit_tools:build_zimage_inpaint_workflow",
+      "operation": "image.inpaint",
+      "supportedOperations": [
+        "image.inpaint",
+        "object_remove",
+        "object_replace",
+        "inpaint"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "VAEEncodeForInpaint",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "mask_image"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "denoise",
+        "strength"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": true,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "parentImages",
+          "maskAssetIds",
+          "operation"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "image.inpaint",
+          "object_remove",
+          "object_replace",
+          "inpaint"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Wave 4 \u2014 Draft until dual-stage live certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:0bcaf0e9fdd92c920df1b5d9dda8053f45c5146aa8f626d0072a1148bd4be0b0",
+        "builderHash": "sha256:005a9685d23d563fbe607140ecdf2bfd59a2d821361d19a47dd99dfea39041e3",
+        "nodeInventoryHash": "sha256:e12c3772860bbe9928cb1518de3065aab563d9807ff45c08a5108900df7e4427",
+        "modelInventoryHash": "sha256:d1423bc0aefc88090e23098100b0c3c4d9b48458a9c4462abf3830b394dfb98f"
+      },
+      "certificationRecordId": "CERT-IMG-ZIMAGE-INPAINT-001-20260730-002"
+    },
+    {
+      "workflowId": "IMG-ZIMAGE-OUTPAINT-001",
+      "workflowKey": "zimage.outpaint",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Certified",
+      "modelFamily": "zimage",
+      "modelVariant": "turbo",
+      "engine": "zimage",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_zimage_outpaint_workflow",
+      "builderPath": "app.workflows.image_edit_tools:build_zimage_outpaint_workflow",
+      "operation": "image.outpaint",
+      "supportedOperations": [
+        "image.outpaint",
+        "crop_extend",
+        "outpaint"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "ImagePadForOutpaint",
+        "VAEEncodeForInpaint",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "padding",
+        "denoise"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": true,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "parentImages",
+          "operation"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "image.outpaint",
+          "crop_extend",
+          "outpaint"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Wave 4 \u2014 Draft until dual-stage live certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:cff26a1b0c70b2be2e47f522615497ffc49e5aedcda2d1aeb7cbe20075f2199c",
+        "builderHash": "sha256:005a9685d23d563fbe607140ecdf2bfd59a2d821361d19a47dd99dfea39041e3",
+        "nodeInventoryHash": "sha256:c225e607f189d88cfa00079400cba5d144ba12c90f50abb46858557c0d9e1db9",
+        "modelInventoryHash": "sha256:d1423bc0aefc88090e23098100b0c3c4d9b48458a9c4462abf3830b394dfb98f"
+      },
+      "certificationRecordId": "CERT-IMG-ZIMAGE-OUTPAINT-001-20260730-002"
+    },
+    {
+      "workflowId": "IMG-FLUX-TXT2IMG-001",
+      "workflowKey": "flux.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "dev",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_txt2img_workflow",
+      "builderPath": "app.imagegen_workflows:build_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": true,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Deferred until FLUX weights discovered and live-certified. Never fabricate Certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-IMG2IMG-001",
+      "workflowKey": "flux.img2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "dev",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit",
+        "img2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "img2img",
+          "image.edit"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred until FLUX weights discovered and live-certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-REF-001",
+      "workflowKey": "flux.reference",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "kontext",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.reference",
+      "supportedOperations": [
+        "image.reference"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "LoadImage",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "reference_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.reference",
+          "reference_guided"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 FLUX Kontext / reference when weights present."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-EDIT-001",
+      "workflowKey": "flux.edit",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "edit",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": true,
+        "supportsOutpaint": false,
+        "supportsFill": true,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.edit"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 FLUX Edit/Fill when weights present."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN2512-TXT2IMG-001",
+      "workflowKey": "qwen2512.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Certified",
+      "modelFamily": "qwen-image-2512",
+      "modelVariant": "base",
+      "engine": "qwen2512",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_2512_txt2img_workflow",
+      "builderPath": "app.workflows.qwen_image_2512:build_qwen_2512_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_2512_unet",
+        "qwen_image_2512_clip",
+        "qwen_image_2512_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Dedicated Qwen-Image-2512 split-model graph. Live ComfyUI smoke verified 2026-07-31 (artifacts/m42/w43-qwen-2512/runtime/qwen_2512_smoke.png). Character consistency still requires Prompt Package + references \u2014 not prompt-only identity."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "HIGH"
+      },
+      "fingerprints": {},
+      "certificationRecordId": "m42-w43-qwen2512-txt2img-smoke-2026-07-31"
+    },
+    {
+      "workflowId": "IMG-QWEN2512-CHAR-CONCEPT-001",
+      "workflowKey": "qwen2512.character_concept",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Identity",
+      "status": "Draft",
+      "modelFamily": "qwen-image-2512",
+      "modelVariant": "character-concept",
+      "engine": "qwen2512",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_2512_character_concept_workflow",
+      "builderPath": "app.workflows.qwen_image_2512:build_qwen_2512_character_concept_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "character.concept"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_2512_unet",
+        "qwen_image_2512_clip",
+        "qwen_image_2512_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": true,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "character.concept",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Text-only character concept prompt envelope. Does not replace Character Creator, reference editing, or final identity certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN2512-CHAR-PROFILE-001",
+      "workflowKey": "qwen2512.character_profile",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Identity",
+      "status": "Draft",
+      "modelFamily": "qwen-image-2512",
+      "modelVariant": "character-profile",
+      "engine": "qwen2512",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_2512_character_concept_workflow",
+      "builderPath": "app.workflows.qwen_image_2512:build_qwen_2512_character_concept_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "character.profile"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_2512_unet",
+        "qwen_image_2512_clip",
+        "qwen_image_2512_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": true,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "character.profile",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Text-only profile-style render. No reference-sheet turnarounds or identity locks are implied by this draft runtime graph."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-KREA2-TURBO-TXT2IMG-001",
+      "workflowKey": "krea2.turbo_txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Draft",
+      "modelFamily": "krea2",
+      "modelVariant": "turbo",
+      "engine": "krea2",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_krea2_turbo_txt2img_workflow",
+      "builderPath": "app.workflows.krea2_image:build_krea2_turbo_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "requiredModels": [
+        "krea2_turbo_checkpoint",
+        "krea2_text_encoder",
+        "krea2_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg",
+        "mu",
+        "styleReferences",
+        "characterReferences",
+        "environmentReferences",
+        "moodboardReferences",
+        "loraId",
+        "loraStrength"
+      ],
+      "optionalNodes": [
+        "LoadImage",
+        "CLIPVisionLoader",
+        "CLIPVisionEncode",
+        "IPAdapterLoader",
+        "IPAdapterApply",
+        "LoraLoader"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsTextToImage": true,
+        "supportsResolutionControl": true,
+        "supportsSeed": true,
+        "supportsReferences": true,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true,
+        "supportsReferenceImages": true,
+        "supportsStyleReferences": true,
+        "supportsMoodboards": true,
+        "supportsCharacterReference": true,
+        "supportsImageEditing": false
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Draft \u2014 Krea 2 Turbo split-model graph (8-step distilled, CFG 0.0, constant mu=1.15, 1024\u20132048 px padded to multiple of 16). Node set verified against ComfyUI PR #14589 (v0.26.0+); ModelSamplingAuraFlow carries the mu timestep shift because PR #14589 adds no Krea2-specific sampling node \u2014 re-probe /object_info and live-smoke before Certified. ComfyUI KSampler cfg semantics for the official 'CFG disabled (0.0)' convention must be validated at Phase C cert. Weights are gated (Krea 2 Community License) \u2014 link an existing download via Source Manager; never auto-downloaded.",
+        "Phase C: style/moodboard/character/environment reference images and LoRA controls are wired in the builder (LoadImage + CLIPVision + IPAdapterApply chain, LoraLoader). These require the optionalNodes support set installed on the ComfyUI runtime; the IPAdapterLoader/IPAdapterApply class names follow the standard IPAdapter plugin convention and are UNVERIFIED pending a live /object_info probe.",
+        "ERS assets are preserved as ENVIRONMENT conditioning; Krea 2's open ComfyUI path consumes them via a generic reference interface, so the semantic role is carried in Adept metadata pending provider-native role support."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "HIGH"
+      },
+      "runtimeParams": {
+        "mu": 1.15,
+        "steps": 8,
+        "cfg": 0.0,
+        "weightDtype": "fp8_e4m3fn"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:5e794607f682813ae37c1ce9ff7176709260919f0910da0f5a4fa2d6cacf3017",
+        "builderHash": "sha256:0c6d8e05ca6a276d0f70d1fa09adbe43c9e07ff459f4314a86899ed37bee34a5",
+        "nodeInventoryHash": "sha256:599c0bccd3439a9eef6963a075f65a0d73a1485fc57b8ceb3e5b0fc2afc0eebd",
+        "modelInventoryHash": "sha256:96ccfa13c16720282e0ba6e1e6d0a9a8c4d984d19f06bade2b5e139ba2a5a173"
+      },
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-KREA2-RAW-TXT2IMG-001",
+      "workflowKey": "krea2.raw_txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Draft",
+      "modelFamily": "krea2",
+      "modelVariant": "raw",
+      "engine": "krea2",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_krea2_raw_txt2img_workflow",
+      "builderPath": "app.workflows.krea2_image:build_krea2_raw_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "requiredModels": [
+        "krea2_raw_checkpoint",
+        "krea2_text_encoder",
+        "krea2_vae"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg",
+        "mu",
+        "styleReferences",
+        "characterReferences",
+        "environmentReferences",
+        "moodboardReferences",
+        "loraId",
+        "loraStrength"
+      ],
+      "optionalNodes": [
+        "LoadImage",
+        "CLIPVisionLoader",
+        "CLIPVisionEncode",
+        "IPAdapterLoader",
+        "IPAdapterApply",
+        "LoraLoader"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsTextToImage": true,
+        "supportsResolutionControl": true,
+        "supportsSeed": true,
+        "supportsReferences": true,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true,
+        "supportsReferenceImages": true,
+        "supportsStyleReferences": true,
+        "supportsMoodboards": true,
+        "supportsCharacterReference": true,
+        "supportsImageEditing": false
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Draft \u2014 Krea 2 RAW split-model graph (52-step base model, CFG 3.5, mu derived from resolution via diffusers dynamic-shifting interpolation 0.5\u21921.15; pin runtimeParams.mu to override). Same node-set caveat as krea2.turbo_txt2img \u2014 re-probe /object_info and live-smoke before Certified. RAW is the LoRA training base (train on RAW, run on Turbo). Gated weights (Krea 2 Community License) \u2014 manual link required.",
+        "Phase C: style/moodboard/character/environment reference images and LoRA controls are wired in the builder (LoadImage + CLIPVision + IPAdapterApply chain, LoraLoader). These require the optionalNodes support set installed on the ComfyUI runtime; the IPAdapterLoader/IPAdapterApply class names follow the standard IPAdapter plugin convention and are UNVERIFIED pending a live /object_info probe.",
+        "ERS assets are preserved as ENVIRONMENT conditioning; Krea 2's open ComfyUI path consumes them via a generic reference interface, so the semantic role is carried in Adept metadata pending provider-native role support."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "HIGH"
+      },
+      "runtimeParams": {
+        "mu": null,
+        "muPolicy": "resolution-derived",
+        "muBaseShift": 0.5,
+        "muMaxShift": 1.15,
+        "steps": 52,
+        "cfg": 3.5,
+        "weightDtype": "fp8_e4m3fn"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:ed4e17ea83debb620a933b54b75c0b48e05a744178a937927ca5bec8b5f9cca6",
+        "builderHash": "sha256:0c6d8e05ca6a276d0f70d1fa09adbe43c9e07ff459f4314a86899ed37bee34a5",
+        "nodeInventoryHash": "sha256:599c0bccd3439a9eef6963a075f65a0d73a1485fc57b8ceb3e5b0fc2afc0eebd",
+        "modelInventoryHash": "sha256:334ceff9760a3789b2a3030df95babe95ed18d9f14b4989baebc071c35cccf11"
+      },
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN-TXT2IMG-001",
+      "workflowKey": "qwen.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Deferred",
+      "modelFamily": "qwen",
+      "modelVariant": "image",
+      "engine": "qwen",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_txt2img_workflow",
+      "builderPath": "app.imagegen_workflows:build_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Deferred until Qwen Image weights discovered. Multilingual prompts supported when Certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN-EDIT-001",
+      "workflowKey": "qwen.edit",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "qwen",
+      "modelVariant": "image",
+      "engine": "qwen",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.edit",
+          "img2img"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred until Qwen Image editing weights present."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN-REF-001",
+      "workflowKey": "qwen.reference",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "qwen",
+      "modelVariant": "image",
+      "engine": "qwen",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.reference",
+      "supportedOperations": [
+        "image.reference"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "LoadImage",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "reference_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.reference"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred until Qwen Image reference workflows present."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-IMAGEN-TXT2IMG-001",
+      "workflowKey": "imagen.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Blocked",
+      "modelFamily": "imagen",
+      "modelVariant": "imagen-3",
+      "engine": "imagen",
+      "providerKind": "cloud",
+      "provider": "google_imagen",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "google",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height"
+      ],
+      "supportedOutputs": [
+        "png",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Blocked \u2014 Provider unavailable or credentials not configured."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "safeConcurrency": 2,
+        "state": "N/A"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-IMAGEN-EDIT-001",
+      "workflowKey": "imagen.edit",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Blocked",
+      "modelFamily": "imagen",
+      "modelVariant": "imagen-3",
+      "engine": "imagen",
+      "providerKind": "cloud",
+      "provider": "google_imagen",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit"
+      ],
+      "requiredRuntime": "google",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "prompt",
+        "source_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": true,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.edit"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Blocked \u2014 Provider unavailable or credentials not configured."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "safeConcurrency": 2,
+        "state": "N/A"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-IMAGEN-REF-001",
+      "workflowKey": "imagen.reference",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Blocked",
+      "modelFamily": "imagen",
+      "modelVariant": "imagen-3",
+      "engine": "imagen",
+      "providerKind": "cloud",
+      "provider": "google_imagen",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.reference",
+      "supportedOperations": [
+        "image.reference"
+      ],
+      "requiredRuntime": "google",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "prompt",
+        "reference_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.reference"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Blocked \u2014 Provider unavailable or credentials not configured."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "safeConcurrency": 2,
+        "state": "N/A"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CKPT-TXT2IMG-001",
+      "workflowKey": "checkpoint.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Deferred",
+      "modelFamily": "checkpoint",
+      "modelVariant": "generic",
+      "engine": "checkpoint",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_txt2img_workflow",
+      "builderPath": "app.imagegen_workflows:build_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "Legacy generic adapter \u2014 prefer flux.txt2img / qwen.txt2img family keys."
+      ],
+      "vramProfile": {
+        "minimumGb": 12,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CKPT-IMG2IMG-001",
+      "workflowKey": "checkpoint.img2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "checkpoint",
+      "modelVariant": "generic",
+      "engine": "checkpoint",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncode",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "img2img"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Legacy generic adapter \u2014 prefer family keys."
+      ],
+      "vramProfile": {
+        "minimumGb": 12,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-UPSCALE-001",
+      "workflowKey": "image.upscale",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Restoration",
+      "status": "Certified",
+      "modelFamily": "utility",
+      "modelVariant": "realesrgan",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_image_upscale_workflow",
+      "builderPath": "app.workflows.image_edit_tools:build_image_upscale_workflow",
+      "operation": "image.upscale",
+      "supportedOperations": [
+        "image.upscale"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UpscaleModelLoader",
+        "ImageUpscaleWithModel"
+      ],
+      "requiredModels": [
+        "upscale_model"
+      ],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.upscale"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Wave 4 \u2014 Draft until dual-stage live certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 4,
+        "recommendedGb": 8,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:3b177c1b440f3eec077c4941db4babafd111258b6750eb6ea2634cd4c406934f",
+        "builderHash": "sha256:005a9685d23d563fbe607140ecdf2bfd59a2d821361d19a47dd99dfea39041e3",
+        "nodeInventoryHash": "sha256:4bcba37fc15b705d458b765cba33820f36dff6bb86afb58feab2b2ed9c2320ff",
+        "modelInventoryHash": "sha256:e6ebe307ce31e3eb589432ea21b22d8578c3351922fdabae0622e5a739043a58"
+      },
+      "certificationRecordId": "CERT-IMG-UPSCALE-001-20260730-002"
+    },
+    {
+      "workflowId": "IMG-RESTORE-001",
+      "workflowKey": "image.restore",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Restoration",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "generic",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.restore",
+      "supportedOperations": [
+        "image.restore",
+        "restore"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.restore",
+          "restore"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 registry stub; builder pending certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 4,
+        "recommendedGb": 8,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FACE-RESTORE-001",
+      "workflowKey": "image.face_restore",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Restoration",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "gfpgan",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.face_restore",
+      "supportedOperations": [
+        "image.face_restore",
+        "face_restore"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.face_restore",
+          "face_restore"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 registry stub; builder pending certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 4,
+        "recommendedGb": 8,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-BG-REMOVE-001",
+      "workflowKey": "image.background_remove",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Utility",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "birefnet",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.background_remove",
+      "supportedOperations": [
+        "image.background_remove",
+        "background_remove"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.background_remove",
+          "background_remove"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 registry stub; transparency output required at certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 4,
+        "recommendedGb": 8,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-TRANSPARENT-001",
+      "workflowKey": "image.transparent_extract",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Utility",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "alpha",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.transparent_extract",
+      "supportedOperations": [
+        "image.transparent_extract",
+        "transparent_extract"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.transparent_extract",
+          "transparent_extract"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 registry stub; requires alpha channel validation."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "safeConcurrency": 2,
+        "state": "OK"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-COMPOSITE-001",
+      "workflowKey": "image.composite",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Compositing",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "layer",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.composite",
+      "supportedOperations": [
+        "image.composite",
+        "composite"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image",
+        "layers"
+      ],
+      "optionalInputs": [],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": false
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.composite",
+          "composite"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 registry stub; multi-layer compositing pending."
+      ],
+      "vramProfile": {
+        "minimumGb": 4,
+        "recommendedGb": 8,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-POSE-001",
+      "workflowKey": "control.pose",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "openpose",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.pose",
+      "supportedOperations": [
+        "control.pose"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_openpose"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.pose"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-DEPTH-001",
+      "workflowKey": "control.depth",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "depth",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.depth",
+      "supportedOperations": [
+        "control.depth"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_depth"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.depth"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-CANNY-001",
+      "workflowKey": "control.canny",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "canny",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.canny",
+      "supportedOperations": [
+        "control.canny"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_canny"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.canny"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-LINEART-001",
+      "workflowKey": "control.lineart",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "lineart",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.lineart",
+      "supportedOperations": [
+        "control.lineart"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_lineart"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.lineart"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-SEG-001",
+      "workflowKey": "control.segmentation",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "segmentation",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.segmentation",
+      "supportedOperations": [
+        "control.segmentation"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_segmentation"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.segmentation"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CONTROL-NORMAL-001",
+      "workflowKey": "control.normal",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "control",
+      "modelVariant": "normal",
+      "engine": "comfy",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "control.normal",
+      "supportedOperations": [
+        "control.normal"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "ControlNetLoader",
+        "ControlNetApply"
+      ],
+      "requiredModels": [
+        "controlnet_normal"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "control_image"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "control.normal"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Wave 4 ControlNet-class stub."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-KONTEXT-001",
+      "workflowKey": "flux.kontext_edit",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Blocked",
+      "modelFamily": "flux",
+      "modelVariant": "kontext",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.edit",
+      "supportedOperations": [
+        "image.edit",
+        "image.reference_edit"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "LoadImage",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_kontext_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.reference_edit",
+          "image.edit"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Blocked \u2014 FLUX Kontext weights not installed or not certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-INPAINT-001",
+      "workflowKey": "flux.inpaint",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "dev",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.inpaint",
+      "supportedOperations": [
+        "image.inpaint",
+        "object_remove",
+        "object_replace"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncodeForInpaint",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "mask_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "denoise",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": true,
+        "supportsInpaint": true,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.inpaint",
+          "object_remove",
+          "object_replace"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred until FLUX inpaint path live-certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-OUTPAINT-001",
+      "workflowKey": "flux.outpaint",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Deferred",
+      "modelFamily": "flux",
+      "modelVariant": "dev",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_img2img_edit_stub",
+      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "operation": "image.outpaint",
+      "supportedOperations": [
+        "image.outpaint",
+        "crop_extend"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "ImagePadForOutpaint",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "padding",
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": true,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": true,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.outpaint",
+          "crop_extend"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred until FLUX outpaint path live-certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-FLUX-FILL-001",
+      "workflowKey": "flux.fill",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Editing",
+      "status": "Blocked",
+      "modelFamily": "flux",
+      "modelVariant": "fill",
+      "engine": "flux",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.inpaint",
+      "supportedOperations": [
+        "image.inpaint",
+        "object_replace"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "VAEEncodeForInpaint",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "flux_fill_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "source_image",
+        "mask_image",
+        "checkpoint"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": true,
+        "supportsOutpaint": false,
+        "supportsFill": true,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.inpaint",
+          "object_replace"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Blocked \u2014 FLUX Fill weights not installed or not certified."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-QWEN-MULTI-REF-001",
+      "workflowKey": "qwen.multi_reference",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Deferred",
+      "modelFamily": "qwen",
+      "modelVariant": "image",
+      "engine": "qwen",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": null,
+      "builderPath": null,
+      "operation": "image.reference",
+      "supportedOperations": [
+        "image.reference",
+        "image.multi_reference"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "LoadImage",
+        "KSampler",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "qwen_image_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "reference_images"
+      ],
+      "optionalInputs": [
+        "seed"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "EditProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.reference",
+          "image.multi_reference"
+        ],
+        "jobKinds": [
+          "imagegen_edit"
+        ]
+      },
+      "limitations": [
+        "Deferred \u2014 Qwen multi-reference editing pending live certification."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    },
+    {
+      "workflowId": "IMG-CHROMA-001",
+      "workflowKey": "image.chroma_key",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Utility",
+      "status": "Deferred",
+      "modelFamily": "utility",
+      "modelVariant": "opencv",
+      "engine": "opencv",
+      "providerKind": "local",
+      "provider": "local",
+      "builder": null,
+      "builderPath": "app.generation_tools.ops:run_chroma_key",
+      "operation": "image.chroma_key",
+      "supportedOperations": [
+        "image.chroma_key"
+      ],
+      "requiredRuntime": "opencv",
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredInputs": [
+        "source_image"
+      ],
+      "optionalInputs": [
+        "key_color"
+      ],
+      "supportedOutputs": [
+        "png"
+      ],
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance"
+      },
+      "apiContract": {
+        "intents": [
+          "image.chroma_key"
+        ],
+        "jobKinds": []
+      },
+      "limitations": [
+        "Non-Comfy utility \u2014 Deferred from requiredLocal GO set."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "safeConcurrency": 4,
+        "state": "OK"
+      },
+      "fingerprints": {},
+      "certificationRecordId": null
+    }
+  ]
+}

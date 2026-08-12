@@ -1,0 +1,479 @@
+{
+  "captured_utc": "2026-08-08T03:55:08.877915Z",
+  "db_path": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\studio.db",
+  "table_counts": {
+    "approved_references": 0,
+    "asset_edges": 161,
+    "asset_versions": 429,
+    "assets": 11,
+    "avatar_project_jobs": 0,
+    "avatar_sessions": 0,
+    "bible_audit_events": 0,
+    "character_profiles": 24,
+    "character_props": 0,
+    "character_reference_assets": 40,
+    "character_traits": 39,
+    "character_versions": 25,
+    "character_wardrobes": 12,
+    "codirector_approvals": 14,
+    "codirector_conversation_events": 65,
+    "codirector_conversations": 28,
+    "codirector_execution_receipts": 14,
+    "codirector_plan_command_idempotency": 0,
+    "codirector_production_plan_events": 0,
+    "codirector_production_plan_versions": 0,
+    "codirector_production_plans": 0,
+    "codirector_proposals": 16,
+    "codirector_specialist_findings": 0,
+    "codirector_synthesis_records": 0,
+    "codirector_tool_invocations": 22,
+    "codirector_validation_approvals": 0,
+    "codirector_validation_comparisons": 0,
+    "codirector_validation_correction_proposals": 0,
+    "codirector_validation_findings": 0,
+    "codirector_validation_reports": 0,
+    "codirector_validation_sessions": 0,
+    "continuity_constraints": 0,
+    "continuity_corrections": 0,
+    "continuity_evaluations": 0,
+    "continuity_history": 0,
+    "continuity_issues": 0,
+    "continuity_packets": 0,
+    "continuity_policies": 0,
+    "continuity_reviews": 0,
+    "creative_bindings": 0,
+    "creative_item_versions": 0,
+    "creative_items": 0,
+    "director_sequences": 0,
+    "editor_projects": 3,
+    "identity_variants": 0,
+    "identity_versions": 0,
+    "jobs": 8,
+    "m211_decision_records": 14,
+    "m211_execution_traces": 0,
+    "m211_memory_items": 0,
+    "m212_confidence_calibration": 0,
+    "m212_lesson_versions": 0,
+    "m212_lessons": 0,
+    "m212_retrospectives": 0,
+    "m212_strategy_packs": 0,
+    "m213_approvals": 0,
+    "m213_blocking_states": 0,
+    "m213_capability_log": 0,
+    "m213_concepts": 0,
+    "m213_scene_plans": 0,
+    "m213_scene_states": 0,
+    "m213_shot_packages": 0,
+    "m213_theme_profiles": 0,
+    "m213_versions": 0,
+    "m213_virtual_environments": 0,
+    "m214_attachment_interpretations": 0,
+    "m214_capability_invokes": 0,
+    "m214_decision_impacts": 0,
+    "m214_emotional_profiles": 0,
+    "m214_media_cards": 0,
+    "m214_production_meetings": 0,
+    "m214_production_motifs": 0,
+    "m214_project_stages": 0,
+    "m214_session_snapshots": 0,
+    "m214_sonic_concepts": 0,
+    "m214_specialist_messages": 0,
+    "m214_storyteller_handoffs": 0,
+    "m214_unified_briefs": 0,
+    "m28_compat_evals": 0,
+    "m28_location_spins": 0,
+    "m28_model_entries": 0,
+    "m28_promotion_manifests": 0,
+    "m28_recipe_stages": 0,
+    "m28_recipes": 0,
+    "m28_sandbox_instances": 0,
+    "m28_sandbox_plans": 0,
+    "m28_sandbox_validations": 0,
+    "m28_shot_profile_versions": 0,
+    "m28_shot_profiles": 0,
+    "m28_virtual_stages": 0,
+    "m28_watchlist": 0,
+    "m29_asset_versions": 14,
+    "m29_audio_cues": 9,
+    "m29_control_plans": 0,
+    "m29_frame_records": 0,
+    "m29_render_manifests": 0,
+    "m29_timeline_proposals": 0,
+    "m30e_generation_experience": 0,
+    "posecraft_custom_poses": 0,
+    "posecraft_revisions": 0,
+    "production_bible_entities": 0,
+    "production_bible_facts": 0,
+    "production_bible_versions": 0,
+    "production_bibles": 0,
+    "production_context_extensions": 0,
+    "production_contexts": 0,
+    "production_job_attempts": 0,
+    "production_job_audit": 0,
+    "production_job_dependencies": 0,
+    "production_job_events": 1,
+    "production_jobs": 0,
+    "production_notifications": 0,
+    "production_units": 2,
+    "profile_items": 0,
+    "project_dialogue_lines": 0,
+    "project_security": 0,
+    "project_security_audit": 0,
+    "project_type_definitions": 0,
+    "project_unlock_attempts": 0,
+    "project_unlock_grants": 0,
+    "projects": 54,
+    "reference_preset_bindings": 0,
+    "reference_presets": 0,
+    "scene_master_sheets": 0,
+    "scene_reference_audit_events": 0,
+    "scene_reference_bindings": 0,
+    "scenes": 54,
+    "schema_migrations": 27,
+    "script_docs": 4,
+    "script_documents_v2": 1,
+    "script_migration_backups": 0,
+    "script_notes": 0,
+    "script_revision_snapshots": 0,
+    "script_segments": 2,
+    "script_transactions": 0,
+    "spatial_map_documents": 0,
+    "spatial_scenes": 5,
+    "storyboard_panels": 2,
+    "timeline_reference_bindings": 0,
+    "timeline_reference_set_versions": 0,
+    "timeline_reference_sets": 0,
+    "visual_identities": 0,
+    "voice_consent_records": 9,
+    "voice_environment_profiles": 0,
+    "voice_environment_renders": 0,
+    "voice_performance_assemblies": 0,
+    "voice_performance_plans": 1,
+    "voice_performance_records": 7,
+    "voice_performance_takes": 7,
+    "voice_profiles": 15
+  },
+  "project_count": 54,
+  "projects": [
+    {
+      "id": "4191386a-668a-4fc5-807b-262a2a1c8f4d",
+      "name": "BROWSER-PROBE-20260804155545"
+    },
+    {
+      "id": "e2e37220-8dd5-47c8-9a4c-a67bd25cb0e4",
+      "name": "COI-Doc-Fixture-1786045711911"
+    },
+    {
+      "id": "47b160cc-de2f-438e-bc5d-c3a83ac5192b",
+      "name": "COI-Doc-Fixture-1786045740328"
+    },
+    {
+      "id": "4c6cff06-92b6-43da-b752-5a9df4d53517",
+      "name": "COI-Film-Fixture-1786045711911"
+    },
+    {
+      "id": "00d2005c-74c9-47fa-b1d5-a8ffb412d31b",
+      "name": "COI-Film-Fixture-1786045740328"
+    },
+    {
+      "id": "c5b7c29c-e594-45c6-93ea-221019977272",
+      "name": "COI-Game-Fixture-1786045711911"
+    },
+    {
+      "id": "3fc1f4d4-bb67-433f-bf9f-bbae03226baa",
+      "name": "COI-Game-Fixture-1786045740328"
+    },
+    {
+      "id": "af29c761-b5ec-4af7-8212-e1630ba983ce",
+      "name": "COI-HG-Doc-1786050594951"
+    },
+    {
+      "id": "d32e55c6-5505-4382-939f-bb8ee66c574b",
+      "name": "COI-HG-Doc-1786050635168"
+    },
+    {
+      "id": "0ed921ec-b9f0-455f-b0d3-8476e9266bfa",
+      "name": "COI-HG-Doc-1786050721341"
+    },
+    {
+      "id": "24be51c2-e6b6-4371-a63e-b1e91b50d410",
+      "name": "COI-HG-Film-1786050594951"
+    },
+    {
+      "id": "ff001ecc-9adb-4889-b381-347d43120cc4",
+      "name": "COI-HG-Film-1786050635168"
+    },
+    {
+      "id": "0164c91f-4080-4b65-8b9b-e00feb58bbe5",
+      "name": "COI-HG-Film-1786050721341"
+    },
+    {
+      "id": "75ea8504-9686-41db-ad6b-3f86a523f91e",
+      "name": "COI-HG-Verify-Doc-17240"
+    },
+    {
+      "id": "ad414df3-401a-4da6-b489-05275a888570",
+      "name": "COI-HG-Verify-Doc-2108"
+    },
+    {
+      "id": "0406b027-2cfc-44da-8a68-5b36cad6bab3",
+      "name": "COI-HG-Verify-Doc-34500"
+    },
+    {
+      "id": "1586920d-6a75-4a9c-8968-1e2e596eea85",
+      "name": "COI-MusicVideo-Fixture-1786045711911"
+    },
+    {
+      "id": "7703286e-4e6a-4761-bffc-a525dfa8c71d",
+      "name": "COI-MusicVideo-Fixture-1786045740328"
+    },
+    {
+      "id": "789bbc79-f15c-45ae-93b1-7efd28da7de7",
+      "name": "COI-Verify-Doc-1156"
+    },
+    {
+      "id": "4cee9acd-d44a-4825-ade2-3f6df9b2ccc8",
+      "name": "COI-Verify-Doc-15212"
+    },
+    {
+      "id": "31ec2389-288f-47c7-a285-3e30bde51b51",
+      "name": "COI-Verify-Doc-35048"
+    },
+    {
+      "id": "2fa5227a-5b55-417a-bf79-9a3b6394bacd",
+      "name": "COI-Verify-Doc-4444"
+    },
+    {
+      "id": "84b481b3-ea63-4676-8c91-83eff5b97c68",
+      "name": "COI-Verify-Doc-45836"
+    },
+    {
+      "id": "f0673b84-d232-4b2d-8663-b345d6e6efcb",
+      "name": "COI-Verify-Doc-49764"
+    },
+    {
+      "id": "65c7522f-9714-4552-b6e2-0900217e4190",
+      "name": "CW-Doc-27908"
+    },
+    {
+      "id": "c8c2ed90-accd-4f54-8c92-e9cbd7bf912d",
+      "name": "CW-Doc-46084"
+    },
+    {
+      "id": "0355da33-80c6-447a-8850-c42d88d0d504",
+      "name": "CW-Doc-6192"
+    },
+    {
+      "id": "ff671684-3464-4ef4-8bea-6803c712e263",
+      "name": "CW-Doc-probe"
+    },
+    {
+      "id": "050b4944-9305-4d92-936b-d61f8639ad16",
+      "name": "CW-Film-1786072904964"
+    },
+    {
+      "id": "d1ba08d2-6c24-4999-b76a-c59bd7864d01",
+      "name": "Dbg"
+    },
+    {
+      "id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "name": "H3-PRIVATE-LIVE-E2E"
+    },
+    {
+      "id": "afb974af-33cf-4cda-b2c2-471713b212ee",
+      "name": "PL-Doc-15212"
+    },
+    {
+      "id": "5964ce1f-43b6-41d4-83ce-f4334889bd41",
+      "name": "PL-Doc-1786072801303"
+    },
+    {
+      "id": "ea775e20-1837-4156-9746-12e75e564555",
+      "name": "PL-Doc-1786072909630"
+    },
+    {
+      "id": "6c55a4b0-06c5-4e0b-b362-461a24735ecd",
+      "name": "PL-Doc-52980"
+    },
+    {
+      "id": "adfd3024-7daa-4f75-835e-5a11273cc531",
+      "name": "POSECRAFT-COFFEESHOP-CERT-2026-08-04T22-55-34-565Z"
+    },
+    {
+      "id": "8c5dfb1d-15d3-4826-b059-d0b62c3acb60",
+      "name": "POSECRAFT-FINAL-MANDATORY-GO-2026-08-04T22-19-11-756Z"
+    },
+    {
+      "id": "fca8d73e-c5da-42a7-831e-3d33621b96d3",
+      "name": "POSECRAFT-FINAL-MANDATORY-GO-2026-08-04T22-42-06-417Z"
+    },
+    {
+      "id": "1a3e3994-5218-40a4-ae25-16b28bf24205",
+      "name": "POSECRAFT-FINAL-MANDATORY-GO-2026-08-04T22-57-37-882Z"
+    },
+    {
+      "id": "3fbd2211-868d-4ead-89d6-6c8521b76579",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T21-38-04-960Z"
+    },
+    {
+      "id": "0169ee33-5a35-4535-94e1-d5238d4686dd",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T21-42-01-258Z"
+    },
+    {
+      "id": "7f183d15-698b-40be-9c9d-a67d1dd11b48",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T21-44-52-490Z"
+    },
+    {
+      "id": "e0163869-9400-49f5-9400-6d00c6df228d",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T21-45-16-164Z"
+    },
+    {
+      "id": "f0983999-5aff-4916-a850-063f2640095a",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T21-48-32-538Z"
+    },
+    {
+      "id": "fd1af9cc-6f37-4f92-87fb-a7d98517606c",
+      "name": "PoseCraft Labels POSECRAFT-LABELS-2026-08-04T22-53-31-008Z"
+    },
+    {
+      "id": "7a218067-aeda-4dfc-8aa6-5759add450d3",
+      "name": "PoseCraft Scroll POSECRAFT-SCROLL-2026-08-04T21-40-22-813Z"
+    },
+    {
+      "id": "e1164dac-c3ae-437e-9588-1d8bb3ac3f68",
+      "name": "PoseCraft Scroll POSECRAFT-SCROLL-2026-08-04T21-41-28-889Z"
+    },
+    {
+      "id": "6ee08996-49c3-411a-84bb-ffeba7abbcdc",
+      "name": "The Dreamweaver"
+    },
+    {
+      "id": "c94f7c89-4b77-4407-82de-e44f71c455ef",
+      "name": "WCC Debug"
+    },
+    {
+      "id": "09aedca3-5360-43ef-8b33-677a90c7f830",
+      "name": "WCC Verifier Fixture"
+    },
+    {
+      "id": "e58dc709-a6f3-4606-92ab-9b2314451e7f",
+      "name": "WCC Verifier Fixture"
+    },
+    {
+      "id": "7e26f50d-22f1-408e-8a42-a40abc698ec5",
+      "name": "WCC Verifier Fixture"
+    },
+    {
+      "id": "cd3504e4-f9a7-4b8d-bb37-4d3b69a7663e",
+      "name": "patch-probe"
+    },
+    {
+      "id": "b1835943-9508-4fc9-a6f5-1efa13684d57",
+      "name": "patch-probe2"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "8b7bef99-85b6-4c3a-95f7-9758ad2cbdfd",
+      "project_id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "scene_id": null,
+      "kind": "imagegen",
+      "status": "done"
+    },
+    {
+      "id": "b6bb3745-25a3-4ff6-b551-6e1467d01391",
+      "project_id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "scene_id": null,
+      "kind": "imagegen",
+      "status": "done"
+    },
+    {
+      "id": "7a2419e8-9eba-40bd-aa11-bd01916d5a55",
+      "project_id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "scene_id": null,
+      "kind": "imagegen",
+      "status": "done"
+    },
+    {
+      "id": "7b7d3805-edb7-457b-ac17-d92b1f8be4e8",
+      "project_id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "scene_id": null,
+      "kind": "imagegen",
+      "status": "done"
+    },
+    {
+      "id": "7563aef4-2a10-4ccf-b1f6-3f40a1b8da10",
+      "project_id": "ae57714e-d43e-4cec-9bd9-0af2780fa185",
+      "scene_id": null,
+      "kind": "imagegen",
+      "status": "done"
+    },
+    {
+      "id": "a5d4d52b-e5ac-4344-a70c-bddb51a139d5",
+      "project_id": "6ee08996-49c3-411a-84bb-ffeba7abbcdc",
+      "scene_id": "06ea5cf4-9141-4d09-92c3-b9b168f6a793",
+      "kind": "render_scene",
+      "status": "failed"
+    },
+    {
+      "id": "80e54b55-0177-4875-b3f7-05a8c27390f5",
+      "project_id": "6ee08996-49c3-411a-84bb-ffeba7abbcdc",
+      "scene_id": "06ea5cf4-9141-4d09-92c3-b9b168f6a793",
+      "kind": "render_scene",
+      "status": "failed"
+    },
+    {
+      "id": "f778d242-f112-4c48-b4bc-2dd72fa2426d",
+      "project_id": "6ee08996-49c3-411a-84bb-ffeba7abbcdc",
+      "scene_id": "06ea5cf4-9141-4d09-92c3-b9b168f6a793",
+      "kind": "render_scene",
+      "status": "failed"
+    }
+  ],
+  "disk_inventory": {
+    "projects": {
+      "entries": 230,
+      "size_mb": 1846.42
+    },
+    "assets": {
+      "entries": 167,
+      "size_mb": 22.1
+    },
+    "audio_studio": {
+      "entries": 18,
+      "size_mb": 0.11
+    },
+    "environment_reference_sheet": {
+      "entries": 106,
+      "size_mb": 46.43
+    },
+    "image_pipeline": {
+      "entries": 53,
+      "size_mb": 3.21
+    },
+    "image_product": {
+      "entries": 66,
+      "size_mb": 2.89
+    },
+    "minimax_h3": {
+      "entries": 51,
+      "size_mb": 0.48
+    },
+    "storyboard_studio": {
+      "entries": 20,
+      "size_mb": 0.17
+    },
+    "visual_continuity": {
+      "entries": 20,
+      "size_mb": 0.01
+    },
+    "timeline_retakes": {
+      "entries": 5,
+      "size_mb": 0.02
+    },
+    "exports": {
+      "entries": 9,
+      "size_mb": 9.82
+    }
+  }
+}

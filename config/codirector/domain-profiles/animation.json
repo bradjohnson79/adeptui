@@ -1,0 +1,15 @@
+{
+  "profileId": "animation",
+  "displayName": "Animation",
+  "projectTypeSlugs": ["animation", "animated"],
+  "productionStages": ["development", "boards", "layout", "animation", "post"],
+  "specialistPriorities": ["art_director", "storyboard_lead", "animation_director", "editor"],
+  "knowledgePackIds": ["visual_staging", "animation_timing", "storyboard_language"],
+  "commonDeliverables": ["style frames", "boards", "animatic", "final master"],
+  "approvalPoints": ["style approval", "board approval", "animatic lock", "final color review"],
+  "qualityChecks": ["poses read clearly", "timing supports emotion", "screen direction stays clean"],
+  "commonRisks": ["pose inconsistency", "overbusy frames", "unclear action reads"],
+  "terminology": {"storyUnit": "board beat", "performancePass": "animation pass"},
+  "defaultPlanTemplate": ["Build style targets", "Board the sequence", "Review animatic pacing", "Animate with continuity checks", "Finish lighting and edit"],
+  "recommendedWorkflows": ["project_readiness_audit", "continuity_scan", "generation_preflight", "export_readiness_check"]
+}

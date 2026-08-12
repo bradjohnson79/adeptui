@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "phase": "M42-W3",
+  "currency": "USD",
+  "perImage": {
+    "imagen": 0.04,
+    "openai": 0.04,
+    "fal": 0.03,
+    "black_forest_labs": 0.05,
+    "stability": 0.04
+  },
+  "localDefaults": {
+    "zimage": {"generationTimeSec": 8, "vramGb": 12},
+    "flux": {"generationTimeSec": 18, "vramGb": 18},
+    "qwen": {"generationTimeSec": 14, "vramGb": 16},
+    "krea2": {"generationTimeSec": 20, "vramGb": 24},
+    "checkpoint": {"generationTimeSec": 12, "vramGb": 14}
+  }
+}

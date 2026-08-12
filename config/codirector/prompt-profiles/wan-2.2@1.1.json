@@ -1,0 +1,18 @@
+{
+  "profileId": "wan-2.2",
+  "profileVersion": "1.1",
+  "providerId": "wan-local",
+  "modelId": "wan-2.2",
+  "generationDomain": "video",
+  "supportedLanguages": ["en", "zh"],
+  "defaultStrategy": "english-primary-chinese-support",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en", "zh"],
+  "recommendedBalance": "subtle",
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "motion", "continuity", "provider"],
+  "maxPromptLength": 2000,
+  "negativePromptSupport": true,
+  "certificationStatus": "experimental",
+  "notes": ["Subtle Chinese semantic layer recommended but not certified."]
+}

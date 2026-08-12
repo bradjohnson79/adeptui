@@ -1,0 +1,17 @@
+{
+  "profileId": "flux-image",
+  "profileVersion": "1.0",
+  "providerId": "comfyui",
+  "modelId": "flux",
+  "generationDomain": "image",
+  "supportedLanguages": ["en"],
+  "defaultStrategy": "english-only",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en"],
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "continuity", "provider"],
+  "maxPromptLength": 1600,
+  "negativePromptSupport": true,
+  "certificationStatus": "supported",
+  "notes": ["English production refinement for FLUX / ComfyUI image paths."]
+}

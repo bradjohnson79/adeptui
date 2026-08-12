@@ -1,0 +1,21 @@
+{
+  "registryVersion": "1",
+  "profiles": [
+    "feature_film",
+    "short_film",
+    "series_web_series",
+    "animation",
+    "anime",
+    "documentary",
+    "commercial",
+    "music_video",
+    "youtube_creator",
+    "educational_explainer",
+    "talking_avatar",
+    "social_media",
+    "storyboard_previs",
+    "game_cinematic",
+    "video_cinematic_trailer",
+    "custom"
+  ]
+}

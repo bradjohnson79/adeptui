@@ -1,0 +1,15 @@
+{
+  "profileId": "storyboard_previs",
+  "displayName": "Storyboard / Previs",
+  "projectTypeSlugs": ["storyboard_previs", "storyboard", "previs", "boards"],
+  "productionStages": ["planning", "boards", "previs", "handoff"],
+  "specialistPriorities": ["storyboard_artist", "previs_supervisor", "director", "editor"],
+  "knowledgePackIds": ["shot_staging", "blocking_clarity", "visual_sequence_design"],
+  "commonDeliverables": ["board pages", "camera plan", "previs sequence", "handoff notes"],
+  "approvalPoints": ["board approval", "camera blocking approval", "handoff review"],
+  "qualityChecks": ["shots communicate intention", "camera logic is readable", "blocking supports story geography"],
+  "commonRisks": ["unclear screen direction", "missing transition shots", "camera plans too expensive to execute"],
+  "terminology": {"storyUnit": "board panel", "movePlan": "camera blocking"},
+  "defaultPlanTemplate": ["Map story beats", "Board the sequence", "Review geography and pacing", "Create previs handoff", "Check production readiness"],
+  "recommendedWorkflows": ["project_readiness_audit", "continuity_scan", "generation_preflight", "project_summary_refresh"]
+}

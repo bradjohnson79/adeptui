@@ -1391,7 +1391,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       // reply is finalized normally and the error is shown alongside it.
       let postCompletionError: ClassifiedError | null = null;
       let executionCreated = false;
-      let executionIdForRecovery: string | null = null;
 
       const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
       const lastUser = [...transcriptForApi].reverse().find((m) => m.role === "user");
@@ -1724,7 +1723,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           // legitimately active (non-preview) execution in `activeExecution`.
           if (execPayload?.execution_id && execPayload.status !== "preview") {
             executionCreated = true;
-            executionIdForRecovery = execPayload.execution_id;
             const execProjectId = b.projectId || "";
             const surfaceType = (execPayload.surface_type as WorkSurfaceState["surface_type"]) || "";
             setActiveExecution({

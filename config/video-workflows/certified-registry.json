@@ -1,0 +1,1816 @@
+{
+  "version": "1.0.0",
+  "phase": "M41-4.1B",
+  "description": "Adept UI Certified Workflow Library \u2014 single authoritative source for video (4.1B); modality field enables 4.1C image reuse.",
+  "statusEnum": [
+    "Draft",
+    "Built",
+    "SmokeTested",
+    "Certified",
+    "Deferred",
+    "Blocked",
+    "Retired"
+  ],
+  "entries": [
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "build_ltx_simple_i2v",
+      "builderPath": "app.workflows.ltx_builder:build_ltx_simple_i2v",
+      "requiredNodes": [
+        "LTXVImgToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-LTXVideo",
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "supportedInputs": [
+        "start_frame",
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [
+        "middle_frame",
+        "true_local_t2v"
+      ],
+      "supportedOutputs": [
+        "mp4",
+        "webm"
+      ],
+      "limitations": [
+        "Local path is I2V-only; requires start frame."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 24,
+        "heavyGb": 20,
+        "peakGb": 22,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render",
+          "extend",
+          "txt2vid_local"
+        ],
+        "jobKinds": [
+          "render_scene",
+          "video_extend"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": "sha256:6e35b92dc996a91861f8bed6baca663fb3075a965aba5613ca5f59fbd3310767",
+        "builderHash": "sha256:2a75e56a6d956fca5d674715b13b634fa2c4ce895623751cb372f01bb4de4e80",
+        "nodeInventoryHash": "sha256:b17eff1b56acdbbb9d814de10354af4531ff16ffba8d6b887426bb2248264bd1",
+        "modelInventoryHash": "sha256:febbcd7a303b6c096e8a359e284de6797428ea4d100c7e094f1eb805e5708947",
+        "topologyHash": "sha256:1bb8b7b42cf2afbee453b2511b2cbc00f45e9d6bf8e063ca9c198432f00f0ab6"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-LTX-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "ltx",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-LTX-001",
+      "workflowKey": "ltx.simple_i2v",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX 2.3",
+      "capabilityId": "video.ltx.simple_i2v",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LTX-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "build_ltx_scene_workflow",
+      "builderPath": "app.workflows.ltx_builder:build_ltx_scene_workflow",
+      "requiredNodes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-LTXVideo"
+      ],
+      "supportedInputs": [
+        "start_frame",
+        "middle_frame",
+        "end_frame",
+        "prompt",
+        "negative",
+        "seed",
+        "audio",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [
+        "true_local_t2v"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Falls back to simple I2V when Director graph fails."
+      ],
+      "vramProfile": {
+        "minimumGb": 12,
+        "recommendedGb": 24,
+        "heavyGb": 22,
+        "peakGb": 24,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": "sha256:5818dfcffb4f15ae146bacf0d06c05e88e00f44d2714eeb5caaaec128d23cf52",
+        "builderHash": "sha256:2a75e56a6d956fca5d674715b13b634fa2c4ce895623751cb372f01bb4de4e80",
+        "nodeInventoryHash": "sha256:4308c1aa2fcc523146038e325dadc860782e84d11044b0d20bfc4136f4b4ba58",
+        "modelInventoryHash": "sha256:febbcd7a303b6c096e8a359e284de6797428ea4d100c7e094f1eb805e5708947",
+        "topologyHash": "sha256:c8ec1eac3ffad1c02d3ded918fc22d52b9fb48a4eec826dd903d98393f34be7b"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-LTX-002-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "ltx",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-LTX-002",
+      "workflowKey": "ltx.scene",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX 2.3",
+      "capabilityId": "video.ltx.scene",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LTX-002-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "compile_ingredients_workflow",
+      "builderPath": "app.workflows.ltx_ingredients_compiler:compile_ingredients_workflow",
+      "requiredNodes": [
+        "LTXICLoRALoaderModelOnly",
+        "LTXAddVideoICLoRAGuide",
+        "EmptyLTXVLatentVideo",
+        "SaveVideo"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint",
+        "ltx23_ic_lora_ingredients"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-LTXVideo"
+      ],
+      "supportedInputs": [
+        "reference_image",
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Blocked when IC-LoRA ingredients weights are absent."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "heavyGb": 22,
+        "peakGb": 24,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "HIGH_RISK"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": "sha256:a9c98db6917c0f41434fb96389d78b2f7322d18345a0906b7e88ca5457e8e894",
+        "nodeInventoryHash": "sha256:e226326f4e9c9f8cec98a49de363c08b5dc5c52041e6bbea974f44505445d3d2",
+        "modelInventoryHash": "sha256:3bb34bd61072153f4e19f0fe0df8ef12bc389a8354cb1632ac17c16a22f1d11b"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-LTX-003-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "ltx",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-LTX-003",
+      "workflowKey": "ltx.ingredients_ic_lora",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX 2.3 IC-LoRA",
+      "capabilityId": "video.ltx.ingredients_ic_lora",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LTX-003-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "build_wan_flf_workflow",
+      "builderPath": "app.workflows.wan_builder:build_wan_flf_workflow",
+      "requiredNodes": [
+        "WanImageToVideo",
+        "WanFirstLastFrameToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-WanVideoWrapper",
+        "ComfyUI-VideoHelperSuite",
+        "ComfyUI-KJNodes"
+      ],
+      "supportedInputs": [
+        "first_frame",
+        "last_frame",
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [
+        "middle_frame",
+        "audio",
+        "camera_path"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Middle frame unsupported on FLF; use wan.three_frame."
+      ],
+      "vramProfile": {
+        "minimumGb": 20,
+        "recommendedGb": 24,
+        "heavyGb": 22,
+        "peakGb": 24,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "HIGH_RISK"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": "sha256:b340bd3f91f4043167cdaf8fa625c12dfe19eb1aaa7d47693f08c89c2651e597",
+        "builderHash": "sha256:148718b847c9a3d90716ec5e4c3feea1e83c62840e77cb2c84d7e3220d1092d7",
+        "nodeInventoryHash": "sha256:dd1bea89f23278b19118daff8e683e7ee861ba59404ffec6716fec14a6d05991",
+        "modelInventoryHash": "sha256:d3567fad64192a2e970bbf402fdda976e46ffa61b0a28b2be049d195036fcd02",
+        "topologyHash": "sha256:a2cc1c31862cb5075be2806391a2eac4ef5cd60d5bf982d4fe223f43390b53fb"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-WAN-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "wan",
+      "orchestration": false,
+      "nodeAliasGroups": [
+        [
+          "WanImageToVideo",
+          "WanFirstLastFrameToVideo"
+        ]
+      ],
+      "workflowId": "WF-WAN-001",
+      "workflowKey": "wan.first_last_frame",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "WAN 2.2",
+      "capabilityId": "video.wan.flf",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-WAN-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "build_wan_three_frame_workflow",
+      "builderPath": "app.workflows.wan_builder:build_wan_three_frame_workflow",
+      "requiredNodes": [
+        "WanFirstLastFrameToVideo",
+        "LoadImage",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-WanVideoWrapper",
+        "ComfyUI-VideoHelperSuite",
+        "ComfyUI-KJNodes"
+      ],
+      "supportedInputs": [
+        "first_frame",
+        "middle_frame",
+        "last_frame",
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Three-frame guided generation using first-to-middle and middle-to-last conditioned segments with validated stitching. Not native simultaneous three-frame conditioning in one sampling graph."
+      ],
+      "vramProfile": {
+        "minimumGb": 20,
+        "recommendedGb": 24,
+        "heavyGb": 22,
+        "peakGb": 24,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "HIGH_RISK"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_scene",
+          "render_shot"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": "sha256:aeef8d737c98352eb75068f2d43f535b3a70fbd3ae5ded160a20b31f64409700",
+        "builderHash": "sha256:148718b847c9a3d90716ec5e4c3feea1e83c62840e77cb2c84d7e3220d1092d7",
+        "nodeInventoryHash": "sha256:f8179ae7e7fb3cf6d4282ef579dd741e3f74c90cf5cdf7346a6b4aafb3cdf2c5",
+        "modelInventoryHash": "sha256:d3567fad64192a2e970bbf402fdda976e46ffa61b0a28b2be049d195036fcd02",
+        "topologyHash": "sha256:a2cc1c31862cb5075be2806391a2eac4ef5cd60d5bf982d4fe223f43390b53fb"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-WAN-002-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "wan",
+      "orchestration": false,
+      "nodeAliasGroups": [
+        [
+          "WanImageToVideo",
+          "WanFirstLastFrameToVideo"
+        ]
+      ],
+      "workflowId": "WF-WAN-002",
+      "workflowKey": "wan.three_frame",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "WAN 2.2",
+      "capabilityId": "video.wan.three_frame",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-WAN-002-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "shot_id",
+        "scene_id",
+        "engine",
+        "start_frame",
+        "middle_frame",
+        "end_frame",
+        "prompt"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Resolves to a leaf Comfy/fal workflow; not a Comfy graph itself."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_shot"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-SHOT-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "orchestration",
+      "engine": "director",
+      "orchestration": true,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-SHOT-001",
+      "workflowKey": "director.shot_render",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "Director orchestration",
+      "capabilityId": "video.director.shot_render",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-SHOT-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "scene_id",
+        "engine",
+        "start_frame",
+        "middle_frame",
+        "end_frame",
+        "prompt",
+        "audio"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Resolves to leaf LTX/WAN/IC-LoRA/fal workflow."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-SCENE-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "orchestration",
+      "engine": "director",
+      "orchestration": true,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-SCENE-001",
+      "workflowKey": "director.scene_render",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "Director orchestration",
+      "capabilityId": "video.director.scene_render",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-SCENE-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "project_id"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Stitches existing/certified scene outputs via FFmpeg; may render missing scenes."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "timeline_render"
+        ],
+        "jobKinds": [
+          "render_timeline"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-TIMELINE-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "orchestration",
+      "engine": "director",
+      "orchestration": true,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-TIMELINE-001",
+      "workflowKey": "director.timeline_render",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "Director orchestration",
+      "capabilityId": "video.director.timeline_render",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-TIMELINE-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "project_id",
+        "force_rerender"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Generates each scene via certified leaf workflows then stitches."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "batch_timeline"
+        ],
+        "jobKinds": [
+          "batch_timeline"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-TIMELINE-002-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "orchestration",
+      "engine": "director",
+      "orchestration": true,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-TIMELINE-002",
+      "workflowKey": "director.batch_timeline",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "Director orchestration",
+      "capabilityId": "video.director.batch_timeline",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-TIMELINE-002-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "source_video",
+        "prompt",
+        "duration_sec"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Extracts last frame then runs certified local I2V (ltx.simple_i2v or wan I2V)."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 24,
+        "heavyGb": 20,
+        "peakGb": 22,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "extend"
+        ],
+        "jobKinds": [
+          "video_extend"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-EXTEND-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "orchestration",
+      "engine": "ltx",
+      "orchestration": true,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-EXTEND-001",
+      "workflowKey": "video.extend",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LTX/WAN continuation",
+      "capabilityId": "video.extend",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-EXTEND-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Certified",
+      "builder": "build_latentsync_workflow",
+      "builderPath": "app.workflows.lipsync_builder:build_latentsync_workflow",
+      "requiredNodes": [
+        "D_LatentSyncNode",
+        "LatentSyncNode",
+        "LoadAudio",
+        "PreviewAny",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [],
+      "requiredExtensions": [
+        "ComfyUI_LatentSync"
+      ],
+      "supportedInputs": [
+        "video",
+        "audio"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Requires face-visible input video."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 16,
+        "heavyGb": 14,
+        "peakGb": 16,
+        "safeConcurrency": 1,
+        "recommendedGpu": "16GB",
+        "state": "SAFE"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "lipsync"
+        ],
+        "jobKinds": [
+          "lipsync",
+          "dual_lipsync"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": "sha256:4b3aed83da8f975a99d88112f9dafff461f620360624b656361c7b33ccdec9ed",
+        "builderHash": "sha256:38a1b5391d78521265092fe6a80e457bf250b14e5f145f01b28510c292bad0f3",
+        "nodeInventoryHash": "sha256:46cff92cfcdf97be70dcab801bd0c93c98e8b081a585cdc61d5672525b7064b5",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "topologyHash": "sha256:5e61839e463045321ad26febad880e9c03420e76da993a52a6dbbabb0fa9bd76"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-LIPSYNC-001-20260729-003",
+        "status": "CERTIFIED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "comfy",
+      "engine": "latentsync",
+      "orchestration": false,
+      "nodeAliasGroups": [
+        [
+          "D_LatentSyncNode",
+          "LatentSyncNode"
+        ],
+        [
+          "PreviewAny",
+          "VHS_VideoCombine",
+          "SaveVideo"
+        ],
+        [
+          "LoadAudio",
+          "VHS_LoadAudio"
+        ]
+      ],
+      "workflowId": "WF-LIPSYNC-001",
+      "workflowKey": "lipsync.latentsync",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "LatentSync",
+      "capabilityId": "video.lipsync.latentsync",
+      "providerKind": "local",
+      "certificationRecordId": "CERT-WF-LIPSYNC-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Blocked",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "prompt",
+        "start_image",
+        "seed"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Requires paid fal approval; live smoke needed for CERTIFIED."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "txt2vid_cloud",
+          "scene_render"
+        ],
+        "jobKinds": [
+          "txt2vid",
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-FAL-001-20260729-003",
+        "status": "BLOCKED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "external_api",
+      "engine": "fal_seedance",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-FAL-001",
+      "workflowKey": "fal.seedance",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "fal Seedance",
+      "providerKind": "external_api",
+      "capabilityId": "video.fal.seedance",
+      "certificationRecordId": "CERT-WF-FAL-001-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Blocked",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "prompt",
+        "start_image",
+        "seed"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Requires paid fal approval; live smoke needed for CERTIFIED."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "txt2vid_cloud",
+          "scene_render"
+        ],
+        "jobKinds": [
+          "txt2vid",
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-FAL-002-20260729-003",
+        "status": "BLOCKED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "external_api",
+      "engine": "fal_kling",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-FAL-002",
+      "workflowKey": "fal.kling",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "fal Kling",
+      "providerKind": "external_api",
+      "capabilityId": "video.fal.kling",
+      "certificationRecordId": "CERT-WF-FAL-002-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Blocked",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "prompt",
+        "start_image",
+        "seed"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Requires paid fal approval; live smoke needed for CERTIFIED."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "txt2vid_cloud",
+          "scene_render"
+        ],
+        "jobKinds": [
+          "txt2vid",
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-FAL-003-20260729-003",
+        "status": "BLOCKED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "external_api",
+      "engine": "fal_veo",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-FAL-003",
+      "workflowKey": "fal.veo",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "fal Veo",
+      "providerKind": "external_api",
+      "capabilityId": "video.fal.veo",
+      "certificationRecordId": "CERT-WF-FAL-003-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Blocked",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "prompt",
+        "start_image",
+        "seed"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Requires paid fal approval; live smoke needed for CERTIFIED."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "txt2vid_cloud",
+          "scene_render"
+        ],
+        "jobKinds": [
+          "txt2vid",
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "modelInventoryHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "certificationRecord": {
+        "certificationRecordId": "CERT-WF-FAL-004-20260729-003",
+        "status": "BLOCKED",
+        "certifiedAt": "2026-07-29T17:06:44Z"
+      },
+      "generationMode": "external_api",
+      "engine": "fal_runway",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-FAL-004",
+      "workflowKey": "fal.runway",
+      "workflowVersion": "1.0.0",
+      "modelFamily": "fal Runway",
+      "providerKind": "external_api",
+      "capabilityId": "video.fal.runway",
+      "certificationRecordId": "CERT-WF-FAL-004-20260729-003"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [
+        "source_video"
+      ],
+      "unsupportedInputs": [],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "SeedVR2 worker not implemented."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "upscale"
+        ],
+        "jobKinds": [
+          "video_upscale"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "seedvr2",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-UPSCALE-001",
+      "workflowKey": "video.upscale",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Video Upscale",
+      "providerKind": "local",
+      "capabilityId": "video.upscale"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-001",
+      "workflowKey": "video.motion_transfer",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.motion_transfer"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-002",
+      "workflowKey": "video.camera_motion",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.camera_motion"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-003",
+      "workflowKey": "video.character_consistent",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.character_consistent"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-004",
+      "workflowKey": "video.rife_interpolation",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.rife_interpolation"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-005",
+      "workflowKey": "video.frame_restoration",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.frame_restoration"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-006",
+      "workflowKey": "video.local_t2v",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.local_t2v"
+    },
+    {
+      "modality": "video",
+      "status": "Deferred",
+      "builder": null,
+      "builderPath": null,
+      "requiredNodes": [],
+      "requiredModels": [],
+      "requiredExtensions": [],
+      "supportedInputs": [],
+      "unsupportedInputs": [
+        "*"
+      ],
+      "supportedOutputs": [],
+      "limitations": [
+        "Future research capability; stable contract only."
+      ],
+      "vramProfile": {
+        "minimumGb": 0,
+        "recommendedGb": 0,
+        "heavyGb": 0,
+        "peakGb": 0,
+        "safeConcurrency": 1,
+        "recommendedGpu": "n/a",
+        "state": "UNKNOWN"
+      },
+      "cancellationSupport": false,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [],
+        "jobKinds": []
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "deferred",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-DEF-007",
+      "workflowKey": "video.pose_transfer",
+      "workflowVersion": "0.0.0",
+      "modelFamily": "Deferred",
+      "providerKind": "local",
+      "capabilityId": "video.pose_transfer"
+    },
+    {
+      "modality": "video",
+      "status": "Built",
+      "builder": "build_hunyuan15_t2v",
+      "builderPath": "app.workflows.hunyuan15_builder:build_hunyuan15_t2v",
+      "requiredNodes": [
+        "HunyuanVideo15Loader",
+        "HunyuanVideo15Sampler",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "hunyuan_video_15"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "supportedInputs": [
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [
+        "start_frame"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Official Tencent weights only; Adept-owned graph.",
+        "True local T2V gated by per-provider certification stamp."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "heavyGb": 28,
+        "peakGb": 30,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render",
+          "txt2vid_local"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null,
+        "topologyHash": "sha256:3046f19f8faab2a4de4b31be9f34f99441ae8787b8595d4d5d1919ccffe32540"
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "hunyuan15",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-HY-HUNYUAN15-T2V",
+      "workflowKey": "hunyuan15.t2v",
+      "workflowVersion": "0.1.0",
+      "modelFamily": "HunyuanVideo 1.5",
+      "providerKind": "local",
+      "capabilityId": "hunyuan15.t2v"
+    },
+    {
+      "modality": "video",
+      "status": "Built",
+      "builder": "build_hunyuan15_i2v",
+      "builderPath": "app.workflows.hunyuan15_builder:build_hunyuan15_i2v",
+      "requiredNodes": [
+        "HunyuanVideo15Loader",
+        "HunyuanVideo15ImgToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "hunyuan_video_15"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "supportedInputs": [
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps",
+        "start_frame"
+      ],
+      "unsupportedInputs": [
+        "true_local_t2v_uncertified"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Official Tencent weights only; Adept-owned graph.",
+        "Requires start frame."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "heavyGb": 28,
+        "peakGb": 30,
+        "safeConcurrency": 1,
+        "recommendedGpu": "24GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null,
+        "topologyHash": "sha256:5336af3bcaed13e9af91dc906452617141f08c2de607e4d5aed0cfcf8a52c9c3"
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "hunyuan15",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-HY-HUNYUAN15-I2V",
+      "workflowKey": "hunyuan15.i2v",
+      "workflowVersion": "0.1.0",
+      "modelFamily": "HunyuanVideo 1.5",
+      "providerKind": "local",
+      "capabilityId": "hunyuan15.i2v"
+    },
+    {
+      "modality": "video",
+      "status": "Built",
+      "builder": "build_hunyuan13b_t2v",
+      "builderPath": "app.workflows.hunyuan13b_builder:build_hunyuan13b_t2v",
+      "requiredNodes": [
+        "HunyuanVideo13BLoader",
+        "HunyuanVideo13BSampler",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "hunyuan_video_13b"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "supportedInputs": [
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps"
+      ],
+      "unsupportedInputs": [
+        "start_frame"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Official Tencent weights only; Adept-owned graph.",
+        "True local T2V gated by per-provider certification stamp."
+      ],
+      "vramProfile": {
+        "minimumGb": 24,
+        "recommendedGb": 32,
+        "heavyGb": 40,
+        "peakGb": 48,
+        "safeConcurrency": 1,
+        "recommendedGpu": "32GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render",
+          "txt2vid_local"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null,
+        "topologyHash": "sha256:3046f19f8faab2a4de4b31be9f34f99441ae8787b8595d4d5d1919ccffe32540"
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "hunyuan13b",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-HY-HUNYUAN13B-T2V",
+      "workflowKey": "hunyuan13b.t2v",
+      "workflowVersion": "0.1.0",
+      "modelFamily": "HunyuanVideo 13B",
+      "providerKind": "local",
+      "capabilityId": "hunyuan13b.t2v"
+    },
+    {
+      "modality": "video",
+      "status": "Built",
+      "builder": "build_hunyuan13b_i2v",
+      "builderPath": "app.workflows.hunyuan13b_builder:build_hunyuan13b_i2v",
+      "requiredNodes": [
+        "HunyuanVideo13BLoader",
+        "HunyuanVideo13BImgToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredModels": [
+        "hunyuan_video_13b"
+      ],
+      "requiredExtensions": [
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "supportedInputs": [
+        "prompt",
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "frames",
+        "fps",
+        "start_frame"
+      ],
+      "unsupportedInputs": [
+        "true_local_t2v_uncertified"
+      ],
+      "supportedOutputs": [
+        "mp4"
+      ],
+      "limitations": [
+        "Official Tencent weights only; Adept-owned graph.",
+        "Requires start frame."
+      ],
+      "vramProfile": {
+        "minimumGb": 24,
+        "recommendedGb": 32,
+        "heavyGb": 40,
+        "peakGb": 48,
+        "safeConcurrency": 1,
+        "recommendedGpu": "32GB",
+        "state": "TIGHT"
+      },
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "playbackValidation": true,
+      "apiContract": {
+        "intents": [
+          "scene_render",
+          "shot_render"
+        ],
+        "jobKinds": [
+          "render_scene"
+        ]
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": null,
+        "nodeInventoryHash": null,
+        "modelInventoryHash": null,
+        "topologyHash": "sha256:5336af3bcaed13e9af91dc906452617141f08c2de607e4d5aed0cfcf8a52c9c3"
+      },
+      "certificationRecord": null,
+      "generationMode": "comfy",
+      "engine": "hunyuan13b",
+      "orchestration": false,
+      "nodeAliasGroups": [],
+      "workflowId": "WF-HY-HUNYUAN13B-I2V",
+      "workflowKey": "hunyuan13b.i2v",
+      "workflowVersion": "0.1.0",
+      "modelFamily": "HunyuanVideo 13B",
+      "providerKind": "local",
+      "capabilityId": "hunyuan13b.i2v"
+    }
+  ]
+}

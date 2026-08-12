@@ -1,0 +1,60 @@
+[
+  {
+    "packId": "lighting_theory",
+    "title": "Lighting Theory",
+    "version": "1.0",
+    "domainTags": ["lighting", "visual", "mood"],
+    "frames": [
+      {
+        "frameId": "lighting_shape_and_mood",
+        "title": "Use light to shape mood and hierarchy",
+        "summary": "Lighting defines what the audience feels first, what they notice second, and what remains uncertain.",
+        "principles": [
+          "Control direction, contrast, and softness to shape emotional reading.",
+          "Motivation should feel coherent even when stylized.",
+          "Key-to-fill balance signals openness, mystery, or threat.",
+          "Let practical sources support story geography and performance focus."
+        ],
+        "patterns": [
+          "Use backlight and separation when identity or isolation matters.",
+          "Shift lighting logic across a sequence as the power dynamic changes."
+        ],
+        "antiPatterns": [
+          "Do not light everything evenly unless neutrality is the point.",
+          "Do not let beautiful light contradict the scene's dramatic need."
+        ],
+        "tags": ["lighting", "visual", "mood", "cinematography"],
+        "evidenceRefs": ["pack:lighting_theory", "discipline:lighting"]
+      }
+    ]
+  },
+  {
+    "packId": "color_psychology",
+    "title": "Color Psychology",
+    "version": "1.0",
+    "domainTags": ["color", "visual", "design"],
+    "frames": [
+      {
+        "frameId": "color_emotional_system",
+        "title": "Build a color system with emotional logic",
+        "summary": "Color becomes meaningful when palettes repeat with narrative intention instead of random taste.",
+        "principles": [
+          "Define what each palette family communicates in this project.",
+          "Use contrast in hue, value, or saturation to spotlight emotional change.",
+          "Let costume, production design, and light collaborate rather than compete.",
+          "Save major palette shifts for turning points or new realities."
+        ],
+        "patterns": [
+          "Associate a character or faction with a limited palette range before evolving it.",
+          "Use desaturation or contamination when safety or certainty is collapsing."
+        ],
+        "antiPatterns": [
+          "Do not rely on generic color symbolism without project-specific meaning.",
+          "Do not over-code every frame until nuance disappears."
+        ],
+        "tags": ["color", "visual", "mood", "design"],
+        "evidenceRefs": ["pack:color_psychology", "discipline:color_design"]
+      }
+    ]
+  }
+]

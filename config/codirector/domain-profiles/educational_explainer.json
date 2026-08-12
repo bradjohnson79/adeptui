@@ -1,0 +1,15 @@
+{
+  "profileId": "educational_explainer",
+  "displayName": "Educational Explainer",
+  "projectTypeSlugs": ["educational_explainer", "educational", "explainer", "training_video"],
+  "productionStages": ["curriculum", "script", "production", "post"],
+  "specialistPriorities": ["learning_designer", "writer", "motion_designer", "editor"],
+  "knowledgePackIds": ["educational_scaffolding", "explainer_pacing", "concept_clarity"],
+  "commonDeliverables": ["lesson outline", "script", "visual support package", "accessible master"],
+  "approvalPoints": ["learning objective approval", "factual review", "accessibility review", "final clarity review"],
+  "qualityChecks": ["one idea at a time", "examples make the concept concrete", "terms stay easy to understand"],
+  "commonRisks": ["too much jargon", "jumping ahead of the learner", "missing accessibility support"],
+  "terminology": {"storyUnit": "lesson beat", "supportVisual": "teaching visual"},
+  "defaultPlanTemplate": ["Lock the learning goal", "Break concepts into teachable beats", "Create supportive visuals", "Review comprehension", "Finish accessibly"],
+  "recommendedWorkflows": ["project_readiness_audit", "plan_validation", "project_summary_refresh", "export_readiness_check"]
+}

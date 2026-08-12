@@ -1,0 +1,17 @@
+{
+  "profileId": "minimax-h3",
+  "profileVersion": "1.0",
+  "providerId": "minimax-h3",
+  "modelId": "minimax-h3",
+  "generationDomain": "video",
+  "supportedLanguages": ["en"],
+  "defaultStrategy": "english-only",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en"],
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "motion", "provider"],
+  "maxPromptLength": 1800,
+  "negativePromptSupport": true,
+  "certificationStatus": "disabled",
+  "notes": ["Coming Soon — profile reserved; generation disabled."]
+}

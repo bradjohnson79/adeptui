@@ -1,0 +1,15 @@
+{
+  "profileId": "anime",
+  "displayName": "Anime",
+  "projectTypeSlugs": ["anime", "stylized_anime"],
+  "productionStages": ["development", "boards", "layout", "animation", "post"],
+  "specialistPriorities": ["series_director", "episode_director", "character_designer", "editor"],
+  "knowledgePackIds": ["anime_pacing", "sakuga_staging", "anime_character_language"],
+  "commonDeliverables": ["character sheets", "key frames", "animatic", "episode master"],
+  "approvalPoints": ["character design approval", "key frame approval", "episode continuity review"],
+  "qualityChecks": ["strong silhouettes", "stylized pacing feels intentional", "emotion reads in close-ups"],
+  "commonRisks": ["off-model faces", "style drift between sequences", "empty holds with no dramatic intent"],
+  "terminology": {"storyUnit": "cut", "heroMoment": "sakuga beat"},
+  "defaultPlanTemplate": ["Lock character appeal", "Stage key cuts", "Review pacing and holds", "Finish continuity packets", "Polish episode delivery"],
+  "recommendedWorkflows": ["project_readiness_audit", "continuity_scan", "missing_asset_audit", "generation_preflight"]
+}

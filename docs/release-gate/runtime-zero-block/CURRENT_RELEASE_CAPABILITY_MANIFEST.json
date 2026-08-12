@@ -1,0 +1,3315 @@
+{
+  "frozenAt": "2026-08-06T01:28:04.881958+00:00",
+  "freezeLaw": "No CURRENTLY_SUPPORTED row may be removed after Wave 3 starts without product-policy audit diff.",
+  "scenecraftExclusion": {
+    "capabilityId": "scenecraft",
+    "releaseStatus": "PLANNED_FUTURE_MODULE",
+    "notPartOfCurrentRelease": true,
+    "exposedInUi": false,
+    "exposedToCoDirector": false,
+    "requiredForCurrentGate": false,
+    "includedInBlockedCount": false,
+    "includedInDeferredCount": false
+  },
+  "entryCount": 188,
+  "entries": [
+    {
+      "capabilityId": "assets.file",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/assets/{assetId}/file",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "assets.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/library",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "assets.tag",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "PATCH /api/projects/{projectId}/assets/{assetId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "assets.upload",
+      "workflowIds": [],
+      "providerId": "app.routers.api:upload_asset",
+      "adapterId": "POST /api/projects/{projectId}/assets",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.character_voice.clone",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/characters/{characterId}/voice-profiles/clone",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.character_voice.design",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/characters/{characterId}/voice-profiles/design",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.character_voice.generate_dialogue",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/characters/{characterId}/voice-profiles/{id}/generate-dialogue",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.dialogue.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/audio/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.music.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/editing/music-cue",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.sfx.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/editing/sfx-cue",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "audio.validate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/audio/process",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "capabilities.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/capabilities",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-QWEN2512-TXT2IMG-001",
+      "workflowIds": [
+        "IMG-QWEN2512-TXT2IMG-001"
+      ],
+      "providerId": "qwen2512",
+      "adapterId": "app.workflows.qwen_image_2512:build_qwen_2512_txt2img_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "qwen_image_2512_unet",
+        "qwen_image_2512_clip",
+        "qwen_image_2512_vae"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-UPSCALE-001",
+      "workflowIds": [
+        "IMG-UPSCALE-001"
+      ],
+      "providerId": "comfy",
+      "adapterId": "app.workflows.image_edit_tools:build_image_upscale_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UpscaleModelLoader",
+        "ImageUpscaleWithModel"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "upscale_model"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-ZIMAGE-INPAINT-001",
+      "workflowIds": [
+        "IMG-ZIMAGE-INPAINT-001"
+      ],
+      "providerId": "zimage",
+      "adapterId": "app.workflows.image_edit_tools:build_zimage_inpaint_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "VAEEncodeForInpaint",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-ZIMAGE-OUTPAINT-001",
+      "workflowIds": [
+        "IMG-ZIMAGE-OUTPAINT-001"
+      ],
+      "providerId": "zimage",
+      "adapterId": "app.workflows.image_edit_tools:build_zimage_outpaint_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "ImagePadForOutpaint",
+        "VAEEncodeForInpaint",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-ZIMAGE-REF-001",
+      "workflowIds": [
+        "IMG-ZIMAGE-REF-001"
+      ],
+      "providerId": "zimage",
+      "adapterId": "app.workflows.image_tools:build_zimage_ref_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "LoadImage",
+        "VAEEncode",
+        "ImageScale",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae",
+        "zimage_clip_vision"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.IMG-ZIMAGE-TXT2IMG-001",
+      "workflowIds": [
+        "IMG-ZIMAGE-TXT2IMG-001"
+      ],
+      "providerId": "zimage",
+      "adapterId": "app.workflows.image_tools:build_zimage_txt2img_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "UNETLoader",
+        "VAEDecode",
+        "KSampler",
+        "TextEncodeZImageOmni"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_unet",
+        "zimage_clip",
+        "zimage_vae"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "image"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-EXTEND-001",
+      "workflowIds": [
+        "WF-EXTEND-001"
+      ],
+      "providerId": "ltx",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-LIPSYNC-001",
+      "workflowIds": [
+        "WF-LIPSYNC-001"
+      ],
+      "providerId": "latentsync",
+      "adapterId": "app.workflows.lipsync_builder:build_latentsync_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "D_LatentSyncNode",
+        "LatentSyncNode",
+        "LoadAudio",
+        "PreviewAny",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [
+        "ComfyUI_LatentSync"
+      ],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-LTX-001",
+      "workflowIds": [
+        "WF-LTX-001"
+      ],
+      "providerId": "ltx",
+      "adapterId": "app.workflows.ltx_builder:build_ltx_simple_i2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXVImgToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [
+        "ComfyUI-LTXVideo",
+        "ComfyUI-VideoHelperSuite"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-LTX-002",
+      "workflowIds": [
+        "WF-LTX-002"
+      ],
+      "providerId": "ltx",
+      "adapterId": "app.workflows.ltx_builder:build_ltx_scene_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [
+        "ComfyUI-LTXVideo"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-LTX-003",
+      "workflowIds": [
+        "WF-LTX-003"
+      ],
+      "providerId": "ltx",
+      "adapterId": "app.workflows.ltx_ingredients_compiler:compile_ingredients_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXICLoRALoaderModelOnly",
+        "LTXAddVideoICLoRAGuide",
+        "EmptyLTXVLatentVideo",
+        "SaveVideo"
+      ],
+      "requiredPackages": [
+        "ComfyUI-LTXVideo"
+      ],
+      "requiredModels": [
+        "ltx_checkpoint",
+        "ltx23_ic_lora_ingredients"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-SCENE-001",
+      "workflowIds": [
+        "WF-SCENE-001"
+      ],
+      "providerId": "director",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-SHOT-001",
+      "workflowIds": [
+        "WF-SHOT-001"
+      ],
+      "providerId": "director",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-TIMELINE-001",
+      "workflowIds": [
+        "WF-TIMELINE-001"
+      ],
+      "providerId": "director",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-TIMELINE-002",
+      "workflowIds": [
+        "WF-TIMELINE-002"
+      ],
+      "providerId": "director",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-WAN-001",
+      "workflowIds": [
+        "WF-WAN-001"
+      ],
+      "providerId": "wan",
+      "adapterId": "app.workflows.wan_builder:build_wan_flf_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "WanImageToVideo",
+        "WanFirstLastFrameToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [
+        "ComfyUI-WanVideoWrapper",
+        "ComfyUI-VideoHelperSuite",
+        "ComfyUI-KJNodes"
+      ],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "certified.WF-WAN-002",
+      "workflowIds": [
+        "WF-WAN-002"
+      ],
+      "providerId": "wan",
+      "adapterId": "app.workflows.wan_builder:build_wan_three_frame_workflow",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "WanFirstLastFrameToVideo",
+        "LoadImage",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [
+        "ComfyUI-WanVideoWrapper",
+        "ComfyUI-VideoHelperSuite",
+        "ComfyUI-KJNodes"
+      ],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "certified_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "character.profile.manage",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/characters",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.attachment.classify",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.attachment.confirm",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.attachment.interpret",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.bible.approve",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/proposals/{proposalId}/approval",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.bible.propose",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/projects/{projectId}/proposals",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.bible.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/codirector/projects/{projectId}/bible",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.chat",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/chat/stream",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.approve",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.compare",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.list",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.reject",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.request_revision",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.review",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.media.select",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.project.propose",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.project.resume",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.provider",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/codirector/health",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.tools",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.vision.review",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/vision/approve",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "codirector.vision.validate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/vision/validate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "codirector",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "comfyui.cancel",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/jobs/{jobId}/cancel",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "comfyui.health",
+      "workflowIds": [],
+      "providerId": "app.capabilities.probes:probe_comfy",
+      "adapterId": "GET /api/comfy/health",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "comfyui.outputs",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "comfyui.queue",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "director.timeline.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/scenes/{sceneId}/director",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "director.timeline.update",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "PUT /api/projects/{projectId}/scenes/{sceneId}/director",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "downloads.queue",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "downloads.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/downloads",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "editor.sequences.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "extensions.comfyui.ready",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.approve",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/{versionId}/approve",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.bind_to_shot",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/{frameId}/bind",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.first.generate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.generate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.last.generate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.replace",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.sequence.generate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.transition.generate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/frames/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "frame.validate",
+      "workflowIds": [
+        "wan.first_last_frame",
+        "wan.three_frame"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LoadImage",
+        "VHS_VideoCombine",
+        "WanFirstLastFrameToVideo",
+        "WanImageToVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "wan_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "generation.image.queue",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/imagegen",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "generation.jobs.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "generation.lipsync.queue",
+      "workflowIds": [
+        "lipsync.latentsync"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/lipsync",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "D_LatentSyncNode",
+        "LatentSyncNode",
+        "PreviewAny",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "generation.video.queue",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/render",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "health.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/health",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.approve",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/{versionId}/approve",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.generate",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.image_to_image",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.inpaint",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.outpaint",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.publish_reference",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/{versionId}/publish-reference",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.reference.generate",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.relight",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.upscale",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.validate",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "image.variation",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/image/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "lipsync.generate",
+      "workflowIds": [
+        "lipsync.latentsync"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/lipsync/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "D_LatentSyncNode",
+        "LatentSyncNode",
+        "PreviewAny",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "lipsync.validate",
+      "workflowIds": [
+        "lipsync.latentsync"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "D_LatentSyncNode",
+        "LatentSyncNode",
+        "PreviewAny",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.compat.evaluate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/compat/evaluate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.radar.discover",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/radar/discover",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.recipe.execute",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/recipes/{recipeId}/run",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.install",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/sandbox/plan/{planId}/approve",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.plan",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/sandbox/plan",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.promote",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/promote/{manifestId}/approve",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.sandbox.validate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m28/sandbox/{sandboxId}/validate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "m28.shot_profile.apply",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "models.image.ready",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "models.video.ready",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "mouth.rectangle.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/lipsync/mouth-rectangle",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "mouth.track.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/lipsync/mouth-track",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.brief.update",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.conflict.detect",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.conflict.resolve",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.decision.propagate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.final_review",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.handoff.create",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.impact.calculate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.meeting.convene",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.meeting.synthesize",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.message.respond",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.message.send",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.readiness.evaluate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "production_team.state.revalidate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.archive",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/archive",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.create",
+      "workflowIds": [],
+      "providerId": "app.routers.api:create_project",
+      "adapterId": "POST /api/projects",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.delete",
+      "workflowIds": [],
+      "providerId": "app.routers.api:delete_project",
+      "adapterId": "DELETE /api/projects/{projectId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.duplicate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/duplicate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.list",
+      "workflowIds": [],
+      "providerId": "app.routers.api:list_projects",
+      "adapterId": "GET /api/projects",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.read",
+      "workflowIds": [],
+      "providerId": "app.routers.api:get_project",
+      "adapterId": "GET /api/projects/{projectId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.active",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.create",
+      "workflowIds": [],
+      "providerId": "app.services.scene_service:SceneService.create",
+      "adapterId": "POST /api/projects/{projectId}/scenes",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.delete",
+      "workflowIds": [],
+      "providerId": "app.services.scene_service:SceneService.delete",
+      "adapterId": "DELETE /api/projects/{projectId}/scenes/{sceneId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.read",
+      "workflowIds": [],
+      "providerId": "app.services.scene_service:SceneService.list_for_project",
+      "adapterId": "GET /api/projects/{projectId}/scenes",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.reorder",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.scenes.update",
+      "workflowIds": [],
+      "providerId": "app.services.scene_service:SceneService.update",
+      "adapterId": "PATCH /api/projects/{projectId}/scenes/{sceneId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.timeline.apply",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/timeline/apply",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.timeline.propose",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/timeline/propose",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "project.update",
+      "workflowIds": [],
+      "providerId": "app.routers.api:update_project",
+      "adapterId": "PATCH /api/projects/{projectId}",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.attach.project",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/references/ingredients",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.attach.scene",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.character_identity",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.end_frame",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.exclude",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/references/ingredients",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.ic_lora.ready",
+      "workflowIds": [
+        "ltx.ingredients_ic_lora"
+      ],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/references/capabilities",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "EmptyLTXVLatentVideo",
+        "LTXAddVideoICLoRAGuide",
+        "LTXICLoRALoaderModelOnly",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx23_ic_lora_ingredients",
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.motion",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.multiple_images",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.primary_frame",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET .../reference-package",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/references/ingredients",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.remove",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.sheet.build",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/references/sheets/build",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.start_frame",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.style",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.thumbnail",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.timeline_bindings",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET/POST /api/projects/{projectId}/scenes/{sceneId}/director/items/{itemId}/references",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.upload",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/assets",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "references.weighting",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "scene.render",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/render",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "setup.prepare",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/setup/prepare",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "setup.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/setup/status",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.ambience.plan",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.concept.create",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.cue.plan",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.dialogue.plan",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.mix_intent.create",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "sound_producer.score_brief.create",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "source_manager.install",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/setup/components/{componentId}/action",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "source_manager.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/source-manager/overview",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "source_manager.refresh",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/setup/components/{componentId}/refresh-source",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "source_manager.repair",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/setup/components/{componentId}/recommended-action",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "spatial.scene.read",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/scenes/{sceneId}/spatial",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storage.database",
+      "workflowIds": [],
+      "providerId": "app.capabilities.probes:probe_database",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storage.project_data",
+      "workflowIds": [],
+      "providerId": "app.capabilities.probes:probe_storage",
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyboard.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/projects/{projectId}/storyboard/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyboard.read",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "GET /api/projects/{projectId}/script",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.character.interpret",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.environment.interpret",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.handoff.create",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.media.review",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.analyze",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.ask_questions",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.define_emotional_arc",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.define_subtext",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.generate_variations",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.identify_unknowns",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "storyteller.scene.propose_direction",
+      "workflowIds": [
+        "ltx.scene"
+      ],
+      "providerId": null,
+      "adapterId": "/api/codirector/m214/",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXDirector",
+        "LTXDirectorGuide",
+        "SaveVideo"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "timeline.minimax_h3",
+      "workflowIds": [
+        "minimax_h3.route_a"
+      ],
+      "providerId": "minimax-h3-33b",
+      "adapterId": "minimax_h3.route_a_adapter",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [
+        "minimax_h3_33b"
+      ],
+      "exposedSurfaces": [
+        "timeline",
+        "ui",
+        "codirector"
+      ]
+    },
+    {
+      "capabilityId": "timeline.render",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/render",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "timeline",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "video.generate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/m29/video/generate",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "video.validate",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": "POST /api/codirector/jobs",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "workflow.hunyuan13b.i2v",
+      "workflowIds": [
+        "hunyuan13b.i2v"
+      ],
+      "providerId": "hunyuan13b",
+      "adapterId": "app.workflows.hunyuan13b_builder:build_hunyuan13b_i2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "HyVideoModelLoader",
+        "HyVideoSampler",
+        "HyVideoI2VEncode",
+        "HyVideoDecode",
+        "HyVideoVAELoader",
+        "DownloadAndLoadHyVideoTextEncoder",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "hunyuan_video_13b"
+      ],
+      "exposedSurfaces": [
+        "api",
+        "workflow_registry",
+        "video"
+      ],
+      "releaseExclusion": {
+        "status": "EXCLUDED",
+        "reason": "User direction 2026-08-05: Hunyuan not used in Adept UI",
+        "excludedAt": "2026-08-06T02:04:57.834887+00:00"
+      },
+      "releaseGate": "EXCLUDED"
+    },
+    {
+      "capabilityId": "workflow.hunyuan13b.t2v",
+      "workflowIds": [
+        "hunyuan13b.t2v"
+      ],
+      "providerId": "hunyuan13b",
+      "adapterId": "app.workflows.hunyuan13b_builder:build_hunyuan13b_t2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "HyVideoModelLoader",
+        "HyVideoSampler",
+        "HyVideoTextEncode",
+        "HyVideoDecode",
+        "HyVideoVAELoader",
+        "DownloadAndLoadHyVideoTextEncoder",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "hunyuan_video_13b"
+      ],
+      "exposedSurfaces": [
+        "api",
+        "workflow_registry",
+        "video"
+      ],
+      "releaseExclusion": {
+        "status": "EXCLUDED",
+        "reason": "User direction 2026-08-05: Hunyuan not used in Adept UI",
+        "excludedAt": "2026-08-06T02:04:57.834887+00:00"
+      },
+      "releaseGate": "EXCLUDED"
+    },
+    {
+      "capabilityId": "workflow.hunyuan15.i2v",
+      "workflowIds": [
+        "hunyuan15.i2v"
+      ],
+      "providerId": "hunyuan15",
+      "adapterId": "app.workflows.hunyuan15_builder:build_hunyuan15_i2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "HyVideoModelLoader",
+        "HyVideoSampler",
+        "HyVideoI2VEncode",
+        "HyVideoDecode",
+        "HyVideoVAELoader",
+        "DownloadAndLoadHyVideoTextEncoder",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "hunyuan_video_15"
+      ],
+      "exposedSurfaces": [
+        "api",
+        "workflow_registry",
+        "video"
+      ],
+      "releaseExclusion": {
+        "status": "EXCLUDED",
+        "reason": "User direction 2026-08-05: Hunyuan not used in Adept UI",
+        "excludedAt": "2026-08-06T02:04:57.834887+00:00"
+      },
+      "releaseGate": "EXCLUDED"
+    },
+    {
+      "capabilityId": "workflow.hunyuan15.t2v",
+      "workflowIds": [
+        "hunyuan15.t2v"
+      ],
+      "providerId": "hunyuan15",
+      "adapterId": "app.workflows.hunyuan15_builder:build_hunyuan15_t2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "HyVideoModelLoader",
+        "HyVideoSampler",
+        "HyVideoTextEncode",
+        "HyVideoDecode",
+        "HyVideoVAELoader",
+        "DownloadAndLoadHyVideoTextEncoder",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "hunyuan_video_15"
+      ],
+      "exposedSurfaces": [
+        "api",
+        "workflow_registry",
+        "video"
+      ],
+      "releaseExclusion": {
+        "status": "EXCLUDED",
+        "reason": "User direction 2026-08-05: Hunyuan not used in Adept UI",
+        "excludedAt": "2026-08-06T02:04:57.834887+00:00"
+      },
+      "releaseGate": "EXCLUDED"
+    },
+    {
+      "capabilityId": "workflow.ltx.simple_i2v",
+      "workflowIds": [
+        "ltx.simple_i2v"
+      ],
+      "providerId": "ltx",
+      "adapterId": "app.workflows.ltx_builder:build_ltx_simple_i2v",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "LTXVImgToVideo",
+        "VHS_VideoCombine"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "ltx_checkpoint"
+      ],
+      "exposedSurfaces": [
+        "api",
+        "workflow_registry",
+        "video"
+      ]
+    },
+    {
+      "capabilityId": "workflows.discover",
+      "workflowIds": [],
+      "providerId": "app.workflows.readiness:list_workflows",
+      "adapterId": "GET /api/workflows",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "workflows.image.ready",
+      "workflowIds": [
+        "image.img2img_edit",
+        "image.txt2img",
+        "image.zimage_reference"
+      ],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [
+        "CLIPLoader",
+        "KSampler",
+        "LoadImage",
+        "ModelSamplingAuraFlow",
+        "SaveImage",
+        "TextEncodeZImageOmni",
+        "UNETLoader",
+        "VAELoader"
+      ],
+      "requiredPackages": [],
+      "requiredModels": [
+        "zimage_models"
+      ],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "workflows.ready",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "workflows.validate",
+      "workflowIds": [],
+      "providerId": "app.workflows.readiness:workflow_readiness",
+      "adapterId": "GET /api/workflows/{workflowId}/readiness",
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "ui",
+        "api"
+      ]
+    },
+    {
+      "capabilityId": "workflows.video.ready",
+      "workflowIds": [],
+      "providerId": null,
+      "adapterId": null,
+      "releaseStatus": "CURRENTLY_SUPPORTED",
+      "requiredNodeTypes": [],
+      "requiredPackages": [],
+      "requiredModels": [],
+      "exposedSurfaces": [
+        "api"
+      ]
+    }
+  ],
+  "enrichmentNote": "Additive certified-registry + MiniMax H3 rows after initial freeze; no removals.",
+  "hunyuanReleaseExclusion": {
+    "status": "EXCLUDED",
+    "reason": "User direction 2026-08-05: Hunyuan not used in Adept UI",
+    "capabilityIds": [
+      "workflow.hunyuan13b.i2v",
+      "workflow.hunyuan13b.t2v",
+      "workflow.hunyuan15.i2v",
+      "workflow.hunyuan15.t2v"
+    ],
+    "excludedAt": "2026-08-06T02:04:57.834887+00:00"
+  }
+}

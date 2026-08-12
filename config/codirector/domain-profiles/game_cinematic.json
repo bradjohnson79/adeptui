@@ -1,0 +1,15 @@
+{
+  "profileId": "game_cinematic",
+  "displayName": "Game Cinematic",
+  "projectTypeSlugs": ["game_cinematic", "game", "in_engine_cinematic"],
+  "productionStages": ["narrative_design", "previs", "capture_or_render", "post"],
+  "specialistPriorities": ["cinematic_director", "narrative_designer", "capture_supervisor", "editor"],
+  "knowledgePackIds": ["interactive_story_beats", "gameplay_to_cinematic_bridge", "cinematic_staging"],
+  "commonDeliverables": ["cinematic script", "capture plan", "engine-ready shot list", "release master"],
+  "approvalPoints": ["narrative beat approval", "capture plan approval", "engine continuity review"],
+  "qualityChecks": ["cinematic fits game tone", "transitions from gameplay feel earned", "world rules stay consistent"],
+  "commonRisks": ["camera language fighting gameplay logic", "asset mismatch between engine states", "lore drift"],
+  "terminology": {"storyUnit": "sequence", "capturePass": "engine capture"},
+  "defaultPlanTemplate": ["Map cinematic goals", "Plan gameplay-to-cinematic transitions", "Prepare engine capture", "Review continuity with lore", "Finish the cinematic edit"],
+  "recommendedWorkflows": ["project_readiness_audit", "missing_asset_audit", "plan_validation", "generation_preflight"]
+}

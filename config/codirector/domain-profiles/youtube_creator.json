@@ -1,0 +1,15 @@
+{
+  "profileId": "youtube_creator",
+  "displayName": "YouTube Creator",
+  "projectTypeSlugs": ["youtube_creator", "youtube", "creator_video"],
+  "productionStages": ["outline", "record", "edit", "publish_prep"],
+  "specialistPriorities": ["content_strategist", "writer", "editor", "thumbnail_director"],
+  "knowledgePackIds": ["hook_retention", "creator_storytelling", "audience_clarity"],
+  "commonDeliverables": ["video outline", "thumbnail direction", "creator cut", "upload package"],
+  "approvalPoints": ["hook approval", "thumbnail approval", "final publish review"],
+  "qualityChecks": ["hook lands in the first moments", "sections stay easy to follow", "payoff matches the promise"],
+  "commonRisks": ["slow opening", "thumbnail-title mismatch", "rambling middle sections"],
+  "terminology": {"storyUnit": "segment", "altVersion": "variant cut"},
+  "defaultPlanTemplate": ["Clarify the audience promise", "Outline sections", "Record or generate support assets", "Edit for retention", "Prep title, thumbnail, and publish package"],
+  "recommendedWorkflows": ["project_readiness_audit", "missing_asset_audit", "plan_validation", "export_readiness_check"]
+}

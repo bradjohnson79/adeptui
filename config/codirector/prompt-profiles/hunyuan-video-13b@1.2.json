@@ -1,0 +1,18 @@
+{
+  "profileId": "hunyuan-video-13b",
+  "profileVersion": "1.2",
+  "providerId": "hunyuan-video-13b-local",
+  "modelId": "hunyuan-video-13b",
+  "generationDomain": "video",
+  "supportedLanguages": ["en", "zh"],
+  "defaultStrategy": "bilingual-balanced",
+  "bilingualCertified": false,
+  "recommendedLanguageModules": ["en", "zh"],
+  "recommendedBalance": "balanced",
+  "promptOrdering": "english-first",
+  "enabledRefinementModules": ["production", "cinematic", "motion", "continuity", "provider"],
+  "maxPromptLength": 2400,
+  "negativePromptSupport": true,
+  "certificationStatus": "experimental",
+  "notes": ["Balanced bilingual prompting recommended pending benchmark certification."]
+}

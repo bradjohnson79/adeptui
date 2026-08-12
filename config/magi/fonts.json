@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "fonts": [
+    {
+      "id": "inter",
+      "family": "Inter",
+      "cssFamily": "Inter, system-ui, sans-serif",
+      "pillowNames": ["Inter", "DejaVuSans", "Arial"],
+      "weights": [400, 600, 700],
+      "licensed": true,
+      "bundled": false,
+      "notes": "UI default; render uses Pillow-safe fallbacks when Inter face file absent"
+    },
+    {
+      "id": "dejavu-sans",
+      "family": "DejaVu Sans",
+      "cssFamily": "\"DejaVu Sans\", sans-serif",
+      "pillowNames": ["DejaVuSans"],
+      "weights": [400, 700],
+      "licensed": true,
+      "bundled": true,
+      "notes": "Deterministic render fallback"
+    },
+    {
+      "id": "dejavu-serif",
+      "family": "DejaVu Serif",
+      "cssFamily": "\"DejaVu Serif\", serif",
+      "pillowNames": ["DejaVuSerif"],
+      "weights": [400, 700],
+      "licensed": true,
+      "bundled": true,
+      "notes": "Cinematic title option"
+    }
+  ],
+  "defaultFontId": "dejavu-sans",
+  "remoteFetchForbidden": true
+}
