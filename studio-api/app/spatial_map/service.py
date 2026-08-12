@@ -186,6 +186,7 @@ def get_document(db: Session, project_id: str, document_id: str) -> SpatialMapDo
 def update_document(db: Session, project_id: str, document_id: str, body: SpatialMapUpdateBody) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
+    explicit = body.model_fields_set
     if body.sceneId:
         _scene_or_404(db, project_id, body.sceneId)
         row.scene_id = body.sceneId
@@ -201,7 +202,8 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
         document.tags = [tag.strip() for tag in body.tags if tag and tag.strip()]
     if body.bounds is not None:
         document.bounds = body.bounds
-    if body.backgroundAssetId is not None:
+    # Distinguish "not provided" (keep existing) from "explicitly null" (clear).
+    if "backgroundAssetId" in explicit:
         document.backgroundAssetId = body.backgroundAssetId
     if body.masterEnvironmentPrompt is not None:
         document.masterEnvironmentPrompt = body.masterEnvironmentPrompt.strip()

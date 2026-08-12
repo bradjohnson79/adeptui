@@ -473,3 +473,76 @@
     align-items: stretch;
   }
 }
+
+/* —— Active Atlas Shot panel —— */
+.spatial-map__atlas-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 6%, transparent);
+  flex-wrap: wrap;
+}
+
+.spatial-map__atlas-thumb {
+  flex-shrink: 0;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.35rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.spatial-map__atlas-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.spatial-map__atlas-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.spatial-map__atlas-label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.spatial-map__atlas-source {
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.spatial-map__atlas-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.spatial-map__atlas-btn {
+  font-size: 0.72rem !important;
+  padding: 0.25rem 0.55rem !important;
+}
+
+.spatial-map__atlas-remove {
+  color: #f0a0a0;
+}
+
+@media (max-width: 600px) {
+  .spatial-map__atlas-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .spatial-map__atlas-actions {
+    justify-content: center;
+  }
+}

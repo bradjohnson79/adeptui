@@ -70,6 +70,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [opMsg, setOpMsg] = useState<string | null>(null);
   const [ersCompositeAssetId, setErsCompositeAssetId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emptyFileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Load most recent map on mount / project change ──────────────────────
   const loadMap = useCallback(async () => {
@@ -97,20 +98,32 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       const resultIds = activeExecution.result_asset_ids || [];
       if (resultIds.length > 0) {
         if (busyOp === "atlas") {
-          // Use the first result asset as the Atlas Shot → create the map.
+          // Use the first result asset as the Atlas Shot.
           const atlasAssetId = resultIds[0];
           void (async () => {
             try {
+            if (replaceModeRef.current && document) {
+              // Replace: PATCH existing map's backgroundAssetId (preserves placements).
+              const updated = await spatialMapApi.updateMap(projectId, document.id, {
+                backgroundAssetId: atlasAssetId,
+              });
+              setDocument(updated);
+              setOpMsg("Atlas Shot replaced.");
+            } else {
+              // Create: new map document with the Atlas as background.
               const doc = await spatialMapApi.createMap(projectId, {
                 title: "Spatial Map",
                 backgroundAssetId: atlasAssetId,
               });
               setDocument(doc);
               setOpMsg("Atlas Shot generated and Spatial Map created.");
-              setBusyOp(null);
+            }
+            setBusyOp(null);
+            replaceModeRef.current = false;
             } catch (err) {
               setOpMsg(err instanceof Error ? err.message : "Failed to create map from Atlas Shot.");
               setBusyOp(null);
+              replaceModeRef.current = false;
             }
           })();
         } else if (busyOp === "ers") {
@@ -167,6 +180,71 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   // For V1 we reuse the EntityPicker prop kind with an image-only library.
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const handleChooseFromLibrary = () => setLibraryPickerOpen(true);
+
+  // ── Replace Atlas (preserve placements via PATCH backgroundAssetId) ────
+  const [replacePickerOpen, setReplacePickerOpen] = useState(false);
+  const handleReplaceFromLibrary = () => setReplacePickerOpen(true);
+
+  const handleReplaceUpload = useCallback(async (file: File) => {
+    if (!document) return;
+    setOpMsg(null);
+    setBusyOp("atlas");
+    try {
+      const asset = await api.uploadAsset(projectId, file, "atlas_shot", "image");
+      const updated = await spatialMapApi.updateMap(projectId, document.id, {
+        backgroundAssetId: asset.id,
+      });
+      setDocument(updated);
+      setOpMsg("Atlas Shot replaced.");
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Replace failed.");
+    } finally {
+      setBusyOp(null);
+    }
+  }, [projectId, document]);
+
+  const handleReplaceGenerate = useCallback(async () => {
+    if (!document) return;
+    setOpMsg(null);
+    setBusyOp("atlas");
+    // Mark that the next atlas result should PATCH the existing map
+    // instead of creating a new one.
+    replaceModeRef.current = true;
+    try {
+      const res = await api.startExecution(projectId, {
+        capability: "atlas.generate",
+        context: {},
+      });
+      const exec = normalizeExecution(res);
+      setActiveExecution(exec);
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
+      setBusyOp(null);
+      replaceModeRef.current = false;
+    }
+  }, [projectId, document, setActiveExecution]);
+
+  // ── Remove Atlas (clear backgroundAssetId, preserve placements + Library asset) ──
+  const handleRemoveAtlas = useCallback(async () => {
+    if (!document?.backgroundAssetId) return;
+    const ok = window.confirm(
+      "Remove the Atlas Shot from this Spatial Map? The Library image is kept; only the map background is cleared.",
+    );
+    if (!ok) return;
+    setOpMsg(null);
+    try {
+      const updated = await spatialMapApi.updateMap(projectId, document.id, {
+        backgroundAssetId: null,
+      });
+      setDocument(updated);
+      setOpMsg("Atlas Shot removed from Spatial Map. The Library image is preserved.");
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Failed to remove Atlas.");
+    }
+  }, [projectId, document]);
+
+  // Track whether a new atlas generation should replace (PATCH) vs create new.
+  const replaceModeRef = useRef(false);
 
   // ── Upload image ───────────────────────────────────────────────────────
   const handleUploadImage = useCallback(async (file: File) => {
@@ -469,7 +547,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             prop, and camera positioning more consistent.
           </p>
           <input
-            ref={fileInputRef}
+            ref={emptyFileInputRef}
             type="file"
             accept="image/*"
             hidden
@@ -501,7 +579,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             <button
               type="button"
               className="ui-btn ui-btn--secondary"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => emptyFileInputRef.current?.click()}
               disabled={isGenerating}
               aria-label="Upload an image as the Atlas Shot"
             >
@@ -531,6 +609,78 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       ) : (
         <>
           <h3 className="spatial-map__heading">{document?.title || "Spatial Map"}</h3>
+
+          {/* Active Atlas Shot panel — thumbnail + View/Replace/Remove */}
+          <div className="spatial-map__atlas-panel" data-testid="active-atlas-panel">
+            <div className="spatial-map__atlas-thumb">
+              <img src={bgUrl} alt="Active Atlas Shot" />
+            </div>
+            <div className="spatial-map__atlas-info">
+              <p className="spatial-map__atlas-label">Active Atlas Shot</p>
+              <p className="spatial-map__atlas-source muted">
+                {document?.backgroundAssetId ? `Asset ${document.backgroundAssetId.slice(0, 8)}…` : "No Atlas"}
+              </p>
+            </div>
+            <div className="spatial-map__atlas-actions">
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary spatial-map__atlas-btn"
+                onClick={() => onGoTab?.("library")}
+                aria-label="View Atlas Shot in Library"
+                data-testid="atlas-view-btn"
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary spatial-map__atlas-btn"
+                onClick={handleReplaceFromLibrary}
+                disabled={isGenerating}
+                aria-label="Replace Atlas Shot"
+                data-testid="atlas-replace-btn"
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary spatial-map__atlas-btn"
+                onClick={() => void handleReplaceGenerate()}
+                disabled={isGenerating}
+                aria-label="Generate another Atlas Shot with Co-Director"
+                data-testid="atlas-regenerate-btn"
+              >
+                Generate New
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary spatial-map__atlas-btn spatial-map__atlas-remove"
+                onClick={() => void handleRemoveAtlas()}
+                aria-label="Remove Atlas Shot from Spatial Map"
+                data-testid="atlas-remove-btn"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+
+          {/* Hidden file input for Replace via upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) {
+                if (document?.backgroundAssetId) {
+                  void handleReplaceUpload(f);
+                } else {
+                  void handleUploadImage(f);
+                }
+              }
+              e.target.value = "";
+            }}
+          />
 
           <SpatialGrid
             backgroundAssetId={document!.backgroundAssetId!}
@@ -636,6 +786,25 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               ? (tag, characterId, name) => void handlePickerConfirmCharacter(tag, characterId, name)
               : (tag, assetId, label) => void handlePickerConfirmProp(tag, assetId, label)
           }
+        />
+      ) : null}
+
+      {replacePickerOpen && document ? (
+        <LibraryAtlasPicker
+          projectId={projectId}
+          onClose={() => setReplacePickerOpen(false)}
+          onPick={async (assetId) => {
+            setReplacePickerOpen(false);
+            try {
+              const updated = await spatialMapApi.updateMap(projectId, document.id, {
+                backgroundAssetId: assetId,
+              });
+              setDocument(updated);
+              setOpMsg("Atlas Shot replaced from Library.");
+            } catch (err) {
+              setOpMsg(err instanceof Error ? err.message : "Failed to replace Atlas.");
+            }
+          }}
         />
       ) : null}
     </div>

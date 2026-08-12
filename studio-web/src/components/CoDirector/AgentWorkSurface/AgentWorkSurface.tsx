@@ -25,6 +25,9 @@ import "./agentWorkSurface.css";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 80; // ~4 minutes
 
+/** Surface types that come from the Spatial Map workflow. */
+const SPATIAL_SURFACE_TYPES: SurfaceType[] = ["atlas_shot_generation", "ers_generation", "scene_generation"];
+
 export function AgentWorkSurface() {
   const { uiContext, activeExecution, setActiveExecution } = useCoDirectorSession();
   const projectId = uiContext.projectId || activeExecution?.project_id || "";
@@ -168,6 +171,19 @@ export function AgentWorkSurface() {
     setActiveExecution(null);
   }, [setActiveExecution]);
 
+  // Escape key dismisses the overlay when terminal (Law #8 — no trapped UI).
+  useEffect(() => {
+    if (!pack || !isTerminal(pack)) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [pack, handleClose]);
+
   if (!pack || !isAgentWork(pack)) {
     return null;
   }
@@ -187,6 +203,9 @@ export function AgentWorkSurface() {
            surfaceType === "image_generation" ? "CREATING IMAGE" :
            surfaceType === "casting_candidates" ? "CASTING CANDIDATES" :
            surfaceType === "voice_generation" ? "VOICE GENERATION" :
+           surfaceType === "atlas_shot_generation" ? "ATLAS SHOT" :
+           surfaceType === "ers_generation" ? "ENVIRONMENT REFERENCE SHEET" :
+           surfaceType === "scene_generation" ? "SCENE GENERATION" :
            "WORKING"}
         </h3>
         {pack.character_id && (
@@ -223,6 +242,17 @@ export function AgentWorkSurface() {
               data-testid="agent-work-cancel"
             >
               {cancelLabel}
+            </button>
+          )}
+          {isTerminal(pack) && (
+            <button
+              type="button"
+              className="agent-work-surface__close-x"
+              onClick={handleClose}
+              aria-label="Close result and return to workspace"
+              data-testid="agent-work-close-x"
+            >
+              ✕
             </button>
           )}
         </div>
@@ -263,7 +293,7 @@ export function AgentWorkSurface() {
       </div>
 
       {isTerminal(pack) && (
-        <div className="agent-work-surface__action-row">
+        <div className="agent-work-surface__action-row" data-testid="agent-work-actions">
           {surfaceType === "storyboard_generation" && total > 1 && (
             <button
               type="button"
@@ -273,6 +303,18 @@ export function AgentWorkSurface() {
               data-testid="agent-work-regenerate-all"
             >
               Regenerate All
+            </button>
+          )}
+          {SPATIAL_SURFACE_TYPES.includes(surfaceType) && pack.result_asset_ids.length > 0 && (
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              onClick={handleClose}
+              data-testid="agent-work-continue"
+            >
+              {surfaceType === "atlas_shot_generation" ? "Continue to Spatial Map" :
+               surfaceType === "ers_generation" ? "Continue to Spatial Map" :
+               "Continue to Scene Creator"}
             </button>
           )}
           {pack.result_asset_ids.length > 0 && (
@@ -285,6 +327,15 @@ export function AgentWorkSurface() {
             </button>
           )}
           {pack.collection_id && surfaceType === "storyboard_generation" && (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => uiContext.onGoTab?.("timeline")}
+            >
+              Send to Timeline
+            </button>
+          )}
+          {pack.collection_id && surfaceType === "scene_generation" && (
             <button
               type="button"
               className="ghost"

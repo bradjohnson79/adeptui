@@ -229,6 +229,33 @@
   margin-top: 8px;
 }
 
+/* X close button in header — deterministic escape (Law #8: no trapped UI). */
+.agent-work-surface__close-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #c9d2e0;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.agent-work-surface__close-x:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.agent-work-surface__close-x:focus-visible {
+  outline: 2px solid var(--codirector-accent, #6b8afd);
+  outline-offset: 2px;
+}
+
 .agent-work-surface__error-detail {
   padding: 8px 12px;
   border-radius: 8px;
