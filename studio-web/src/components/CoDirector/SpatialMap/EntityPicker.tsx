@@ -37,10 +37,19 @@ type Props =
       slot: SlotDef;
       onClose: () => void;
       onConfirm: (tag: string, assetId: string, displayLabel: string) => void;
+    }
+  | {
+      kind: "environment";
+      projectId: string;
+      title?: string;
+      onClose: () => void;
+      onConfirm: (assetId: string) => void;
     };
 
 export function EntityPicker(props: Props) {
-  const { kind, projectId, slot, onClose } = props;
+  const { kind, projectId, onClose } = props;
+  const slot = "slot" in props ? props.slot : undefined;
+  const title = "title" in props && props.title ? props.title : undefined;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -50,17 +59,26 @@ export function EntityPicker(props: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const ariaLabel = kind === "environment" ? (title || "Select Spatial Map Image") : `${slot?.label || kind} picker`;
+
   return createPortal(
-    <div className="spatial-map__picker" role="dialog" aria-modal="true" aria-label={`${slot.label} picker`}>
+    <div className="spatial-map__picker" role="dialog" aria-modal="true" aria-label={ariaLabel}>
       <div className="spatial-map__picker-panel">
         <button type="button" className="spatial-map__picker-close" aria-label="Close" onClick={onClose}>×</button>
         <h3 className="spatial-map__picker-title">
-          {kind === "character" ? "Choose a Character" : "Add a Prop"}
+          {kind === "character" ? "Choose a Character" :
+           kind === "environment" ? (title || "Select Spatial Map Image") :
+           "Add a Prop"}
         </h3>
         {kind === "character" ? (
           <CharacterPickerBody
             projectId={projectId}
             onConfirm={(tag, characterId, name) => props.onConfirm(tag, characterId, name)}
+          />
+        ) : kind === "environment" ? (
+          <EnvironmentPickerBody
+            projectId={projectId}
+            onConfirm={(assetId) => (props.onConfirm as (assetId: string) => void)(assetId)}
           />
         ) : (
           <PropPickerBody

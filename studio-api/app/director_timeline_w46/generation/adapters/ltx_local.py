@@ -88,9 +88,10 @@ class LtxLocalAdapter:
 
     def submit(self, request: TimelineGenerationRequest) -> NormalizedJobSubmission:
         job_id = str(uuid4())
+        gen_id = request.generatorId or GENERATOR_ID
         params = {
             "engine": "ltx",
-            "generatorId": GENERATOR_ID,
+            "generatorId": gen_id,
             "prompt": request.prompt,
             "negativePrompt": request.negativePrompt,
             "startImageAssetId": request.startImageAssetId,
@@ -103,6 +104,12 @@ class LtxLocalAdapter:
             "timelineGeneration": True,
             "fallbackAllowed": bool(request.fallbackAllowed),
         }
+
+        if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
+            params["fast_mode"] = bool(request.providerOptions.get("fast_generation", True))
+            params["generate_audio"] = bool(request.providerOptions.get("audio_generation", True))
+            params["variant"] = gen_id
+
         db: Session = SessionLocal()
         try:
             row = Job(
@@ -143,13 +150,14 @@ class LtxLocalAdapter:
             internalJobId=job_id,
             providerJobId=job_id,
             queueJobId=job_id,
-            generatorId=GENERATOR_ID,
+            generatorId=gen_id,
             status="queued",
             apiUsed=False,
             providerMetadata={
                 "projectId": request.projectId,
                 "sceneId": request.sceneId,
                 "engine": "ltx",
+                "generatorId": gen_id,
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
             },

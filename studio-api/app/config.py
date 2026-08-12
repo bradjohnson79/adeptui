@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     ltx_2_5_text_encoder: str = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
     ltx_2_5_video_vae: str = "ltx-2.5-video-vae-bf16.safetensors"
     ltx_2_5_audio_vae: str = "ltx-2.5-audio-vae-bf16.safetensors"
-    ltx_2_5_spatial_upscaler: str = "ltx-2.5-latent-spatial-upscaler-x2-bf16.safetensors"
+    ltx_2_5_spatial_upscaler: str = "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
     wan_high_noise: str = "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
     wan_low_noise: str = "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
     # Comfy VAELoader lists subdirectory names with backslashes on Windows.

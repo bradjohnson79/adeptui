@@ -224,6 +224,75 @@ def build_leaf_graph(
             filename_prefix=filename_prefix,
         )
 
+    if key.startswith("ltx_25."):
+        from ..workflows.ltx_25_builder import (
+            build_ltx_25_flf2v,
+            build_ltx_25_i2v,
+            build_ltx_25_t2v,
+        )
+
+        length_seconds = length / float(fps) if fps > 0 else 5.0
+        generate_audio = audio_file is not None
+        fast_mode = steps <= 16
+
+        if key == "ltx_25.t2v":
+            return build_ltx_25_t2v(
+                settings=settings,
+                execution_id=filename_prefix.split("/")[-1] if "/" in filename_prefix else filename_prefix,
+                prompt=positive,
+                negative_prompt=negative,
+                width=width,
+                height=height,
+                length_seconds=length_seconds,
+                fps=fps,
+                seed=seed,
+                generate_audio=generate_audio,
+                fast_mode=fast_mode,
+            )
+
+        if key == "ltx_25.i2v":
+            if not start_image:
+                raise RuntimeError("ltx_25.i2v requires start_image")
+            return build_ltx_25_i2v(
+                settings=settings,
+                execution_id=filename_prefix.split("/")[-1] if "/" in filename_prefix else filename_prefix,
+                prompt=positive,
+                negative_prompt=negative,
+                start_image_path=start_image,
+                width=width,
+                height=height,
+                length_seconds=length_seconds,
+                fps=fps,
+                seed=seed,
+                generate_audio=generate_audio,
+                fast_mode=fast_mode,
+            )
+
+        if key == "ltx_25.flf2v":
+            if not start_image:
+                raise RuntimeError("ltx_25.flf2v requires start_image")
+            if not end_image:
+                end_image_resolved = middle_image or start_image
+            else:
+                end_image_resolved = end_image
+            return build_ltx_25_flf2v(
+                settings=settings,
+                execution_id=filename_prefix.split("/")[-1] if "/" in filename_prefix else filename_prefix,
+                prompt=positive,
+                negative_prompt=negative,
+                start_image_path=start_image,
+                end_image_path=end_image_resolved,
+                width=width,
+                height=height,
+                length_seconds=length_seconds,
+                fps=fps,
+                seed=seed,
+                generate_audio=generate_audio,
+                fast_mode=fast_mode,
+            )
+
+        raise RuntimeError(f"Unknown ltx_25 leaf workflow: {key}")
+
     raise RuntimeError(f"No local Comfy builder for leaf workflow: {key}")
 
 

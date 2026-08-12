@@ -1,0 +1,29 @@
+fix(spatial-map): Atlas result escape + Active Atlas panel + Replace/Remove
+
+The Atlas Shot generation result overlay (AgentWorkSurface) had no X
+button and no Escape key handler, and the "Close" button was the only
+dismiss mechanism. After Atlas generation completed, the overlay stayed
+open covering the Spatial Map editor, trapping the user.
+
+Changes:
+- AgentWorkSurface.tsx: Added X close button in header (visible when
+  terminal), Escape key dismissal, surface-specific titles for
+  atlas/ers/scene_generation, and "Continue to Spatial Map" / "Continue
+  to Scene Creator" primary action for spatial surface types.
+- agentWorkSurface.css: Styled the X close button with hover/focus states.
+- SpatialMapPanel.tsx: Added "Active Atlas Shot" panel above the grid
+  showing thumbnail, asset name, and View/Replace/Generate New/Remove
+  buttons. Replace uses PATCH backgroundAssetId (preserves placements).
+  Remove clears backgroundAssetId (preserves Library asset). Upload
+  file input now uses separate refs for empty-state vs atlas panel.
+- spatialMap.css: Styled the Active Atlas panel (responsive).
+- service.py: Fixed update_document to distinguish "not provided"
+  from "explicitly null" for backgroundAssetId using model_fields_set,
+  enabling Remove Atlas to clear the background.
+
+Playwright certification (3 tests, all pass):
+- A+F: Atlas result overlay has dismiss (X, Close, Escape) — no trapped UI
+- D: Reset Map clears placements, preserves Atlas + Library
+- C+E: Remove Atlas clears background; refresh restores editor
+
+Co-Director atlas generation path is preserved — no regression.
