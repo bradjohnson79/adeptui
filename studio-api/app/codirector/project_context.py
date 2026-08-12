@@ -50,6 +50,15 @@ def retrieve_project_context(
     if "foundation" in target_pillars:
         result["foundation"] = _get_foundation(db, project_id)
 
+    # m413: Spatial Map + ERS + Scene Creator state. Always present as keys
+    # (None when absent) so callers can distinguish "pillar absent" from
+    # "pillar errored" without a try/except at the call site. These reuse the
+    # same authoritative stores as the spatial_map router and ers_persistence
+    # — no duplicate stores (Build Law #5, #17).
+    result["spatial_map_summary"] = _get_spatial_map_summary(db, project_id)
+    result["ers_packages"] = _get_ers_packages(db, project_id)
+    result["scene_batches"] = _get_scene_batches(db, project_id)
+
     return result
 
 
@@ -191,6 +200,112 @@ def _get_foundation(db: Session, project_id: str) -> Optional[dict[str, Any]]:
 
         status = get_foundation_status(db, project_id)
         return status.model_dump()
+    except Exception:
+        pass
+    return None
+
+
+def _get_spatial_map_summary(db: Session, project_id: str) -> Optional[dict[str, Any]]:
+    """Compact summary of the most recent SpatialMapDocument.
+
+    Reuses ``spatial_map.service.list_documents`` — the same authoritative
+    store the spatial_map HTTP router uses. Returns ``None`` when absent or
+    when the subsystem is unavailable. The summary is intentionally small so
+    it can be injected into Co-Director context without dumping raw placement
+    JSON.
+    """
+    try:
+        from app.spatial_map.service import list_documents
+
+        docs = list_documents(db, project_id)
+        if not docs:
+            return None
+        doc = docs[0]
+        has_ers = False
+        try:
+            from app.spatial_map.ers_persistence import list_ers_packages
+
+            for pkg in list_ers_packages(db, project_id):
+                if pkg.scene_layout_id == doc.id:
+                    has_ers = True
+                    break
+        except Exception:
+            pass
+        return {
+            "id": doc.id,
+            "title": doc.title,
+            "character_count": len(doc.characters or []),
+            "prop_count": len(doc.props or []),
+            "camera_count": len(doc.cameras or []),
+            "has_background": bool(doc.backgroundAssetId),
+            "has_ers": has_ers,
+            "scene_id": doc.sceneId,
+            "updated_at": doc.updatedAt,
+        }
+    except Exception:
+        pass
+    return None
+
+
+def _get_ers_packages(db: Session, project_id: str) -> Optional[list[dict[str, Any]]]:
+    """Compact summaries of recent EnvironmentReferencePackage entries.
+
+    Reuses ``spatial_map.ers_persistence.list_ers_packages``. Returns ``None``
+    when no ERS packages exist or the subsystem is unavailable.
+    """
+    try:
+        from app.spatial_map.ers_persistence import list_ers_packages
+
+        packages = list_ers_packages(db, project_id)
+        if not packages:
+            return None
+        summaries: list[dict[str, Any]] = []
+        for pkg in packages[:5]:
+            directional = pkg.directional_assets or {}
+            summaries.append(
+                {
+                    "id": pkg.id,
+                    "scene_layout_id": pkg.scene_layout_id,
+                    "atlas_asset_id": pkg.atlas_asset_id,
+                    "has_directional_assets": any(directional.values()),
+                    "has_composite": bool(pkg.ers_composite_asset_id),
+                    "orientation": pkg.orientation,
+                    "created_at": pkg.created_at,
+                }
+            )
+        return summaries
+    except Exception:
+        pass
+    return None
+
+
+def _get_scene_batches(db: Session, project_id: str) -> Optional[list[dict[str, Any]]]:
+    """Compact summaries of recent SceneGenerationBatch entries.
+
+    Reuses ``spatial_map.ers_persistence.list_scene_batches``. Returns
+    ``None`` when no scene batches exist or the subsystem is unavailable.
+    """
+    try:
+        from app.spatial_map.ers_persistence import list_scene_batches
+
+        batches = list_scene_batches(db, project_id)
+        if not batches:
+            return None
+        summaries: list[dict[str, Any]] = []
+        for batch in batches[:5]:
+            results = list(batch.result_asset_ids or [])
+            completed = sum(1 for r in results if r and not str(r).startswith("failed_"))
+            summaries.append(
+                {
+                    "id": batch.id,
+                    "ers_package_id": batch.ers_package_id,
+                    "shot_count": len(batch.shot_requests or []),
+                    "completed_count": completed,
+                    "output_count": batch.output_count,
+                    "created_at": batch.created_at,
+                }
+            )
+        return summaries
     except Exception:
         pass
     return None

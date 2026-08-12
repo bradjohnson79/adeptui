@@ -109,6 +109,99 @@ _DISCUSS_SEEKING_PATTERN = re.compile(
 )
 
 
+# --- Spatial Map + Atlas + ERS + Scene Creator operational commands (m413) ---
+#
+# Amendment #52 (Co-Director routing for spatial/scene ops). These patterns
+# classify explicit operational commands as EXECUTE_PRODUCTION with a
+# `capability` hint carried via RouteDecision.target so the downstream
+# unified-intent classifier can resolve the capability id. They run BEFORE
+# the generic `_EXECUTE_GENERATE_PATTERN` so a specific "generate the ers"
+# is not collapsed into a generic image-generation intent.
+#
+# The deterministic classifier itself does not resolve capability ids — it
+# only sets `RouteDecision.target` to a stable marker string. The unified
+# intent classifier (`routing.unified_intent._resolve_capability`) maps the
+# message text to the registered capability id (atlas.generate / ers.generate
+# / scene.generate). See `_CAPABILITY_PATTERNS` in `unified_intent.py`.
+
+# "create an atlas shot of X" / "generate atlas shot" / "make an atlas shot"
+_ATLAS_SHOT_PATTERN = re.compile(
+    r"\b(?:create|generate|make|render|build)\b\s+(?:an?\s+)?(?:atlas\s+shot|roofless\s+(?:shot|map|view))\b",
+    re.I,
+)
+
+# "use that as the spatial map" / "use it as the spatial map" / "set it as the background"
+_USE_AS_SPATIAL_MAP_PATTERN = re.compile(
+    r"\buse\s+(?:that|it|this|the\s+(?:last\s+)?atlas(?:\s+shot)?)\s+as\s+(?:the\s+)?(?:spatial\s+map|map\s+background|background)\b",
+    re.I,
+)
+
+# "put @Korri behind the bar" / "place @character at <location>"
+# Deferred — requires LLM spatial reasoning to extract a normalized (x,y)
+# placement. We still classify deterministically as EXECUTE_PRODUCTION so the
+# downstream LLM/curated-tools path can resolve the placement.
+_PLACE_CHARACTER_PATTERN = re.compile(
+    r"\b(?:put|place|position|move|set)\s+@([A-Za-z][A-Za-z0-9_]*)\s+(?:behind|in\s+front\s+of|at|on|near|by|next\s+to|under|over|beside)\b",
+    re.I,
+)
+
+# "place #coffeecup in front of her" / "put #prop at <location>"
+_PLACE_PROP_PATTERN = re.compile(
+    r"\b(?:put|place|position|move|set)\s+#([A-Za-z][A-Za-z0-9_-]*)\s+(?:behind|in\s+front\s+of|at|on|near|by|next\s+to|under|over|beside)\b",
+    re.I,
+)
+
+# "generate the ers" / "generate environment reference sheet" / "make the ers"
+_ERS_GENERATE_PATTERN = re.compile(
+    r"\b(?:generate|create|make|build|render|assemble)\b\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package|set))\b",
+    re.I,
+)
+
+# "suggest a close-up" / "suggest a shot" — NOT an execution; a suggestion.
+# Returns READ_INSPECT (analysis) so the LLM proposes shots without firing
+# the scene.generate capability.
+_SUGGEST_SHOT_PATTERN = re.compile(
+    r"\b(?:suggest|propose|recommend)\s+(?:a\s+|an\s+|some\s+)?(?:close-?up|wide|medium|over[-\s]?the-?shoulder|two[-\s]?shot|insert|establishing|shot|shots|camera\s+angle|framing)\b",
+    re.I,
+)
+
+# "generate four shots" / "generate N shots" / "make 3 scene shots"
+# Captures the count (digit OR common word-number) into group 1. Word
+# numbers are handled so "generate four shots" classifies the same as
+# "generate 4 shots". The generic ``_EXECUTE_GENERATE_PATTERN`` uses
+# ``\bshot\b`` (no optional ``s``), so plural "shots" would otherwise fall
+# through to the semantic classifier — this specific pattern wins first.
+#
+# The pattern requires EITHER an explicit count (digit or word-number) OR
+# the "scene" qualifier, so a bare "create shots." still falls through to
+# the semantic classifier (preserves the ``test_phase3_router`` corpus
+# expectation that bare "Create shots." is not a deterministic match).
+_GENERATE_N_SHOTS_PATTERN = re.compile(
+    r"\b(?:generate|create|make|render|build)\b\s+"
+    r"(?:"
+    # (1) explicit count + (optional "scene") + shots/images
+    r"(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|a\s+couple\s+of|a\s+few)\s+)"
+    r"(?:scene\s+)?(?:shots?|images?|scene\s+images?)"
+    r"|"
+    # (2) optional article + "scene" qualifier + shots/images (no count)
+    r"(?:an?\s+|some\s+)?scene\s+(?:shots?|images?)"
+    r")\b",
+    re.I,
+)
+
+# "regenerate shot 2" / "redo shot 3" / "regenerate the second shot"
+_REGENERATE_SHOT_PATTERN = re.compile(
+    r"\b(?:regenerate|redo|re-?render|re-?make|retry)\s+(?:shot|frame)\s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b",
+    re.I,
+)
+
+# "send those to timeline" / "send to timeline" / "send these shots to the timeline"
+_SEND_TO_TIMELINE_PATTERN = re.compile(
+    r"\bsend\s+(?:those|these|them|the\s+shots?|the\s+batch)?\s*(?:shots?|images?|frames?)?\s*to\s+(?:the\s+)?timeline\b",
+    re.I,
+)
+
+
 NAVIGATION_TARGETS: dict[str, str] = {
     "script writer": "script_writer",
     "script": "script_writer",
@@ -405,6 +498,138 @@ def classify_deterministic(
             writeAllowed=True,
             destructive=False,
             evidence=["Matched modify knowledge pattern"],
+        )
+
+    # 6b. Spatial Map + Atlas + ERS + Scene Creator operational commands (m413).
+    # Specific patterns run BEFORE the generic EXECUTE_GENERATE_PATTERN so a
+    # precise "generate the ers" is not collapsed into a generic image gen.
+    # The `target` field carries a stable marker string consumed by the
+    # unified-intent capability resolver; capability id is resolved there.
+
+    # "suggest a close-up" / "suggest a shot" → analysis (NOT execution).
+    # The LLM proposes shot text; the creator then says "generate four shots".
+    if _SUGGEST_SHOT_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.READ_INSPECT,
+            target="scene.suggest_shot",
+            confidence=0.85,
+            executionLane="read",
+            writeAllowed=False,
+            destructive=False,
+            evidence=["Matched scene shot suggestion pattern (analysis, not execution)"],
+        )
+
+    # "create an atlas shot of X" → atlas.generate
+    if _ATLAS_SHOT_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="atlas.generate",
+            confidence=0.92,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched atlas shot generation pattern"],
+        )
+
+    # "use that as the spatial map" → set spatial map background (no capability
+    # yet; this is an inline spatial map operation handled by the LLM/curated
+    # tools path with the most recent atlas asset). Classified as EXECUTION so
+    # the dispatcher acts rather than acknowledges (Law #13 — no fake
+    # operation).
+    if _USE_AS_SPATIAL_MAP_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="spatial_map.use_as_background",
+            confidence=0.88,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched 'use as spatial map' pattern"],
+        )
+
+    # "generate the ers" → ers.generate
+    if _ERS_GENERATE_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="ers.generate",
+            confidence=0.92,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched ERS generation pattern"],
+        )
+
+    # "generate four shots" / "generate N shots" → scene.generate
+    if _GENERATE_N_SHOTS_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="scene.generate",
+            confidence=0.9,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched scene shot generation pattern"],
+        )
+
+    # "regenerate shot 2" → scene.generate targeted regen (capability id
+    # resolved downstream; the shot index is extracted by the LLM/curated
+    # tools path from the message).
+    if _REGENERATE_SHOT_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="scene.regenerate_shot",
+            confidence=0.9,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched scene shot regeneration pattern"],
+        )
+
+    # "send those to timeline" → scene creator timeline handoff
+    if _SEND_TO_TIMELINE_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="scene.send_to_timeline",
+            confidence=0.92,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched scene-to-timeline handoff pattern"],
+        )
+
+    # "put @Korri behind the bar" / "place #coffeecup in front of her"
+    # → spatial map placement. Classified as EXECUTION so the dispatcher
+    # routes through curated tools. The LLM resolves the normalized (x,y)
+    # placement from the location phrase (deferred — requires LLM spatial
+    # reasoning; the deterministic router extracts the @/# tag and the
+    # location phrase but does not compute coordinates).
+    place_char = _PLACE_CHARACTER_PATTERN.search(message)
+    if place_char:
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="spatial_map.place_character",
+            confidence=0.85,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=[
+                f"Matched spatial map character placement pattern (entity=@{place_char.group(1)})",
+                "Coordinate resolution deferred — requires LLM spatial reasoning",
+            ],
+        )
+    place_prop = _PLACE_PROP_PATTERN.search(message)
+    if place_prop:
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="spatial_map.place_prop",
+            confidence=0.85,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=[
+                f"Matched spatial map prop placement pattern (entity=#{place_prop.group(1)})",
+                "Coordinate resolution deferred — requires LLM spatial reasoning",
+            ],
         )
 
     # 8. EXECUTE_PRODUCTION (§8.6)

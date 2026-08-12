@@ -21,7 +21,10 @@ export type SurfaceType =
   | "storyboard_generation"
   | "casting_candidates"
   | "voice_generation"
-  | "script_operation";
+  | "script_operation"
+  | "atlas_shot_generation"
+  | "ers_generation"
+  | "scene_generation";
 
 export type ChildJobStatus =
   | "queued"

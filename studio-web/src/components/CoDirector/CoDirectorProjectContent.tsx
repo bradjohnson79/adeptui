@@ -14,11 +14,13 @@ import { isAgentWork } from "./AgentWorkSurface/types";
 import { CoDirectorEmptyState } from "./cards";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { EnvironmentReferenceSheetPanel } from "./EnvironmentReferenceSheetPanel";
+import { SceneCreatorPanel } from "./SceneCreator/SceneCreatorPanel";
 import { PlanWorkspacePanel } from "./plans";
 import { ProjectRetrievalPanel, RETRIEVAL_TOOL_SETS } from "./retrieval";
 import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
 import { ScriptwriterInlineEditor } from "./scriptwriter/ScriptwriterInlineEditor";
 import { CharacterCompactView } from "./characters/CharacterCompactView";
+import { SpatialMapPanel } from "./SpatialMap/SpatialMapPanel";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -557,6 +559,28 @@ export function CoDirectorProjectContent({
               />
             ) : (
               <p className="muted">Select a project to open Character Creator.</p>
+            )}
+          </div>
+        )}
+        {tab === "spatial_map" && (
+          <div data-testid="codirector-content-spatial-map">
+            {projectId ? (
+              <SpatialMapPanel projectId={projectId} onGoTab={onGoTab} />
+            ) : (
+              <CoDirectorEmptyState
+                testId="codirector-spatial-map-empty"
+                title="No Project Selected"
+                description="Select a project to open Spatial Map."
+              />
+            )}
+          </div>
+        )}
+        {tab === "scene_creator" && (
+          <div data-testid="codirector-content-scene-creator">
+            {projectId ? (
+              <SceneCreatorPanel projectId={projectId} onGoTab={onGoTab} />
+            ) : (
+              <CoDirectorEmptyState title="No Project Selected" description="Select a project to open Scene Creator." />
             )}
           </div>
         )}

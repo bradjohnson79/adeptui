@@ -1476,7 +1476,125 @@ def _enrich_execution_context(
         ctx.setdefault("visual_style", style)
         ctx.setdefault("project_style", style)
 
+    # m413: Spatial Map + ERS + Scene Creator context summaries. Always
+    # resolve compact summaries (never raw JSON) so Co-Director can answer
+    # "where is @Korri?" / "is there an ERS?" without dumping structured
+    # state into the model context. Failures degrade to ``None`` so a
+    # missing subsystem never blocks the rest of the enrichment.
+    ctx.setdefault("spatial_map_summary", _resolve_spatial_map_summary(db, project_id))
+    ctx.setdefault("ers_packages", _resolve_ers_summary(db, project_id))
+    ctx.setdefault("scene_batches", _resolve_scene_batches_summary(db, project_id))
+
     return ctx
+
+
+def _resolve_spatial_map_summary(db: Any, project_id: str) -> Optional[dict[str, Any]]:
+    """Compact summary of the most recent SpatialMapDocument for the project.
+
+    Returns ``None`` when there is no spatial map or the spatial map subsystem
+    is unavailable. The summary is intentionally small (id, title, counts,
+    has_ers flag) — no raw placement JSON is exposed to the model.
+    """
+    try:
+        from ..spatial_map.service import list_documents
+
+        docs = list_documents(db, project_id)
+        if not docs:
+            return None
+        doc = docs[0]
+        # Cross-reference ERS packages that snapshot this spatial map so the
+        # summary exposes a single ``has_ers`` flag without forcing the model
+        # to correlate two lists.
+        has_ers = False
+        try:
+            from ..spatial_map.ers_persistence import list_ers_packages
+
+            for pkg in list_ers_packages(db, project_id):
+                if pkg.scene_layout_id == doc.id:
+                    has_ers = True
+                    break
+        except Exception:
+            pass
+        return {
+            "id": doc.id,
+            "title": doc.title,
+            "character_count": len(doc.characters or []),
+            "prop_count": len(doc.props or []),
+            "camera_count": len(doc.cameras or []),
+            "has_background": bool(doc.backgroundAssetId),
+            "has_ers": has_ers,
+            "scene_id": doc.sceneId,
+            "updated_at": doc.updatedAt,
+        }
+    except Exception:
+        logger.debug("Spatial map summary resolution failed", exc_info=True)
+        return None
+
+
+def _resolve_ers_summary(db: Any, project_id: str) -> Optional[list[dict[str, Any]]]:
+    """Compact summaries of recent EnvironmentReferencePackage entries.
+
+    Returns ``None`` when no ERS packages exist or the subsystem is
+    unavailable. Each entry is intentionally small (id, scene_layout_id,
+    directional asset presence, composite presence) — no raw placements.
+    """
+    try:
+        from ..spatial_map.ers_persistence import list_ers_packages
+
+        packages = list_ers_packages(db, project_id)
+        if not packages:
+            return None
+        summaries: list[dict[str, Any]] = []
+        for pkg in packages[:5]:  # cap to the 5 most recent
+            directional = pkg.directional_assets or {}
+            summaries.append(
+                {
+                    "id": pkg.id,
+                    "scene_layout_id": pkg.scene_layout_id,
+                    "atlas_asset_id": pkg.atlas_asset_id,
+                    "has_directional_assets": any(directional.values()),
+                    "has_composite": bool(pkg.ers_composite_asset_id),
+                    "orientation": pkg.orientation,
+                    "created_at": pkg.created_at,
+                }
+            )
+        return summaries
+    except Exception:
+        logger.debug("ERS summary resolution failed", exc_info=True)
+        return None
+
+
+def _resolve_scene_batches_summary(db: Any, project_id: str) -> Optional[list[dict[str, Any]]]:
+    """Compact summaries of recent SceneGenerationBatch entries.
+
+    Returns ``None`` when no scene batches exist or the subsystem is
+    unavailable. Each entry is intentionally small (id, ers_package_id,
+    shot count, completed count) — no raw shot prompts.
+    """
+    try:
+        from ..spatial_map.ers_persistence import list_scene_batches
+
+        batches = list_scene_batches(db, project_id)
+        if not batches:
+            return None
+        summaries: list[dict[str, Any]] = []
+        for batch in batches[:5]:  # cap to the 5 most recent
+            results = list(batch.result_asset_ids or [])
+            completed = sum(1 for r in results if r and not str(r).startswith("failed_"))
+            summaries.append(
+                {
+                    "id": batch.id,
+                    "ers_package_id": batch.ers_package_id,
+                    "shot_count": len(batch.shot_requests or []),
+                    "completed_count": completed,
+                    "output_count": batch.output_count,
+                    "created_at": batch.created_at,
+                }
+            )
+        return summaries
+    except Exception:
+        logger.debug("Scene batches summary resolution failed", exc_info=True)
+        return None
 
 
 def _detect_visual_style(user_text: str) -> str:

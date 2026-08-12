@@ -438,6 +438,12 @@ try:
 except Exception as exc:  # pragma: no cover
     logger.warning("spatial_map router unavailable: %s", exc)
 try:
+    from .scene_creator.router import router as scene_creator_router
+
+    app.include_router(scene_creator_router, prefix="/api")
+except Exception as exc:  # pragma: no cover
+    logger.warning("scene_creator router unavailable: %s", exc)
+try:
     from .templates_presets.api import router as templates_presets_router
 
     app.include_router(templates_presets_router, prefix="/api")

@@ -290,6 +290,36 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         tool_ids=("storyboard.prepare_timeline",),
         surface_type="",
     ),
+    # --- Spatial Map + ERS + Scene Creator (frozen contracts) ---
+    CapabilityDefinition(
+        id="atlas.generate",
+        title="Generate Atlas Shot",
+        description="Generate a roofless top-down environment reference for Spatial Map.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("visual_style", "scene_context"),
+        surface_type="atlas_shot_generation",
+    ),
+    CapabilityDefinition(
+        id="ers.generate",
+        title="Generate Environment Reference Sheet",
+        description="Generate directional N/E/S/W views from a spatial map, then assemble the ERS sheet programmatically.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project", "spatial_map"),
+        surface_type="ers_generation",
+    ),
+    CapabilityDefinition(
+        id="scene.generate",
+        title="Generate Scene Images",
+        description="Generate N scene images from shot requests + ERS + character/prop references.",
+        handler_kind=HandlerKind.CAPABILITY_HANDLER,
+        approval_policy=ApprovalPolicy.DIRECT,
+        required_context=("project",),
+        optional_context=("ers_package", "character", "reference_image", "visual_style"),
+        surface_type="scene_generation",
+    ),
 )
 
 

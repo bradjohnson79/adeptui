@@ -4003,6 +4003,82 @@ export const api = {
         cache: "no-store",
       }),
   },
+  sceneCreator: {
+    parseShots: (projectId: string, rawText: string) =>
+      req<{ shots: import("./components/CoDirector/SceneCreator/types").ShotRequest[] }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/parse-shots`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw_text: rawText }),
+        },
+      ),
+    createBatch: (
+      projectId: string,
+      body: {
+        ers_package_id: string;
+        shot_requests_raw: string;
+        output_count: number;
+        visual_style?: string;
+        character_names?: string[];
+      },
+    ) =>
+      req<{
+        batch: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch;
+        child_jobs: import("./components/CoDirector/SceneCreator/types").ChildJobSummary[];
+        job_ids: string[];
+        surface_type?: string;
+      }>(`/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    listBatches: (projectId: string) =>
+      req<{ batches: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch[] }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches`,
+        { cache: "no-store" },
+      ),
+    getBatch: (projectId: string, batchId: string) =>
+      req<{ batch: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}`,
+        { cache: "no-store" },
+      ),
+    regenerateShot: (
+      projectId: string,
+      batchId: string,
+      body: { shot_index: number; new_prompt: string; visual_style?: string },
+    ) =>
+      req<{
+        batch: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch;
+        job_id: string;
+        status: string;
+        shot_index: number;
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}/regenerate-shot`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    sendToTimeline: (
+      projectId: string,
+      batchId: string,
+      body: { scene_id: string; label?: string; batch_block_id?: string },
+    ) =>
+      req<{
+        batch: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch;
+        timeline: Record<string, unknown>;
+        clips_sent: number;
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}/send-to-timeline`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+  },
   minimaxH3: {
     capability: (territory = resolveMiniMaxH3Territory()) =>
       req<Record<string, unknown>>(`/api/minimax-h3/capability?territory=${encodeURIComponent(territory)}`),
