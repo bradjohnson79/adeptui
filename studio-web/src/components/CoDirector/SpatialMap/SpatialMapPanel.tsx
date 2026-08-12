@@ -843,11 +843,11 @@ function LibraryAtlasPicker({
 }) {
   return (
     <EntityPicker
-      kind="prop"
+      kind="environment"
       projectId={projectId}
-      slot={{ index: 0, colorKey: "purple", label: "Atlas Shot", kind: "prop" }}
+      title="Select Spatial Map Image"
       onClose={onClose}
-      onConfirm={(_tag, assetId, _label) => onPick(assetId)}
+      onConfirm={(assetId) => onPick(assetId)}
     />
   );
 }

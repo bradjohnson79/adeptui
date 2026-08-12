@@ -546,3 +546,18 @@
     justify-content: center;
   }
 }
+
+/* —— Atlas Shot badge in environment picker —— */
+.spatial-map__atlas-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent, #2dd4bf);
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #2dd4bf) 30%, transparent);
+  border-radius: 0.3rem;
+  margin-top: 0.2rem;
+}

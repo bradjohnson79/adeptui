@@ -302,3 +302,100 @@ function PropPickerBody({
     </>
   );
 }
+
+function EnvironmentPickerBody({
+  projectId,
+  onConfirm,
+}: {
+  projectId: string;
+  onConfirm: (assetId: string) => void;
+}) {
+  const [assets, setAssets] = useState<LibraryAsset[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<LibraryAsset | null>(null);
+
+  const refresh = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const payload = await api.library(projectId, {});
+      const items = Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : [];
+      setAssets(items.filter(isImageAsset));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const canConfirm = !!selectedAsset;
+
+  const handleConfirm = useCallback(() => {
+    if (!canConfirm || !selectedAsset) return;
+    onConfirm(selectedAsset.id);
+  }, [canConfirm, selectedAsset, onConfirm]);
+
+  if (busy) return <p className="spatial-map__busy">Loading Library images…</p>;
+  if (error) {
+    return (
+      <>
+        <p className="spatial-map__hint error">{error}</p>
+        <button type="button" className="ui-btn ui-btn--secondary" onClick={() => void refresh()}>Retry</button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="spatial-map__hint">
+        Choose an Atlas Shot or Master Environment Image from your Library.
+      </p>
+      <p className="spatial-map__hint">
+        Atlas Shots provide the clearest spatial reference, but a normal Master Environment Image can also be used.
+      </p>
+      {assets.length === 0 ? (
+        <p className="spatial-map__hint">No images in the Library yet. Generate or upload an image first.</p>
+      ) : (
+        <div className="spatial-map__picker-grid" role="list" data-testid="environment-picker-grid">
+          {assets.map((a) => {
+            const isAtlas = (a.tag || "").toLowerCase().includes("atlas");
+            return (
+              <button
+                key={a.id}
+                type="button"
+                className={`spatial-map__picker-card${selectedAsset?.id === a.id ? " is-selected" : ""}`}
+                onClick={() => setSelectedAsset(a)}
+                aria-pressed={selectedAsset?.id === a.id}
+                data-testid={`environment-asset-${a.id}`}
+              >
+                {getCardPreviewUrl(a) ? (
+                  <img className="spatial-map__picker-thumb" src={getCardPreviewUrl(a)!} alt={a.tag || a.filename || "asset"} loading="lazy" />
+                ) : (
+                  <div className="spatial-map__picker-thumb" />
+                )}
+                <span className="spatial-map__picker-name">{a.tag || a.filename || "Untitled"}</span>
+                {isAtlas && <span className="spatial-map__atlas-badge" data-testid={`atlas-badge-${a.id}`}>Atlas Shot</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div className="spatial-map__picker-row" style={{ justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          className="ui-btn ui-btn--primary"
+          disabled={!canConfirm}
+          onClick={handleConfirm}
+          data-testid="environment-picker-confirm"
+        >
+          Use as Spatial Map Image
+        </button>
+      </div>
+    </>
+  );
+}
