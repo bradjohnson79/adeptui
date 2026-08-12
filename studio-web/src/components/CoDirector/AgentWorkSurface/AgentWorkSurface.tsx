@@ -46,7 +46,7 @@ export function AgentWorkSurface() {
       focused_artifact_ids: res.result_asset_ids || [],
       child_jobs: (res.child_jobs || []).map((c: any) => ({
         job_id: c.job_id,
-        label: c.label || `Frame ${c.child_index + 1}`,
+        label: c.label || (res.surface_type === "storyboard_generation" ? `Output ${c.child_index + 1}` : `Item ${c.child_index + 1}`),
         status: c.status,
         asset_id: c.asset_id,
         error: c.error,
@@ -196,7 +196,9 @@ export function AgentWorkSurface() {
         )}
         <div className="agent-work-surface__progress">
           <span className="agent-work-surface__progress-count">
-            {completed} / {total} {total > 1 ? "Complete" : ""}
+            {surfaceType === "storyboard_generation"
+              ? `${completed} / ${total} Outputs Complete`
+              : `${completed} / ${total}${total > 1 ? " Complete" : ""}`}
           </span>
           {failed > 0 && (
             <span className="agent-work-surface__failed-count">
@@ -261,7 +263,7 @@ export function AgentWorkSurface() {
       </div>
 
       {isTerminal(pack) && (
-        <div className="agent-work-surface__footer">
+        <div className="agent-work-surface__action-row">
           {surfaceType === "storyboard_generation" && total > 1 && (
             <button
               type="button"

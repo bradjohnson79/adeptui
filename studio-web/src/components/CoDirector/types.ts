@@ -234,6 +234,34 @@ export interface CoDirectorMessageExecutionChild {
   stage?: string;
 }
 
+export interface GenerationOutputPlan {
+  index: number;
+  output_type: string;
+  framing: string;
+  description: string;
+  prompt_summary: string;
+  character_names: string[];
+  location: string;
+  action_beat: string;
+  emotional_beat: string;
+}
+
+export interface GenerationPlan {
+  output_count: number;
+  output_mode: string;
+  outputs: GenerationOutputPlan[];
+  references: {
+    character_refs: { id: string; name: string }[];
+    reference_asset_ids: string[];
+  };
+  style_context: string;
+  scene_context: {
+    location: string;
+    action: string;
+    dialogue: string;
+  };
+}
+
 export interface CoDirectorMessageExecution {
   execution_id: string;
   capability?: string;
@@ -244,6 +272,7 @@ export interface CoDirectorMessageExecution {
   surface_type?: string;
   collection_id?: string | null;
   result_asset_ids?: string[];
+  plan_data?: GenerationPlan | null;
   child_jobs?: CoDirectorMessageExecutionChild[];
 }
 

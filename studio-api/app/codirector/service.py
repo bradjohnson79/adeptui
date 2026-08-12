@@ -1652,6 +1652,7 @@ def _emit_execution_status_event(plan: Any, request_id: str) -> dict:
             "surface_type": plan.surface_type,
             "collection_id": plan.collection_id,
             "result_asset_ids": list(plan.result_asset_ids),
+            "plan_data": plan.plan_data if plan.plan_data else None,
             "child_jobs": [
                 {
                     "job_id": cj.job_id,
@@ -2600,6 +2601,7 @@ async def _stream_for_project_inner(
                         "surface_type": plan.surface_type,
                         "collection_id": plan.collection_id,
                         "result_asset_ids": list(plan.result_asset_ids),
+                        "plan_data": plan.plan_data if plan.plan_data else None,
                         "child_jobs": [
                             {
                                 "job_id": cj.job_id,

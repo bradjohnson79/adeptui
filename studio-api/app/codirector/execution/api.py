@@ -1,10 +1,11 @@
-"""Execution REST API — endpoints for starting, advancing, and canceling executions.
+"""Execution REST API — endpoints for starting, advancing, canceling, and approving executions.
 
 Spec §19: "Active Work Surface Controller" — the frontend calls these endpoints
 to manage the Live Agent Work Surface.
 
 Endpoints:
 - POST   /codirector/projects/{project_id}/executions
+- POST   /codirector/projects/{project_id}/executions/{execution_id}/approve
 - POST   /codirector/projects/{project_id}/executions/{execution_id}/advance
 - POST   /codirector/projects/{project_id}/executions/{execution_id}/cancel
 - GET    /codirector/projects/{project_id}/executions/{execution_id}
@@ -22,7 +23,7 @@ from sqlalchemy.orm import Session
 from ...db import get_db
 from .advance import advance_execution_pack
 from .cancel import cancel_execution
-from .contracts import ExecutionPlan
+from .contracts import ExecutionPlan, ExecutionStatus
 from .dispatcher import dispatch
 from .pack_store import list_packs, load_pack
 from ..routing.unified_intent import UnifiedIntent, UnifiedIntentKind, DispatchStrategy
@@ -132,6 +133,34 @@ async def get_active_execution(project_id: str, db: Session = Depends(get_db)) -
     if not plan:
         return {"execution": None}
     return {"execution": plan.model_dump(mode="json")}
+
+
+@router.post("/{execution_id}/approve")
+async def approve_execution(project_id: str, execution_id: str, db: Session = Depends(get_db)) -> dict:
+    """Approve a pending execution plan and start actual generation.
+
+    Only works for executions in PREVIEW status that have plan_data.
+    Transitions the execution from PREVIEW to QUEUED and creates real GPU jobs.
+
+    Returns the updated (now-running) execution plan on success.
+    """
+    from .dispatcher import approve_and_execute as _approve
+
+    plan = _approve(db, project_id, execution_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail={
+            "code": "EXECUTION_NOT_FOUND",
+            "message": "Execution not found.",
+        })
+    if plan.status == ExecutionStatus.PREVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "APPROVE_FAILED",
+                "message": plan.error or "Could not approve execution.",
+            },
+        )
+    return plan.model_dump(mode="json")
 
 
 class RegenerateFrameRequest(BaseModel):

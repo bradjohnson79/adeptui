@@ -218,11 +218,15 @@
   color: #f0a0a0;
 }
 
-.agent-work-surface__footer {
+.agent-work-surface__action-row {
   display: flex;
-  gap: 8px;
-  padding-top: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 8px;
 }
 
 .agent-work-surface__error-detail {

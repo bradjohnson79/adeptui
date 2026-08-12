@@ -4855,6 +4855,133 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 }
 .codirector-exec-child.child-running .codirector-exec-child-status {
   color: rgba(13, 148, 136, 0.9);
+
+/* Generation Queue Card — pre-approval plan display in chat */
+.codirector-gen-queue {
+  margin: 0.2rem 0 0.45rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid rgba(107, 138, 253, 0.3);
+  background: rgba(107, 138, 253, 0.06);
+  font-size: 0.85rem;
+}
+.codirector-gen-queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.codirector-gen-queue-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: #b8c8ff;
+}
+.codirector-gen-queue-count {
+  font-size: 0.75rem;
+  color: var(--text-muted, #64748b);
+}
+.codirector-gen-queue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 0.5rem;
+}
+.codirector-gen-queue-output {
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.codirector-gen-queue-output-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  margin-bottom: 2px;
+}
+.codirector-gen-queue-output-index {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: #d4def7;
+}
+.codirector-gen-queue-output-type {
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(107, 138, 253, 0.2);
+  color: #8aa4ff;
+}
+.codirector-gen-queue-output-framing {
+  font-size: 0.78rem;
+  color: #b0bcca;
+  margin-bottom: 1px;
+}
+.codirector-gen-queue-output-desc {
+  font-size: 0.75rem;
+  color: #8a94a6;
+  line-height: 1.3;
+}
+.codirector-gen-queue-style {
+  font-size: 0.75rem;
+  color: #8a94a6;
+  margin-bottom: 0.4rem;
+}
+.codirector-gen-queue-style-label {
+  color: #b0bcca;
+  font-weight: 500;
+}
+.codirector-gen-queue-status {
+  font-size: 0.75rem;
+  color: #8a94a6;
+  margin-bottom: 0.5rem;
+}
+.codirector-gen-queue-status-value {
+  color: #f0c040;
+  font-weight: 600;
+}
+.codirector-gen-queue-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.codirector-gen-queue-approve {
+  font-size: 0.8rem;
+  padding: 4px 14px;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 8px;
+  color: #7ec97e;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.codirector-gen-queue-approve:hover {
+  background: rgba(34, 197, 94, 0.25);
+}
+.codirector-gen-queue-approve:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.codirector-gen-queue-refine {
+  font-size: 0.8rem;
+  padding: 4px 14px;
+  background: rgba(107, 138, 253, 0.1);
+  border: 1px solid rgba(107, 138, 253, 0.2);
+  border-radius: 8px;
+  color: #8aa4ff;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.codirector-gen-queue-refine:hover {
+  background: rgba(107, 138, 253, 0.2);
+}
+.codirector-gen-queue-refine-hint {
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: #8a94a6;
+  font-style: italic;
+}
 }
 .codirector-exec-child.child-queued .codirector-exec-child-status,
 .codirector-exec-child.child-cancelled .codirector-exec-child-status {

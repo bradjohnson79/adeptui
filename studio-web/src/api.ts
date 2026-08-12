@@ -785,6 +785,7 @@ export type CoDirectorStreamEvent =
         total?: number;
         collection_id?: string | null;
         result_asset_ids?: string[];
+        plan_data?: Record<string, unknown> | null;
         child_jobs?: {
           job_id?: string;
           child_index?: number;
@@ -7049,6 +7050,11 @@ export const api = {
   cancelExecution: (projectId: string, executionId: string) =>
     req<any>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/cancel`,
+      { method: "POST" },
+    ),
+  approveExecution: (projectId: string, executionId: string) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/approve`,
       { method: "POST" },
     ),
   getExecution: (projectId: string, executionId: string) =>

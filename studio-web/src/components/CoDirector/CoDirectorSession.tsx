@@ -1390,6 +1390,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       // fatal provider error (no prior `completed`) does. Tracked separately so the completed
       // reply is finalized normally and the error is shown alongside it.
       let postCompletionError: ClassifiedError | null = null;
+      let executionCreated = false;
+      let executionIdForRecovery: string | null = null;
 
       const apiMessages = transcriptForApi.map((m) => ({ role: m.role, content: m.content }));
       const lastUser = [...transcriptForApi].reverse().find((m) => m.role === "user");
@@ -1680,7 +1682,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           // assistant bubble in place (when the dispatch path streams) or insert
           // a dedicated execution_status message. The execution payload is
           // attached so CoDirectorMessage can render the compact progress card.
-          const execPayload = (event.execution as CoDirectorMessageExecution | undefined) || undefined;
+          const execPayload = (event.execution as unknown as CoDirectorMessageExecution | undefined) || undefined;
           const execMessageType = (event.messageType as CoDirectorAssistantMessageType | undefined) || "execution_status";
           const execContent = (event.content as string | undefined) || "";
           setMessages((prev) => {
@@ -1721,6 +1723,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           // overlay. This also prevents a stale preview from overwriting a
           // legitimately active (non-preview) execution in `activeExecution`.
           if (execPayload?.execution_id && execPayload.status !== "preview") {
+            executionCreated = true;
+            executionIdForRecovery = execPayload.execution_id;
             const execProjectId = b.projectId || "";
             const surfaceType = (execPayload.surface_type as WorkSurfaceState["surface_type"]) || "";
             setActiveExecution({
@@ -2179,9 +2183,34 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               : prev,
           );
           void reconcileConversation();
+        } else if (sawToken && executionCreated) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    status: "interrupted" as const,
+                    content:
+                      m.content +
+                      "\n\n*Co-Director's response was interrupted, but your generation is still running.*",
+                  }
+                : m,
+            ),
+          );
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "completed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: [
+                    "Co-Director's message was interrupted, but your generation is still running.",
+                  ],
+                }
+              : prev,
+          );
+          void reconcileConversation();
         } else if (sawToken) {
-          // Stream ended without a terminal event but tokens arrived — preserve the partial
-          // reply instead of discarding it.
           setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, status: "interrupted" as const } : m)));
           setActivity((prev) =>
             prev && prev.requestId === requestId
@@ -2190,6 +2219,33 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
                   status: "failed",
                   completedAt: new Date().toISOString(),
                   summaryFacts: ["Co-Director started a reply, but the response was interrupted."],
+                }
+              : prev,
+          );
+          void reconcileConversation();
+        } else if (executionCreated) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? {
+                    ...m,
+                    status: "interrupted" as const,
+                    content:
+                      m.content ||
+                      "*Co-Director's response was interrupted, but your generation is still running.*",
+                  }
+                : m,
+            ),
+          );
+          setActivity((prev) =>
+            prev && prev.requestId === requestId
+              ? {
+                  ...prev,
+                  status: "completed",
+                  completedAt: new Date().toISOString(),
+                  summaryFacts: [
+                    "Co-Director's message was interrupted, but your generation is still running.",
+                  ],
                 }
               : prev,
           );

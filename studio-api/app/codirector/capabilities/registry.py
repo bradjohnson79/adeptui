@@ -33,6 +33,8 @@ class ApprovalPolicy(str, Enum):
     NEEDS_CHOICE = "needs_choice"
     # Destructive — requires explicit confirmation.
     NEEDS_CONFIRMATION = "needs_confirmation"
+    # Requires user approval via Approve/Refine queue (generation queue).
+    NEEDS_APPROVAL = "needs_approval"
 
 
 class HandlerKind(str, Enum):
@@ -195,7 +197,7 @@ CAPABILITY_REGISTRY: tuple[CapabilityDefinition, ...] = (
         title="Generate Storyboard",
         description="Plan N distinct shots and generate N storyboard frame images.",
         handler_kind=HandlerKind.CAPABILITY_HANDLER,
-        approval_policy=ApprovalPolicy.DIRECT,
+        approval_policy=ApprovalPolicy.NEEDS_APPROVAL,
         required_context=("project",),
         optional_context=("script_scene", "character", "reference_image", "visual_style", "story"),
         surface_type="storyboard_generation",

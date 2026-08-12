@@ -116,6 +116,10 @@ class ExecutionPlan(BaseModel):
     # Attachment IDs used as references (spec §12).
     attachment_asset_ids: list[str] = Field(default_factory=list)
 
+    # Plan data — stores the shot plan when awaiting approval (populated during
+    # PREVIEW phase for NEEDS_APPROVAL capabilities). Empty/null for direct execution.
+    plan_data: dict[str, Any] = Field(default_factory=dict)
+
     # Observability trace (spec §48).
     user_turn_id: Optional[str] = None
     intent: str = ""

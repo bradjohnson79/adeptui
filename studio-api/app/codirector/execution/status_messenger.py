@@ -90,6 +90,8 @@ def _serialize_plan_summary(plan: Any) -> dict[str, Any]:
     status = str(getattr(plan, "status", "") or "").lower()
     progress = float(getattr(plan, "progress", 0.0) or 0.0)
 
+    plan_data_val = getattr(plan, "plan_data", None) or {}
+
     return {
         "execution_id": getattr(plan, "execution_id", "") or "",
         "capability": getattr(plan, "capability", "") or "",
@@ -100,6 +102,7 @@ def _serialize_plan_summary(plan: Any) -> dict[str, Any]:
         "collection_id": getattr(plan, "collection_id", None),
         "result_asset_ids": list(getattr(plan, "result_asset_ids", []) or []),
         "child_jobs": child_jobs,
+        "plan_data": plan_data_val if plan_data_val else None,
     }
 
 

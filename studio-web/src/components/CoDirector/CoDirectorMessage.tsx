@@ -1,5 +1,8 @@
+import { useState } from "react";
+import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessage as Msg, CoDirectorMessageExecution } from "./types";
 import { renderAssistantMarkdown } from "./assistantMarkdown";
+import GenerationQueueCard from "./GenerationQueueCard";
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   recommendation: "Recommendation",
@@ -83,19 +86,29 @@ export function CoDirectorMessage({
   message: Msg;
   onRetry?: () => void;
 }) {
+  const { uiContext } = useCoDirectorSession();
+  const [dismissedQueue, setDismissedQueue] = useState(false);
   const typeLabel = message.messageType ? MESSAGE_TYPE_LABELS[message.messageType] : null;
   const isAssistant = message.role === "assistant";
   const html = isAssistant ? renderAssistantMarkdown(message.content) : "";
   const isExecutionStatus = message.messageType === "execution_status";
   const isCompletion = message.messageType === "completion";
   const hasExecutionPayload = Boolean(message.execution && message.execution.execution_id);
+  const isPreviewQueue = hasExecutionPayload && message.execution?.status === "preview" && !!message.execution?.plan_data;
 
   return (
     <article
       className={`codirector-msg ${message.role}${message.messageType ? ` type-${message.messageType}` : ""}`}
     >
       {typeLabel && isAssistant ? <span className="codirector-msg-type">{typeLabel}</span> : null}
-      {isExecutionStatus && hasExecutionPayload ? (
+      {isPreviewQueue && !dismissedQueue ? (
+        <GenerationQueueCard
+          execution={message.execution as CoDirectorMessageExecution}
+          projectId={uiContext.projectId || ""}
+          onClose={() => setDismissedQueue(true)}
+        />
+      ) : null}
+      {isExecutionStatus && hasExecutionPayload && !isPreviewQueue ? (
         <ExecutionSummaryCard execution={message.execution as CoDirectorMessageExecution} />
       ) : null}
       {isAssistant ? (
