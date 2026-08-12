@@ -6,7 +6,7 @@ type Diagnostics = {
   comfyui?: { connected?: boolean; version?: string | null; status?: string; message?: string };
   gpu?: { name?: string | null; availableGb?: number | null; currentGb?: number | null };
   nodeInventory?: { installed?: number; missingVsRegistry?: number };
-  modelInventory?: { wan?: boolean; ltx?: boolean; zimage?: boolean; icLora?: boolean };
+  modelInventory?: { wan?: boolean; ltx?: boolean; ltx_2_5?: boolean; zimage?: boolean; icLora?: boolean };
   queue?: {
     comfyRunning?: number;
     comfyWaiting?: number;
@@ -144,6 +144,7 @@ export default function VideoRuntimeDiagnostics() {
             <ul style={{ listStyle: "none", padding: 0, margin: 0, lineHeight: 1.7 }}>
               <li>WAN {mark(data.modelInventory?.wan)}</li>
               <li>LTX {mark(data.modelInventory?.ltx)}</li>
+              <li>LTX 2.5 {mark(data.modelInventory?.ltx_2_5)}</li>
               <li>Z-Image {mark(data.modelInventory?.zimage)}</li>
               <li>IC-LoRA {mark(data.modelInventory?.icLora)}</li>
             </ul>
@@ -165,6 +166,7 @@ export default function VideoRuntimeDiagnostics() {
             <h2 style={h2}>Average Render Time</h2>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, lineHeight: 1.7 }}>
               <li>LTX: {fmtSec(data.averageRenderSeconds?.ltx)}</li>
+              <li>LTX 2.5: {fmtSec(data.averageRenderSeconds?.ltx_2_5)}</li>
               <li>WAN: {fmtSec(data.averageRenderSeconds?.wan)}</li>
               <li>fal: {fmtSec(data.averageRenderSeconds?.fal)}</li>
             </ul>

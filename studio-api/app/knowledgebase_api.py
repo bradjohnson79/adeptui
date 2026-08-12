@@ -79,7 +79,7 @@ def get_doc(path: str):
 
 class CompileBody(BaseModel):
     intention: str
-    model_id: str = "ltx_2_3"
+    model_id: str = "ltx_2_5_distilled"
     mode: str = "creative"  # creative | structured | model | advanced
     project_id: Optional[str] = None
     scene_id: Optional[str] = None

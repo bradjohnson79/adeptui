@@ -370,8 +370,15 @@ def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSn
 
 
 def _eval_models_video(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    ltx_variants = ("ltx_checkpoint", "ltx_2_5_checkpoint")
+    if snapshot.setup_components:
+        any_ltx_ready = any(snapshot.component_ready(cid) is True for cid in ltx_variants)
+        if any_ltx_ready:
+            return _model_component_eval(
+                definition, snapshot, required=(), optional=("wan_models",)
+            )
     return _model_component_eval(
-        definition, snapshot, required=("ltx_checkpoint",), optional=("wan_models",)
+        definition, snapshot, required=ltx_variants, optional=("wan_models",)
     )
 
 
@@ -682,7 +689,7 @@ def _eval_generation_queue(definition: CapabilityDefinition, snapshot: ProbeSnap
             component_ids=workflows.component_ids or definition.component_ids,
             details=workflows.details,
         )
-    model_ids = ("zimage_models",) if modality == "image" else ("ltx_checkpoint",)
+    model_ids = ("zimage_models",) if modality == "image" else ("ltx_checkpoint", "ltx_2_5_checkpoint")
     models = _model_component_eval(definition, snapshot, required=model_ids)
     if models.status not in (S.LOCALLY_VERIFIED, S.DEGRADED):
         return CapabilityEvaluation(

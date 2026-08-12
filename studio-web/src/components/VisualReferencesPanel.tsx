@@ -210,7 +210,7 @@ export function VisualReferencesPanel({
     <section className="visual-references" aria-label="Visual References" style={{ marginTop: "0.75rem" }}>
       <h3 style={{ margin: "0 0 0.35rem" }}>Visual References</h3>
       <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-        Guide LTX 2.3 with a composite Ingredients reference sheet (IC-LoRA).
+        Guide LTX 2.5 with a composite Ingredients reference sheet (IC-LoRA).
       </p>
 
       <fieldset style={{ border: "none", padding: 0, margin: "0 0 0.75rem" }}>

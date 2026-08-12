@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     ltx_checkpoint: str = "ltx-2.3-22b-distilled-fp8.safetensors"
     # LTX 2.3 CheckpointLoaderSimple returns CLIP=None; load Gemma/LTX text encoder separately.
     ltx_text_encoder: str = "gemma_3_12B_it_fp4_mixed.safetensors"
+    # LTX 2.5
+    ltx_2_5_checkpoint: str = "ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors"
+    ltx_2_5_text_encoder: str = "gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors"
+    ltx_2_5_video_vae: str = "ltx-2.5-video-vae-bf16.safetensors"
+    ltx_2_5_audio_vae: str = "ltx-2.5-audio-vae-bf16.safetensors"
+    ltx_2_5_spatial_upscaler: str = "ltx-2.5-latent-spatial-upscaler-x2-bf16.safetensors"
     wan_high_noise: str = "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
     wan_low_noise: str = "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
     # Comfy VAELoader lists subdirectory names with backslashes on Windows.

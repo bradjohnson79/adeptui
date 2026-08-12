@@ -1,44 +1,20 @@
-feat(spatial): Spatial Map + Atlas Shot + ERS + Scene Creator
+fix(codirector): activate Spatial Map + Scene Creator navigation tabs
 
-Add spatial-continuity and scene-generation workflow to Co-Director
-Project Building, reusing the existing spatial_map and
-environment_reference_sheet backend modules.
+The normalizeContentTab whitelist in CoDirectorShell.tsx was missing
+spatial_map, scene_creator, development, and production. When a user
+clicked either Spatial Map or Scene Creator tab, the click handler
+fired but normalizeContentTab silently reverted the tab to "wiki",
+making the tabs appear inert/non-clickable.
 
-Backend:
-- SpatialPlacement grid extension (gridRow, gridColumn, slotIndex,
-  colorKey, miniPrompt, tag) — frozen contract
-- ERS contracts: EnvironmentReferencePackage, ShotRequest,
-  SceneGenerationBatch, PropEntity, normalize_prop_tag
-- Entity resolver: @Character (spaces/apostrophes/hyphens) and
-  #prop (normalized tags) parser, shot request parser, prompt
-  compilation with layered style resolution
-- 3 capability handlers: atlas.generate, ers.generate, scene.generate
-  (all use real enqueue_imagegen_job — no mocks)
-- Scene Creator REST router at /api/scene-creator (parse-shots,
-  batches CRUD, regenerate-shot, send-to-timeline)
-- ERS persistence via ProjectTraitRow (spatial_ers, scene_batch,
-  prop_entity categories — no DB migration)
-- Scene shots collection builder (Library collection type scene_shots)
-- Timeline handoff delegates to magi.timeline_handoff.export_to_timeline
-- 9 deterministic routing patterns + 5 capability patterns for
-  atlas/ers/scene/spatial-map/send-to-timeline
-- Context resolution extended with spatial_map_summary,
-  ers_packages, scene_batches
+Added all four missing members so the whitelist matches the ContentTab
+type union exactly. This also fixes the StageStrip "Open Production"
+action which was silently reverting to Wiki for the same reason.
 
-Frontend:
-- Spatial Map tab with 10x10 grid, 4 character + 4 prop slots,
-  click-to-place, occupancy protection, mini-prompts, ERS display
-- Scene Creator tab with ERS selector, shot request textarea,
-  output count 1-8, shot suggestion, result grid, targeted regen,
-  Send to Timeline
-- AgentWorkSurface surface types: atlas_shot_generation,
-  ers_generation, scene_generation
+Added Playwright certification tests (4 tests):
+- A: Spatial Map tab click + panel load + project context
+- B: Scene Creator tab click + panel load + project context
+- C: Tab availability (neither disabled nor aria-disabled)
+- D: Regression for Wiki, Script Writer, Character Creator,
+     Spatial Map, Scene Creator, Library
 
-Amendments honored:
-1. Atlas Shot is an INPUT to Spatial Map
-2. ERS composite assembled in code (not image-generated)
-3. Spatial Map authoritative — generation never mutates placement
-4. Orientation scene-relative (Atlas North = top edge)
-5. @ supports real names; # uses normalized tags; UI pickers preferred
-
-Independent verifier: VERIFIED across all 16 areas.
+All 4 tests pass against local Vite dev server.

@@ -32,6 +32,10 @@ MODEL_MISSING = "MODEL_MISSING"
 #: Catalogued components that carry local generation weights, in priority order.
 MODEL_COMPONENT_IDS: tuple[str, ...] = (
     "ltx_checkpoint",
+    "ltx_2_5_checkpoint",
+    "ltx_2_5_text_encoder",
+    "ltx_2_5_video_vae",
+    "ltx_2_5_audio_vae",
     "wan_models",
     "ltx23_ic_lora_ingredients",
     "zimage_models",

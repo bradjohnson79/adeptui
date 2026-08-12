@@ -558,7 +558,7 @@ export function TimelineInspector({
             <select value={scene.engine} onChange={(e) => void updateScene({ engine: e.target.value as Scene["engine"] })}>
               <option value="auto">Auto Select</option>
               <option value="minimax-h3">MiniMax H3 (Default)</option>
-              <option value="ltx">LTX 2.3</option>
+              <option value="ltx">LTX 2.5</option>
               <option value="wan">WAN 2.2</option>
               <option value="fal_seedance">Seedance</option>
               <option value="fal_kling">Kling</option>

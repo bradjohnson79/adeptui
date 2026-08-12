@@ -324,6 +324,21 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             recommendation="correct_path" if location else "install", requires_user_interaction=True,
         )
 
+    if component.verifier == "ltx_2_5_file":
+        path = _candidate_file(location, settings.ltx_2_5_checkpoint, ("diffusion_models", "checkpoints"))
+        if path:
+            if os.access(path, os.R_OK) and path.stat().st_size > 0:
+                return Verification(True, False, None, "The LTX 2.5 checkpoint is available and readable.", str(path))
+            return Verification(
+                False, False, "permission_denied", "The LTX 2.5 checkpoint cannot be read.", str(path),
+                recommendation="grant_permission", requires_user_interaction=True,
+            )
+        return Verification(
+            False, True, "required_model_missing", "The required LTX 2.5 checkpoint was not found.",
+            location, details=(f"Expected file: {settings.ltx_2_5_checkpoint}",),
+            recommendation="correct_path" if location else "install", requires_user_interaction=True,
+        )
+
     if component.verifier == "wan_files":
         names = (settings.wan_high_noise, settings.wan_low_noise, settings.wan_vae, settings.wan_text_encoder)
         found = [_candidate_file(location, name, ("diffusion_models", "vae", "text_encoders")) for name in names]

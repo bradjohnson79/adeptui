@@ -35,7 +35,7 @@ import "../../styles/timeline-master/timeline-editor-shell.css";
 function generatorLabel(engine: string) {
   if (engine === "auto") return "Auto";
   if (engine === "minimax-h3") return "MiniMax H3 (Default)";
-  if (engine === "ltx") return "LTX Video";
+  if (engine === "ltx") return "LTX 2.5";
   if (engine === "hunyuan15") return "HunyuanVideo 1.5";
   if (engine === "hunyuan13b") return "HunyuanVideo 13B";
   if (engine === "wan") return "WAN 2.2";

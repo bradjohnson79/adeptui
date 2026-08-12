@@ -71,6 +71,23 @@
 - `studio-web/vercel.json` — Vercel SPA rewrite config
 - `docs/release-gate/hosted-beta/` — Certification reports for hosted beta
 
+## Spatial Map + Atlas + ERS + Scene Creator (2026-08-11)
+- `studio-api/app/spatial_map/ers_contracts.py` — EnvironmentReferencePackage, ShotRequest, SceneGenerationBatch, PropEntity, normalize_prop_tag, color constants
+- `studio-api/app/spatial_map/ers_persistence.py` — ProjectTraitRow persistence for ERS packages, scene batches, prop entities
+- `studio-api/app/spatial_map/schemas.py` — SpatialPlacement with grid extension (gridRow, gridColumn, slotIndex, colorKey, miniPrompt, tag)
+- `studio-api/app/spatial_map/{models.py, router.py, service.py}` — SpatialMapDocumentRow, REST endpoints, core service
+- `studio-api/app/environment_reference_sheet/` — ERS orchestrator, exports (composite renderer), contracts, continuity, store, api
+- `studio-api/app/codirector/capabilities/handlers/{atlas,ers,scene}_generate.py` — Capability handlers
+- `studio-api/app/codirector/entity_resolver.py` — @/# entity resolution, shot parser, prompt compilation
+- `studio-api/app/codirector/execution/scene_shot_collection_builder.py` — Library collections for scene shots
+- `studio-api/app/scene_creator/{router.py, timeline_handoff.py}` — Scene Creator REST API + Timeline handoff
+- `studio-api/app/codirector/capabilities/registry.py` — 3 new capability definitions (atlas.generate, ers.generate, scene.generate)
+- `studio-web/src/components/CoDirector/SpatialMap/` — SpatialMapPanel, SpatialGrid, PlacementSlot, EntityPicker, ErsResultDisplay, spatialMapApi, types, spatialMap.css
+- `studio-web/src/components/CoDirector/SceneCreator/` — SceneCreatorPanel, ShotRequestInput, SceneResultGrid, SceneResultCard, ErsSelector, sceneCreatorApi, types
+- `studio-web/src/components/CoDirector/AgentWorkSurface/types.ts` — SurfaceType union (includes atlas_shot_generation, ers_generation, scene_generation)
+- `tests/e2e/codirector/spatial-scene-creator.spec.ts` — Playwright suite (970 lines, S77-S89)
+- `docs/release-gate/spatial-map/SPATIAL_MAP_ATLAS_ERS_SCENE_CREATOR_COMPLETION_REPORT.md` — Governing milestone report
+
 ## Frontend
 - `studio-web/src/components/CoDirector/CoDirectorSession.tsx` — Main session hook, status check, welcome suggestions
 - `studio-web/src/components/CoDirector/CoDirectorProjectContent.tsx` — Wiki sidebar, dropdowns

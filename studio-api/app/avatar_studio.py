@@ -292,7 +292,7 @@ def _empty(project_id: str, name: str = "Avatar Session") -> dict[str, Any]:
         "duration_class": "story_section",
         "provider_mode": "best_match",
         "provider_choice": None,
-        "model_id": "ltx_2_3",
+        "model_id": "ltx_2_5_distilled",
         "prompt": "",
         "negative_prompt": (
             "identity drift, teeth distortion, frozen face, overactive facial motion, "

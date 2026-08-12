@@ -6,6 +6,7 @@ from typing import Iterable
 
 from .adapters.kling_api import ALIASES as KLING_ALIASES
 from .adapters.kling_api import KlingApiAdapter
+from .adapters.ltx_local import ALIASES as LTX_ALIASES
 from .adapters.ltx_local import LtxLocalAdapter
 from .adapters.minimax_h3_i2v_local import ALIASES as MINIMAX_I2V_ALIASES
 from .adapters.minimax_h3_i2v_local import MiniMaxH3I2VLocalAdapter
@@ -44,7 +45,8 @@ class VideoGeneratorRegistry:
             self._aliases[alias] = SeedanceApiAdapter.id
         for alias in KLING_ALIASES:
             self._aliases[alias] = KlingApiAdapter.id
-        self._aliases["ltx-local"] = LtxLocalAdapter.id
+        for alias in LTX_ALIASES:
+            self._aliases[alias] = LtxLocalAdapter.id
         # CERT_STUB_ENV_GATED: the certification stub replaces the provider
         # execution boundary only when ADEPT_TIMELINE_CERT_STUB=1. Invisible
         # in production.

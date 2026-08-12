@@ -258,7 +258,7 @@ export function PromptComposer({
           </optgroup>
           <optgroup label="Local (ComfyUI)">
             <option value="minimax-h3">MiniMax H3 (Default)</option>
-            <option value="ltx">LTX Video</option>
+            <option value="ltx">LTX 2.5</option>
             <option value="hunyuan15">HunyuanVideo 1.5</option>
             <option value="hunyuan13b">HunyuanVideo 13B</option>
             <option value="wan">WAN 2.2 (Optional)</option>

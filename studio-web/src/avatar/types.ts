@@ -469,7 +469,7 @@ export function emptyAvatarSession(projectId: string, name = "Avatar Session"): 
     },
     provider_mode: "best_match",
     provider_choice: null,
-    model_id: "ltx_2_3",
+    model_id: "ltx_2_5_distilled",
     prompt: "",
     negative_prompt:
       "identity drift, teeth distortion, frozen face, overactive facial motion, mouth drift, cropped chin, background warping, duplicate characters, blurry, low quality",

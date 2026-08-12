@@ -1,13 +1,19 @@
 # Current Project State
 
 ## Running Services (Beta Backend Manager)
-- **Web (Vercel)**: https://adeptui.vercel.app
+- **Web (Vercel)**: https://adeptui-5uunxq106-anoint.vercel.app (latest Production deployment, 2026-08-11)
 - **Studio API**: http://127.0.0.1:8758/api/health (managed by Beta Backend Manager)
-- **ComfyUI**: headless backend, port 8188 (managed)
+- **ComfyUI**: headless backend, port 8188 (managed), cuda:0 NVIDIA GeForce RTX 5090 (32 GB VRAM)
 - **Cloudflare Tunnel**: api-beta.adeptui.org -> localhost:8758 (managed)
-- **Ollama**: port 11434 (managed)
+- **Ollama**: port 11434 (managed); `qwen3.6:35b-a3b` listed but NOT loading into memory (env issue)
 - **Hosted API**: https://api-beta.adeptui.org/api/healthz
 - **Provider**: Ollama (qwen3.6:35b-a3b)
+- **Co-Director capabilities**: 56 callable (includes `atlas.generate`, `ers.generate`, `scene.generate`)
+
+## Current Branch / SHA
+- **Branch**: `beta`
+- **HEAD**: `4d899b4` (`feat(spatial): Spatial Map + Atlas Shot + ERS + Scene Creator`)
+- **GitHub remote**: git@github.com:bradjohnson79/adeptui.git
 
 ## Backend Manager (NEW - replaces old :8760 supervisor)
 - **Scripts**: `Start/Stop/Restart/Get-Status/Watch/Register-Startup/Unregister-Startup-AdeptBetaBackend.ps1` + `scripts/beta-backend/BetaBackendCommon.ps1`
@@ -53,6 +59,7 @@ Full backend suite (Co-Director + voice + spatial + magi + production dock + set
 - **Four Pillars Implementation**: Story tool (backend+frontend), Foundation Status service, Project Building Pane (Wiki|Notes|Story|Script Writer|Storyboard|Character Creator|Library), Co-Director unified context retriever (`project.read_context` tool), active tab context hint, four-candidate character workflow with missing-description guard, FoundationStatusBar in Wiki, CharacterCandidatePanel. 27 files, 2440 lines. Build PASS, 88 tests PASS.
 - **Four Pillars UX Closure**: Story editor upgraded to TipTap (bold/italic/headings/lists/undo/redo/autosave), Script Writer toolbar cleaned (removed Storyboard+Timeline buttons), 3 new Co-Director tools (script.estimate_timing, storyboard.estimate_runtime, foundation.compare_pillars), Wiki foundation section in page_compiler, foundation retriever bug fixed, active tab labels fixed. 14 files, 838 lines. Build PASS, 94 tests PASS. Live Playwright: 0 CORS errors, 0 console errors, 78 API reqs/2min, persistence PASS.
 - **Story Entries + Wiki Restructure**: New `story_entries` table with structured fields (title/logline/shortSummary/longSummary/entryType/sortOrder). Multiple entries per project. Legacy migration. Wiki pulls Story from story_entries and Characters from character_profiles (not conversation-derived knowledge). Conversation suggestions become suggestion-only. StoryEntryEditor replaces StoryEditor in Co-Director pane. Wiki panel renders structured Story accordions + Character cards with casting images/personality/details. 15 files, 1753 lines. Build PASS, 71 tests PASS. Deployed.
+- **Spatial Map + Atlas Shot + ERS + Scene Creator (2026-08-11)**: Four-part spatial-continuity workflow integrated into Co-Director Project Building. 52 files, +9555/-2 lines, commit `4d899b4`. New nav tabs: Spatial Map, Scene Creator (between Character Creator and Library). 3 new Co-Director capabilities (`atlas.generate`, `ers.generate`, `scene.generate`). Frozen contracts: SpatialPlacement grid extension, EnvironmentReferencePackage, ShotRequest, SceneGenerationBatch, @/# resolver. ERS composite is deterministic (code-assembled from real N/E/S/W assets, no LLM layout). 25 product laws consolidated. Independent verifier (Subagent J): VERIFIED. Playwright deferred to manual beta (Ollama hang, not code defect). Governing report: `docs/release-gate/spatial-map/SPATIAL_MAP_ATLAS_ERS_SCENE_CREATOR_COMPLETION_REPORT.md`. Phase memory: `memory/phases/phase-spatial-map-ers-scene-creator.md`.
 
 ## Known Issues
 | Issue | Status |
@@ -62,6 +69,11 @@ Full backend suite (Co-Director + voice + spatial + magi + production dock + set
 | `_voice_handoff` workspaceUrl strips deferred | Phase 5 consolidation |
 | Playwright 7/24 failures are test-harness limitation, not product defects | Monitor |
 | Asset ORB blocking on some project covers | ERR_BLOCKED_BY_ORB on `/api/assets/{id}/file` — browser security feature, not CORS |
+| Ollama `qwen3.6:35b-a3b` not loading into memory (2026-08-11) | `ollama ps` empty; 5-token generation times out at 60s. Blocks Co-Director chat + Playwright onboarding dismissal. Investigate VRAM contention with ComfyUI or pull smaller model. |
+| Vercel deployment SSO-gated | Production Vercel URL requires Vercel authentication; use local Vite (`STUDIO_API_PORT=8758`) for automated testing |
+| Local :8760 web server retired (Law #15) | Playwright config defaults to 8760 when `STUDIO_API_PORT=8758`; set `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173` to override |
+| Krea 2 model missing | `krea2_models` required_models_missing; deferred to v1.2; does not block spatial/scene workflow |
+| Playwright spatial-scene-creator.spec.ts not green (2026-08-11) | Suite authored (970 lines, S77-S89); blocked by Ollama hang during onboarding dismissal, not code defect. Deferred to manual beta by user. |
 
 ## Key Commands
 ```powershell

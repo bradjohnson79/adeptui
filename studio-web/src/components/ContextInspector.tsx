@@ -151,7 +151,7 @@ export function ContextInspector({
                 <option value="auto">Auto Select</option>
               </optgroup>
               <optgroup label="Local">
-                <option value="ltx">LTX 2.3</option>
+                <option value="ltx">LTX 2.5</option>
                 <option value="wan">WAN 2.2</option>
               </optgroup>
               <optgroup label="Cloud">

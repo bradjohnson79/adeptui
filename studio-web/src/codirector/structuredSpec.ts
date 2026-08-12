@@ -62,7 +62,7 @@ export function buildSpecFromContext(opts: {
   return {
     intention: opts.intention,
     mode: opts.mode || "creative",
-    model_id: opts.model_id || "ltx_2_3",
+    model_id: opts.model_id || "ltx_2_5_distilled",
     characters: by("character").map((c) => ({
       name: c.label,
       description: c.description,

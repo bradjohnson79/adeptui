@@ -127,7 +127,7 @@ export function VideoModelLibrary() {
     <section className="panel" data-testid="video-model-library" aria-label="Video Model Library">
       <h3>Video Models</h3>
       <p className="scene-meta">
-        LTX Video remains the default production engine. HunyuanVideo 1.5 and 13B install independently
+        LTX 2.5 is the recommended production engine. HunyuanVideo 1.5 and 13B install independently
         from official Tencent Hugging Face sources. Installing one never overwrites the other. WAN stays
         optional. MiniMax H3 is selectable in Adept UI surfaces with honest preflight; local weights require
         license clearance and runtime certification before generation.

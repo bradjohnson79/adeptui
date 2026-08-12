@@ -47,7 +47,7 @@ def propose_revision(
         actions.append(
             {
                 "action": "consider_model_switch",
-                "candidates": ["fal_seedance", "ltx_2_3"],
+                "candidates": ["fal_seedance", "ltx_2_5_distilled", "ltx_2_5_full", "ltx_2_3"],
                 "reason": "Prefer engines with explicit audio off or no native soundtrack",
             }
         )

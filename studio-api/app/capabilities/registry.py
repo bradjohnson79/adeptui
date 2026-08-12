@@ -637,7 +637,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         baseline_status=S.BACKEND_ONLY,
         summary="A video-modality workflow has all required nodes and models present.",
         dependencies=("workflows.validate", "comfyui.health"),
-        component_ids=("comfyui", "ltx_checkpoint"),
+        component_ids=("comfyui", "ltx_checkpoint", "ltx_2_5_checkpoint"),
         baseline_reason="Probe-driven.",
     ),
     # ----------------------------------------------------------------- models
@@ -671,7 +671,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         subsystem="models",
         baseline_status=S.BACKEND_ONLY,
         summary="LTX (and optionally WAN) weights verified on disk.",
-        component_ids=("ltx_checkpoint", "wan_models"),
+        component_ids=("ltx_checkpoint", "ltx_2_5_checkpoint", "wan_models"),
         baseline_reason="Derived from Setup component verification; blocked when absent.",
     ),
     _d(
@@ -811,7 +811,7 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         read_only=False,
         requires_approval=True,
         dependencies=("comfyui.queue", "workflows.video.ready", "models.video.ready"),
-        component_ids=("comfyui", "ltx_checkpoint", "wan_models"),
+        component_ids=("comfyui", "ltx_checkpoint", "ltx_2_5_checkpoint", "wan_models"),
         http_ref="POST /api/projects/{projectId}/render",
         baseline_reason="No verified render in this environment; probe reports blocked when models are absent.",
         scope="project",

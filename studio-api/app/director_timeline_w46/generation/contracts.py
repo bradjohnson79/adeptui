@@ -42,9 +42,15 @@ class VideoGeneratorCapabilities(BaseModel):
     supportedDurations: list[float] = Field(default_factory=list)
     supportedResolutions: list[str] = Field(default_factory=list)
     supportedAspectRatios: list[str] = Field(default_factory=list)
+    supportedFps: list[int] = Field(default_factory=list)
     supportsSeed: bool = True
     supportsNegativePrompt: bool = False
     supportsCameraControls: bool = False
+    native_multishot: bool = False
+    audio_generation: bool = False
+    auto_duration: bool = False
+    fast_generation: bool = False
+    audio: dict[str, Any] = Field(default_factory=dict)
     executable: bool = True
     notes: str = ""
 

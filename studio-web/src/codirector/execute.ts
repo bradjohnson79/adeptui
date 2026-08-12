@@ -217,7 +217,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
     case "compilePrompt":
       return api.compilePrompt({
         intention: inputs.intention,
-        model_id: inputs.modelId || "ltx_2_3",
+        model_id: inputs.modelId || "ltx_2_5_distilled",
         mode: inputs.mode || "creative",
         project_id: projectId || undefined,
         scene_id: sceneId || undefined,
@@ -307,7 +307,7 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
     case "compileDirectorPrompt": {
       return api.compilePrompt({
         intention: String(inputs.intention || "Director shot"),
-        model_id: String(inputs.modelId || "ltx_2_3"),
+        model_id: String(inputs.modelId || "ltx_2_5_distilled"),
         mode: String(inputs.mode || "structured"),
         project_id: projectId || undefined,
         scene_id: sceneId || undefined,

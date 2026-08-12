@@ -1,5 +1,6 @@
 # Workflow package
 from .ltx_builder import build_ltx_scene_workflow, build_ltx_simple_i2v
+from .ltx_25_builder import build_ltx_25_t2v, build_ltx_25_i2v, build_ltx_25_flf2v
 from .wan_builder import build_wan_flf_workflow, build_wan_three_frame_workflow
 from .lipsync_builder import build_latentsync_workflow, lipsync_available_hint
 from .image_tools import (
@@ -27,6 +28,9 @@ from .registry import (
 __all__ = [
     "build_ltx_scene_workflow",
     "build_ltx_simple_i2v",
+    "build_ltx_25_t2v",
+    "build_ltx_25_i2v",
+    "build_ltx_25_flf2v",
     "build_wan_flf_workflow",
     "build_wan_three_frame_workflow",
     "build_latentsync_workflow",

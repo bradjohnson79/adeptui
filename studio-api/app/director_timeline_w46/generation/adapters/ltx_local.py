@@ -20,12 +20,18 @@ from ..contracts import (
 )
 
 GENERATOR_ID = "ltx-local"
+ALIASES = frozenset({
+    "ltx-local",
+    "ltx-2.5-full",
+    "ltx-2.5-distilled",
+    "ltx-2.5-comfy",
+})
 
 
 def _capabilities() -> VideoGeneratorCapabilities:
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
-        label="LTX 2.3 (Local)",
+        label="LTX 2.5 (Local)",
         executionType="local",
         supportsTextToVideo=True,
         supportsImageToVideo=True,
@@ -37,14 +43,24 @@ def _capabilities() -> VideoGeneratorCapabilities:
         maximumReferenceImages=0,
         maximumReferenceVideos=0,
         maximumReferenceAudio=0,
-        supportedDurations=[5.0, 8.0, 10.0],
-        supportedResolutions=["1280x720", "768x512"],
+        supportedDurations=[5.0, 8.0, 10.0, 15.0, 20.0],
+        supportedResolutions=["1280x720", "768x512", "3840x2160"],
         supportedAspectRatios=["16:9", "9:16"],
+        supportedFps=[24, 30, 48, 50],
         supportsSeed=True,
         supportsNegativePrompt=True,
         supportsCameraControls=False,
+        native_multishot=True,
+        audio_generation=True,
+        auto_duration=True,
+        fast_generation=True,
+        audio={
+            "generation": True,
+            "synchronized": True,
+            "native": True,
+        },
         executable=True,
-        notes="Local Comfy LTX path via studio render_scene jobs.",
+        notes="Local Comfy LTX path via studio render_scene jobs. Supports LTX 2.3 and 2.5 variants.",
     )
 
 
@@ -53,7 +69,22 @@ class LtxLocalAdapter:
     capabilities = _capabilities()
 
     def validate(self, request: TimelineGenerationRequest) -> ValidationResult:
-        return validate_against_capabilities(self.capabilities, request)
+        result = validate_against_capabilities(self.capabilities, request)
+        if not result.ok:
+            return result
+        gen_id = request.generatorId or ""
+        if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
+            errors: list[str] = []
+            from ....setup.diagnostics import verify_component
+            required_components = ["ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"]
+            if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled"):
+                required_components.append("ltx_2_5_audio_vae")
+            missing = [cid for cid in required_components if not verify_component(cid).healthy]
+            if missing:
+                errors.append(f"LTX 2.5 model components not found: {', '.join(missing)}. Use Source Manager to install required models.")
+            if errors:
+                return ValidationResult(ok=False, errors=errors)
+        return result
 
     def submit(self, request: TimelineGenerationRequest) -> NormalizedJobSubmission:
         job_id = str(uuid4())
@@ -131,7 +162,7 @@ class LtxLocalAdapter:
             if not row:
                 return NormalizedJobStatus(
                     internalJobId=job.internalJobId,
-                    generatorId=GENERATOR_ID,
+                    generatorId=job.generatorId,
                     status="failed",
                     errorCode="LTX_JOB_MISSING",
                     errorMessage="LTX queue job not found.",
@@ -141,7 +172,7 @@ class LtxLocalAdapter:
                 internalJobId=job.internalJobId,
                 providerJobId=row.comfy_prompt_id or job.providerJobId,
                 queueJobId=row.id,
-                generatorId=GENERATOR_ID,
+                generatorId=job.generatorId,
                 status=mapped,
                 progress=float(row.progress or 0.0),
                 errorMessage=row.message if mapped == "failed" else None,
@@ -174,7 +205,7 @@ class LtxLocalAdapter:
                 internalJobId=job.internalJobId,
                 providerJobId=status.providerJobId,
                 queueJobId=status.queueJobId,
-                generatorId=GENERATOR_ID,
+                generatorId=job.generatorId,
                 status=status.status,
                 progress=status.progress,
                 apiUsed=False,
@@ -187,7 +218,7 @@ class LtxLocalAdapter:
             internalJobId=job.internalJobId,
             providerJobId=status.providerJobId,
             queueJobId=status.queueJobId,
-            generatorId=GENERATOR_ID,
+            generatorId=job.generatorId,
             status="completed",
             progress=1.0,
             outputAssetIds=list(status.providerMetadata.get("outputAssetIds") or []),

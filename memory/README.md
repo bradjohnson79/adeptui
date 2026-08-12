@@ -61,8 +61,10 @@ Creator message
 ## Fresh Start Reading Order
 
 1. `/memory/README.md` — this file
-2. `/memory/phases/phase-10-11-final.md` — certification summary
-3. `/memory/project/state.md` — current project state
-4. `/memory/infrastructure/beta-server-stability.md` — if working on stability
-5. `/memory/infrastructure/knowledge-cards.md` — if working on Knowledge Cards
-6. Any phase-specific file as needed
+2. `/memory/phases/phase-spatial-map-ers-scene-creator.md` — Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
+3. `/memory/session-2026-08-11.md` — session memory for Spatial Map implementation day
+4. `/memory/phases/phase-10-11-final.md` — Co-Director 2.0 certification summary
+5. `/memory/project/state.md` — current project state
+6. `/memory/infrastructure/beta-server-stability.md` — if working on stability
+7. `/memory/infrastructure/knowledge-cards.md` — if working on Knowledge Cards
+8. Any phase-specific file as needed

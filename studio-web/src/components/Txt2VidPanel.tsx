@@ -400,7 +400,7 @@ export function Txt2VidPanel({
             {[
               ["auto", "Auto"],
               ["minimax-h3", "MiniMax H3 (Default)"],
-              ["ltx", "LTX Video"],
+              ["ltx", "LTX 2.5"],
               ["minimax-h3", "MiniMax H3"],
               ["hunyuan15", "HunyuanVideo 1.5"],
               ["hunyuan13b", "HunyuanVideo 13B"],

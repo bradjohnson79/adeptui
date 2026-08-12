@@ -92,6 +92,34 @@ def ensure_suggested_path(component_id: str) -> Path:
         checkpoints.mkdir(parents=True, exist_ok=True)
         return checkpoints
 
+    if component.id == "ltx_2_5_checkpoint":
+        for folder in ("diffusion_models", "checkpoints"):
+            candidate = models / folder
+            if candidate.is_dir():
+                return candidate
+        diffusion = models / "diffusion_models"
+        diffusion.mkdir(parents=True, exist_ok=True)
+        return diffusion
+
+    if component.id == "ltx_2_5_text_encoder":
+        for folder in ("text_encoders", "clip"):
+            candidate = models / folder
+            if candidate.is_dir():
+                return candidate
+        text_encoders = models / "text_encoders"
+        text_encoders.mkdir(parents=True, exist_ok=True)
+        return text_encoders
+
+    if component.id in ("ltx_2_5_video_vae", "ltx_2_5_audio_vae"):
+        vae = models / "vae"
+        vae.mkdir(parents=True, exist_ok=True)
+        return vae
+
+    if component.id == "ltx_2_5_spatial_upscaler":
+        latent = models / "latent_upscale_models"
+        latent.mkdir(parents=True, exist_ok=True)
+        return latent
+
     if component.id == "wan_models":
         return models
 
@@ -109,7 +137,7 @@ def ensure_suggested_path(component_id: str) -> Path:
 
 def path_selector_mode(component_id: str) -> PathMode:
     component = get_component(component_id)
-    if component.verifier in ("ltx_file", "ic_lora_file"):
+    if component.verifier in ("ltx_file", "ltx_2_5_file", "ic_lora_file"):
         return "file"
     return "directory"
 

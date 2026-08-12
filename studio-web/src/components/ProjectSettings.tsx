@@ -243,7 +243,7 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             >
               {["auto", "ltx", "wan", "fal_seedance", "fal_kling", "fal_veo", "fal_runway"].map((e) => (
                 <option key={e} value={e}>
-                  {e}
+                  {e === "ltx" ? "LTX 2.5" : e === "wan" ? "WAN 2.2" : e === "fal_seedance" ? "Seedance" : e === "fal_kling" ? "Kling" : e === "fal_veo" ? "Veo" : e === "fal_runway" ? "Runway" : e}
                 </option>
               ))}
             </select>

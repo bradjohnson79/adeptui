@@ -366,7 +366,7 @@ export function AdvancedPanel({ project, onChange }: { project: Project; onChang
               <option value="auto">Auto Select</option>
             </optgroup>
             <optgroup label="Local (ComfyUI)">
-              <option value="ltx">LTX 2.3</option>
+              <option value="ltx">LTX 2.5</option>
               <option value="wan">WAN 2.2</option>
             </optgroup>
             <optgroup label="Hosted AI Providers (Kie.ai · WaveSpeed.ai · fal.ai)">

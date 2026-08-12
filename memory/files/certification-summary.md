@@ -18,6 +18,7 @@
 | BS | Beta Stability | — | GO | 2026-08-09 |
 | CK | Knowledge Cards | 9 | GO | 2026-08-09 |
 | HB | Hosted Beta Infrastructure | 79 (Python) + 24 (Playwright) | GO | 2026-08-10 |
+| SM | Spatial Map + Atlas + ERS + Scene Creator | Independent verifier VERIFIED; Playwright DEFERRED | READY FOR MANUAL BETA | 2026-08-11 |
 
 ## Test Counts by Suite
 

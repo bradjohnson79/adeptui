@@ -43,6 +43,36 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         12000 * MB, 12000 * MB, ("comfyui",), "ltx_file", "path_link",
     ),
     ComponentDefinition(
+        "ltx_2_5_checkpoint", "LTX 2.5 Video Checkpoint",
+        "LTX 2.5 distilled transformer (ComfyUI int8) - required for LTX 2.5 generation", False,
+        25000 * MB, 25000 * MB, ("comfyui",), "ltx_2_5_file", "path_link",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "ltx_2_5_text_encoder", "LTX 2.5 Text Encoder (Gemma 4)",
+        "Gemma 4 12B text encoder with LTX 2.5 projection - required for LTX 2.5 generation", False,
+        12000 * MB, 12000 * MB, ("comfyui",), "text_encoder_file", "path_link",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "ltx_2_5_video_vae", "LTX 2.5 Video VAE",
+        "LTX 2.5 video VAE decoder - required for LTX 2.5 generation", False,
+        2000 * MB, 2000 * MB, ("comfyui",), "vae_file", "path_link",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "ltx_2_5_audio_vae", "LTX 2.5 Audio VAE",
+        "LTX 2.5 audio VAE - required for synchronized audio generation", False,
+        1000 * MB, 1000 * MB, ("comfyui", "ltx_2_5_checkpoint", "ltx_2_5_text_encoder", "ltx_2_5_video_vae"), "vae_file", "path_link",
+        category="Video Models",
+    ),
+    ComponentDefinition(
+        "ltx_2_5_spatial_upscaler", "LTX 2.5 Spatial Upscaler",
+        "LTX 2.5 spatial latent upscaler for 4K output - optional", False,
+        1000 * MB, 1000 * MB, ("comfyui", "ltx_2_5_checkpoint"), "latent_upscale_model_file", "path_link",
+        category="Video Models",
+    ),
+    ComponentDefinition(
         "ollama", "Ollama", "Local LLM host for the Adept assistant.", False,
         0, 4000 * MB, (), "ollama_service", "manual",
     ),

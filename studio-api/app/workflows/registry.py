@@ -12,6 +12,7 @@ from .lipsync_builder import build_latentsync_workflow
 from .hunyuan13b_builder import build_hunyuan13b_i2v, build_hunyuan13b_t2v
 from .hunyuan15_builder import build_hunyuan15_i2v, build_hunyuan15_t2v
 from .ltx_builder import build_ltx_scene_workflow, build_ltx_simple_i2v
+from .ltx_25_builder import build_ltx_25_t2v, build_ltx_25_i2v, build_ltx_25_flf2v
 from .ltx_ingredients_compiler import compile_ingredients_workflow
 from .wan_builder import build_wan_flf_workflow, build_wan_three_frame_workflow
 
