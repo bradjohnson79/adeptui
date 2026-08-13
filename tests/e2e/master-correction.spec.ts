@@ -635,12 +635,23 @@ test.describe.serial("Workstream H — Master Correction Playwright Certificatio
     // Type text into the editor and apply formatting.
     const editor = page.getByTestId("sw-inline-editor").locator(".ProseMirror").first();
     await expect(editor).toBeVisible({ timeout: 10_000 });
+
+    // Deterministically wait for the async hydration to complete. The backend's
+    // get_or_create_document seeds a default "INT. LOCATION - DAY" scene heading;
+    // waiting for that text to appear in the editor proves setContent() finished,
+    // so the subsequent Ctrl+A -> Delete reliably clears the default content
+    // (instead of being a no-op against an un-hydrated ProseMirror, which is
+    // the root cause of the retry flake).
+    await expect(editor).toContainText(/INT\. LOCATION/i, { timeout: 15_000 });
+
+    // Now clear the default content deterministically.
     await editor.click();
-    // Clear any default/template content so our assertions target only what we type.
     await page.keyboard.press("Control+a");
     await page.waitForTimeout(100);
     await page.keyboard.press("Delete");
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(200);
+    // Confirm the editor is now empty (no leftover default heading).
+    await expect(editor).not.toContainText(/INT\. LOCATION/i, { timeout: 5_000 });
 
     // Type a paragraph, then select it and apply inline marks.
     await page.keyboard.type("MC-D bold paragraph text");

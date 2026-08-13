@@ -6,6 +6,25 @@
  * backend fields (created_at, characterId, sceneId, classification).
  */
 import { api } from "../../../api";
+import { apiUrl } from "../../../runtime/apiBase";
+
+/**
+ * Resolve an asset URL string against the configured API_BASE.
+ *
+ * - Absolute URLs (http://, https://, protocol-relative //) and data: URIs are
+ *   returned unchanged.
+ * - Relative paths starting with "/" are routed through apiUrl() so they pick
+ *   up API_BASE on hosted (Vercel) builds and stay relative in local dev (where
+ *   Vite proxies /api → Studio API).
+ * - Other strings (e.g. already-resolved absolute URLs without a leading slash)
+ *   are returned as-is.
+ */
+export function resolveAssetUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  if (/^(https?:)?\/\//i.test(url) || /^data:/i.test(url)) return url;
+  if (url.startsWith("/")) return apiUrl(url);
+  return url;
+}
 
 export type LibraryAsset = {
   id: string;
@@ -104,8 +123,9 @@ export function matchesFilter(asset: LibraryAsset, filter: AssetFilterId): boole
 }
 
 export function getCardPreviewUrl(asset: LibraryAsset): string | undefined {
-  if (asset.thumb_url) return asset.thumb_url;
-  if (asset.preview_url || asset.previewUrl) return asset.preview_url || asset.previewUrl;
+  if (asset.thumb_url) return resolveAssetUrl(asset.thumb_url);
+  const preview = asset.preview_url || asset.previewUrl;
+  if (preview) return resolveAssetUrl(preview);
   if (isImageAsset(asset)) return api.assetUrl(asset.id);
   return undefined;
 }
