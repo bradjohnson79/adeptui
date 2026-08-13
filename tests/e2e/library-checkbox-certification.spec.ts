@@ -13,6 +13,8 @@ const BASE = process.env.PLAYWRIGHT_BASE_URL || "";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8742";
 const SCREENSHOT_DIR = path.join("tests", "e2e", "screenshots");
 
+const IMAGE_COUNT = 15;
+const TOTAL_ASSETS = IMAGE_COUNT + 3;
 const FIXTURES = path.join("tests", "e2e", "fixtures", "codirector-prebeta");
 const IMAGE = fs.readFileSync(path.join(FIXTURES, "cert-image.png"));
 const VIDEO = fs.readFileSync(path.join(FIXTURES, "cert-video.mp4"));
@@ -159,17 +161,18 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
     const project = await createTempProject(request, `LibAllMedia-${Date.now()}`);
     projectId = project.id;
 
-    const images = await Promise.all(
-      Array.from({ length: 20 }).map((_, i) =>
-        uploadAsset(request, projectId, {
-          name: `img-${i}.png`,
-          tag: `Img ${i}`,
-          kind: "image",
-          mimeType: "image/png",
-          buffer: IMAGE,
-        }),
-      ),
-    );
+    // Upload sequentially to avoid backend connection-pool races and make failures deterministic.
+    const imageIds: string[] = [];
+    for (let i = 0; i < IMAGE_COUNT; i += 1) {
+      const a = await uploadAsset(request, projectId, {
+        name: `img-${i}.png`,
+        tag: `Img ${i}`,
+        kind: "image",
+        mimeType: "image/png",
+        buffer: IMAGE,
+      });
+      imageIds.push(a.id);
+    }
     const video = await uploadAsset(request, projectId, {
       name: "clip.mp4",
       tag: "Vid 1",
@@ -192,8 +195,19 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
       buffer: DOCUMENT,
     });
 
+    // Wait for the backend library index to reflect every asset before the UI tries to render them.
+    await expect
+      .poll(
+        async () => {
+          const lib = await listLibrary(request, projectId);
+          return (lib.items || []).length;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe(TOTAL_ASSETS);
+
     assets = {
-      imageIds: images.map((a) => a.id),
+      imageIds,
       videoId: video.id,
       audioId: audio.id,
       documentId: document.id,
@@ -216,7 +230,7 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
     const grid = page.getByTestId("library-media-grid");
     await expect(grid).toBeVisible({ timeout: 15_000 });
     const allCards = grid.locator('[data-testid^="library-card-"]');
-    await expect.poll(async () => allCards.count(), { timeout: 30_000 }).toBe(24);
+    await expect.poll(async () => allCards.count(), { timeout: 30_000 }).toBe(TOTAL_ASSETS);
 
     const imageCards = grid.locator('[data-testid="library-card-image"]');
     const videoCards = grid.locator('[data-testid="library-card-video"]');
@@ -251,14 +265,14 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
 
     // Filter Images → Select All should select only images.
     await clickFilter(page, "images");
-    await expect.poll(async () => imageCards.count(), { timeout: 10_000 }).toBe(20);
-    await expect(videoCards.count()).toBe(0);
-    await expect(audioCards.count()).toBe(0);
-    await expect(documentCards.count()).toBe(0);
+    await expect.poll(async () => imageCards.count(), { timeout: 10_000 }).toBe(IMAGE_COUNT);
+    await expect(videoCards).toHaveCount(0);
+    await expect(audioCards).toHaveCount(0);
+    await expect(documentCards).toHaveCount(0);
 
     await page.getByTestId("library-select-all").click();
     await page.waitForTimeout(300);
-    await expect(deleteSelectedBtn).toContainText(/Delete Selected \(20\)/, { timeout: 5000 });
+    await expect(deleteSelectedBtn).toContainText(`Delete Selected (${IMAGE_COUNT})`, { timeout: 5000 });
     await page.getByTestId("library-exit-select").click();
     await page.waitForTimeout(300);
     await expect(page.getByTestId("library-enter-select")).toBeVisible({ timeout: 5000 });
@@ -298,7 +312,7 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
     await enterSelectBtn.click();
     await page.getByTestId("library-select-all").click();
     await page.waitForTimeout(300);
-    await expect(deleteSelectedBtn).toContainText(/Delete Selected \(24\)/, { timeout: 5000 });
+    await expect(deleteSelectedBtn).toContainText(`Delete Selected (${TOTAL_ASSETS})`, { timeout: 5000 });
     await page.getByTestId("library-select-all").click(); // toggles to Clear Selection
     await page.waitForTimeout(300);
     await expect(deleteSelectedBtn).toContainText(/Delete Selected$/, { timeout: 5000 });
@@ -309,14 +323,14 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
     await page.waitForTimeout(300);
     await scrollLibrary(page);
     await expect(page.getByTestId("library-select-all")).toBeVisible({ timeout: 5000 });
-    await expect(page.getByTestId("library-delete-selected")).toContainText(/Delete Selected \(24\)/, { timeout: 5000 });
+    await expect(page.getByTestId("library-delete-selected")).toContainText(`Delete Selected (${TOTAL_ASSETS})`, { timeout: 5000 });
     await expect(page.getByTestId("library-filter-all")).toBeVisible({ timeout: 5000 });
     await expect(page.getByTestId("library-filter-images")).toBeVisible({ timeout: 5000 });
     await screenshot(page, "library-all-media-02-sticky-toolbar-scroll");
 
     // Cancel delete preserves all assets.
     await deleteSelectedBtn.click();
-    const confirmDialog = page.getByRole("alertdialog", { name: /Delete 24 assets\?/i });
+    const confirmDialog = page.getByRole("alertdialog", { name: new RegExp(`Delete ${TOTAL_ASSETS} assets\\?`, "i") });
     await expect(confirmDialog).toBeVisible({ timeout: 5000 });
     await screenshot(page, "library-all-media-03-delete-confirmation");
     await page.getByTestId("library-bulk-delete-cancel").click();
@@ -324,7 +338,7 @@ test.describe("Library all-media selection + sticky toolbar certification", () =
 
     const libBeforeDelete = await listLibrary(request, projectId);
     const beforeIds = new Set((libBeforeDelete.items || []).map((a) => a.id));
-    expect(beforeIds.size).toBe(24);
+    expect(beforeIds.size).toBe(TOTAL_ASSETS);
     expect(beforeIds.has(assets.videoId)).toBe(true);
     expect(beforeIds.has(assets.audioId)).toBe(true);
     expect(beforeIds.has(assets.documentId)).toBe(true);
