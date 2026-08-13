@@ -233,6 +233,18 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         category="Still Image Models",
     ),
     ComponentDefinition(
+        "illustrious_local",
+        "Illustrious XL 1.0 (Anime)",
+        "Local Illustrious XL v1.0 SDXL anime/animation/stylized/realistic-anime image engine.",
+        False,
+        9000 * MB,
+        12000 * MB,
+        ("comfyui",),
+        "illustrious_files",
+        "path_link",
+        category="Still Image Models",
+    ),
+    ComponentDefinition(
         "sd35_large_local",
         "Stable Diffusion 3.5 Large",
         "Local SD 3.5 Large still-image stack for modern prompt adherence and composition work.",

@@ -67,6 +67,38 @@ def _detect_family(roots: list[Path], patterns: tuple[str, ...]) -> dict[str, An
     }
 
 
+def _detect_illustrious(roots: list[Path]) -> dict[str, Any]:
+    """Illustrious XL (SDXL anime engine) detection.
+
+    Detects the configured ``imagegen_illustrious_checkpoint`` filename anywhere
+    under the model roots, plus any file whose name contains ``illustrious``.
+    """
+    files: list[str] = []
+    for root in roots:
+        files.extend(_scan_files(root, ("illustrious",)))
+    try:
+        from ..config import settings
+
+        configured = str(getattr(settings, "imagegen_illustrious_checkpoint", "") or "").strip()
+    except Exception:
+        configured = ""
+    if configured:
+        target = configured.lower()
+        for root in roots:
+            for dirpath, _dirnames, filenames in os.walk(root):
+                if Path(dirpath).name.lower() in {".git", "node_modules", "__pycache__"}:
+                    continue
+                for name in filenames:
+                    if name.lower() == target:
+                        files.append(str(Path(dirpath) / name))
+    uniq = sorted(set(files))
+    return {
+        "installed": len(uniq) > 0,
+        "fileCount": len(uniq),
+        "sampleFiles": uniq[:12],
+    }
+
+
 def _detect_krea2(roots: list[Path]) -> dict[str, Any]:
     """Krea 2 detection — tight filename patterns plus the official HF layout.
 
@@ -118,6 +150,7 @@ def discover_modern_image_models() -> dict[str, Any]:
     krea2 = _detect_krea2(roots)
     # Qwen text encoder used by Z-Image is not Qwen Image family
     checkpoint = _detect_family(roots, ("sdxl", "sd3", "hidream", ".safetensors"))
+    illustrious = _detect_illustrious(roots)
 
     imagen_creds = bool(
         os.environ.get("GOOGLE_API_KEY")
@@ -181,6 +214,18 @@ def discover_modern_image_models() -> dict[str, Any]:
             **checkpoint,
             "statusHint": "Deferred",
             "reason": "Legacy generic checkpoint adapter — prefer family keys (flux.*/qwen.*)",
+        },
+        "illustrious": {
+            "modelFamily": "illustrious",
+            "variants": ["xl-v1"],
+            **illustrious,
+            "statusHint": "Draft" if illustrious["installed"] else "Blocked",
+            "reason": (
+                "Illustrious XL checkpoint detected"
+                if illustrious["installed"]
+                else "Illustrious XL checkpoint not found in models/checkpoints"
+            ),
+            "category": "Anime / Animation",
         },
     }
 

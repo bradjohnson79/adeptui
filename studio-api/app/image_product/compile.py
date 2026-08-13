@@ -214,12 +214,25 @@ def compile_image_request(
     else:
         prompt_info["acceptedPrompt"] = prompt_info["originalPrompt"]
 
+    # Resolve a creator-facing visual_style for data-driven style→engine routing.
+    # Sources (in priority order): creativeContext.visualStyle,
+    # creativeContext.style_layers.user, body.style.styleKey, body.style.key.
+    _vs = (
+        creative_extras.get("visualStyle")
+        or (creative_extras.get("style_layers") or {}).get("user")
+        or (body.get("style") or {}).get("styleKey")
+        or (body.get("style") or {}).get("key")
+        or ""
+    )
+    visual_style_for_routing = str(_vs or "").strip() or None
+
     recommendation = recommend_image_family(
         prompt=prompt_info["acceptedPrompt"],
         purpose=purpose,
         operation=operation,
         model_family_preference=body.get("modelFamilyPreference") or body.get("model"),
         quality=str(body.get("quality") or "standard"),
+        style=visual_style_for_routing,
     )
     family = recommendation["executionFamily"]
 

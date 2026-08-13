@@ -43,6 +43,11 @@ class VisualStyleProfile:
     cameraLanguage: str
     negativeConstraints: tuple[str, ...]
     qwen2512PromptRules: tuple[str, ...]
+    # Data-driven style→engine routing: when this style is selected, prefer the
+    # named model family for generation (e.g. "illustrious" for anime). Empty
+    # means "no style-specific preference — use the default recommender".
+    preferredFamily: str = ""
+    styleTags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -58,6 +63,8 @@ class VisualStyleProfile:
             "cameraLanguage": self.cameraLanguage,
             "negativeConstraints": list(self.negativeConstraints),
             "qwen2512PromptRules": list(self.qwen2512PromptRules),
+            "preferredFamily": self.preferredFamily,
+            "styleTags": list(self.styleTags),
         }
 
 
@@ -107,6 +114,8 @@ STYLE_REGISTRY: dict[str, VisualStyleProfile] = {
             "Explicitly say 'same character, anime rendering only' or equivalent to prevent style drift.",
             "Mention preserved silhouette anchors before anime flourishes such as linework, cel shading, or speed-line energy.",
         ),
+        preferredFamily="illustrious",
+        styleTags=("anime", "animation", "animated", "stylized_anime"),
     ),
     "realistic_anime": VisualStyleProfile(
         key="realistic_anime",
@@ -131,6 +140,8 @@ STYLE_REGISTRY: dict[str, VisualStyleProfile] = {
             "Describe the prompt as anime-rooted identity with realistic shading, not as a new person photographed in costume.",
             "Call out preserved face geometry and canonical palette locks before adding realistic skin or material detail.",
         ),
+        preferredFamily="illustrious",
+        styleTags=("realistic_anime", "cinematic_anime", "photorealistic_anime_hybrid"),
     ),
     "live_action": VisualStyleProfile(
         key="live_action",
@@ -322,6 +333,29 @@ def get_profile(key: str) -> VisualStyleProfile:
 
 def list_profiles() -> tuple[VisualStyleProfile, ...]:
     return tuple(STYLE_REGISTRY[key] for key in REQUIRED_STYLE_KEYS)
+
+
+def preferred_family_for_style(visual_style: str | None) -> str:
+    """Return the registry-declared preferred model family for a visual style.
+
+    Resolves a creator-facing ``visual_style`` (registry key or display name)
+    to its ``preferredFamily``. Returns "" when the style has no
+    style-specific preference (non-anime styles), so callers fall back to
+    the default recommender. Never returns a non-executable family — callers
+    must still confirm Certified executability before routing.
+    """
+    if not visual_style:
+        return ""
+    key = visual_style.strip()
+    if not key:
+        return ""
+    if key in STYLE_REGISTRY:
+        return STYLE_REGISTRY[key].preferredFamily
+    lowered = key.lower()
+    for k in REQUIRED_STYLE_KEYS:
+        if STYLE_REGISTRY[k].displayName.lower() == lowered:
+            return STYLE_REGISTRY[k].preferredFamily
+    return ""
 
 
 def registry_as_dict() -> list[dict[str, Any]]:

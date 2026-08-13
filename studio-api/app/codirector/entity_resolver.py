@@ -403,6 +403,33 @@ def compile_shot_prompt(
         prompt_parts.append(shot.additional_instructions)
     prompt = ". ".join(part for part in prompt_parts if part).strip()
 
+    # Style-aware model selection for scene shots. Scene shots frequently carry
+    # approved casting / ERS directional reference images — when a reference is
+    # attached we keep the reference-capable default (zimage) so reference-
+    # conditioned generation is never downgraded to a text-only engine
+    # (Reference Law). When no reference is attached, consult the style→engine
+    # recommender using the layered visual style (project > environment) so
+    # anime/animation scenes prefer Illustrious XL while photoreal scenes keep
+    # the realism engine.
+    routing_style = project_style or environment_style or (character_styles[0] if character_styles else "")
+    has_reference = bool(reference_image_ids)
+    if has_reference:
+        scene_model_family = "zimage"
+    else:
+        try:
+            from ..image_product.recommend import recommend_image_family
+
+            rec = recommend_image_family(
+                prompt=prompt,
+                purpose="scene_shot",
+                operation="image.generate",
+                style=routing_style or None,
+            )
+            scene_model_family = rec.get("executionFamily") or "zimage"
+        except Exception:
+            scene_model_family = "zimage"
+    scene_workflow_key = f"{scene_model_family}.txt2img"
+
     creative_context: dict[str, Any] = {
         "objective": "scene_shot",
         "shot_index": shot.index,
@@ -421,7 +448,7 @@ def compile_shot_prompt(
             "characters": character_styles,
             "user": user_style,
         },
-        "workflowKey": "zimage.txt2img",
+        "workflowKey": scene_workflow_key,
     }
 
     body: dict[str, Any] = {
@@ -430,7 +457,7 @@ def compile_shot_prompt(
         "width": 1280,
         "height": 720,
         "tag": f"scene_shot_{shot.index}",
-        "modelFamilyPreference": "zimage",
+        "modelFamilyPreference": scene_model_family,
         "purpose": "scene_shot",
         "aspectRatio": "16:9",
         "batchCount": 1,

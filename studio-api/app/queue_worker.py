@@ -2149,6 +2149,8 @@ class JobQueue:
             return settings.imagegen_hidream_checkpoint
         if mid in ("sd35", "sd3.5"):
             return settings.imagegen_sd35_checkpoint
+        if mid == "illustrious":
+            return settings.imagegen_illustrious_checkpoint
         if mid == "custom":
             return settings.imagegen_custom_checkpoint or settings.imagegen_flux_checkpoint
         if mid in ("zimage", "auto"):
@@ -2702,6 +2704,13 @@ class JobQueue:
             ckpt = self._checkpoint_for_model(model, custom_ckpt)
             if not intent.enginePreference or intent.enginePreference == "zimage":
                 intent.enginePreference = "checkpoint"
+            # Illustrious XL uses its own smoke-validated quality defaults (steps/cfg)
+            # rather than the generic imagegen defaults — anime/stylized rendering.
+            if model == "illustrious":
+                steps = int(params.get("steps") or settings.imagegen_illustrious_steps)
+                cfg = float(
+                    params.get("cfg") if params.get("cfg") is not None else settings.imagegen_illustrious_cfg
+                )
 
         # Resolve / revalidate pinned contract — never silently switch certified version
         allow_draft = bool(params.get("allow_draft_cert_harness"))

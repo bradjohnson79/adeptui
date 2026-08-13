@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     imagegen_hidream_checkpoint: str = "hidream_i1_dev_fp8.safetensors"
     imagegen_sd35_checkpoint: str = "sd3.5_large.safetensors"
     imagegen_custom_checkpoint: str = ""
+    # Illustrious XL v1.0 — SDXL anime/animation/stylized/realistic-anime engine.
+    imagegen_illustrious_checkpoint: str = "Illustrious-XL-v1.0.safetensors"
+    imagegen_illustrious_steps: int = 28
+    imagegen_illustrious_cfg: float = 5.0
     imagegen_default_steps: int = 20
     imagegen_default_cfg: float = 3.5
 

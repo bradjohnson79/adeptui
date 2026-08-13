@@ -53,6 +53,7 @@ def recommend(body: dict[str, Any]) -> dict[str, Any]:
         operation=str(body.get("operation") or "image.generate"),
         model_family_preference=body.get("modelFamilyPreference") or body.get("model"),
         quality=str(body.get("quality") or "standard"),
+        style=body.get("style") or body.get("visualStyle"),
     )
 
 

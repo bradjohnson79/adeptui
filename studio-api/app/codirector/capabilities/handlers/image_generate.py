@@ -68,6 +68,29 @@ def handle(
     if attachment_asset_ids:
         reference_asset_id = attachment_asset_ids[0]
 
+    # Style-aware model selection. When a reference is attached we keep the
+    # reference-capable default (zimage) so reference-conditioned generation is
+    # never downgraded to a text-only engine (Reference Law). When no reference
+    # is attached, consult the style→engine recommender so anime/animation
+    # styles prefer Illustrious XL, while photoreal/portrait keep realism.
+    if reference_asset_id:
+        model_family = "zimage"
+        workflow_key = "zimage.txt2img"
+    else:
+        try:
+            from ....image_product.recommend import recommend_image_family
+
+            rec = recommend_image_family(
+                prompt=prompt,
+                purpose="codirector_image_generate",
+                operation="image.generate",
+                style=visual_style or None,
+            )
+            model_family = rec.get("executionFamily") or "zimage"
+        except Exception:
+            model_family = "zimage"
+        workflow_key = f"{model_family}.txt2img"
+
     # Build the generation request.
     body: dict[str, Any] = {
         "prompt": prompt,
@@ -75,7 +98,7 @@ def handle(
         "width": 1280,
         "height": 720,
         "tag": f"codirector_image_generate_{execution_id[:8]}",
-        "modelFamilyPreference": "zimage",
+        "modelFamilyPreference": model_family,
         "purpose": "codirector_image_generate",
         "aspectRatio": aspect_ratio,
         "batchCount": max(1, min(count, 8)),
@@ -84,7 +107,7 @@ def handle(
             "executionId": execution_id,
             "characterId": resolved_character_id or "",
             "characterName": resolved_character_name or "",
-            "workflowKey": "zimage.txt2img",
+            "workflowKey": workflow_key,
         },
     }
 

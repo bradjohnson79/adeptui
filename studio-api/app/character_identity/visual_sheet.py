@@ -264,10 +264,51 @@ def _candidate_seed(character_id: str, index: int) -> int:
     return int(digest[:8], 16) % (2**31)
 
 
+def _candidate_family_executable(family: str) -> bool:
+    """True when the family's txt2img workflow is Certified (production-executable)."""
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        wf = get_workflow(f"{family}.txt2img")
+        return bool(wf and wf.status == "Certified")
+    except Exception:
+        return False
+
+
+def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
+    """Distinct Certified txt2img families for no-reference candidates.
+
+    Anime/realistic-anime styles prefer Illustrious XL first (when Certified),
+    then fall back to the default Qwen-2512 / Z-Image order. Non-anime styles
+    keep the default order. Only Certified-executable families are returned so
+    production paths never route to a non-executable engine.
+    """
+    style_preferred = ""
+    try:
+        from ..style_intelligence.registry import preferred_family_for_style
+
+        style_preferred = (preferred_family_for_style(visual_style) or "").strip().lower()
+    except Exception:
+        style_preferred = ""
+
+    ordered: list[str] = []
+    if style_preferred and _candidate_family_executable(style_preferred):
+        ordered.append(style_preferred)
+    for fam in NO_REFERENCE_TXT2IMG_FAMILIES:
+        if fam not in ordered and _candidate_family_executable(fam):
+            ordered.append(fam)
+    if not ordered:
+        # No Certified family resolved — keep the declarative order and let the
+        # resolver/compile layer apply its Certified fallback honestly.
+        ordered = [style_preferred] + [f for f in NO_REFERENCE_TXT2IMG_FAMILIES if f != style_preferred]
+    return ordered
+
+
 def _build_candidate_routing_plan(
     *,
     candidate_count: int,
     reference_asset_id: str | None,
+    visual_style: str | None = None,
 ) -> list[dict[str, Any]]:
     """Per-candidate routing plan drawn from the Certified READY registry.
 
@@ -275,10 +316,13 @@ def _build_candidate_routing_plan(
     workflow (``zimage.ref_edit``) so the reference pixels participate in
     conditioning. Only one distinct reference-capable Certified model exists
     today, so ``referenceFidelityMode`` is recorded as ``limited`` honestly.
+    Illustrious (text-only) is intentionally excluded from reference-locked
+    candidates — never silently downgrade reference-conditioned generation to
+    text-only.
 
     No-reference: each distinct Certified txt2img family is used once before any
-    reuse; remaining slots reuse a family with a different seed. We never
-    fabricate distinctness.
+    reuse; remaining slots reuse a family with a different seed. Anime/realistic-
+    anime styles prefer Illustrious XL first. We never fabricate distinctness.
     """
     plan: list[dict[str, Any]] = []
     if reference_asset_id:
@@ -295,7 +339,7 @@ def _build_candidate_routing_plan(
                 }
             )
         return plan
-    distinct = list(NO_REFERENCE_TXT2IMG_FAMILIES)
+    distinct = _no_reference_families_for_style(visual_style)
     for i in range(candidate_count):
         fam = distinct[i % len(distinct)]
         plan.append(
@@ -536,6 +580,7 @@ def start_visual_sheet_generation(
         routing_plan = _build_candidate_routing_plan(
             candidate_count=candidate_count,
             reference_asset_id=reference_asset_id,
+            visual_style=resolved_style_key,
         )
         reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []

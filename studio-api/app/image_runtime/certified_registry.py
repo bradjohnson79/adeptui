@@ -66,6 +66,10 @@ class ImageWorkflow:
     fingerprints: dict[str, Any] = field(default_factory=dict)
     capabilities: dict[str, Any] = field(default_factory=dict)
     provenance_policy: dict[str, Any] = field(default_factory=dict)
+    # Optional declarative style tags used by data-driven style→engine routing
+    # (e.g. ["anime","stylized_anime","realistic_anime"]). Consulted by
+    # recommend_image_family / visual_sheet candidate routing.
+    style_tags: tuple[str, ...] = ()
     certification_record_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -101,6 +105,7 @@ class ImageWorkflow:
             "fingerprints": dict(self.fingerprints),
             "capabilities": dict(self.capabilities),
             "provenancePolicy": dict(self.provenance_policy),
+            "styleTags": list(self.style_tags),
             "certificationRecordId": self.certification_record_id,
         }
 
@@ -144,6 +149,7 @@ def _parse_entry(raw: dict[str, Any]) -> ImageWorkflow:
         fingerprints=dict(raw.get("fingerprints") or {}),
         capabilities=dict(raw.get("capabilities") or {}),
         provenance_policy=dict(raw.get("provenancePolicy") or raw.get("provenance_policy") or {}),
+        style_tags=tuple(raw.get("styleTags") or raw.get("style_tags") or ()),
         certification_record_id=raw.get("certificationRecordId") or raw.get("certification_record_id"),
     )
 
@@ -192,6 +198,27 @@ def family_keys() -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for w in load_registry():
         out.setdefault(w.model_family, []).append(w.workflow_key)
+    return out
+
+
+def certified_families_for_style(style: str | None) -> list[str]:
+    """Return Certified model families whose styleTags include ``style``.
+
+    Used by data-driven style→engine routing (recommend_image_family,
+    visual_sheet candidate routing). Only Certified (executable) families
+    are returned so production paths never route to a non-executable engine.
+    Style matching is case-insensitive and normalizes ``-``/space to ``_``.
+    """
+    if not style:
+        return []
+    norm = style.strip().lower().replace("-", "_").replace(" ", "_")
+    out: list[str] = []
+    for w in load_registry():
+        if w.status != "Certified":
+            continue
+        tags = [str(t).strip().lower().replace("-", "_").replace(" ", "_") for t in w.style_tags]
+        if norm in tags and w.model_family not in out:
+            out.append(w.model_family)
     return out
 
 

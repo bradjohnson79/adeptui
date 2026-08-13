@@ -105,6 +105,27 @@ BUILTIN_PRESETS: list[dict[str, Any]] = [
         "promptTemplate": "Matte painting, epic environment, {subject}",
         "defaultReferenceAssetTypes": ["environment", "lighting", "palette"],
     },
+    {
+        "presetId": "builtin-realistic-anime",
+        "name": "Realistic Anime",
+        "builtin": True,
+        "preferredModelFamily": "illustrious",
+        "aspectRatio": "16:9",
+        "qualityPreset": "high",
+        "resolution": "1080p",
+        "guidance": 5.0,
+        "promptTemplate": (
+            "Realistic anime illustration of {subject}. Anime character identity and "
+            "proportions with clean stylized line work, large expressive eyes, and "
+            "defined anime silhouette. Cinematic materials: believable fabrics, metal, "
+            "skin, and hair with realistic light response and soft falloff. Realistic "
+            "lighting with motivated key light, atmospheric depth, and readable contrast. "
+            "High environmental integration with grounded perspective and cinematic lens "
+            "depth. Clean professional rendering, high detail, no noise. The character "
+            "remains visibly anime/stylized — not photoreal, not a live-action recast."
+        ),
+        "defaultReferenceAssetTypes": ["character", "style"],
+    },
 ]
 
 

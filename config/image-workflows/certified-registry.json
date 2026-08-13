@@ -1270,6 +1270,107 @@
       "certificationRecordId": null
     },
     {
+      "workflowId": "IMG-ILLUSTRIOUS-TXT2IMG-001",
+      "workflowKey": "illustrious.txt2img",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Generation",
+      "status": "Certified",
+      "modelFamily": "illustrious",
+      "modelVariant": "xl-v1",
+      "engine": "checkpoint",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_txt2img_workflow",
+      "builderPath": "app.imagegen_workflows:build_txt2img_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "txt2img"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "CheckpointLoaderSimple",
+        "CLIPTextEncode",
+        "KSampler",
+        "EmptyLatentImage",
+        "VAEDecode"
+      ],
+      "requiredModels": [
+        "illustrious_checkpoint"
+      ],
+      "requiredInputs": [
+        "prompt"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": false,
+        "supportsEditing": false,
+        "supportsControlNet": false,
+        "supportsLoRA": true,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": true,
+        "supportsBatch": true
+      },
+      "styleTags": [
+        "anime",
+        "animation",
+        "animated",
+        "stylized_anime",
+        "realistic_anime",
+        "cinematic_anime"
+      ],
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "txt2img",
+          "image.generate"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "SDXL anime engine (OnomaAIResearch/Illustrious-XL-v1.0). Text-to-image only — does NOT consume reference pixels; reference-locked Character Creator candidates must use a Certified reference-capable workflow (zimage.ref_edit). Promoted to Certified only after live ComfyUI generation evidence."
+      ],
+      "vramProfile": {
+        "minimumGb": 8,
+        "recommendedGb": 12,
+        "safeConcurrency": 1,
+        "state": "UNKNOWN"
+      },
+      "fingerprints": {
+        "graphHash": null,
+        "builderHash": "sha256:a6f805259d93ecb7d2711e3f0312d3fa8f20c6349680705c5d0693a1dc586cba",
+        "nodeInventoryHash": "sha256:4839c9c7bcf599c479e2206e793abd1e423d57956a1388b9b370ff10bb8915d4",
+        "modelInventoryHash": "sha256:b8a825feeda83ba38460a355abb46dce14439a148c8d0e8e9039a06d6db80f5b"
+      },
+      "certificationRecordId": "CERT-IMG-ILLUSTRIOUS-TXT2IMG-001-20260813-001"
+    },
+    {
       "workflowId": "IMG-QWEN-TXT2IMG-001",
       "workflowKey": "qwen.txt2img",
       "workflowVersion": "1.0.0",

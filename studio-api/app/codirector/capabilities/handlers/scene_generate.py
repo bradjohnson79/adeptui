@@ -116,6 +116,25 @@ def handle(
         if visual_style and isinstance(body.get("creativeContext"), dict):
             style_layers = body["creativeContext"].setdefault("style_layers", {})
             style_layers["user"] = visual_style
+            # Re-resolve the model family when the user style is anime/animation
+            # AND no reference is attached (Reference Law: reference-conditioned
+            # shots keep the reference-capable zimage engine). This lets the
+            # creator's explicit visual_style drive style→engine routing.
+            if not body.get("referenceImage") and not body.get("reference_image"):
+                try:
+                    from ....image_product.recommend import recommend_image_family
+
+                    rec = recommend_image_family(
+                        prompt=str(body.get("prompt") or ""),
+                        purpose="scene_shot",
+                        operation="image.generate",
+                        style=visual_style or None,
+                    )
+                    fam = rec.get("executionFamily") or "zimage"
+                    body["modelFamilyPreference"] = fam
+                    body["creativeContext"]["workflowKey"] = f"{fam}.txt2img"
+                except Exception:
+                    pass
         body["tag"] = f"codirector_scene_{execution_id[:8]}_shot{resolved.index + 1}"
         body["creativeContext"]["executionId"] = execution_id
         body["creativeContext"]["ersPackageId"] = ers_package_id or ""

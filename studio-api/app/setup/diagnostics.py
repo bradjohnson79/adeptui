@@ -424,6 +424,28 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    if component.verifier == "illustrious_files":
+        name = settings.imagegen_illustrious_checkpoint
+        found = _candidate_file(location, name, ("checkpoints",))
+        if found and os.access(found, os.R_OK):
+            return Verification(
+                True,
+                False,
+                None,
+                f"Illustrious XL checkpoint ({name}) is readable.",
+                location,
+            )
+        return Verification(
+            False,
+            found is None,
+            "required_models_missing",
+            f"Illustrious XL checkpoint ({name}) was not found in the configured models directory.",
+            location,
+            details=(f"Missing: {name}",),
+            recommendation="correct_path" if location else "install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "krea2_files":
         return _verify_krea2_files(location)
 

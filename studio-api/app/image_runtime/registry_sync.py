@@ -34,6 +34,11 @@ def sync_registry_status_from_discovery(*, dry_run: bool = False) -> dict[str, A
             # Required keys stay Certified if already; others Draft/Blocked by install
             new_status = "Draft" if info.get("installed") else "Blocked"
             reason = info.get("reason") or ""
+        elif fam == "illustrious":
+            # Draft when the SDXL anime checkpoint is installed; Blocked when absent.
+            # Certified is only set by live evidence — discovery never promotes it.
+            new_status = "Draft" if info.get("installed") else "Blocked"
+            reason = info.get("reason") or ""
         elif fam == "krea2":
             # Krea 2 entries stay at their registry-declared status (Draft) until the
             # Phase C live certification records evidence — discovery alone never

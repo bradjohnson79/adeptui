@@ -38,6 +38,9 @@ class CanonicalImageWorkflowContract:
     status: str = "Draft"
     disclosures: list[str] = field(default_factory=list)
     inputs: dict[str, Any] = field(default_factory=dict)
+    # Declarative style tags (e.g. ["anime","realistic_anime"]) used by
+    # data-driven style→engine routing. Propagated from the registry entry.
+    style_tags: tuple[str, ...] = ()
     # Phase C reference / LoRA inputs (Krea 2): role-grouped AssetRef dicts
     # ({assetId, role, image?, weight?, displayName?}) — see
     # image_runtime/asset_refs.py. Environment refs keep role="environment"
@@ -68,6 +71,7 @@ class CanonicalImageWorkflowContract:
         d["provenancePolicy"] = dict(self.provenance_policy)
         d["builderPath"] = self.builder_path
         d["certificationRecordId"] = self.certification_record_id
+        d["styleTags"] = list(self.style_tags)
         # Phase C reference / LoRA carriers (camelCase for API consumers)
         d["styleReferences"] = list(self.style_references)
         d["characterReferences"] = list(self.character_references)
@@ -204,6 +208,7 @@ def _from_workflow(wf: ImageWorkflow, *, intent: str, present: dict[str, Any]) -
         status=wf.status,
         disclosures=list(wf.limitations),
         inputs=dict(present),
+        style_tags=tuple(wf.style_tags or ()),
         style_references=list(present.get("styleReferences") or present.get("style_references") or []),
         character_references=list(
             present.get("characterReferences") or present.get("character_references") or []
@@ -235,6 +240,8 @@ def _normalize_family(engine: str | None, model_family: str | None) -> str:
         return "imagen"
     if fam in {"checkpoint", "sdxl", "sd3"}:
         return "checkpoint"
+    if fam in {"illustrious", "illustrious-xl", "illustrious_xl", "sdxl-illustrious", "sdxl_illustrious"}:
+        return "illustrious"
     return fam
 
 
@@ -310,6 +317,8 @@ def resolve_image_workflow(
             key = "qwen.txt2img"
         elif family == "imagen":
             key = "imagen.txt2img"
+        elif family == "illustrious":
+            key = "illustrious.txt2img"
         elif family == "checkpoint":
             key = "checkpoint.txt2img"
         elif family == "krea2":

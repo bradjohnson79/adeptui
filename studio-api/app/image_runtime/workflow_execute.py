@@ -330,7 +330,7 @@ def build_leaf_graph(
             **ref_support,
         )
 
-    if key in {"flux.txt2img", "qwen.txt2img", "checkpoint.txt2img"}:
+    if key in {"flux.txt2img", "qwen.txt2img", "checkpoint.txt2img", "illustrious.txt2img"}:
         from ..imagegen_workflows import build_txt2img_workflow
 
         ckpt = checkpoint or getattr(settings, "default_checkpoint", None) or ""

@@ -42,6 +42,8 @@ def _family_status(family: str) -> str:
         "flux-dev": ["flux.dev.txt2img", "flux.txt2img"],
         # Krea 2 workflow keys land with the Phase B builders; Unknown until then.
         "krea2": ["krea2.turbo_txt2img", "krea2.raw_txt2img"],
+        # Illustrious XL (SDXL anime engine) — single txt2img workflow.
+        "illustrious": ["illustrious.txt2img"],
     }.get(family, [])
     statuses = []
     for k in keys:
@@ -80,6 +82,8 @@ def _estimates(family: str) -> dict[str, Any]:
         key = "qwen2512.txt2img"
     elif family == "zimage":
         key = "zimage.txt2img"
+    elif family == "illustrious":
+        key = "illustrious.txt2img"
     else:
         key = f"{family}.txt2img"
     wf = get_workflow(key)
@@ -103,11 +107,20 @@ def _why(family: str, purpose: str, prompt: str) -> str:
         "qwen": "Legacy Qwen Image family (deferred) — prefer Qwen-Image-2512.",
         "imagen": "Best match for high-quality cloud editing and polished stills.",
         "zimage": "Certified local fallback workflow when Qwen-Image-2512 is not yet executable.",
+        "illustrious": "Illustrious XL 1.0 — preferred SDXL anime/animation/stylized/realistic-anime engine for anime-leaning styles.",
     }
     base = reasons.get(family, reasons["qwen2512"])
     if purpose:
         base = f"{base} Purpose: {purpose}."
     return base
+
+
+def _display_name(family: str) -> str:
+    if family in {"qwen2512", "qwen-image-2512"}:
+        return "Qwen-Image-2512"
+    if family == "illustrious":
+        return "Illustrious XL 1.0"
+    return family
 
 
 def recommend_image_family(
@@ -117,18 +130,43 @@ def recommend_image_family(
     operation: str = "image.generate",
     model_family_preference: str | None = None,
     quality: str = "standard",
+    style: str | None = None,
 ) -> dict[str, Any]:
     text = f"{purpose} {prompt}"
     preferred = (model_family_preference or "").strip().lower() or None
     if preferred in {"qwen-image-2512", "qwen_image_2512"}:
         preferred = "qwen2512"
 
-    if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage"}:
+    # Data-driven style→engine routing: consult the style registry's
+    # preferredFamily (e.g. anime/realistic_anime → illustrious) and the
+    # Certified registry's styleTags. Only Certified-executable families are
+    # preferred; otherwise we fall back to the default recommender.
+    style_preferred = ""
+    if style:
+        try:
+            from ..style_intelligence.registry import preferred_family_for_style
+
+            style_preferred = (preferred_family_for_style(style) or "").strip().lower()
+        except Exception:
+            style_preferred = ""
+    if not style_preferred and style:
+        try:
+            from .certified_registry import certified_families_for_style
+
+            candidates = certified_families_for_style(style)
+            if candidates:
+                style_preferred = candidates[0]
+        except Exception:
+            pass
+
+    if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious"}:
         primary = preferred
+    elif style_preferred and _executable(style_preferred):
+        primary = style_preferred
     elif _EDIT.search(text) or operation in {"image.edit", "image.reference"}:
         primary = "imagen" if _executable("imagen") or _family_status("imagen") == "Draft" else "qwen2512"
     elif _ANIME.search(text):
-        primary = "qwen2512"
+        primary = "illustrious" if _executable("illustrious") else "qwen2512"
     elif _PHOTO.search(text) or purpose in {"marketing", "poster", "production_still", "concept_art"}:
         # Photoreal intents still recommend Qwen-2512 by default; FLUX remains the open-weight alternative.
         primary = "qwen2512"
@@ -138,7 +176,7 @@ def recommend_image_family(
     # Execution fallback: only Certified families execute in production
     exec_family = primary
     if not _executable(exec_family):
-        for candidate in ("qwen2512", "zimage", "flux"):
+        for candidate in ("qwen2512", "zimage", "flux", "illustrious"):
             if candidate != primary and _executable(candidate):
                 exec_family = candidate
                 break
@@ -146,7 +184,7 @@ def recommend_image_family(
             exec_family = "zimage"
 
     alts = []
-    for fam in ("flux", "zimage", "qwen", "imagen"):
+    for fam in ("flux", "zimage", "qwen", "imagen", "illustrious"):
         if fam == primary:
             continue
         label_family = fam
@@ -164,7 +202,7 @@ def recommend_image_family(
 
     return {
         "recommendedFamily": primary,
-        "recommendedDisplayName": "Qwen-Image-2512" if primary in {"qwen2512", "qwen-image-2512"} else primary,
+        "recommendedDisplayName": _display_name(primary),
         "executionFamily": exec_family,
         "status": _family_status(primary),
         "executable": _executable(primary),

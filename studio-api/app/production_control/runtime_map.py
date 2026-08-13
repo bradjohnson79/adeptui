@@ -117,17 +117,77 @@ def require_executable_route(project_id: str, modality: str) -> dict[str, Any]:
     }
 
 
+def _style_preferred_family(creative_context: Any) -> str:
+    """Resolve a creator-chosen visualStyle → data-driven preferred family.
+
+    Mirrors the recommender's style→engine routing (e.g. anime/realistic_anime →
+    illustrious) so the Production Dock can defer to style routing when the
+    creator expressed an explicit style. Returns "" when no style or no mapping.
+    """
+    ctx = creative_context if isinstance(creative_context, dict) else {}
+    style = (
+        ctx.get("visualStyle")
+        or (ctx.get("style_layers") or {}).get("user")
+        or ""
+    )
+    style = str(style or "").strip()
+    if not style:
+        return ""
+    try:
+        from ..style_intelligence.registry import preferred_family_for_style
+
+        fam = (preferred_family_for_style(style) or "").strip().lower()
+        if fam:
+            return fam
+    except Exception:
+        pass
+    try:
+        from ..image_runtime.certified_registry import certified_families_for_style
+
+        candidates = certified_families_for_style(style)
+        if candidates:
+            return candidates[0]
+    except Exception:
+        pass
+    return ""
+
+
+def _family_executable(family: str) -> bool:
+    """True only when the family has a Certified workflow (production-ready)."""
+    if not family:
+        return False
+    try:
+        from ..image_product.recommend import _executable
+
+        return bool(_executable(family))
+    except Exception:
+        return False
+
+
 def apply_image_dock_preference(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Gate + inject dock image family when request has no explicit family override."""
+    """Gate + inject dock image family when request has no explicit family override.
+
+    Style-aware: when the creator expressed a visualStyle that maps to a
+    Certified-executable preferred family (e.g. anime → illustrious), that
+    style routing takes priority over the dock's generic default family —
+    unless the caller explicitly locked a model family. This keeps the
+    Production Dock as the fallback for unstyled requests while honoring the
+    data-driven style→engine routing for styled anime/realistic-anime work.
+    """
     dock = require_executable_route(project_id, "image")
     out = dict(body or {})
     explicit = out.get("modelFamilyPreference") or out.get("model")
     # Treat legacy hardcodes as non-override when caller left default zimage without lock.
     locked = bool(out.get("lockModelFamily") or out.get("modelLocked"))
     if not explicit or (not locked and explicit in ("zimage", "auto", "default")):
-        family = dock.get("imageFamily")
-        if family:
-            out["modelFamilyPreference"] = family
+        style_family = _style_preferred_family(out.get("creativeContext"))
+        chosen = (
+            style_family
+            if (style_family and _family_executable(style_family))
+            else dock.get("imageFamily")
+        )
+        if chosen:
+            out["modelFamilyPreference"] = chosen
     out.setdefault("productionDock", dock)
     return out
 

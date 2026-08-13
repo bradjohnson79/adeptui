@@ -111,6 +111,7 @@ def build_img2img_edit_stub(
 IMAGEGEN_MODELS = [
     {"id": "auto", "label": "Auto Select", "group": "auto"},
     {"id": "zimage", "label": "Z-Image Turbo (local)", "group": "local"},
+    {"id": "illustrious", "label": "Illustrious XL 1.0 (Anime)", "group": "local"},
     {"id": "flux", "label": "FLUX.1 family", "group": "local"},
     {"id": "hidream", "label": "HiDream-I1", "group": "local"},
     {"id": "sd35", "label": "Stable Diffusion 3.5", "group": "local"},
