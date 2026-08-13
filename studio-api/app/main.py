@@ -631,6 +631,62 @@ def get_asset_file(asset_id: str):
         db.close()
 
 
+@app.get("/api/assets/{asset_id}/thumb")
+def get_asset_thumbnail(asset_id: str, w: int = 256):
+    """Generate and serve a thumbnail for an image asset.
+
+    On first request, generates a 256px (or custom ``w``) max-dimension WebP
+    thumbnail cached in a ``.thumbs/`` directory next to the source file.
+    Subsequent requests serve the cached derivative with strong caching headers.
+
+    Only supported for image-kind assets.  Non-image assets return a 404.
+    """
+    from fastapi import HTTPException, Response
+
+    from .db import SessionLocal, Asset
+
+    db = SessionLocal()
+    try:
+        asset = db.get(Asset, asset_id)
+        if not asset:
+            raise HTTPException(status_code=404, detail={"error": "ASSET_NOT_FOUND", "assetId": asset_id})
+        if asset.kind != "image":
+            raise HTTPException(status_code=404, detail={"error": "NOT_AN_IMAGE", "assetId": asset_id})
+        if not asset.path:
+            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id})
+        src = Path(asset.path)
+        if not src.exists() or not src.is_file():
+            raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id, "path": str(src)})
+
+        thumb_dir = src.parent / ".thumbs"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        thumb_path = thumb_dir / f"{src.stem}_{w}.webp"
+
+        if not thumb_path.exists():
+            try:
+                from PIL import Image
+                with Image.open(src) as im:
+                    im = im.convert("RGBA") if im.mode in ("RGBA", "P") else im.convert("RGB")
+                    im.thumbnail((w, w))
+                    im.save(thumb_path, "WEBP", quality=82, method=6)
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail={"error": "THUMBNAIL_FAILED", "message": str(exc)[:200]})
+
+        return FileResponse(
+            thumb_path,
+            headers={
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "Content-Type": "image/webp",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": "THUMBNAIL_STORAGE_ERROR", "type": type(exc).__name__, "message": str(exc)[:200]})
+    finally:
+        db.close()
+
+
 @app.get("/api/file")
 def get_file(path: str):
     p = Path(path)
