@@ -4583,6 +4583,16 @@ export const api = {
       }),
     assetUsage: (projectId: string, assetId: string) =>
       req<Record<string, unknown>>(`/api/projects/${projectId}/references/assets/${assetId}/usage`),
+    deleteAsset: (projectId: string, assetId: string) =>
+      req<{ deleted: boolean; assetId: string; name?: string; deleteBlocked?: boolean }>(
+        `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(assetId)}`,
+        { method: "DELETE" },
+      ),
+    bulkDeleteAssets: (projectId: string, assetIds: string[], force?: boolean) =>
+      req<{ results: { assetId: string; status: string; name?: string }[] }>(
+        `/api/projects/${encodeURIComponent(projectId)}/assets/bulk-delete`,
+        { method: "POST", body: JSON.stringify({ assetIds, force: force ?? false }) },
+      ),
     capabilities: () => req<{ items: any[] }>("/api/scene-references/capabilities"),
     gate: () => req<Record<string, unknown>>("/api/m42-product/gate/wave6p/scene-references"),
   },

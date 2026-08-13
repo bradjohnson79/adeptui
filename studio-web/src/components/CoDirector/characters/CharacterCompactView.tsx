@@ -246,6 +246,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [refImageBusy, setRefImageBusy] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const [selectedPickerAsset, setSelectedPickerAsset] = useState<LibraryAsset | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1054,27 +1055,48 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
             </div>
             <div className="character-compact__picker-grid">
               <div className="character-compact__assets-grid">
-                {libraryAssets.filter(isImageAsset).map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    className="character-compact__asset is-media"
-                    onClick={() => void handleAttachLibraryRef(a)}
-                    aria-label={`Use ${a.tag || a.filename}`}
-                  >
-                    <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
-                    <strong>{a.tag || a.filename}</strong>
-                  </button>
-                ))}
+                {libraryAssets.filter(isImageAsset).map((a) => {
+                  const isSelected = selectedPickerAsset?.id === a.id;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      className={`character-compact__asset is-media${isSelected ? " is-selected" : ""}`}
+                      onClick={() => setSelectedPickerAsset(a)}
+                      aria-label={`Select ${a.tag || a.filename}${isSelected ? " (currently selected)" : ""}`}
+                      aria-pressed={isSelected}
+                    >
+                      <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
+                      <strong>{a.tag || a.filename}</strong>
+                      {isSelected ? <span className="character-compact__asset-check">✓</span> : null}
+                    </button>
+                  );
+                })}
                 {libraryAssets.filter(isImageAsset).length === 0 ? (
                   <p className="character-compact__bio-text">No images in your Library yet.</p>
                 ) : null}
               </div>
             </div>
             <div className="character-compact__picker-footer">
-              <button type="button" className="character-compact__actions-button" onClick={() => setLibraryPickerOpen(false)}>
-                Cancel
-              </button>
+              <div className="character-compact__picker-footer-inner">
+                <button type="button" className="character-compact__actions-button" onClick={() => { setLibraryPickerOpen(false); setSelectedPickerAsset(null); }}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="character-compact__actions-button primary"
+                  data-testid="character-compact-picker-select"
+                  disabled={!selectedPickerAsset}
+                  onClick={() => {
+                    if (selectedPickerAsset) {
+                      void handleAttachLibraryRef(selectedPickerAsset);
+                      setSelectedPickerAsset(null);
+                    }
+                  }}
+                >
+                  Select
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1165,6 +1165,104 @@ def update_asset_tag(project_id: str, asset_id: str, tag: str = Form(...), db: S
     return AssetOut.model_validate(asset)
 
 
+def _delete_asset_thumbnails(asset_dir: Path, stem: str) -> None:
+    thumbs_dir = asset_dir / ".thumbs"
+    if not thumbs_dir.is_dir():
+        return
+    for p in list(thumbs_dir.glob(f"{stem}_*.webp")):
+        try:
+            p.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+@router.delete("/projects/{project_id}/assets/{asset_id}")
+def delete_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
+    from ..scene_references import service as scene_ref_service
+
+    asset = db.get(Asset, asset_id)
+    if not asset or asset.project_id != project_id:
+        raise HTTPException(404, "Asset not found")
+
+    usage = scene_ref_service.asset_usage(db, project_id, asset_id)
+    if usage["deleteBlocked"]:
+        return {
+            "deleteBlocked": True,
+            "assetId": asset_id,
+            "name": asset.tag or asset.filename,
+            "activeBindingCount": usage["activeBindingCount"],
+            "bindings": usage["bindings"],
+        }
+
+    asset_path = Path(asset.path)
+    if asset_path.exists():
+        try:
+            asset_path.unlink()
+        except Exception:
+            pass
+
+    asset_dir = asset_path.parent
+    stem = asset_path.stem
+    _delete_asset_thumbnails(asset_dir, stem)
+
+    db.delete(asset)
+    project = db.get(Project, project_id)
+    if project:
+        project.updated_at = datetime.utcnow()
+    db.commit()
+    return {"deleted": True, "assetId": asset_id, "name": asset.tag or asset.filename}
+
+
+@router.post("/projects/{project_id}/assets/bulk-delete")
+def bulk_delete_assets(project_id: str, body: dict, db: Session = Depends(get_db)):
+    from ..scene_references import service as scene_ref_service
+
+    asset_ids: list[str] = body.get("assetIds") or []
+    force: bool = bool(body.get("force", False))
+    project = db.get(Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+
+    results: list[dict] = []
+    for asset_id in asset_ids:
+        try:
+            asset = db.get(Asset, asset_id)
+            if not asset or asset.project_id != project_id:
+                results.append({"assetId": asset_id, "status": "failed", "name": None})
+                continue
+
+            if not force:
+                usage = scene_ref_service.asset_usage(db, project_id, asset_id)
+                if usage["deleteBlocked"]:
+                    results.append({
+                        "assetId": asset_id,
+                        "status": "blocked",
+                        "name": asset.tag or asset.filename,
+                        "activeBindingCount": usage["activeBindingCount"],
+                    })
+                    continue
+
+            asset_path = Path(asset.path)
+            if asset_path.exists():
+                try:
+                    asset_path.unlink()
+                except Exception:
+                    pass
+
+            asset_dir = asset_path.parent
+            stem = asset_path.stem
+            _delete_asset_thumbnails(asset_dir, stem)
+
+            db.delete(asset)
+            results.append({"assetId": asset_id, "status": "deleted", "name": asset.tag or asset.filename})
+        except Exception:
+            results.append({"assetId": asset_id, "status": "failed", "name": None})
+
+    project.updated_at = datetime.utcnow()
+    db.commit()
+    return {"results": results}
+
+
 @router.post("/projects/{project_id}/resolve-tags", response_model=TagResolveOut)
 def resolve_tags(project_id: str, prompt: str = Form(...), db: Session = Depends(get_db)):
     assets = db.query(Asset).filter(Asset.project_id == project_id).all()
