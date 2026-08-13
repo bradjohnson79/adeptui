@@ -499,6 +499,7 @@ export function CoDirectorProjectContent({
                     setCastingFocus(name);
                     onTabChange("casting");
                   }}
+                  onGoTab={onGoTab}
                 />
               </>
             ) : (

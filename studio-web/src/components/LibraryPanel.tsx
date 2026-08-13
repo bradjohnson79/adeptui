@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
@@ -164,6 +165,12 @@ export function LibraryPanel({
   const [newCollectionName, setNewCollectionName] = useState("");
   const [genHistory, setGenHistory] = useState<any[]>([]);
 
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<"single" | "bulk" | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteResults, setDeleteResults] = useState<string | null>(null);
+
   useEffect(() => {
     setFavorites(loadFavorites(project.id));
   }, [project.id]);
@@ -259,6 +266,58 @@ export function LibraryPanel({
   }, [items, showFavoritesOnly, favorites, modelFamilyFilter, refsFilter, collectionFilter, collections]);
 
   const selectedItem = useMemo(() => items.find((a) => a.id === selected) || null, [items, selected]);
+
+  const enterSelect = useCallback(() => {
+    setSelectMode(true);
+    setSelectedIds(new Set());
+  }, []);
+
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelect = useCallback((assetId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(filteredItems.filter((a) => a.kind === "image").map((a) => a.id)));
+  }, [filteredItems]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (deleteConfirm !== "bulk") return;
+    setDeleteBusy(true);
+    try {
+      const ids = [...selectedIds];
+      const res = await api.sceneReferences.bulkDeleteAssets(project.id, ids, false);
+      const results = res?.results ?? [];
+      const failed = results.filter((r: { assetId: string; status: string; name?: string }) => r.status !== "deleted" && r.status !== "ok");
+      if (failed.length > 0) {
+        const names = failed.map((r: { assetId: string; status: string; name?: string }) => r.name || r.assetId).join(", ");
+        setDeleteResults(`Some assets could not be deleted: ${names}`);
+      } else {
+        setDeleteResults(`${ids.length} asset${ids.length !== 1 ? "s" : ""} deleted.`);
+      }
+      setDeleteConfirm(null);
+      setSelectMode(false);
+      setSelectedIds(new Set());
+      await refresh();
+    } catch (err) {
+      setDeleteResults(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteConfirm, selectedIds, project.id, refresh]);
 
   const filteredDir = dirFilter === "all" ? dirSeqs : dirSeqs.filter((s) => s.status === dirFilter);
   const clipCount = editor
@@ -488,7 +547,45 @@ export function LibraryPanel({
             Clear collection filter
           </button>
         )}
+        {selectMode ? (
+          <div className="library-select-actions">
+            <button
+              type="button"
+              onClick={() => {
+                const imageIds = filteredItems.filter((a) => a.kind === "image").map((a) => a.id);
+                if (imageIds.length > 0 && imageIds.every((id) => selectedIds.has(id))) {
+                  clearSelection();
+                } else {
+                  selectAll();
+                }
+              }}
+              disabled={filteredItems.filter((a) => a.kind === "image").length === 0}
+            >
+              {filteredItems.filter((a) => a.kind === "image").length > 0 &&
+              filteredItems.filter((a) => a.kind === "image").every((a) => selectedIds.has(a.id))
+                ? "Clear"
+                : "Select All"}
+            </button>
+            <button
+              type="button"
+              className="library-delete-btn"
+              disabled={selectedIds.size === 0}
+              onClick={() => setDeleteConfirm("bulk")}
+            >
+              Delete Selected ({selectedIds.size})
+            </button>
+            <button type="button" className="primary" onClick={exitSelect}>
+              Done
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={enterSelect}>
+            Select
+          </button>
+        )}
       </div>
+
+      {deleteResults && <p className="pill warn">{deleteResults}</p>}
 
       <div className="library-layout">
         <aside className="library-inspector" style={{ maxWidth: 220 }}>
@@ -557,29 +654,48 @@ export function LibraryPanel({
           {!filteredItems.length ? (
             <p className="empty">No assets match filters.</p>
           ) : (
-            filteredItems.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className={`library-card ${selected === a.id ? "selected" : ""}`}
-                onClick={() => setSelected(a.id)}
-              >
-                {a.kind === "image" ? (
-                  <img src={assetThumbUrl(a)} alt={a.filename} loading="lazy" />
-                ) : (
-                  <div className="library-card-fallback">{a.kind}</div>
-                )}
-                <span>
-                  {favorites.has(a.id) ? "★ " : ""}
-                  {a.tag || a.filename}
-                </span>
-                {assetModelFamily(a) && (
-                  <span className="pill" style={{ fontSize: "0.65rem" }}>
-                    {assetModelFamily(a)}
+            filteredItems.map((a) => {
+              const isImage = a.kind === "image";
+              const showSelect = selectMode && isImage;
+              const isSelected = selectedIds.has(a.id);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className={`library-card${selected === a.id ? " selected" : ""}${isSelected ? " is-library-selected" : ""}${showSelect ? " is-selectable" : ""}`}
+                  onClick={() => {
+                    if (showSelect) {
+                      toggleSelect(a.id);
+                      return;
+                    }
+                    setSelected(a.id);
+                  }}
+                >
+                  {showSelect && (
+                    <label
+                      className={`library-checkbox${isSelected ? " is-checked" : ""}`}
+                      onClick={(e) => { e.stopPropagation(); }}
+                    >
+                      <input type="checkbox" checked={isSelected} onChange={() => toggleSelect(a.id)} />
+                    </label>
+                  )}
+                  {isImage ? (
+                    <img src={assetThumbUrl(a)} alt={a.filename} loading="lazy" />
+                  ) : (
+                    <div className="library-card-fallback">{a.kind}</div>
+                  )}
+                  <span>
+                    {favorites.has(a.id) ? "★ " : ""}
+                    {a.tag || a.filename}
                   </span>
-                )}
-              </button>
-            ))
+                  {assetModelFamily(a) && (
+                    <span className="pill" style={{ fontSize: "0.65rem" }}>
+                      {assetModelFamily(a)}
+                    </span>
+                  )}
+                </button>
+              );
+            })
           )}
         </div>
 
@@ -661,6 +777,32 @@ export function LibraryPanel({
           )}
         </aside>
       </div>
+
+      {deleteConfirm &&
+        createPortal(
+          <div className="library-confirm">
+            <div className="library-confirm__panel">
+              <h3>Delete {selectedIds.size} asset{selectedIds.size !== 1 ? "s" : ""}?</h3>
+              <p className="library-confirm__hint">
+                This action cannot be undone. Assets used in scenes may block deletion.
+              </p>
+              <div className="library-confirm__actions">
+                <button type="button" onClick={() => setDeleteConfirm(null)} disabled={deleteBusy}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="library-confirm__confirm"
+                  onClick={handleDeleteConfirm}
+                  disabled={deleteBusy}
+                >
+                  {deleteBusy ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

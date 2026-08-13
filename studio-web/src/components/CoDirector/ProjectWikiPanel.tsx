@@ -3,6 +3,9 @@ import { api, type CoDirectorProjectWiki, type ProjectWikiEntry, type ProjectWik
 import { Button } from "../ui";
 import { CoDirectorEmptyState, CoDirectorErrorState } from "./cards";
 import { CompiledWikiReader } from "./wiki/CompiledWikiReader";
+function stripHtml(text: string): string {
+  return text.replace(/<[^>]+>/g, "").trim();
+}
 
 type SectionSpec = {
   key: keyof CoDirectorProjectWiki["sections"];
@@ -150,7 +153,7 @@ export function ProjectWikiPanel({
   wikiUiMessage?: string | null;
   wikiVerification?: { persistenceState?: string; presentationState?: string; finalState?: string; error?: string | null } | null;
   onOpenCasting?: (characterName: string) => void;
-  onGoTab?: (tab: string) => void;
+  onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 }) {
   const [loading, setLoading] = useState(true);
   const [wiki, setWiki] = useState<CoDirectorProjectWiki | null>(null);
@@ -911,19 +914,19 @@ export function ProjectWikiPanel({
                   {entry.logline && (
                     <div className="wiki-story-entry__section">
                       <strong>Logline</strong>
-                      <p>{entry.logline}</p>
+                      <p>{stripHtml(entry.logline)}</p>
                     </div>
                   )}
                   {entry.shortSummary && (
                     <div className="wiki-story-entry__section">
                       <strong>Short Summary</strong>
-                      <p>{entry.shortSummary}</p>
+                      <p>{stripHtml(entry.shortSummary)}</p>
                     </div>
                   )}
                   {entry.longSummary && (
                     <div className="wiki-story-entry__section">
                       <strong>Long Summary</strong>
-                      <p>{entry.longSummary}</p>
+                      <p>{stripHtml(entry.longSummary)}</p>
                     </div>
                   )}
                 </details>
@@ -975,7 +978,7 @@ export function ProjectWikiPanel({
                       </div>
                     ) : null}
                     <div className="wiki-character-card__actions">
-                      <button type="button" className="ghost" onClick={() => onGoTab?.("characters")}>
+                      <button type="button" className="ghost" onClick={() => onGoTab?.("characters", { characterId: char.profileId })}>
                         Open Character
                       </button>
                     </div>
@@ -1353,7 +1356,7 @@ export function ProjectWikiPanel({
                   </div>
                 ) : null}
                 <div className="wiki-character-card__actions">
-                  <button type="button" className="ghost" onClick={() => onGoTab?.("characters")}>
+                  <button type="button" className="ghost" onClick={() => onGoTab?.("characters", { characterId: char.profileId })}>
                     Open Character
                   </button>
                 </div>

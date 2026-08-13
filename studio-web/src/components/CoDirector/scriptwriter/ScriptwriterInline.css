@@ -114,7 +114,7 @@
   font-weight: 700;
   margin-top: 1em !important;
 }
-.sw-inline__editor .sp-el--action { }
+.sw-inline__editor .sp-el--action { font-style: italic; }
 .sw-inline__editor .sp-el--character {
   text-transform: uppercase;
   margin-left: 30%;

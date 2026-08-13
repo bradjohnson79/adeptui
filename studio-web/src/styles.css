@@ -4318,6 +4318,7 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   font-size: 0.85rem;
   line-height: 1.5;
   margin: 0.5rem 0;
+  white-space: pre-wrap;
 }
 .wiki-character-card__keywords {
   display: flex;
@@ -6125,4 +6126,153 @@ html[dir="rtl"] .director-timeline {
   color: rgba(255, 255, 255, 0.95);
   font-weight: 600;
   font-size: 0.92rem;
+}
+
+/* ---- LibraryPanel select mode ---- */
+
+.library-select-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.library-delete-btn {
+  border-color: rgba(255, 120, 120, 0.45);
+  color: #ffd7d7;
+}
+
+.library-delete-btn:hover:not(:disabled) {
+  border-color: rgba(255, 120, 120, 0.7);
+  background: rgba(255, 90, 90, 0.14);
+}
+
+.library-delete-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.library-card.is-selectable {
+  position: relative;
+}
+
+.library-card.is-library-selected {
+  border-color: rgba(126, 180, 255, 0.85);
+  box-shadow: 0 0 0 2px rgba(126, 180, 255, 0.55), 0 12px 26px rgba(0, 0, 0, 0.18);
+  background: rgba(84, 152, 255, 0.1);
+}
+
+.library-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  border-radius: 6px;
+  background: rgba(10, 12, 18, 0.72);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.library-checkbox input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.library-checkbox::after {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.library-checkbox.is-checked {
+  border-color: rgba(126, 180, 255, 0.95);
+  background: rgba(84, 152, 255, 0.92);
+}
+
+.library-checkbox.is-checked::after {
+  background: #fff;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.5 8.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+}
+
+/* ---- LibraryPanel delete confirmation dialog ---- */
+
+.library-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.library-confirm__panel {
+  position: relative;
+  z-index: 1;
+  width: min(440px, calc(100vw - 48px));
+  padding: 22px 24px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(22, 28, 40, 0.98), rgba(14, 18, 28, 0.98));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  color: #f7f8fb;
+  display: grid;
+  gap: 12px;
+}
+
+.library-confirm__panel h3 {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.library-confirm__hint {
+  margin: 0;
+  color: rgba(201, 210, 224, 0.85);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.library-confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.library-confirm__confirm {
+  min-height: 38px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 120, 120, 0.6);
+  border-radius: 999px;
+  background: rgba(255, 90, 90, 0.22);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.library-confirm__confirm:hover:not(:disabled) {
+  background: rgba(255, 90, 90, 0.36);
+  border-color: rgba(255, 120, 120, 0.85);
+}
+
+.library-confirm__confirm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }

@@ -127,8 +127,34 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     return () => { cancelled = true; };
   }, [projectId, editor]);
 
+  const normalizeText = (text: string, type: string): string => {
+    if (type === "parenthetical" && !(text.startsWith("(") && text.endsWith(")"))) {
+      return "(" + text + ")";
+    }
+    if (type === "shot" && !(text.startsWith("[") && text.endsWith("]"))) {
+      return "[" + text + "]";
+    }
+    return text;
+  };
+
   const handleFormatChange = useCallback((newType: string) => {
     if (!editor) return;
+    const { $from } = editor.state.selection;
+    const node = $from.parent;
+    if (node && node.type.name === "paragraph") {
+      const original = node.textContent || "";
+      const normalized = normalizeText(original, newType);
+      if (normalized !== original) {
+        editor
+          .chain()
+          .focus()
+          .updateAttributes("paragraph", { elementType: newType })
+          .insertContentAt({ from: $from.start(), to: $from.end() }, normalized)
+          .run();
+        setCurrentType(newType);
+        return;
+      }
+    }
     editor.chain().focus().updateAttributes("paragraph", { elementType: newType }).run();
     setCurrentType(newType);
   }, [editor]);
