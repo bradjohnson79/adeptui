@@ -124,6 +124,10 @@ class SpatialCamera(BaseModel):
     targetCharacterIds: list[str] = Field(default_factory=list)
     hero: bool = False
     lockedFor360: bool = False
+    # V1 camera blocking fields
+    cameraSlot: int = -1
+    orientation: str = "N"  # N, NE, E, SE, S, SW, W, NW
+    fovPreset: str = "medium"  # narrow, medium, wide
 
 
 class SpatialMovementWaypoint(BaseModel):
@@ -236,6 +240,7 @@ class SpatialMapDocument(BaseModel):
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
+    gridScale: int = 0  # -3 .. +3, 0 = Neutral
     anchors: list[SpatialAnchor] = Field(default_factory=list)
     characters: list[SpatialCharacterPlacement] = Field(default_factory=list)
     props: list[SpatialPropPlacement] = Field(default_factory=list)
@@ -271,6 +276,7 @@ class SpatialMapUpdateBody(BaseModel):
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: Optional[str] = None
     providerHonesty: Optional[ProviderHonestyMode] = None
+    gridScale: Optional[int] = None
 
 
 class SpatialCharacterPlacementBody(BaseModel):
@@ -289,6 +295,13 @@ class SpatialCharacterPlacementBody(BaseModel):
     pose: str = ""
     expression: str = ""
     eyeLine: str = ""
+    # V1 circular grid placement fields
+    gridRow: int = -1
+    gridColumn: int = -1
+    slotIndex: int = -1
+    colorKey: str = ""
+    miniPrompt: str = ""
+    tag: str = ""
 
 
 class SpatialPropPlacementBody(BaseModel):
@@ -306,6 +319,13 @@ class SpatialPropPlacementBody(BaseModel):
     pitchDegrees: float = 0.0
     rollDegrees: float = 0.0
     scale: float = 1.0
+    # V1 circular grid placement fields
+    gridRow: int = -1
+    gridColumn: int = -1
+    slotIndex: int = -1
+    colorKey: str = ""
+    miniPrompt: str = ""
+    tag: str = ""
 
 
 class SpatialCameraCreateBody(BaseModel):
@@ -322,6 +342,10 @@ class SpatialCameraCreateBody(BaseModel):
     targetCharacterIds: list[str] = Field(default_factory=list)
     hero: bool = False
     lockedFor360: bool = False
+    # V1 camera blocking fields
+    cameraSlot: int = -1
+    orientation: str = "N"
+    fovPreset: str = "medium"
 
 
 class SpatialCharacterPlacementUpdateBody(BaseModel):
@@ -339,6 +363,13 @@ class SpatialCharacterPlacementUpdateBody(BaseModel):
     pose: Optional[str] = None
     expression: Optional[str] = None
     eyeLine: Optional[str] = None
+    # V1 circular grid placement fields
+    gridRow: Optional[int] = None
+    gridColumn: Optional[int] = None
+    slotIndex: Optional[int] = None
+    colorKey: Optional[str] = None
+    miniPrompt: Optional[str] = None
+    tag: Optional[str] = None
 
 
 class SpatialPropPlacementUpdateBody(BaseModel):
@@ -356,6 +387,13 @@ class SpatialPropPlacementUpdateBody(BaseModel):
     pitchDegrees: Optional[float] = None
     rollDegrees: Optional[float] = None
     scale: Optional[float] = None
+    # V1 circular grid placement fields
+    gridRow: Optional[int] = None
+    gridColumn: Optional[int] = None
+    slotIndex: Optional[int] = None
+    colorKey: Optional[str] = None
+    miniPrompt: Optional[str] = None
+    tag: Optional[str] = None
 
 
 class SpatialCameraUpdateBody(BaseModel):
@@ -372,6 +410,10 @@ class SpatialCameraUpdateBody(BaseModel):
     targetCharacterIds: Optional[list[str]] = None
     hero: Optional[bool] = None
     lockedFor360: Optional[bool] = None
+    # V1 camera blocking fields
+    cameraSlot: Optional[int] = None
+    orientation: Optional[str] = None
+    fovPreset: Optional[str] = None
 
 
 class SpatialMovementPathCreateBody(BaseModel):
