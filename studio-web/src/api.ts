@@ -6594,6 +6594,11 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/references`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  detachCharacterReference: (projectId: string, characterId: string, assetId: string) =>
+    req<{ ok: boolean; detached: string | null }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/references/${encodeURIComponent(assetId)}`,
+      { method: "DELETE" },
+    ),
   getCharacterCoverage: (projectId: string, characterId: string) =>
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/coverage`,

@@ -711,6 +711,11 @@ export default function ProjectEditor() {
             undefined
           }
           onChange={refresh}
+          returnWorkspace={
+            new URLSearchParams(locationSearch).get("returnWorkspace") ||
+            new URLSearchParams(locationSearch).get("return") ||
+            undefined
+          }
         />
       ) : tab === "characters" || tab === "identityregistry" ? (
         <CharacterProfileWorkspace

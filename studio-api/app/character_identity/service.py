@@ -527,6 +527,33 @@ def attach_reference(
     }
 
 
+def detach_reference(
+    db: Session, project_id: str, character_id: str, asset_id: str
+) -> dict[str, Any]:
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    if profile.status in ("LOCKED", "ARCHIVED"):
+        raise _err("LOCKED_VERSION", "Cannot detach references from a locked profile.", 409)
+    row = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(
+            CharacterReferenceAssetRow.character_profile_id == character_id,
+            CharacterReferenceAssetRow.asset_id == asset_id,
+        )
+        .first()
+    )
+    if not row:
+        return {"ok": True, "detached": None}
+    db.delete(row)
+    profile.updated_at = _now()
+    cov = _coverage_for(db, profile)
+    if profile.status not in ("APPROVED", "LOCKED", "ARCHIVED"):
+        profile.status = cov.status
+    db.commit()
+    return {"ok": True, "detached": asset_id}
+
+
 def approve_character_candidate(
     db: Session,
     project_id: str,

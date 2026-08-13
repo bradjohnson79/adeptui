@@ -119,6 +119,13 @@ def attach_reference(project_id: str, character_id: str, body: ReferenceAttach, 
     return service.attach_reference(db, project_id, character_id, body)
 
 
+@router.delete("/projects/{project_id}/characters/{character_id}/references/{asset_id}")
+def detach_reference_route(project_id: str, character_id: str, asset_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    return service.detach_reference(db, project_id, character_id, asset_id)
+
+
 class ApproveCandidateBody(BaseModel):
     assetId: str
     referenceRole: str = "hero_identity"

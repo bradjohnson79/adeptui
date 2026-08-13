@@ -20,6 +20,7 @@ type VoiceStudioShellProps = {
   project: Project;
   onChange?: () => void | Promise<void>;
   initialCharacterId?: string;
+  returnWorkspace?: string;
 };
 
 type CharacterVoiceCard = {
@@ -86,6 +87,7 @@ export function VoiceStudioShell({
   project,
   onChange,
   initialCharacterId,
+  returnWorkspace,
 }: VoiceStudioShellProps) {
   const navigate = useNavigate();
   const [cards, setCards] = useState<CharacterVoiceCard[]>([]);
@@ -168,6 +170,10 @@ export function VoiceStudioShell({
     });
   }, [navigate, project.id]);
 
+  const backToCoDirector = useCallback(() => {
+    window.location.assign(`/project/${project.id}?workspace=codirector`);
+  }, [project.id]);
+
   if (selectedCharacter) {
     return (
       <section className="page voice-studio-shell" data-testid="voice-studio-shell">
@@ -185,6 +191,15 @@ export function VoiceStudioShell({
               </p>
             </div>
             <div className="voice-studio-actions">
+              {returnWorkspace === "codirector" ? (
+                <Button
+                  type="button"
+                  data-testid="voicestudio-back-to-codirector"
+                  onClick={backToCoDirector}
+                >
+                  ← Back to Co-Director
+                </Button>
+              ) : null}
               <Button type="button" onClick={() => setSelectedCharacterId("")}>
                 Choose Another Character
               </Button>
@@ -224,6 +239,15 @@ export function VoiceStudioShell({
           </p>
         ) : null}
         <div className="voice-studio-actions">
+          {returnWorkspace === "codirector" ? (
+            <Button
+              type="button"
+              data-testid="voicestudio-back-to-codirector"
+              onClick={backToCoDirector}
+            >
+              ← Back to Co-Director
+            </Button>
+          ) : null}
           <Button type="button" className="voice-studio-primary-cta" onClick={openCreateCharacter}>
             Create New Character
           </Button>

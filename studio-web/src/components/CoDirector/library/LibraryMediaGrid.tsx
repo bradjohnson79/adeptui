@@ -31,6 +31,13 @@ type Props = {
   onGoTab?: (tab: string) => void;
 };
 
+type BulkDeleteResult = { assetId: string; status: string; name?: string };
+
+type ConfirmState =
+  | { kind: "delete"; ids: string[] }
+  | { kind: "blocked"; blocked: BulkDeleteResult[] }
+  | null;
+
 function formatDuration(seconds: number | null): string {
   if (seconds == null || !isFinite(seconds) || seconds <= 0) return "";
   const m = Math.floor(seconds / 60);
@@ -64,56 +71,140 @@ function CardMeta({ asset, duration }: { asset: LibraryAsset; duration?: string 
   );
 }
 
-function MediaCard({ asset, onOpen }: { asset: LibraryAsset; onOpen: () => void }) {
+function SelectCheckbox({
+  checked,
+  onClick,
+  label,
+}: {
+  checked: boolean;
+  onClick: (e: React.MouseEvent) => void;
+  label: string;
+}) {
+  return (
+    <label
+      className={`library-media-grid__select-checkbox${checked ? " is-checked" : ""}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(e);
+      }}
+      title={label}
+      aria-label={label}
+    >
+      <input type="checkbox" checked={checked} onChange={() => {}} />
+    </label>
+  );
+}
+
+function MediaCard({
+  asset,
+  onOpen,
+  selectMode,
+  selected,
+  onToggleSelect,
+}: {
+  asset: LibraryAsset;
+  onOpen: () => void;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: () => void;
+}) {
   const [duration, setDuration] = useState<number | null>(null);
   const previewUrl = getCardPreviewUrl(asset);
 
+  const handleClick = () => {
+    if (selectMode && isImageAsset(asset)) {
+      onToggleSelect();
+      return;
+    }
+    onOpen();
+  };
+
+  const cardClass = `library-media-grid__card${selectMode && isImageAsset(asset) ? " is-selectable" : ""}${
+    selected ? " is-selected" : ""
+  }`;
+
+  const showCheckbox = selectMode && isImageAsset(asset);
+
+  const cardContent = (preview: React.ReactNode) => (
+    <>
+      {showCheckbox ? (
+        <SelectCheckbox
+          checked={selected}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect();
+          }}
+          label={`Select ${getAssetName(asset)}`}
+        />
+      ) : null}
+      <div className="library-media-grid__thumb">{preview}</div>
+      <CardMeta asset={asset} />
+    </>
+  );
+
   if (isImageAsset(asset) && previewUrl) {
     return (
-      <button type="button" className="library-media-grid__card" data-testid="library-card-image" onClick={onOpen}>
-        <div className="library-media-grid__thumb">
-          <img src={previewUrl} alt={getAssetName(asset)} loading="lazy" />
-        </div>
-        <CardMeta asset={asset} />
+      <button
+        type="button"
+        className={cardClass}
+        data-testid="library-card-image"
+        onClick={handleClick}
+        aria-pressed={showCheckbox ? selected : undefined}
+      >
+        {cardContent(<img src={previewUrl} alt={getAssetName(asset)} loading="lazy" />)}
       </button>
     );
   }
 
   if (isVideoAsset(asset)) {
     return (
-      <button type="button" className="library-media-grid__card" data-testid="library-card-video" onClick={onOpen}>
-        <div className="library-media-grid__thumb">
-          <video
-            src={api.assetUrl(asset.id)}
-            preload="metadata"
-            muted
-            playsInline
-            onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration)}
-          />
-          <span className="library-media-grid__play-overlay">▶</span>
-        </div>
-        <CardMeta asset={asset} duration={formatDuration(duration)} />
+      <button
+        type="button"
+        className={cardClass}
+        data-testid="library-card-video"
+        onClick={handleClick}
+        aria-pressed={showCheckbox ? selected : undefined}
+      >
+        {cardContent(
+          <>
+            <video
+              src={api.assetUrl(asset.id)}
+              preload="metadata"
+              muted
+              playsInline
+              onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration)}
+            />
+            <span className="library-media-grid__play-overlay">▶</span>
+          </>,
+        )}
       </button>
     );
   }
 
   if (isAudioAsset(asset)) {
     return (
-      <button type="button" className="library-media-grid__card" data-testid="library-card-audio" onClick={onOpen}>
-        <div className="library-media-grid__thumb">
-          <span className="library-media-grid__thumb-icon">♪</span>
-        </div>
+      <button
+        type="button"
+        className={cardClass}
+        data-testid="library-card-audio"
+        onClick={handleClick}
+        aria-pressed={showCheckbox ? selected : undefined}
+      >
+        {cardContent(<span className="library-media-grid__thumb-icon">♪</span>)}
         <CardMeta asset={asset} duration={formatDuration(duration)} />
       </button>
     );
   }
 
   return (
-    <button type="button" className="library-media-grid__card" data-testid="library-card-document" onClick={onOpen}>
-      <div className="library-media-grid__thumb">
-        <span className="library-media-grid__thumb-icon">{getDocumentKind(asset.filename)}</span>
-      </div>
-      <CardMeta asset={asset} />
+    <button
+      type="button"
+      className={cardClass}
+      data-testid="library-card-document"
+      onClick={handleClick}
+      aria-pressed={showCheckbox ? selected : undefined}
+    >
+      {cardContent(<span className="library-media-grid__thumb-icon">{getDocumentKind(asset.filename)}</span>)}
     </button>
   );
 }
@@ -182,6 +273,121 @@ function PreviewModal({ asset, onClose }: { asset: LibraryAsset; onClose: () => 
   );
 }
 
+function ConfirmDialog({
+  state,
+  onCancel,
+  onConfirm,
+  busy,
+}: {
+  state: ConfirmState;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, busy]);
+
+  if (state?.kind === "delete") {
+    const n = state.ids.length;
+    const label = n === 1 ? "Delete 1 image?" : `Delete ${n} images?`;
+    return createPortal(
+      <div className="library-media-confirm" role="alertdialog" aria-modal="true" aria-label={label}>
+        <button
+          type="button"
+          className="library-media-preview__backdrop"
+          aria-label="Cancel"
+          onClick={onCancel}
+          disabled={busy}
+        />
+        <div className="library-media-confirm__panel">
+          <h3>{label}</h3>
+          <p className="library-media-confirm__hint">
+            {n === 1
+              ? "This will remove the image from this project's library."
+              : `This will remove ${n} images from this project's library.`}
+          </p>
+          <div className="library-media-confirm__actions">
+            <button
+              type="button"
+              className="library-media-grid__filter"
+              onClick={onCancel}
+              disabled={busy}
+              data-testid="library-bulk-delete-cancel"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="library-media-confirm__confirm"
+              onClick={onConfirm}
+              disabled={busy}
+              data-testid="library-bulk-delete-confirm"
+            >
+              {n === 1 ? "Delete" : `Delete ${n} Images`}
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (state?.kind === "blocked") {
+    const blocked = state.blocked;
+    const n = blocked.length;
+    return createPortal(
+      <div className="library-media-confirm" role="alertdialog" aria-modal="true" aria-label="Some images are in use">
+        <button
+          type="button"
+          className="library-media-preview__backdrop"
+          aria-label="Cancel"
+          onClick={onCancel}
+          disabled={busy}
+        />
+        <div className="library-media-confirm__panel">
+          <h3>{n === 1 ? "1 image is in use" : `${n} images are in use`}</h3>
+          <p className="library-media-confirm__hint">
+            These images are referenced by other parts of this project. Force delete removes them anyway.
+          </p>
+          <ul className="library-media-confirm__list" data-testid="library-bulk-delete-blocked-list">
+            {blocked.map((b) => (
+              <li key={b.assetId}>{b.name || b.assetId}</li>
+            ))}
+          </ul>
+          <div className="library-media-confirm__actions">
+            <button
+              type="button"
+              className="library-media-grid__filter"
+              onClick={onCancel}
+              disabled={busy}
+              data-testid="library-bulk-delete-blocked-cancel"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="library-media-confirm__confirm library-media-confirm__confirm--danger"
+              onClick={onConfirm}
+              disabled={busy}
+              data-testid="library-bulk-delete-force"
+            >
+              Force Delete
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  return null;
+}
+
 function SkeletonGrid() {
   return (
     <div className="library-media-grid__skeleton" aria-hidden="true">
@@ -206,6 +412,11 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
 
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const refresh = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -222,9 +433,7 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   // Live update: refresh when an execution completes or produces new assets.
   useEffect(() => {
     if (!activeExecution) return;
-    // Only refresh if this execution belongs to the current project.
     if (activeExecution.project_id && activeExecution.project_id !== projectId) return;
-    // Refresh when execution status changes to completed (new assets in Library).
     if (activeExecution.status === "completed" || activeExecution.result_asset_ids?.length) {
       void refresh();
     }
@@ -257,6 +466,79 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
     [assets, filter],
   );
 
+  const selectableIds = useMemo(
+    () => filtered.filter((a) => isImageAsset(a)).map((a) => a.id),
+    [filtered],
+  );
+
+  const toggleSelect = useCallback((assetId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(assetId)) next.delete(assetId);
+      else next.add(assetId);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(selectableIds));
+  }, [selectableIds]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const enterSelect = useCallback(() => {
+    setSelectMode(true);
+    setSelectedIds(new Set());
+  }, []);
+
+  const exitSelect = useCallback(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const onDelete = () => {
+    setConfirmState({ kind: "delete", ids: [...selectedIds] });
+  };
+
+  const runDelete = async (assetIds: string[], force: boolean) => {
+    setDeleting(true);
+    try {
+      const res = await api.sceneReferences.bulkDeleteAssets(projectId, assetIds, force);
+      const results = res?.results ?? [];
+      if (!force) {
+        const blocked = results.filter((r: { assetId: string; status: string; name?: string }) => r.status !== "deleted" && r.status !== "ok");
+        if (blocked.length > 0) {
+          setConfirmState({ kind: "blocked", blocked });
+          return;
+        }
+      }
+      setConfirmState(null);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setConfirmState(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const onConfirmDelete = () => {
+    if (confirmState?.kind !== "delete") return;
+    void runDelete(confirmState.ids, false);
+  };
+
+  const onConfirmForce = () => {
+    if (confirmState?.kind !== "blocked") return;
+    const blockedIds = confirmState.blocked.map((b) => b.assetId);
+    void runDelete(blockedIds, true);
+  };
+
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+
   return (
     <div className="library-media-grid" data-testid="library-media-grid">
       <div className="library-media-grid__toolbar">
@@ -284,6 +566,47 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
             </button>
           ))}
         </div>
+        <div className="library-media-grid__select-actions">
+          {selectMode ? (
+            <>
+              <button
+                type="button"
+                className="library-media-grid__filter"
+                onClick={allSelected ? clearSelection : selectAll}
+                disabled={selectableIds.length === 0}
+                data-testid="library-select-all"
+              >
+                {allSelected ? "Clear Selection" : "Select All"}
+              </button>
+              <button
+                type="button"
+                className="library-media-grid__filter library-media-grid__filter--danger"
+                onClick={onDelete}
+                disabled={selectedIds.size === 0}
+                data-testid="library-delete-selected"
+              >
+                Delete Selected{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+              </button>
+              <button
+                type="button"
+                className="library-media-grid__filter"
+                onClick={exitSelect}
+                data-testid="library-exit-select"
+              >
+                Done
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="library-media-grid__filter"
+              onClick={enterSelect}
+              data-testid="library-enter-select"
+            >
+              Select
+            </button>
+          )}
+        </div>
       </div>
 
       {busy ? (
@@ -309,12 +632,27 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
       ) : (
         <div className="library-media-grid__grid" role="list">
           {filtered.map((asset) => (
-            <MediaCard key={asset.id} asset={asset} onOpen={() => setPreviewAsset(asset)} />
+            <MediaCard
+              key={asset.id}
+              asset={asset}
+              onOpen={() => setPreviewAsset(asset)}
+              selectMode={selectMode}
+              selected={selectedIds.has(asset.id)}
+              onToggleSelect={() => toggleSelect(asset.id)}
+            />
           ))}
         </div>
       )}
 
       {previewAsset ? <PreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} /> : null}
+      {confirmState ? (
+        <ConfirmDialog
+          state={confirmState}
+          onCancel={() => !deleting && setConfirmState(null)}
+          onConfirm={confirmState.kind === "delete" ? onConfirmDelete : onConfirmForce}
+          busy={deleting}
+        />
+      ) : null}
     </div>
   );
 }

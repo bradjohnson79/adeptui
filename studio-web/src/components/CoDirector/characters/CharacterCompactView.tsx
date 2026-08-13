@@ -11,6 +11,7 @@
  * characterId (flushed pending save first).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../../api";
 import {
   getCardPreviewUrl,
@@ -245,6 +246,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   const [assetFilter, setAssetFilter] = useState<(typeof ASSET_FILTERS)[number]["id"]>("images");
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [refImageBusy, setRefImageBusy] = useState(false);
+  const [removingRef, setRemovingRef] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [selectedPickerAsset, setSelectedPickerAsset] = useState<LibraryAsset | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -278,48 +280,46 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
     }
   }, [draftKey, profile, candidates]);
 
-  const restoreDraftFromSession = useCallback((): boolean => {
+  const restoreDraftFromSession = useCallback((): {
+    visual_description?: string;
+    description?: string;
+    name?: string;
+    visual_style?: string;
+    active_voice_profile_id?: string;
+    gender_presentation?: string;
+    candidates?: Candidate[];
+  } | null => {
     try {
       const raw = sessionStorage.getItem(draftKey);
-      if (!raw) return false;
+      if (!raw) return null;
       const draft = JSON.parse(raw);
-      if (draft?.visual_description && profile) {
-        setProfile((prev) =>
-          prev
-            ? {
-                ...prev,
-                visual_description: draft.visual_description,
-                description: draft.description || draft.visual_description,
-                name: draft.name || prev.name,
-                visual_style: draft.visual_style || prev.visual_style,
-                active_voice_profile_id: draft.active_voice_profile_id || prev.active_voice_profile_id,
-                gender_presentation: draft.gender_presentation || (prev as CharacterProfile & { gender_presentation?: string }).gender_presentation,
-              } as CharacterProfile
-            : prev,
-        );
-        if (draft.candidates?.length) {
-          setCandidates(draft.candidates);
-        }
-        return true;
-      }
+      if (!draft || !draft.visual_description) return null;
+      return {
+        visual_description: draft.visual_description,
+        description: draft.description || draft.visual_description,
+        name: draft.name || "",
+        visual_style: draft.visual_style || "",
+        active_voice_profile_id: draft.active_voice_profile_id || "",
+        gender_presentation: draft.gender_presentation || "",
+        candidates: Array.isArray(draft.candidates) ? draft.candidates : [],
+      };
     } catch {
-      // ignore parse errors
+      return null;
     }
-    return false;
-  }, [draftKey, profile]);
+  }, [draftKey]);
 
-  // On mount, check for a saved draft (Amendment 3 — return from Voice Studio)
+  // On mount, refresh voices so a newly-created voice is available for selection
+  // after returning from Voice Studio. Draft profile fields are reconciled inside
+  // the main refresh() effect below, so they merge onto real server data.
   useEffect(() => {
     void (async () => {
-      const restored = restoreDraftFromSession();
-      if (restored) {
-        // Refresh voices so newly-created voice is available for selection
-        try {
-          const v = await api.listCharacterVoiceProfiles(projectId, characterId).catch(() => ({ items: [] }));
-          setVoices(Array.isArray((v as { items?: VoiceProfile[] }).items) ? (v as { items: VoiceProfile[] }).items : []);
-        } catch {
-          // best-effort
-        }
+      try {
+        const hasDraft = sessionStorage.getItem(draftKey) !== null;
+        if (!hasDraft) return;
+        const v = await api.listCharacterVoiceProfiles(projectId, characterId).catch(() => ({ items: [] }));
+        setVoices(Array.isArray((v as { items?: VoiceProfile[] }).items) ? (v as { items: VoiceProfile[] }).items : []);
+      } catch {
+        // best-effort
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -364,20 +364,47 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         : [];
       setLibraryAssets(libItems);
       // Load existing candidate pack if present
+      let serverCandidates: Candidate[] = [];
       try {
         const pack = await api.getCharacterVisualSheet(projectId, characterId);
         if (pack?.candidates?.length) {
-          setCandidates(pack.candidates as Candidate[]);
+          serverCandidates = pack.candidates as Candidate[];
         }
       } catch {
         // no pack yet
+      }
+      // Amendment 3: merge any saved draft onto the freshly-loaded server profile
+      // so creator-authored text survives a Voice Studio round-trip. The draft is
+      // applied AFTER server data is available, then cleared.
+      const draft = restoreDraftFromSession();
+      if (draft) {
+        const merged = {
+          ...(p as CharacterProfile),
+          visual_description: draft.visual_description,
+          description: draft.description,
+          name: draft.name || (p as CharacterProfile).name,
+          visual_style: draft.visual_style || (p as CharacterProfile).visual_style,
+          active_voice_profile_id: draft.active_voice_profile_id || (p as CharacterProfile).active_voice_profile_id,
+          gender_presentation: draft.gender_presentation || (p as CharacterProfile & { gender_presentation?: string }).gender_presentation,
+        } as CharacterProfile;
+        setProfile(merged);
+        if (draft.candidates?.length) {
+          setCandidates(draft.candidates);
+        } else if (serverCandidates.length) {
+          setCandidates(serverCandidates);
+        }
+        try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
+      } else {
+        if (serverCandidates.length) {
+          setCandidates(serverCandidates);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [projectId, characterId]);
+  }, [projectId, characterId, draftKey, restoreDraftFromSession]);
 
   useEffect(() => {
     void refresh();
@@ -439,6 +466,19 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
     [characterAssets, assetFilter],
   );
 
+  const imageAssets = useMemo(() => libraryAssets.filter(isImageAsset), [libraryAssets]);
+
+  useEffect(() => {
+    if (!libraryPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setLibraryPickerOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [libraryPickerOpen]);
+
   const handleFieldChange = useCallback(
     (field: keyof CharacterProfile, value: string) => {
       setProfile((prev) => (prev ? { ...prev, [field]: value } : prev));
@@ -489,6 +529,23 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
       }
     },
     [projectId, characterId, refresh],
+  );
+
+  const handleRemoveReference = useCallback(
+    async () => {
+      if (!referenceImage?.asset_id) return;
+      setRemovingRef(true);
+      setGenMsg("");
+      try {
+        await api.detachCharacterReference(projectId, characterId, referenceImage.asset_id);
+        await refresh();
+      } catch (e) {
+        setGenMsg(e instanceof Error ? e.message : "Remove failed");
+      } finally {
+        setRemovingRef(false);
+      }
+    },
+    [projectId, characterId, referenceImage, refresh],
   );
 
   const handleGenerate = useCallback(
@@ -731,6 +788,17 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
               <img src={api.assetUrl(referenceImage.asset_id)} alt="Reference" />
             </div>
           ) : null}
+          {referenceImage?.asset_id ? (
+            <button
+              type="button"
+              className="character-compact__actions-button character-compact__ref-remove"
+              data-testid="character-compact-remove-ref"
+              disabled={removingRef || refImageBusy}
+              onClick={() => void handleRemoveReference()}
+            >
+              {removingRef ? "Removing…" : "Remove"}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -946,11 +1014,14 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
             type="button"
             className="character-compact__actions-button"
             data-testid="character-compact-reset"
-            onClick={() => {
+            onClick={async () => {
               if (window.confirm("Reset? This clears unsaved changes and reverts to the last saved state.")) {
                 try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
-                void refresh();
-                setCandidates([]);
+                if (profile?.id) {
+                  await refresh();
+                } else {
+                  setCandidates([]);
+                }
               }
             }}
           >
@@ -986,6 +1057,9 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
             <p className="character-compact__confirm-hint">
               This will remove the character from this project.
               This action cannot be undone.
+            </p>
+            <p className="character-compact__confirm-hint">
+              References in Spatial Map, Scene Creator, Timeline, and Wiki may remain and should be reviewed.
             </p>
             {deleteError ? (
               <p className="character-compact__confirm-error" data-testid="character-compact-delete-error">{deleteError}</p>
@@ -1042,65 +1116,70 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         </div>
       ) : null}
 
-      {libraryPickerOpen ? (
-        <div
-          className="character-compact__preview"
-          role="dialog"
-          aria-label="Choose reference from Library"
-          onClick={() => setLibraryPickerOpen(false)}
-        >
-          <div className="character-compact__picker-body" onClick={(e) => e.stopPropagation()}>
-            <div className="character-compact__picker-header">
-              <strong>Choose a Reference Image</strong>
-            </div>
-            <div className="character-compact__picker-grid">
-              <div className="character-compact__assets-grid">
-                {libraryAssets.filter(isImageAsset).map((a) => {
-                  const isSelected = selectedPickerAsset?.id === a.id;
-                  return (
-                    <button
-                      key={a.id}
-                      type="button"
-                      className={`character-compact__asset is-media${isSelected ? " is-selected" : ""}`}
-                      onClick={() => setSelectedPickerAsset(a)}
-                      aria-label={`Select ${a.tag || a.filename}${isSelected ? " (currently selected)" : ""}`}
-                      aria-pressed={isSelected}
-                    >
-                      <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
-                      <strong>{a.tag || a.filename}</strong>
-                      {isSelected ? <span className="character-compact__asset-check">✓</span> : null}
+      {libraryPickerOpen
+        ? createPortal(
+            <div
+              className="character-compact__preview"
+              role="dialog"
+              aria-label="Choose reference from Library"
+              aria-modal="true"
+              onClick={() => setLibraryPickerOpen(false)}
+            >
+              <div className="character-compact__picker-body" onClick={(e) => e.stopPropagation()}>
+                <div className="character-compact__picker-header">
+                  <strong>Choose a Reference Image</strong>
+                </div>
+                <div className="character-compact__picker-grid">
+                  <div className="character-compact__assets-grid" role="listbox" aria-label="Library images">
+                    {imageAssets.map((a) => {
+                      const isSelected = selectedPickerAsset?.id === a.id;
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className={`character-compact__asset is-media${isSelected ? " is-selected" : ""}`}
+                          onClick={() => setSelectedPickerAsset(a)}
+                          aria-label={`Select ${a.tag || a.filename}${isSelected ? " (currently selected)" : ""}`}
+                          role="option"
+                          aria-selected={isSelected}
+                        >
+                          <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
+                          <strong>{a.tag || a.filename}</strong>
+                          {isSelected ? <span className="character-compact__asset-check">✓</span> : null}
+                        </button>
+                      );
+                    })}
+                    {imageAssets.length === 0 ? (
+                      <p className="character-compact__bio-text">No images in your Library yet.</p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="character-compact__picker-footer">
+                  <div className="character-compact__picker-footer-inner">
+                    <button type="button" className="character-compact__actions-button" onClick={() => { setLibraryPickerOpen(false); setSelectedPickerAsset(null); }}>
+                      Cancel
                     </button>
-                  );
-                })}
-                {libraryAssets.filter(isImageAsset).length === 0 ? (
-                  <p className="character-compact__bio-text">No images in your Library yet.</p>
-                ) : null}
+                    <button
+                      type="button"
+                      className="character-compact__actions-button primary"
+                      data-testid="character-compact-picker-select"
+                      disabled={!selectedPickerAsset}
+                      onClick={() => {
+                        if (selectedPickerAsset) {
+                          void handleAttachLibraryRef(selectedPickerAsset);
+                          setSelectedPickerAsset(null);
+                        }
+                      }}
+                    >
+                      Select
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="character-compact__picker-footer">
-              <div className="character-compact__picker-footer-inner">
-                <button type="button" className="character-compact__actions-button" onClick={() => { setLibraryPickerOpen(false); setSelectedPickerAsset(null); }}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="character-compact__actions-button primary"
-                  data-testid="character-compact-picker-select"
-                  disabled={!selectedPickerAsset}
-                  onClick={() => {
-                    if (selectedPickerAsset) {
-                      void handleAttachLibraryRef(selectedPickerAsset);
-                      setSelectedPickerAsset(null);
-                    }
-                  }}
-                >
-                  Select
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
