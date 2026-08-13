@@ -1087,8 +1087,29 @@ async def promote_to_wiki(
     return result
 
 
+class WikiCompileBody(BaseModel):
+    # When True (manual "Save to Wiki"), the compiled Story summary is taken
+    # verbatim from the saved Story record via the sync compiler — exact
+    # creator-authored wording is preserved, no provider rephrasing. When
+    # False/absent, the async editorial compiler may refine the prose.
+    preserveStoryWording: bool = False
+
+
 @router.post("/projects/{project_id}/wiki/compile")
-async def compile_project_wiki(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def compile_project_wiki(
+    project_id: str,
+    body: WikiCompileBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if body and body.preserveStoryWording:
+        # Manual Save-to-Wiki: preserve exact creator-authored wording by
+        # using the sync compiler, which reads the Story record verbatim
+        # (compile_story_summary) and does not invoke an editorial provider.
+        from ..codirector.wiki_intelligence.compiled.page_compiler import compile_wiki_bundle
+
+        compiled = compile_wiki_bundle(db, project_id, force_full=True)
+        return {"ok": True, "projectId": project_id, "compiled": compiled}
+
     from ..codirector.wiki_intelligence.compiled.page_compiler import compile_wiki_bundle_async
 
     compiled = await compile_wiki_bundle_async(db, project_id, force_full=True)

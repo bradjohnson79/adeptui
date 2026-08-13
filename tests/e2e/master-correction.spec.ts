@@ -479,6 +479,10 @@ test.describe.serial("Workstream H — Master Correction Playwright Certificatio
     });
     expect(res.ok(), `createStoryEntry failed: ${await res.text()}`).toBeTruthy();
 
+    // Manual Save-to-Wiki model: the Wiki Story section shows the PUBLISHED
+    // story, which only refreshes on an explicit compile. Seed → publish.
+    await request.post(`${API}/api/codirector/projects/${projectIdB}/wiki/compile`, { data: { preserveStoryWording: true } });
+
     // Reload the Wiki panel so it re-fetches from the API.
     await page.reload();
     await page.waitForLoadState("networkidle");

@@ -119,7 +119,7 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
     setPublishing(true);
     setPublishMsg("");
     try {
-      await api.compileCoDirectorWiki(projectId);
+      await api.compileCoDirectorWiki(projectId, { preserveStoryWording: true });
       // Snapshot the published values so we can detect unpublished changes.
       setLastPublished(prev => ({
         ...prev,

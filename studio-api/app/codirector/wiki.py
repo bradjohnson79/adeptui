@@ -356,23 +356,56 @@ def build_project_wiki(db: Session, project_id: str) -> dict[str, Any]:
     knowledge_ids: set[str] = set()
 
     # Authoritative story entries from story_entries table.
+    # Manual Save-to-Wiki model (Amendment: Story → Wiki Manual Save): the Wiki
+    # Story section shows the PUBLISHED story — i.e. the version captured at the
+    # last explicit "Save to Wiki" (POST /wiki/compile → compile_wiki_bundle).
+    # Story autosave does NOT refresh the compiled Wiki cache, so editing the
+    # Story leaves the Wiki at the previously-published version until the
+    # creator clicks Save to Wiki again. We render the published storySummary
+    # (logline/short/long) from the compiled cache; the title comes from the
+    # live StoryEntry (the compiled cache does not freeze the title). Before
+    # any explicit publish, the Wiki Story section is empty.
     story_entry_data: list[dict[str, Any]] = []
+    live_story_entries: list[Any] = []
     try:
         from app.story_entries.store import list_entries as list_story_entries
 
-        entries = list_story_entries(db, project_id)
-        for entry in entries:
-            story_entry_data.append({
-                "entry_id": entry.id,
-                "title": entry.title,
-                "entryType": entry.entry_type,
-                "logline": entry.logline,
-                "shortSummary": entry.short_summary,
-                "longSummary": entry.long_summary,
-                "sortOrder": entry.sort_order,
-            })
+        live_story_entries = list_story_entries(db, project_id)
     except Exception:
-        pass
+        live_story_entries = []
+
+    # Fetch the published (compiled) story summary. This is the ONLY source for
+    # the Wiki Story body; the live table is not consulted for logline/short/long.
+    published_summary: dict[str, Any] = {}
+    try:
+        from .wiki_intelligence.compiled.page_compiler import get_compiled_wiki
+
+        compiled_cache = get_compiled_wiki(db, project_id)
+        published_summary = (compiled_cache or {}).get("storySummary") or {}
+    except Exception:
+        published_summary = {}
+
+    has_published = any(
+        str(published_summary.get(k) or "").strip()
+        for k in ("logline", "shortSummary", "longSummary")
+    )
+    if has_published and live_story_entries:
+        # Use the first live entry as the carrier for id/title/entryType/sortOrder
+        # (the compiled cache does not freeze these), but the body comes from the
+        # published storySummary. This keeps the Wiki Story section stable across
+        # Story edits until the next explicit Save to Wiki.
+        carrier = live_story_entries[0]
+        story_entry_data.append({
+            "entry_id": carrier.id,
+            "title": carrier.title,
+            "entryType": carrier.entry_type,
+            "logline": str(published_summary.get("logline") or ""),
+            "shortSummary": str(published_summary.get("shortSummary") or ""),
+            "longSummary": str(published_summary.get("longSummary") or ""),
+            "sortOrder": carrier.sort_order,
+        })
+    # If never published (or no live StoryEntry), story_entry_data stays empty —
+    # the Wiki Story section is empty until the first explicit Save to Wiki.
 
     # Authoritative character profiles from character_identity table.
     character_profile_data: list[dict[str, Any]] = []
