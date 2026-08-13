@@ -1228,6 +1228,39 @@ export interface DirectorTimelineCameraCatalog {
 export type ServiceOwnership = "owned" | "reused" | "external";
 export type ServiceStatusValue = "running" | "stopped" | "error" | "not_configured" | "starting";
 
+// --- Phase 6 — Character Variants -----------------------------------------
+// A Variant is an alternate look (wardrobe/styling) that preserves the locked
+// identity. The Original canonical sheet is immutable and lives on the
+// character's hero_identity reference; variants hang off the character's
+// continuity identity version. Variant generation is reference-locked to the
+// canonical sheet.
+export type CharacterVariant = {
+  id: string;
+  identityId: string;
+  identityVersionId: string;
+  projectId: string;
+  variantType: string;
+  name: string;
+  description: string;
+  lockedTraits?: string[];
+  referenceSetId?: string | null;
+  status?: string;
+  archived?: boolean;
+  createdBy?: string;
+  createdAt?: string;
+  /** Composed 4-view Character Sheet asset id (creator-facing). */
+  characterSheetAssetId?: string | null;
+  generationStatus?: "generating" | "done" | "failed" | string | null;
+  canonicalSheetAssetId?: string | null;
+  generator?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  workflowKey?: string | null;
+  referenceAssetId?: string | null;
+  referenceLocked?: boolean | null;
+  generationError?: string | null;
+};
+
 export interface ComfyUiStatus {
   status: ServiceStatusValue;
   ownership: ServiceOwnership;
@@ -4653,6 +4686,10 @@ export const api = {
         `/api/continuity/versions/${versionId}/variants?projectId=${encodeURIComponent(projectId)}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
       ),
+    listVariants: (projectId: string, versionId: string) =>
+      req<{ items: any[] }>(
+        `/api/continuity/versions/${versionId}/variants?projectId=${encodeURIComponent(projectId)}`
+      ),
     listReferences: (projectId: string, identityId?: string) => {
       const q = new URLSearchParams({ projectId });
       if (identityId) q.set("identityId", identityId);
@@ -5682,10 +5719,13 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  compileCoDirectorWiki: (projectId: string) =>
+  compileCoDirectorWiki: (projectId: string, opts?: { preserveStoryWording?: boolean }) =>
     req<{ ok: boolean; compiled?: Record<string, unknown> }>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/wiki/compile`,
-      { method: "POST" },
+      {
+        method: "POST",
+        body: JSON.stringify({ preserveStoryWording: opts?.preserveStoryWording ?? false }),
+      },
     ),
   refineCoDirectorStorySummary: (projectId: string) =>
     req<{ ok: boolean; storySummary: Record<string, unknown> }>(
@@ -6625,6 +6665,39 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  patchCharacterProp: (projectId: string, characterId: string, propId: string, body: Record<string, unknown>) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props/${encodeURIComponent(propId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  deleteCharacterProp: (projectId: string, characterId: string, propId: string) =>
+    req<{ deleted: boolean; id: string; name: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props/${encodeURIComponent(propId)}`,
+      { method: "DELETE" },
+    ),
+  approveCharacterProp: (projectId: string, characterId: string, propId: string) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props/${encodeURIComponent(propId)}/approve`,
+      { method: "POST", body: "{}" },
+    ),
+  generateCharacterProp: (projectId: string, characterId: string, propId: string) =>
+    req<{ id: string; name: string; jobId: string; status: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props/${encodeURIComponent(propId)}/generate`,
+      { method: "POST", body: "{}" },
+    ),
+  getCharacterPropStatus: (projectId: string, characterId: string, propId: string) =>
+    req<{
+      id: string;
+      name: string;
+      prop_type?: string;
+      description?: string;
+      library_asset_id?: string | null;
+      approval_status?: string;
+      jobId?: string | null;
+      jobStatus?: string | null;
+    }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/props/${encodeURIComponent(propId)}/status`,
+    ),
   listCharacterVoiceProfiles: (projectId: string, characterId: string) =>
     req<{ items: any[] }>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice-profiles`,
@@ -7114,6 +7187,49 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ approvedBy, selectDirectionId }),
       },
+    ),
+  listCharacterVariants: (projectId: string, characterId: string) =>
+    req<{
+      characterId: string;
+      identityId: string;
+      versionId: string;
+      original: {
+        id: string | null;
+        name: string;
+        description: string;
+        characterSheetAssetId: string | null;
+        isOriginal: true;
+        immutable: true;
+      };
+      variants: CharacterVariant[];
+      maxVariants: number;
+      canGenerate: boolean;
+    }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/variants`,
+    ),
+  createCharacterVariant: (
+    projectId: string,
+    characterId: string,
+    body: { name: string; description?: string; createdBy?: string },
+  ) =>
+    req<CharacterVariant>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/variants`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  deleteCharacterVariant: (projectId: string, characterId: string, variantId: string) =>
+    req<{ ok: boolean; variantId: string; deleted: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/variants/${encodeURIComponent(variantId)}`,
+      { method: "DELETE" },
+    ),
+  generateCharacterVariant: (projectId: string, characterId: string, variantId: string) =>
+    req<{ ok: boolean; variantId: string; generation: Record<string, unknown> }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/variants/${encodeURIComponent(variantId)}/generate`,
+      { method: "POST" },
+    ),
+  advanceCharacterVariant: (projectId: string, characterId: string, variantId: string) =>
+    req<{ ok: boolean; variantId: string; generation: Record<string, unknown> }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/variants/${encodeURIComponent(variantId)}/advance`,
+      { method: "POST" },
     ),
   seedKorriCanon: (projectId: string) =>
     req<any>(`/api/projects/${encodeURIComponent(projectId)}/characters/seed-korri`, {

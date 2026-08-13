@@ -1,0 +1,118 @@
+/* PropsWorkspace — creator-first Props & Accessories panel.
+   Matches the shared character-core look (whitespace, large buttons,
+   plain-language hints). Scoped to .props-workspace. */
+
+.props-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.props-workspace__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.props-workspace__header-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary, #eef1f7);
+  margin: 0;
+}
+
+.props-workspace__header-count {
+  font-size: 13px;
+  color: var(--text-muted, #7c8496);
+}
+
+.props-workspace__slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.props-workspace__slot {
+  border: 1px solid var(--border, #2c3346);
+  border-radius: 12px;
+  background: var(--panel-2, #1c2130);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.props-workspace__slot.is-approved {
+  border-color: #4a8a5a;
+}
+
+.props-workspace__slot-media {
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #14181f;
+  border: 1px solid var(--border, #2c3346);
+}
+
+.props-workspace__slot-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.props-workspace__slot-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted, #7c8496);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.props-workspace__slot-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.props-workspace__slot-actions .character-core__button {
+  flex: 1 1 auto;
+}
+
+.props-workspace__slot-badge {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6fbf86;
+  font-weight: 600;
+}
+
+.props-workspace__add {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.props-workspace__add .character-core__button {
+  min-width: 200px;
+}
+
+.props-workspace__empty {
+  font-size: 13px;
+  color: var(--text-muted, #7c8496);
+  margin: 0;
+}
+
+.props-workspace__disabled-banner {
+  font-size: 13px;
+  color: var(--text-muted, #7c8496);
+  background: var(--panel-2, #1c2130);
+  border: 1px dashed var(--border, #2c3346);
+  border-radius: 10px;
+  padding: 12px 14px;
+}

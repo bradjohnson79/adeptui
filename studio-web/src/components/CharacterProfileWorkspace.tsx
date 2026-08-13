@@ -7,6 +7,9 @@ import { Button } from "./ui";
 import { useOpenCoDirector } from "./CoDirector";
 import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
 import { IdentityRegistryWorkspace } from "./continuity/IdentityRegistryWorkspace";
+import { CharacterCore } from "./character";
+import { PropsWorkspace } from "./character/PropsWorkspace";
+import { VariantsWorkspace } from "./character/VariantsWorkspace";
 
 type TabId =
   | "overview"
@@ -269,12 +272,20 @@ export function CharacterProfileWorkspace({
   const [refs, setRefs] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-  const [name, setName] = useState("New Character");
-  const [roleLabel, setRoleLabel] = useState("");
   const [attachRole, setAttachRole] = useState("full_body_front");
   const [attachAssetId, setAttachAssetId] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
   const [bridgeRefs, setBridgeRefs] = useState(true);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [autoFocusNew, setAutoFocusNew] = useState(false);
+  const [advancedPanel, setAdvancedPanel] = useState<"" | "props" | "variants">(() => {
+    try {
+      const a = new URLSearchParams(window.location.search).get("advanced");
+      return a === "props" || a === "variants" ? a : "";
+    } catch {
+      return "";
+    }
+  });
 
   const selected = useMemo(() => items.find((i) => i.id === selectedId) || profile, [items, selectedId, profile]);
 
@@ -306,8 +317,13 @@ export function CharacterProfileWorkspace({
 
   useEffect(() => {
     if (!initialTab) return;
-    if (initialTab === "voice" || initialTab === "voicePerformance") setTab("voiceStudio");
-    else setTab(initialTab);
+    if (initialTab === "voice" || initialTab === "voicePerformance") {
+      setTab("voiceStudio");
+      setAdvancedOpen(true);
+    } else {
+      setTab(initialTab);
+      setAdvancedOpen(true);
+    }
   }, [initialTab]);
 
   useEffect(() => {
@@ -330,7 +346,11 @@ export function CharacterProfileWorkspace({
       if (detail.characterId) setSelectedId(detail.characterId);
       if (detail.tab === "voicePerformance" || detail.tab === "voice" || detail.tab === "voiceStudio") {
         setTab("voiceStudio");
-      } else if (detail.tab === "identityRegistry") setTab("identityRegistry");
+        setAdvancedOpen(true);
+      } else if (detail.tab === "identityRegistry") {
+        setTab("identityRegistry");
+        setAdvancedOpen(true);
+      }
     };
     window.addEventListener("adept:open-character-voice", onOpenVoice);
     return () => window.removeEventListener("adept:open-character-voice", onOpenVoice);
@@ -340,11 +360,12 @@ export function CharacterProfileWorkspace({
     setBusy(true);
     setMsg("");
     try {
-      const created = await api.createCharacterProfile(project.id, { name, role: roleLabel });
+      const created = await api.createCharacterProfile(project.id, { name: "Untitled Character" });
       setSelectedId(created.id);
+      setAutoFocusNew(true);
       await refreshList();
       await onChange?.();
-      setMsg(`Created draft Character Profile “${created.name}”.`);
+      setMsg("Started a new character. Type a name to begin.");
       if (returnWorkspace === "voicestudio" && created?.id) {
         try {
           sessionStorage.setItem("adept_selected_character", created.id);
@@ -488,8 +509,8 @@ export function CharacterProfileWorkspace({
   return (
     <div className="page" data-testid="character-profile-workspace">
       <PanelHeading
-        title="Character Profile"
-        tip="Canonical Character Identity System for this project. Generated sheets, voice, and assets stay in this project’s Library — never a new project per image."
+        title="Character Creator"
+        tip="Build your cast. Generated sheets, voice, and assets stay in this project’s Library — never a new project per image."
       />
       {returnWorkspace === "codirector" ? (
         <div className="row-actions" style={{ marginBottom: "0.75rem" }}>
@@ -516,35 +537,149 @@ export function CharacterProfileWorkspace({
         </p>
       )}
 
-      <div className="row-actions" style={{ gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Character name" data-testid="character-name-input" />
-        <input value={roleLabel} onChange={(e) => setRoleLabel(e.target.value)} placeholder="Role" />
+      <div className="row-actions" style={{ gap: "0.75rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "center" }}>
         <Button variant="primary" disabled={busy} onClick={() => void create()} data-testid="character-create">
-          Create Character Profile
+          + Create Character
         </Button>
-        <Button disabled={busy} onClick={() => void seedKorri()} data-testid="character-seed-korri">
-          Seed Korri (canon v1)
-        </Button>
-        <Button disabled={busy || !selectedId} onClick={() => void promoteIdentity()} data-testid="character-promote">
-          Promote to Identity / Bible / Prompts
-        </Button>
-        <select
-          value={selectedId}
-          onChange={(e) => setSelectedId(e.target.value)}
-          data-testid="character-select"
-        >
-          <option value="">Select character…</option>
-          {items.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.name} ({i.status})
-            </option>
-          ))}
-        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span className="muted">Load Character</span>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
+            data-testid="character-select"
+          >
+            <option value="">Select a saved character…</option>
+            {items.map((i) => (
+              <option key={i.id} value={i.id}>
+                {i.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
+      {selectedId ? (
+        <CharacterCore
+          projectId={project.id}
+          characterId={selectedId}
+          autoFocusName={autoFocusNew}
+          renderAdvanced={({ saved }) => (
+            <>
+              <Button
+                variant="ghost"
+                disabled={!saved}
+                title={!saved ? "Save the character first" : "Open Voice Studio for this character"}
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    workspace: "voicestudio",
+                    characterId: selectedId,
+                    returnWorkspace: "characters",
+                  });
+                  navigate(`/project/${project.id}?${params.toString()}`);
+                }}
+              >
+                Voice Studio
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!saved}
+                title={!saved ? "Save the character first" : "Open PoseCraft for this character"}
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    workspace: "posecraft",
+                    characterId: selectedId,
+                    returnWorkspace: "characters",
+                  });
+                  navigate(`/project/${project.id}?${params.toString()}`);
+                }}
+              >
+                PoseCraft
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!saved}
+                title={!saved ? "Save the character first" : "Props & accessories for this character"}
+                data-testid="character-advanced-props"
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    workspace: "characters",
+                    characterId: selectedId,
+                    advanced: "props",
+                  });
+                  navigate(`/project/${project.id}?${params.toString()}`);
+                  setAdvancedPanel("props");
+                }}
+              >
+                Props & Accessories
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={!saved}
+                title={!saved ? "Save the character first" : "Variants of this character's look"}
+                data-testid="character-advanced-variants"
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    workspace: "characters",
+                    characterId: selectedId,
+                    advanced: "variants",
+                  });
+                  navigate(`/project/${project.id}?${params.toString()}`);
+                  setAdvancedPanel("variants");
+                }}
+              >
+                Variants
+              </Button>
+            </>
+          )}
+        />
+      ) : (
+        <div className="empty-state" data-testid="character-empty">
+          <strong>No character selected.</strong>
+          <p className="muted">
+            Click <em>Create Character</em> to start a new character, or load a saved one from the dropdown above.
+          </p>
+        </div>
+      )}
+
+      {selectedId && advancedPanel === "props" && (
+        <section className="panel" data-testid="character-props-panel" style={{ marginTop: "1.5rem" }}>
+          <div className="row-actions" style={{ justifyContent: "space-between", marginBottom: "0.75rem" }}>
+            <h3 style={{ margin: 0 }}>Props &amp; Accessories</h3>
+            <Button variant="ghost" onClick={() => setAdvancedPanel("")} data-testid="character-advanced-close">
+              Close
+            </Button>
+          </div>
+          <PropsWorkspace projectId={project.id} characterId={selectedId} />
+        </section>
+      )}
+
+      {selectedId && advancedPanel === "variants" && (
+        <section className="panel" data-testid="character-variants-panel" style={{ marginTop: "1.5rem" }}>
+          <div className="row-actions" style={{ justifyContent: "space-between", marginBottom: "0.75rem" }}>
+            <h3 style={{ margin: 0 }}>Variants</h3>
+            <Button variant="ghost" onClick={() => setAdvancedPanel("")} data-testid="character-variants-close">
+              Close
+            </Button>
+          </div>
+          <VariantsWorkspace projectId={project.id} characterId={selectedId} enabled={!!selectedId} />
+        </section>
+      )}
+
       {selected && (
-        <>
-          <nav className="row-actions" style={{ flexWrap: "wrap", gap: "0.35rem", marginBottom: "1rem" }} data-testid="character-tabs">
+        <details
+          className="character-advanced"
+          data-testid="character-advanced"
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+          style={{ marginTop: "1.5rem" }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+            Advanced / More
+          </summary>
+          <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.5rem" }}>
+            Power tools for visual gates, identity packs, continuity, versions, and generated assets. Not required for a valid character.
+          </p>
+          <nav className="row-actions" style={{ flexWrap: "wrap", gap: "0.35rem", marginBottom: "1rem", marginTop: "0.75rem" }} data-testid="character-tabs">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -569,6 +704,14 @@ export function CharacterProfileWorkspace({
                 Active wardrobe: {profile?.active_wardrobe_id || "none"} · Active voice:{" "}
                 {profile?.active_voice_profile_id || "none"}
               </p>
+              <div className="row-actions" style={{ gap: "0.5rem", flexWrap: "wrap", margin: "0.5rem 0 1rem" }}>
+                <Button disabled={busy} onClick={() => void seedKorri()} data-testid="character-seed-korri">
+                  Seed Korri (canon v1)
+                </Button>
+                <Button disabled={busy || !selectedId} onClick={() => void promoteIdentity()} data-testid="character-promote">
+                  Promote to Identity / Bible / Prompts
+                </Button>
+              </div>
               <div className="character-overview__fields">
                 <label className="character-overview__field">
                   <span>Bio &amp; Personality</span>
@@ -946,7 +1089,7 @@ export function CharacterProfileWorkspace({
               </pre>
             </section>
           )}
-        </>
+        </details>
       )}
     </div>
   );

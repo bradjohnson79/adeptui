@@ -37,6 +37,11 @@ from .schemas import (
 )
 
 
+# Phase 6 Props workspace: a character can have at most this many props.
+# Enforced in create_prop; the frontend mirrors the cap in the UI.
+MAX_PROPS_PER_CHARACTER = 4
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
@@ -96,6 +101,12 @@ def ensure_character_identity_tables() -> None:
                     "ADD COLUMN provenance VARCHAR(64) NOT NULL DEFAULT 'PROPOSED_BY_CHARACTER_CREATOR'"
                 )
             )
+            conn.commit()
+        # Phase 6 Props workspace: legacy DBs created before the Props
+        # workspace lack the generation_job_id column on character_props.
+        prop_rows = conn.execute(text("PRAGMA table_info(character_props)")).fetchall()
+        if prop_rows and not any(r[1] == "generation_job_id" for r in prop_rows):
+            conn.execute(text("ALTER TABLE character_props ADD COLUMN generation_job_id VARCHAR(36)"))
             conn.commit()
 
 
@@ -328,7 +339,9 @@ def update_profile(
     row.updated_at = _now()
     cov = _coverage_for(db, row)
     if row.status not in ("APPROVED", "LOCKED", "ARCHIVED"):
-        row.status = cov.status
+        # Completeness law: never surface INCOMPLETE on the profile itself; the
+        # detailed coverage report stays internal for advanced views.
+        row.status = "DRAFT" if cov.status == "INCOMPLETE" else cov.status
     db.commit()
     db.refresh(row)
     return to_out(db, row)
@@ -517,7 +530,9 @@ def attach_reference(
     db.flush()
     cov = _coverage_for(db, profile)
     if profile.status not in ("APPROVED", "LOCKED", "ARCHIVED"):
-        profile.status = cov.status
+        # Completeness law: a saved character with a valid name is valid. Keep the
+        # detailed coverage report internal; never surface INCOMPLETE on the profile.
+        profile.status = "DRAFT" if cov.status == "INCOMPLETE" else cov.status
     db.commit()
     return {
         "id": rid,
@@ -549,7 +564,8 @@ def detach_reference(
     profile.updated_at = _now()
     cov = _coverage_for(db, profile)
     if profile.status not in ("APPROVED", "LOCKED", "ARCHIVED"):
-        profile.status = cov.status
+        # Completeness law: never surface INCOMPLETE on the profile itself.
+        profile.status = "DRAFT" if cov.status == "INCOMPLETE" else cov.status
     db.commit()
     return {"ok": True, "detached": asset_id}
 
@@ -570,6 +586,13 @@ def approve_character_candidate(
     the chosen asset as canonical + approval_status=approved. Does not touch
     other roles or the visual-sheet pack status (owner-approve handles gates).
     Safe to call repeatedly; idempotent if the same asset is already canonical.
+
+    Use-as-Character-Identity (Phase 5): when ``source_type`` is ``upload`` or
+    ``library`` the candidate is a user-provided reference that becomes a
+    candidate WITHOUT generation. Provenance records ``generationUsed=false``
+    and the ORIGINAL Library asset id is preserved (no binary duplication) —
+    the same asset row is simply attached as canonical. It becomes
+    ``hero_identity`` only via this explicit approval action.
     """
     profile = db.get(CharacterProfileRow, character_id)
     if not profile or profile.project_id != project_id:
@@ -578,6 +601,19 @@ def approve_character_candidate(
         raise _err("LOCKED_VERSION", "Cannot approve references for a locked profile.", 409)
     if reference_role not in ALL_REFERENCE_ROLES:
         raise _err("INVALID_REFERENCE_ROLE", f"Unknown reference role: {reference_role}")
+
+    # Phase 5: record generationUsed provenance. upload/library candidates did
+    # NOT use generation; generation candidates did. The original asset id is
+    # preserved (we attach the existing Library asset, never duplicating bytes).
+    generation_used = source_type not in ("upload", "library")
+    lineage = json.dumps(
+        {
+            "generationUsed": generation_used,
+            "sourceType": source_type,
+            "originalAssetId": asset_id,
+            "approvedAt": _now(),
+        }
+    )
 
     # Demote any existing canonical reference for this role.
     existing = (
@@ -598,11 +634,13 @@ def approve_character_candidate(
             row.approval_status = "review"
 
     if already_canonical:
-        # Ensure the existing row is marked approved.
+        # Ensure the existing row is marked approved + provenance refreshed.
         for row in existing:
             if row.asset_id == asset_id:
                 row.approval_status = "approved"
                 row.canonical = True
+                row.source_type = source_type
+                row.generation_lineage_json = lineage
         profile.updated_at = _now()
         db.commit()
         return {
@@ -612,6 +650,8 @@ def approve_character_candidate(
             "canonical": True,
             "approvalStatus": "approved",
             "replaced": False,
+            "generationUsed": generation_used,
+            "sourceType": source_type,
         }
 
     rid = str(uuid.uuid4())
@@ -624,7 +664,7 @@ def approve_character_candidate(
         approval_status="approved",
         canonical=True,
         source_type=source_type,
-        generation_lineage_json="{}",
+        generation_lineage_json=lineage,
         notes=notes,
         created_at=_now(),
     )
@@ -639,6 +679,8 @@ def approve_character_candidate(
         "canonical": True,
         "approvalStatus": "approved",
         "replaced": bool(existing),
+        "generationUsed": generation_used,
+        "sourceType": source_type,
     }
 
 
@@ -812,6 +854,22 @@ def create_prop(db: Session, project_id: str, character_id: str, body: PropCreat
     profile = db.get(CharacterProfileRow, character_id)
     if not profile or profile.project_id != project_id:
         raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    # Phase 6 Props workspace: enforce a maximum of 4 props per character so
+    # the creator-facing surface stays focused. A 5th prop is rejected with a
+    # clear 400 — the UI also disables the add button at 4, but the backend
+    # remains the authority.
+    existing_count = (
+        db.query(CharacterPropRow)
+        .filter(CharacterPropRow.character_profile_id == character_id)
+        .count()
+    )
+    if existing_count >= MAX_PROPS_PER_CHARACTER:
+        raise _err(
+            "PROP_LIMIT_REACHED",
+            f"A character can have at most {MAX_PROPS_PER_CHARACTER} props. "
+            "Remove one before adding another.",
+            400,
+        )
     pid = str(uuid.uuid4())
     row = CharacterPropRow(
         id=pid,
@@ -833,7 +891,89 @@ def create_prop(db: Session, project_id: str, character_id: str, body: PropCreat
     db.add(row)
     profile.updated_at = _now()
     db.commit()
+    # If the caller supplied an existing Library asset (upload / library
+    # pick), register it as a character-associated Library asset so it lives
+    # in the character's library folder without duplicating the binary.
+    if body.library_asset_id:
+        _assign_prop_library_asset(db, project_id, character_id, body.library_asset_id)
     return {"id": pid, "name": body.name, "prop_type": body.prop_type}
+
+
+def update_prop(
+    db: Session, project_id: str, character_id: str, prop_id: str, body: "PropUpdate"
+) -> dict[str, Any]:
+    """Patch an existing prop's editable fields (name, description, etc.).
+
+    Does not touch approval_status or generation_job_id. If a new
+    library_asset_id is supplied, registers it as a character-associated
+    Library asset (no binary duplication).
+    """
+    from .schemas import PropUpdate  # local import to avoid cycle at module load
+
+    assert isinstance(body, PropUpdate)
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = db.get(CharacterPropRow, prop_id)
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Prop not found.", 404)
+    data = body.model_dump(exclude_unset=True)
+    new_asset_id: str | None = None
+    for key, value in data.items():
+        if key == "library_asset_id":
+            new_asset_id = value  # apply after row update
+            continue
+        if value is not None:
+            setattr(row, key, value)
+    if new_asset_id is not None:
+        row.library_asset_id = new_asset_id
+    profile.updated_at = _now()
+    db.commit()
+    if new_asset_id:
+        _assign_prop_library_asset(db, project_id, character_id, new_asset_id)
+    return {
+        "id": row.id,
+        "name": row.name,
+        "prop_type": row.prop_type,
+        "description": row.description,
+        "library_asset_id": row.library_asset_id,
+        "approval_status": row.approval_status,
+    }
+
+
+def _assign_prop_library_asset(
+    db: Session, project_id: str, character_id: str, asset_id: str
+) -> None:
+    """Register an existing Library image as a character-associated asset.
+
+    Uses project_library.service.assign_asset with entity_type="character"
+    and entity_id=characterId so the prop image lives in the character's
+    library folder. The binary is NOT duplicated — the same Asset row is
+    classified into the character's folder.
+    """
+    try:
+        from ..db import Asset
+        from ..project_library.service import assign_asset
+
+        asset = db.get(Asset, asset_id)
+        if not asset or asset.project_id != project_id:
+            return
+        profile = db.get(CharacterProfileRow, character_id)
+        entity_name = (profile.name if profile else "") or "Character"
+        assign_asset(
+            db,
+            asset,
+            entity_type="character",
+            entity_name=entity_name,
+            entity_id=character_id,
+            classified_by="character_props",
+            hints={"purpose": "character_prop"},
+        )
+    except Exception:
+        # Library classification is best-effort: a failure here (e.g. minimal
+        # test DB without the library taxonomy) must not break prop creation
+        # or approval. The prop row remains the source of truth.
+        return
 
 
 def list_props(db: Session, project_id: str, character_id: str) -> list[dict[str, Any]]:
@@ -847,9 +987,239 @@ def list_props(db: Session, project_id: str, character_id: str) -> list[dict[str
             "description": r.description,
             "library_asset_id": r.library_asset_id,
             "approval_status": r.approval_status,
+            "generation_job_id": getattr(r, "generation_job_id", None),
         }
         for r in rows
     ]
+
+
+def delete_prop(db: Session, project_id: str, character_id: str, prop_id: str) -> dict[str, Any]:
+    """Delete a single prop row.
+
+    Deletes ONLY the character_props row. The associated Library image (if
+    any) remains a reusable project resource — consistent with
+    delete_profile, which never deletes shared Library assets.
+    """
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = db.get(CharacterPropRow, prop_id)
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Prop not found.", 404)
+    name = row.name
+    db.delete(row)
+    profile.updated_at = _now()
+    db.commit()
+    return {"deleted": True, "id": prop_id, "name": name}
+
+
+def approve_prop(
+    db: Session, project_id: str, character_id: str, prop_id: str
+) -> dict[str, Any]:
+    """Mark a prop as approved (saved) and ensure its Library image is
+    registered as a character-associated Library asset.
+
+    No binary duplication: the existing Library Asset row is classified into
+    the character's library folder via project_library.service.assign_asset.
+    """
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = db.get(CharacterPropRow, prop_id)
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Prop not found.", 404)
+    if not row.library_asset_id:
+        raise _err(
+            "NO_PROP_IMAGE",
+            "Generate or attach a prop image before approving.",
+            400,
+        )
+    row.approval_status = "approved"
+    profile.updated_at = _now()
+    db.commit()
+    _assign_prop_library_asset(db, project_id, character_id, row.library_asset_id)
+    return {
+        "id": row.id,
+        "name": row.name,
+        "approval_status": row.approval_status,
+        "library_asset_id": row.library_asset_id,
+    }
+
+
+def generate_prop_image(
+    db: Session, project_id: str, character_id: str, prop_id: str
+) -> dict[str, Any]:
+    """Enqueue a single reference-locked image job for a prop.
+
+    Reuses the existing image-generation enqueue path
+    (storyboard_jobs.enqueue_imagegen_job) — does NOT invent a new
+    generator. The character's canonical hero_identity sheet is the
+    reference (reference-locked via zimage.ref_edit) and the prop
+    description is the prompt. Stores the job id on the prop row so the
+    frontend can poll get_prop_status.
+    """
+    from ..db import Asset, Job
+    from ..storyboard_jobs import enqueue_imagegen_job
+
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = db.get(CharacterPropRow, prop_id)
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Prop not found.", 404)
+
+    # Resolve the character's canonical hero_identity sheet (reference).
+    hero_asset_id = resolve_approved_reference(db, character_id, "hero_identity")
+    if not hero_asset_id:
+        raise _err(
+            "NO_CHARACTER_SHEET",
+            "Generate and approve a Character Sheet first — props are "
+            "reference-locked to the character's canonical look.",
+            400,
+        )
+    hero_asset = db.get(Asset, hero_asset_id)
+    if not hero_asset or hero_asset.project_id != project_id or hero_asset.kind != "image":
+        raise _err("NO_CHARACTER_SHEET", "Character Sheet asset is missing or invalid.", 400)
+
+    # Build a focused prop prompt from the character profile + prop fields.
+    profile_out = get_profile(db, project_id, character_id)
+    prop_prompt = _build_prop_prompt(profile_out.model_dump(), row)
+
+    body: dict[str, Any] = {
+        "prompt": prop_prompt,
+        "negative_prompt": (
+            "blonde hair, aqua eyes, blue eyes, child, sexualized, low quality, "
+            "watermark, collage, grid, multiple views, text"
+        ),
+        "width": 1024,
+        "height": 1024,
+        "tag": f"prop_{(row.name or 'prop').replace(' ', '_').lower()}",
+        "modelFamilyPreference": "zimage",
+        "purpose": "character_prop",
+        "presetId": "builtin-character-prop",
+        "source_asset_id": hero_asset_id,
+        "denoise": 0.68,
+        "creativeContext": {
+            "objective": "character_prop",
+            "characterId": character_id,
+            "propId": prop_id,
+            "workflowKey": "zimage.ref_edit",
+            "referenceAssetId": hero_asset_id,
+            "referenceLocked": True,
+            "referenceFidelityMode": "zimage_ref_edit",
+        },
+    }
+    job = enqueue_imagegen_job(db, project_id, body)
+
+    # Record the pending job on the prop row.
+    row.generation_job_id = job.id  # type: ignore[attr-defined]
+    row.approval_status = "draft"
+    db.commit()
+    return {
+        "id": row.id,
+        "name": row.name,
+        "jobId": job.id,
+        "status": job.status,
+    }
+
+
+def get_prop_status(
+    db: Session, project_id: str, character_id: str, prop_id: str
+) -> dict[str, Any]:
+    """Poll a prop generation job and link the output asset when done.
+
+    Returns the prop row plus the live job status and the output asset id
+    (with a thumbnail URL) once the job completes. When the job is done the
+    prop's library_asset_id is set and the asset is registered as a
+    character-associated Library asset (no binary duplication).
+    """
+    from ..db import Job
+
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        raise _err("NOT_FOUND", "Character Profile not found.", 404)
+    row = db.get(CharacterPropRow, prop_id)
+    if not row or row.character_profile_id != character_id:
+        raise _err("NOT_FOUND", "Prop not found.", 404)
+
+    job_id = getattr(row, "generation_job_id", None)
+    job_status = None
+    output_asset_id = row.library_asset_id
+
+    if job_id:
+        job = db.get(Job, job_id)
+        if job:
+            job_status = job.status
+            if job.status == "done" and not row.library_asset_id:
+                import json as _json
+
+                params = _json.loads(job.params_json or "{}")
+                aid = params.get("output_asset_id")
+                if aid:
+                    row.library_asset_id = aid
+                    db.commit()
+                    output_asset_id = aid
+                    _assign_prop_library_asset(db, project_id, character_id, aid)
+            elif job.status in ("done", "failed", "cancelled"):
+                # Clear the pending job pointer once terminal.
+                row.generation_job_id = None  # type: ignore[attr-defined]
+                db.commit()
+
+    return {
+        "id": row.id,
+        "name": row.name,
+        "prop_type": row.prop_type,
+        "description": row.description,
+        "library_asset_id": output_asset_id,
+        "approval_status": row.approval_status,
+        "jobId": job_id,
+        "jobStatus": job_status,
+    }
+
+
+def _build_prop_prompt(profile: dict[str, Any], prop_row: CharacterPropRow) -> str:
+    """Compose a focused prop-image prompt from the character profile + prop fields.
+
+    The character's canonical identity is preserved (reference-locked); the
+    prop description specifies the accessory to render. Keeps the prompt
+    concise and creator-language-friendly.
+    """
+    name = (profile.get("name") or "the character").strip()
+    visual = (profile.get("visual_description") or "").strip()
+    prop_name = (prop_row.name or "an accessory").strip()
+    prop_desc = (prop_row.description or "").strip()
+    prop_type = (prop_row.prop_type or "").strip()
+    colors = (prop_row.colors or "").strip()
+    materials = (prop_row.materials or "").strip()
+
+    bits: list[str] = []
+    bits.append(f"A single focused product-style reference image of {prop_name}")
+    if prop_type:
+        bits.append(f"({prop_type})")
+    bits.append(f"for the character {name}.")
+    if prop_desc:
+        bits.append(prop_desc)
+    if materials:
+        bits.append(f"Materials: {materials}.")
+    if colors:
+        bits.append(f"Colors: {colors}.")
+    if visual:
+        bits.append(f"Character visual context: {visual}.")
+    bits.append(
+        "Reference-locked to the character's canonical look — preserve the "
+        "character's identity, skin tone, hair, and style. Clean simple "
+        "background, soft studio light, the prop is the clear subject."
+    )
+    return " ".join(bits)[:1800]
+
+
+def service_resolve_approved_reference(
+    db: Session, character_id: str, role: str = "hero_identity"
+) -> str | None:
+    """Local alias for resolve_approved_reference (kept here to avoid a
+    circular import with the module-level resolve_approved_reference below
+    when generate_prop_image is called)."""
+    return resolve_approved_reference(db, character_id, role=role)
 
 
 def upsert_trait(db: Session, project_id: str, character_id: str, body: TraitUpsert) -> dict[str, Any]:

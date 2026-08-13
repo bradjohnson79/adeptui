@@ -85,6 +85,47 @@ def test_feature_disabled_returns_404(client: TestClient, monkeypatch: pytest.Mo
     _apply_flags_in_place(os.environ)
 
 
+def test_name_only_save_is_valid_no_incomplete(client: TestClient, project_id: str):
+    """Completeness law: a saved character with a valid name is valid (never INCOMPLETE),
+    even after attaching a reference (which recomputes coverage)."""
+    created = client.post(
+        f"/api/projects/{project_id}/characters",
+        json={"name": "Name Only"},
+    )
+    assert created.status_code == 200, created.text
+    cid = created.json()["id"]
+    assert created.json()["status"] != "INCOMPLETE"
+
+    attach = client.post(
+        f"/api/projects/{project_id}/characters/{cid}/references",
+        json={"asset_id": "asset-ref-1", "reference_role": "reference_image", "source_type": "upload"},
+    )
+    assert attach.status_code == 200, attach.text
+
+    fetched = client.get(f"/api/projects/{project_id}/characters/{cid}").json()
+    assert fetched["status"] != "INCOMPLETE"
+    assert fetched["status"] in ("DRAFT", "READY_FOR_GENERATION", "APPROVED")
+    # Coverage detail stays available internally for advanced views.
+    assert "coverage" in fetched
+
+
+def test_patch_partial_domains_never_surfaces_incomplete(client: TestClient, project_id: str):
+    """Completeness law (D1): patching personality/performance/etc. via the
+    Advanced 'Save domains' path (update_profile) must not surface INCOMPLETE."""
+    cid = client.post(
+        f"/api/projects/{project_id}/characters",
+        json={"name": "Partial Domains"},
+    ).json()["id"]
+    patched = client.patch(
+        f"/api/projects/{project_id}/characters/{cid}",
+        json={"personality": {"core_personality": "stoic"}, "description": "x"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["status"] != "INCOMPLETE"
+    fetched = client.get(f"/api/projects/{project_id}/characters/{cid}").json()
+    assert fetched["status"] != "INCOMPLETE"
+
+
 def test_create_profile_coverage_and_lock(client: TestClient, project_id: str):
     created = client.post(
         f"/api/projects/{project_id}/characters",

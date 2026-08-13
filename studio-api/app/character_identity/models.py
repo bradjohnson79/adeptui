@@ -134,6 +134,12 @@ class CharacterPropRow(Base):
     library_asset_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     approval_status: Mapped[str] = mapped_column(String(32), default="draft")
     reference_asset_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    # Phase 6 Props workspace: pending image-generation job id for an
+    # in-flight prop image. Cleared once the job completes and the output
+    # asset is linked via library_asset_id. Stored on the prop row so the
+    # frontend can poll a single prop-status endpoint without a parallel
+    # job-tracking table.
+    generation_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[str] = mapped_column(String(64), default="")
 
 

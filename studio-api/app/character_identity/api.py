@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from .schemas import (
     CharacterProfileUpdate,
     DialogueGenerateRequest,
     PropCreate,
+    PropUpdate,
     ReferenceAttach,
     TraitUpsert,
     VoiceConsentCreate,
@@ -184,6 +185,51 @@ def create_prop(project_id: str, character_id: str, body: PropCreate, db: Sessio
     _require_flag()
     _project(db, project_id)
     return service.create_prop(db, project_id, character_id, body)
+
+
+@router.patch("/projects/{project_id}/characters/{character_id}/props/{prop_id}")
+def update_prop_route(
+    project_id: str, character_id: str, prop_id: str, body: PropUpdate, db: Session = Depends(get_db)
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.update_prop(db, project_id, character_id, prop_id, body)
+
+
+@router.delete("/projects/{project_id}/characters/{character_id}/props/{prop_id}")
+def delete_prop_route(
+    project_id: str, character_id: str, prop_id: str, db: Session = Depends(get_db)
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.delete_prop(db, project_id, character_id, prop_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/props/{prop_id}/approve")
+def approve_prop_route(
+    project_id: str, character_id: str, prop_id: str, db: Session = Depends(get_db)
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.approve_prop(db, project_id, character_id, prop_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/props/{prop_id}/generate")
+def generate_prop_route(
+    project_id: str, character_id: str, prop_id: str, db: Session = Depends(get_db)
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.generate_prop_image(db, project_id, character_id, prop_id)
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/props/{prop_id}/status")
+def prop_status_route(
+    project_id: str, character_id: str, prop_id: str, db: Session = Depends(get_db)
+):
+    _require_flag()
+    _project(db, project_id)
+    return service.get_prop_status(db, project_id, character_id, prop_id)
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/traits")
@@ -852,6 +898,10 @@ class VisualSheetStartBody(BaseModel):
     heroAssetId: Optional[str] = None
     candidateCount: Optional[int] = None
     visualStyle: Optional[str] = None
+    # User Control Law: which generator source pools the creator enabled.
+    # { "local": {"family": str|None}|None, "api": {"model": str|None}|None }
+    # A pool set to None (or omitted entirely when neither key present) is disabled.
+    generatorSources: Optional[Dict[str, Any]] = None
 
 
 class VisualSheetApproveBody(BaseModel):
@@ -876,6 +926,7 @@ def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStar
             hero_asset_id=body.heroAssetId,
             candidate_count=body.candidateCount if body.candidateCount is not None else 1,
             visual_style=body.visualStyle,
+            generator_sources=body.generatorSources,
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
@@ -924,3 +975,82 @@ def owner_approve_visual_sheet(
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
+
+
+# ── Phase 6 — Character Variants ────────────────────────────────────────────
+# A Variant is an alternate look (wardrobe/styling) that preserves the locked
+# identity. The Original canonical sheet is immutable; up to 12 variants hang
+# off the character's continuity identity version via the EXISTING
+# identity_variants table. Variant generation is reference-locked to the
+# canonical sheet. See character_identity.variants.
+
+
+class VariantCreateBody(BaseModel):
+    name: str
+    description: str = ""
+    createdBy: str = "user"
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/variants")
+def list_character_variants(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    """List the Original + variants for a character (creator-first single call)."""
+    _require_flag()
+    _project(db, project_id)
+    from .variants import list_variants_for_character
+
+    return list_variants_for_character(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/variants")
+def create_character_variant(
+    project_id: str, character_id: str, body: VariantCreateBody, db: Session = Depends(get_db)
+):
+    """Create a variant (up to 12 per character; Original is separate/immutable)."""
+    _require_flag()
+    _project(db, project_id)
+    from .variants import create_variant_for_character
+
+    return create_variant_for_character(
+        db,
+        project_id,
+        character_id,
+        name=body.name,
+        description=body.description,
+        created_by=body.createdBy,
+    )
+
+
+@router.delete("/projects/{project_id}/characters/{character_id}/variants/{variant_id}")
+def delete_character_variant(
+    project_id: str, character_id: str, variant_id: str, db: Session = Depends(get_db)
+):
+    """Delete a variant. NEVER alters the Original canonical sheet."""
+    _require_flag()
+    _project(db, project_id)
+    from .variants import delete_variant
+
+    return delete_variant(db, project_id, variant_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/variants/{variant_id}/generate")
+def generate_character_variant(
+    project_id: str, character_id: str, variant_id: str, db: Session = Depends(get_db)
+):
+    """Enqueue a reference-locked variant sheet generation (canonical sheet = primary reference)."""
+    _require_flag()
+    _project(db, project_id)
+    from .variants import enqueue_variant_generation
+
+    return enqueue_variant_generation(db, project_id, character_id, variant_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/variants/{variant_id}/advance")
+def advance_character_variant(
+    project_id: str, character_id: str, variant_id: str, db: Session = Depends(get_db)
+):
+    """Poll a variant's view jobs and compose the 2x2 character sheet when ready."""
+    _require_flag()
+    _project(db, project_id)
+    from .variants import advance_variant_generation
+
+    return advance_variant_generation(db, project_id, variant_id)

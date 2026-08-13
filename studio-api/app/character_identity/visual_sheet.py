@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -114,6 +115,34 @@ REFERENCE_LOCKED_WORKFLOW_KEY = "zimage.ref_edit"
 REFERENCE_LOCKED_FAMILY = "zimage"
 REFERENCE_FIDELITY_MODE_LIMITED = "limited"
 REFERENCE_FIDELITY_MODE_FULL = "zimage_ref_edit"
+
+# --- Phase 5 — Character Creator Simplification: composed 4-view sheet ---
+#
+# Each casting candidate produces ONE canonical composed Character Sheet asset.
+# The 4 required views (front full body, side full body, back full body, front
+# close-up) are generated per candidate, validated for identity consistency,
+# then composed into a 2x2 grid (PIL) and ingested as a single Library asset.
+# The 4 source view assets are retained as lineage; the creator-facing
+# candidate ``assetId`` is the composed sheet (Amendment 4 / Phase 5).
+CANDIDATE_SHEET_VIEW_ROLES: tuple[str, ...] = (
+    "hero_identity",
+    "full_body_side_left",
+    "full_body_back",
+    "closeup_front",
+)
+
+# 2x2 grid layout (row-major): front, side / back, front-close-up.
+CHARACTER_SHEET_GRID_COLS = 2
+CHARACTER_SHEET_GRID_ROWS = 2
+CHARACTER_SHEET_TILE_SIZE = 1024
+
+COMPOSITION_INTENT_CHARACTER_SHEET = "character_sheet_composed"
+
+# Certified families that are text-only (cannot consume reference pixels). A
+# reference-locked candidate must NEVER route to one of these — enforced in
+# ``_build_candidate_routing_plan`` as the reference-first hierarchy guard so
+# an attached reference never silently downgrades to a text-only family.
+TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious"})
 
 
 def _resolve_style_profile(visual_style: str | None) -> dict[str, Any]:
@@ -304,17 +333,44 @@ def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
     return ordered
 
 
+def _family_supports_references(family: str) -> bool:
+    """True when the family has a Certified workflow that can consume reference pixels.
+
+    Consults the Certified registry's ``supportsReferences`` capability. Used
+    by the reference-first routing guard so a reference-locked candidate is
+    never routed to a text-only family (e.g. Illustrious) that would silently
+    drop reference conditioning.
+    """
+    try:
+        from ..image_runtime.certified_registry import list_workflows
+
+        for wf in list_workflows(model_family=family):
+            if wf.status != "Certified":
+                continue
+            if bool((wf.capabilities or {}).get("supportsReferences", False)):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def _build_candidate_routing_plan(
     *,
     candidate_count: int,
     reference_asset_id: str | None,
     visual_style: str | None = None,
+    generator_sources: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Per-candidate routing plan drawn from the Certified READY registry.
 
-    Reference-locked: all candidates route to the Certified reference-capable
-    workflow (``zimage.ref_edit``) so the reference pixels participate in
-    conditioning. Only one distinct reference-capable Certified model exists
+    Reference-first hierarchy (Amendment 3 + Phase 5): when a reference image is
+    attached it is the visual authority — candidates route to a Certified
+    reference-capable workflow (``zimage.ref_edit``) so reference PIXELS
+    participate in conditioning. A reference-locked candidate NEVER routes to
+    a text-only family (e.g. Illustrious) — enforced explicitly below. Style
+    recommendation only participates when no reference is attached.
+
+    Reference-locked: only one distinct reference-capable Certified model exists
     today, so ``referenceFidelityMode`` is recorded as ``limited`` honestly.
     Illustrious (text-only) is intentionally excluded from reference-locked
     candidates — never silently downgrade reference-conditioned generation to
@@ -324,8 +380,30 @@ def _build_candidate_routing_plan(
     reuse; remaining slots reuse a family with a different seed. Anime/realistic-
     anime styles prefer Illustrious XL first. We never fabricate distinctness.
     """
+    # User Control Law: when the caller explicitly passes generator_sources with
+    # BOTH pools disabled, refuse to enqueue any jobs (zero-job guarantee) rather
+    # than silently falling back. Omitted (None) preserves legacy default routing.
+    if generator_sources is not None:
+        _local = generator_sources.get("local")
+        _api = generator_sources.get("api")
+        if not _local and not _api:
+            raise ValueError(
+                "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
+            )
     plan: list[dict[str, Any]] = []
     if reference_asset_id:
+        # Reference-first guard: the resolved family must be reference-capable
+        # and must NOT be a text-only family. zimage.ref_edit is the only
+        # Certified reference-capable workflow today; this guard keeps the
+        # hierarchy honest as more families become Certified.
+        if REFERENCE_LOCKED_FAMILY in TEXT_ONLY_FAMILIES or not _family_supports_references(
+            REFERENCE_LOCKED_FAMILY
+        ):
+            raise RuntimeError(
+                "Reference-locked candidate routing requires a Certified "
+                "reference-capable workflow; zimage.ref_edit is not reference-capable "
+                "or is text-only. Refusing to silently downgrade reference conditioning."
+            )
         for _i in range(candidate_count):
             plan.append(
                 {
@@ -395,6 +473,220 @@ def _low_reference_fidelity(*, reference_locked: bool, lineage: dict[str, Any]) 
     if not reference_locked:
         return False
     return not bool(lineage.get("supportsReferences"))
+
+
+# --- Phase 5: composed 4-view Character Sheet helpers ---
+
+
+def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | None]]:
+    """The 4 required views per casting candidate, in 2x2 grid order.
+
+    Order is row-major: front, side, back, front-close-up. The front view
+    reuses the full-body casting composition (Amendment 2) so the canonical
+    "full body casting" / "no close-up" framing is preserved on the primary
+    tile; the remaining views use production turnaround/close-up compositions
+    drawn from the coverage pack so all 4 tiles share identity-safe framing.
+    """
+    coverage = {role: (goal, comp) for role, goal, comp in _coverage_role_specs()}
+    side = coverage["full_body_side_left"]
+    back = coverage["full_body_back"]
+    closeup = coverage["closeup_front"]
+    return [
+        (
+            "hero_identity",
+            "a cinematic full-body character casting reference",
+            dict(FULL_BODY_CASTING_COMPOSITION),
+            list(FULL_BODY_CASTING_NEGATIVE_RULES),
+        ),
+        ("full_body_side_left", side[0], dict(side[1]), None),
+        ("full_body_back", back[0], dict(back[1]), None),
+        ("closeup_front", closeup[0], dict(closeup[1]), None),
+    ]
+
+
+def _validate_candidate_view_consistency(view_entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Structural identity-consistency check across a candidate's 4 view jobs.
+
+    This is a lightweight structural validation (Phase 5): all 4 jobs must have
+    completed (status ``done`` with an output asset id) and share the same seed
+    and routing/identity params (model family, workflow key, reference lock).
+    This is NOT a fake ML visual validator — a pixel-level identity comparison is
+    deferred to a later vision-tooling pass. Returns ``{ok, reasons}``.
+    """
+    reasons: list[str] = []
+    if len(view_entries) != len(CANDIDATE_SHEET_VIEW_ROLES):
+        reasons.append(
+            f"expected {len(CANDIDATE_SHEET_VIEW_ROLES)} views, got {len(view_entries)}"
+        )
+        return {"ok": False, "reasons": reasons}
+    asset_ids: list[str] = []
+    seeds: set[Any] = set()
+    families: set[str] = set()
+    workflow_keys: set[str] = set()
+    ref_locks: set[bool] = set()
+    for entry in view_entries:
+        if entry.get("status") != "done":
+            reasons.append(f"view {entry.get('role')} not done (status={entry.get('status')})")
+        aid = entry.get("assetId")
+        if not aid:
+            reasons.append(f"view {entry.get('role')} missing output assetId")
+        else:
+            asset_ids.append(str(aid))
+        if "seed" in entry and entry["seed"] is not None:
+            seeds.add(entry["seed"])
+        if entry.get("modelFamily"):
+            families.add(str(entry["modelFamily"]))
+        if entry.get("workflowKey"):
+            workflow_keys.add(str(entry["workflowKey"]))
+        ref_locks.add(bool(entry.get("referenceLocked")))
+    if len(seeds) > 1:
+        reasons.append(f"inconsistent seeds across views: {sorted(seeds)}")
+    if len(families) > 1:
+        reasons.append(f"inconsistent model families across views: {sorted(families)}")
+    if len(workflow_keys) > 1:
+        reasons.append(f"inconsistent workflow keys across views: {sorted(workflow_keys)}")
+    if len(ref_locks) > 1:
+        reasons.append(f"inconsistent reference-lock state across views: {sorted(ref_locks)}")
+    if len(asset_ids) != len(set(asset_ids)):
+        reasons.append("duplicate output asset ids across views")
+    return {"ok": not reasons, "reasons": reasons, "assetIds": asset_ids}
+
+
+def _compose_character_sheet_grid(
+    view_paths: list[str], out_path: str
+) -> str:
+    """Compose 4 view images into a 2x2 Character Sheet grid (PIL).
+
+    Each tile is resized to ``CHARACTER_SHEET_TILE_SIZE`` (preserving aspect,
+    padded onto a square canvas) then pasted into the grid. No rendered text is
+    added — the sheet is a clean image grid. Returns the composed file path.
+    """
+    from PIL import Image
+
+    if len(view_paths) != CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS:
+        raise ValueError(
+            f"character sheet grid requires "
+            f"{CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS} view images, "
+            f"got {len(view_paths)}"
+        )
+    tile = CHARACTER_SHEET_TILE_SIZE
+    grid = Image.new("RGB", (tile * CHARACTER_SHEET_GRID_COLS, tile * CHARACTER_SHEET_GRID_ROWS), (24, 24, 24))
+    for idx, src in enumerate(view_paths):
+        im = Image.open(src).convert("RGB")
+        # Resize preserving aspect ratio, then center on a square canvas.
+        im.thumbnail((tile, tile))
+        canvas = Image.new("RGB", (tile, tile), (24, 24, 24))
+        x = (tile - im.width) // 2
+        y = (tile - im.height) // 2
+        canvas.paste(im, (x, y))
+        col = idx % CHARACTER_SHEET_GRID_COLS
+        row = idx // CHARACTER_SHEET_GRID_COLS
+        grid.paste(canvas, (col * tile, row * tile))
+    out = str(out_path)
+    grid.save(out, format="PNG")
+    return out
+
+
+def _composed_sheet_output_path(project_id: str, character_id: str, candidate_index: int) -> Path:
+    """Resolve the on-disk path for a candidate's composed Character Sheet."""
+    from pathlib import Path
+
+    from ..config import settings
+
+    dest_dir = Path(settings.data_dir) / "projects" / project_id / "assets"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    return dest_dir / f"character_sheet_{character_id[:8]}_c{candidate_index + 1}_{uuid.uuid4().hex[:8]}.png"
+
+
+def _ingest_composed_sheet_asset(
+    db: Session,
+    project_id: str,
+    *,
+    character_id: str,
+    candidate_index: int,
+    composed_path: str,
+    source_asset_ids: list[str],
+    lineage: dict[str, Any],
+) -> Asset:
+    """Register the composed Character Sheet as a Library asset.
+
+    The 4 source view asset ids are recorded in ``prompt_meta_json`` lineage so
+    they remain queryable for provenance/continuity without being duplicated.
+    """
+    import os
+
+    meta = {
+        "objective": "character_sheet_composed",
+        "characterId": character_id,
+        "candidateIndex": candidate_index,
+        "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
+        "sourceAssetIds": list(source_asset_ids),
+        "grid": {
+            "cols": CHARACTER_SHEET_GRID_COLS,
+            "rows": CHARACTER_SHEET_GRID_ROWS,
+            "tileSize": CHARACTER_SHEET_TILE_SIZE,
+        },
+        "lineage": lineage,
+        "createdAt": _now(),
+    }
+    asset = Asset(
+        id=str(uuid.uuid4()),
+        project_id=project_id,
+        tag="character_sheet",
+        kind="image",
+        filename=os.path.basename(composed_path),
+        path=str(composed_path),
+        comfy_name="",
+        scope="project",
+        labels_json=_dumps(["character_sheet", "composed", f"candidate_{candidate_index + 1}"]),
+        prompt_meta_json=_dumps(meta),
+        production_approval="none",
+    )
+    db.add(asset)
+    db.flush()
+    # Record provenance edges to the 4 source views (best-effort). Use a
+    # savepoint so a failure here (e.g. missing graph table in a minimal test
+    # DB) never rolls back the composed sheet asset itself.
+    try:
+        from ..asset_graph import add_edge
+
+        nested = db.begin_nested()
+        for src_id in source_asset_ids:
+            if db.get(Asset, src_id):
+                add_edge(db, src_id, asset.id, "composed_from", {"op": "character_sheet_compose"})
+        nested.commit()
+    except Exception:
+        pass
+    return asset
+
+
+def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Poll a candidate's 4 view jobs. Returns (all_done, view_asset_ids)."""
+    view_jobs = candidate.get("viewJobs") or []
+    if not view_jobs:
+        return False, []
+    asset_ids: list[str] = []
+    all_done = True
+    for vj in view_jobs:
+        job = db.get(Job, vj.get("jobId"))
+        if not job:
+            vj["status"] = "missing"
+            all_done = False
+            continue
+        vj["status"] = job.status
+        if job.status == "done":
+            aid = _job_params(job).get("output_asset_id")
+            if aid:
+                vj["assetId"] = aid
+                asset_ids.append(str(aid))
+            else:
+                all_done = False
+        elif job.status == "failed":
+            vj["status"] = "failed"
+            all_done = False
+        else:
+            all_done = False
+    return all_done, asset_ids
 
 
 def _save_pack(db: Session, project_id: str, character_id: str, pack: dict[str, Any]) -> dict[str, Any]:
@@ -488,6 +780,7 @@ def start_visual_sheet_generation(
     hero_asset_id: Optional[str] = None,
     candidate_count: int = 1,
     visual_style: Optional[str] = None,
+    generator_sources: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Enqueue real certified image jobs for a Generated Character Image Profile.
 
@@ -581,64 +874,90 @@ def start_visual_sheet_generation(
             candidate_count=candidate_count,
             reference_asset_id=reference_asset_id,
             visual_style=resolved_style_key,
+            generator_sources=generator_sources,
         )
         reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []
+        view_specs = _candidate_view_specs()
         for _i in range(candidate_count):
-            composition = dict(FULL_BODY_CASTING_COMPOSITION)
-            composition["candidate_index"] = _i
             route = routing_plan[_i]
-            hero_prompt = _compile_visual_prompt(
-                profile,
-                prompt_goal="a cinematic full-body character casting reference",
-                composition=composition,
-                references=references,
-                role="hero_identity",
-                extra_negative_constraints=FULL_BODY_CASTING_NEGATIVE_RULES,
-                style_profile=style_profile,
-                reference_locked=reference_locked,
-            )
             seed = _candidate_seed(character_id, _i)
-            hero_job = _enqueue_txt2img(
-                db,
-                project_id,
-                character_id=character_id,
-                prompt=hero_prompt.prompt,
-                negative_prompt=hero_prompt.negative_prompt,
-                tag=f"{char_slug}_hero_identity" + (f"_c{_i + 1}" if candidate_count > 1 else ""),
-                role="hero_identity",
-                model_family_preference=route["modelFamilyPreference"],
-                source_asset_id=route.get("source_asset_id"),
-                denoise=route.get("denoise"),
-                seed=seed,
-                prompt_metadata={
-                    "promptFamily": hero_prompt.prompt_family,
-                    "promptModel": hero_prompt.model_key,
-                    "promptValidationOk": hero_prompt.validation.get("ok"),
-                    "sheetMode": hero_prompt.metadata.get("sheetMode"),
-                    "candidateIndex": _i,
-                    "candidateCount": candidate_count,
-                    # Amendment 2b: machine-readable composition intent for
-                    # lineage/retakes/MAGI. Regeneration inherits this via the
-                    # same endpoint. Do not rely on prompt-text parsing.
-                    "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
-                    "fullBody": True,
-                    # Amendment 3: per-candidate routing + reference fidelity.
-                    "workflowKey": route["workflowKey"],
-                    "modelFamily": route["modelFamilyPreference"],
-                    "referenceLocked": reference_locked,
-                    "referenceAssetId": reference_asset_id,
-                    "referenceFidelityMode": route.get("referenceFidelityMode"),
-                    "seed": seed,
-                },
-            )
+            # Phase 5: enqueue the 4 required views for this candidate. The
+            # front view reuses role="hero_identity" (legacy + e2e compat) and
+            # the full-body casting composition; the other three views use
+            # their turnaround/close-up coverage compositions. All 4 views
+            # share the same seed + routing so identity is structurally
+            # consistent across the sheet.
+            view_jobs: list[dict[str, Any]] = []
+            for vidx, (vrole, vgoal, vcomposition, vneg) in enumerate(view_specs):
+                composition = dict(vcomposition)
+                composition["candidate_index"] = _i
+                vprompt = _compile_visual_prompt(
+                    profile,
+                    prompt_goal=vgoal,
+                    composition=composition,
+                    references=references,
+                    role=vrole,
+                    extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
+                    style_profile=style_profile,
+                    reference_locked=reference_locked,
+                )
+                vtag = f"{char_slug}_{vrole}" + (f"_c{_i + 1}" if candidate_count > 1 else "")
+                vjob = _enqueue_txt2img(
+                    db,
+                    project_id,
+                    character_id=character_id,
+                    prompt=vprompt.prompt,
+                    negative_prompt=vprompt.negative_prompt,
+                    tag=vtag,
+                    role=vrole,
+                    model_family_preference=route["modelFamilyPreference"],
+                    source_asset_id=route.get("source_asset_id"),
+                    denoise=route.get("denoise"),
+                    seed=seed,
+                    prompt_metadata={
+                        "promptFamily": vprompt.prompt_family,
+                        "promptModel": vprompt.model_key,
+                        "promptValidationOk": vprompt.validation.get("ok"),
+                        "sheetMode": vprompt.metadata.get("sheetMode"),
+                        "candidateIndex": _i,
+                        "candidateCount": candidate_count,
+                        "viewIndex": vidx,
+                        "viewRole": vrole,
+                        "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
+                        if vrole != "hero_identity"
+                        else COMPOSITION_INTENT_FULL_BODY_CASTING,
+                        "fullBody": vrole != "closeup_front",
+                        "workflowKey": route["workflowKey"],
+                        "modelFamily": route["modelFamilyPreference"],
+                        "referenceLocked": reference_locked,
+                        "referenceAssetId": reference_asset_id,
+                        "referenceFidelityMode": route.get("referenceFidelityMode"),
+                        "seed": seed,
+                    },
+                )
+                view_jobs.append(
+                    {
+                        "jobId": vjob.id,
+                        "role": vrole,
+                        "viewIndex": vidx,
+                        "status": vjob.status,
+                        "assetId": None,
+                        "seed": seed,
+                        "modelFamily": route["modelFamilyPreference"],
+                        "workflowKey": route["workflowKey"],
+                        "referenceLocked": reference_locked,
+                    }
+                )
+            # jobs["hero"] points at the front view job (legacy + e2e compat).
+            hero_job = view_jobs[0]
             lineage = _workflow_lineage(route["workflowKey"])
             low_fidelity = _low_reference_fidelity(reference_locked=reference_locked, lineage=lineage)
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             entry = {
-                "jobId": hero_job.id,
+                "jobId": hero_job["jobId"],
                 "role": "hero_identity",
-                "status": hero_job.status,
+                "status": hero_job["status"],
                 "candidateIndex": _i,
                 "label": label,
                 "assetId": None,
@@ -653,14 +972,18 @@ def start_visual_sheet_generation(
                 "referenceFidelityMode": route.get("referenceFidelityMode"),
                 "referenceLocked": reference_locked,
                 "lowReferenceFidelity": low_fidelity,
+                # Phase 5: the 4 view jobs that compose into the canonical sheet.
+                "viewJobs": view_jobs,
+                "sheetAssetId": None,
+                "sourceAssetIds": [],
             }
             hero_candidate_jobs.append(entry)
             candidates.append({
                 "assetId": None,
-                "jobId": hero_job.id,
+                "jobId": hero_job["jobId"],
                 "url": None,
                 "label": label,
-                "status": hero_job.status,
+                "status": hero_job["status"],
                 "candidateIndex": _i,
                 "generator": lineage.get("generator"),
                 "provider": lineage.get("provider"),
@@ -673,6 +996,9 @@ def start_visual_sheet_generation(
                 "referenceFidelityMode": route.get("referenceFidelityMode"),
                 "referenceLocked": reference_locked,
                 "lowReferenceFidelity": low_fidelity,
+                "viewJobs": view_jobs,
+                "sheetAssetId": None,
+                "sourceAssetIds": [],
             })
         jobs["hero"] = hero_candidate_jobs[0]
         if candidate_count > 1:
@@ -731,8 +1057,14 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 params = _job_params(job)
                 aid = params.get("output_asset_id")
                 if aid:
-                    role_assets["hero_identity"] = aid
-                    _attach_role(db, project_id, character_id, aid, "hero_identity")
+                    # Phase 5: when this candidate has 4 viewJobs, the canonical
+                    # hero_identity asset is the COMPOSED sheet (set by the
+                    # composition block below), not the front view alone. Skip
+                    # the front-view attach here so we don't double-attach the
+                    # hero_identity reference role.
+                    if not hero_meta.get("viewJobs"):
+                        role_assets["hero_identity"] = aid
+                        _attach_role(db, project_id, character_id, aid, "hero_identity")
                     hero_meta["assetId"] = aid
             elif job.status == "failed":
                 pack["status"] = "FAILED"
@@ -776,8 +1108,134 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "referenceFidelityMode": item.get("referenceFidelityMode"),
                 "referenceLocked": bool(item.get("referenceLocked")),
                 "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
+                "sheetAssetId": item.get("sheetAssetId"),
+                "sourceAssetIds": item.get("sourceAssetIds") or [],
+                "viewJobs": item.get("viewJobs") or [],
             }
             for item in hero_candidates
+        ]
+
+    # Phase 5: compose each candidate's 4 views into ONE canonical Character
+    # Sheet asset. The composed sheet becomes the creator-facing candidate
+    # ``assetId`` and ``role_assets["hero_identity"]``; the 4 source view assets
+    # are retained as lineage (``sourceAssetIds``) and their roles are marked
+    # satisfied so the coverage flow does not duplicate them.
+    candidate_entries = (
+        list(jobs.get("hero_candidates")) if isinstance(jobs.get("hero_candidates"), list) else ([jobs["hero"]] if jobs.get("hero") else [])
+    )
+    primary_sheet_set = bool(role_assets.get("hero_identity"))
+    for centry in candidate_entries:
+        view_jobs = centry.get("viewJobs")
+        if not isinstance(view_jobs, list) or not view_jobs:
+            continue
+        if centry.get("sheetAssetId"):
+            continue
+        all_done, _ = _poll_candidate_views(db, centry)
+        if not all_done:
+            # Surface per-view status on the candidate for the UI.
+            centry["status"] = "generating"
+            continue
+        validation = _validate_candidate_view_consistency(view_jobs)
+        if not validation.get("ok"):
+            centry["status"] = "failed"
+            centry["error"] = "identity consistency check failed: " + "; ".join(validation.get("reasons") or [])
+            continue
+        source_asset_ids = validation["assetIds"]
+        # Resolve on-disk paths for the 4 source view assets (composition input).
+        view_paths: list[str] = []
+        for aid in source_asset_ids:
+            a = db.get(Asset, aid)
+            if not a or not a.path:
+                centry["status"] = "failed"
+                centry["error"] = f"missing source view asset path for {aid}"
+                break
+            view_paths.append(a.path)
+        else:
+            try:
+                out_path = _composed_sheet_output_path(
+                    project_id, character_id, int(centry.get("candidateIndex") or 0)
+                )
+                composed_path = _compose_character_sheet_grid(view_paths, str(out_path))
+                lineage = _workflow_lineage(centry.get("workflowKey") or "")
+                sheet_asset = _ingest_composed_sheet_asset(
+                    db,
+                    project_id,
+                    character_id=character_id,
+                    candidate_index=int(centry.get("candidateIndex") or 0),
+                    composed_path=composed_path,
+                    source_asset_ids=source_asset_ids,
+                    lineage=lineage,
+                )
+                centry["sheetAssetId"] = sheet_asset.id
+                centry["assetId"] = sheet_asset.id
+                centry["sourceAssetIds"] = source_asset_ids
+                centry["status"] = "done"
+                # Only the first candidate (candidateIndex 0) populates the
+                # pack-level role_assets / hero_identity so multi-candidate
+                # generation does not collide on shared role keys. Other
+                # candidates keep their views as lineage only.
+                if int(centry.get("candidateIndex") or 0) == 0:
+                    for vj in view_jobs:
+                        role_assets[vj.get("role")] = vj.get("assetId")
+                    role_assets["hero_identity"] = sheet_asset.id
+                    _attach_role(db, project_id, character_id, sheet_asset.id, "hero_identity")
+                    primary_sheet_set = True
+            except Exception as exc:  # pragma: no cover - defensive
+                centry["status"] = "failed"
+                centry["error"] = f"character sheet composition failed: {exc}"
+    # Mirror candidate sheet state back into pack["candidates"].
+    if isinstance(jobs.get("hero_candidates"), list):
+        pack["candidates"] = [
+            {
+                "assetId": item.get("assetId"),
+                "jobId": item.get("jobId"),
+                "url": None,
+                "label": item.get("label") or "Candidate",
+                "status": item.get("status"),
+                "candidateIndex": item.get("candidateIndex"),
+                "generator": item.get("generator"),
+                "provider": item.get("provider"),
+                "model": item.get("model"),
+                "modelVariant": item.get("modelVariant"),
+                "workflowKey": item.get("workflowKey"),
+                "seed": item.get("seed"),
+                "referenceAssetIds": item.get("referenceAssetIds") or [],
+                "compositionIntent": item.get("compositionIntent"),
+                "referenceFidelityMode": item.get("referenceFidelityMode"),
+                "referenceLocked": bool(item.get("referenceLocked")),
+                "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
+                "sheetAssetId": item.get("sheetAssetId"),
+                "sourceAssetIds": item.get("sourceAssetIds") or [],
+                "viewJobs": item.get("viewJobs") or [],
+                "error": item.get("error"),
+            }
+            for item in jobs["hero_candidates"]
+        ]
+    elif jobs.get("hero") and jobs["hero"].get("sheetAssetId"):
+        pack["candidates"] = [
+            {
+                "assetId": jobs["hero"].get("assetId"),
+                "jobId": jobs["hero"].get("jobId"),
+                "url": None,
+                "label": jobs["hero"].get("label") or "Hero",
+                "status": jobs["hero"].get("status"),
+                "candidateIndex": jobs["hero"].get("candidateIndex"),
+                "generator": jobs["hero"].get("generator"),
+                "provider": jobs["hero"].get("provider"),
+                "model": jobs["hero"].get("model"),
+                "modelVariant": jobs["hero"].get("modelVariant"),
+                "workflowKey": jobs["hero"].get("workflowKey"),
+                "seed": jobs["hero"].get("seed"),
+                "referenceAssetIds": jobs["hero"].get("referenceAssetIds") or [],
+                "compositionIntent": jobs["hero"].get("compositionIntent"),
+                "referenceFidelityMode": jobs["hero"].get("referenceFidelityMode"),
+                "referenceLocked": bool(jobs["hero"].get("referenceLocked")),
+                "lowReferenceFidelity": bool(jobs["hero"].get("lowReferenceFidelity")),
+                "sheetAssetId": jobs["hero"].get("sheetAssetId"),
+                "sourceAssetIds": jobs["hero"].get("sourceAssetIds") or [],
+                "viewJobs": jobs["hero"].get("viewJobs") or [],
+                "error": jobs["hero"].get("error"),
+            }
         ]
 
     hero_id = role_assets.get("hero_identity") or role_assets.get("hero_portrait")

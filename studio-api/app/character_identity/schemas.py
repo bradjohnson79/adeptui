@@ -342,6 +342,20 @@ class PropCreate(BaseModel):
     library_asset_id: Optional[str] = None
 
 
+class PropUpdate(BaseModel):
+    name: Optional[str] = None
+    prop_type: Optional[str] = None
+    description: Optional[str] = None
+    materials: Optional[str] = None
+    colors: Optional[str] = None
+    placement: Optional[str] = None
+    how_worn: Optional[str] = None
+    hand_assignment: Optional[str] = None
+    usage_behavior: Optional[str] = None
+    continuity_rules: Optional[str] = None
+    library_asset_id: Optional[str] = None
+
+
 class TraitUpsert(BaseModel):
     category: str
     key: str

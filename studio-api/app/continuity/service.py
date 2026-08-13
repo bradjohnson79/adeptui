@@ -175,6 +175,13 @@ def _version_out(row: IdentityVersionRow) -> dict[str, Any]:
 
 
 def _variant_out(row: IdentityVariantRow) -> dict[str, Any]:
+    # Phase 6 variants: the composed Character Sheet asset id + generation
+    # state live in a reserved ``__variant_sheet__`` namespace inside
+    # trait_overrides_json (no schema migration needed). Surface them as
+    # first-class creator-facing fields.
+    overrides = _l(row.trait_overrides_json, {})
+    sheet_state = overrides.get("__variant_sheet__") if isinstance(overrides, dict) else None
+    sheet_state = sheet_state if isinstance(sheet_state, dict) else {}
     return {
         "id": row.id,
         "identityId": row.identity_id,
@@ -183,13 +190,24 @@ def _variant_out(row: IdentityVariantRow) -> dict[str, Any]:
         "variantType": row.variant_type,
         "name": row.name,
         "description": row.description,
-        "traitOverrides": _l(row.trait_overrides_json, {}),
+        "traitOverrides": overrides,
         "lockedTraits": _l(row.locked_traits_json, []),
         "referenceSetId": row.reference_set_id,
         "status": row.status,
         "archived": bool(row.archived),
         "createdBy": row.created_by,
         "createdAt": row.created_at,
+        # Phase 6 variant sheet (creator-facing):
+        "characterSheetAssetId": sheet_state.get("sheetAssetId"),
+        "generationStatus": sheet_state.get("status"),
+        "canonicalSheetAssetId": sheet_state.get("canonicalSheetAssetId"),
+        "generator": sheet_state.get("generator"),
+        "provider": sheet_state.get("provider"),
+        "model": sheet_state.get("model"),
+        "workflowKey": sheet_state.get("workflowKey"),
+        "referenceAssetId": sheet_state.get("referenceAssetId"),
+        "referenceLocked": True if sheet_state.get("canonicalSheetAssetId") else None,
+        "generationError": sheet_state.get("error"),
     }
 
 

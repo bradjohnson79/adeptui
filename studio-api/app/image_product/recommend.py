@@ -123,6 +123,27 @@ def _display_name(family: str) -> str:
     return family
 
 
+def _family_supports_references(family: str) -> bool:
+    """True when the family has a Certified workflow that can consume reference pixels."""
+    try:
+        from ..image_runtime.certified_registry import list_workflows
+
+        for wf in list_workflows(model_family=family):
+            if wf.status != "Certified":
+                continue
+            if bool((wf.capabilities or {}).get("supportsReferences", False)):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+# Families that are text-only (cannot consume reference pixels). When a
+# reference image is attached, the recommender must never silently route to one
+# of these — reference fidelity overrides style routing (Amendment 3 / Phase 5).
+_TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious"})
+
+
 def recommend_image_family(
     *,
     prompt: str = "",
@@ -131,11 +152,41 @@ def recommend_image_family(
     model_family_preference: str | None = None,
     quality: str = "standard",
     style: str | None = None,
+    reference_asset_id: str | None = None,
 ) -> dict[str, Any]:
     text = f"{purpose} {prompt}"
     preferred = (model_family_preference or "").strip().lower() or None
     if preferred in {"qwen-image-2512", "qwen_image_2512"}:
         preferred = "qwen2512"
+
+    # Reference-first hierarchy (Amendment 3 / Phase 5): when a reference image
+    # is attached it is the visual authority. Reference-capable Certified
+    # families take precedence over style routing, and a reference-locked
+    # request NEVER routes to a text-only family (e.g. Illustrious) that would
+    # silently drop reference conditioning. This mirrors the guard in
+    # ``character_identity.visual_sheet._build_candidate_routing_plan``.
+    reference_locked = bool(reference_asset_id)
+    if reference_locked:
+        # zimage.ref_edit is the only Certified reference-capable workflow today.
+        # If the style-preferred or caller-preferred family is text-only, refuse
+        # it for reference conditioning and prefer a reference-capable family.
+        ref_capable_default = "zimage" if _family_supports_references("zimage") else "qwen2512"
+        if preferred and (preferred in _TEXT_ONLY_FAMILIES or not _family_supports_references(preferred)):
+            preferred = ref_capable_default
+        if style:
+            try:
+                from ..style_intelligence.registry import preferred_family_for_style
+
+                style_pref = (preferred_family_for_style(style) or "").strip().lower()
+            except Exception:
+                style_pref = ""
+            if style_pref and (style_pref in _TEXT_ONLY_FAMILIES or not _family_supports_references(style_pref)):
+                # Style preference is text-only; reference fidelity overrides it.
+                style_pref = ""
+            # When reference-locked, style only refines within reference-capable
+            # families — do not let a text-only style family win.
+            if not preferred:
+                preferred = style_pref or ref_capable_default
 
     # Data-driven style→engine routing: consult the style registry's
     # preferredFamily (e.g. anime/realistic_anime → illustrious) and the
@@ -159,6 +210,10 @@ def recommend_image_family(
         except Exception:
             pass
 
+    # Reference-locked: never let a text-only family win, even via style routing.
+    if reference_locked and style_preferred in _TEXT_ONLY_FAMILIES:
+        style_preferred = ""
+
     if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious"}:
         primary = preferred
     elif style_preferred and _executable(style_preferred):
@@ -172,6 +227,11 @@ def recommend_image_family(
         primary = "qwen2512"
     else:
         primary = "qwen2512"
+
+    # Reference-locked final guard: a text-only family must never be the primary
+    # when a reference image is attached.
+    if reference_locked and primary in _TEXT_ONLY_FAMILIES:
+        primary = "zimage" if _executable("zimage") else "qwen2512"
 
     # Execution fallback: only Certified families execute in production
     exec_family = primary
@@ -216,4 +276,6 @@ def recommend_image_family(
         "defaultOpenWeight": "qwen-image-2512",
         "alternativeOpenWeight": "flux",
         "certifiedKeys": production_ready_keys(),
+        "referenceLocked": reference_locked,
+        "referenceAssetId": reference_asset_id,
     }
