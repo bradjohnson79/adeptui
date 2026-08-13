@@ -209,6 +209,8 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
         document.masterEnvironmentPrompt = body.masterEnvironmentPrompt.strip()
     if body.providerHonesty is not None:
         document.providerHonesty = body.providerHonesty
+    if body.gridScale is not None:
+        document.gridScale = max(-3, min(3, body.gridScale))
     return _save_document(db, row, document)
 
 
@@ -239,6 +241,12 @@ def place_character(
             expression=body.expression,
             eyeLine=body.eyeLine,
             providerHonesty=document.providerHonesty,
+            gridRow=body.gridRow,
+            gridColumn=body.gridColumn,
+            slotIndex=body.slotIndex,
+            colorKey=body.colorKey,
+            miniPrompt=body.miniPrompt,
+            tag=body.tag,
         )
     )
     return _save_document(db, row, document)
@@ -265,6 +273,12 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
             rollDegrees=body.rollDegrees,
             scale=body.scale,
             providerHonesty=document.providerHonesty,
+            gridRow=body.gridRow,
+            gridColumn=body.gridColumn,
+            slotIndex=body.slotIndex,
+            colorKey=body.colorKey,
+            miniPrompt=body.miniPrompt,
+            tag=body.tag,
         )
     )
     return _save_document(db, row, document)
@@ -325,6 +339,9 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
             targetCharacterIds=list(body.targetCharacterIds),
             hero=hero,
             lockedFor360=body.lockedFor360,
+            cameraSlot=body.cameraSlot,
+            orientation=body.orientation,
+            fovPreset=body.fovPreset,
         )
     )
     return _save_document(db, row, document)

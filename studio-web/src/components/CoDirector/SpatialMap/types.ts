@@ -1,12 +1,10 @@
 /**
- * Spatial Map frontend types — mirrors the frozen backend schema in
- * studio-api/app/spatial_map/schemas.py (SpatialPlacement extension + grid
- * fields added in V1).
+ * Spatial Map frontend types — mirrors the backend schema in
+ * studio-api/app/spatial_map/schemas.py.
  *
- * NOTE: The shared contract in `studio-web/src/contracts/spatialMapM411.ts`
- * predates the V1 grid placement extension (gridRow/gridColumn/slotIndex/
- * colorKey/miniPrompt/tag). We extend it here WITHOUT modifying the frozen
- * contract, casting through the existing `api.spatialMap` client.
+ * The shared contract in `studio-web/src/contracts/spatialMapM411.ts` is frozen.
+ * We extend it here locally with the V1 circular/radial grid fields and camera
+ * blocking fields, casting through the existing `api.spatialMap` client.
  */
 import type {
   SpatialMapDocument as _SpatialMapDocument,
@@ -23,19 +21,21 @@ import type {
   ProviderHonestyMode,
   SpatialBounds,
   SpatialAnchor,
-  SpatialCamera,
+  SpatialCamera as _SpatialCamera,
   SpatialMovementPath,
   Spatial360Collage,
 } from "../../../contracts/spatialMapM411";
 
-/** Grid placement extension (V1) — added to base SpatialPlacement in backend. */
+export type { GridScale } from "./gridGeometry";
+
+/** Circular/radial grid placement extension (V1). */
 export type SpatialPlacementGridExtension = {
-  gridRow: number; // 0-9, -1 = unplaced
-  gridColumn: number; // 0-9, -1 = unplaced
+  gridRow: number; // ring index, 0 = innermost, -1 = unplaced
+  gridColumn: number; // spoke index 0..7 (N, NE, E...), -1 = unplaced
   slotIndex: number; // 0-3, -1 = none
   colorKey: string; // red|blue|orange|green (characters), purple|brown|aqua|gray (props)
-  miniPrompt: string; // e.g. "@Korri is standing behind the barista bar."
-  tag: string; // "@Korri" or "#coffee-cup" — friendly reference
+  miniPrompt: string;
+  tag: string;
 };
 
 export type SpatialPlacement = _SpatialCharacterPlacement & SpatialPlacementGridExtension;
@@ -44,16 +44,23 @@ export type SpatialCharacterPlacement = Omit<_SpatialCharacterPlacement, keyof S
 
 export type SpatialPropPlacement = Omit<_SpatialPropPlacement, keyof SpatialPlacementGridExtension> & SpatialPlacementGridExtension;
 
-export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props"> & {
-  characters: SpatialCharacterPlacement[];
-  props: SpatialPropPlacement[];
+export type SpatialCamera = _SpatialCamera & {
+  cameraSlot: number;
+  orientation: string; // N, NE, E, SE, S, SW, W, NW
+  fovPreset: string; // narrow, medium, wide
 };
 
-/** Body types extended with V1 grid fields (sent via PATCH to persist grid). */
+export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras" | "gridScale"> & {
+  characters: SpatialCharacterPlacement[];
+  props: SpatialPropPlacement[];
+  cameras: SpatialCamera[];
+  gridScale: number;
+};
+
+/** Body types extended with V1 circular grid fields. */
 export type SpatialCharacterPlacementBody = _SpatialCharacterPlacementBody & Partial<SpatialPlacementGridExtension>;
 
-export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody &
-  Partial<SpatialPlacementGridExtension>;
+export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
 
 export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<SpatialPlacementGridExtension>;
 
@@ -67,20 +74,18 @@ export type {
   ProviderHonestyMode,
   SpatialBounds,
   SpatialAnchor,
-  SpatialCamera,
   SpatialMovementPath,
   Spatial360Collage,
 };
 
-/** V1 slot configuration — amendment: accessible labels in addition to color. */
-export type SlotKind = "character" | "prop";
+export type SlotKind = "character" | "prop" | "camera";
 
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
 
 export type SlotDef = {
-  index: number; // 0-3
+  index: number;
   colorKey: SlotColorKey;
-  label: string; // "Character 1 (Red)"
+  label: string;
   kind: SlotKind;
 };
 
@@ -98,6 +103,13 @@ export const PROP_SLOTS: SlotDef[] = [
   { index: 3, colorKey: "gray", label: "Prop 4 (Gray)", kind: "prop" },
 ];
 
+export const CAMERA_SLOTS: SlotDef[] = [
+  { index: 0, colorKey: "gray", label: "C1", kind: "camera" },
+  { index: 1, colorKey: "gray", label: "C2", kind: "camera" },
+  { index: 2, colorKey: "gray", label: "C3", kind: "camera" },
+  { index: 3, colorKey: "gray", label: "C4", kind: "camera" },
+];
+
 export const SLOT_COLORS: Record<SlotColorKey, string> = {
   red: "#e5484d",
   blue: "#3b82f6",
@@ -109,26 +121,13 @@ export const SLOT_COLORS: Record<SlotColorKey, string> = {
   gray: "#94a3b8",
 };
 
-/** 10x10 grid coordinate helpers. Columns A-J, rows 1-10. */
-export const GRID_SIZE = 10;
-
-export function columnLetter(column: number): string {
-  // 0 -> A, 9 -> J
-  return String.fromCharCode("A".charCodeAt(0) + column);
-}
-
-export function cellLabel(row: number, column: number): string {
-  // row 0 -> "1", column 0 -> "A" → "A1"
-  return `${columnLetter(column)}${row + 1}`;
-}
-
 /** Normalize a human prop label into a project-safe tag (#coffee-cup). */
 export function normalizePropTag(label: string): string {
   const s = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
   return s || "prop";
 }
 
-/** Build the @ tag for a character name (amendment #5 — real names with spaces). */
+/** Build the @ tag for a character name. */
 export function characterTag(name: string): string {
   const trimmed = name.trim();
   return trimmed ? `@${trimmed}` : "";

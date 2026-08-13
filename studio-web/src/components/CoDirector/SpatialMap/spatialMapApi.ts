@@ -2,10 +2,9 @@
  * Spatial Map API client — thin typed wrapper over the existing
  * `api.spatialMap` client in `studio-web/src/api.ts`.
  *
- * Reuses the shared client (Law #17 — reuse before rebuild). The grid fields
- * (gridRow/gridColumn/slotIndex/colorKey/miniPrompt/tag) are forwarded via the
- * PATCH placement endpoints by casting through the existing body types,
- * because the frozen M411 contract body types predate the V1 grid extension.
+ * Reuses the shared client (Law #17). The V1 circular-grid fields and camera
+ * blocking fields are now accepted by the backend; the small casts below are
+ * only because the frozen M411 contract types in `api.ts` predate those fields.
  */
 import { api } from "../../../api";
 import type {
@@ -14,19 +13,37 @@ import type {
   SpatialMapDocument,
   SpatialCharacterPlacement,
   SpatialPropPlacement,
+  SpatialCamera,
   SpatialCharacterPlacementBody,
   SpatialCharacterPlacementUpdateBody,
   SpatialPropPlacementBody,
   SpatialPropPlacementUpdateBody,
 } from "./types";
 
+type CameraBody = {
+  label?: string;
+  x?: number;
+  y?: number;
+  z?: number;
+  yawDegrees?: number;
+  pitchDegrees?: number;
+  rollDegrees?: number;
+  lensMm?: number;
+  heightMeters?: number;
+  shotType?: string;
+  targetCharacterIds?: string[];
+  hero?: boolean;
+  lockedFor360?: boolean;
+  cameraSlot?: number;
+  orientation?: string;
+  fovPreset?: string;
+};
+
 export const spatialMapApi = {
-  /** Load the most recent Spatial Map document for a project (first in list). */
   async getMostRecentMap(projectId: string): Promise<SpatialMapDocument | null> {
     const res = await api.spatialMap.listMaps(projectId);
     const docs = (res.documents || []) as unknown as SpatialMapDocument[];
     if (!docs.length) return null;
-    // Sort by updatedAt desc, fall back to createdAt.
     const sorted = [...docs].sort((a, b) => {
       const ta = (a.updatedAt || a.createdAt || "").localeCompare(b.updatedAt || b.createdAt || "");
       return -ta;
@@ -62,8 +79,6 @@ export const spatialMapApi = {
     const res = await api.spatialMap.placeCharacter(
       projectId,
       documentId,
-      // Cast: frozen contract body omits V1 grid fields; backend placement
-      // model has them with defaults, so create without grid then PATCH grid.
       body as Parameters<typeof api.spatialMap.placeCharacter>[2],
     );
     return res.document as unknown as SpatialMapDocument;
@@ -122,8 +137,35 @@ export const spatialMapApi = {
     return res.document as unknown as SpatialMapDocument;
   },
 
-  /** Type guards for narrowing the union-free document. */
+  async createCamera(projectId: string, documentId: string, body: CameraBody): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.createCamera(
+      projectId,
+      documentId,
+      body as Parameters<typeof api.spatialMap.createCamera>[2],
+    );
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async updateCamera(projectId: string, documentId: string, cameraId: string, body: CameraBody): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.updateCamera(
+      projectId,
+      documentId,
+      cameraId,
+      body as Parameters<typeof api.spatialMap.updateCamera>[3],
+    );
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async removeCamera(projectId: string, documentId: string, cameraId: string): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.removeCamera(projectId, documentId, cameraId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
   isCharacterPlacement(p: SpatialCharacterPlacement | SpatialPropPlacement): p is SpatialCharacterPlacement {
     return (p as SpatialCharacterPlacement).characterId !== undefined;
+  },
+
+  isCamera(p: unknown): p is SpatialCamera {
+    return (p as SpatialCamera).cameraSlot !== undefined;
   },
 };

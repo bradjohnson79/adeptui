@@ -4,7 +4,7 @@ from .errors import SpatialMapErrorCode, raise_http_error
 
 CHARACTER_LIMIT = 4
 PROP_LIMIT = 4
-CAMERA_LIMIT = 8
+CAMERA_LIMIT = 4
 
 
 def enforce_character_limit(count: int) -> None:
