@@ -72,6 +72,10 @@ def generate_images(
             "refs": body.get("refs") or [],
             "cloudPaid": intent.get("providerPreference") == "cloud",
             "tag": body.get("tag") or "imagegen",
+            # Reference-fidelity strength (img2img / ref_edit). Lower denoise =
+            # more of the reference latent preserved. Character Creator passes a
+            # fidelity-first value when a Character Reference is attached.
+            "denoise": body.get("denoise"),
             "productionDock": dock_meta,
             "preferenceProvenance": (dock_meta or {}).get("provenance"),
         }

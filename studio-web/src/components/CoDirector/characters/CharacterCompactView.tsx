@@ -83,6 +83,17 @@ type Candidate = {
   label?: string;
   status?: string;
   candidateIndex?: number;
+  generator?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  modelVariant?: string | null;
+  workflowKey?: string | null;
+  seed?: number | null;
+  referenceAssetIds?: string[];
+  compositionIntent?: string | null;
+  referenceFidelityMode?: string | null;
+  referenceLocked?: boolean;
+  lowReferenceFidelity?: boolean;
 };
 
 type Props = {
@@ -868,6 +879,24 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
                     </div>
                   )}
                   <span>{c.label || `Candidate ${i + 1}`}</span>
+                  {c.generator || c.model ? (
+                    <span
+                      className="character-compact__candidate-generator"
+                      data-testid="character-compact-candidate-generator"
+                    >
+                      {c.generator || c.model}
+                      {c.model && c.model !== c.generator ? ` / ${c.model}` : ""}
+                    </span>
+                  ) : null}
+                  {c.lowReferenceFidelity ? (
+                    <span
+                      className="character-compact__candidate-flag"
+                      data-testid="character-compact-candidate-low-fidelity"
+                      title="This candidate was generated without real reference-image conditioning, so identity may drift from the attached reference."
+                    >
+                      Low reference fidelity
+                    </span>
+                  ) : null}
                   <label className="character-compact__radio">
                     <input
                       type="radio"

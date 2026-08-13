@@ -70,6 +70,51 @@ QWEN_VISUAL_SHEET_STYLE = {
     "lighting": "soft studio lighting with readable facial clarity",
 }
 
+# --- Character Candidate Diversity + Reference Fidelity (Amendment 3) ---
+#
+# Authority order when a Character Reference / Reference Sheet is attached:
+#   REFERENCE IMAGE  >  Character Profile  >  project visual style  >  model formatting
+#
+# The written Profile may clarify personality/expression/pose and add details NOT
+# visible in the reference; it must NOT override visible reference features. When
+# no reference is attached, the Character Profile remains the primary visual
+# authority (legacy behavior).
+#
+# Multi-generator routing: candidate diversity comes from different Certified
+# generators / seeds / interpretation — NEVER from changing the character's
+# identity. We draw from the Certified READY registry only (no Draft/Deferred
+# workflows), use each distinct generator once before reusing, and never
+# fabricate distinctness.
+REFERENCE_REPRODUCTION_DIRECTIVE = (
+    "Reproduce the attached character reference as faithfully as possible. "
+    "Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, "
+    "wardrobe, accessories, tattoos/circuitry, and silhouette. "
+    "Do not redesign or reinterpret the character. "
+    "Only vary pose, expression, and background subtly. "
+    "Full-body casting view, head to feet visible."
+)
+
+# Reference-fidelity strength for zimage.ref_edit (img2img latent path). At 0.68
+# denoise the model retains ~32% of the reference latent for identity lock while
+# keeping enough freedom to compose a clean full-body casting image (rather than
+# re-rendering a multi-view sheet layout). Lower values reproduce the sheet too
+# closely; higher values drop reference conditioning.
+REFERENCE_FIDELITY_DENOISE = 0.68
+
+# Certified txt2img families available for no-reference candidate routing, in
+# preference order. Each is used once before any reuse. Sourced from the
+# Certified READY registry (zimage.txt2img, qwen2512.txt2img).
+NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage")
+
+# Reference-capable Certified workflow for reference-locked candidates. This is
+# the only Certified workflow that consumes reference pixels today; until more
+# reference-capable workflows are Certified, all reference-locked candidates use
+# it and we record referenceFidelityMode="limited" honestly.
+REFERENCE_LOCKED_WORKFLOW_KEY = "zimage.ref_edit"
+REFERENCE_LOCKED_FAMILY = "zimage"
+REFERENCE_FIDELITY_MODE_LIMITED = "limited"
+REFERENCE_FIDELITY_MODE_FULL = "zimage_ref_edit"
+
 
 def _resolve_style_profile(visual_style: str | None) -> dict[str, Any]:
     """Resolve a creator-facing visual_style to a style_profile dict.
@@ -179,6 +224,7 @@ def _compile_visual_prompt(
     role: str,
     extra_negative_constraints: list[str] | None = None,
     style_profile: dict[str, Any] | None = None,
+    reference_locked: bool = False,
 ) -> Any:
     return compile_character_image_prompt(
         _compiler_payload(profile),
@@ -188,7 +234,123 @@ def _compile_visual_prompt(
         references=references,
         sheet_request=_sheet_request_for_role(role),
         extra_negative_constraints=extra_negative_constraints or [],
+        reference_locked=reference_locked,
     )
+
+
+def _resolve_reference_asset_id(references: list[dict[str, Any]]) -> str | None:
+    """Return the first attached character-reference asset id, if any.
+
+    A Character Reference Sheet or single reference image attached to the
+    character (role ``reference_image`` or canonical ``hero_identity``) is the
+    visual identity authority for reference-locked candidate generation.
+    """
+    for item in references or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("reference_role") or "").strip()
+        if role in ("reference_image", "hero_identity"):
+            aid = item.get("asset_id") or item.get("assetId")
+            if aid:
+                return str(aid)
+    return None
+
+
+def _candidate_seed(character_id: str, index: int) -> int:
+    """Deterministic-but-distinct seed per candidate for diversity within a model."""
+    import hashlib
+
+    digest = hashlib.sha1(f"{character_id}:hero_identity:{index}".encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % (2**31)
+
+
+def _build_candidate_routing_plan(
+    *,
+    candidate_count: int,
+    reference_asset_id: str | None,
+) -> list[dict[str, Any]]:
+    """Per-candidate routing plan drawn from the Certified READY registry.
+
+    Reference-locked: all candidates route to the Certified reference-capable
+    workflow (``zimage.ref_edit``) so the reference pixels participate in
+    conditioning. Only one distinct reference-capable Certified model exists
+    today, so ``referenceFidelityMode`` is recorded as ``limited`` honestly.
+
+    No-reference: each distinct Certified txt2img family is used once before any
+    reuse; remaining slots reuse a family with a different seed. We never
+    fabricate distinctness.
+    """
+    plan: list[dict[str, Any]] = []
+    if reference_asset_id:
+        for _i in range(candidate_count):
+            plan.append(
+                {
+                    "modelFamilyPreference": REFERENCE_LOCKED_FAMILY,
+                    "workflowKey": REFERENCE_LOCKED_WORKFLOW_KEY,
+                    "referenceAssetId": reference_asset_id,
+                    "referenceLocked": True,
+                    "referenceFidelityMode": REFERENCE_FIDELITY_MODE_LIMITED,
+                    "source_asset_id": reference_asset_id,
+                    "denoise": REFERENCE_FIDELITY_DENOISE,
+                }
+            )
+        return plan
+    distinct = list(NO_REFERENCE_TXT2IMG_FAMILIES)
+    for i in range(candidate_count):
+        fam = distinct[i % len(distinct)]
+        plan.append(
+            {
+                "modelFamilyPreference": fam,
+                "workflowKey": f"{fam}.txt2img",
+                "referenceAssetId": None,
+                "referenceLocked": False,
+                "referenceFidelityMode": None,
+                "source_asset_id": None,
+                "denoise": None,
+            }
+        )
+    return plan
+
+
+def _workflow_lineage(workflow_key: str) -> dict[str, Any]:
+    """Resolve a workflow key to its registry lineage (generator/provider/model)."""
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        wf = get_workflow(workflow_key)
+        if wf:
+            caps = dict(wf.capabilities or {})
+            return {
+                "workflowKey": wf.workflow_key,
+                "generator": wf.engine,
+                "provider": wf.provider or wf.provider_kind,
+                "model": wf.model_family,
+                "modelVariant": wf.model_variant,
+                "supportsReferences": bool(caps.get("supportsReferences", False)),
+            }
+    except Exception:
+        pass
+    return {
+        "workflowKey": workflow_key,
+        "generator": None,
+        "provider": None,
+        "model": None,
+        "supportsReferences": False,
+    }
+
+
+def _low_reference_fidelity(*, reference_locked: bool, lineage: dict[str, Any]) -> bool:
+    """Provenance-based candidate quality gate (Amendment 3, §9).
+
+    Flag a candidate as low reference fidelity when the creator attached a
+    reference (expecting visual identity lock) but the resolved workflow
+    cannot consume reference pixels — i.e. reference conditioning fell back to
+    prompt-text-only. A full pixel-level visual comparison is deferred to a
+    later vision-tooling pass; this provenance gate is the honest floor.
+    """
+    if not reference_locked:
+        return False
+    return not bool(lineage.get("supportsReferences"))
 
 
 def _save_pack(db: Session, project_id: str, character_id: str, pack: dict[str, Any]) -> dict[str, Any]:
@@ -357,19 +519,41 @@ def start_visual_sheet_generation(
         # the composition block is explicit. The user's Character Profile
         # (visual_description) is preserved as authoritative subject identity —
         # the full-body instruction supplements, never rewrites.
+        #
+        # Amendment 3 — Candidate Diversity + Reference Fidelity:
+        # * When a Character Reference / Reference Sheet is attached, the
+        #   reference image is the primary visual authority and its PIXELS
+        #   participate in conditioning (routed to zimage.ref_edit, the only
+        #   Certified reference-capable workflow). The Character Profile
+        #   becomes supplemental and must not override visible reference
+        #   features.
+        # * Candidate variety comes from different Certified generators / seeds
+        #   / interpretation — never from changing the character's identity.
+        # * Each distinct Certified generator is used once before reuse; we
+        #   never fabricate distinctness.
+        references = service.list_references(db, project_id, character_id)
+        reference_asset_id = _resolve_reference_asset_id(references)
+        routing_plan = _build_candidate_routing_plan(
+            candidate_count=candidate_count,
+            reference_asset_id=reference_asset_id,
+        )
+        reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []
         for _i in range(candidate_count):
             composition = dict(FULL_BODY_CASTING_COMPOSITION)
             composition["candidate_index"] = _i
+            route = routing_plan[_i]
             hero_prompt = _compile_visual_prompt(
                 profile,
                 prompt_goal="a cinematic full-body character casting reference",
                 composition=composition,
-                references=service.list_references(db, project_id, character_id),
+                references=references,
                 role="hero_identity",
                 extra_negative_constraints=FULL_BODY_CASTING_NEGATIVE_RULES,
                 style_profile=style_profile,
+                reference_locked=reference_locked,
             )
+            seed = _candidate_seed(character_id, _i)
             hero_job = _enqueue_txt2img(
                 db,
                 project_id,
@@ -378,6 +562,10 @@ def start_visual_sheet_generation(
                 negative_prompt=hero_prompt.negative_prompt,
                 tag=f"{char_slug}_hero_identity" + (f"_c{_i + 1}" if candidate_count > 1 else ""),
                 role="hero_identity",
+                model_family_preference=route["modelFamilyPreference"],
+                source_asset_id=route.get("source_asset_id"),
+                denoise=route.get("denoise"),
+                seed=seed,
                 prompt_metadata={
                     "promptFamily": hero_prompt.prompt_family,
                     "promptModel": hero_prompt.model_key,
@@ -390,8 +578,17 @@ def start_visual_sheet_generation(
                     # same endpoint. Do not rely on prompt-text parsing.
                     "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
                     "fullBody": True,
+                    # Amendment 3: per-candidate routing + reference fidelity.
+                    "workflowKey": route["workflowKey"],
+                    "modelFamily": route["modelFamilyPreference"],
+                    "referenceLocked": reference_locked,
+                    "referenceAssetId": reference_asset_id,
+                    "referenceFidelityMode": route.get("referenceFidelityMode"),
+                    "seed": seed,
                 },
             )
+            lineage = _workflow_lineage(route["workflowKey"])
+            low_fidelity = _low_reference_fidelity(reference_locked=reference_locked, lineage=lineage)
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             entry = {
                 "jobId": hero_job.id,
@@ -400,6 +597,17 @@ def start_visual_sheet_generation(
                 "candidateIndex": _i,
                 "label": label,
                 "assetId": None,
+                "generator": lineage.get("generator"),
+                "provider": lineage.get("provider"),
+                "model": lineage.get("model"),
+                "modelVariant": lineage.get("modelVariant"),
+                "workflowKey": route["workflowKey"],
+                "seed": seed,
+                "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
+                "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
+                "referenceFidelityMode": route.get("referenceFidelityMode"),
+                "referenceLocked": reference_locked,
+                "lowReferenceFidelity": low_fidelity,
             }
             hero_candidate_jobs.append(entry)
             candidates.append({
@@ -409,20 +617,32 @@ def start_visual_sheet_generation(
                 "label": label,
                 "status": hero_job.status,
                 "candidateIndex": _i,
+                "generator": lineage.get("generator"),
+                "provider": lineage.get("provider"),
+                "model": lineage.get("model"),
+                "modelVariant": lineage.get("modelVariant"),
+                "workflowKey": route["workflowKey"],
+                "seed": seed,
+                "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
+                "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
+                "referenceFidelityMode": route.get("referenceFidelityMode"),
+                "referenceLocked": reference_locked,
+                "lowReferenceFidelity": low_fidelity,
             })
         jobs["hero"] = hero_candidate_jobs[0]
         if candidate_count > 1:
             jobs["hero_candidates"] = hero_candidate_jobs
 
     pack = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "GENERATING",
         "characterId": character_id,
         "projectId": project_id,
-        "engine": "qwen2512.txt2img",
-        "workflows": ["qwen2512.txt2img", "character_sheet", "sequential_identity_prompts"],
+        "engine": "multi_model",
+        "workflows": ["character_sheet", "sequential_identity_prompts", "multi_model_routing"],
         "identityLock": KORRI_LOCK if char_slug == "korri" else "",
         "referenceEditReplaced": True,
+        "referenceLocked": bool(reference_asset_id) if not hero_asset_id else False,
         "jobs": jobs,
         "roleAssets": role_assets,
         "candidates": candidates,
@@ -489,6 +709,9 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 aid = _job_params(job).get("output_asset_id")
                 if aid:
                     item["assetId"] = aid
+        # Preserve per-candidate lineage (generator/provider/model/workflowKey/
+        # seed/referenceAssetIds/compositionIntent/referenceFidelityMode) recorded
+        # at enqueue time — only update the live status/assetId fields above.
         pack["candidates"] = [
             {
                 "assetId": item.get("assetId"),
@@ -497,6 +720,17 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "label": item.get("label") or "Candidate",
                 "status": item.get("status"),
                 "candidateIndex": item.get("candidateIndex"),
+                "generator": item.get("generator"),
+                "provider": item.get("provider"),
+                "model": item.get("model"),
+                "modelVariant": item.get("modelVariant"),
+                "workflowKey": item.get("workflowKey"),
+                "seed": item.get("seed"),
+                "referenceAssetIds": item.get("referenceAssetIds") or [],
+                "compositionIntent": item.get("compositionIntent"),
+                "referenceFidelityMode": item.get("referenceFidelityMode"),
+                "referenceLocked": bool(item.get("referenceLocked")),
+                "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
             }
             for item in hero_candidates
         ]
@@ -910,6 +1144,10 @@ def _enqueue_txt2img(
     tag: str,
     role: str,
     prompt_metadata: dict[str, Any] | None = None,
+    model_family_preference: str = "qwen2512",
+    source_asset_id: str | None = None,
+    denoise: float | None = None,
+    seed: int | None = None,
 ) -> Job:
     from ..storyboard_jobs import enqueue_imagegen_job
 
@@ -917,27 +1155,33 @@ def _enqueue_txt2img(
         "objective": "character_sheet",
         "characterId": character_id,
         "role": role,
-        "workflowKey": "qwen2512.txt2img",
+        "workflowKey": (prompt_metadata or {}).get("workflowKey") or f"{model_family_preference}.txt2img",
         "sequentialMethod": "method_b",
     }
     if prompt_metadata:
         creative_context.update(prompt_metadata)
 
-    return enqueue_imagegen_job(
-        db,
-        project_id,
-        {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt or DEFAULT_NEGATIVE_PROMPT,
-            "width": 1024,
-            "height": 1024,
-            "tag": tag,
-            "modelFamilyPreference": "qwen2512",
-            "purpose": "character_sheet",
-            "presetId": "builtin-character-sheet",
-            "creativeContext": creative_context,
-        },
-    )
+    body: dict[str, Any] = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt or DEFAULT_NEGATIVE_PROMPT,
+        "width": 1024,
+        "height": 1024,
+        "tag": tag,
+        "modelFamilyPreference": model_family_preference,
+        "purpose": "character_sheet",
+        "presetId": "builtin-character-sheet",
+        "creativeContext": creative_context,
+    }
+    # Reference-locked candidates route to a reference-capable edit workflow
+    # (zimage.ref_edit) by supplying the reference asset as the source image so
+    # its PIXELS participate in conditioning — not merely a filename in the prompt.
+    if source_asset_id:
+        body["source_asset_id"] = source_asset_id
+    if denoise is not None:
+        body["denoise"] = denoise
+    if seed is not None:
+        body["seed"] = seed
+    return enqueue_imagegen_job(db, project_id, body)
 
 
 def _coverage_role_specs() -> list[tuple[str, str, dict[str, Any]]]:

@@ -29,6 +29,22 @@ BLOCK_ORDER: tuple[str, ...] = (
     "output_guardrails",
 )
 
+# Reference-first authority directive (Amendment 3). When a Character Reference
+# / Reference Sheet is attached, this block makes the reference image the
+# primary visual authority and demotes the written Character Profile to
+# supplemental guidance. The profile may clarify personality/expression/pose
+# and add details NOT visible in the reference, but must NOT override visible
+# reference features (face/hair/eyes/ears/skin/wardrobe/accessories/circuitry/
+# silhouette). If the profile conflicts with the reference, the reference wins.
+REFERENCE_REPRODUCTION_BLOCK = (
+    "REFERENCE-FIRST AUTHORITY: Reproduce the attached character reference as faithfully as possible. "
+    "Preserve the same face, hairstyle, eye color, ears, skin tone, body proportions, wardrobe, "
+    "accessories, tattoos/circuitry, and silhouette. Do not redesign or reinterpret the character. "
+    "Only vary pose, expression, and background subtly. "
+    "The attached reference image is the visual identity lock; the written profile is supplemental "
+    "guidance only and must not override clearly visible reference details."
+)
+
 
 @dataclass(frozen=True)
 class PromptBlock:
@@ -121,8 +137,16 @@ def compile_character_image_prompt(
     references: Sequence[Mapping[str, Any]] | None = None,
     sheet_request: Mapping[str, Any] | None = None,
     extra_negative_constraints: Sequence[str] | None = None,
+    reference_locked: bool = False,
 ) -> CharacterImagePromptPackage:
-    """Compile a structured, stable 13-block Qwen-Image-2512 prompt package."""
+    """Compile a structured, stable 13-block Qwen-Image-2512 prompt package.
+
+    When ``reference_locked`` is True (a Character Reference / Reference Sheet
+    is attached), a reference-first authority block is prepended so the
+    reference image is the primary visual identity lock and the written
+    Character Profile is demoted to supplemental guidance that must not
+    override visible reference features.
+    """
     blueprint = extract_character_blueprint(payload)
     identity_lock = build_identity_lock(blueprint)
     motion = blueprint.get("motion") or {}
@@ -153,10 +177,18 @@ def compile_character_image_prompt(
         "negative_constraints": negative_prompt,
         "output_guardrails": _guardrail_block(identity_lock),
     }
+    # Reference-first authority block is prepended (as block 1) when a reference
+    # is attached, shifting the canonical blocks down by one. This makes the
+    # reference-reproduction directive the first instruction the model reads.
+    if reference_locked:
+        block_texts = {"reference_reproduction": REFERENCE_REPRODUCTION_BLOCK, **block_texts}
+        block_order = ("reference_reproduction",) + BLOCK_ORDER
+    else:
+        block_order = BLOCK_ORDER
 
     blocks = [
         PromptBlock(index=index, key=key, label=key.replace("_", " ").title(), text=block_texts[key])
-        for index, key in enumerate(BLOCK_ORDER, start=1)
+        for index, key in enumerate(block_order, start=1)
     ]
     prompt = "\n".join(f"{block.index}. {block.label}: {block.text}" for block in blocks)
     package = CharacterImagePromptPackage(
@@ -172,10 +204,11 @@ def compile_character_image_prompt(
         identity_lock=identity_lock,
         validation={},
         metadata={
-            "stableBlockOrder": list(BLOCK_ORDER),
-            "blockCount": len(BLOCK_ORDER),
+            "stableBlockOrder": list(block_order),
+            "blockCount": len(block_order),
             "referencesAttached": len(list(references or [])),
             "sheetMode": bool((sheet_request or {}).get("enabled") or (sheet_request or {}).get("views")),
+            "referenceLocked": bool(reference_locked),
         },
         blueprint=blueprint,
         compositionSummary=composition_summary,
@@ -183,7 +216,7 @@ def compile_character_image_prompt(
         styleSummary=style_summary,
     )
 
-    validation_issues = validate_compiled_package(package.to_dict(), expected_block_order=BLOCK_ORDER)
+    validation_issues = validate_compiled_package(package.to_dict(), expected_block_order=block_order)
     package_dict = package.to_dict()
     package_dict["validation"] = {
         "ok": not any(issue.severity == "error" for issue in validation_issues),

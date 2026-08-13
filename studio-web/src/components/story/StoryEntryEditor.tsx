@@ -24,6 +24,13 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
   const [entries, setEntries] = useState<StoryEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [publishing, setPublishing] = useState(false);
+  const [publishMsg, setPublishMsg] = useState<string>("");
+  // Snapshot of Story values at the last explicit "Save to Wiki" publish,
+  // keyed by entry id. Used to detect unpublished changes (dirty state).
+  // Wiki Story only updates on explicit publish — Story autosave does NOT
+  // trigger a Wiki compile.
+  const [lastPublished, setLastPublished] = useState<Record<string, { title: string; logline: string; shortSummary: string; longSummary: string }>>({});
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
 
@@ -101,6 +108,52 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
     setEntries(next);
     api.storyEntriesReorder(projectId, next.map(e => e.id)).catch(() => {});
   };
+
+  // Manual Save to Wiki: the ONLY path that writes Story fields into the Wiki.
+  // Story autosave above does NOT trigger a Wiki compile, so editing Story
+  // leaves the Wiki at the previously-published version until the creator
+  // explicitly publishes here. Blank Story fields map to blank Wiki fields
+  // (no conversation fallback — the compiler reads StoryEntry directly).
+  const handleSaveToWiki = useCallback(async () => {
+    if (!selected) return;
+    setPublishing(true);
+    setPublishMsg("");
+    try {
+      await api.compileCoDirectorWiki(projectId);
+      // Snapshot the published values so we can detect unpublished changes.
+      setLastPublished(prev => ({
+        ...prev,
+        [selected.id]: {
+          title: selected.title,
+          logline: selected.logline,
+          shortSummary: selected.shortSummary,
+          longSummary: selected.longSummary,
+        },
+      }));
+      setPublishMsg("Story saved to Wiki.");
+      setTimeout(() => setPublishMsg(""), 3000);
+    } catch {
+      setPublishMsg("Save to Wiki failed.");
+    } finally {
+      setPublishing(false);
+    }
+  }, [projectId, selected]);
+
+  // Dirty-state indicator: Story has unpublished changes vs last publish.
+  const hasUnpublishedChanges = (() => {
+    if (!selected) return false;
+    const snap = lastPublished[selected.id];
+    if (!snap) {
+      // Never published yet but Story has content → unpublished.
+      return Boolean(selected.title || selected.logline || selected.shortSummary || selected.longSummary);
+    }
+    return (
+      snap.title !== selected.title ||
+      snap.logline !== selected.logline ||
+      snap.shortSummary !== selected.shortSummary ||
+      snap.longSummary !== selected.longSummary
+    );
+  })();
 
   const baseClass = embedded ? "story-editor story-editor--embedded" : "story-editor";
 
@@ -207,6 +260,28 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
               rows={12}
               data-testid="story-entry-long-summary"
             />
+          </div>
+
+          <div className="story-entry__publish">
+            {hasUnpublishedChanges ? (
+              <span className="story-entry__dirty" data-testid="story-unpublished-changes">
+                Story has unpublished changes
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="story-entry__save-wiki"
+              onClick={() => void handleSaveToWiki()}
+              disabled={publishing}
+              data-testid="story-save-to-wiki"
+            >
+              {publishing ? "Saving to Wiki…" : "Save to Wiki"}
+            </button>
+            {publishMsg ? (
+              <span className="story-entry__publish-msg" data-testid="story-publish-msg">
+                {publishMsg}
+              </span>
+            ) : null}
           </div>
         </div>
       )}

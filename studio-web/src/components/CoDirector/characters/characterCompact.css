@@ -390,6 +390,25 @@
   color: rgba(246, 248, 252, 0.92);
 }
 
+.character-compact__candidate-generator {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(180, 196, 220, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.01em;
+}
+
+.character-compact__candidate-flag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 6px;
+  padding: 3px 6px;
+  text-align: center;
+}
+
 /* ---- Character assets ---- */
 .character-compact__asset-filters {
   display: flex;
