@@ -422,14 +422,14 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Generation",
-      "status": "Deferred",
+      "status": "Certified",
       "modelFamily": "flux",
-      "modelVariant": "dev",
+      "modelVariant": "kontext-dev",
       "engine": "flux",
       "providerKind": "local",
       "provider": "comfyui",
-      "builder": "build_txt2img_workflow",
-      "builderPath": "app.imagegen_workflows:build_txt2img_workflow",
+      "builder": "build_flux_txt2img_workflow",
+      "builderPath": "app.workflows.flux_image:build_flux_txt2img_workflow",
       "operation": "image.generate",
       "supportedOperations": [
         "image.generate",
@@ -437,17 +437,28 @@
       ],
       "requiredRuntime": "comfy",
       "requiredNodes": [
-        "CheckpointLoaderSimple",
+        "UNETLoader",
+        "VAELoader",
+        "DualCLIPLoader",
         "CLIPTextEncode",
+        "ConditioningZeroOut",
+        "EmptySD3LatentImage",
         "KSampler",
-        "VAEDecode"
+        "VAEDecode",
+        "SaveImage"
       ],
       "requiredModels": [
-        "flux_checkpoint"
+        "flux_checkpoint",
+        "flux_clip_l",
+        "flux_t5",
+        "flux_vae"
       ],
       "requiredInputs": [
         "prompt",
-        "checkpoint"
+        "unet",
+        "clip_l",
+        "t5",
+        "vae"
       ],
       "optionalInputs": [
         "negative",
@@ -486,16 +497,22 @@
         ]
       },
       "limitations": [
-        "Deferred until FLUX weights discovered and live-certified. Never fabricate Certified."
+        "Live-certified on Adept UI local runtime (ComfyUI): 1024x1024 txt2img generated and inspected."
       ],
       "vramProfile": {
         "minimumGb": 16,
         "recommendedGb": 24,
         "safeConcurrency": 1,
-        "state": "UNKNOWN"
+        "state": "OK"
       },
-      "fingerprints": {},
-      "certificationRecordId": null
+      "fingerprints": {
+        "liveTestPrompt": "A red cube on a white background",
+        "liveTestResolution": "1024x1024",
+        "liveTestResult": "flux_00001_.png",
+        "liveTestPromptId": "0c18e4d8-8b00-4d67-8e77-bcb93d7df5ea",
+        "liveTestDate": "2026-08-13"
+      },
+      "certificationRecordId": "CR-FLUX-TXT2IMG-20260813-001"
     },
     {
       "workflowId": "IMG-FLUX-IMG2IMG-001",
@@ -503,14 +520,14 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Deferred",
+      "status": "Certified",
       "modelFamily": "flux",
-      "modelVariant": "dev",
+      "modelVariant": "kontext-dev",
       "engine": "flux",
       "providerKind": "local",
       "provider": "comfyui",
-      "builder": "build_img2img_edit_stub",
-      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
+      "builder": "build_flux_img2img_workflow",
+      "builderPath": "app.workflows.flux_image:build_flux_img2img_workflow",
       "operation": "image.edit",
       "supportedOperations": [
         "image.edit",
@@ -518,18 +535,30 @@
       ],
       "requiredRuntime": "comfy",
       "requiredNodes": [
-        "CheckpointLoaderSimple",
+        "UNETLoader",
+        "VAELoader",
+        "DualCLIPLoader",
+        "CLIPTextEncode",
+        "ConditioningZeroOut",
+        "LoadImage",
         "VAEEncode",
         "KSampler",
-        "VAEDecode"
+        "VAEDecode",
+        "SaveImage"
       ],
       "requiredModels": [
-        "flux_checkpoint"
+        "flux_checkpoint",
+        "flux_clip_l",
+        "flux_t5",
+        "flux_vae"
       ],
       "requiredInputs": [
         "prompt",
         "source_image",
-        "checkpoint"
+        "unet",
+        "clip_l",
+        "t5",
+        "vae"
       ],
       "optionalInputs": [
         "denoise",
@@ -564,16 +593,23 @@
         ]
       },
       "limitations": [
-        "Deferred until FLUX weights discovered and live-certified."
+        "Live-certified on Adept UI local runtime (ComfyUI): 1024x1024 img2img edit (denoise 0.35) generated and inspected."
       ],
       "vramProfile": {
         "minimumGb": 16,
         "recommendedGb": 24,
         "safeConcurrency": 1,
-        "state": "UNKNOWN"
+        "state": "OK"
       },
-      "fingerprints": {},
-      "certificationRecordId": null
+      "fingerprints": {
+        "liveTestPrompt": "A blue metallic cube on a white background",
+        "liveTestResolution": "1024x1024",
+        "liveTestSourceImage": "test/flux_00001_.png",
+        "liveTestResult": "flux_edit_00001_.png",
+        "liveTestPromptId": "5c3f02e8-9fee-4f95-9410-01aec1147fdd",
+        "liveTestDate": "2026-08-13"
+      },
+      "certificationRecordId": "CR-FLUX-IMG2IMG-20260813-001"
     },
     {
       "workflowId": "IMG-FLUX-REF-001",
@@ -581,7 +617,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Reference",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "kontext",
       "engine": "flux",
@@ -640,7 +676,7 @@
         ]
       },
       "limitations": [
-        "Deferred \u2014 FLUX Kontext / reference when weights present."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -657,7 +693,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "edit",
       "engine": "flux",
@@ -716,7 +752,7 @@
         ]
       },
       "limitations": [
-        "Deferred \u2014 FLUX Edit/Fill when weights present."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -1354,7 +1390,7 @@
         ]
       },
       "limitations": [
-        "SDXL anime engine (OnomaAIResearch/Illustrious-XL-v1.0). Text-to-image only — does NOT consume reference pixels; reference-locked Character Creator candidates must use a Certified reference-capable workflow (zimage.ref_edit). Promoted to Certified only after live ComfyUI generation evidence."
+        "SDXL anime engine (OnomaAIResearch/Illustrious-XL-v1.0). Text-to-image only \u2014 does NOT consume reference pixels; reference-locked Character Creator candidates must use a Certified reference-capable workflow (zimage.ref_edit). Promoted to Certified only after live ComfyUI generation evidence."
       ],
       "vramProfile": {
         "minimumGb": 8,
@@ -1376,7 +1412,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Generation",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "qwen",
       "modelVariant": "image",
       "engine": "qwen",
@@ -1438,7 +1474,7 @@
         ]
       },
       "limitations": [
-        "Deferred until Qwen Image weights discovered. Multilingual prompts supported when Certified."
+        "Qwen Image weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -1455,7 +1491,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "qwen",
       "modelVariant": "image",
       "engine": "qwen",
@@ -1515,7 +1551,7 @@
         ]
       },
       "limitations": [
-        "Deferred until Qwen Image editing weights present."
+        "Qwen Image weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -1532,7 +1568,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Reference",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "qwen",
       "modelVariant": "image",
       "engine": "qwen",
@@ -1590,7 +1626,7 @@
         ]
       },
       "limitations": [
-        "Deferred until Qwen Image reference workflows present."
+        "Qwen Image weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -1877,82 +1913,7 @@
         ]
       },
       "limitations": [
-        "Legacy generic adapter \u2014 prefer flux.txt2img / qwen.txt2img family keys."
-      ],
-      "vramProfile": {
-        "minimumGb": 12,
-        "recommendedGb": 24,
-        "safeConcurrency": 1,
-        "state": "UNKNOWN"
-      },
-      "fingerprints": {},
-      "certificationRecordId": null
-    },
-    {
-      "workflowId": "IMG-CKPT-IMG2IMG-001",
-      "workflowKey": "checkpoint.img2img",
-      "workflowVersion": "1.0.0",
-      "modality": "image",
-      "category": "Editing",
-      "status": "Deferred",
-      "modelFamily": "checkpoint",
-      "modelVariant": "generic",
-      "engine": "checkpoint",
-      "providerKind": "local",
-      "provider": "comfyui",
-      "builder": "build_img2img_edit_stub",
-      "builderPath": "app.imagegen_workflows:build_img2img_edit_stub",
-      "operation": "image.edit",
-      "supportedOperations": [
-        "image.edit"
-      ],
-      "requiredRuntime": "comfy",
-      "requiredNodes": [
-        "CheckpointLoaderSimple",
-        "VAEEncode",
-        "KSampler",
-        "VAEDecode"
-      ],
-      "requiredModels": [
-        "checkpoint"
-      ],
-      "requiredInputs": [
-        "prompt",
-        "source_image"
-      ],
-      "optionalInputs": [
-        "denoise",
-        "seed"
-      ],
-      "supportedOutputs": [
-        "png"
-      ],
-      "cancellationSupport": true,
-      "outputValidation": true,
-      "capabilities": {
-        "supportsReferences": true,
-        "supportsEditing": true,
-        "supportsControlNet": false,
-        "supportsLoRA": true,
-        "supportsInpaint": false,
-        "supportsOutpaint": false,
-        "supportsFill": false,
-        "supportsIdentity": false,
-        "supportsBatch": true
-      },
-      "provenancePolicy": {
-        "schema": "ImageProvenance"
-      },
-      "apiContract": {
-        "intents": [
-          "img2img"
-        ],
-        "jobKinds": [
-          "imagegen_edit"
-        ]
-      },
-      "limitations": [
-        "Legacy generic adapter \u2014 prefer family keys."
+        "Legacy generic checkpoint adapter \u2014 prefer family keys (flux.*/qwen.*)."
       ],
       "vramProfile": {
         "minimumGb": 12,
@@ -2806,7 +2767,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Blocked",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "kontext",
       "engine": "flux",
@@ -2866,7 +2827,7 @@
         ]
       },
       "limitations": [
-        "Blocked \u2014 FLUX Kontext weights not installed or not certified."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -2883,7 +2844,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "dev",
       "engine": "flux",
@@ -2947,7 +2908,7 @@
         ]
       },
       "limitations": [
-        "Deferred until FLUX inpaint path live-certified."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -2964,7 +2925,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "dev",
       "engine": "flux",
@@ -3025,7 +2986,7 @@
         ]
       },
       "limitations": [
-        "Deferred until FLUX outpaint path live-certified."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -3042,7 +3003,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Editing",
-      "status": "Blocked",
+      "status": "Draft",
       "modelFamily": "flux",
       "modelVariant": "fill",
       "engine": "flux",
@@ -3103,7 +3064,7 @@
         ]
       },
       "limitations": [
-        "Blocked \u2014 FLUX Fill weights not installed or not certified."
+        "FLUX weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,
@@ -3120,7 +3081,7 @@
       "workflowVersion": "1.0.0",
       "modality": "image",
       "category": "Reference",
-      "status": "Deferred",
+      "status": "Draft",
       "modelFamily": "qwen",
       "modelVariant": "image",
       "engine": "qwen",
@@ -3179,7 +3140,7 @@
         ]
       },
       "limitations": [
-        "Deferred \u2014 Qwen multi-reference editing pending live certification."
+        "Qwen Image weights detected"
       ],
       "vramProfile": {
         "minimumGb": 16,

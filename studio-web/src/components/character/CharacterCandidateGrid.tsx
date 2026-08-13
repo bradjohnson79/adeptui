@@ -2,8 +2,15 @@
  * CharacterCandidateGrid — renders composed character-sheet candidates with
  * provenance labels (LOCAL — Illustrious XL / LOCAL — Z-Image / API — provider/model).
  * The creator-facing candidate image is the composed canonical sheet asset.
+ *
+ * Per-card state machine (truthful):
+ *  - queued / generating → centered spinner + "Generating..." + generator/model + stage
+ *  - assembling          → spinner + "Assembling Sheet"
+ *  - complete            → spinner removed, composed sheet preview shown
+ *  - failed              → spinner removed, error state + Retry. Never an infinite loader.
  */
 import { api } from "../../api";
+import { candidateStage, SHEET_VIEW_LABELS } from "./types";
 import type { CharacterCandidate } from "./types";
 
 type Props = {
@@ -11,6 +18,7 @@ type Props = {
   selectedAssetId?: string | null;
   disabled?: boolean;
   onApprove: (candidate: CharacterCandidate) => void;
+  onRetry?: (candidate: CharacterCandidate) => void;
 };
 
 function provenanceLabel(c: CharacterCandidate): string {
@@ -23,7 +31,28 @@ function provenanceLabel(c: CharacterCandidate): string {
   return model ? `LOCAL — ${model}` : "LOCAL";
 }
 
-export function CharacterCandidateGrid({ candidates, selectedAssetId, disabled, onApprove }: Props) {
+function generatorName(c: CharacterCandidate): string {
+  return c.modelVariant || c.model || c.workflowKey || "Local generator";
+}
+
+/** Friendly current stage for a generating candidate (e.g. "Front / Side"). */
+function stageLabel(c: CharacterCandidate): string {
+  const views = c.viewJobs || [];
+  if (!views.length) return "";
+  const active = views
+    .filter((v) => v.status !== "done" && !v.assetId)
+    .map((v) => SHEET_VIEW_LABELS[v.role || ""] || v.role || "View");
+  if (!active.length) return "Assembling Sheet";
+  return active.join(" / ");
+}
+
+export function CharacterCandidateGrid({
+  candidates,
+  selectedAssetId,
+  disabled,
+  onApprove,
+  onRetry,
+}: Props) {
   if (!candidates.length) return null;
   return (
     <div className="character-core__candidates" data-testid="character-candidate-grid">
@@ -32,35 +61,79 @@ export function CharacterCandidateGrid({ candidates, selectedAssetId, disabled, 
         const assetId = c.sheetAssetId || c.assetId || null;
         const src = assetId ? api.assetUrl(assetId) : "";
         const isSelected = selectedAssetId && assetId === selectedAssetId;
-        const ready = c.status === "done" || !!assetId;
+        const stage = candidateStage(c);
+        const ready = stage === "complete";
+        const failed = stage === "failed";
+        const busy = stage === "queued" || stage === "generating" || stage === "assembling";
         return (
           <div
             key={c.jobId || assetId || `cand-${i}`}
-            className={`character-core__candidate${isSelected ? " is-selected" : ""}`}
+            className={`character-core__candidate${isSelected ? " is-selected" : ""}${failed ? " is-failed" : ""}`}
             data-testid={`character-candidate-${i}`}
+            data-stage={stage}
           >
             <div className="character-core__candidate-media">
-              {src ? (
+              {src && ready ? (
                 <img src={src} alt={c.label || `Candidate ${i + 1}`} loading="lazy" />
-              ) : (
-                <div className="character-core__candidate-placeholder">
-                  {ready ? "No preview" : "Generating…"}
+              ) : busy ? (
+                <div
+                  className="character-core__candidate-loading"
+                  data-testid={`candidate-loading-${i}`}
+                  role="status"
+                >
+                  <span className="character-core__spinner" aria-hidden="true" />
+                  <span className="character-core__candidate-loading-text">
+                    {stage === "assembling" ? "Assembling Sheet…" : "Generating..."}
+                  </span>
+                  <span className="character-core__candidate-loading-model">
+                    {generatorName(c)}
+                  </span>
+                  {stage === "generating" && stageLabel(c) ? (
+                    <span className="character-core__candidate-loading-stage">
+                      {stageLabel(c)}
+                    </span>
+                  ) : null}
                 </div>
+              ) : failed ? (
+                <div
+                  className="character-core__candidate-error"
+                  data-testid={`candidate-error-${i}`}
+                  role="alert"
+                >
+                  <span className="character-core__candidate-error-title">Generation failed</span>
+                  {c.error ? (
+                    <span className="character-core__candidate-error-msg">{c.error}</span>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="character-core__candidate-placeholder">No preview</div>
               )}
             </div>
             <div className="character-core__candidate-meta">
               <span className="character-core__candidate-prov" data-testid={`candidate-provenance-${i}`}>
                 {provenanceLabel(c)}
               </span>
-              <button
-                type="button"
-                className="character-core__button primary"
-                data-testid={`candidate-approve-${i}`}
-                disabled={disabled || !ready || !assetId}
-                onClick={() => onApprove(c)}
-              >
-                {isSelected ? "Selected" : "Use This Look"}
-              </button>
+              {failed && onRetry ? (
+                <button
+                  type="button"
+                  className="character-core__button"
+                  data-testid={`candidate-retry-${i}`}
+                  disabled={disabled}
+                  onClick={() => onRetry(c)}
+                >
+                  Retry
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="character-core__button primary"
+                  data-testid={`candidate-approve-${i}`}
+                  disabled={disabled || !ready || !assetId}
+                  onClick={() => onApprove(c)}
+                >
+                  {isSelected ? "Selected" : "Use This Look"}
+                </button>
+              )}
             </div>
           </div>
         );

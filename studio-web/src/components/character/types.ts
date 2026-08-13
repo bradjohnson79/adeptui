@@ -38,6 +38,18 @@ export type CharacterReference = {
   filename?: string;
 };
 
+export type CharacterViewJob = {
+  jobId?: string;
+  role?: string;
+  viewIndex?: number;
+  status?: string;
+  assetId?: string | null;
+  seed?: number;
+  modelFamily?: string;
+  workflowKey?: string;
+  referenceLocked?: boolean;
+};
+
 export type CharacterCandidate = {
   assetId?: string | null;
   jobId?: string;
@@ -57,7 +69,71 @@ export type CharacterCandidate = {
   lowReferenceFidelity?: boolean;
   /** Composed canonical 4-view sheet asset id (creator-facing). */
   sheetAssetId?: string | null;
+  /** Per-view job states (front / side / back / close-up). */
+  viewJobs?: CharacterViewJob[];
+  /** Error message when the candidate failed. */
+  error?: string | null;
 };
+
+/** Truthful per-candidate generation stage derived from backend state. */
+export type CandidateStage =
+  | "queued"
+  | "generating"
+  | "assembling"
+  | "complete"
+  | "failed";
+
+/** Friendly label for each sheet-view role. */
+export const SHEET_VIEW_LABELS: Record<string, string> = {
+  hero_identity: "Front",
+  full_body_side_left: "Side",
+  full_body_back: "Back",
+  closeup_front: "Close-Up",
+};
+
+/** Derive a truthful stage for a candidate from its backend state. */
+export function candidateStage(c: CharacterCandidate): CandidateStage {
+  const views = c.viewJobs || [];
+  const anyFailed =
+    c.status === "failed" ||
+    views.some((v) => ["failed", "error", "cancelled", "missing"].includes(v.status || ""));
+  if (anyFailed) return "failed";
+  if (c.status === "done" || c.sheetAssetId || c.assetId) return "complete";
+  if (c.status === "assembling") return "assembling";
+  // All views done but no composed sheet yet → assembling.
+  if (views.length && views.every((v) => v.status === "done" || v.assetId) && !c.sheetAssetId) {
+    return "assembling";
+  }
+  const anyRunning = views.some((v) => v.status === "running");
+  if (anyRunning || c.status === "generating") return "generating";
+  return "queued";
+}
+
+/** Aggregate batch progress across all candidates (honest, view-based). */
+export function batchProgress(candidates: CharacterCandidate[]): {
+  doneViews: number;
+  totalViews: number;
+  doneSheets: number;
+  totalSheets: number;
+  percent: number;
+} {
+  let doneViews = 0;
+  let totalViews = 0;
+  let doneSheets = 0;
+  const totalSheets = candidates.length;
+  for (const c of candidates) {
+    const views = c.viewJobs || [];
+    totalViews += views.length;
+    doneViews += views.filter((v) => v.status === "done" || v.assetId).length;
+    if (candidateStage(c) === "complete") doneSheets += 1;
+  }
+  // Percent reflects real completed units: finished views + a finished sheet
+  // counts its assembly. No fake smoothing.
+  const units = totalViews + totalSheets; // views + one assembly step per sheet
+  const done = doneViews + doneSheets;
+  const percent = units > 0 ? Math.round((done / units) * 100) : 0;
+  return { doneViews, totalViews, doneSheets, totalSheets, percent };
+}
 
 export type GeneratorSourceKind = "local" | "api";
 
@@ -73,11 +149,18 @@ export type GeneratorOption = {
   credits?: number | null;
   /** Human availability when no numeric balance: "Connected" | "Balance unavailable" */
   availability?: string;
+  /** Family can consume reference pixels (any Certified reference-capable key). */
+  supportsReferences?: boolean;
+  /** Family has a real img2img/edit workflow for Stage 2 style refinement. */
+  supportsEditing?: boolean;
 };
 
 export type GeneratorSourceState = {
   enabled: boolean;
   selectedId: string;
+  /** Optional Stage 2 style-refinement engine. */
+  stage2Enabled?: boolean;
+  stage2SelectedId?: string;
 };
 
 export const CHARACTER_STYLE_OPTIONS = [

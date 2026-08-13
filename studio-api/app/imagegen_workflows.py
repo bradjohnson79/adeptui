@@ -4,6 +4,105 @@ from __future__ import annotations
 
 from typing import Any
 
+# Creator-facing labels for local generator families. Keyed by the canonical
+# family id used across routing/recommendation. Falls back to the registry
+# modelFamily / _display_name when a family is not listed here.
+_FAMILY_LABELS: dict[str, str] = {
+    "qwen2512": "Qwen Image 2512",
+    "illustrious": "Illustrious XL 1.0 (Anime)",
+    "zimage": "Z-Image Turbo",
+    "flux": "FLUX.1 Kontext [dev]",
+}
+
+# Preferred dropdown ordering for known families (Auto Select is always first).
+_FAMILY_ORDER: tuple[str, ...] = ("qwen2512", "zimage", "illustrious", "flux")
+
+
+def _family_label(family: str, variant: str) -> str:
+    if family in _FAMILY_LABELS:
+        return _FAMILY_LABELS[family]
+    base = family.replace("-", " ").replace("_", " ").title()
+    return f"{base} {variant}".strip() if variant else base
+
+
+def build_local_generator_models() -> list[dict[str, Any]]:
+    """Authoritative Local Generator roster sourced from the Certified registry.
+
+    The Character Creator / Character Creator Express dropdown must reflect
+    installed + READY + Certified + capability-compatible local generators —
+    never a hardcoded list. Each entry carries readiness/capability metadata so
+    the selector can apply reference-aware eligibility (e.g. disable a
+    text-to-image-only family when a Character Reference is attached).
+    """
+    from .image_runtime.certified_registry import list_workflows
+
+    def _is_txt2img(wf) -> bool:
+        return wf.operation in {"image.generate", "txt2img"} or "txt2img" in (
+            wf.supported_operations or ()
+        )
+
+    # family -> aggregated option. ``_gen`` tracks whether the family has a
+    # Certified text-to-image/generation workflow (what makes it a generator).
+    families: dict[str, dict[str, Any]] = {}
+    for wf in list_workflows():
+        if (wf.provider_kind or "local").lower() != "local":
+            continue
+        canonical = "qwen2512" if wf.model_family in {"qwen-image-2512", "qwen_image_2512"} else wf.model_family
+        entry = families.setdefault(
+            canonical,
+            {
+                "id": canonical,
+                "label": _family_label(canonical, wf.model_variant),
+                "group": "local",
+                "status": "Unknown",
+                "supportsReferences": False,
+                "supportsEditing": False,
+                "executable": False,
+                "_gen": False,
+            },
+        )
+        # Certified wins for status.
+        if wf.status == "Certified":
+            entry["status"] = "Certified"
+        elif entry["status"] == "Unknown":
+            entry["status"] = wf.status
+        # Executable as a generator requires a Certified txt2img/generation key.
+        if wf.status == "Certified" and _is_txt2img(wf):
+            entry["executable"] = True
+            entry["_gen"] = True
+        # Reference capability is a family-level property: any Certified
+        # reference-capable workflow in the family (e.g. zimage.ref_edit) makes
+        # the family reference-capable even though its txt2img key is not.
+        if wf.status == "Certified" and bool((wf.capabilities or {}).get("supportsReferences", False)):
+            entry["supportsReferences"] = True
+        # Editing capability is a family-level property: any Certified editing
+        # workflow (img2img/edit/inpaint/outpaint/fill) makes the family eligible
+        # as a Stage 2 style-refinement engine.
+        if wf.status == "Certified" and bool((wf.capabilities or {}).get("supportsEditing", False)):
+            entry["supportsEditing"] = True
+
+    # Keep only Certified generators (production-safe) by default; drop the
+    # internal _gen marker from the public payload.
+    ready = [
+        {k: v for k, v in f.items() if k != "_gen"}
+        for f in families.values()
+        if f["_gen"] and f["executable"] and f["status"] == "Certified"
+    ]
+
+    def _sort(opt: dict[str, Any]) -> tuple[int, str]:
+        try:
+            return (_FAMILY_ORDER.index(opt["id"]), opt["label"])
+        except ValueError:
+            return (len(_FAMILY_ORDER), opt["label"])
+
+    ready.sort(key=_sort)
+    return [{"id": "auto", "label": "Auto Select", "group": "auto"}] + ready
+
+
+# Backwards-compatible static snapshot. Prefer build_local_generator_models()
+# for the live, registry-sourced roster.
+IMAGEGEN_MODELS = build_local_generator_models()
+
 
 def build_txt2img_workflow(
     *,
@@ -108,12 +207,5 @@ def build_img2img_edit_stub(
     }
 
 
-IMAGEGEN_MODELS = [
-    {"id": "auto", "label": "Auto Select", "group": "auto"},
-    {"id": "zimage", "label": "Z-Image Turbo (local)", "group": "local"},
-    {"id": "illustrious", "label": "Illustrious XL 1.0 (Anime)", "group": "local"},
-    {"id": "flux", "label": "FLUX.1 family", "group": "local"},
-    {"id": "hidream", "label": "HiDream-I1", "group": "local"},
-    {"id": "sd35", "label": "Stable Diffusion 3.5", "group": "local"},
-    {"id": "custom", "label": "ComfyUI Custom checkpoint", "group": "local"},
-]
+
+IMAGEGEN_MODELS = build_local_generator_models()

@@ -330,34 +330,52 @@ def build_leaf_graph(
             **ref_support,
         )
 
-    if key in {"flux.txt2img", "qwen.txt2img", "checkpoint.txt2img", "illustrious.txt2img"}:
-        from ..imagegen_workflows import build_txt2img_workflow
+    if key == "flux.txt2img":
+        from ..workflows.flux_image import build_flux_txt2img_workflow
 
-        ckpt = checkpoint or getattr(settings, "default_checkpoint", None) or ""
-        if not ckpt:
-            raise RuntimeError(f"{key} requires checkpoint")
-        return build_txt2img_workflow(
-            checkpoint=ckpt,
+        unet_name = checkpoint or getattr(settings, "imagegen_flux_checkpoint", None) or ""
+        if not unet_name:
+            raise RuntimeError(f"{key} requires imagegen_flux_checkpoint")
+        return build_flux_txt2img_workflow(
             positive=prompt,
             negative=negative,
             width=width,
             height=height,
             seed=seed,
-            steps=steps,
-            cfg=cfg,
+            unet_name=unet_name,
+            clip_l_name=getattr(settings, "imagegen_flux_clip_l", "clip_l.safetensors"),
+            t5_name=getattr(settings, "imagegen_flux_t5", "t5xxl_fp16.safetensors"),
+            vae_name=getattr(settings, "imagegen_flux_vae", "ae.safetensors"),
+            steps=steps if steps != 8 else getattr(settings, "imagegen_flux_steps", 20),
+            cfg=cfg if cfg != 1.0 else getattr(settings, "imagegen_flux_cfg", 1.0),
             filename_prefix=filename_prefix,
         )
 
-    if key in {
-        "flux.img2img",
-        "flux.edit",
-        "flux.reference",
-        "flux.inpaint",
-        "flux.outpaint",
-        "qwen.edit",
-        "qwen.reference",
-        "checkpoint.img2img",
-    }:
+    if key in {"flux.img2img", "flux.edit", "flux.reference"}:
+        from ..workflows.flux_image import build_flux_img2img_workflow
+
+        img = reference_image or source_image
+        if not img:
+            raise RuntimeError(f"{key} requires source/reference image")
+        unet_name = checkpoint or getattr(settings, "imagegen_flux_checkpoint", None) or ""
+        if not unet_name:
+            raise RuntimeError(f"{key} requires imagegen_flux_checkpoint")
+        return build_flux_img2img_workflow(
+            positive=prompt,
+            negative=negative,
+            image_name=img,
+            seed=seed,
+            unet_name=unet_name,
+            clip_l_name=getattr(settings, "imagegen_flux_clip_l", "clip_l.safetensors"),
+            t5_name=getattr(settings, "imagegen_flux_t5", "t5xxl_fp16.safetensors"),
+            vae_name=getattr(settings, "imagegen_flux_vae", "ae.safetensors"),
+            denoise=denoise,
+            steps=steps if steps != 8 else getattr(settings, "imagegen_flux_steps", 20),
+            cfg=cfg if cfg != 1.0 else getattr(settings, "imagegen_flux_cfg", 1.0),
+            filename_prefix=filename_prefix,
+        )
+
+    if key in {"flux.inpaint", "flux.outpaint", "qwen.edit", "qwen.reference", "checkpoint.img2img"}:
         from ..imagegen_workflows import build_img2img_edit_stub
 
         img = reference_image or source_image
@@ -374,6 +392,24 @@ def build_leaf_graph(
             denoise=denoise,
             seed=seed,
             steps=steps,
+            filename_prefix=filename_prefix,
+        )
+
+    if key in {"qwen.txt2img", "checkpoint.txt2img", "illustrious.txt2img"}:
+        from ..imagegen_workflows import build_txt2img_workflow
+
+        ckpt = checkpoint or getattr(settings, "default_checkpoint", None) or ""
+        if not ckpt:
+            raise RuntimeError(f"{key} requires checkpoint")
+        return build_txt2img_workflow(
+            checkpoint=ckpt,
+            positive=prompt,
+            negative=negative,
+            width=width,
+            height=height,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
             filename_prefix=filename_prefix,
         )
 

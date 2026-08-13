@@ -85,7 +85,12 @@ class Settings(BaseSettings):
     krea2_raw_steps: int = 52
     krea2_raw_cfg: float = 3.5
     # ImageGen checkpoints (model-agnostic Comfy path; override via STUDIO_* env)
-    imagegen_flux_checkpoint: str = "flux1-dev-fp8.safetensors"
+    imagegen_flux_checkpoint: str = "flux1-kontext-dev.safetensors"
+    imagegen_flux_clip_l: str = "clip_l.safetensors"
+    imagegen_flux_t5: str = "t5xxl_fp16.safetensors"
+    imagegen_flux_vae: str = "ae.safetensors"
+    imagegen_flux_steps: int = 20
+    imagegen_flux_cfg: float = 1.0
     imagegen_hidream_checkpoint: str = "hidream_i1_dev_fp8.safetensors"
     imagegen_sd35_checkpoint: str = "sd3.5_large.safetensors"
     imagegen_custom_checkpoint: str = ""

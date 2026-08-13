@@ -954,9 +954,13 @@ async def enqueue_imagegen(project_id: str, body: dict, db: Session = Depends(ge
 
 @router.get("/imagegen/models")
 def imagegen_models():
-    from ..imagegen_workflows import IMAGEGEN_MODELS
+    # Live, registry-sourced roster: installed + READY + Certified local
+    # generators with capability metadata (supportsReferences) so the selector
+    # can apply reference-aware eligibility. Sourced from the Certified
+    # registry — never a hardcoded Character Creator list.
+    from ..imagegen_workflows import build_local_generator_models
 
-    return IMAGEGEN_MODELS
+    return build_local_generator_models()
 
 
 @router.get("/projects/{project_id}/library")

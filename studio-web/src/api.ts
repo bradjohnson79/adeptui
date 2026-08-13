@@ -3783,7 +3783,17 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  imagegenModels: () => req<{ id: string; label: string; group: string }[]>("/api/imagegen/models"),
+  imagegenModels: () =>
+    req<
+      {
+        id: string;
+        label: string;
+        group: string;
+        status?: string;
+        supportsReferences?: boolean;
+        executable?: boolean;
+      }[]
+    >("/api/imagegen/models"),
   imageProduct: {
     generate: (projectId: string, body: Record<string, unknown>) =>
       req<ImageProductGenerateResult>(`/api/image-product/projects/${projectId}/generate`, {
@@ -7107,6 +7117,10 @@ export const api = {
       heroAssetId?: string;
       candidateCount?: number;
       visualStyle?: string;
+      generatorSources?: {
+        local?: { family?: string; stage2Family?: string; stage2Enabled?: boolean } | null;
+        api?: { model?: string } | null;
+      };
     },
   ) =>
     req<{ ok: boolean; pack: any }>(

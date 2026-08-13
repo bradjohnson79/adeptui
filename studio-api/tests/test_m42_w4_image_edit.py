@@ -116,11 +116,13 @@ def test_masks_and_versions():
     assert tree.get("versions") or tree.get("nodes")
 
 
-def test_kontext_blocked():
+def test_kontext_draft_or_blocked():
     sess = create_session("p-k", source_asset_id="a1")
-    assert sess["status"] == "Blocked"
+    # With FLUX weights present, flux.kontext_edit is Draft; without weights it is Blocked.
+    assert sess["status"] in {"Draft", "Blocked"}
+    assert sess["status"] != "CertifiedReady"
     turn = add_turn("p-k", sess["sessionId"], role="user", text="make it blue")
-    assert turn.get("status") == "Blocked"
+    assert turn.get("status") in {"Draft", "Blocked"}
     assert not (turn.get("turn") or {}).get("executed")
 
 

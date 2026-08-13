@@ -42,7 +42,9 @@ def test_certified_required_keys():
     assert "zimage.txt2img" in ready
     assert "zimage.ref_edit" in ready
     assert get_workflow("zimage.txt2img").status == "Certified"
-    assert get_workflow("flux.txt2img").status in {"Draft", "Deferred", "Blocked"}
+    # FLUX is now live-certified locally.
+    assert get_workflow("flux.txt2img").status == "Certified"
+    assert get_workflow("flux.img2img").status == "Certified"
 
 
 def test_resolve_production_mode_certified():
@@ -57,12 +59,11 @@ def test_resolve_production_mode_certified():
     assert pinned.get("fingerprint") or pinned.get("fingerprints")
 
 
-def test_resolve_deferred_flux_rejected():
-    try:
-        resolve_image_workflow("txt2img", engine="flux", allow_draft=False)
-        assert False, "expected reject"
-    except RuntimeError as exc:
-        assert "not executable" in str(exc).lower() or "Certified" in str(exc) or "Deferred" in str(exc)
+def test_resolve_flux_production_mode_certified():
+    c = resolve_image_workflow("txt2img", engine="flux", allow_draft=False)
+    assert c.workflow_key == "flux.txt2img"
+    assert c.status == "Certified"
+    assert c.model_family == "flux"
 
 
 def test_multi_family_unified_resolver():

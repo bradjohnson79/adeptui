@@ -8,6 +8,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 import { api } from "../../api";
+import { GenerationProgressBar } from "./GenerationProgressBar";
 import type { CharacterCandidate, CharacterProfile, GeneratorSourceState } from "./types";
 
 type Sources = { local: GeneratorSourceState; api: GeneratorSourceState };
@@ -36,6 +37,7 @@ export function CharacterSheetGenerator({
 }: Props) {
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
+  const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const pollingRef = useRef(false);
 
   const anyEnabled = sources.local.enabled || sources.api.enabled;
@@ -54,12 +56,26 @@ export function CharacterSheetGenerator({
         const adv = await api.advanceCharacterVisualSheet(projectId, characterId);
         const pack = (adv as { pack?: { candidates?: CharacterCandidate[]; status?: string } }).pack;
         const cands = readCandidates(pack);
-        if (cands.length) onCandidates(cands);
-        const allDone = cands.every((c) => c.status === "done" || c.assetId || c.sheetAssetId);
+        if (cands.length) {
+          setCandidates(cands);
+          onCandidates(cands);
+        }
+        // Done when every candidate reached a terminal state (complete or failed).
+        const allDone =
+          cands.length > 0 &&
+          cands.every((c) => {
+            const failed =
+              c.status === "failed" ||
+              (c.viewJobs || []).some((v) =>
+                ["failed", "error", "cancelled", "missing"].includes(v.status || ""),
+              );
+            return failed || c.status === "done" || c.assetId || c.sheetAssetId;
+          });
         if (
           allDone ||
           pack?.status === "READY_FOR_OWNER" ||
-          pack?.status === "OWNER_APPROVED"
+          pack?.status === "OWNER_APPROVED" ||
+          pack?.status === "FAILED"
         ) {
           pollingRef.current = false;
           setGenerating(false);
@@ -79,6 +95,7 @@ export function CharacterSheetGenerator({
     setGenerating(true);
     setMessage("Generating character sheets…");
     onCandidates([]);
+    setCandidates([]);
     try {
       const res = await api.startCharacterVisualSheet(projectId, characterId, {
         candidateCount: 4,
@@ -87,11 +104,21 @@ export function CharacterSheetGenerator({
         includePerformance: false,
         // User Control Law: pass enabled source pools only.
         generatorSources: {
-          local: sources.local.enabled ? { family: sources.local.selectedId || undefined } : null,
+          local: sources.local.enabled
+            ? {
+                family: sources.local.selectedId || undefined,
+                stage2Family: sources.local.stage2Enabled
+                  ? sources.local.stage2SelectedId || undefined
+                  : undefined,
+                stage2Enabled: sources.local.stage2Enabled || false,
+              }
+            : null,
           api: sources.api.enabled ? { model: sources.api.selectedId || undefined } : null,
         },
       } as Record<string, unknown>);
-      onCandidates(readCandidates((res as { pack?: unknown }).pack));
+      const initial = readCandidates((res as { pack?: unknown }).pack);
+      setCandidates(initial);
+      onCandidates(initial);
       pollingRef.current = true;
       void poll(120);
     } catch (e) {
@@ -102,6 +129,9 @@ export function CharacterSheetGenerator({
 
   return (
     <div className="character-core__generate">
+      {generating || candidates.length > 0 ? (
+        <GenerationProgressBar candidates={candidates} active={generating} />
+      ) : null}
       <button
         type="button"
         className="character-core__button primary"

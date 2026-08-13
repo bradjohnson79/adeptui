@@ -9,5 +9,6 @@ export { CharacterReferenceControl } from "./CharacterReferenceControl";
 export { GeneratorSourceSelector } from "./GeneratorSourceSelector";
 export { CharacterSheetGenerator } from "./CharacterSheetGenerator";
 export { CharacterCandidateGrid } from "./CharacterCandidateGrid";
+export { GenerationProgressBar } from "./GenerationProgressBar";
 export { CharacterActions } from "./CharacterActions";
 export { CharacterCore } from "./CharacterCore";

@@ -238,7 +238,7 @@ def test_no_reference_anime_plan_prefers_illustrious_when_certified(monkeypatch)
     plan = visual_sheet._build_candidate_routing_plan(
         candidate_count=4, reference_asset_id=None, visual_style="anime"
     )
-    families = [r["modelFamilyPreference"] for r in plan]
+    families = [r["stage1"]["modelFamilyPreference"] for r in plan]
     assert families[0] == "illustrious"
     # Remaining slots use the other Certified families then reuse.
     assert set(families) <= {"illustrious", "qwen2512", "zimage"}
@@ -252,7 +252,7 @@ def test_no_reference_non_anime_plan_keeps_default_order():
     plan = visual_sheet._build_candidate_routing_plan(
         candidate_count=4, reference_asset_id=None, visual_style="live_action"
     )
-    families = [r["modelFamilyPreference"] for r in plan]
+    families = [r["stage1"]["modelFamilyPreference"] for r in plan]
     # Illustrious is not preferred for live_action.
     assert families[0] != "illustrious" or not _illustrious_certified()
     # Default Certified families still present.
@@ -268,11 +268,11 @@ def test_reference_locked_plan_stays_zimage_ref_edit_with_anime_style(monkeypatc
     )
     assert len(plan) == 4
     for route in plan:
-        assert route["modelFamilyPreference"] == visual_sheet.REFERENCE_LOCKED_FAMILY
-        assert route["workflowKey"] == visual_sheet.REFERENCE_LOCKED_WORKFLOW_KEY
-        assert route["referenceLocked"] is True
+        assert route["stage1"]["modelFamilyPreference"] == visual_sheet.REFERENCE_LOCKED_FAMILY
+        assert route["stage1"]["workflowKey"] == visual_sheet.REFERENCE_LOCKED_WORKFLOW_KEY
+        assert route["stage1"]["referenceLocked"] is True
         # Illustrious never used for reference-locked candidates (Reference Law).
-        assert route["modelFamilyPreference"] != "illustrious"
+        assert route["stage1"]["modelFamilyPreference"] != "illustrious"
 
 
 def _illustrious_certified() -> bool:
@@ -315,7 +315,7 @@ def test_existing_no_reference_default_order_preserved_without_style():
     plan = visual_sheet._build_candidate_routing_plan(
         candidate_count=len(NO_REFERENCE_TXT2IMG_FAMILIES), reference_asset_id=None, visual_style=None
     )
-    families = [r["modelFamilyPreference"] for r in plan]
+    families = [r["stage1"]["modelFamilyPreference"] for r in plan]
     # Without an anime style, the default Certified family order is preserved.
     for fam in NO_REFERENCE_TXT2IMG_FAMILIES:
         if visual_sheet._candidate_family_executable(fam):

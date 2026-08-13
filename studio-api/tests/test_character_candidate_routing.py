@@ -76,25 +76,26 @@ def test_reference_locked_routing_uses_zimage_ref_edit_with_source_pixels():
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-123")
     assert len(plan) == 4
     for route in plan:
-        assert route["modelFamilyPreference"] == REFERENCE_LOCKED_FAMILY
-        assert route["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
+        stage1 = route["stage1"]
+        assert stage1["modelFamilyPreference"] == REFERENCE_LOCKED_FAMILY
+        assert stage1["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
         # The reference asset ID is passed as source_asset_id so its PIXELS
         # participate in conditioning (img2img latent path), not prompt text.
-        assert route["source_asset_id"] == "sheet-123"
-        assert route["referenceAssetId"] == "sheet-123"
-        assert route["referenceLocked"] is True
-        assert route["referenceFidelityMode"] == REFERENCE_FIDELITY_MODE_LIMITED
+        assert stage1["source_asset_id"] == "sheet-123"
+        assert stage1["referenceAssetId"] == "sheet-123"
+        assert stage1["referenceLocked"] is True
+        assert stage1["referenceFidelityMode"] == REFERENCE_FIDELITY_MODE_LIMITED
         # Fidelity-first denoise is applied so the reference latent is preserved.
-        assert route["denoise"] == REFERENCE_FIDELITY_DENOISE
+        assert stage1["denoise"] == REFERENCE_FIDELITY_DENOISE
 
 
 def test_reference_locked_routing_records_honest_limited_mode():
     """Only one Certified reference-capable model exists today — record honestly."""
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
-    modes = {route["referenceFidelityMode"] for route in plan}
+    modes = {route["stage1"]["referenceFidelityMode"] for route in plan}
     assert REFERENCE_FIDELITY_MODE_LIMITED in modes
     # All candidates use the SAME reference-capable workflow (no fabrication).
-    keys = {route["workflowKey"] for route in plan}
+    keys = {route["stage1"]["workflowKey"] for route in plan}
     assert keys == {REFERENCE_LOCKED_WORKFLOW_KEY}
 
 
@@ -104,7 +105,7 @@ def test_reference_locked_routing_records_honest_limited_mode():
 def test_no_reference_routing_uses_distinct_certified_families_first():
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
     assert len(plan) == 4
-    families = [route["modelFamilyPreference"] for route in plan]
+    families = [route["stage1"]["modelFamilyPreference"] for route in plan]
     # Each distinct Certified family is used once before any reuse.
     distinct = list(NO_REFERENCE_TXT2IMG_FAMILIES)
     for i, fam in enumerate(distinct):
@@ -116,7 +117,7 @@ def test_no_reference_routing_uses_distinct_certified_families_first():
 def test_no_reference_routing_never_fabricates_distinctness():
     """With only 2 Certified txt2img families, a 4-batch must not invent a 3rd/4th."""
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
-    families = {route["modelFamilyPreference"] for route in plan}
+    families = {route["stage1"]["modelFamilyPreference"] for route in plan}
     assert families == set(NO_REFERENCE_TXT2IMG_FAMILIES)
     assert len(families) == len(NO_REFERENCE_TXT2IMG_FAMILIES)
 
@@ -124,11 +125,12 @@ def test_no_reference_routing_never_fabricates_distinctness():
 def test_no_reference_routing_has_no_source_asset_or_fidelity_mode():
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
     for route in plan:
-        assert route["source_asset_id"] is None
-        assert route["referenceAssetId"] is None
-        assert route["referenceLocked"] is False
-        assert route["referenceFidelityMode"] is None
-        assert route["denoise"] is None
+        stage1 = route["stage1"]
+        assert stage1["source_asset_id"] is None
+        assert stage1["referenceAssetId"] is None
+        assert stage1["referenceLocked"] is False
+        assert stage1["referenceFidelityMode"] is None
+        assert stage1["denoise"] is None
 
 
 def test_fewer_than_four_ready_models_exhausts_unique_before_reuse():
@@ -136,7 +138,7 @@ def test_fewer_than_four_ready_models_exhausts_unique_before_reuse():
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
     seeds = [_candidate_seed("char-1", i) for i in range(4)]
     # Distinct models used once first.
-    assert plan[0]["modelFamilyPreference"] != plan[1]["modelFamilyPreference"]
+    assert plan[0]["stage1"]["modelFamilyPreference"] != plan[1]["stage1"]["modelFamilyPreference"]
     # Reuse slots differ by seed (diversity from seed, not identity change).
     assert seeds[0] != seeds[2]
     assert seeds[1] != seeds[3]
@@ -270,8 +272,8 @@ def test_reference_sheet_is_passed_as_source_pixels_not_filename():
     for route in plan:
         # source_asset_id drives the img2img latent path — the sheet's pixels
         # participate in conditioning. The prompt never relies on the filename.
-        assert route["source_asset_id"] == "sheet-abc"
-        assert route["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
+        assert route["stage1"]["source_asset_id"] == "sheet-abc"
+        assert route["stage1"]["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
 
 
 # --- Regeneration preserves reference + routing ---
@@ -285,18 +287,18 @@ def test_regeneration_preserves_reference_lock_and_routing():
     plan_b = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=ref_id)
     assert plan_a == plan_b
     for route in plan_a:
-        assert route["referenceLocked"] is True
-        assert route["source_asset_id"] == "sheet-1"
+        assert route["stage1"]["referenceLocked"] is True
+        assert route["stage1"]["source_asset_id"] == "sheet-1"
 
 
 def test_regeneration_after_reference_detached_drops_reference_lock():
     """If the creator detaches the reference, regeneration is no longer locked."""
     plan_with = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
     plan_without = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
-    assert all(r["referenceLocked"] for r in plan_with)
-    assert all(not r["referenceLocked"] for r in plan_without)
-    assert all(r["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_with)
-    assert all(r["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_without)
+    assert all(r["stage1"]["referenceLocked"] for r in plan_with)
+    assert all(not r["stage1"]["referenceLocked"] for r in plan_without)
+    assert all(r["stage1"]["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_with)
+    assert all(r["stage1"]["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_without)
 
 
 if __name__ == "__main__":

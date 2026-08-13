@@ -116,6 +116,27 @@ REFERENCE_LOCKED_FAMILY = "zimage"
 REFERENCE_FIDELITY_MODE_LIMITED = "limited"
 REFERENCE_FIDELITY_MODE_FULL = "zimage_ref_edit"
 
+# --- Stage 2 Identity-Lock + Style Refinement Pipeline ---
+#
+# When a Character Reference is attached, Stage 1 runs a reference-capable
+# identity engine (e.g. zimage.ref_edit) to lock the character identity. Stage 2
+# is optional: it uses a real img2img/edit/refinement workflow (e.g. flux.img2img)
+# to improve visual style / finish while preserving identity. Stage 2 receives
+# the Stage 1 output as its source image, never the original reference.
+# Truthfulness Law: if no real compatible Stage 2 workflow exists, Stage 2 is
+# not offered and the Stage 1 result is used directly.
+STAGE2_DEFAULT_DENOISE = 0.35
+STAGE2_IDENTITY_PRESERVATION_PROMPT = (
+    "Preserve the exact character identity, face, hair, eye color, ears, skin, "
+    "body proportions, wardrobe, accessories, markings, and silhouette. "
+    "Only refine visual style, finish, lighting, and texture. Do not redesign."
+)
+STAGE2_STYLE_ONLY_NEGATIVE = (
+    "different face, different hair, different eyes, different species, "
+    "different body proportions, different wardrobe, different silhouette, "
+    "redesign, reinterpret"
+)
+
 # --- Phase 5 — Character Creator Simplification: composed 4-view sheet ---
 #
 # Each casting candidate produces ONE canonical composed Character Sheet asset.
@@ -354,6 +375,46 @@ def _family_supports_references(family: str) -> bool:
     return False
 
 
+def _family_supports_stage2(family: str) -> bool:
+    """True when the family has a Certified real img2img/edit workflow.
+
+    A real Stage 2 workflow must accept a source image and perform a genuine
+    image-to-image/edit pass (not a text-only generation that claims to refine).
+    """
+    if not family:
+        return False
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        # Candidate Stage 2 keys in priority order. Only certify the exact keys
+        # that are real and tested for this family.
+        candidates = [f"{family}.img2img", f"{family}.edit"]
+        for key in candidates:
+            wf = get_workflow(key)
+            if wf and wf.status == "Certified" and (wf.capabilities or {}).get("supportsEditing"):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _stage2_workflow_key(family: str) -> str | None:
+    """Return the Certified Stage 2 workflow key for a family, or None."""
+    if not family:
+        return None
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        candidates = [f"{family}.img2img", f"{family}.edit"]
+        for key in candidates:
+            wf = get_workflow(key)
+            if wf and wf.status == "Certified" and (wf.capabilities or {}).get("supportsEditing"):
+                return key
+    except Exception:
+        return None
+    return None
+
+
 def _build_candidate_routing_plan(
     *,
     candidate_count: int,
@@ -364,17 +425,15 @@ def _build_candidate_routing_plan(
     """Per-candidate routing plan drawn from the Certified READY registry.
 
     Reference-first hierarchy (Amendment 3 + Phase 5): when a reference image is
-    attached it is the visual authority — candidates route to a Certified
+    attached it is the visual authority — Stage 1 routes to a Certified
     reference-capable workflow (``zimage.ref_edit``) so reference PIXELS
-    participate in conditioning. A reference-locked candidate NEVER routes to
-    a text-only family (e.g. Illustrious) — enforced explicitly below. Style
-    recommendation only participates when no reference is attached.
+    participate in conditioning. An optional Stage 2 style engine may then refine
+    the Stage 1 output via a real img2img/edit workflow. Stage 2 receives the
+    Stage 1 output, never the original reference.
 
-    Reference-locked: only one distinct reference-capable Certified model exists
-    today, so ``referenceFidelityMode`` is recorded as ``limited`` honestly.
-    Illustrious (text-only) is intentionally excluded from reference-locked
-    candidates — never silently downgrade reference-conditioned generation to
-    text-only.
+    A reference-locked candidate NEVER routes to a text-only family (e.g.
+    Illustrious) for Stage 1 — enforced explicitly below. Stage 2 is only enabled
+    when a real certified editing workflow exists for the selected family.
 
     No-reference: each distinct Certified txt2img family is used once before any
     reuse; remaining slots reuse a family with a different seed. Anime/realistic-
@@ -391,6 +450,38 @@ def _build_candidate_routing_plan(
                 "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
             )
     plan: list[dict[str, Any]] = []
+    # Explicit Local Generator selection (User Control Law + user authority):
+    # when the creator picked a specific local family (not Auto Select), honor it
+    # for no-reference candidates instead of style routing. ""/"auto" → style routing.
+    chosen_local = ""
+    chosen_stage2_family = ""
+    stage2_enabled = False
+    if generator_sources is not None:
+        _loc = generator_sources.get("local")
+        if isinstance(_loc, dict):
+            chosen_local = str(_loc.get("family") or "").strip().lower()
+            chosen_stage2_family = str(_loc.get("stage2Family") or "").strip().lower()
+            stage2_enabled = bool(_loc.get("stage2Enabled"))
+    if chosen_local in {"", "auto"}:
+        chosen_local = ""
+    if chosen_stage2_family in {"", "auto"}:
+        chosen_stage2_family = ""
+
+    # Resolve Stage 2 config (if requested and real).
+    stage2: dict[str, Any] | None = None
+    if stage2_enabled and chosen_stage2_family:
+        stage2_key = _stage2_workflow_key(chosen_stage2_family)
+        if stage2_key:
+            stage2 = {
+                "modelFamilyPreference": chosen_stage2_family,
+                "workflowKey": stage2_key,
+                "referenceAssetId": None,
+                "referenceLocked": False,
+                "referenceFidelityMode": None,
+                "source_asset_id": None,  # set to Stage 1 output at runtime
+                "denoise": STAGE2_DEFAULT_DENOISE,
+            }
+
     if reference_asset_id:
         # Reference-first guard: the resolved family must be reference-capable
         # and must NOT be a text-only family. zimage.ref_edit is the only
@@ -404,16 +495,48 @@ def _build_candidate_routing_plan(
                 "reference-capable workflow; zimage.ref_edit is not reference-capable "
                 "or is text-only. Refusing to silently downgrade reference conditioning."
             )
+        # Reference-locked: only reference-capable families are eligible. If the
+        # creator explicitly chose a text-only family for a reference-locked
+        # generation, refuse rather than silently downgrade reference conditioning.
+        if chosen_local and (
+            chosen_local in TEXT_ONLY_FAMILIES or not _family_supports_references(chosen_local)
+        ):
+            raise ValueError(
+                f"{chosen_local} requires text-to-image generation and cannot use the attached Character Reference."
+            )
         for _i in range(candidate_count):
             plan.append(
                 {
-                    "modelFamilyPreference": REFERENCE_LOCKED_FAMILY,
-                    "workflowKey": REFERENCE_LOCKED_WORKFLOW_KEY,
-                    "referenceAssetId": reference_asset_id,
-                    "referenceLocked": True,
-                    "referenceFidelityMode": REFERENCE_FIDELITY_MODE_LIMITED,
-                    "source_asset_id": reference_asset_id,
-                    "denoise": REFERENCE_FIDELITY_DENOISE,
+                    "stage1": {
+                        "modelFamilyPreference": REFERENCE_LOCKED_FAMILY,
+                        "workflowKey": REFERENCE_LOCKED_WORKFLOW_KEY,
+                        "referenceAssetId": reference_asset_id,
+                        "referenceLocked": True,
+                        "referenceFidelityMode": REFERENCE_FIDELITY_MODE_LIMITED,
+                        "source_asset_id": reference_asset_id,
+                        "denoise": REFERENCE_FIDELITY_DENOISE,
+                    },
+                    "stage2": stage2,
+                    "stage2Enabled": bool(stage2),
+                }
+            )
+        return plan
+    if chosen_local and _candidate_family_executable(chosen_local):
+        # Honor the explicit Certified local family for every candidate (different seeds).
+        for _i in range(candidate_count):
+            plan.append(
+                {
+                    "stage1": {
+                        "modelFamilyPreference": chosen_local,
+                        "workflowKey": f"{chosen_local}.txt2img",
+                        "referenceAssetId": None,
+                        "referenceLocked": False,
+                        "referenceFidelityMode": None,
+                        "source_asset_id": None,
+                        "denoise": None,
+                    },
+                    "stage2": stage2,
+                    "stage2Enabled": bool(stage2),
                 }
             )
         return plan
@@ -422,13 +545,17 @@ def _build_candidate_routing_plan(
         fam = distinct[i % len(distinct)]
         plan.append(
             {
-                "modelFamilyPreference": fam,
-                "workflowKey": f"{fam}.txt2img",
-                "referenceAssetId": None,
-                "referenceLocked": False,
-                "referenceFidelityMode": None,
-                "source_asset_id": None,
-                "denoise": None,
+                "stage1": {
+                    "modelFamilyPreference": fam,
+                    "workflowKey": f"{fam}.txt2img",
+                    "referenceAssetId": None,
+                    "referenceLocked": False,
+                    "referenceFidelityMode": None,
+                    "source_asset_id": None,
+                    "denoise": None,
+                },
+                "stage2": stage2,
+                "stage2Enabled": bool(stage2),
             }
         )
     return plan
@@ -458,6 +585,48 @@ def _workflow_lineage(workflow_key: str) -> dict[str, Any]:
         "provider": None,
         "model": None,
         "supportsReferences": False,
+    }
+
+
+def _candidate_sheet_lineage(candidate: dict[str, Any], view_jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a dual-stage lineage record for the composed Character Sheet.
+
+    Records the Stage 1 identity engine (required) and the Stage 2 style engine
+    (if enabled) per final view, including the source asset chain.
+    """
+    stage1_lineage = _workflow_lineage(str(candidate.get("workflowKey") or ""))
+    stage2_lineage = _workflow_lineage(str(candidate.get("stage2WorkflowKey") or ""))
+    view_lineages: list[dict[str, Any]] = []
+    for vj in view_jobs:
+        vlineage: dict[str, Any] = {
+            "role": vj.get("role"),
+            "viewIndex": vj.get("viewIndex"),
+            "stage1": {
+                "workflowKey": vj.get("workflowKey"),
+                "modelFamily": vj.get("modelFamily"),
+                "assetId": vj.get("assetId"),
+                "seed": vj.get("seed"),
+            },
+        }
+        if vj.get("stage2Enabled"):
+            vlineage["stage2"] = {
+                "workflowKey": vj.get("stage2WorkflowKey") or stage2_lineage.get("workflowKey"),
+                "modelFamily": vj.get("stage2ModelFamily") or stage2_lineage.get("modelFamily"),
+                "assetId": vj.get("stage2AssetId"),
+                "jobId": vj.get("stage2JobId"),
+                "sourceAssetId": vj.get("assetId"),
+                "seed": vj.get("seed"),
+            }
+        view_lineages.append(vlineage)
+    return {
+        "stage1": stage1_lineage,
+        "stage2": stage2_lineage if candidate.get("stage2Enabled") else None,
+        "stage2Enabled": bool(candidate.get("stage2Enabled")),
+        "stage2Failed": bool(candidate.get("stage2Failed")),
+        "referenceLocked": bool(candidate.get("referenceLocked")),
+        "referenceFidelityMode": candidate.get("referenceFidelityMode"),
+        "referenceAssetIds": list(candidate.get("referenceAssetIds") or []),
+        "views": view_lineages,
     }
 
 
@@ -507,11 +676,11 @@ def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | 
 def _validate_candidate_view_consistency(view_entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Structural identity-consistency check across a candidate's 4 view jobs.
 
-    This is a lightweight structural validation (Phase 5): all 4 jobs must have
-    completed (status ``done`` with an output asset id) and share the same seed
-    and routing/identity params (model family, workflow key, reference lock).
-    This is NOT a fake ML visual validator — a pixel-level identity comparison is
-    deferred to a later vision-tooling pass. Returns ``{ok, reasons}``.
+    For two-stage candidates, this validates the final (Stage 2 when enabled,
+    otherwise Stage 1) view assets. All 4 final views must be complete and share
+    the same seed and routing/identity params. This is NOT a fake ML visual
+    validator — a pixel-level identity comparison is deferred to a later vision
+    tooling pass. Returns ``{ok, reasons, assetIds}``.
     """
     reasons: list[str] = []
     if len(view_entries) != len(CANDIDATE_SHEET_VIEW_ROLES):
@@ -525,20 +694,31 @@ def _validate_candidate_view_consistency(view_entries: list[dict[str, Any]]) -> 
     workflow_keys: set[str] = set()
     ref_locks: set[bool] = set()
     for entry in view_entries:
-        if entry.get("status") != "done":
-            reasons.append(f"view {entry.get('role')} not done (status={entry.get('status')})")
-        aid = entry.get("assetId")
+        stage2_enabled = bool(entry.get("stage2Enabled"))
+        stage2_done = stage2_enabled and entry.get("stage2Status") == "done"
+        if stage2_done:
+            aid = entry.get("stage2AssetId")
+            family = entry.get("stage2ModelFamily") or entry.get("modelFamily")
+            workflow_key = entry.get("stage2WorkflowKey") or entry.get("workflowKey")
+            ref_locked = False
+        else:
+            if entry.get("status") != "done":
+                reasons.append(f"view {entry.get('role')} not done (status={entry.get('status')})")
+            aid = entry.get("assetId")
+            family = entry.get("modelFamily")
+            workflow_key = entry.get("workflowKey")
+            ref_locked = bool(entry.get("referenceLocked"))
         if not aid:
             reasons.append(f"view {entry.get('role')} missing output assetId")
         else:
             asset_ids.append(str(aid))
         if "seed" in entry and entry["seed"] is not None:
             seeds.add(entry["seed"])
-        if entry.get("modelFamily"):
-            families.add(str(entry["modelFamily"]))
-        if entry.get("workflowKey"):
-            workflow_keys.add(str(entry["workflowKey"]))
-        ref_locks.add(bool(entry.get("referenceLocked")))
+        if family:
+            families.add(str(family))
+        if workflow_key:
+            workflow_keys.add(str(workflow_key))
+        ref_locks.add(ref_locked)
     if len(seeds) > 1:
         reasons.append(f"inconsistent seeds across views: {sorted(seeds)}")
     if len(families) > 1:
@@ -607,11 +787,14 @@ def _ingest_composed_sheet_asset(
     composed_path: str,
     source_asset_ids: list[str],
     lineage: dict[str, Any],
+    stage1_source_asset_ids: list[str] | None = None,
 ) -> Asset:
     """Register the composed Character Sheet as a Library asset.
 
     The 4 source view asset ids are recorded in ``prompt_meta_json`` lineage so
     they remain queryable for provenance/continuity without being duplicated.
+    For two-stage candidates, ``stage1_source_asset_ids`` records the identity-
+    locked Stage 1 outputs when the composed sheet uses Stage 2 outputs.
     """
     import os
 
@@ -621,6 +804,7 @@ def _ingest_composed_sheet_asset(
         "candidateIndex": candidate_index,
         "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
         "sourceAssetIds": list(source_asset_ids),
+        "stage1SourceAssetIds": list(stage1_source_asset_ids or []),
         "grid": {
             "cols": CHARACTER_SHEET_GRID_COLS,
             "rows": CHARACTER_SHEET_GRID_ROWS,
@@ -660,33 +844,83 @@ def _ingest_composed_sheet_asset(
     return asset
 
 
-def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Poll a candidate's 4 view jobs. Returns (all_done, view_asset_ids)."""
+def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool, bool, list[str]]:
+    """Poll a candidate's 4 view jobs (Stage 1 + optional Stage 2).
+
+    Returns ``(all_done, any_failed, final_view_asset_ids)``.
+    ``all_done`` is True when every view reached a final successful asset:
+    Stage 1 asset if Stage 2 is disabled, or Stage 2 asset if enabled.
+    ``any_failed`` is True when any view job reached a terminal non-success
+    state (failed/error/missing). This lets the caller surface a truthful
+    candidate failure instead of leaving it stuck in "generating" forever.
+    """
     view_jobs = candidate.get("viewJobs") or []
     if not view_jobs:
-        return False, []
+        return False, False, []
     asset_ids: list[str] = []
     all_done = True
+    any_failed = False
     for vj in view_jobs:
+        # Stage 1 poll
         job = db.get(Job, vj.get("jobId"))
         if not job:
             vj["status"] = "missing"
             all_done = False
+            any_failed = True
             continue
         vj["status"] = job.status
         if job.status == "done":
-            aid = _job_params(job).get("output_asset_id")
-            if aid:
-                vj["assetId"] = aid
-                asset_ids.append(str(aid))
+            stage1_aid = _job_params(job).get("output_asset_id")
+            if stage1_aid:
+                vj["assetId"] = stage1_aid
             else:
                 all_done = False
-        elif job.status == "failed":
-            vj["status"] = "failed"
+                continue
+        elif job.status in ("failed", "error", "cancelled"):
+            vj["status"] = job.status
             all_done = False
+            any_failed = True
+            continue
         else:
             all_done = False
-    return all_done, asset_ids
+            continue
+
+        # Stage 2 poll (if enabled and enqueued)
+        stage2_enabled = bool(vj.get("stage2Enabled"))
+        stage2_job_id = vj.get("stage2JobId")
+        if stage2_enabled and stage2_job_id:
+            stage2_job = db.get(Job, stage2_job_id)
+            if not stage2_job:
+                vj["stage2Status"] = "missing"
+                all_done = False
+                any_failed = True
+                continue
+            vj["stage2Status"] = stage2_job.status
+            if stage2_job.status == "done":
+                stage2_aid = _job_params(stage2_job).get("output_asset_id")
+                if stage2_aid:
+                    vj["stage2AssetId"] = stage2_aid
+                    asset_ids.append(str(stage2_aid))
+                else:
+                    all_done = False
+                    continue
+            elif stage2_job.status in ("failed", "error", "cancelled"):
+                vj["stage2Status"] = stage2_job.status
+                all_done = False
+                any_failed = True
+                continue
+            else:
+                all_done = False
+                continue
+        elif stage2_enabled and not stage2_job_id:
+            # Stage 2 is enabled but not yet enqueued — not done yet.
+            all_done = False
+            continue
+        else:
+            # Stage 2 disabled: use Stage 1 asset as the final view.
+            if vj.get("assetId"):
+                asset_ids.append(str(vj["assetId"]))
+    return all_done, any_failed, asset_ids
 
 
 def _save_pack(db: Session, project_id: str, character_id: str, pack: dict[str, Any]) -> dict[str, Any]:
@@ -821,6 +1055,8 @@ def start_visual_sheet_generation(
     candidates: list[dict[str, Any]] = []
 
     # Optional: use existing uploaded canonical sheet as hero baseline (authority), still generate pack from it
+    reference_asset_id: str | None = None
+    reference_locked = False
     if hero_asset_id:
         asset = db.get(Asset, hero_asset_id)
         if not asset or asset.project_id != project_id or asset.kind != "image":
@@ -881,6 +1117,8 @@ def start_visual_sheet_generation(
         view_specs = _candidate_view_specs()
         for _i in range(candidate_count):
             route = routing_plan[_i]
+            stage1_route = route["stage1"]
+            stage2_route = route.get("stage2")
             seed = _candidate_seed(character_id, _i)
             # Phase 5: enqueue the 4 required views for this candidate. The
             # front view reuses role="hero_identity" (legacy + e2e compat) and
@@ -888,6 +1126,10 @@ def start_visual_sheet_generation(
             # their turnaround/close-up coverage compositions. All 4 views
             # share the same seed + routing so identity is structurally
             # consistent across the sheet.
+            #
+            # Two-stage pipeline: Stage 1 locks identity (reference-capable or
+            # txt2img). Stage 2 is an optional real img2img/edit refinement that
+            # runs on the Stage 1 output after it completes.
             view_jobs: list[dict[str, Any]] = []
             for vidx, (vrole, vgoal, vcomposition, vneg) in enumerate(view_specs):
                 composition = dict(vcomposition)
@@ -911,10 +1153,11 @@ def start_visual_sheet_generation(
                     negative_prompt=vprompt.negative_prompt,
                     tag=vtag,
                     role=vrole,
-                    model_family_preference=route["modelFamilyPreference"],
-                    source_asset_id=route.get("source_asset_id"),
-                    denoise=route.get("denoise"),
+                    model_family_preference=stage1_route["modelFamilyPreference"],
+                    source_asset_id=stage1_route.get("source_asset_id"),
+                    denoise=stage1_route.get("denoise"),
                     seed=seed,
+                    force_workflow_key=stage1_route.get("workflowKey"),
                     prompt_metadata={
                         "promptFamily": vprompt.prompt_family,
                         "promptModel": vprompt.model_key,
@@ -928,13 +1171,24 @@ def start_visual_sheet_generation(
                         if vrole != "hero_identity"
                         else COMPOSITION_INTENT_FULL_BODY_CASTING,
                         "fullBody": vrole != "closeup_front",
-                        "workflowKey": route["workflowKey"],
-                        "modelFamily": route["modelFamilyPreference"],
+                        "workflowKey": stage1_route["workflowKey"],
+                        "modelFamily": stage1_route["modelFamilyPreference"],
                         "referenceLocked": reference_locked,
                         "referenceAssetId": reference_asset_id,
-                        "referenceFidelityMode": route.get("referenceFidelityMode"),
+                        "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
                         "seed": seed,
+                        "stage": 1,
                     },
+                )
+                stage2_prompt = (
+                    f"{STAGE2_IDENTITY_PRESERVATION_PROMPT} {vprompt.prompt}"
+                    if stage2_route
+                    else None
+                )
+                stage2_negative = (
+                    f"{STAGE2_STYLE_ONLY_NEGATIVE}, {vprompt.negative_prompt}"
+                    if stage2_route
+                    else None
                 )
                 view_jobs.append(
                     {
@@ -944,15 +1198,47 @@ def start_visual_sheet_generation(
                         "status": vjob.status,
                         "assetId": None,
                         "seed": seed,
-                        "modelFamily": route["modelFamilyPreference"],
-                        "workflowKey": route["workflowKey"],
+                        "modelFamily": stage1_route["modelFamilyPreference"],
+                        "workflowKey": stage1_route["workflowKey"],
                         "referenceLocked": reference_locked,
+                        # Stage 2 fields (populated when Stage 1 completes).
+                        "stage2Enabled": bool(stage2_route),
+                        "stage2Route": stage2_route,
+                        "stage2JobId": None,
+                        "stage2AssetId": None,
+                        "stage2Status": None,
+                        "stage2Prompt": stage2_prompt,
+                        "stage2Negative": stage2_negative,
+                        "stage2PromptMetadata": {
+                            "promptFamily": vprompt.prompt_family,
+                            "promptModel": vprompt.model_key,
+                            "promptValidationOk": vprompt.validation.get("ok"),
+                            "sheetMode": vprompt.metadata.get("sheetMode"),
+                            "candidateIndex": _i,
+                            "candidateCount": candidate_count,
+                            "viewIndex": vidx,
+                            "viewRole": vrole,
+                            "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
+                            if vrole != "hero_identity"
+                            else COMPOSITION_INTENT_FULL_BODY_CASTING,
+                            "fullBody": vrole != "closeup_front",
+                            "workflowKey": stage2_route["workflowKey"] if stage2_route else None,
+                            "modelFamily": stage2_route["modelFamilyPreference"] if stage2_route else None,
+                            "referenceLocked": False,
+                            "referenceAssetId": None,
+                            "referenceFidelityMode": None,
+                            "seed": seed,
+                            "stage": 2,
+                        } if stage2_route else None,
                     }
                 )
             # jobs["hero"] points at the front view job (legacy + e2e compat).
             hero_job = view_jobs[0]
-            lineage = _workflow_lineage(route["workflowKey"])
-            low_fidelity = _low_reference_fidelity(reference_locked=reference_locked, lineage=lineage)
+            stage1_lineage = _workflow_lineage(stage1_route["workflowKey"])
+            stage2_lineage = _workflow_lineage(stage2_route["workflowKey"]) if stage2_route else None
+            low_fidelity = _low_reference_fidelity(
+                reference_locked=reference_locked, lineage=stage1_lineage
+            )
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             entry = {
                 "jobId": hero_job["jobId"],
@@ -961,21 +1247,28 @@ def start_visual_sheet_generation(
                 "candidateIndex": _i,
                 "label": label,
                 "assetId": None,
-                "generator": lineage.get("generator"),
-                "provider": lineage.get("provider"),
-                "model": lineage.get("model"),
-                "modelVariant": lineage.get("modelVariant"),
-                "workflowKey": route["workflowKey"],
+                "generator": stage1_lineage.get("generator"),
+                "provider": stage1_lineage.get("provider"),
+                "model": stage1_lineage.get("model"),
+                "modelVariant": stage1_lineage.get("modelVariant"),
+                "workflowKey": stage1_route["workflowKey"],
                 "seed": seed,
                 "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
                 "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
-                "referenceFidelityMode": route.get("referenceFidelityMode"),
+                "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
                 "referenceLocked": reference_locked,
                 "lowReferenceFidelity": low_fidelity,
+                "stage2Enabled": bool(stage2_route),
+                "stage2Generator": stage2_lineage.get("generator") if stage2_lineage else None,
+                "stage2Provider": stage2_lineage.get("provider") if stage2_lineage else None,
+                "stage2Model": stage2_lineage.get("model") if stage2_lineage else None,
+                "stage2ModelVariant": stage2_lineage.get("modelVariant") if stage2_lineage else None,
+                "stage2WorkflowKey": stage2_route["workflowKey"] if stage2_route else None,
                 # Phase 5: the 4 view jobs that compose into the canonical sheet.
                 "viewJobs": view_jobs,
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
+                "stage2SourceAssetIds": [],
             }
             hero_candidate_jobs.append(entry)
             candidates.append({
@@ -985,20 +1278,27 @@ def start_visual_sheet_generation(
                 "label": label,
                 "status": hero_job["status"],
                 "candidateIndex": _i,
-                "generator": lineage.get("generator"),
-                "provider": lineage.get("provider"),
-                "model": lineage.get("model"),
-                "modelVariant": lineage.get("modelVariant"),
-                "workflowKey": route["workflowKey"],
+                "generator": stage1_lineage.get("generator"),
+                "provider": stage1_lineage.get("provider"),
+                "model": stage1_lineage.get("model"),
+                "modelVariant": stage1_lineage.get("modelVariant"),
+                "workflowKey": stage1_route["workflowKey"],
                 "seed": seed,
                 "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
                 "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
-                "referenceFidelityMode": route.get("referenceFidelityMode"),
+                "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
                 "referenceLocked": reference_locked,
                 "lowReferenceFidelity": low_fidelity,
+                "stage2Enabled": bool(stage2_route),
+                "stage2Generator": stage2_lineage.get("generator") if stage2_lineage else None,
+                "stage2Provider": stage2_lineage.get("provider") if stage2_lineage else None,
+                "stage2Model": stage2_lineage.get("model") if stage2_lineage else None,
+                "stage2ModelVariant": stage2_lineage.get("modelVariant") if stage2_lineage else None,
+                "stage2WorkflowKey": stage2_route["workflowKey"] if stage2_route else None,
                 "viewJobs": view_jobs,
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
+                "stage2SourceAssetIds": [],
             })
         jobs["hero"] = hero_candidate_jobs[0]
         if candidate_count > 1:
@@ -1120,9 +1420,12 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
     # ``assetId`` and ``role_assets["hero_identity"]``; the 4 source view assets
     # are retained as lineage (``sourceAssetIds``) and their roles are marked
     # satisfied so the coverage flow does not duplicate them.
-    candidate_entries = (
-        list(jobs.get("hero_candidates")) if isinstance(jobs.get("hero_candidates"), list) else ([jobs["hero"]] if jobs.get("hero") else [])
-    )
+    _hero_candidates = jobs.get("hero_candidates")
+    candidate_entries: list[dict[str, Any]] = []
+    if isinstance(_hero_candidates, list):
+        candidate_entries = list(_hero_candidates)
+    elif jobs.get("hero"):
+        candidate_entries = [jobs["hero"]]
     primary_sheet_set = bool(role_assets.get("hero_identity"))
     for centry in candidate_entries:
         view_jobs = centry.get("viewJobs")
@@ -1130,8 +1433,77 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             continue
         if centry.get("sheetAssetId"):
             continue
-        all_done, _ = _poll_candidate_views(db, centry)
+        all_done, any_failed, final_asset_ids = _poll_candidate_views(db, centry)
+        if any_failed:
+            # Stage 1 failure is a hard candidate failure. Stage 2 failure is
+            # recoverable: preserve Stage 1 identity-locked assets and mark the
+            # candidate as stage2_failed so the UI can offer the Stage 1 sheet.
+            stage1_failed = any(
+                vj.get("status") in ("failed", "error", "cancelled", "missing")
+                for vj in view_jobs
+            )
+            if stage1_failed:
+                failed_views = [
+                    (vj.get("role") or f"view {vj.get('viewIndex')}")
+                    for vj in view_jobs
+                    if vj.get("status") in ("failed", "error", "cancelled", "missing")
+                ]
+                centry["status"] = "failed"
+                centry["error"] = "view generation failed: " + ", ".join(failed_views or ["unknown"])
+                continue
+            # Stage 2 failed but Stage 1 succeeded.
+            centry["status"] = "stage2_failed"
+            centry["stage2Failed"] = True
+            centry["stage2SourceAssetIds"] = [
+                str(vj.get("assetId")) for vj in view_jobs if vj.get("assetId")
+            ]
+            centry["error"] = (
+                "Stage 2 style refinement failed. The identity-locked Stage 1 views are preserved; "
+                "you can use the Stage 1 result or retry."
+            )
+            continue
         if not all_done:
+            # Stage 1 may be complete while Stage 2 is enabled but not yet enqueued.
+            stage1_all_done = all(vj.get("status") == "done" and vj.get("assetId") for vj in view_jobs)
+            stage2_pending = any(
+                vj.get("stage2Enabled") and not vj.get("stage2JobId")
+                for vj in view_jobs
+            )
+            if stage1_all_done and stage2_pending:
+                # Enqueue Stage 2 style refinement jobs using Stage 1 outputs as source.
+                for vj in view_jobs:
+                    if not vj.get("stage2Enabled") or vj.get("stage2JobId"):
+                        continue
+                    stage2_route = vj.get("stage2Route")
+                    stage1_aid = vj.get("assetId")
+                    if not stage2_route or not stage1_aid:
+                        continue
+                    stage2_tag = f"{char_slug}_{vj.get('role')}_stage2"
+                    if int(pack.get("candidateCount") or 1) > 1:
+                        stage2_tag += f"_c{int(centry.get('candidateIndex') or 0) + 1}"
+                    stage2_prompt = str(vj.get("stage2Prompt") or "")
+                    stage2_negative = str(vj.get("stage2Negative") or "")
+                    stage2_metadata = dict(vj.get("stage2PromptMetadata") or {})
+                    stage2_metadata["stage1AssetId"] = stage1_aid
+                    stage2_job = _enqueue_txt2img(
+                        db,
+                        project_id,
+                        character_id=character_id,
+                        prompt=stage2_prompt,
+                        negative_prompt=stage2_negative,
+                        tag=stage2_tag,
+                        role=str(vj.get("role") or "view"),
+                        model_family_preference=stage2_route["modelFamilyPreference"],
+                        source_asset_id=str(stage1_aid),
+                        denoise=stage2_route.get("denoise"),
+                        seed=vj.get("seed"),
+                        force_workflow_key=stage2_route.get("workflowKey"),
+                        prompt_metadata=stage2_metadata,
+                    )
+                    vj["stage2JobId"] = stage2_job.id
+                    vj["stage2Status"] = stage2_job.status
+                centry["status"] = "generating_stage2"
+                continue
             # Surface per-view status on the candidate for the UI.
             centry["status"] = "generating"
             continue
@@ -1151,12 +1523,20 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 break
             view_paths.append(a.path)
         else:
+            # All 4 views are done and validated — surface a truthful
+            # "assembling" stage before the synchronous grid composition so the
+            # UI can show Assembly progress rather than implying views are still
+            # rendering.
+            centry["status"] = "assembling"
             try:
                 out_path = _composed_sheet_output_path(
                     project_id, character_id, int(centry.get("candidateIndex") or 0)
                 )
                 composed_path = _compose_character_sheet_grid(view_paths, str(out_path))
-                lineage = _workflow_lineage(centry.get("workflowKey") or "")
+                lineage = _candidate_sheet_lineage(centry, view_jobs)
+                stage1_source_asset_ids = [
+                    str(vj.get("assetId")) for vj in view_jobs if vj.get("assetId")
+                ]
                 sheet_asset = _ingest_composed_sheet_asset(
                     db,
                     project_id,
@@ -1165,10 +1545,12 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                     composed_path=composed_path,
                     source_asset_ids=source_asset_ids,
                     lineage=lineage,
+                    stage1_source_asset_ids=stage1_source_asset_ids,
                 )
                 centry["sheetAssetId"] = sheet_asset.id
                 centry["assetId"] = sheet_asset.id
                 centry["sourceAssetIds"] = source_asset_ids
+                centry["stage1SourceAssetIds"] = stage1_source_asset_ids
                 centry["status"] = "done"
                 # Only the first candidate (candidateIndex 0) populates the
                 # pack-level role_assets / hero_identity so multi-candidate
@@ -1184,59 +1566,43 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 centry["status"] = "failed"
                 centry["error"] = f"character sheet composition failed: {exc}"
     # Mirror candidate sheet state back into pack["candidates"].
+    def _mirror_candidate(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "assetId": item.get("assetId"),
+            "jobId": item.get("jobId"),
+            "url": None,
+            "label": item.get("label") or "Candidate",
+            "status": item.get("status"),
+            "candidateIndex": item.get("candidateIndex"),
+            "generator": item.get("generator"),
+            "provider": item.get("provider"),
+            "model": item.get("model"),
+            "modelVariant": item.get("modelVariant"),
+            "workflowKey": item.get("workflowKey"),
+            "seed": item.get("seed"),
+            "referenceAssetIds": item.get("referenceAssetIds") or [],
+            "compositionIntent": item.get("compositionIntent"),
+            "referenceFidelityMode": item.get("referenceFidelityMode"),
+            "referenceLocked": bool(item.get("referenceLocked")),
+            "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
+            "stage2Enabled": bool(item.get("stage2Enabled")),
+            "stage2Generator": item.get("stage2Generator"),
+            "stage2Provider": item.get("stage2Provider"),
+            "stage2Model": item.get("stage2Model"),
+            "stage2ModelVariant": item.get("stage2ModelVariant"),
+            "stage2WorkflowKey": item.get("stage2WorkflowKey"),
+            "stage2Failed": bool(item.get("stage2Failed")),
+            "stage2SourceAssetIds": item.get("stage2SourceAssetIds") or [],
+            "sheetAssetId": item.get("sheetAssetId"),
+            "sourceAssetIds": item.get("sourceAssetIds") or [],
+            "viewJobs": item.get("viewJobs") or [],
+            "error": item.get("error"),
+        }
+
     if isinstance(jobs.get("hero_candidates"), list):
-        pack["candidates"] = [
-            {
-                "assetId": item.get("assetId"),
-                "jobId": item.get("jobId"),
-                "url": None,
-                "label": item.get("label") or "Candidate",
-                "status": item.get("status"),
-                "candidateIndex": item.get("candidateIndex"),
-                "generator": item.get("generator"),
-                "provider": item.get("provider"),
-                "model": item.get("model"),
-                "modelVariant": item.get("modelVariant"),
-                "workflowKey": item.get("workflowKey"),
-                "seed": item.get("seed"),
-                "referenceAssetIds": item.get("referenceAssetIds") or [],
-                "compositionIntent": item.get("compositionIntent"),
-                "referenceFidelityMode": item.get("referenceFidelityMode"),
-                "referenceLocked": bool(item.get("referenceLocked")),
-                "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
-                "sheetAssetId": item.get("sheetAssetId"),
-                "sourceAssetIds": item.get("sourceAssetIds") or [],
-                "viewJobs": item.get("viewJobs") or [],
-                "error": item.get("error"),
-            }
-            for item in jobs["hero_candidates"]
-        ]
+        pack["candidates"] = [_mirror_candidate(item) for item in jobs["hero_candidates"]]
     elif jobs.get("hero") and jobs["hero"].get("sheetAssetId"):
-        pack["candidates"] = [
-            {
-                "assetId": jobs["hero"].get("assetId"),
-                "jobId": jobs["hero"].get("jobId"),
-                "url": None,
-                "label": jobs["hero"].get("label") or "Hero",
-                "status": jobs["hero"].get("status"),
-                "candidateIndex": jobs["hero"].get("candidateIndex"),
-                "generator": jobs["hero"].get("generator"),
-                "provider": jobs["hero"].get("provider"),
-                "model": jobs["hero"].get("model"),
-                "modelVariant": jobs["hero"].get("modelVariant"),
-                "workflowKey": jobs["hero"].get("workflowKey"),
-                "seed": jobs["hero"].get("seed"),
-                "referenceAssetIds": jobs["hero"].get("referenceAssetIds") or [],
-                "compositionIntent": jobs["hero"].get("compositionIntent"),
-                "referenceFidelityMode": jobs["hero"].get("referenceFidelityMode"),
-                "referenceLocked": bool(jobs["hero"].get("referenceLocked")),
-                "lowReferenceFidelity": bool(jobs["hero"].get("lowReferenceFidelity")),
-                "sheetAssetId": jobs["hero"].get("sheetAssetId"),
-                "sourceAssetIds": jobs["hero"].get("sourceAssetIds") or [],
-                "viewJobs": jobs["hero"].get("viewJobs") or [],
-                "error": jobs["hero"].get("error"),
-            }
-        ]
+        pack["candidates"] = [_mirror_candidate(jobs["hero"])]
 
     hero_id = role_assets.get("hero_identity") or role_assets.get("hero_portrait")
     if not hero_id:
@@ -1651,6 +2017,7 @@ def _enqueue_txt2img(
     source_asset_id: str | None = None,
     denoise: float | None = None,
     seed: int | None = None,
+    force_workflow_key: str | None = None,
 ) -> Job:
     from ..storyboard_jobs import enqueue_imagegen_job
 
@@ -1678,12 +2045,16 @@ def _enqueue_txt2img(
     # Reference-locked candidates route to a reference-capable edit workflow
     # (zimage.ref_edit) by supplying the reference asset as the source image so
     # its PIXELS participate in conditioning — not merely a filename in the prompt.
+    # Stage 2 refinement also uses source_asset_id, pointing at the Stage 1 output.
     if source_asset_id:
         body["source_asset_id"] = source_asset_id
     if denoise is not None:
         body["denoise"] = denoise
     if seed is not None:
         body["seed"] = seed
+    if force_workflow_key:
+        body["forceWorkflowKey"] = force_workflow_key
+        body["allow_force_workflow_key"] = True
     return enqueue_imagegen_job(db, project_id, body)
 
 
