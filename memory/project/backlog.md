@@ -11,6 +11,7 @@
 8. ~~**Cloudflare Tunnel**~~ — DONE (api-beta.adeptui.org → localhost:8758)
 9. ~~**Aurora visual assets committed**~~ — DONE (hero images, icons, templates, motifs)
 10. ~~**Hosted Beta Infrastructure Certification**~~ — DONE (GO verdict)
+11. ~~**Library all-media selection + sticky toolbar refinement**~~ — DONE 2026-08-13; all media types selectable, bulk-deletable, toolbar sticky; Playwright 1/1 pass
 
 ## Approved but Not Implemented
 - (None — all previously approved items are complete)
