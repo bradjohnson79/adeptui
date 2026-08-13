@@ -1048,28 +1048,34 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
           aria-label="Choose reference from Library"
           onClick={() => setLibraryPickerOpen(false)}
         >
-          <div className="character-compact__preview-body" onClick={(e) => e.stopPropagation()}>
-            <strong>Choose a Reference Image</strong>
-            <div className="character-compact__assets-grid">
-              {libraryAssets.filter(isImageAsset).map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className="character-compact__asset is-media"
-                  onClick={() => void handleAttachLibraryRef(a)}
-                  aria-label={`Use ${a.tag || a.filename}`}
-                >
-                  <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
-                  <strong>{a.tag || a.filename}</strong>
-                </button>
-              ))}
-              {libraryAssets.filter(isImageAsset).length === 0 ? (
-                <p className="character-compact__bio-text">No images in your Library yet.</p>
-              ) : null}
+          <div className="character-compact__picker-body" onClick={(e) => e.stopPropagation()}>
+            <div className="character-compact__picker-header">
+              <strong>Choose a Reference Image</strong>
             </div>
-            <button type="button" className="character-compact__actions-button" onClick={() => setLibraryPickerOpen(false)}>
-              Cancel
-            </button>
+            <div className="character-compact__picker-grid">
+              <div className="character-compact__assets-grid">
+                {libraryAssets.filter(isImageAsset).map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    className="character-compact__asset is-media"
+                    onClick={() => void handleAttachLibraryRef(a)}
+                    aria-label={`Use ${a.tag || a.filename}`}
+                  >
+                    <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
+                    <strong>{a.tag || a.filename}</strong>
+                  </button>
+                ))}
+                {libraryAssets.filter(isImageAsset).length === 0 ? (
+                  <p className="character-compact__bio-text">No images in your Library yet.</p>
+                ) : null}
+              </div>
+            </div>
+            <div className="character-compact__picker-footer">
+              <button type="button" className="character-compact__actions-button" onClick={() => setLibraryPickerOpen(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
