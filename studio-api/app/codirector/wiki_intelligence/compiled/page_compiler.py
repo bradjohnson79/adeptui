@@ -39,6 +39,27 @@ def _entry_texts(snapshot: Any, sections: set[str] | None = None) -> list[tuple[
     return out
 
 
+def _fetch_authoritative_story_record(db: Session, project_id: str) -> Any:
+    """Fetch the authoritative StoryEntry row for a project, or None.
+
+    The saved Story record is the single source of truth for Logline /
+    Short Summary / Long Summary. Reuses the existing `story_entries`
+    store — never a parallel store.
+    """
+    try:
+        from ....story_entries.store import list_entries as _list_story_entries
+
+        rows = _list_story_entries(db, project_id)
+        if not rows:
+            return None
+        for row in rows:
+            if getattr(row, "entry_type", "") == "project_story":
+                return row
+        return rows[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def get_compiled_wiki(db: Session, project_id: str) -> dict[str, Any]:
     snapshot = load_snapshot(db, project_id)
     cached = getattr(snapshot, "compiledWiki", None) or {}
@@ -104,45 +125,25 @@ def compile_wiki_bundle(
     ]
 
     overview = compile_project_overview(db, project_id, facts=facts)
+
+    # Authoritative Story record — the single source of truth for
+    # Logline / Short Summary / Long Summary. Fetched once and passed to
+    # both the summary compiler and the page renderer. Conversation never
+    # writes those fields.
+    story_record = _fetch_authoritative_story_record(db, project_id)
+
     story_summary = compile_story_summary(
         story_texts=story_texts,
         open_questions=list(getattr(snapshot, "openQuestions", None) or [])[:8],
         episode_summaries=[p.get("summary") or "" for p in episode_pages],
         source_ids=[i for i, _, _ in entries[:20]],
+        story_record=story_record,
     )
     story_page = compile_story_page(
-        story_summary, episode_children=[{"pageId": c["pageId"], "label": c["label"]} for c in episode_children]
+        story_summary,
+        episode_children=[{"pageId": c["pageId"], "label": c["label"]} for c in episode_children],
+        story_record=story_record,
     )
-
-    # Authoritative story entries — enrich story page sections.
-    try:
-        from ....story_entries.store import list_entries as _list_story_entries
-
-        _story_rows = _list_story_entries(db, project_id)
-        if _story_rows:
-            story_entry_sections = []
-            for _se in _story_rows:
-                _body_parts = []
-                if _se.logline:
-                    _body_parts.append(f"Logline: {_se.logline}")
-                if _se.short_summary:
-                    _body_parts.append(f"Short Summary: {_se.short_summary}")
-                if _se.long_summary:
-                    _body_parts.append(_se.long_summary[:800])
-                story_entry_sections.append({
-                    "id": f"sec-story-entry-{_se.id}",
-                    "title": _se.title or _se.entry_type.replace("_", " ").title(),
-                    "body": "\n\n".join(_body_parts),
-                    "bullets": [],
-                })
-            # Append authoritative sections after default story sections
-            existing_ids = {s["id"] for s in story_page.get("sections") or []}
-            for _sec in story_entry_sections:
-                if _sec["id"] not in existing_ids:
-                    story_page.setdefault("sections", []).append(_sec)
-                    existing_ids.add(_sec["id"])
-    except Exception:
-        pass
 
     # Authoritative character profiles — replace conversation-derived characters.
     characters: list[dict[str, Any]] = []

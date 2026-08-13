@@ -100,6 +100,33 @@ def autosave_elements(
     return {"ok": True, "document": doc.model_dump(mode="json"), "transaction": tx.model_dump(mode="json"), "saveState": "saved"}
 
 
+def autosave_html(
+    db: Session,
+    document_id: str,
+    html: str,
+    *,
+    expected_revision: Optional[int] = None,
+) -> dict[str, Any]:
+    doc = get_document(db, document_id)
+    if expected_revision is not None and expected_revision != doc.revision:
+        set_recovery(db, document_id, {"html": html, "expectedRevision": expected_revision})
+        raise ScriptwriterError(
+            "SCRIPT_CONFLICT",
+            "Document revision conflict.",
+            details={"serverRevision": doc.revision, "clientRevision": expected_revision},
+            recovery_action="reload_or_recover",
+        )
+
+    def mutate(d: ScriptDocument) -> list[str]:
+        d.contentHtml = html
+        d.contentType = "html"
+        return []
+
+    doc, tx = commit_transaction(db, doc, kind="autosave_html", source="creator", mutate=mutate, reversible=True)
+    clear_recovery(db, document_id)
+    return {"ok": True, "document": doc.model_dump(mode="json"), "transaction": tx.model_dump(mode="json"), "saveState": "saved"}
+
+
 def insert_scene(db: Session, document_id: str, *, after_order: int = -1, heading: str = "INT. LOCATION - DAY") -> dict[str, Any]:
     doc = get_document(db, document_id)
 

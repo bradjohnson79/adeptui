@@ -5078,7 +5078,11 @@ export const api = {
         recovery?: Record<string, unknown> | null;
         paginationMode?: string;
       }>(`/api/projects/${projectId}/scriptwriter/documents/${documentId}`),
-    autosave: (projectId: string, documentId: string, body: { elements: unknown[]; expectedRevision?: number }) =>
+    autosave: (
+      projectId: string,
+      documentId: string,
+      body: { html?: string; elements?: unknown[]; expectedRevision?: number },
+    ) =>
       req<{ ok: boolean; document: Record<string, unknown>; saveState?: string }>(
         `/api/projects/${projectId}/scriptwriter/documents/${documentId}/autosave`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },

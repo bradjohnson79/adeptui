@@ -37,6 +37,8 @@ class ScriptDocumentRow(Base):
     active_revision: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     production_numbers_locked: Mapped[bool] = mapped_column(Boolean, default=False)
     elements_json: Mapped[str] = mapped_column(Text, default="[]")
+    content_html: Mapped[str] = mapped_column(Text, default="")
+    content_type: Mapped[str] = mapped_column(String(16), default="elements")
     scene_sync_json: Mapped[str] = mapped_column(Text, default="{}")
     legacy_doc_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     recovery_json: Mapped[str] = mapped_column(Text, default="")
@@ -109,6 +111,21 @@ def ensure_scriptwriter_tables() -> None:
             ScriptMigrationBackupRow.__table__,
         ],
     )
+    _ensure_content_html_columns()
+
+
+def _ensure_content_html_columns() -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if not insp.has_table(ScriptDocumentRow.__tablename__):
+        return
+    existing = {c["name"] for c in insp.get_columns(ScriptDocumentRow.__tablename__)}
+    with engine.begin() as conn:
+        if "content_html" not in existing:
+            conn.execute(text("ALTER TABLE script_documents_v2 ADD COLUMN content_html TEXT DEFAULT ''"))
+        if "content_type" not in existing:
+            conn.execute(text("ALTER TABLE script_documents_v2 ADD COLUMN content_type VARCHAR(16) DEFAULT 'elements'"))
 
 
 def _row_to_doc(row: ScriptDocumentRow) -> ScriptDocument:
@@ -121,6 +138,8 @@ def _row_to_doc(row: ScriptDocumentRow) -> ScriptDocument:
         format=row.format,  # type: ignore[arg-type]
         draftStatus=row.draft_status,  # type: ignore[arg-type]
         elements=sorted(elements, key=lambda e: e.order),
+        contentHtml=row.content_html or None,
+        contentType=row.content_type if row.content_type in ("html", "elements") else "elements",  # type: ignore[arg-type]
         revision=row.revision,
         revisionSetId=row.revision_set_id,
         activeRevision=row.active_revision,
@@ -149,6 +168,8 @@ def save_document(db: Session, doc: ScriptDocument) -> ScriptDocument:
     row.active_revision = doc.activeRevision
     row.production_numbers_locked = doc.productionNumbersLocked
     row.elements_json = json.dumps([e.model_dump(mode="json") for e in doc.elements], ensure_ascii=False)
+    row.content_html = doc.contentHtml or ""
+    row.content_type = doc.contentType if doc.contentType in ("html", "elements") else "elements"
     row.scene_sync_json = json.dumps(doc.sceneSync, ensure_ascii=False)
     row.legacy_doc_id = doc.legacyDocId
     row.updated_at = doc.updatedAt

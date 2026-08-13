@@ -331,6 +331,10 @@ def run_cleanup_for_all_projects(db_session: Session) -> list[dict[str, Any]]:
         pid = project.id
         try:
             result = clean_persisted_wiki_filler(pid, db_session)
+            # Also run the known-string polluted-Story cleanup so both
+            # passes run together on startup.
+            story_result = clean_polluted_wiki_story(db_session, pid)
+            result["polluted_story_cleanup"] = story_result
         except Exception as exc:  # noqa: BLE001
             logger.error("wiki_cleanup: project=%s failed: %s", pid, exc)
             result = {
@@ -342,6 +346,201 @@ def run_cleanup_for_all_projects(db_session: Session) -> list[dict[str, Any]]:
             }
         results.append(result)
     return results
+
+
+# ── Known-string polluted Wiki Story cleanup ──────────────────────────────
+#
+# A second, more aggressive pass that targets known contamination strings
+# (test fixtures / onboarding chatter that leaked into Story fields) by
+# exact substring match. Conservative: only blanks Story fields whose
+# content contains one of the known pollution markers; never touches a
+# field that is genuinely empty or contains legitimate story.
+#
+# After blanking, the Wiki Story is rebuilt from the authoritative
+# StoryEntry record (`story_entries.store`) — Logline / Short / Long come
+# exclusively from the saved Story record, never from conversation.
+
+_POLLUTION_MARKERS: tuple[str, ...] = (
+    "Please call me friend",
+    "I've filled in how I'd like us to work together",
+    "Persistence verification",
+    "Follow-up Test",
+    "test strings",
+    "Audit Schnick Coffee",
+)
+
+
+def _contains_pollution(text: str) -> str | None:
+    """Return the first matching pollution marker in `text`, or None."""
+    if not text:
+        return None
+    lower = str(text).lower()
+    for marker in _POLLUTION_MARKERS:
+        if marker.lower() in lower:
+            return marker
+    return None
+
+
+def _fetch_story_record_for_rebuild(db_session: Session, project_id: str) -> Any:
+    """Fetch the authoritative StoryEntry row for rebuild (or None).
+
+    Reuses the existing `story_entries` store — never a parallel store.
+    Prefers a `project_story` entry; otherwise falls back to the first row.
+    """
+    try:
+        from ...story_entries.store import list_entries as _list_story_entries
+
+        rows = _list_story_entries(db_session, project_id)
+        if not rows:
+            return None
+        for row in rows:
+            if getattr(row, "entry_type", "") == "project_story":
+                return row
+        return rows[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _record_field(story_record: Any, field: str) -> str:
+    if story_record is None:
+        return ""
+    snake_map = {
+        "logline": "logline",
+        "shortSummary": "short_summary",
+        "longSummary": "long_summary",
+    }
+    if isinstance(story_record, dict):
+        value = story_record.get(field) or story_record.get(snake_map.get(field, ""))
+    else:
+        value = getattr(story_record, field, None)
+        if value is None:
+            value = getattr(story_record, snake_map.get(field, ""), None)
+    return str(value or "").strip()
+
+
+def clean_polluted_wiki_story(db_session: Session, project_id: str) -> dict[str, Any]:
+    """Clean Wiki Story fields containing known contamination strings and
+    rebuild them from the authoritative Story record.
+
+    Targets the contamination strings enumerated in `_POLLUTION_MARKERS`
+    (test fixtures / onboarding chatter that previously leaked into
+    Logline / Short Summary / Long Summary via conversation compilation).
+
+    Steps:
+    1. Load `Project.settings_json.projectIntelligence.compiledWiki.storySummary`.
+    2. For each of `logline` / `shortSummary` / `longSummary`, if the field
+       contains a known pollution marker, blank it and record an audit entry.
+    3. After blanking, rebuild the Wiki Story from the authoritative
+       StoryEntry record (the single source of truth) so the page reflects
+       the saved Story, not the polluted conversation.
+    4. Persist only when something changed (idempotent).
+
+    Returns a dict:
+        {
+          "project_id": str,
+          "cleaned_fields": list[str],
+          "preserved_fields": list[str],
+          "audit": list[dict],
+          "rebuilt_from_story_record": bool,
+        }
+    """
+    project = db_session.get(Project, project_id)
+    if not project:
+        return {
+            "project_id": project_id,
+            "cleaned_fields": [],
+            "preserved_fields": [],
+            "audit": [],
+            "rebuilt_from_story_record": False,
+            "error": "project_not_found",
+        }
+
+    settings = _load_project_settings(project)
+    payload = settings.get(_SETTINGS_KEY)
+    if not isinstance(payload, dict):
+        return {
+            "project_id": project_id,
+            "cleaned_fields": [],
+            "preserved_fields": [],
+            "audit": [],
+            "rebuilt_from_story_record": False,
+        }
+
+    cleaned: list[str] = []
+    preserved: list[str] = []
+    audit: list[dict[str, Any]] = []
+    changed = False
+
+    compiled_wiki = payload.get("compiledWiki")
+    if not isinstance(compiled_wiki, dict):
+        compiled_wiki = {}
+        payload["compiledWiki"] = compiled_wiki
+        changed = True
+
+    story_summary = compiled_wiki.get("storySummary")
+    if not isinstance(story_summary, dict):
+        story_summary = {}
+        compiled_wiki["storySummary"] = story_summary
+        changed = True
+
+    for field in _STORY_SUMMARY_FIELDS:
+        original = story_summary.get(field, "")
+        original_text = original if isinstance(original, str) else ("" if original is None else str(original))
+        marker = _contains_pollution(original_text)
+        if marker is not None:
+            audit.append({
+                "project_id": project_id,
+                "field": f"storySummary.{field}",
+                "original_snippet": _snippet(original_text),
+                "pollution_marker": marker,
+                "action": "cleaned",
+            })
+            story_summary[field] = _BLANK_VALUE
+            cleaned.append(f"storySummary.{field}")
+            changed = True
+        else:
+            audit.append({
+                "project_id": project_id,
+                "field": f"storySummary.{field}",
+                "original_snippet": _snippet(original_text),
+                "pollution_marker": None,
+                "action": "preserved",
+            })
+            preserved.append(f"storySummary.{field}")
+
+    # Rebuild cleaned Wiki Story from the authoritative Story record so the
+    # page reflects the saved Story (single source of truth), not polluted
+    # conversation. This pass writes the Story record's values into the
+    # cleaned fields — but only when at least one field was blanked, to
+    # avoid clobbering legitimate content on idempotent reruns.
+    rebuilt = False
+    if cleaned:
+        story_record = _fetch_story_record_for_rebuild(db_session, project_id)
+        if story_record is not None:
+            story_summary["logline"] = _record_field(story_record, "logline")
+            story_summary["shortSummary"] = _record_field(story_record, "shortSummary")
+            story_summary["longSummary"] = _record_field(story_record, "longSummary")
+            rebuilt = True
+            changed = True
+            audit.append({
+                "project_id": project_id,
+                "field": "storySummary.rebuild",
+                "original_snippet": "",
+                "pollution_marker": None,
+                "action": "rebuilt_from_story_record",
+            })
+
+    if changed:
+        settings[_SETTINGS_KEY] = payload
+        _persist_settings(db_session, project, settings)
+
+    return {
+        "project_id": project_id,
+        "cleaned_fields": cleaned,
+        "preserved_fields": preserved,
+        "audit": audit,
+        "rebuilt_from_story_record": rebuilt,
+    }
 
 
 def _iter_projects(db_session: Session) -> Iterable[Project]:

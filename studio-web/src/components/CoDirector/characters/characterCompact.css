@@ -141,6 +141,7 @@
 .character-compact__field textarea {
   min-height: 96px;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .character-compact__style-custom {
@@ -153,6 +154,30 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+}
+
+.character-compact__ref-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.character-compact__ref-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+.character-compact__ref-meta strong {
+  font-size: 0.88rem;
+  color: rgba(246, 248, 252, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .character-compact__ref-thumb {

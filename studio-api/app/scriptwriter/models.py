@@ -65,6 +65,7 @@ TRANSACTION_KINDS = (
     "apply_timeline_prep_metadata",
     "edit_elements",
     "autosave_batch",
+    "autosave_html",
     "migration",
 )
 
@@ -91,6 +92,8 @@ class ScriptDocument(BaseModel):
     format: ScriptFormat = "feature"
     draftStatus: DraftStatus = "first-draft"
     elements: list[ScriptElement] = Field(default_factory=list)
+    contentHtml: Optional[str] = None
+    contentType: Literal["html", "elements"] = "elements"
     revision: int = 1
     revisionSetId: Optional[str] = None
     activeRevision: Optional[str] = None

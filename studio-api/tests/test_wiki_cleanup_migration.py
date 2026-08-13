@@ -21,6 +21,7 @@ import pytest
 from app.codirector.wiki_intelligence.cleanup_migration import (
     SETTINGS_KEY,
     clean_persisted_wiki_filler,
+    clean_polluted_wiki_story,
     run_cleanup_for_all_projects,
 )
 from app.db import Project, SessionLocal, init_db
@@ -428,5 +429,184 @@ def test_run_cleanup_for_all_projects_handles_multiple() -> None:
             f == "storySummary.logline" for f in by_pid[filler_pid]["cleaned_fields"]
         ), "filler project must be cleaned"
         assert by_pid[canon_pid]["cleaned_fields"] == [], "canon project must not be cleaned"
+    finally:
+        db.close()
+
+
+# ── clean_polluted_wiki_story: known-string contamination cleanup ──────────
+
+
+def _seed_story_entry(db, project_id: str, *, logline: str = "", short: str = "", long_summary: str = "") -> None:
+    """Seed an authoritative StoryEntry row via the existing store."""
+    from app.story_entries.models import StoryEntryCreate
+    from app.story_entries.store import create_entry, ensure_story_entries_tables
+
+    ensure_story_entries_tables()
+    create_entry(
+        db,
+        project_id,
+        StoryEntryCreate(
+            title="Story",
+            entryType="project_story",
+            logline=logline,
+            shortSummary=short,
+            longSummary=long_summary,
+        ),
+    )
+
+
+def test_polluted_wiki_story_cleans_known_contamination_strings() -> None:
+    """Story fields containing known contamination strings are blanked and
+    then rebuilt from the authoritative Story record."""
+    db = _db()
+    try:
+        polluted_summary = {
+            "logline": "Please call me friend",  # known marker
+            "shortSummary": "I've filled in how I'd like us to work together",  # known marker
+            "longSummary": "Audit Schnick Coffee — Follow-up Test",  # known markers
+        }
+        pid = _make_project(db, story_summary=polluted_summary)
+        # Authoritative Story record has clean content.
+        _seed_story_entry(
+            db,
+            pid,
+            logline="Korri enters the coffee shop and reacts with surprise at the latte.",
+            short="Korri orders a latte and reacts with surprise.",
+            long_summary="Korri enters the coffee shop, orders a latte, tastes it, and reacts with surprise.",
+        )
+
+        result = clean_polluted_wiki_story(db, pid)
+
+        assert set(result["cleaned_fields"]) == {
+            "storySummary.logline",
+            "storySummary.shortSummary",
+            "storySummary.longSummary",
+        }, f"all three polluted fields should be cleaned, got: {result['cleaned_fields']}"
+        assert result["rebuilt_from_story_record"] is True
+
+        # Read back: Story fields now mirror the authoritative Story record.
+        intelligence = _load_intelligence(db, pid)
+        story = intelligence["compiledWiki"]["storySummary"]
+        assert story["logline"] == "Korri enters the coffee shop and reacts with surprise at the latte."
+        assert story["shortSummary"] == "Korri orders a latte and reacts with surprise."
+        assert story["longSummary"] == "Korri enters the coffee shop, orders a latte, tastes it, and reacts with surprise."
+        # No pollution markers survive.
+        for field in ("logline", "shortSummary", "longSummary"):
+            assert "call me friend" not in story[field].lower()
+            assert "schnick" not in story[field].lower()
+            assert "follow-up test" not in story[field].lower()
+    finally:
+        db.close()
+
+
+def test_polluted_wiki_story_preserves_legitimate_content() -> None:
+    """Story fields with no pollution markers are preserved untouched."""
+    db = _db()
+    try:
+        logline = "Korri enters the coffee shop, orders a latte, tastes it, and reacts with surprise at the flavor."
+        short = "Korri orders a latte and reacts with surprise, deciding to investigate the barista."
+        long_summary = "Korri enters the coffee shop, orders a latte, tastes it, and reacts with surprise at the flavor. She decides to investigate the mysterious barista."
+        clean_summary = {"logline": logline, "shortSummary": short, "longSummary": long_summary}
+        pid = _make_project(db, story_summary=clean_summary)
+
+        result = clean_polluted_wiki_story(db, pid)
+
+        assert result["cleaned_fields"] == [], "legitimate content must not be cleaned"
+        assert result["rebuilt_from_story_record"] is False, "no rebuild when nothing cleaned"
+        assert set(result["preserved_fields"]) == {
+            "storySummary.logline",
+            "storySummary.shortSummary",
+            "storySummary.longSummary",
+        }
+
+        # Read back: content byte-for-byte preserved.
+        intelligence = _load_intelligence(db, pid)
+        story = intelligence["compiledWiki"]["storySummary"]
+        assert story["logline"] == logline
+        assert story["shortSummary"] == short
+        assert story["longSummary"] == long_summary
+    finally:
+        db.close()
+
+
+def test_polluted_wiki_story_idempotent() -> None:
+    """Running twice == running once. The second run finds clean content and
+    is a no-op."""
+    db = _db()
+    try:
+        polluted_summary = {
+            "logline": "Please call me friend",
+            "shortSummary": "Persistence verification — Follow-up Test",
+            "longSummary": "Audit Schnick Coffee",
+        }
+        pid = _make_project(db, story_summary=polluted_summary)
+        _seed_story_entry(db, pid, logline="Korri tastes a surprising latte.")
+
+        first = clean_polluted_wiki_story(db, pid)
+        assert len(first["cleaned_fields"]) == 3
+
+        second = clean_polluted_wiki_story(db, pid)
+        assert second["cleaned_fields"] == [], "second run must not re-clean clean content"
+        assert second["rebuilt_from_story_record"] is False
+
+        intelligence = _load_intelligence(db, pid)
+        story = intelligence["compiledWiki"]["storySummary"]
+        assert story["logline"] == "Korri tastes a surprising latte."
+    finally:
+        db.close()
+
+
+def test_polluted_wiki_story_blank_when_no_story_record() -> None:
+    """When pollution is cleaned but no Story record exists, Story fields
+    remain genuinely blank (no filler, no rebuild)."""
+    db = _db()
+    try:
+        polluted_summary = {
+            "logline": "Please call me friend",
+            "shortSummary": "",
+            "longSummary": "",
+        }
+        pid = _make_project(db, story_summary=polluted_summary)
+        # No StoryEntry seeded.
+
+        result = clean_polluted_wiki_story(db, pid)
+
+        assert result["cleaned_fields"] == ["storySummary.logline"]
+        assert result["rebuilt_from_story_record"] is False, "no rebuild without a Story record"
+
+        intelligence = _load_intelligence(db, pid)
+        story = intelligence["compiledWiki"]["storySummary"]
+        assert story["logline"] == "", "polluted logline must be blanked with no Story record to rebuild from"
+    finally:
+        db.close()
+
+
+def test_polluted_wiki_story_audit_records_decisions() -> None:
+    """The audit log records a per-field decision for cleaned and preserved
+    fields, with the matching pollution marker."""
+    db = _db()
+    try:
+        mixed_summary = {
+            "logline": "Please call me friend",  # cleaned
+            "shortSummary": "Korri orders a latte and reacts with surprise.",  # preserved
+            "longSummary": "",  # preserved (already blank)
+        }
+        pid = _make_project(db, story_summary=mixed_summary)
+        _seed_story_entry(db, pid, logline="Korri tastes a surprising latte.")
+
+        result = clean_polluted_wiki_story(db, pid)
+        audit = result["audit"]
+        fields_audited = {entry["field"] for entry in audit if entry["field"].startswith("storySummary.")}
+        assert "storySummary.logline" in fields_audited
+        assert "storySummary.shortSummary" in fields_audited
+        assert "storySummary.longSummary" in fields_audited
+
+        cleaned_entries = [e for e in audit if e["action"] == "cleaned"]
+        assert len(cleaned_entries) == 1
+        assert cleaned_entries[0]["field"] == "storySummary.logline"
+        assert cleaned_entries[0]["pollution_marker"] == "Please call me friend"
+
+        preserved_entries = [e for e in audit if e["action"] == "preserved"]
+        assert any(e["field"] == "storySummary.shortSummary" for e in preserved_entries)
     finally:
         db.close()

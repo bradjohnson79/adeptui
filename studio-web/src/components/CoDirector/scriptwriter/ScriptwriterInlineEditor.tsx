@@ -1,33 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import type { SaveState, ScriptElement } from "../../scriptwriter/types";
-import { ScreenplayParagraph, ScreenplayKeys, elementsToDocJson, docJsonToElements } from "../../scriptwriter/screenplayExtension";
+import Underline from "@tiptap/extension-underline";
+import TextAlign from "@tiptap/extension-text-align";
+import type { SaveState, ScriptDocument } from "../../scriptwriter/types";
+import { IndentKeys, IndentParagraph } from "../../scriptwriter/richTextExtensions";
+import { elementsToHtml, isBlankHtml } from "../../scriptwriter/legacyHtml";
+import { sanitizeHtml } from "../../scriptwriter/sanitizeHtml";
 import { api, ApiError } from "../../../api";
 import "./ScriptwriterInline.css";
-
-export type InlineEditorElementType = "scene_heading" | "action" | "character" | "dialogue" | "parenthetical" | "shot" | "transition" | "general";
-
-const ELEMENT_LABELS: Record<string, string> = {
-  scene_heading: "Scene Heading",
-  action: "Action",
-  character: "Character",
-  dialogue: "Dialogue",
-  parenthetical: "Parenthetical",
-  shot: "Camera / Shot",
-  transition: "Transition",
-  general: "General Text / Note",
-};
-
-const ELEMENT_OPTIONS = [
-  "scene_heading", "action", "character", "dialogue",
-  "parenthetical", "shot", "transition", "general",
-] as const;
 
 type Props = {
   projectId: string;
   onOpenFull?: () => void;
 };
+
+function resolveInitialHtml(doc: Partial<ScriptDocument> | null): string {
+  if (doc?.contentHtml && !isBlankHtml(doc.contentHtml)) return doc.contentHtml;
+  if (doc?.elements && doc.elements.length > 0) return elementsToHtml(doc.elements);
+  return "<p></p>";
+}
 
 export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
   const [docId, setDocId] = useState<string | null>(null);
@@ -35,7 +27,6 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
   const [stats, setStats] = useState<Record<string, number>>({});
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [message, setMessage] = useState<string | null>(null);
-  const [currentType, setCurrentType] = useState<string>("action");
   const hydrating = useRef(false);
   const saveTimer = useRef<number | null>(null);
   const latestRevisionRef = useRef<number | undefined>(undefined);
@@ -44,10 +35,12 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ paragraph: false }),
-      ScreenplayParagraph,
-      ScreenplayKeys,
+      IndentParagraph,
+      Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      IndentKeys,
     ],
-    content: elementsToDocJson([]),
+    content: "<p></p>",
     onUpdate: ({ editor: ed }) => {
       if (hydrating.current || !docId) return;
       setSaveState("unsaved");
@@ -57,9 +50,9 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
           if (!docId) return;
           try {
             setSaveState("saving");
-            const elements = docJsonToElements(ed.getJSON() as { content?: Array<Record<string, unknown>> });
+            const html = sanitizeHtml(ed.getHTML());
             const res = await api.scriptwriter.autosave(projectId, docId, {
-              elements,
+              html,
               expectedRevision: latestRevisionRef.current ?? undefined,
             });
             const d = res.document as unknown as { id: string; title: string; revision: number };
@@ -72,15 +65,15 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
             if (e instanceof ApiError && e.status === 400 && ((e.code === "SCRIPT_CONFLICT") || (String(e.message || "").includes("CONFLICT")))) {
               try {
                 const fresh = await api.scriptwriter.studio(projectId);
-                const d = fresh.document as unknown as { id: string; title: string; elements?: ScriptElement[]; revision: number };
+                const d = fresh.document as unknown as Partial<ScriptDocument> & { id: string; title: string; revision: number };
                 if (d.id) {
                   latestRevisionRef.current = d.revision;
                   setDocId(d.id);
                   if (d.title) setTitle(d.title);
                 }
-                if (editor && d.elements) {
+                if (editor) {
                   hydrating.current = true;
-                  editor.commands.setContent(elementsToDocJson(d.elements));
+                  editor.commands.setContent(resolveInitialHtml(d));
                   hydrating.current = false;
                 }
                 setSaveState("save_failed");
@@ -95,30 +88,21 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
 
   useEffect(() => {
     if (!editor) return;
-    const fn = () => {
-      const t = (editor.getAttributes("paragraph").elementType || "action") as string;
-      setCurrentType(t);
-    };
-    editor.on("selectionUpdate", fn);
-    return () => { editor.off("selectionUpdate", fn); };
-  }, [editor]);
-
-  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const bundle = await api.scriptwriter.studio(projectId);
         if (cancelled) return;
-        const d = bundle.document as unknown as { id: string; title: string; elements?: ScriptElement[]; revision: number; updatedAt?: string };
+        const d = bundle.document as unknown as Partial<ScriptDocument> & { id: string; title: string; revision: number };
         if (d.id) {
           setDocId(d.id);
           setTitle(d.title);
           latestRevisionRef.current = d.revision;
         }
         setStats((bundle.stats || {}) as Record<string, number>);
-        if (editor && d.elements) {
+        if (editor) {
           hydrating.current = true;
-          editor.commands.setContent(elementsToDocJson(d.elements));
+          editor.commands.setContent(resolveInitialHtml(d));
           hydrating.current = false;
           loadedRef.current = true;
         }
@@ -127,37 +111,10 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     return () => { cancelled = true; };
   }, [projectId, editor]);
 
-  const normalizeText = (text: string, type: string): string => {
-    if (type === "parenthetical" && !(text.startsWith("(") && text.endsWith(")"))) {
-      return "(" + text + ")";
-    }
-    if (type === "shot" && !(text.startsWith("[") && text.endsWith("]"))) {
-      return "[" + text + "]";
-    }
-    return text;
-  };
-
-  const handleFormatChange = useCallback((newType: string) => {
-    if (!editor) return;
-    const { $from } = editor.state.selection;
-    const node = $from.parent;
-    if (node && node.type.name === "paragraph") {
-      const original = node.textContent || "";
-      const normalized = normalizeText(original, newType);
-      if (normalized !== original) {
-        editor
-          .chain()
-          .focus()
-          .updateAttributes("paragraph", { elementType: newType })
-          .insertContentAt({ from: $from.start(), to: $from.end() }, normalized)
-          .run();
-        setCurrentType(newType);
-        return;
-      }
-    }
-    editor.chain().focus().updateAttributes("paragraph", { elementType: newType }).run();
-    setCurrentType(newType);
-  }, [editor]);
+  const isActive = useCallback(
+    (name: string, attrs?: Record<string, unknown>) => editor?.isActive(name, attrs) ?? false,
+    [editor],
+  );
 
   const saveLabel = saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving..." : saveState === "save_failed" ? "Save failed" : "";
 
@@ -184,17 +141,23 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
       </div>
 
       <div className="sw-inline__toolbar" data-testid="sw-inline-toolbar">
-        <label className="sw-inline__format-label">Element:</label>
-        <select
-          className="sw-inline__format-select"
-          value={currentType}
-          onChange={(e) => handleFormatChange(e.target.value)}
-          data-testid="sw-inline-format-select"
-        >
-          {ELEMENT_OPTIONS.map((t) => (
-            <option key={t} value={t}>{ELEMENT_LABELS[t] || t}</option>
-          ))}
-        </select>
+        <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().toggleBold().run()} disabled={!editor?.can().toggleBold()} data-testid="sw-inline-bold" title="Bold">B</button>
+        <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().toggleItalic().run()} disabled={!editor?.can().toggleItalic()} data-testid="sw-inline-italic" title="Italic">I</button>
+        <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().toggleUnderline().run()} disabled={!editor?.can().toggleUnderline()} data-testid="sw-inline-underline" title="Underline">U</button>
+        <span className="sw-inline__tool-sep" />
+        <button type="button" className={isActive("heading", { level: 1 }) ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} data-testid="sw-inline-h1" title="Heading 1">H1</button>
+        <button type="button" className={isActive("heading", { level: 2 }) ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} data-testid="sw-inline-h2" title="Heading 2">H2</button>
+        <span className="sw-inline__tool-sep" />
+        <button type="button" className={isActive("bulletList") ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().toggleBulletList().run()} data-testid="sw-inline-bullet" title="Bullet list">•</button>
+        <button type="button" className={isActive("orderedList") ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().toggleOrderedList().run()} data-testid="sw-inline-ordered" title="Numbered list">1.</button>
+        <span className="sw-inline__tool-sep" />
+        <button type="button" className={isActive("textAlign", { textAlign: "left" }) ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().setTextAlign("left").run()} data-testid="sw-inline-align-left" title="Align left">⯇</button>
+        <button type="button" className={isActive("textAlign", { textAlign: "center" }) ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().setTextAlign("center").run()} data-testid="sw-inline-align-center" title="Align center">≣</button>
+        <button type="button" className={isActive("textAlign", { textAlign: "right" }) ? "sw-inline__tool-btn is-active" : "sw-inline__tool-btn"} onClick={() => editor?.chain().focus().setTextAlign("right").run()} data-testid="sw-inline-align-right" title="Align right">⯈</button>
+        <span className="sw-inline__tool-sep" />
+        <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().focus().run() && editor?.commands.updateAttributes("paragraph", { indent: Math.min(Number(editor.getAttributes("paragraph").indent || 0) + 40, 320) })} data-testid="sw-inline-indent" title="Indent">→|</button>
+        <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().focus().run() && editor?.commands.updateAttributes("paragraph", { indent: Math.max(Number(editor.getAttributes("paragraph").indent || 0) - 40, 0) })} data-testid="sw-inline-outdent" title="Outdent">|←</button>
+        <span className="sw-inline__tool-sep" />
         <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} data-testid="sw-inline-undo" title="Undo">↶</button>
         <button type="button" className="sw-inline__tool-btn" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} data-testid="sw-inline-redo" title="Redo">↷</button>
       </div>

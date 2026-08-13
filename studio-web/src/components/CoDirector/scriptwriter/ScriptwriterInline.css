@@ -80,6 +80,8 @@
   color: var(--text-primary, #ddd);
   font-size: 0.9rem;
   line-height: 1;
+  min-width: 1.6rem;
+  font-weight: 600;
 }
 .sw-inline__tool-btn:disabled {
   opacity: 0.35;
@@ -88,6 +90,18 @@
 .sw-inline__tool-btn:hover:not(:disabled) {
   background: var(--hover-color, rgba(255,255,255,0.1));
 }
+.sw-inline__tool-btn.is-active {
+  background: var(--accent-bg, rgba(74,170,153,0.18));
+  border-color: var(--accent, #4a9);
+  color: var(--accent, #4a9);
+}
+.sw-inline__tool-sep {
+  width: 1px;
+  height: 1.1rem;
+  background: var(--border-color, #444);
+  flex-shrink: 0;
+  margin: 0 0.1rem;
+}
 
 /* Editor area */
 .sw-inline__editor {
@@ -95,46 +109,31 @@
   overflow-y: auto;
   border: 1px solid var(--border-color, #333);
   border-radius: 4px;
-  padding: 0.75rem;
+  padding: 0.75rem 1rem;
   background: var(--surface-color, rgba(255,255,255,0.03));
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.9rem;
+  font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  font-size: 0.95rem;
   line-height: 1.6;
 }
 .sw-inline__editor .ProseMirror {
   outline: none;
   min-height: 200px;
 }
-.sw-inline__editor .ProseMirror p { margin: 0; }
-.sw-inline__editor .ProseMirror > p + p { margin-top: 0.5em; }
-
-/* Screenplay formatting — reuse sw-preview classes */
-.sw-inline__editor .sp-el--scene_heading {
-  text-transform: uppercase;
-  font-weight: 700;
-  margin-top: 1em !important;
+.sw-inline__editor .ProseMirror p { margin: 0 0 0.5em 0; }
+.sw-inline__editor .ProseMirror h1 { font-size: 1.5rem; margin: 0.8em 0 0.4em; }
+.sw-inline__editor .ProseMirror h2 { font-size: 1.25rem; margin: 0.7em 0 0.35em; }
+.sw-inline__editor .ProseMirror ul,
+.sw-inline__editor .ProseMirror ol { margin: 0.3em 0 0.6em 1.4em; }
+.sw-inline__editor .ProseMirror blockquote {
+  border-left: 3px solid var(--border-color, #444);
+  padding-left: 0.8rem;
+  margin: 0.4em 0;
+  color: var(--text-muted, #aaa);
 }
-.sw-inline__editor .sp-el--action { font-style: italic; }
-.sw-inline__editor .sp-el--character {
-  text-transform: uppercase;
-  margin-left: 30%;
-}
-.sw-inline__editor .sp-el--parenthetical {
-  font-style: italic;
-  margin-left: 34%;
-  margin-right: 20%;
-}
-.sw-inline__editor .sp-el--dialogue {
-  margin-left: 30%;
-  margin-right: 30%;
-}
-.sw-inline__editor .sp-el--shot {
-  text-transform: uppercase;
-  font-weight: 600;
-}
-.sw-inline__editor .sp-el--transition {
-  text-align: right;
-  text-transform: uppercase;
+.sw-inline__editor .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border-color, #444);
+  margin: 0.8em 0;
 }
 
 /* Message */

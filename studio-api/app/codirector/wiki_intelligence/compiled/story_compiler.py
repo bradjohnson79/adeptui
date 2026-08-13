@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..classification import classify_conversation_turn, is_non_canon_turn
+from ..classification import classify_conversation_turn
 from .contracts import CompiledStorySummary
 
 
@@ -20,48 +20,82 @@ def _clean_theme(text: str) -> str | None:
 
 
 def _is_canon_narrative(text: str) -> bool:
-    """A story text may populate summaries only if it reads as in-world canon.
-
-    The sync `compile_story_summary` is defense-in-depth: the primary fix is the
-    async editor path (page_compiler.compile_wiki_bundle_async → editor.py +
-    readiness gates). This guard ensures the sync compiler cannot paste a
-    user-preference / production-request / meta-conversation / question turn
-    as the Logline / Short Summary / Long Summary when a caller still hits
-    the sync path (tests, get_compiled_wiki cache-miss, timeline_context).
-
-    Brainstorming is NOT canon here — only the explicit rebuild operation may
-    opt brainstorming into candidate extraction, and even then it should not
-    become the Logline.
+    """Classify a conversation turn as canon narrative (used for theme/conflict
+    mining only — never for Logline/Short/Long, which come from the Story record).
     """
     return classify_conversation_turn(text) == "story_canon"
 
 
+# Maps the public StoryEntry camelCase field names to the SQLAlchemy row's
+# snake_case column attributes. Used by `_story_record_field` to read either a
+# dict or a StoryEntryRow transparently.
+_SNAKE_MAP: dict[str, str] = {
+    "logline": "logline",
+    "shortSummary": "short_summary",
+    "longSummary": "long_summary",
+}
+
+
+def _story_record_field(story_record: Any, field: str) -> str:
+    """Read a Story field from a StoryEntry row/dict, normalized to a stripped
+    string. Returns "" when the record or field is missing/empty.
+
+    Accepts both SQLAlchemy row attributes (logline / short_summary /
+    long_summary) and dict shapes (logline / shortSummary / longSummary).
+    """
+    if story_record is None:
+        return ""
+    value: Any = ""
+    if isinstance(story_record, dict):
+        value = story_record.get(field) or story_record.get(_SNAKE_MAP.get(field, ""))
+    else:
+        value = getattr(story_record, field, None)
+        if value is None:
+            value = getattr(story_record, _SNAKE_MAP.get(field, ""), None)
+    return str(value or "").strip()
+
+
 def compile_story_summary(
     *,
-    story_texts: list[str],
-    open_questions: list[str],
-    episode_summaries: list[str],
-    source_ids: list[str],
+    story_texts: list[str] | None = None,
+    open_questions: list[str] | None = None,
+    episode_summaries: list[str] | None = None,
+    source_ids: list[str] | None = None,
+    story_record: Any = None,
 ) -> CompiledStorySummary:
-    # Split canon narrative from non-canon material. Non-canon texts
-    # (user_preference / production_request / meta_conversation / question /
-    # unknown / brainstorming) must NEVER populate Logline / Short / Long.
+    """Compile the Story summary.
+
+    Logline / Short Summary / Long Summary are sourced EXCLUSIVELY from the
+    saved Story record (`story_record`). Conversation never writes those
+    fields. When the Story record is None or its fields are empty, the
+    Story fields are genuinely empty — no filler, no placeholder prose,
+    no inferred plot.
+
+    Conversation material may still feed other Wiki sections (themes,
+    central conflicts, open questions) but NEVER Logline / Short / Long.
+    """
+    story_texts = story_texts or []
+    open_questions = open_questions or []
+    episode_summaries = episode_summaries or []
+    source_ids = source_ids or []
+
+    # Story-record-only Logline / Short / Long. Blank means blank — no
+    # compilation from `story_texts`, no fallback filler.
+    logline = _story_record_field(story_record, "logline")
+    short = _story_record_field(story_record, "shortSummary")
+    long_summary = _story_record_field(story_record, "longSummary")
+
     canon_texts: list[str] = []
-    non_canon_texts: list[str] = []
     for t in story_texts:
         stripped = (t or "").strip()
         if not stripped:
             continue
         if _is_canon_narrative(stripped):
             canon_texts.append(stripped)
-        else:
-            non_canon_texts.append(stripped)
 
-    # Prefer longer narrative sentences for summaries, drawn ONLY from canon.
-    narrative = [t for t in canon_texts if len(t) >= 40]
+    # Themes may be mined from any conversation text (labeled Theme: X /
+    # Emerging theme) — they never paste as Logline prose.
     themes: list[str] = []
-    # Themes may be mined from either canon or non-canon text — themes are
-    # labeled (Theme: X / Emerging theme) and never paste as Logline prose.
     for t in story_texts:
         if re.search(r"\btheme\b", t, re.I) or "memory" in t.lower() or "agency" in t.lower():
             cleaned = _clean_theme(t)
@@ -70,36 +104,22 @@ def compile_story_summary(
         if len(themes) >= 5:
             break
 
-    logline = ""
-    if narrative:
-        logline = narrative[0]
-        if len(logline) > 220:
-            logline = logline[:217].rstrip() + "…"
-    short = " ".join(narrative[:2])[:480] if narrative else ""
-    long = " ".join(narrative[:6])[:1200] if narrative else short
-    if episode_summaries and long:
-        long = (long + " " + episode_summaries[0]).strip()[:1400]
-
-    conflicts: list[str] = []
     # Conflicts may only be drawn from canon narrative — never from a
     # production_request or user_preference that happens to contain "vs".
+    conflicts: list[str] = []
     for t in canon_texts:
         if re.search(r"\b(conflict|versus|vs\.?|tension|strained)\b", t, re.I):
             conflicts.append(t.strip()[:160])
         if len(conflicts) >= 3:
             break
 
-    # Honesty rule: when there is no canon narrative material, leave Logline /
-    # Short / Long genuinely empty. Do NOT write placeholder prose, do NOT
-    # paste Co-Director instructions, do NOT paste conversation excerpts.
-    # The Story page renders a warm "still taking shape" nudge for the creator.
     narrative_frame = ""
-    if narrative:
+    if logline or short or long_summary:
         narrative_frame = "Based on the established project material so far."
     return CompiledStorySummary(
         logline=logline,
-        shortSummary=short or logline,
-        longSummary=long or short or logline,
+        shortSummary=short,
+        longSummary=long_summary,
         themes=themes[:5],
         centralConflicts=conflicts,
         narrativeFrame=narrative_frame,
@@ -108,34 +128,41 @@ def compile_story_summary(
     )
 
 
-def compile_story_page(summary: CompiledStorySummary, episode_children: list[dict[str, Any]]) -> dict[str, Any]:
+def compile_story_page(
+    summary: CompiledStorySummary,
+    episode_children: list[dict[str, Any]],
+    *,
+    story_record: Any = None,
+) -> dict[str, Any]:
+    """Render the Story page.
+
+    Logline / Short Summary / Long Summary sections are sourced EXCLUSIVELY
+    from the saved Story record (`story_record`) — never from the compiled
+    `summary`'s Story fields (which are themselves Story-record-sourced, but
+    the page renderer reads the authoritative record directly to remain
+    independent of any stale cache).
+
+    When ALL three Story fields are empty, the page renders the warm
+    "still taking shape" nudge for the creator. Otherwise blank sections are
+    simply omitted (no filler prose).
+    """
+    logline = _story_record_field(story_record, "logline")
+    short = _story_record_field(story_record, "shortSummary")
+    long_summary = _story_record_field(story_record, "longSummary")
+
     sections: list[dict[str, Any]] = []
-    if summary.logline:
-        sections.append({"id": "sec-logline", "title": "Logline", "body": summary.logline, "bullets": []})
-    if summary.shortSummary:
+    if logline:
+        sections.append({"id": "sec-logline", "title": "Logline", "body": logline, "bullets": []})
+    if short:
         sections.append(
-            {"id": "sec-short", "title": "Short Summary", "body": summary.shortSummary, "bullets": []}
+            {"id": "sec-short", "title": "Short Summary", "body": short, "bullets": []}
         )
-    if summary.longSummary:
+    if long_summary:
         sections.append(
-            {"id": "sec-long", "title": "Long Summary", "body": summary.longSummary, "bullets": []}
+            {"id": "sec-long", "title": "Long Summary", "body": long_summary, "bullets": []}
         )
-    # Warm sparse nudge when long summary is omitted.
-    if not summary.longSummary and not summary.shortSummary:
-        sections.append(
-            {
-                "id": "sec-long-pending",
-                "title": "Long Summary",
-                "body": (
-                    "The story is still taking shape.\n\n"
-                    "As more of it becomes established, Co-Director will expand "
-                    "this summary automatically."
-                ),
-                "bullets": [],
-                "developStoryAction": True,
-            }
-        )
-    elif not summary.longSummary:
+    # Warm sparse nudge when the Story record has no Logline / Short / Long.
+    if not logline and not short and not long_summary:
         sections.append(
             {
                 "id": "sec-long-pending",
@@ -184,7 +211,7 @@ def compile_story_page(summary: CompiledStorySummary, episode_children: list[dic
         "pageId": "page-story",
         "pageType": "STORY",
         "title": "Story",
-        "summary": summary.logline or summary.shortSummary,
+        "summary": logline or short,
         "sections": sections,
         "relatedPageIds": [c.get("pageId") for c in episode_children if c.get("pageId")],
         "sourceRecordIds": summary.sourceRecordIds,

@@ -11,7 +11,6 @@
  * characterId (flushed pending save first).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { api } from "../../../api";
 import {
   getCardPreviewUrl,
@@ -23,6 +22,7 @@ import {
   matchesFilter,
   type LibraryAsset,
 } from "../library/assetModel";
+import { CharacterReferenceAssetPicker } from "./CharacterReferenceAssetPicker";
 import "./characterCompact.css";
 
 type CharacterProfile = {
@@ -246,6 +246,8 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   const [assetFilter, setAssetFilter] = useState<(typeof ASSET_FILTERS)[number]["id"]>("images");
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [refImageBusy, setRefImageBusy] = useState(false);
+  const [attachingRef, setAttachingRef] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [removingRef, setRemovingRef] = useState(false);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [selectedPickerAsset, setSelectedPickerAsset] = useState<LibraryAsset | null>(null);
@@ -412,8 +414,8 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
 
   const handleAttachLibraryRef = useCallback(
     async (asset: LibraryAsset) => {
-      setRefImageBusy(true);
-      setGenMsg("");
+      setAttachingRef(true);
+      setAttachError(null);
       try {
         await api.attachCharacterReference(projectId, characterId, {
           asset_id: asset.id,
@@ -423,10 +425,11 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         });
         await refresh();
         setLibraryPickerOpen(false);
+        setSelectedPickerAsset(null);
       } catch (e) {
-        setGenMsg(e instanceof Error ? e.message : "Attach failed");
+        setAttachError(e instanceof Error ? e.message : "Attach failed");
       } finally {
-        setRefImageBusy(false);
+        setAttachingRef(false);
       }
     },
     [projectId, characterId, refresh],
@@ -434,6 +437,19 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
 
   const approvedImage = getApprovedImage(refs);
   const referenceImage = getReferenceImage(refs);
+  const referenceImageAsset = useMemo(
+    () =>
+      referenceImage?.asset_id
+        ? libraryAssets.find((a) => a.id === referenceImage.asset_id) ?? null
+        : null,
+    [referenceImage, libraryAssets],
+  );
+  const referencePreviewSrc = useMemo(() => {
+    if (!referenceImage?.asset_id) return "";
+    if (referenceImageAsset) return getCardPreviewUrl(referenceImageAsset) || api.assetUrl(referenceImageAsset.id);
+    return api.assetUrl(referenceImage.asset_id);
+  }, [referenceImage, referenceImageAsset]);
+  const referenceName = referenceImageAsset?.tag || referenceImageAsset?.filename || "Reference";
   const approvedVoice = voices.find((v) => v.approval_status === "approved" || v.status === "APPROVED");
 
   const personalityTags = useMemo(() => {
@@ -465,19 +481,6 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
     () => characterAssets.filter((a) => matchesFilter(a, assetFilter)),
     [characterAssets, assetFilter],
   );
-
-  const imageAssets = useMemo(() => libraryAssets.filter(isImageAsset), [libraryAssets]);
-
-  useEffect(() => {
-    if (!libraryPickerOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setLibraryPickerOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [libraryPickerOpen]);
 
   const handleFieldChange = useCallback(
     (field: keyof CharacterProfile, value: string) => {
@@ -764,42 +767,65 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
 
       <div className="character-compact__field">
         <label>Character Reference — Optional</label>
-        <div className="character-compact__ref-row">
-          <button
-            type="button"
-            className="character-compact__actions-button"
-            data-testid="character-compact-add-ref"
-            disabled={refImageBusy}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {refImageBusy ? "Adding…" : "Upload Image"}
-          </button>
-          <button
-            type="button"
-            className="character-compact__actions-button"
-            data-testid="character-compact-add-ref-library"
-            disabled={refImageBusy}
-            onClick={() => setLibraryPickerOpen(true)}
-          >
-            Choose from Library
-          </button>
-          {referenceImage?.asset_id ? (
+        {referenceImage?.asset_id ? (
+          <div className="character-compact__ref-preview">
             <div className="character-compact__ref-thumb" data-testid="character-compact-ref-thumb">
-              <img src={api.assetUrl(referenceImage.asset_id)} alt="Reference" />
+              <img src={referencePreviewSrc} alt={referenceName} />
             </div>
-          ) : null}
-          {referenceImage?.asset_id ? (
+            <div className="character-compact__ref-meta">
+              <strong>{referenceName}</strong>
+              <div className="character-compact__ref-row">
+                <button
+                  type="button"
+                  className="character-compact__actions-button"
+                  data-testid="character-compact-change-ref"
+                  disabled={attachingRef || refImageBusy}
+                  onClick={() => {
+                    setAttachError(null);
+                    setSelectedPickerAsset(referenceImageAsset);
+                    setLibraryPickerOpen(true);
+                  }}
+                >
+                  Change
+                </button>
+                <button
+                  type="button"
+                  className="character-compact__actions-button character-compact__ref-remove"
+                  data-testid="character-compact-remove-ref"
+                  disabled={removingRef || attachingRef || refImageBusy}
+                  onClick={() => void handleRemoveReference()}
+                >
+                  {removingRef ? "Removing…" : "Remove"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="character-compact__ref-row">
             <button
               type="button"
-              className="character-compact__actions-button character-compact__ref-remove"
-              data-testid="character-compact-remove-ref"
-              disabled={removingRef || refImageBusy}
-              onClick={() => void handleRemoveReference()}
+              className="character-compact__actions-button"
+              data-testid="character-compact-add-ref"
+              disabled={refImageBusy}
+              onClick={() => fileInputRef.current?.click()}
             >
-              {removingRef ? "Removing…" : "Remove"}
+              {refImageBusy ? "Adding…" : "Upload Image"}
             </button>
-          ) : null}
-        </div>
+            <button
+              type="button"
+              className="character-compact__actions-button"
+              data-testid="character-compact-add-ref-library"
+              disabled={refImageBusy}
+              onClick={() => {
+                setAttachError(null);
+                setSelectedPickerAsset(null);
+                setLibraryPickerOpen(true);
+              }}
+            >
+              Choose from Library
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="character-compact__gen-row">
@@ -1116,70 +1142,24 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         </div>
       ) : null}
 
-      {libraryPickerOpen
-        ? createPortal(
-            <div
-              className="character-compact__preview"
-              role="dialog"
-              aria-label="Choose reference from Library"
-              aria-modal="true"
-              onClick={() => setLibraryPickerOpen(false)}
-            >
-              <div className="character-compact__picker-body" onClick={(e) => e.stopPropagation()}>
-                <div className="character-compact__picker-header">
-                  <strong>Choose a Reference Image</strong>
-                </div>
-                <div className="character-compact__picker-grid">
-                  <div className="character-compact__assets-grid" role="listbox" aria-label="Library images">
-                    {imageAssets.map((a) => {
-                      const isSelected = selectedPickerAsset?.id === a.id;
-                      return (
-                        <button
-                          key={a.id}
-                          type="button"
-                          className={`character-compact__asset is-media${isSelected ? " is-selected" : ""}`}
-                          onClick={() => setSelectedPickerAsset(a)}
-                          aria-label={`Select ${a.tag || a.filename}${isSelected ? " (currently selected)" : ""}`}
-                          role="option"
-                          aria-selected={isSelected}
-                        >
-                          <img src={getCardPreviewUrl(a) || api.assetUrl(a.id)} alt={a.tag || a.filename} loading="lazy" />
-                          <strong>{a.tag || a.filename}</strong>
-                          {isSelected ? <span className="character-compact__asset-check">✓</span> : null}
-                        </button>
-                      );
-                    })}
-                    {imageAssets.length === 0 ? (
-                      <p className="character-compact__bio-text">No images in your Library yet.</p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="character-compact__picker-footer">
-                  <div className="character-compact__picker-footer-inner">
-                    <button type="button" className="character-compact__actions-button" onClick={() => { setLibraryPickerOpen(false); setSelectedPickerAsset(null); }}>
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      className="character-compact__actions-button primary"
-                      data-testid="character-compact-picker-select"
-                      disabled={!selectedPickerAsset}
-                      onClick={() => {
-                        if (selectedPickerAsset) {
-                          void handleAttachLibraryRef(selectedPickerAsset);
-                          setSelectedPickerAsset(null);
-                        }
-                      }}
-                    >
-                      Select
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {libraryPickerOpen ? (
+        <CharacterReferenceAssetPicker
+          projectId={projectId}
+          currentAssetId={selectedPickerAsset?.id ?? referenceImage?.asset_id ?? null}
+          open={libraryPickerOpen}
+          busy={attachingRef}
+          error={attachError}
+          onCancel={() => {
+            setLibraryPickerOpen(false);
+            setSelectedPickerAsset(null);
+            setAttachError(null);
+          }}
+          onConfirm={(asset) => {
+            setSelectedPickerAsset(asset);
+            void handleAttachLibraryRef(asset);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

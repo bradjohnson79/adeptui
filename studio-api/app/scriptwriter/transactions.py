@@ -33,6 +33,8 @@ def commit_transaction(
     before_rev = doc.revision
     before_elements = [e.model_dump(mode="json") for e in doc.elements]
     before_sync = copy.deepcopy(doc.sceneSync)
+    before_html = doc.contentHtml
+    before_ctype = doc.contentType
     try:
         affected = mutate(doc) or []
     except ScriptwriterError:
@@ -60,6 +62,8 @@ def commit_transaction(
         payload={
             "beforeElements": before_elements,
             "beforeSceneSync": before_sync,
+            "beforeContentHtml": before_html,
+            "beforeContentType": before_ctype,
             **(extra_payload or {}),
         },
     )
@@ -83,6 +87,10 @@ def undo_last(db: Session, document_id: str) -> tuple[ScriptDocument, ScriptTran
         sync = tx.payload.get("beforeSceneSync")
         if isinstance(sync, dict):
             d.sceneSync = sync  # type: ignore[assignment]
+        before_html = tx.payload.get("beforeContentHtml")
+        before_ctype = tx.payload.get("beforeContentType")
+        d.contentHtml = before_html if isinstance(before_html, str) else None
+        d.contentType = before_ctype if before_ctype in ("html", "elements") else "elements"  # type: ignore[assignment]
         return [e.id for e in d.elements]
 
     # Mark original undone via a follow-up system tx and restore

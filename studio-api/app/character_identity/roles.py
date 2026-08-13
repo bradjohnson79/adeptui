@@ -28,6 +28,7 @@ OPTIONAL_CLOSEUP = (
 
 ADDITIONAL_ROLES = (
     "hero_identity",
+    "reference_image",
     "neutral_portrait",
     "expression_sheet",
     "pose_sheet",

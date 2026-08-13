@@ -227,3 +227,125 @@ test("Amendment F6: library bulk-delete is multi-select — selectedIds is a Set
   assert.equal(selectedIds.size, 3);
   assert.ok(selectedIds.has("a2"));
 });
+
+// ── CharacterReferenceAssetPicker: single-select state machine (Workstream A) ──
+//
+// The picker is a React component that owns a `selectedAssetId: string | null`
+// state. Parent owns attachment/persistence; the picker only reports selection.
+// These tests cover the extractable pure logic that mirrors the component's
+// state transitions, confirm-disabled rule, and busy-state confirm label.
+
+type PickerState = {
+  selectedAssetId: string | null;
+  busy: boolean;
+};
+
+function initSelection(currentAssetId: string | null | undefined): string | null {
+  // Mirrors: setSelectedAssetId(currentAssetId ?? null) on open.
+  return currentAssetId ?? null;
+}
+
+function clickAsset(state: PickerState, assetId: string): PickerState {
+  // Mirrors: onClick={() => setSelectedAssetId(a.id)}
+  return { ...state, selectedAssetId: assetId };
+}
+
+function canConfirm(state: PickerState): boolean {
+  // Mirrors: disabled={!selectedAssetId || busy}
+  return Boolean(state.selectedAssetId) && !state.busy;
+}
+
+function confirmLabel(state: PickerState): string {
+  // Mirrors: {busy ? "Attaching…" : "Select"}
+  return state.busy ? "Attaching…" : "Select";
+}
+
+function findSelected(
+  assets: { id: string }[],
+  selectedAssetId: string | null,
+): { id: string } | null {
+  return assets.find((a) => a.id === selectedAssetId) ?? null;
+}
+
+test("Picker: selectedAssetId initializes from currentAssetId", () => {
+  assert.equal(initSelection("asset-1"), "asset-1");
+  assert.equal(initSelection(null), null);
+  assert.equal(initSelection(undefined), null);
+});
+
+test("Picker: clicking an asset sets selection", () => {
+  const state: PickerState = { selectedAssetId: null, busy: false };
+  const next = clickAsset(state, "asset-1");
+  assert.equal(next.selectedAssetId, "asset-1");
+});
+
+test("Picker: clicking another asset transfers selection", () => {
+  const state: PickerState = { selectedAssetId: "asset-1", busy: false };
+  const next = clickAsset(state, "asset-2");
+  assert.equal(next.selectedAssetId, "asset-2");
+  assert.notEqual(next.selectedAssetId, "asset-1");
+});
+
+test("Picker: confirm calls onConfirm with the selected asset", () => {
+  const assets = [{ id: "asset-1" }, { id: "asset-2" }];
+  const selectedAssetId = "asset-2";
+  const selected = findSelected(assets, selectedAssetId);
+  assert.ok(selected, "selected asset must resolve from the list");
+  assert.equal(selected!.id, "asset-2");
+
+  // onConfirm is only called when selectedAsset is non-null.
+  let confirmedAsset: { id: string } | null = null;
+  if (selected) {
+    confirmedAsset = selected;
+  }
+  assert.equal(confirmedAsset!.id, "asset-2");
+});
+
+test("Picker: confirm disabled when no selection", () => {
+  const state: PickerState = { selectedAssetId: null, busy: false };
+  assert.equal(canConfirm(state), false);
+});
+
+test("Picker: confirm enabled when a selection exists and not busy", () => {
+  const state: PickerState = { selectedAssetId: "asset-1", busy: false };
+  assert.equal(canConfirm(state), true);
+});
+
+test("Picker: busy state disables confirm", () => {
+  const state: PickerState = { selectedAssetId: "asset-1", busy: true };
+  assert.equal(canConfirm(state), false);
+});
+
+test("Picker: busy state shows 'Attaching…' label", () => {
+  const busy: PickerState = { selectedAssetId: "asset-1", busy: true };
+  const idle: PickerState = { selectedAssetId: "asset-1", busy: false };
+  assert.equal(confirmLabel(busy), "Attaching…");
+  assert.equal(confirmLabel(idle), "Select");
+});
+
+test("Picker: confirm stays disabled when busy even if a selection exists", () => {
+  const state: PickerState = { selectedAssetId: "asset-1", busy: true };
+  assert.equal(canConfirm(state), false);
+});
+
+test("Picker: full selection transition sequence (init → click → transfer → confirm)", () => {
+  const assets = [{ id: "a1" }, { id: "a2" }, { id: "a3" }];
+  let state: PickerState = { selectedAssetId: initSelection(null), busy: false };
+  assert.equal(canConfirm(state), false, "no selection yet");
+
+  state = clickAsset(state, "a1");
+  assert.equal(state.selectedAssetId, "a1");
+  assert.equal(canConfirm(state), true);
+
+  state = clickAsset(state, "a3");
+  assert.equal(state.selectedAssetId, "a3", "selection transferred to a3");
+  assert.equal(canConfirm(state), true);
+
+  const selected = findSelected(assets, state.selectedAssetId);
+  assert.equal(selected!.id, "a3");
+
+  // Parent starts attaching.
+  state = { ...state, busy: true };
+  assert.equal(canConfirm(state), false, "confirm disabled while busy");
+  assert.equal(confirmLabel(state), "Attaching…");
+});

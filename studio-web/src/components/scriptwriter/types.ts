@@ -33,6 +33,8 @@ export type ScriptDocument = {
   format: string;
   draftStatus: string;
   elements: ScriptElement[];
+  contentHtml?: string | null;
+  contentType?: "html" | "elements";
   revision: number;
   productionNumbersLocked?: boolean;
   sceneSync?: Record<string, string>;

@@ -52,7 +52,17 @@ def diagnose_wiki(db: Session, project_id: str) -> dict[str, Any]:
 
 
 def rebuild_wiki_from_conversation(db: Session, project_id: str) -> dict[str, Any]:
-    """Scan conversation events → extract → dedupe → persist → verify → refresh."""
+    """Scan conversation events → extract → dedupe → persist → verify → refresh.
+
+    Story field guard (Workstream B): this function must NEVER write Wiki
+    Story Logline / Short Summary / Long Summary. Those fields are sourced
+    exclusively from the saved StoryEntry record (see
+    `story_entries.store` + `compile_story_summary`/`compile_story_page`).
+    Conversation mining here may add knowledge entries to other Wiki
+    sections (characters, worldAndSetting, creativeFoundation, etc.) but
+    never Story-record-only fields. The candidate `section_map` below
+    intentionally routes every category away from Logline/Short/Long.
+    """
     request_id = f"wiki_rebuild_{uuid4().hex[:12]}"
     project = db.get(Project, project_id)
     if not project:

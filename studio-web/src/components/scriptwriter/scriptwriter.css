@@ -74,50 +74,71 @@
   background: #f7f4ea;
   color: #111;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  padding: 72px 72px 72px 96px;
+  padding: 24px 72px 72px 96px;
+}
+
+.sw-richtext-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.75rem;
+  background: #efe9d6;
+  border-bottom: 1px solid #d8cfb4;
+  border-radius: 4px 4px 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.sw-rt-btn {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  background: transparent;
+  color: #222;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  min-width: 1.8rem;
+}
+.sw-rt-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.sw-rt-btn:hover:not(:disabled) { background: rgba(0,0,0,0.08); }
+.sw-rt-btn.is-active {
+  background: rgba(60,90,140,0.18);
+  border-color: rgba(60,90,140,0.6);
+  color: #1a3a6a;
+}
+.sw-rt-sep {
+  width: 1px;
+  height: 1.2rem;
+  background: #c9bf9f;
+  margin: 0 0.15rem;
 }
 
 .sw-page .ProseMirror {
   outline: none;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 12pt;
-  line-height: 1.15;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13pt;
+  line-height: 1.6;
   min-height: 700px;
 }
-
-.sw-page .sp-el--scene_heading {
-  text-transform: uppercase;
-  font-weight: 700;
-  margin: 1.2em 0 0.6em;
+.sw-page .ProseMirror p { margin: 0 0 0.6em 0; }
+.sw-page .ProseMirror h1 { font-size: 1.6rem; margin: 1em 0 0.4em; }
+.sw-page .ProseMirror h2 { font-size: 1.35rem; margin: 0.8em 0 0.35em; }
+.sw-page .ProseMirror ul,
+.sw-page .ProseMirror ol { margin: 0.3em 0 0.6em 1.6em; }
+.sw-page .ProseMirror blockquote {
+  border-left: 3px solid #b0a878;
+  padding-left: 0.9rem;
+  margin: 0.5em 0;
+  color: #444;
 }
-
-.sw-page .sp-el--action {
-  font-style: italic;
-  margin: 0.55em 0;
-}
-
-.sw-page .sp-el--character {
-  text-transform: uppercase;
-  font-weight: 700;
-  margin: 0.9em 0 0;
-  padding-left: 2.4in;
-}
-
-.sw-page .sp-el--parenthetical {
-  padding-left: 1.8in;
-  margin: 0;
-}
-
-.sw-page .sp-el--dialogue {
-  padding-left: 1.1in;
-  padding-right: 1.2in;
-  margin: 0 0 0.55em;
-}
-
-.sw-page .sp-el--transition {
-  text-transform: uppercase;
-  text-align: right;
-  margin: 0.9em 0;
+.sw-page .ProseMirror hr {
+  border: none;
+  border-top: 1px solid #c9bf9f;
+  margin: 1em 0;
 }
 
 .sw-studio.is-dialogue .sp-el--action {

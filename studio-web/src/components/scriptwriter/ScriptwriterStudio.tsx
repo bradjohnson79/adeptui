@@ -1,12 +1,22 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import Underline from "@tiptap/extension-underline";
+import TextAlign from "@tiptap/extension-text-align";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api";
 import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
-import { docJsonToElements, elementsToDocJson, ScreenplayKeys, ScreenplayParagraph } from "./screenplayExtension";
+import { IndentKeys, IndentParagraph } from "./richTextExtensions";
+import { elementsToHtml, isBlankHtml } from "./legacyHtml";
+import { sanitizeHtml } from "./sanitizeHtml";
 import type { SaveState, ScriptDocument, StudioView, WritingMode } from "./types";
 import "./scriptwriter.css";
+
+function resolveInitialHtml(doc: Partial<ScriptDocument> | null | undefined): string {
+  if (doc?.contentHtml && !isBlankHtml(doc.contentHtml)) return doc.contentHtml;
+  if (doc?.elements && doc.elements.length > 0) return elementsToHtml(doc.elements);
+  return "<p></p>";
+}
 
 type NavScene = {
   sceneHeadingId?: string;
@@ -90,10 +100,12 @@ export function ScriptwriterStudio({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ paragraph: false }),
-      ScreenplayParagraph,
-      ScreenplayKeys,
+      IndentParagraph,
+      Underline,
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      IndentKeys,
     ],
-    content: elementsToDocJson([]),
+    content: "<p></p>",
     onUpdate: ({ editor: ed }) => {
       if (hydrating.current || !latestDocIdRef.current) return;
       setSaveState("unsaved");
@@ -104,9 +116,9 @@ export function ScriptwriterStudio({
           if (!docId) return;
           try {
             setSaveState("saving");
-            const elements = docJsonToElements(ed.getJSON() as { content?: Array<Record<string, unknown>> });
+            const html = sanitizeHtml(ed.getHTML());
             const res = await api.scriptwriter.autosave(project.id, docId, {
-              elements,
+              html,
               expectedRevision: latestRevisionRef.current ?? undefined,
             });
             const d = res.document as unknown as ScriptDocument;
@@ -120,7 +132,7 @@ export function ScriptwriterStudio({
                 setDocTracked(d);
                 if (editor) {
                   hydrating.current = true;
-                  editor.commands.setContent(elementsToDocJson(d.elements || []));
+                  editor.commands.setContent(resolveInitialHtml(d));
                   hydrating.current = false;
                 }
                 setSaveState("save_failed");
@@ -144,7 +156,7 @@ export function ScriptwriterStudio({
       .then((d) => {
         if (!editor) return;
         hydrating.current = true;
-        editor.commands.setContent(elementsToDocJson(d.elements || []));
+        editor.commands.setContent(resolveInitialHtml(d));
         hydrating.current = false;
       })
       .catch((e: Error) => setMessage(e.message));
@@ -169,7 +181,7 @@ export function ScriptwriterStudio({
   const syncEditorFromDoc = (d: ScriptDocument) => {
     if (!editor) return;
     hydrating.current = true;
-    editor.commands.setContent(elementsToDocJson(d.elements || []));
+    editor.commands.setContent(resolveInitialHtml(d));
     hydrating.current = false;
   };
 
@@ -454,6 +466,24 @@ export function ScriptwriterStudio({
         <main className="sw-page-wrap" data-testid="scriptwriter-page">
           {view === "script" ? (
             <div className="sw-page" aria-label="Screenplay page">
+              <div className="sw-richtext-toolbar" data-testid="scriptwriter-richtext-toolbar">
+                <button type="button" className="sw-rt-btn" onClick={() => editor?.chain().focus().toggleBold().run()} disabled={!editor?.can().toggleBold()} title="Bold">B</button>
+                <button type="button" className="sw-rt-btn" onClick={() => editor?.chain().focus().toggleItalic().run()} disabled={!editor?.can().toggleItalic()} title="Italic">I</button>
+                <button type="button" className="sw-rt-btn" onClick={() => editor?.chain().focus().toggleUnderline().run()} disabled={!editor?.can().toggleUnderline()} title="Underline">U</button>
+                <span className="sw-rt-sep" />
+                <button type="button" className={editor?.isActive("heading", { level: 1 }) ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} title="Heading 1">H1</button>
+                <button type="button" className={editor?.isActive("heading", { level: 2 }) ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} title="Heading 2">H2</button>
+                <span className="sw-rt-sep" />
+                <button type="button" className={editor?.isActive("bulletList") ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().toggleBulletList().run()} title="Bullet list">•</button>
+                <button type="button" className={editor?.isActive("orderedList") ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().toggleOrderedList().run()} title="Numbered list">1.</button>
+                <span className="sw-rt-sep" />
+                <button type="button" className={editor?.isActive("textAlign", { textAlign: "left" }) ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title="Align left">⯇</button>
+                <button type="button" className={editor?.isActive("textAlign", { textAlign: "center" }) ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title="Align center">≣</button>
+                <button type="button" className={editor?.isActive("textAlign", { textAlign: "right" }) ? "sw-rt-btn is-active" : "sw-rt-btn"} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title="Align right">⯈</button>
+                <span className="sw-rt-sep" />
+                <button type="button" className="sw-rt-btn" onClick={() => editor?.chain().focus().undo().run()} disabled={!editor?.can().undo()} title="Undo">↶</button>
+                <button type="button" className="sw-rt-btn" onClick={() => editor?.chain().focus().redo().run()} disabled={!editor?.can().redo()} title="Redo">↷</button>
+              </div>
               <EditorContent editor={editor} data-testid="scriptwriter-editor" />
             </div>
           ) : null}

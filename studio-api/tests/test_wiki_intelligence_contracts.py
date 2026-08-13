@@ -161,7 +161,11 @@ def test_resolve_characters_still_accepts_legitimate_names():
 
 
 def test_story_compiler_no_hardcoded_narrative_frame():
-    """narrativeFrame must not contain hardcoded 'Current Co-Director' text."""
+    """narrativeFrame must not contain hardcoded 'Current Co-Director' text.
+
+    Workstream B: narrativeFrame derives from the saved Story record (when
+    any of Logline/Short/Long is populated), not from conversation.
+    """
     from app.codirector.wiki_intelligence.compiled.story_compiler import compile_story_summary
 
     result = compile_story_summary(
@@ -173,12 +177,20 @@ def test_story_compiler_no_hardcoded_narrative_frame():
     assert "Current" not in result.narrativeFrame, f"narrativeFrame contains hardcoded text: {result.narrativeFrame}"
     assert result.narrativeFrame == "", f"Expected empty narrativeFrame, got: {result.narrativeFrame}"
 
-    # With story content, narrativeFrame should be non-empty but reasonable
+    # With a populated Story record, narrativeFrame should be non-empty but
+    # reasonable (conversation-only input no longer drives it).
+    class _Record:
+        logline = "Maya Chen is a detective in Neo-Tokyo who discovers a conspiracy."
+        short_summary = ""
+        long_summary = ""
+        entry_type = "project_story"
+
     result2 = compile_story_summary(
-        story_texts=["Maya Chen is a detective in Neo-Tokyo who discovers a conspiracy."],
+        story_texts=[],
         open_questions=[],
         episode_summaries=[],
         source_ids=["test-1"],
+        story_record=_Record(),
     )
     assert "Current" not in result2.narrativeFrame
-    assert result2.narrativeFrame, "Expected non-empty narrativeFrame with story content"
+    assert result2.narrativeFrame, "Expected non-empty narrativeFrame with Story record content"

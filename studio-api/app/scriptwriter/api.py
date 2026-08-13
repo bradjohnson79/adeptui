@@ -22,7 +22,8 @@ def _err(exc: ScriptwriterError) -> HTTPException:
 
 
 class AutosaveBody(BaseModel):
-    elements: list[dict[str, Any]] = Field(default_factory=list)
+    elements: Optional[list[dict[str, Any]]] = None
+    html: Optional[str] = None
     expectedRevision: Optional[int] = None
 
 
@@ -124,7 +125,9 @@ def get_doc(project_id: str, document_id: str, db: Session = Depends(get_db)) ->
 @router.post("/documents/{document_id}/autosave")
 def autosave(project_id: str, document_id: str, body: AutosaveBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
-        return service.autosave_elements(db, document_id, body.elements, expected_revision=body.expectedRevision)
+        if body.html is not None:
+            return service.autosave_html(db, document_id, body.html, expected_revision=body.expectedRevision)
+        return service.autosave_elements(db, document_id, body.elements or [], expected_revision=body.expectedRevision)
     except ScriptwriterError as exc:
         raise _err(exc) from exc
 

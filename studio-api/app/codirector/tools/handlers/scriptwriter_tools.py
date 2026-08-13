@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from app.scriptwriter import service as sw
 from app.scriptwriter.continuity import analyze_continuity
+from app.scriptwriter.htmltext import document_text
 from app.scriptwriter.stats import compute_stats
 from app.scriptwriter.store import list_documents, load_document
 
@@ -45,15 +46,19 @@ def _load(ctx: ToolContext, args: dict[str, Any]):
 async def script_inspect(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     doc = _load(ctx, args)
     stats = compute_stats(doc)
+    text = document_text(doc)
     return {
         "documentId": doc.id,
         "title": doc.title,
         "revision": doc.revision,
+        "contentType": doc.contentType,
+        "contentPreview": text[:2000],
+        "contentWords": len(text.split()),
         "elementCount": len(doc.elements),
         "sceneCount": sum(1 for e in doc.elements if e.type == "scene_heading"),
         "stats": stats.model_dump(mode="json"),
         "productionNumbersLocked": doc.productionNumbersLocked,
-        "_summary": f"Script '{doc.title}' rev {doc.revision}.",
+        "_summary": f"Script '{doc.title}' rev {doc.revision} ({doc.contentType}).",
         "_evidence": [{"sourceType": "script", "sourceId": doc.id, "sourceName": doc.title, "repository": "scriptwriter"}],
     }
 
@@ -63,6 +68,16 @@ async def script_scene_context(ctx: ToolContext, args: dict[str, Any]) -> dict[s
     scene_id = str(args.get("sceneHeadingId") or "")
     block = sw._block_for_heading(doc.elements, scene_id)  # noqa: SLF001
     if not block:
+        if doc.contentType == "html" or not doc.elements:
+            text = document_text(doc)
+            return {
+                "documentId": doc.id,
+                "sceneHeadingId": scene_id or None,
+                "heading": None,
+                "fullText": text[:4000],
+                "syncStatus": "unlinked",
+                "_summary": "Rich-text script — scene-block context unavailable; returning full text.",
+            }
         raise CoDirectorError(TOOL_TARGET_NOT_FOUND, "Scene not found.", details={"sceneHeadingId": scene_id})
     return {
         "documentId": doc.id,
@@ -77,6 +92,16 @@ async def script_scene_context(ctx: ToolContext, args: dict[str, Any]) -> dict[s
 
 async def script_character_context(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     doc = _load(ctx, args)
+    if doc.contentType == "html" or not doc.elements:
+        text = document_text(doc)
+        return {
+            "documentId": doc.id,
+            "characterName": str(args.get("characterName") or "").strip() or None,
+            "dialogueLines": [],
+            "fullText": text[:4000],
+            "voiceGuidance": "Script is in rich-text mode; structured character extraction is unavailable. Use fullText for context.",
+            "_summary": "Rich-text script — returning full text for character context.",
+        }
     name = str(args.get("characterName") or "").strip().upper()
     lines = []
     current_char: Optional[str] = None
@@ -122,6 +147,19 @@ async def script_analyze_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[s
 
 async def script_analyze_dialogue(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     doc = _load(ctx, args)
+    if doc.contentType == "html" or not doc.elements:
+        text = document_text(doc)
+        words = len(text.split())
+        return {
+            "documentId": doc.id,
+            "dialogueCount": 0,
+            "avgWordsPerLine": 0.0,
+            "fullText": text[:4000],
+            "recommendations": [
+                "Rich-text script: structured dialogue analysis unavailable. Review fullText for voice and rhythm.",
+            ],
+            "_summary": "Rich-text script — dialogue analysis from full text.",
+        }
     dialogue = [e for e in doc.elements if e.type == "dialogue"]
     avg = (sum(len(e.text.split()) for e in dialogue) / len(dialogue)) if dialogue else 0
     return {
@@ -149,6 +187,18 @@ async def script_analyze_continuity(ctx: ToolContext, args: dict[str, Any]) -> d
 async def script_suggest_revision(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     doc = _load(ctx, args)
     element_id = str(args.get("elementId") or "")
+    if doc.contentType == "html" or not doc.elements:
+        text = document_text(doc)
+        return {
+            "documentId": doc.id,
+            "elementId": element_id or None,
+            "original": None,
+            "suggested": None,
+            "fullText": text[:4000],
+            "note": "Rich-text script: element-level suggestions unavailable. Review fullText and propose edits via script.propose_replace after review.",
+            "appliesAutomatically": False,
+            "_summary": "Rich-text script — returning full text for revision review.",
+        }
     el = next((e for e in doc.elements if e.id == element_id), None)
     if not el:
         raise CoDirectorError(TOOL_TARGET_NOT_FOUND, "Element not found.", details={"elementId": element_id})

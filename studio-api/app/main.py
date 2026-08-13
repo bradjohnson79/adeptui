@@ -215,6 +215,25 @@ async def lifespan(_: FastAPI):
                 )
     except Exception:
         logger.exception("hero_identity_rename migration failed")
+    try:
+        from .codirector.wiki_intelligence.cleanup_migration import (
+            run_cleanup_for_all_projects,
+        )
+        from .db import SessionLocal
+
+        with SessionLocal() as session:
+            cleanup_results = run_cleanup_for_all_projects(session)
+            total_cleaned = sum(
+                len(r.get("cleaned_fields", [])) for r in cleanup_results if isinstance(r, dict)
+            )
+            if total_cleaned:
+                logger.info(
+                    "wiki cleanup migration: cleaned %s polluted Wiki Story field(s) across %s project(s)",
+                    total_cleaned,
+                    len(cleanup_results),
+                )
+    except Exception:
+        logger.exception("wiki polluted-story cleanup migration failed")
     # Render jobs read the fal credential from the secret store only, so a key that lives
     # in .env has to be promoted before the queue starts consuming jobs.
     from .fal_env_bridge import bridge_fal_key_at_startup

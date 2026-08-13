@@ -182,9 +182,65 @@ async def edit_story_summary(
     if violations:
         summary = _apply_violations(summary, violations, source)
 
+    # Story-record pass-through: the LLM editor must NEVER overwrite
+    # Logline / Short / Long. Those fields come exclusively from the saved
+    # StoryEntry record. The editor may only refine themes, centralConflicts,
+    # narrativeFrame, unresolvedQuestions — never Story text. Read the
+    # authoritative record and pass its values through unchanged.
+    story_record = _fetch_story_record(db, project_id)
+    if story_record is not None:
+        logline = _record_field(story_record, "logline")
+        short = _record_field(story_record, "shortSummary")
+        long_summary = _record_field(story_record, "longSummary")
+        summary.logline = logline
+        summary.shortSummary = short
+        summary.longSummary = long_summary
+
     # Persist into compiled Wiki cache + bump revision.
     _persist(db, project_id, summary, source)
     return summary
+
+
+def _fetch_story_record(db: Session, project_id: str) -> Any:
+    """Return the authoritative StoryEntry row for the project, or None.
+
+    Reads from the existing `story_entries` store — never a parallel store.
+    """
+    try:
+        from ....story_entries.store import list_entries as _list_story_entries
+
+        rows = _list_story_entries(db, project_id)
+        if not rows:
+            return None
+        # Prefer a `project_story` entry; otherwise fall back to the first row.
+        for row in rows:
+            if getattr(row, "entry_type", "") == "project_story":
+                return row
+        return rows[0]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _record_field(story_record: Any, field: str) -> str:
+    """Read a Story field from a StoryEntry row/dict, normalized to "".
+
+    Accepts both SQLAlchemy row attributes (logline / short_summary /
+    long_summary) and dict shapes (logline / shortSummary / longSummary).
+    """
+    if story_record is None:
+        return ""
+    snake_map = {
+        "logline": "logline",
+        "shortSummary": "short_summary",
+        "longSummary": "long_summary",
+    }
+    if isinstance(story_record, dict):
+        value = story_record.get(field) or story_record.get(snake_map.get(field, ""))
+    else:
+        value = getattr(story_record, field, None)
+        if value is None:
+            value = getattr(story_record, snake_map.get(field, ""), None)
+    return str(value or "").strip()
 
 
 async def _run_provider(provider: Any, source: StorySummarySource) -> CompiledStorySummary:
