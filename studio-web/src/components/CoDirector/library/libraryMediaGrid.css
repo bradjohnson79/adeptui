@@ -5,10 +5,17 @@
 }
 
 .library-media-grid__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+  padding: 0.5rem 0;
+  margin: -0.5rem 0;
+  background: var(--codirector-surface, #141a1f);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .library-media-grid__search {

@@ -38,13 +38,6 @@ type ConfirmState =
   | { kind: "blocked"; blocked: BulkDeleteResult[] }
   | null;
 
-function formatDuration(seconds: number | null): string {
-  if (seconds == null || !isFinite(seconds) || seconds <= 0) return "";
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
 function getAssociationLabel(asset: LibraryAsset): string {
   const parts: string[] = [];
   if (asset.characterId) parts.push("Character");
@@ -108,22 +101,19 @@ function MediaCard({
   selected: boolean;
   onToggleSelect: () => void;
 }) {
-  const [duration, setDuration] = useState<number | null>(null);
   const previewUrl = getCardPreviewUrl(asset);
 
   const handleClick = () => {
-    if (selectMode && isImageAsset(asset)) {
+    if (selectMode) {
       onToggleSelect();
       return;
     }
     onOpen();
   };
 
-  const cardClass = `library-media-grid__card${selectMode && isImageAsset(asset) ? " is-selectable" : ""}${
-    selected ? " is-selected" : ""
-  }`;
+  const cardClass = `library-media-grid__card${selectMode ? " is-selectable" : ""}${selected ? " is-selected" : ""}`;
 
-  const showCheckbox = selectMode && isImageAsset(asset);
+  const showCheckbox = selectMode;
 
   const cardContent = (preview: React.ReactNode) => (
     <>
@@ -167,13 +157,7 @@ function MediaCard({
       >
         {cardContent(
           <>
-            <video
-              src={api.assetUrl(asset.id)}
-              preload="metadata"
-              muted
-              playsInline
-              onLoadedMetadata={(e) => setDuration((e.target as HTMLVideoElement).duration)}
-            />
+            <video src={api.assetUrl(asset.id)} preload="metadata" muted playsInline />
             <span className="library-media-grid__play-overlay">▶</span>
           </>,
         )}
@@ -191,7 +175,6 @@ function MediaCard({
         aria-pressed={showCheckbox ? selected : undefined}
       >
         {cardContent(<span className="library-media-grid__thumb-icon">♪</span>)}
-        <CardMeta asset={asset} duration={formatDuration(duration)} />
       </button>
     );
   }
@@ -294,7 +277,7 @@ function ConfirmDialog({
 
   if (state?.kind === "delete") {
     const n = state.ids.length;
-    const label = n === 1 ? "Delete 1 image?" : `Delete ${n} images?`;
+    const label = n === 1 ? "Delete 1 asset?" : `Delete ${n} assets?`;
     return createPortal(
       <div className="library-media-confirm" role="alertdialog" aria-modal="true" aria-label={label}>
         <button
@@ -308,8 +291,8 @@ function ConfirmDialog({
           <h3>{label}</h3>
           <p className="library-media-confirm__hint">
             {n === 1
-              ? "This will remove the image from this project's library."
-              : `This will remove ${n} images from this project's library.`}
+              ? "This will remove the asset from this project's library."
+              : `This will remove ${n} assets from this project's library.`}
           </p>
           <div className="library-media-confirm__actions">
             <button
@@ -328,7 +311,7 @@ function ConfirmDialog({
               disabled={busy}
               data-testid="library-bulk-delete-confirm"
             >
-              {n === 1 ? "Delete" : `Delete ${n} Images`}
+              {n === 1 ? "Delete" : `Delete ${n} Assets`}
             </button>
           </div>
         </div>
@@ -341,7 +324,7 @@ function ConfirmDialog({
     const blocked = state.blocked;
     const n = blocked.length;
     return createPortal(
-      <div className="library-media-confirm" role="alertdialog" aria-modal="true" aria-label="Some images are in use">
+      <div className="library-media-confirm" role="alertdialog" aria-modal="true" aria-label="Some assets are in use">
         <button
           type="button"
           className="library-media-preview__backdrop"
@@ -350,9 +333,9 @@ function ConfirmDialog({
           disabled={busy}
         />
         <div className="library-media-confirm__panel">
-          <h3>{n === 1 ? "1 image is in use" : `${n} images are in use`}</h3>
+          <h3>{n === 1 ? "1 asset is in use" : `${n} assets are in use`}</h3>
           <p className="library-media-confirm__hint">
-            These images are referenced by other parts of this project. Force delete removes them anyway.
+            These assets are referenced by other parts of this project. Force delete removes them anyway.
           </p>
           <ul className="library-media-confirm__list" data-testid="library-bulk-delete-blocked-list">
             {blocked.map((b) => (
@@ -466,10 +449,7 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
     [assets, filter],
   );
 
-  const selectableIds = useMemo(
-    () => filtered.filter((a) => isImageAsset(a)).map((a) => a.id),
-    [filtered],
-  );
+  const selectableIds = useMemo(() => filtered.map((a) => a.id), [filtered]);
 
   const toggleSelect = useCallback((assetId: string) => {
     setSelectedIds((prev) => {
