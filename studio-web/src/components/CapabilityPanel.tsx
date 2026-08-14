@@ -94,6 +94,9 @@ function actionTarget(blocker: CapabilityBlocker, projectId?: string): string | 
   });
   switch (blocker.recommendedAction) {
     case "open_source_manager":
+      return projectId
+        ? `/source-manager?projectId=${encodeURIComponent(projectId)}`
+        : "/source-manager";
     case "add_source_url":
       return setupTarget;
     case "install_comfyui_extensions":

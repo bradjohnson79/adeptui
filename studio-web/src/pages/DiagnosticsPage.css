@@ -14,3 +14,13 @@
 .diagnostics-card strong { font-size: 0.9rem; }
 .diagnostics-card span { font-size: 0.85rem; }
 .diagnostics-card .muted { font-size: 0.8rem; opacity: 0.6; }
+.diagnostics-error {
+  background: var(--panel);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-control);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-5);
+  color: var(--ink);
+}
+.diagnostics-error h2 { margin: 0 0 var(--space-2); color: var(--status-danger); }
+.diagnostics-error p { margin: 0; color: var(--muted); }

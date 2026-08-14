@@ -1,0 +1,114 @@
+.local-runtime-settings {
+  width: min(48rem, 100%);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5) var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  color: var(--ink);
+}
+
+.local-runtime-settings__card {
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.local-runtime-settings__card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.local-runtime-settings__card-title {
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.local-runtime-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.local-runtime-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.local-runtime-settings__advanced,
+.local-runtime-settings__diagnostics {
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-control);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-glass);
+}
+
+.local-runtime-settings__advanced-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.local-runtime-settings__message {
+  color: var(--ink);
+}
+
+.local-runtime-settings__raw {
+  color: var(--muted);
+  overflow: auto;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--ink);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: auto;
+  min-width: 1rem;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.local-runtime-settings .badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--border-glass);
+  font-size: var(--text-helper);
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.local-runtime-settings .badge--ok {
+  color: var(--status-positive);
+  border-color: var(--status-positive);
+}
+
+.local-runtime-settings .badge--warn {
+  color: var(--status-warning);
+  border-color: var(--status-warning);
+}
+
+.local-runtime-settings .badge--busy {
+  color: var(--status-info);
+  border-color: var(--status-info);
+}
+
+.local-runtime-settings .badge--off {
+  color: var(--muted);
+}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type RuntimeManagerPreferences, type RuntimeManagerStatus } from "../../api";
+import "./LocalRuntime.css";
 
 export function LocalRuntimeSettings() {
   const [status, setStatus] = useState<RuntimeManagerStatus | null>(null);

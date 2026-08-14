@@ -6276,3 +6276,19 @@ html[dir="rtl"] .director-timeline {
   opacity: 0.55;
   cursor: not-allowed;
 }
+/* maintenance/ui-sweep-20260814 - cover metadata contrast + centered error state */
+.project-cover-body .muted,
+.project-cover-body .scene-meta {
+  color: var(--ink);
+}
+
+.page.error-boundary-page {
+  min-height: min(70vh, 40rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--space-4);
+  max-width: 36rem;
+}

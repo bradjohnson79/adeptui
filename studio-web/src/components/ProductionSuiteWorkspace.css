@@ -1,0 +1,39 @@
+.m29-suite-page {
+  max-width: 52rem;
+}
+
+.m29-suite-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.m29-suite-tabs button {
+  border: 1px solid var(--border-glass);
+  color: var(--ink);
+  background: var(--btn-bg);
+}
+
+.m29-suite-tabs button.primary {
+  border-color: var(--border-glass-active);
+}
+
+.m29-suite-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  max-width: 52rem;
+}
+
+.m29-suite-form input {
+  flex: 1 1 16rem;
+  width: auto;
+  min-width: 12rem;
+  color: var(--ink);
+}
+
+.m29-suite-form input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}

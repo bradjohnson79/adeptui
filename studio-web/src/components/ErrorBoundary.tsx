@@ -18,7 +18,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.error) {
       return (
-        <div className="page" role="alert">
+        <div className="page error-boundary-page" role="alert">
           <h1>Something went wrong</h1>
           <p>The workspace hit an unexpected error. Your project data was not deleted.</p>
           <pre className="empty">{this.state.error.message}</pre>

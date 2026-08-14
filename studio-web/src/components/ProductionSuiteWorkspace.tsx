@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { StudioChrome } from "./dashboard/StudioChrome";
+import "./ProductionSuiteWorkspace.css";
 
 type Section =
   | "image"
@@ -137,7 +138,7 @@ export default function ProductionSuiteWorkspace() {
       <div className="page m29-suite-page">
       <h1 className="ds-type-h1">Production Suite</h1>
       <p className="ds-type-helper">M2.9 native production departments (flag-gated, executive-backed).</p>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <div className="row m29-suite-tabs">
         {active.map((s) => (
           <button
             key={s.id}
@@ -150,7 +151,7 @@ export default function ProductionSuiteWorkspace() {
           </button>
         ))}
       </div>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+      <div className="row m29-suite-form">
         <input
           data-testid="m29-project-id"
           placeholder="Project ID"

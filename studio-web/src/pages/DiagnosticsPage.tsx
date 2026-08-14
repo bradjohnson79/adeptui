@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "../runtime/apiBase";
+import { isDiagnosticsResult } from "./diagnosticsResult";
 import "./DiagnosticsPage.css";
 
 type PortInfo = {
@@ -48,30 +49,60 @@ type DiagnosticsResult = {
   classification: Classification;
 };
 
-function stateClass(state: string): string {
+function stateClass(state: string | undefined): string {
   if (state === "HEALTHY" || state === "ONLINE") return "state-ok";
-  if (state === "DEGRADED" || state === "DEGRADED" || state === "PROXY_TIMEOUT") return "state-warn";
+  if (state === "DEGRADED" || state === "PROXY_TIMEOUT") return "state-warn";
   return "state-error";
 }
 
 export function DiagnosticsPage() {
   const [result, setResult] = useState<DiagnosticsResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
   const runTrace = async () => {
     setRunning(true);
+    setError(null);
     try {
       const res = await fetch(apiUrl("/api/diagnostics/run"));
-      const data = await res.json();
-      setResult(data);
+      let data: unknown = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !isDiagnosticsResult(data)) {
+        setResult(null);
+        const statusHint = res.ok ? "unexpected response" : `HTTP ${res.status}`;
+        const message =
+          data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : data && typeof data === "object" && "message" in data && typeof (data as { message: unknown }).message === "string"
+              ? (data as { message: string }).message
+              : statusHint;
+        setError(`Diagnostics could not complete (${message}). The API did not return a full result.`);
+        return;
+      }
+      setResult(data as DiagnosticsResult);
     } catch (err) {
       console.error("Diagnostics trace failed", err);
+      setResult(null);
+      setError(err instanceof Error ? err.message : "Diagnostics trace failed.");
     } finally {
       setRunning(false);
     }
   };
 
   useEffect(() => { void runTrace(); }, []);
+
+  const faultDomain = result?.classification?.faultDomain;
+  const evidence = result?.classification?.evidence;
+  const confidence = result?.classification?.confidence;
+  const layers = result?.layers;
+  const apiDirect = layers?.apiDirect;
+  const proxy = layers?.proxy;
+  const comfy = layers?.providers?.comfyui;
+  const ports = layers?.ports;
 
   return (
     <div className="diagnostics-page">
@@ -95,48 +126,55 @@ export function DiagnosticsPage() {
         </div>
       </header>
 
+      {error && (
+        <section className="diagnostics-error" role="alert">
+          <h2>Diagnostics unavailable</h2>
+          <p>{error}</p>
+        </section>
+      )}
+
       {result && (
         <>
           <section className="diagnostics-classification">
-            <h2>Status: <span className={stateClass(result.classification.faultDomain)}>{result.classification.faultDomain}</span></h2>
-            <p className="muted">{result.classification.evidence}</p>
-            <p className="muted">Confidence: {result.classification.confidence} · {result.totalMs}ms total</p>
+            <h2>Status: <span className={stateClass(faultDomain)}>{faultDomain ?? "Unknown"}</span></h2>
+            <p className="muted">{evidence}</p>
+            <p className="muted">Confidence: {confidence} · {result.totalMs}ms total</p>
           </section>
 
           <section className="diagnostics-layers">
             <h3>Studio API</h3>
             <div className="diagnostics-grid">
-              <div className={`diagnostics-card ${result.layers.apiDirect.tcp.listening ? "state-ok" : "state-error"}`}>
+              <div className={`diagnostics-card ${apiDirect?.tcp?.listening ? "state-ok" : "state-error"}`}>
                 <strong>TCP :8758</strong>
-                <span>{result.layers.apiDirect.tcp.listening ? "Listening" : "Not listening"}</span>
-                <span className="muted">{result.layers.apiDirect.healthz.elapsedMs}ms</span>
+                <span>{apiDirect?.tcp?.listening ? "Listening" : "Not listening"}</span>
+                <span className="muted">{apiDirect?.healthz?.elapsedMs}ms</span>
               </div>
-              <div className={`diagnostics-card ${result.layers.apiDirect.healthz.status === 200 ? "state-ok" : "state-error"}`}>
+              <div className={`diagnostics-card ${apiDirect?.healthz?.status === 200 ? "state-ok" : "state-error"}`}>
                 <strong>/healthz</strong>
-                <span>{result.layers.apiDirect.healthz.status ?? "—"}</span>
-                <span className="muted">{result.layers.apiDirect.healthz.elapsedMs}ms</span>
+                <span>{apiDirect?.healthz?.status ?? "—"}</span>
+                <span className="muted">{apiDirect?.healthz?.elapsedMs}ms</span>
               </div>
-              <div className={`diagnostics-card ${result.layers.apiDirect.health.status === 200 ? "state-ok" : "state-warn"}`}>
+              <div className={`diagnostics-card ${apiDirect?.health?.status === 200 ? "state-ok" : "state-warn"}`}>
                 <strong>/api/health</strong>
-                <span>{result.layers.apiDirect.health.status ?? "—"}</span>
-                <span className="muted">{result.layers.apiDirect.health.elapsedMs}ms</span>
+                <span>{apiDirect?.health?.status ?? "—"}</span>
+                <span className="muted">{apiDirect?.health?.elapsedMs}ms</span>
               </div>
             </div>
           </section>
 
-          {result.layers.proxy.healthz.status !== null && (
+          {proxy?.healthz?.status !== null && proxy?.healthz?.status !== undefined && (
             <section className="diagnostics-layers">
               <h3>Proxy (8760)</h3>
               <div className="diagnostics-grid">
-                <div className={`diagnostics-card ${result.layers.proxy.healthz.status === 200 ? "state-ok" : "state-error"}`}>
+                <div className={`diagnostics-card ${proxy?.healthz?.status === 200 ? "state-ok" : "state-error"}`}>
                   <strong>/healthz (proxied)</strong>
-                  <span>{result.layers.proxy.healthz.status ?? "—"}</span>
-                  <span className="muted">{result.layers.proxy.healthz.elapsedMs}ms</span>
+                  <span>{proxy?.healthz?.status ?? "—"}</span>
+                  <span className="muted">{proxy?.healthz?.elapsedMs}ms</span>
                 </div>
-                <div className={`diagnostics-card ${result.layers.proxy.health.status === 200 ? "state-ok" : "state-warn"}`}>
+                <div className={`diagnostics-card ${proxy?.health?.status === 200 ? "state-ok" : "state-warn"}`}>
                   <strong>/api/health (proxied)</strong>
-                  <span>{result.layers.proxy.health.status ?? "—"}</span>
-                  <span className="muted">{result.layers.proxy.health.elapsedMs}ms</span>
+                  <span>{proxy?.health?.status ?? "—"}</span>
+                  <span className="muted">{proxy?.health?.elapsedMs}ms</span>
                 </div>
               </div>
             </section>
@@ -145,11 +183,11 @@ export function DiagnosticsPage() {
           <section className="diagnostics-layers">
             <h3>Providers</h3>
             <div className="diagnostics-grid">
-              <div className={`diagnostics-card ${result.layers.providers.comfyui.state === "ONLINE" ? "state-ok" : "state-error"}`}>
+              <div className={`diagnostics-card ${comfy?.state === "ONLINE" ? "state-ok" : "state-error"}`}>
                 <strong>ComfyUI</strong>
-                <span>{result.layers.providers.comfyui.state}</span>
-                <span className="muted">:{result.layers.providers.comfyui.port}</span>
-                {result.layers.providers.comfyui.error && <span className="muted">{result.layers.providers.comfyui.error}</span>}
+                <span>{comfy?.state}</span>
+                <span className="muted">:{comfy?.port}</span>
+                {comfy?.error && <span className="muted">{comfy.error}</span>}
               </div>
             </div>
           </section>
@@ -157,7 +195,7 @@ export function DiagnosticsPage() {
           <section className="diagnostics-layers">
             <h3>Ports</h3>
             <div className="diagnostics-grid">
-              {result.layers.ports.map((p) => (
+              {(ports ?? []).map((p) => (
                 <div key={p.port} className={`diagnostics-card ${p.listening ? "state-ok" : "state-error"}`}>
                   <strong>:{p.port}</strong>
                   <span>{p.processName || "—"}</span>

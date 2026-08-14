@@ -114,7 +114,7 @@ export function AddCustomCapability({ onRegistered }: { onRegistered?: () => voi
       <ol className="setup-nav-strip" aria-label="Install stages">
         {STAGES.map((label, i) => (
           <li key={label} style={{ opacity: i === stage ? 1 : 0.55 }}>
-            {i + 1}. {label}
+            {label}
           </li>
         ))}
       </ol>
