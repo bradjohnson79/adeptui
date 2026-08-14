@@ -125,6 +125,34 @@ class SendShotToTimelineBody(BaseModel):
     batch_block_id: str | None = None
 
 
+class CinematographerCommandBody(BaseModel):
+    camera_id: str
+    operation_id: str
+    character_id: str = ""
+    prop_id: str = ""
+    shot_id: str = ""
+    user_prompt_delta: str | None = None
+
+
+class CinematographerCameraBody(BaseModel):
+    camera_id: str
+    shot_id: str = ""
+
+
+class CinematographerDeltaBody(BaseModel):
+    camera_id: str
+    delta: str = ""
+
+
+class CinematographerGenerateBody(BaseModel):
+    camera_id: str
+    shot_id: str
+    local_enabled: bool = True
+    api_enabled: bool = False
+    local_family: str = ""
+    api_model: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -521,3 +549,174 @@ def api_send_shot_to_timeline(
             {"error": error, "message": result.get("message") or "Timeline handoff failed."},
         )
     return {"timeline": result, "clips_sent": result.get("clips_sent") or 1}
+
+
+@router.get("/projects/{project_id}/scenes/{scene_id}/cinematographer")
+def api_get_cinematographer(
+    project_id: str, scene_id: str, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import hydrate_cinematographer
+
+    try:
+        pack = hydrate_cinematographer(db, project_id, scene_id=scene_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/command")
+def api_cinematographer_command(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerCommandBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import apply_cinematographer_command
+
+    try:
+        pack = apply_cinematographer_command(
+            db,
+            project_id,
+            scene_id=scene_id,
+            camera_id=body.camera_id,
+            operation_id=body.operation_id,
+            character_id=body.character_id,
+            prop_id=body.prop_id,
+            shot_id=body.shot_id,
+            user_prompt_delta=body.user_prompt_delta,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/undo")
+def api_cinematographer_undo(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerCameraBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import undo_cinematographer
+
+    try:
+        pack = undo_cinematographer(
+            db, project_id, scene_id=scene_id, camera_id=body.camera_id, shot_id=body.shot_id
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/reset")
+def api_cinematographer_reset(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerCameraBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import reset_cinematographer
+
+    try:
+        pack = reset_cinematographer(
+            db, project_id, scene_id=scene_id, camera_id=body.camera_id, shot_id=body.shot_id
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/lock")
+def api_cinematographer_lock(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerCameraBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import lock_cinematographer
+
+    try:
+        pack = lock_cinematographer(
+            db, project_id, scene_id=scene_id, camera_id=body.camera_id, shot_id=body.shot_id
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/prompt-delta")
+def api_cinematographer_delta(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerDeltaBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import set_prompt_delta
+
+    try:
+        pack = set_prompt_delta(
+            db, project_id, scene_id=scene_id, camera_id=body.camera_id, delta=body.delta
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/preview")
+def api_cinematographer_preview(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerGenerateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import generate_camera_preview
+
+    try:
+        pack, shot = generate_camera_preview(
+            db,
+            project_id,
+            scene_id=scene_id,
+            camera_id=body.camera_id,
+            shot_id=body.shot_id,
+            local_enabled=body.local_enabled,
+            api_enabled=body.api_enabled,
+            local_family=body.local_family,
+            api_model=body.api_model,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump(), "shot": shot.model_dump()}
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/cinematographer/final")
+def api_cinematographer_final(
+    project_id: str,
+    scene_id: str,
+    body: CinematographerGenerateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .cinematographer_service import generate_camera_final
+
+    try:
+        pack, shot = generate_camera_final(
+            db,
+            project_id,
+            scene_id=scene_id,
+            camera_id=body.camera_id,
+            shot_id=body.shot_id,
+            local_enabled=body.local_enabled,
+            api_enabled=body.api_enabled,
+            local_family=body.local_family,
+            api_model=body.api_model,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"cinematographer": pack.model_dump(), "shot": shot.model_dump()}

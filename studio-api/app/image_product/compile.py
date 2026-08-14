@@ -235,6 +235,18 @@ def compile_image_request(
         style=visual_style_for_routing,
     )
     family = recommendation["executionFamily"]
+    if body.get("lockModelFamily"):
+        locked = str(body.get("modelFamilyPreference") or body.get("model") or "").strip().lower()
+        if locked in {"qwen-image-2512", "qwen_image_2512"}:
+            locked = "qwen2512"
+        if locked:
+            family = locked
+            recommendation = {
+                **recommendation,
+                "executionFamily": family,
+                "fallbackApplied": False,
+                "lockModelFamily": True,
+            }
 
     aspect = str(body.get("aspectRatio") or body.get("aspect") or "1:1")
     resolution = str(body.get("resolution") or "1080p")
@@ -301,12 +313,14 @@ def compile_image_request(
         "image.generate" if intent.operation == "image.storyboard_frame" else intent.operation
     )
     force_key = body.get("forceWorkflowKey") if body.get("allow_force_workflow_key") else None
+    purpose = str(body.get("purpose") or "")
+    requested_draft = bool(body.get("allowDraft") or body.get("allow_draft")) or purpose == "scene_shot_preview"
     try:
         contract = resolve_image_workflow(
             op_for_resolve if not force_key else "txt2img",
             engine=family,
             model_family=family,
-            allow_draft=False,
+            allow_draft=requested_draft,
             force_workflow_key=force_key,
             present_inputs={
                 "prompt": intent.prompt,
@@ -314,7 +328,7 @@ def compile_image_request(
             },
             provider_preference=intent.providerPreference,
         )
-        allow_draft = False
+        allow_draft = requested_draft
         if force_key:
             forced_family = str(
                 getattr(contract, "model_family", None) or str(force_key).split(".", 1)[0]
@@ -326,6 +340,10 @@ def compile_image_request(
         if force_key:
             # Character Sheet / explicit workflow pin: fail visibly. Never silently
             # substitute Z-Image for Illustrious, Qwen, or any forced family.
+            raise
+        if requested_draft or purpose == "scene_shot_preview":
+            raise
+        if body.get("lockModelFamily"):
             raise
         purpose = str(body.get("purpose") or "")
         creative_ctx = body.get("creativeContext") or {}

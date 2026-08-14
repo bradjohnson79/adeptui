@@ -21,7 +21,7 @@ function cand(partial: Partial<SceneShotCandidate>): SceneShotCandidate {
 }
 
 describe("Scene Creator contracts", () => {
-  it("treats four candidates as one shot progress, not four shots", () => {
+    it("treats four candidates as one shot progress, not four shots", () => {
     const candidates = [0, 1, 2, 3].map((index) =>
       cand({ id: `c${index}`, index, status: index < 2 ? "complete" : "generating" }),
     );
@@ -29,6 +29,13 @@ describe("Scene Creator contracts", () => {
     expect(progress.total).toBe(4);
     expect(progress.done).toBe(2);
     expect(progress.percent).toBe(50);
+  });
+
+  it("reports honest progress for a single production candidate", () => {
+    const progress = candidateProgress([cand({ status: "complete", asset_id: "a1" })]);
+    expect(progress.total).toBe(1);
+    expect(progress.done).toBe(1);
+    expect(progress.percent).toBe(100);
   });
 
   it("keeps cinematic HOW defaults off the Spatial Map WHERE fields", () => {
@@ -60,6 +67,9 @@ describe("Scene Creator contracts", () => {
     const express = src.slice(src.indexOf("function ExpressLayout"), src.indexOf("function StandardLayout"));
     expect(express).toContain("RetakeBlock");
     expect(express).toContain("{sc.approved ? <RetakeBlock");
+    expect(express).toContain("CinematographerPanel");
+    expect(src).toContain("Final Quality Render");
+    expect(src).not.toContain("function CameraBlock");
   });
 
   it("wires placed project props onto the shot as toggle chips", async () => {

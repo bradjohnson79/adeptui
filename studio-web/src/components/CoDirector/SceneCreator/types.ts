@@ -92,6 +92,7 @@ export type ResolvedCharacter = {
   character_id: string;
   name: string;
   position_label: string;
+  slot_index?: number | null;
 };
 
 /** A prop resolved from the spatial map, available as #tag. */
@@ -103,6 +104,10 @@ export type ResolvedProp = {
   approved_asset_id?: string | null;
   library_asset_id?: string | null;
   description?: string;
+  slot_index?: number | null;
+  placementMode?: string;
+  attachedCharacterId?: string | null;
+  relationship?: string | null;
 };
 
 /** One shot suggestion from Co-Director. */
@@ -161,6 +166,10 @@ export type SceneShotCandidate = {
   take_label: string;
   error?: string;
   created_at?: string;
+  camera_state_version?: number | null;
+  camera_state_hash?: string;
+  source_camera_id?: string;
+  quality_profile?: string;
 };
 
 export type SceneShot = {
@@ -193,6 +202,9 @@ export type SceneCreatorCameraOption = {
   yawDegrees?: number | null;
   lensMm?: number | null;
   hero?: boolean;
+  visible?: boolean;
+  gridColumn?: number;
+  gridRow?: number;
 };
 
 export type SceneCreatorWorkspace = {
@@ -214,8 +226,14 @@ export type SceneCreatorWorkspace = {
   characters: ResolvedCharacter[];
   props: ResolvedProp[];
   api_generation_available: boolean;
+  api_models?: { id?: string; modelId?: string; label?: string; name?: string; providerId?: string }[];
   local_families: { id: string; label: string; executable?: boolean; supportsReferences?: boolean }[];
   has_reference: boolean;
+  cinematographer?: import("./cinematographer/cameraCommandEngine").SceneCinematographerPack | null;
+  preview_capabilities?: {
+    local?: { status?: string; label?: string };
+    api?: { status?: string; label?: string; discovered?: boolean; noneLabel?: string };
+  } | null;
 };
 
 export const DEFAULT_CINEMATIC: CinematicShotControls = {

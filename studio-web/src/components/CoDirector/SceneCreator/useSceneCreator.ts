@@ -11,6 +11,10 @@ import type {
   SceneShot,
 } from "./types";
 import { DEFAULT_CINEMATIC } from "./types";
+import {
+  validateCameraCommand,
+  type SceneCinematographerPack,
+} from "./cinematographer/cameraCommandEngine";
 
 export type SceneCreatorVariant = "express" | "standard";
 
@@ -34,6 +38,14 @@ export function useSceneCreator(projectId: string) {
   const [propIds, setPropIds] = useState<string[]>([]);
   const [localEnabled, setLocalEnabled] = useState(true);
   const [localFamily, setLocalFamily] = useState("");
+  const [apiEnabled, setApiEnabled] = useState(false);
+  const [apiModel, setApiModel] = useState("");
+  const [cinematographer, setCinematographer] = useState<SceneCinematographerPack | null>(null);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
+  const [cineOperation, setCineOperation] = useState("extreme_close_up");
+  const [cineCharacterId, setCineCharacterId] = useState("");
+  const [cinePropId, setCinePropId] = useState("");
+  const [cineInstruction, setCineInstruction] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +89,15 @@ export function useSceneCreator(projectId: string) {
       setSceneId(data.selected_scene_id || "");
       const placed = (data.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id));
       applyShot(data.selected_shot, placed);
+      if (data.cinematographer) {
+        setCinematographer(data.cinematographer);
+        const selected = data.cinematographer.selected_camera_id || data.cinematographer.cameras?.[0]?.cameraId || "";
+        setSelectedCameraId(selected);
+        const rec = (data.cinematographer.cameras || []).find((c) => c.cameraId === selected);
+        if (rec) {
+          setCineInstruction(rec.userCameraPromptDelta ? `${rec.displayInstruction}\n${rec.userCameraPromptDelta}`.trim() : rec.displayInstruction || "");
+        }
+      }
       return data;
     },
     [applyShot, projectId, sceneId, sheetId, shot?.id],
@@ -105,17 +126,29 @@ export function useSceneCreator(projectId: string) {
       pollRef.current = setInterval(() => {
         void sceneCreatorApi
           .getShot(projectId, shotId)
-          .then((res) => {
+          .then(async (res) => {
             applyShot(res.shot, (workspace?.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id)));
-            const pending = (res.shot.candidates || []).some(
+            const pendingShot = (res.shot.candidates || []).some(
               (c) => c.status === "queued" || c.status === "generating",
             );
-            if (!pending) stopPoll();
+            let pendingPreview = false;
+            if (sceneId) {
+              try {
+                const cine = await sceneCreatorApi.cinematographer(projectId, sceneId);
+                setCinematographer(cine.cinematographer);
+                pendingPreview = (cine.cinematographer.cameras || []).some(
+                  (c) => c.lineage?.previewStatus === "generating",
+                );
+              } catch {
+                /* ignore */
+              }
+            }
+            if (!pendingShot && !pendingPreview) stopPoll();
           })
           .catch(() => undefined);
       }, 2000);
     },
-    [applyShot, projectId, stopPoll, workspace?.props],
+    [applyShot, projectId, sceneId, stopPoll, workspace?.props],
   );
 
   const persistShot = useCallback(async () => {
@@ -130,39 +163,41 @@ export function useSceneCreator(projectId: string) {
       camera: camera as unknown as Record<string, unknown>,
       generator: {
         local_enabled: localEnabled,
-        api_enabled: false,
+        api_enabled: apiEnabled,
         local_family: localFamily,
+        api_model: apiModel,
       },
     });
     applyShot(res.shot);
     return res.shot;
-  }, [applyShot, camera, characterIds, intent, localEnabled, localFamily, projectId, propIds, sceneId, sheetId, shot?.id]);
+  }, [applyShot, apiEnabled, apiModel, camera, characterIds, intent, localEnabled, localFamily, projectId, propIds, sceneId, sheetId, shot?.id]);
 
-  const generate = useCallback(async () => {
-    if (shot?.approved_candidate_id) {
-      setError("Use Re-Take to change an approved look.");
-      return;
+  const applyPack = useCallback((pack: SceneCinematographerPack, cameraId?: string) => {
+    setCinematographer(pack);
+    const nextId = cameraId || pack.selected_camera_id || selectedCameraId || pack.cameras?.[0]?.cameraId || "";
+    setSelectedCameraId(nextId);
+    const rec = (pack.cameras || []).find((c) => c.cameraId === nextId);
+    if (rec) {
+      const structured = rec.displayInstruction || "";
+      const delta = rec.userCameraPromptDelta || "";
+      setCineInstruction(delta ? `${structured}\n${delta}`.trim() : structured);
+      const cineSize = rec.current?.shotType || "medium";
+      setCamera((prev) => ({
+        ...prev,
+        camera_id: rec.cameraId,
+        camera_slot: rec.cameraSlot,
+        label: rec.label || `C${rec.cameraSlot + 1}`,
+        orientation: rec.current?.orientation || prev.orientation,
+        fov_preset: rec.current?.fovPreset || prev.fov_preset,
+        yaw_degrees: rec.current?.yawDegrees ?? prev.yaw_degrees,
+        lens_mm: rec.current?.lensMm ?? prev.lens_mm,
+        cinematic: {
+          ...prev.cinematic,
+          shot_size: cineSize.includes("close") ? "close_up" : cineSize.includes("wide") ? "wide" : prev.cinematic.shot_size,
+        },
+      }));
     }
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const current = await persistShot();
-      const res = await sceneCreatorApi.generateShot(projectId, current.id, {
-        local_enabled: localEnabled,
-        api_enabled: false,
-        local_family: localFamily,
-        candidate_count: 4,
-      });
-      applyShot(res.shot);
-      startPoll(res.shot.id);
-      setNotice("Generating four looks for this shot.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [applyShot, localEnabled, localFamily, persistShot, projectId, shot?.approved_candidate_id, startPoll]);
+  }, [selectedCameraId]);
 
   const approve = useCallback(
     async (candidateId: string) => {
@@ -192,8 +227,9 @@ export function useSceneCreator(projectId: string) {
       const res = await sceneCreatorApi.retakeShot(projectId, current.id, {
         correction,
         local_enabled: localEnabled,
-        api_enabled: false,
+        api_enabled: apiEnabled,
         local_family: localFamily,
+        api_model: apiModel,
       });
       applyShot(res.shot);
       startPoll(res.shot.id);
@@ -204,7 +240,7 @@ export function useSceneCreator(projectId: string) {
     } finally {
       setBusy(false);
     }
-  }, [applyShot, correction, localEnabled, localFamily, persistShot, projectId, shot, startPoll]);
+  }, [applyShot, apiEnabled, apiModel, correction, localEnabled, localFamily, persistShot, projectId, shot, startPoll]);
 
   const sendToTimeline = useCallback(async () => {
     if (!shot) return;
@@ -290,9 +326,174 @@ export function useSceneCreator(projectId: string) {
     setPropIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }, []);
 
-  const apiAvailable = workspace?.api_generation_available === true;
+  const selectCinematographerCamera = useCallback((cameraId: string) => {
+    setSelectedCameraId(cameraId);
+    const rec = (cinematographer?.cameras || []).find((c) => c.cameraId === cameraId);
+    if (rec) {
+      const structured = rec.displayInstruction || "";
+      const delta = rec.userCameraPromptDelta || "";
+      setCineInstruction(delta ? `${structured}\n${delta}`.trim() : structured);
+    }
+  }, [cinematographer]);
+
+  const enterCameraCommand = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    const check = validateCameraCommand(cineOperation, cineCharacterId, cinePropId);
+    if (!check.ok) {
+      setError(check.error);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await sceneCreatorApi.cinematographerCommand(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        operation_id: cineOperation,
+        character_id: cineCharacterId,
+        prop_id: cinePropId,
+        shot_id: shot?.id,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+      setNotice("Camera updated. Generate a preview when you want to see it.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPack, cineCharacterId, cineOperation, cinePropId, projectId, sceneId, selectedCameraId, shot?.id]);
+
+  const undoCamera = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await sceneCreatorApi.cinematographerUndo(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        shot_id: shot?.id,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPack, projectId, sceneId, selectedCameraId, shot?.id]);
+
+  const resetCamera = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await sceneCreatorApi.cinematographerReset(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        shot_id: shot?.id,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+      setNotice("Camera restored to the Spatial Map starting position.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPack, projectId, sceneId, selectedCameraId, shot?.id]);
+
+  const lockCamera = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await sceneCreatorApi.cinematographerLock(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        shot_id: shot?.id,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+      setNotice("Camera locked. Final Quality Render will use this setup.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPack, projectId, sceneId, selectedCameraId, shot?.id]);
+
+  const saveCineDelta = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    const rec = (cinematographer?.cameras || []).find((c) => c.cameraId === selectedCameraId);
+    const structured = rec?.displayInstruction || "";
+    let delta = cineInstruction;
+    if (structured && delta.startsWith(structured)) {
+      delta = delta.slice(structured.length).trim();
+    }
+    try {
+      const res = await sceneCreatorApi.cinematographerDelta(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        delta,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+    } catch {
+      /* keep local text */
+    }
+  }, [applyPack, cineInstruction, cinematographer, projectId, sceneId, selectedCameraId]);
+
+  const previewCamera = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const current = await persistShot();
+      const res = await sceneCreatorApi.cinematographerPreview(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        shot_id: current.id,
+        local_enabled: localEnabled,
+        api_enabled: apiEnabled,
+        local_family: localFamily,
+        api_model: apiModel,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+      applyShot(res.shot);
+      startPoll(res.shot.id);
+      setNotice("Preview started. This is a draft look, not the final image.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, startPoll]);
+
+  const finalRender = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    if (shot?.approved_candidate_id) {
+      setError("Use Re-Take to change an approved look.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const current = await persistShot();
+      const res = await sceneCreatorApi.cinematographerFinal(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        shot_id: current.id,
+        local_enabled: localEnabled,
+        api_enabled: apiEnabled,
+        local_family: localFamily,
+        api_model: apiModel,
+      });
+      applyPack(res.cinematographer, selectedCameraId);
+      applyShot(res.shot);
+      startPoll(res.shot.id);
+      setNotice("Final quality render started.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, shot?.approved_candidate_id, startPoll]);
+
+  const apiAvailable = workspace?.api_generation_available === true || apiEnabled;
   const approved = shot?.candidates.find((c) => c.id === shot.approved_candidate_id) || null;
-  const generating = (shot?.candidates || []).some((c) => c.status === "queued" || c.status === "generating");
+  const generating = (shot?.candidates || []).some((c) => c.status === "queued" || c.status === "generating")
+    || (cinematographer?.cameras || []).some((c) => c.lineage?.previewStatus === "generating");
 
   return {
     workspace,
@@ -308,6 +509,20 @@ export function useSceneCreator(projectId: string) {
     setLocalEnabled,
     localFamily,
     setLocalFamily,
+    apiEnabled,
+    setApiEnabled,
+    apiModel,
+    setApiModel,
+    cinematographer,
+    selectedCameraId,
+    cineOperation,
+    setCineOperation,
+    cineCharacterId,
+    setCineCharacterId,
+    cinePropId,
+    setCinePropId,
+    cineInstruction,
+    setCineInstruction,
     loading,
     busy,
     error,
@@ -318,7 +533,7 @@ export function useSceneCreator(projectId: string) {
     approved,
     generating,
     refresh,
-    generate,
+    generate: finalRender,
     approve,
     retake,
     sendToTimeline,
@@ -331,5 +546,13 @@ export function useSceneCreator(projectId: string) {
     toggleCharacter,
     toggleProp,
     persistShot,
+    selectCinematographerCamera,
+    enterCameraCommand,
+    undoCamera,
+    resetCamera,
+    lockCamera,
+    saveCineDelta,
+    previewCamera,
+    finalRender,
   };
 }

@@ -15,6 +15,7 @@ import type {
   SceneShot,
   SendToTimelineResponse,
 } from "./types";
+import type { SceneCinematographerPack } from "./cinematographer/cameraCommandEngine";
 
 export type CreateBatchInput = {
   ers_package_id: string;
@@ -97,4 +98,50 @@ export const sceneCreatorApi = {
     body?: { batch_block_id?: string },
   ): Promise<{ timeline: Record<string, unknown>; clips_sent: number }> =>
     api.sceneCreator.sendShotToTimeline(projectId, shotId, body),
+  cinematographer: (projectId: string, sceneId: string) =>
+    api.sceneCreator.cinematographer(projectId, sceneId),
+  cinematographerCommand: (
+    projectId: string,
+    sceneId: string,
+    body: {
+      camera_id: string;
+      operation_id: string;
+      character_id?: string;
+      prop_id?: string;
+      shot_id?: string;
+    },
+  ): Promise<{ cinematographer: SceneCinematographerPack }> =>
+    api.sceneCreator.cinematographerCommand(projectId, sceneId, body),
+  cinematographerUndo: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+    api.sceneCreator.cinematographerUndo(projectId, sceneId, body),
+  cinematographerReset: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+    api.sceneCreator.cinematographerReset(projectId, sceneId, body),
+  cinematographerLock: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+    api.sceneCreator.cinematographerLock(projectId, sceneId, body),
+  cinematographerDelta: (projectId: string, sceneId: string, body: { camera_id: string; delta: string }) =>
+    api.sceneCreator.cinematographerDelta(projectId, sceneId, body),
+  cinematographerPreview: (
+    projectId: string,
+    sceneId: string,
+    body: {
+      camera_id: string;
+      shot_id: string;
+      local_enabled: boolean;
+      api_enabled: boolean;
+      local_family?: string;
+      api_model?: string;
+    },
+  ) => api.sceneCreator.cinematographerPreview(projectId, sceneId, body),
+  cinematographerFinal: (
+    projectId: string,
+    sceneId: string,
+    body: {
+      camera_id: string;
+      shot_id: string;
+      local_enabled: boolean;
+      api_enabled: boolean;
+      local_family?: string;
+      api_model?: string;
+    },
+  ) => api.sceneCreator.cinematographerFinal(projectId, sceneId, body),
 };

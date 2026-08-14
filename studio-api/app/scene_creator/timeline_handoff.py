@@ -140,6 +140,10 @@ def send_approved_shot_to_timeline(
             "source_scene": scene_id,
             "approved_take": True,
             "role": "start",
+            "sourceCameraId": getattr(candidate, "source_camera_id", "")
+            or getattr(getattr(shot, "camera", None), "camera_id", "")
+            or "",
+            "cameraStateVersion": getattr(candidate, "camera_state_version", None),
         }
     ]
     result = export_to_timeline(

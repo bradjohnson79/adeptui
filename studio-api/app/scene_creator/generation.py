@@ -79,7 +79,7 @@ def build_candidate_plans(
     if not local_enabled and not api_enabled:
         raise ValueError("Enable a Local or Cloud generator to create scene shots.")
 
-    api_ok = hosted_image_generation_available()
+    api_ok = hosted_image_generation_available() or bool((api_model or "").strip())
     if api_enabled and not api_ok:
         raise ValueError("API Generation — Not Available")
 

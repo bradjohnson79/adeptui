@@ -237,6 +237,7 @@ def _get_spatial_map_summary(db: Session, project_id: str) -> Optional[dict[str,
             "character_count": len(doc.characters or []),
             "prop_count": len(doc.props or []),
             "camera_count": len(doc.cameras or []),
+            "cameras": _cinematographer_context(db, project_id, doc),
             "has_background": bool(doc.backgroundAssetId),
             "has_ers": has_ers,
             "scene_id": doc.sceneId,
@@ -245,6 +246,55 @@ def _get_spatial_map_summary(db: Session, project_id: str) -> Optional[dict[str,
     except Exception:
         pass
     return None
+
+
+def _cinematographer_context(db: Session, project_id: str, doc: Any) -> list[dict[str, Any]]:
+    """Read-only Co-Director summary of Scene Creator camera lock/framing."""
+    out: list[dict[str, Any]] = []
+    try:
+        from app.scene_creator.cinematographer import list_packs, load_pack, lock_is_valid
+
+        scene_id = str(getattr(doc, "sceneId", "") or "")
+        pack = load_pack(db, project_id, scene_id) if scene_id else None
+        if pack is None or not pack.cameras:
+            packs = list_packs(db, project_id)
+            pack = next((p for p in packs if p.cameras), None)
+        records = list(pack.cameras) if pack else []
+        if not records:
+            for index, cam in enumerate(doc.cameras or []):
+                slot = cam.cameraSlot if cam.cameraSlot is not None and cam.cameraSlot >= 0 else index
+                out.append(
+                    {
+                        "slot": int(slot) + 1,
+                        "label": cam.label or f"C{int(slot) + 1}",
+                        "summary": f"Camera {int(slot) + 1} is at Spatial Map baseline.",
+                    }
+                )
+            return out
+        for rec in records:
+            locked = lock_is_valid(rec)
+            pose = rec.current
+            shot = (pose.shotType or "medium").replace("_", " ")
+            angle = (pose.anglePreset or "eye_level").replace("_", " ")
+            target = pose.targetEntityId or "no target"
+            lock_word = "locked" if locked else "unlocked"
+            out.append(
+                {
+                    "slot": rec.cameraSlot + 1,
+                    "cameraId": rec.cameraId,
+                    "locked": locked,
+                    "shotType": pose.shotType,
+                    "anglePreset": pose.anglePreset,
+                    "targetEntityId": pose.targetEntityId,
+                    "cameraStateVersion": rec.cameraStateVersion,
+                    "summary": (
+                        f"Camera {rec.cameraSlot + 1} is {lock_word} on a {angle} {shot} of {target}."
+                    ),
+                }
+            )
+    except Exception:
+        return out
+    return out
 
 
 def _get_ers_packages(db: Session, project_id: str) -> Optional[list[dict[str, Any]]]:

@@ -6,6 +6,7 @@ import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
+import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
@@ -13,24 +14,6 @@ export type SceneCreatorCoreProps = {
   variant: SceneCreatorVariant;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
-
-const SIZE_OPTIONS = [
-  ["wide", "Wide"],
-  ["medium_wide", "Medium Wide"],
-  ["medium", "Medium"],
-  ["close_up", "Close-Up"],
-] as const;
-const MOTION_OPTIONS = [
-  ["static", "Static"],
-  ["pan", "Pan"],
-  ["dolly", "Dolly"],
-] as const;
-const FRAMING_OPTIONS = [
-  ["single", "Single"],
-  ["two_shot", "Two Shot"],
-  ["group", "Group"],
-  ["over_shoulder", "Over Shoulder"],
-] as const;
 
 export function SceneCreatorCore({ projectId, variant, onGoTab }: SceneCreatorCoreProps) {
   const sc = useSceneCreator(projectId);
@@ -90,7 +73,7 @@ function ExpressLayout({ sc, onGoTab }: LayoutProps) {
     <section className="scene-creator-core" data-testid="scene-creator-panel">
       <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
       <CharactersPropsBlock sc={sc} />
-      <CameraBlock sc={sc} compact />
+      <CinematographerPanel sc={sc} />
       <ShotPromptBlock sc={sc} />
       <GeneratorBlock sc={sc} />
       <ActionsBlock sc={sc} />
@@ -143,7 +126,7 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
       <aside className="scene-creator-standard__inspector">
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
         <CharactersPropsBlock sc={sc} />
-        <CameraBlock sc={sc} compact={false} />
+        <CinematographerPanel sc={sc} />
         <ShotPromptBlock sc={sc} />
         <GeneratorBlock sc={sc} />
         <ActionsBlock sc={sc} />
@@ -233,59 +216,6 @@ function CharactersPropsBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }
   );
 }
 
-function CameraBlock({ sc, compact }: { sc: ReturnType<typeof useSceneCreator>; compact: boolean }) {
-  const cameras = sc.workspace?.cameras || [];
-  return (
-    <div>
-      <p className="scene-creator-core__label">Camera</p>
-      <div className="scene-creator-core__row">
-        <select
-          data-testid="scene-creator-camera-select"
-          value={sc.camera.camera_id}
-          onChange={(e) => sc.pickCamera(e.target.value)}
-        >
-          <option value="">Default Camera</option>
-          {cameras.map((cam, index) => (
-            <option key={cam.id} value={cam.id}>
-              {cam.label || `C${(cam.cameraSlot ?? index) + 1}`} {cam.orientation} {cam.fovPreset}
-            </option>
-          ))}
-        </select>
-        <select
-          data-testid="scene-creator-shot-size"
-          value={sc.camera.cinematic.shot_size}
-          onChange={(e) => sc.setCinematic({ shot_size: e.target.value })}
-        >
-          {SIZE_OPTIONS.map(([id, label]) => (
-            <option key={id} value={id}>{label}</option>
-          ))}
-        </select>
-        <select
-          data-testid="scene-creator-shot-motion"
-          value={sc.camera.cinematic.motion}
-          onChange={(e) => sc.setCinematic({ motion: e.target.value })}
-        >
-          {MOTION_OPTIONS.map(([id, label]) => (
-            <option key={id} value={id}>{label}</option>
-          ))}
-        </select>
-        <select
-          data-testid="scene-creator-shot-framing"
-          value={sc.camera.cinematic.framing}
-          onChange={(e) => sc.setCinematic({ framing: e.target.value })}
-        >
-          {FRAMING_OPTIONS.map(([id, label]) => (
-            <option key={id} value={id}>{label}</option>
-          ))}
-        </select>
-      </div>
-      {!compact ? (
-        <p className="muted">Spatial Map sets where the camera sits. These controls set how the shot feels.</p>
-      ) : null}
-    </div>
-  );
-}
-
 function ShotPromptBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   return (
     <div>
@@ -302,6 +232,17 @@ function ShotPromptBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
 }
 
 function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const apiModels = sc.workspace?.api_models || [];
+  const hasApi = apiModels.length > 0;
+  const caps = sc.workspace?.preview_capabilities;
+  let apiLabel = caps?.api?.noneLabel || "API Generation — Not Available";
+  if (hasApi && sc.apiEnabled && sc.apiModel) {
+    apiLabel = "Standard-Cost Preview Only — cloud previews cost the same as a full image unless the provider says otherwise.";
+  } else if (hasApi && sc.apiEnabled && !sc.apiModel) {
+    apiLabel = "Preview Unsupported until you choose a cloud model.";
+  } else if (hasApi && !sc.apiEnabled) {
+    apiLabel = "Cloud generators use credits. Nothing is generated until you click Preview or Final Quality Render.";
+  }
   return (
     <div data-testid="scene-creator-generators">
       <p className="scene-creator-core__label">Generator</p>
@@ -325,28 +266,44 @@ function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
           ))}
         </select>
       </label>
+      <label className="scene-creator-core__row">
+        <input
+          type="checkbox"
+          data-testid="generator-api-enable"
+          checked={sc.apiEnabled}
+          disabled={!hasApi}
+          onChange={(e) => sc.setApiEnabled(e.target.checked)}
+        />
+        Cloud Generators (uses credits)
+        <select
+          data-testid="generator-api-model"
+          value={sc.apiModel}
+          disabled={!sc.apiEnabled}
+          onChange={(e) => sc.setApiModel(e.target.value)}
+        >
+          <option value="">Choose a cloud model</option>
+          {apiModels.map((model) => {
+            const id = String(model.modelId || model.id || "");
+            const label = String(model.label || model.name || id);
+            return (
+              <option key={id} value={id}>{label}</option>
+            );
+          })}
+        </select>
+      </label>
       <p className="muted" data-testid="scene-creator-api-unavailable">
-        API Generation — Not Available
+        {sc.localEnabled ? `${caps?.local?.label || "Economy Preview Available"} for local generators. ` : ""}
+        {apiLabel}
       </p>
     </div>
   );
 }
 
 function ActionsBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
-  const canGenerate = !!sc.intent.trim() && sc.localEnabled && !sc.busy && !sc.approved;
   const canSend = !!sc.approved && !sc.busy;
   const progress = candidateProgress(sc.shot?.candidates || []);
   return (
     <div className="scene-creator-core__row">
-      <button
-        type="button"
-        className="primary"
-        data-testid="scene-creator-generate"
-        disabled={!canGenerate}
-        onClick={() => void sc.generate()}
-      >
-        {sc.generating ? "Generating…" : "Generate"}
-      </button>
       <button
         type="button"
         className="ghost"
@@ -358,7 +315,7 @@ function ActionsBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
       </button>
         {sc.generating ? (
         <span className="muted" data-testid="generation-progress">
-          {progress.done} of {progress.total} looks complete
+          {progress.total ? `${progress.done} of ${progress.total} looks complete` : "Working…"}
         </span>
       ) : null}
       {sc.approved ? (
@@ -385,7 +342,7 @@ function RetakeBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
         type="button"
         className="ghost"
         data-testid="scene-creator-retake"
-        disabled={!sc.correction.trim() || !sc.localEnabled || sc.busy}
+        disabled={!sc.correction.trim() || sc.busy || (!sc.localEnabled && !sc.apiEnabled)}
         onClick={() => void sc.retake()}
       >
         Re-Take

@@ -4298,6 +4298,85 @@ export const api = {
           body: JSON.stringify(body || {}),
         },
       ),
+    cinematographer: (projectId: string, sceneId: string) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer`,
+        { cache: "no-store" },
+      ),
+    cinematographerCommand: (
+      projectId: string,
+      sceneId: string,
+      body: {
+        camera_id: string;
+        operation_id: string;
+        character_id?: string;
+        prop_id?: string;
+        shot_id?: string;
+        user_prompt_delta?: string | null;
+      },
+    ) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/command`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerUndo: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/undo`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerReset: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/reset`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerLock: (projectId: string, sceneId: string, body: { camera_id: string; shot_id?: string }) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/lock`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerDelta: (projectId: string, sceneId: string, body: { camera_id: string; delta: string }) =>
+      req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/prompt-delta`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerPreview: (
+      projectId: string,
+      sceneId: string,
+      body: {
+        camera_id: string;
+        shot_id: string;
+        local_enabled: boolean;
+        api_enabled: boolean;
+        local_family?: string;
+        api_model?: string;
+      },
+    ) =>
+      req<{
+        cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack;
+        shot: import("./components/CoDirector/SceneCreator/types").SceneShot;
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/preview`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    cinematographerFinal: (
+      projectId: string,
+      sceneId: string,
+      body: {
+        camera_id: string;
+        shot_id: string;
+        local_enabled: boolean;
+        api_enabled: boolean;
+        local_family?: string;
+        api_model?: string;
+      },
+    ) =>
+      req<{
+        cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack;
+        shot: import("./components/CoDirector/SceneCreator/types").SceneShot;
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/final`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
   },
   propCreator: {
     workspace: (projectId: string, propId?: string) => {
@@ -7422,8 +7501,20 @@ export const api = {
       candidateCount?: number;
       visualStyle?: string;
       generatorSources?: {
-        local?: { family?: string; stage2Family?: string; stage2Enabled?: boolean } | null;
-        api?: { model?: string } | null;
+        local?: Array<{ family?: string; enabled?: boolean; batchCount?: number }> | {
+          family?: string;
+          stage2Family?: string;
+          stage2Enabled?: boolean;
+        } | null;
+        api?: Array<{
+          model?: string;
+          providerId?: string;
+          modelId?: string;
+          enabled?: boolean;
+          batchCount?: number;
+        }> | { model?: string } | null;
+        stage2Enabled?: boolean;
+        stage2Family?: string;
       };
       generationMode?: "profile_guided" | "reference_conditioned";
     },
@@ -7431,6 +7522,15 @@ export const api = {
     req<{ ok: boolean; pack: any }>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet/generate`,
       { method: "POST", body: JSON.stringify(body || {}) },
+    ),
+  saveCharacterVisualSheetPreferences: (
+    projectId: string,
+    characterId: string,
+    body: { generatorSources: Record<string, unknown> },
+  ) =>
+    req<{ ok: boolean; pack: any }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet/preferences`,
+      { method: "PUT", body: JSON.stringify(body) },
     ),
   advanceCharacterVisualSheet: (projectId: string, characterId: string) =>
     req<{ ok: boolean; pack: any }>(

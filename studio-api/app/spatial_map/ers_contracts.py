@@ -236,6 +236,10 @@ class SceneShotCandidate(BaseModel):
     take_label: str = ""
     error: str = ""
     created_at: str = ""
+    camera_state_version: Optional[int] = None
+    camera_state_hash: str = ""
+    source_camera_id: str = ""
+    quality_profile: str = ""
 
 
 class PropCandidate(BaseModel):

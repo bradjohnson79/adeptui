@@ -136,23 +136,30 @@ def hydrate_workspace(
                             "character_id": placement.get("characterId"),
                             "name": placement.get("label") or placement.get("characterId"),
                             "position_label": _position_summary(placement),
+                            "slot_index": placement.get("slotIndex"),
                         }
                     )
                 else:
+                    leftover_prop_id = str(placement.get("propId") or placement.get("prop_id") or "").strip()
+                    if not leftover_prop_id:
+                        # Leftover character-as-prop rows (e.g. {prop_id:null, tag:"Korri"})
+                        # are not PropEntities. Skip; Spatial Map union adds real ids.
+                        continue
                     props.append(
                         _hydrate_prop(
                             db,
                             project_id,
-                            prop_id=str(placement.get("propId") or placement.get("prop_id") or ""),
+                            prop_id=leftover_prop_id,
                             asset_id=str(placement.get("assetId") or placement.get("asset_id") or ""),
                             label=str(placement.get("label") or placement.get("tag") or "Prop"),
                             position_label=_position_summary(placement),
+                            placement=placement,
                         )
                     )
         except ErsResolveError as exc:
             resolved = {"error": str(exc)}
 
-    if not characters and not props:
+    if not characters:
         try:
             maps = list_documents(db, project_id)
         except Exception:
@@ -160,39 +167,49 @@ def hydrate_workspace(
         if maps:
             latest = maps[0]
             for c in latest.characters or []:
-                characters.append(
-                    {
-                        "character_id": c.characterId,
-                        "name": c.label or c.characterId,
-                        "position_label": _position_summary(c.model_dump()),
-                    }
-                )
-            for p in latest.props or []:
-                props.append(
-                    _hydrate_prop(
-                        db,
-                        project_id,
-                        prop_id=p.propId or "",
-                        asset_id=p.assetId or "",
-                        label=p.label or p.tag or "Prop",
-                        position_label=_position_summary(p.model_dump()),
-                    )
-                )
-            if not cameras:
-                for index, cam in enumerate(latest.cameras or []):
-                    slot = cam.cameraSlot if cam.cameraSlot is not None and cam.cameraSlot >= 0 else index
-                    cameras.append(
+                    characters.append(
                         {
-                            "id": cam.id,
-                            "label": cam.label or f"C{slot + 1}",
-                            "cameraSlot": int(slot),
-                            "orientation": cam.orientation or "",
-                            "fovPreset": cam.fovPreset or "",
-                            "yawDegrees": cam.yawDegrees,
-                            "lensMm": cam.lensMm,
-                            "hero": bool(cam.hero),
+                            "character_id": c.characterId,
+                            "name": c.label or c.characterId,
+                            "position_label": _position_summary(c.model_dump()),
+                            "slot_index": getattr(c, "slotIndex", None),
                         }
                     )
+
+    # Always union Spatial Map PropEntity rows so attached project props appear
+    # even when leftover ERS placements already filled workspace.props.
+    _union_spatial_map_project_props(db, project_id, props)
+
+    if not cameras:
+        try:
+            from ..spatial_map.service import list_documents as _list_maps_for_cameras
+            maps_for_cameras = _list_maps_for_cameras(db, project_id)
+        except Exception:
+            maps_for_cameras = []
+        if maps_for_cameras:
+            latest_map = maps_for_cameras[0]
+            for index, cam in enumerate(latest_map.cameras or []):
+                slot = cam.cameraSlot if cam.cameraSlot is not None and cam.cameraSlot >= 0 else index
+                cameras.append(
+                    {
+                        "id": cam.id,
+                        "label": cam.label or f"C{slot + 1}",
+                        "cameraSlot": int(slot),
+                        "orientation": cam.orientation or "",
+                        "fovPreset": cam.fovPreset or "",
+                        "yawDegrees": cam.yawDegrees,
+                        "lensMm": cam.lensMm,
+                        "hero": bool(cam.hero),
+                        "visible": bool(getattr(cam, "visible", True)),
+                        "gridColumn": getattr(cam, "gridColumn", -1),
+                        "gridRow": getattr(cam, "gridRow", -1),
+                        "normalizedX": getattr(cam, "normalizedX", None),
+                        "normalizedY": getattr(cam, "normalizedY", None),
+                        "heightMeters": getattr(cam, "heightMeters", None),
+                        "pitchDegrees": getattr(cam, "pitchDegrees", None),
+                        "targetCharacterIds": list(getattr(cam, "targetCharacterIds", None) or []),
+                    }
+                )
 
     scene = ensure_scene_id(db, project_id, preferred_scene)
     from ..services.scene_service import SceneService
@@ -217,6 +234,23 @@ def hydrate_workspace(
         and any((resolved.get("directional_assets") or {}).values())
     )
 
+    cinematographer = None
+    api_models: list[dict[str, Any]] = []
+    try:
+        from ..hosted_providers.discovery import dock_api_models
+
+        payload = dock_api_models("image")
+        api_models = [m for m in (payload.get("models") or []) if isinstance(m, dict)]
+    except Exception:
+        api_models = []
+    try:
+        from .cinematographer_service import hydrate_cinematographer
+
+        pack = hydrate_cinematographer(db, project_id, scene_id=scene.id)
+        cinematographer = pack.model_dump()
+    except Exception:
+        logger.exception("Cinematographer hydrate failed")
+
     return {
         "sheets": sheet_summaries,
         "selected_sheet_id": selected_sheet_id,
@@ -229,9 +263,12 @@ def hydrate_workspace(
         "cameras": cameras,
         "characters": characters,
         "props": props,
-        "api_generation_available": hosted_image_generation_available(),
+        "api_generation_available": hosted_image_generation_available() or bool(api_models),
+        "api_models": api_models,
         "local_families": list_local_generator_families(has_reference=has_reference),
         "has_reference": has_reference,
+        "cinematographer": cinematographer,
+        "preview_capabilities": _workspace_preview_capabilities(bool(api_models)),
     }
 
 
@@ -294,6 +331,8 @@ def _enqueue_shot_candidates(
     api_model: str,
     candidate_count: int,
     index_offset: int = 0,
+    quality_profile: str = "final",
+    camera_record: Any = None,
 ) -> list[SceneShotCandidate]:
     package, runtime = resolve_ers_for_sheet(db, project_id, shot.sheet_id)
     shot.ers_package_id = package.id
@@ -323,37 +362,70 @@ def _enqueue_shot_candidates(
 
     parsed = _shot_request_from_scene_shot(shot)
     body_base = compile_shot_prompt(db, project_id, parsed, ers_package=package)
-    _apply_cinematic(body_base, shot)
+    _apply_cinematic(body_base, shot, camera_record=camera_record, db=db, project_id=project_id)
+    draft = (quality_profile or "final").lower() == "draft"
+    if draft:
+        body_base["purpose"] = "scene_shot_preview"
+        body_base["quality"] = "draft"
+        body_base["width"] = 512
+        body_base["height"] = 288
+        body_base["allowDraft"] = True
 
     candidates: list[SceneShotCandidate] = []
     for plan in plans:
-        if plan["source"] == "api":
-            # Hosted image generation is not Certified/executable. Never fall
-            # back to local Comfy under an API provenance label.
-            raise SceneCreatorError("API Generation — Not Available")
         index = plan["index"] + index_offset
         body = dict(body_base)
         body["modelFamilyPreference"] = plan["family"]
         body["seed"] = plan["seed"]
         body["sceneId"] = shot.scene_id
         body["shotId"] = shot.id
-        body["tag"] = f"scene_shot_{shot.id[:8]}_c{index + 1}"
+        tag_prefix = "scene_preview" if draft else "scene_shot"
+        body["tag"] = f"{tag_prefix}_{shot.id[:8]}_c{index + 1}"
         ctx = body.setdefault("creativeContext", {})
         if isinstance(ctx, dict):
             ctx["workflowKey"] = f"{plan['family']}.txt2img"
             ctx["candidateIndex"] = index
             ctx["sheetId"] = shot.sheet_id
             ctx["ersPackageId"] = package.id
+            ctx["qualityProfile"] = "draft" if draft else "final"
+            if camera_record is not None:
+                ctx["cinematographer"] = {
+                    "cameraId": getattr(camera_record, "cameraId", ""),
+                    "cameraSlot": getattr(camera_record, "cameraSlot", None),
+                    "cameraStateVersion": getattr(camera_record, "cameraStateVersion", None),
+                    "cameraStateHash": getattr(camera_record, "cameraStateHash", ""),
+                    "locked": bool(getattr(getattr(camera_record, "lineage", None), "locked", False)),
+                }
+                pose = getattr(camera_record, "current", None)
+                if pose is not None:
+                    ctx["cinematographer"]["pose"] = pose.model_dump() if hasattr(pose, "model_dump") else dict(pose)
+        if plan["source"] == "api":
+            hosted = (api_model or plan.get("model") or "").strip()
+            if not hosted:
+                raise SceneCreatorError("API Generation — Not Available")
+            body["providerPreference"] = "cloud"
+            body["hostedModelId"] = hosted
+            body["model"] = hosted
+            body["lockModelFamily"] = True
+        elif plan["source"] == "local" and plan.get("family"):
+            body["lockModelFamily"] = True
+            body["model"] = plan["family"]
         try:
             job = enqueue_imagegen_job(db, project_id, body, scene_id=shot.scene_id)
+            if plan["source"] == "api":
+                job = _pin_hosted_image_job(db, job, hosted=hosted)
             job_id = job.id
-            status = "queued"
-            error = ""
+            job_status = str(getattr(job, "status", "") or "").lower()
+            status = "failed" if job_status in {"failed", "error"} else "queued"
+            error = str(getattr(job, "message", "") or "")
         except Exception as exc:
             logger.error("Scene candidate enqueue failed: %s", exc)
             job_id = f"failed_scene_cand_{index}"
             status = "failed"
             error = str(exc)
+        provenance = plan["provenance_label"]
+        if draft:
+            provenance = f"PREVIEW — {provenance}"
         candidates.append(
             SceneShotCandidate(
                 shot_id=shot.id,
@@ -364,12 +436,49 @@ def _enqueue_shot_candidates(
                 family=plan["family"],
                 model=plan["model"],
                 seed=plan["seed"],
-                provenance_label=plan["provenance_label"],
-                take_label=f"Take {chr(ord('A') + min(index, 25))}",
+                provenance_label=provenance,
+                take_label="Preview" if draft else f"Take {chr(ord('A') + min(index, 25))}",
                 error=error,
+                camera_state_version=getattr(camera_record, "cameraStateVersion", None),
+                camera_state_hash=getattr(camera_record, "cameraStateHash", "") or "",
+                source_camera_id=getattr(camera_record, "cameraId", "") or "",
+                quality_profile="draft" if draft else "final",
             )
         )
     return candidates
+
+
+def _pin_hosted_image_job(db: Session, job: Any, *, hosted: str) -> Any:
+    """Pin Fal/hosted still-image dispatch. Never silently substitute Comfy."""
+    try:
+        from ..character_identity.visual_sheet import _fal_image_model_id
+    except Exception:
+        _fal_image_model_id = None  # type: ignore[assignment]
+    try:
+        params = json.loads(job.params_json or "{}")
+    except Exception:
+        params = {}
+    fal_id = _fal_image_model_id(hosted) if _fal_image_model_id else None
+    if fal_id:
+        params["cloudPaid"] = True
+        params["falImageModelId"] = fal_id
+        params["hostedModelId"] = hosted
+        params["providerPreference"] = "cloud"
+        job.params_json = json.dumps(params)
+        db.commit()
+        db.refresh(job)
+        return job
+    runtime_key = str((params.get("imageRuntime") or {}).get("workflowKey") or "")
+    cloud_paid = bool(params.get("cloudPaid"))
+    if not cloud_paid and not runtime_key.startswith("imagen."):
+        job.status = "failed"
+        job.message = (
+            f"API model {hosted} resolved to local workflow {runtime_key or 'unknown'}; "
+            "refusing silent Comfy substitute."
+        )
+        db.commit()
+        db.refresh(job)
+    return job
 
 
 def generate_candidates(
@@ -448,6 +557,7 @@ def retake_shot(
         api_model=api_model or shot.generator.api_model,
         candidate_count=1,
         index_offset=len(prior),
+        camera_record=_camera_record_for_shot(db, project_id, shot),
     )
     shot.candidates = prior + new_cands
     shot.approved_candidate_id = approved_id
@@ -483,6 +593,9 @@ def approve_candidate(
         "take_label": candidate.take_label,
         "family": candidate.family,
         "source": candidate.source,
+        "sourceCameraId": candidate.source_camera_id or shot.camera.camera_id,
+        "cameraStateVersion": candidate.camera_state_version,
+        "cameraStateHash": candidate.camera_state_hash,
     }
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
     save_scene_shot(db, project_id, shot)
@@ -633,7 +746,59 @@ def _shot_request_from_scene_shot(shot: SceneShot) -> ShotRequest:
     )
 
 
-def _apply_cinematic(body: dict[str, Any], shot: SceneShot) -> None:
+def _workspace_preview_capabilities(api_discovered: bool) -> dict[str, Any]:
+    from .cinematographer import api_preview_capability, local_preview_capability
+
+    api_cap = api_preview_capability(api_enabled=False, api_model="")
+    api_cap["discovered"] = bool(api_discovered)
+    api_cap["noneLabel"] = "API Generation — Not Available"
+    if api_discovered:
+        api_cap["status"] = "standard_cost"
+        api_cap["label"] = "Standard-Cost Preview Only"
+    else:
+        api_cap["status"] = "none"
+        api_cap["label"] = "API Generation — Not Available"
+    return {"local": local_preview_capability(), "api": api_cap}
+
+
+def _camera_record_for_shot(db: Session, project_id: str, shot: SceneShot) -> Any:
+    try:
+        from .cinematographer import get_camera, load_pack
+
+        pack = load_pack(db, project_id, shot.scene_id)
+        if pack is None:
+            return None
+        approved = _approved_candidate(shot)
+        cam_id = str(getattr(approved, "source_camera_id", "") or "") if approved else ""
+        if not cam_id:
+            locked = next((c for c in pack.cameras if lock_is_valid_safe(c)), None)
+            cam_id = locked.cameraId if locked else ""
+        if not cam_id:
+            cam_id = str(getattr(shot.camera, "camera_id", "") or "")
+        if not cam_id:
+            return None
+        return get_camera(pack, cam_id)
+    except Exception:
+        return None
+
+
+def lock_is_valid_safe(record: Any) -> bool:
+    try:
+        from .cinematographer import lock_is_valid
+
+        return bool(lock_is_valid(record))
+    except Exception:
+        return False
+
+
+def _apply_cinematic(
+    body: dict[str, Any],
+    shot: SceneShot,
+    camera_record: Any = None,
+    *,
+    db: Session | None = None,
+    project_id: str = "",
+) -> None:
     ctx = body.setdefault("creativeContext", {})
     if not isinstance(ctx, dict):
         return
@@ -641,6 +806,37 @@ def _apply_cinematic(body: dict[str, Any], shot: SceneShot) -> None:
     ctx["sceneId"] = shot.scene_id
     ctx["camera"] = shot.camera.model_dump()
     ctx["cinematic"] = shot.camera.cinematic.model_dump()
+    if camera_record is not None:
+        try:
+            from .cinematographer import association_for, compile_camera_context
+
+            pose = getattr(camera_record, "current", None)
+            held = ""
+            char_id = ""
+            prop_id = ""
+            if pose is not None:
+                if getattr(pose, "targetEntityType", "") == "character":
+                    char_id = str(getattr(pose, "targetEntityId", "") or "")
+                elif getattr(pose, "targetEntityType", "") == "prop":
+                    prop_id = str(getattr(pose, "targetEntityId", "") or "")
+                prop_id = str(getattr(pose, "inclusionPropId", "") or prop_id or "")
+            if db is not None and project_id and (char_id or prop_id):
+                held = association_for(db, project_id, character_id=char_id, prop_id=prop_id)
+            compiled = compile_camera_context(
+                camera_record,
+                held_association=held,
+            )
+            ctx["cinematographer"] = compiled
+            extra = compiled.get("prose") or ""
+            if extra:
+                prompt = str(body.get("prompt") or "")
+                delta = str(getattr(camera_record, "userCameraPromptDelta", "") or "")
+                parts = [prompt, extra]
+                if delta:
+                    parts.append(delta)
+                body["prompt"] = " ".join(p for p in parts if p).strip()
+        except Exception:
+            logger.exception("Failed to compile cinematographer context")
 
 
 def _seed_take_memory(shot: SceneShot, package: Any, user_correction: dict[str, Any]) -> SceneShotTakeMemory:
@@ -705,6 +901,43 @@ def _placed_project_prop_ids(db: Session, project_id: str, sheet_id: str = "") -
     return ids
 
 
+
+def _union_spatial_map_project_props(db: Session, project_id: str, props: list[dict[str, Any]]) -> None:
+    """Add Spatial Map PropEntity placements into workspace.props (same store).
+
+    Attached rows use PropEntity.id. Leftover ERS {prop_id:null} rows are not
+    a second registry and are dropped once a real propId is present.
+    """
+    from ..spatial_map.service import list_documents
+
+    try:
+        maps = list_documents(db, project_id)
+    except Exception:
+        maps = []
+    if not maps:
+        return
+    seen = {str(p.get("prop_id") or "").strip() for p in props if str(p.get("prop_id") or "").strip()}
+    for placement in maps[0].props or []:
+        pid = str(getattr(placement, "propId", None) or "").strip()
+        if not pid or pid in seen:
+            continue
+        dumped = placement.model_dump()
+        props.append(
+            _hydrate_prop(
+                db,
+                project_id,
+                prop_id=pid,
+                asset_id=getattr(placement, "assetId", None) or "",
+                label=getattr(placement, "label", None) or getattr(placement, "tag", None) or "Prop",
+                position_label=_position_summary(dumped),
+                placement=dumped,
+            )
+        )
+        seen.add(pid)
+    if seen:
+        props[:] = [p for p in props if str(p.get("prop_id") or "").strip()]
+
+
 def _hydrate_prop(
     db: Session,
     project_id: str,
@@ -713,6 +946,7 @@ def _hydrate_prop(
     asset_id: str = "",
     label: str = "Prop",
     position_label: str = "",
+    placement: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve a Spatial Map / ERS placement to an approved PropEntity when possible."""
     entity = load_prop_entity_by_id(db, project_id, prop_id) if (prop_id or "").strip() else None
@@ -731,7 +965,7 @@ def _hydrate_prop(
         resolved_id = entity.id
     else:
         visual = (asset_id or "").strip()
-    return {
+    result = {
         "prop_id": resolved_id,
         "tag": tag,
         "display_label": display,
@@ -739,10 +973,24 @@ def _hydrate_prop(
         "approved_asset_id": approved,
         "library_asset_id": visual,
         "description": description,
+        "slot_index": (placement or {}).get("slotIndex"),
     }
+    src = placement or {}
+    if src.get("placementMode") == "attached":
+        result["placementMode"] = "attached"
+        result["attachedCharacterSlot"] = src.get("attachedCharacterSlot")
+        result["attachedCharacterId"] = src.get("attachedCharacterId")
+        result["relationship"] = src.get("relationship")
+        result["attachmentPoint"] = src.get("attachmentPoint")
+        result["position_label"] = ""
+    elif src.get("placementMode"):
+        result["placementMode"] = src.get("placementMode")
+    return result
 
 
 def _position_summary(p: dict[str, Any]) -> str:
+    if str(p.get("placementMode") or "") == "attached":
+        return ""
     try:
         x = float(p.get("x") or 0)
         z = float(p.get("z") or 0)

@@ -117,6 +117,21 @@ def test_candidate_diversity_one_family_uses_distinct_seeds(monkeypatch) -> None
     assert all(p["provenance_label"].startswith("LOCAL") for p in plans)
 
 
+def test_candidate_count_one_is_a_valid_plan(monkeypatch) -> None:
+    monkeypatch.setattr(
+        gen_mod,
+        "list_local_generator_families",
+        lambda has_reference=False: [
+            {"id": "zimage", "label": "Z-Image Turbo", "executable": True, "supportsReferences": True}
+        ],
+    )
+    plans = build_candidate_plans(
+        local_enabled=True, api_enabled=False, local_family="zimage", candidate_count=1, seed=3
+    )
+    assert len(plans) == 1
+    assert plans[0]["index"] == 0
+
+
 def test_resolve_sheet_without_package_builds_runtime_and_does_not_require_package_uuid() -> None:
     project_id = _create_project("ERS Resolver")
     north_id = str(uuid.uuid4())
@@ -346,6 +361,70 @@ def test_unapproved_cannot_send_to_timeline(monkeypatch) -> None:
             raise AssertionError("unapproved send should fail")
         except SceneCreatorError as exc:
             assert "Approve a take" in str(exc)
+    finally:
+        db.close()
+
+
+def test_one_candidate_approve_retake_and_timeline_metadata(monkeypatch) -> None:
+    from app.db import Asset, Job
+    from app.scene_creator.service import approve_candidate, create_or_update_shot, generate_candidates, retake_shot
+    from app.spatial_map.ers_persistence import save_scene_shot
+
+    project_id = _create_project("One Candidate Final")
+    sheet = _save_sheet(project_id)
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", lambda *a, **k: SimpleNamespace(id=str(uuid.uuid4())))
+    monkeypatch.setattr(
+        gen_mod,
+        "list_local_generator_families",
+        lambda has_reference=False: [
+            {"id": "zimage", "label": "Z-Image Turbo", "executable": True, "supportsReferences": True}
+        ],
+    )
+    db = _session()
+    try:
+        shot = create_or_update_shot(db, project_id, sheet_id=sheet.sheetId, intent="Locked camera final")
+        generated = generate_candidates(
+            db, project_id, shot.id, local_enabled=True, api_enabled=False, candidate_count=1
+        )
+        assert len(generated.candidates) == 1
+        take_a = generated.candidates[0]
+        take_a.source_camera_id = "cam-1"
+        take_a.camera_state_version = 7
+        save_scene_shot(db, project_id, generated)
+        asset = Asset(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            tag="scene_shot",
+            kind="image",
+            filename="final.png",
+            path="final.png",
+            production_approval="none",
+        )
+        db.add(asset)
+        db.add(
+            Job(
+                id=take_a.job_id,
+                project_id=project_id,
+                kind="imagegen",
+                status="done",
+                params_json=json.dumps({"output_asset_id": asset.id}),
+            )
+        )
+        db.commit()
+        approved = approve_candidate(db, project_id, generated.id, take_a.id)
+        assert approved.approved_candidate_id == take_a.id
+        assert len(approved.candidates) == 1
+        assert approved.take_memory.takeState.get("sourceCameraId") == "cam-1"
+        retaken = retake_shot(
+            db,
+            project_id,
+            generated.id,
+            correction="Keep the same camera, warmer light",
+            local_enabled=True,
+            api_enabled=False,
+        )
+        assert retaken.approved_candidate_id == take_a.id
+        assert len(retaken.candidates) == 2
     finally:
         db.close()
 
