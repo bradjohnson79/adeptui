@@ -8,88 +8,269 @@
       "displayName": "ComfyUI Local",
       "kind": "local",
       "runtime": "comfy",
-      "supportedModelFamilies": ["qwen2512", "zimage", "flux", "qwen", "hidream", "checkpoint", "sdxl", "krea2"],
-      "operations": ["image.generate", "image.edit", "image.reference", "image.upscale"]
+      "supportedModelFamilies": [
+        "qwen2512",
+        "zimage",
+        "flux",
+        "qwen",
+        "hidream",
+        "checkpoint",
+        "sdxl",
+        "krea2"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit",
+        "image.reference",
+        "image.upscale"
+      ]
     },
     {
       "providerId": "local",
       "displayName": "Local OpenCV / Utility",
       "kind": "local",
       "runtime": "opencv",
-      "supportedModelFamilies": ["utility"],
-      "operations": ["image.chroma_key"]
+      "supportedModelFamilies": [
+        "utility"
+      ],
+      "operations": [
+        "image.chroma_key"
+      ]
     },
     {
       "providerId": "google_imagen",
       "displayName": "Google Imagen",
       "kind": "cloud",
       "runtime": "google",
-      "supportedModelFamilies": ["imagen"],
-      "operations": ["image.generate", "image.edit", "image.reference"],
-      "credentialEnvKeys": ["GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS", "IMAGEN_API_KEY", "GCP_PROJECT"]
+      "supportedModelFamilies": [
+        "imagen"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit",
+        "image.reference"
+      ],
+      "credentialEnvKeys": [
+        "GOOGLE_API_KEY",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "IMAGEN_API_KEY",
+        "GCP_PROJECT"
+      ],
+      "summary": "Google's hosted Imagen models for still-image generation and edits.",
+      "useCases": [
+        "Photoreal stills",
+        "Prompted concept art",
+        "Reference-guided edits"
+      ],
+      "localVsCloud": "Cloud only. Prompts and images leave this machine when an adapter exists.",
+      "requirements": [
+        "Google AI / Gemini API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Google account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://aistudio.google.com/apikey",
+      "docsUrl": "https://ai.google.dev/gemini-api/docs/imagen"
     },
     {
       "providerId": "openai",
       "displayName": "OpenAI Images",
       "kind": "cloud",
       "runtime": "openai",
-      "supportedModelFamilies": ["openai"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["OPENAI_API_KEY"]
+      "supportedModelFamilies": [
+        "openai"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "OPENAI_API_KEY"
+      ],
+      "summary": "OpenAI Images for hosted still-image generation and edits.",
+      "useCases": [
+        "Concept stills",
+        "Prompted illustration",
+        "Image edits"
+      ],
+      "localVsCloud": "Cloud only. Prompts and images leave this machine when an adapter exists.",
+      "requirements": [
+        "OpenAI API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your OpenAI account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://platform.openai.com/api-keys",
+      "docsUrl": "https://platform.openai.com/docs/guides/images"
     },
     {
       "providerId": "replicate",
       "displayName": "Replicate",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["flux", "sdxl", "stable"],
-      "operations": ["image.generate", "image.edit", "image.reference"],
-      "credentialEnvKeys": ["REPLICATE_API_TOKEN"]
+      "supportedModelFamilies": [
+        "flux",
+        "sdxl",
+        "stable"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit",
+        "image.reference"
+      ],
+      "credentialEnvKeys": [
+        "REPLICATE_API_TOKEN"
+      ],
+      "summary": "Replicate hosted model marketplace for image generation and edits.",
+      "useCases": [
+        "Hosted Flux / SDXL runs",
+        "Experimenting with community models"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Replicate, not on local certified recipes.",
+      "requirements": [
+        "Replicate API token"
+      ],
+      "costPrivacyNote": "Usage is billed per run on Replicate. Adept stores the token on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://replicate.com/account/api-tokens",
+      "docsUrl": "https://replicate.com/docs"
     },
     {
       "providerId": "ideogram",
       "displayName": "Ideogram",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["ideogram"],
-      "operations": ["image.generate"],
-      "credentialEnvKeys": ["IDEOGRAM_API_KEY"]
+      "supportedModelFamilies": [
+        "ideogram"
+      ],
+      "operations": [
+        "image.generate"
+      ],
+      "credentialEnvKeys": [
+        "IDEOGRAM_API_KEY"
+      ],
+      "summary": "Ideogram hosted image models, often used when typography in the image matters.",
+      "useCases": [
+        "Poster lettering",
+        "Logo-like stills",
+        "Prompted illustration"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Ideogram, not on local certified recipes.",
+      "requirements": [
+        "Ideogram API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Ideogram account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://developer.ideogram.ai/",
+      "docsUrl": "https://developer.ideogram.ai/"
     },
     {
       "providerId": "recraft",
       "displayName": "Recraft",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["recraft"],
-      "operations": ["image.generate"],
-      "credentialEnvKeys": ["RECRAFT_API_KEY"]
+      "supportedModelFamilies": [
+        "recraft"
+      ],
+      "operations": [
+        "image.generate"
+      ],
+      "credentialEnvKeys": [
+        "RECRAFT_API_KEY"
+      ],
+      "summary": "Recraft hosted illustration and design-oriented image generation.",
+      "useCases": [
+        "Brand illustration",
+        "Stylized stills",
+        "Design drafts"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Recraft, not on local certified recipes.",
+      "requirements": [
+        "Recraft API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Recraft account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://www.recraft.ai/",
+      "docsUrl": "https://www.recraft.ai/docs"
     },
     {
       "providerId": "leonardo",
       "displayName": "Leonardo",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["leonardo"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["LEONARDO_API_KEY"]
+      "supportedModelFamilies": [
+        "leonardo"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "LEONARDO_API_KEY"
+      ],
+      "summary": "Leonardo hosted image models for generation and edits.",
+      "useCases": [
+        "Concept stills",
+        "Stylized illustration",
+        "Prompted edits"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Leonardo, not on local certified recipes.",
+      "requirements": [
+        "Leonardo API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Leonardo account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://app.leonardo.ai/api-access",
+      "docsUrl": "https://docs.leonardo.ai/"
     },
     {
       "providerId": "runware",
       "displayName": "Runware",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["flux", "sdxl"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["RUNWARE_API_KEY"]
+      "supportedModelFamilies": [
+        "flux",
+        "sdxl"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "RUNWARE_API_KEY"
+      ],
+      "summary": "Runware hosted image API for generation and edits.",
+      "useCases": [
+        "Hosted Flux / SDXL stills",
+        "Prompted edits"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Runware, not on local certified recipes.",
+      "requirements": [
+        "Runware API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Runware account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://my.runware.ai/",
+      "docsUrl": "https://runware.ai/docs/en/getting-started/introduction"
     },
     {
       "providerId": "together",
       "displayName": "Together AI",
       "kind": "cloud",
       "runtime": "hosted",
-      "supportedModelFamilies": ["flux", "sdxl"],
-      "operations": ["image.generate"],
-      "credentialEnvKeys": ["TOGETHER_API_KEY"]
+      "supportedModelFamilies": [
+        "flux",
+        "sdxl"
+      ],
+      "operations": [
+        "image.generate"
+      ],
+      "credentialEnvKeys": [
+        "TOGETHER_API_KEY"
+      ],
+      "summary": "Together AI hosted open models, including image families.",
+      "useCases": [
+        "Hosted Flux / SDXL stills",
+        "Open-weight cloud inference"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Together AI, not on local certified recipes.",
+      "requirements": [
+        "Together API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Together account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://api.together.ai/",
+      "docsUrl": "https://docs.together.ai/"
     },
     {
       "providerId": "kie",
@@ -98,9 +279,20 @@
       "runtime": "hosted",
       "tier": "primary",
       "recommended": true,
-      "supportedModelFamilies": ["flux", "seedance", "kling"],
-      "operations": ["image.generate", "image.edit", "image.reference"],
-      "credentialEnvKeys": ["KIE_API_KEY", "KIE_KEY"],
+      "supportedModelFamilies": [
+        "flux",
+        "seedance",
+        "kling"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit",
+        "image.reference"
+      ],
+      "credentialEnvKeys": [
+        "KIE_API_KEY",
+        "KIE_KEY"
+      ],
       "hostedProviderTier": "m42"
     },
     {
@@ -110,9 +302,18 @@
       "runtime": "hosted",
       "tier": "secondary",
       "recommended": false,
-      "supportedModelFamilies": ["flux", "seedance"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["WAVESPEED_API_KEY", "WAVESPEED_KEY"],
+      "supportedModelFamilies": [
+        "flux",
+        "seedance"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "WAVESPEED_API_KEY",
+        "WAVESPEED_KEY"
+      ],
       "hostedProviderTier": "m42"
     },
     {
@@ -122,9 +323,18 @@
       "runtime": "fal",
       "tier": "third",
       "recommended": false,
-      "supportedModelFamilies": ["flux", "sdxl"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["FAL_KEY", "FAL_API_KEY"],
+      "supportedModelFamilies": [
+        "flux",
+        "sdxl"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "FAL_KEY",
+        "FAL_API_KEY"
+      ],
       "hostedProviderTier": "m42"
     },
     {
@@ -132,18 +342,57 @@
       "displayName": "Black Forest Labs",
       "kind": "cloud",
       "runtime": "bfl",
-      "supportedModelFamilies": ["flux"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["BFL_API_KEY"]
+      "supportedModelFamilies": [
+        "flux"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "BFL_API_KEY"
+      ],
+      "summary": "Official Black Forest Labs FLUX API for hosted image generation and edits.",
+      "useCases": [
+        "FLUX stills",
+        "Official BFL cloud inference"
+      ],
+      "localVsCloud": "Cloud only. This is the vendor API, not a local Flux install.",
+      "requirements": [
+        "Black Forest Labs API key (BFL_API_KEY)"
+      ],
+      "costPrivacyNote": "Usage is billed to your BFL account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://dashboard.bfl.ai/",
+      "docsUrl": "https://docs.bfl.ml/quick_start/get_started"
     },
     {
       "providerId": "stability",
       "displayName": "Stability AI",
       "kind": "cloud",
       "runtime": "stability",
-      "supportedModelFamilies": ["sdxl", "stable"],
-      "operations": ["image.generate", "image.edit"],
-      "credentialEnvKeys": ["STABILITY_API_KEY"]
+      "supportedModelFamilies": [
+        "sdxl",
+        "stable"
+      ],
+      "operations": [
+        "image.generate",
+        "image.edit"
+      ],
+      "credentialEnvKeys": [
+        "STABILITY_API_KEY"
+      ],
+      "summary": "Stability AI Platform image API for hosted generation and edits.",
+      "useCases": [
+        "Stable Diffusion stills",
+        "Hosted image edits"
+      ],
+      "localVsCloud": "Cloud only. Jobs run on Stability AI, not on local certified recipes.",
+      "requirements": [
+        "Stability AI Platform API key"
+      ],
+      "costPrivacyNote": "Usage is billed to your Stability account. Adept stores the key on this machine only. Saving a key does not enable generation yet.",
+      "keysUrl": "https://platform.stability.ai/account/keys",
+      "docsUrl": "https://platform.stability.ai/docs/api-reference"
     }
   ]
 }

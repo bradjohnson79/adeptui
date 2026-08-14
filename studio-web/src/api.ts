@@ -2571,6 +2571,41 @@ export const api = {
     }),
   setupLifecycleHardware: () => req<Record<string, unknown>>("/api/setup/lifecycle/hardware"),
   setupLifecycleCloudProviders: () => req<{ count: number; items: LifecycleCloudProvider[] }>("/api/setup/lifecycle/cloud-providers"),
+  setupLifecycleCloudProviderKey: (providerId: string) =>
+    req<{
+      providerId: string;
+      configured: boolean;
+      state?: string | null;
+      hint?: string | null;
+      statusLabel: string;
+      setupSupported: boolean;
+    }>(`/api/setup/lifecycle/cloud-providers/${encodeURIComponent(providerId)}/key`),
+  setupLifecycleSetCloudProviderKey: (providerId: string, api_key: string) =>
+    req<{
+      ok: boolean;
+      providerId: string;
+      configured: boolean;
+      state?: string | null;
+      hint?: string | null;
+      statusLabel: string;
+      message?: string;
+    }>(`/api/setup/lifecycle/cloud-providers/${encodeURIComponent(providerId)}/key`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key }),
+    }),
+  setupLifecycleClearCloudProviderKey: (providerId: string) =>
+    req<{
+      ok: boolean;
+      providerId: string;
+      configured: boolean;
+      state?: string | null;
+      hint?: string | null;
+      statusLabel: string;
+      message?: string;
+    }>(`/api/setup/lifecycle/cloud-providers/${encodeURIComponent(providerId)}/key`, {
+      method: "DELETE",
+    }),
   setupLifecycleVerify: (componentId: string) =>
     req<Record<string, unknown>>(`/api/setup/lifecycle/components/${encodeURIComponent(componentId)}/verify`, {
       method: "POST",

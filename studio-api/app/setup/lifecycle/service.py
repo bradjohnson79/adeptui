@@ -8,7 +8,7 @@ from typing import Any
 
 from ...config import settings
 from ...image_runtime.provider_registry import list_providers as list_image_providers
-from ...secrets_store import secret_status
+from ...secrets_store import clear_secret, secret_status, set_secret
 from ...source_manager.install_jobs.service import (
     create_or_resume_install,
     get_job,
@@ -41,7 +41,10 @@ _IMAGE_PROVIDER_KEYS = {
     "leonardo": "leonardo_api_key",
     "runware": "runware_api_key",
     "together": "together_api_key",
+    "black_forest_labs": "bfl_api_key",
+    "stability": "stability_api_key",
 }
+_API_KEY_CLOUD_SKIP = {"kie", "fal", "wavespeed", "kie.ai", "fal.ai", "wavespeed.ai"}
 _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
     "flux1_dev_local": {
         "parameterCount": "12B",
@@ -1137,28 +1140,124 @@ def get_monitor_status() -> dict[str, Any]:
     return {"count": len(items), "items": items}
 
 
+def _is_skipped_api_key_provider(provider_id: str) -> bool:
+    return provider_id.strip().lower() in _API_KEY_CLOUD_SKIP
+
+
+def _cloud_provider_record(provider_id: str) -> dict[str, Any] | None:
+    for provider in list_image_providers():
+        if provider.get("kind") != "cloud":
+            continue
+        pid = str(provider.get("providerId") or "")
+        if pid == provider_id:
+            return provider
+    return None
+
+
+def _status_label(status: dict[str, Any]) -> str:
+    return "Ready" if status.get("state") == "verified" else "Requires Setup"
+
+
+def _serialize_cloud_provider(provider: dict[str, Any]) -> dict[str, Any]:
+    provider_id = str(provider.get("providerId") or "")
+    secret_name = _IMAGE_PROVIDER_KEYS.get(provider_id)
+    status = secret_status(secret_name) if secret_name else {"configured": False, "state": "missing", "hint": None}
+    return {
+        "providerId": provider_id,
+        "displayName": provider.get("displayName"),
+        "statusLabel": _status_label(status),
+        "configured": bool(status.get("configured")),
+        "state": status.get("state"),
+        "hint": status.get("hint"),
+        "operations": list(provider.get("operations") or []),
+        "modelFamilies": list(provider.get("supportedModelFamilies") or []),
+        "group": "API Providers",
+        "subgroup": "Image Providers",
+        "keysUrl": provider.get("keysUrl"),
+        "docsUrl": provider.get("docsUrl"),
+        "summary": provider.get("summary"),
+        "useCases": list(provider.get("useCases") or []),
+        "localVsCloud": provider.get("localVsCloud"),
+        "requirements": list(provider.get("requirements") or []),
+        "costPrivacyNote": provider.get("costPrivacyNote"),
+        "secretName": secret_name,
+        "setupSupported": bool(secret_name),
+        "connectionTestAvailable": False,
+    }
+
+
 def list_cloud_providers() -> dict[str, Any]:
     providers = []
     for provider in list_image_providers():
         if provider.get("kind") != "cloud":
             continue
         provider_id = str(provider.get("providerId") or "")
-        if provider_id.strip().lower() in {"kie", "fal", "wavespeed", "kie.ai", "fal.ai", "wavespeed.ai"}:
+        if _is_skipped_api_key_provider(provider_id):
             continue
-        secret_name = _IMAGE_PROVIDER_KEYS.get(provider_id)
-        status = secret_status(secret_name) if secret_name else {"configured": False, "state": "missing"}
-        providers.append(
-            {
-                "providerId": provider_id,
-                "displayName": provider.get("displayName"),
-                "statusLabel": "Ready" if status.get("state") == "verified" else "Requires Setup",
-                "configured": bool(status.get("configured")),
-                "state": status.get("state"),
-                "operations": list(provider.get("operations") or []),
-                "modelFamilies": list(provider.get("supportedModelFamilies") or []),
-                "group": "API Providers",
-                "subgroup": "Image Providers",
-            }
-        )
+        providers.append(_serialize_cloud_provider(provider))
     return {"count": len(providers), "items": providers}
+
+
+def _require_cloud_provider(provider_id: str) -> dict[str, Any]:
+    if _is_skipped_api_key_provider(provider_id):
+        raise KeyError(f"Unknown cloud provider: {provider_id}")
+    provider = _cloud_provider_record(provider_id)
+    if provider is None:
+        raise KeyError(f"Unknown cloud provider: {provider_id}")
+    return provider
+
+
+def _require_secret_name(provider_id: str) -> str:
+    _require_cloud_provider(provider_id)
+    secret_name = _IMAGE_PROVIDER_KEYS.get(provider_id)
+    if not secret_name:
+        raise KeyError(f"Setup is not yet supported for {provider_id}")
+    return secret_name
+
+
+def cloud_provider_key_status(provider_id: str) -> dict[str, Any]:
+    secret_name = _require_secret_name(provider_id)
+    status = secret_status(secret_name)
+    return {
+        "providerId": provider_id,
+        "configured": bool(status.get("configured")),
+        "state": status.get("state"),
+        "hint": status.get("hint"),
+        "statusLabel": _status_label(status),
+        "setupSupported": True,
+        "connectionTestAvailable": False,
+    }
+
+
+def set_cloud_provider_key(provider_id: str, api_key: str) -> dict[str, Any]:
+    secret_name = _require_secret_name(provider_id)
+    key = (api_key or "").strip()
+    if not key:
+        raise ValueError("API key is required.")
+    set_secret(secret_name, key)
+    status = secret_status(secret_name)
+    return {
+        "ok": True,
+        "providerId": provider_id,
+        "configured": bool(status.get("configured")),
+        "state": status.get("state"),
+        "hint": status.get("hint"),
+        "statusLabel": _status_label(status),
+        "message": "API key saved. Credentials stored only — this provider is not generation-ready yet.",
+    }
+
+
+def clear_cloud_provider_key(provider_id: str) -> dict[str, Any]:
+    secret_name = _require_secret_name(provider_id)
+    clear_secret(secret_name)
+    status = secret_status(secret_name)
+    return {
+        "ok": True,
+        "providerId": provider_id,
+        "configured": bool(status.get("configured")),
+        "state": status.get("state"),
+        "hint": status.get("hint"),
+        "statusLabel": _status_label(status),
+        "message": "API key removed",
+    }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import { useOpenCoDirector } from "../../components/CoDirector";
 import { HostedProvidersSetupPanel } from "../../components/HostedProvidersSetupPanel";
 import { filterCloudProviders, isApiKeyCatalogComponent } from "../../components/hostedProviderSetupCopy";
 import type { InstallJob } from "../../contracts/installJobs";
@@ -9,6 +10,14 @@ import type {
   SetupComponentStatus,
   SetupStatusResponse,
 } from "../types";
+import {
+  SETUP_NOT_YET_SUPPORTED,
+  cloudProviderPrimaryAction,
+  cloudProviderPrimaryLabel,
+  cloudProviderStatusVocabulary,
+} from "./cloudProviderCardCopy";
+import { CloudProviderLearnMoreModal } from "./CloudProviderLearnMoreModal";
+import { CloudProviderSetupModal } from "./CloudProviderSetupModal";
 
 function matchesIntent(component: SetupComponentStatus, brief: string): boolean {
   const q = brief.trim().toLowerCase();
@@ -111,6 +120,9 @@ export function AiGuidedSetupPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [cloudProviders, setCloudProviders] = useState<LifecycleCloudProvider[]>([]);
   const [monitorItems, setMonitorItems] = useState<Array<{ componentId: string; statusLabel: string; findings: Array<{ message: string }> }>>([]);
+  const [setupProvider, setSetupProvider] = useState<LifecycleCloudProvider | null>(null);
+  const [learnMoreProvider, setLearnMoreProvider] = useState<LifecycleCloudProvider | null>(null);
+  const openCoDirector = useOpenCoDirector();
 
   useEffect(() => {
     void Promise.all([
@@ -394,25 +406,82 @@ export function AiGuidedSetupPanel({
           </div>
         </div>
         <div className="setup-component-grid">
-          {filterCloudProviders(cloudProviders).map((provider) => (
-            <article key={provider.providerId} className="setup-component-card">
-              <header className="setup-card-header">
-                <div>
-                  <h3>{provider.displayName}</h3>
-                  <span className="setup-requirement">{provider.statusLabel}</span>
+          {filterCloudProviders(cloudProviders).map((provider) => {
+            const action = cloudProviderPrimaryAction(provider);
+            const vocab = cloudProviderStatusVocabulary(provider);
+            return (
+              <article
+                key={provider.providerId}
+                className="setup-component-card"
+                data-testid={`setup-cloud-provider-${provider.providerId}`}
+              >
+                <header className="setup-card-header">
+                  <div>
+                    <h3>{provider.displayName}</h3>
+                    <span className="setup-requirement">{vocab.statusLabel}</span>
+                  </div>
+                </header>
+                <p className="setup-component-description">
+                  {provider.summary || (provider.modelFamilies || []).join(" · ") || "Commercial image provider"}
+                </p>
+                <div className="setup-card-meta">
+                  <span>{vocab.metaLabel}</span>
+                  {(provider.operations || []).length > 0 && <span>{provider.operations?.join(", ")}</span>}
                 </div>
-              </header>
-              <p className="setup-component-description">
-                {(provider.modelFamilies || []).join(" · ") || "Commercial image provider"}
-              </p>
-              <div className="setup-card-meta">
-                <span>{provider.configured ? "Configured" : "Needs credentials"}</span>
-                {(provider.operations || []).length > 0 && <span>{provider.operations?.join(", ")}</span>}
-              </div>
-            </article>
-          ))}
+                <div className="setup-card-actions">
+                  {action === "coming_soon" ? (
+                    <span className="setup-requirement">{SETUP_NOT_YET_SUPPORTED}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="primary"
+                      data-testid={`setup-cloud-setup-btn-${provider.providerId}`}
+                      onClick={() => setSetupProvider(provider)}
+                    >
+                      {cloudProviderPrimaryLabel(provider)}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="linkish"
+                    data-testid={`setup-cloud-learn-more-btn-${provider.providerId}`}
+                    onClick={() => setLearnMoreProvider(provider)}
+                  >
+                    Learn More
+                  </button>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
+
+      {learnMoreProvider ? (
+        <CloudProviderLearnMoreModal
+          provider={learnMoreProvider}
+          onClose={() => setLearnMoreProvider(null)}
+          onSetUp={
+            cloudProviderPrimaryAction(learnMoreProvider) === "coming_soon"
+              ? undefined
+              : () => {
+                  setSetupProvider(learnMoreProvider);
+                  setLearnMoreProvider(null);
+                }
+          }
+        />
+      ) : null}
+
+      {setupProvider ? (
+        <CloudProviderSetupModal
+          provider={filterCloudProviders(cloudProviders).find((item) => item.providerId === setupProvider.providerId) || setupProvider}
+          onClose={() => setSetupProvider(null)}
+          onChanged={setCloudProviders}
+          onAskCoDirector={(prompt) => {
+            openCoDirector(prompt);
+            setSetupProvider(null);
+          }}
+        />
+      ) : null}
 
       {monitorItems.length > 0 && (
         <div className="panel">

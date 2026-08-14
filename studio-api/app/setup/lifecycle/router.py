@@ -238,7 +238,37 @@ def lifecycle_move(component_id: str, body: MoveBody):
     return service.move_installation(component_id, body.destinationRoot)
 
 
+class CloudProviderKeyBody(BaseModel):
+    api_key: str
+
+
 @router.get("/cloud-providers")
 def lifecycle_cloud_providers():
     return service.list_cloud_providers()
+
+
+@router.get("/cloud-providers/{provider_id}/key")
+def lifecycle_cloud_provider_key(provider_id: str):
+    try:
+        return service.cloud_provider_key_status(provider_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.put("/cloud-providers/{provider_id}/key")
+def lifecycle_set_cloud_provider_key(provider_id: str, body: CloudProviderKeyBody):
+    try:
+        return service.set_cloud_provider_key(provider_id, body.api_key)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/cloud-providers/{provider_id}/key")
+def lifecycle_clear_cloud_provider_key(provider_id: str):
+    try:
+        return service.clear_cloud_provider_key(provider_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
 

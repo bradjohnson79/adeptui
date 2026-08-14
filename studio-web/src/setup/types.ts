@@ -323,6 +323,17 @@ export interface LifecycleCloudProvider {
   modelFamilies?: string[];
   group?: string | null;
   subgroup?: string | null;
+  keysUrl?: string | null;
+  docsUrl?: string | null;
+  summary?: string | null;
+  useCases?: string[];
+  localVsCloud?: string | null;
+  requirements?: string[];
+  costPrivacyNote?: string | null;
+  secretName?: string | null;
+  setupSupported?: boolean;
+  connectionTestAvailable?: boolean;
+  hint?: string | null;
 }
 
 export interface SetupSummaryCounts {
