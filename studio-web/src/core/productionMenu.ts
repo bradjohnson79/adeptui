@@ -214,16 +214,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
     label: PRODUCTION_CATEGORY_LABELS["pre-production"],
     entries: [
       {
-        id: "continuity",
-        label: "Continuity",
-        description: "Review visual consistency across characters, scenes, and shots",
-        helpLabel: "What is Continuity?",
-        helpContent:
-          "Reviews whether characters, wardrobe, environments, and props stay consistent.",
-        action: "workspace",
-        workspace: "continuity",
-      },
-      {
         id: "scriptwriter",
         label: "Scriptwriter",
         description: "Write and organize scripts and dialogue",
@@ -233,13 +223,13 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         workspace: "scriptwriter",
       },
       {
-        id: "mastersheet",
-        label: "Scene Master Sheet",
-        description: "Manage the complete plan for a scene",
-        helpLabel: "What is Scene Master Sheet?",
-        helpContent: "Collects the complete production plan and assets for one scene.",
+        id: "scenecreator",
+        label: "Scene Creator",
+        description: "Turn an Environment Reference Sheet into scene-shot images for the Timeline",
+        helpLabel: "What is Scene Creator?",
+        helpContent: "Create scene shots from your Environment Reference Sheet, approve a look, and send it to the Timeline.",
         action: "workspace",
-        workspace: "mastersheet",
+        workspace: "scenecreator",
       },
       {
         id: "spatial",

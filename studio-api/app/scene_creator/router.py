@@ -90,6 +90,41 @@ class SendToTimelineBody(BaseModel):
     batch_block_id: str | None = None
 
 
+class CreateShotBody(BaseModel):
+    sheet_id: str
+    scene_id: str = ""
+    shot_id: str = ""
+    intent: str = ""
+    character_ids: list[str] | None = None
+    prop_entity_ids: list[str] | None = None
+    camera: dict[str, Any] | None = None
+    generator: dict[str, Any] | None = None
+
+
+class GenerateShotBody(BaseModel):
+    local_enabled: bool = True
+    api_enabled: bool = False
+    local_family: str = ""
+    api_model: str = ""
+    candidate_count: int = 4
+
+
+class RetakeShotBody(BaseModel):
+    correction: str
+    local_enabled: bool = True
+    api_enabled: bool = False
+    local_family: str = ""
+    api_model: str = ""
+
+
+class ApproveCandidateBody(BaseModel):
+    candidate_id: str
+
+
+class SendShotToTimelineBody(BaseModel):
+    batch_block_id: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -263,6 +298,9 @@ def api_send_to_timeline(
     _require_project(db, project_id)
     batch = _batch_or_404(db, project_id, batch_id)
 
+    if not (body.scene_id or "").strip():
+        raise HTTPException(400, "Send to Timeline needs a Scene. Create or select one first.")
+
     # Build clips from the batch's result asset ids (in shot order). Only
     # include slots that actually resolved to real asset ids — skip failed
     # regens (marked "failed_*" or empty).
@@ -305,10 +343,12 @@ def api_send_to_timeline(
     )
 
     if not result.get("ok"):
+        error = result.get("error") or "TIMELINE_HANDOFF_FAILED"
+        status = 400 if error in {"SCENE_ID_REQUIRED", "NO_COMPLETED_SHOTS", "SCENE_BATCH_NOT_FOUND"} else 502
         raise HTTPException(
-            502,
+            status,
             {
-                "error": result.get("error") or "TIMELINE_HANDOFF_FAILED",
+                "error": error,
                 "message": result.get("message") or "Timeline handoff failed.",
             },
         )
@@ -318,3 +358,166 @@ def api_send_to_timeline(
         "timeline": result,
         "clips_sent": result.get("clips_sent") or len(clips),
     }
+
+
+def _service_error(exc: Exception) -> HTTPException:
+    from .ers_resolver import ErsResolveError
+    from .service import SceneCreatorError
+
+    if isinstance(exc, (SceneCreatorError, ErsResolveError, ValueError)):
+        return HTTPException(400, str(exc))
+    logger.exception("Scene Creator error")
+    return HTTPException(500, str(exc))
+
+
+@router.get("/projects/{project_id}/workspace")
+def api_workspace(
+    project_id: str,
+    sheet_id: str = "",
+    scene_id: str = "",
+    shot_id: str = "",
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import hydrate_workspace
+
+    try:
+        return hydrate_workspace(
+            db, project_id, sheet_id=sheet_id, scene_id=scene_id, shot_id=shot_id
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/shots")
+def api_upsert_shot(
+    project_id: str, body: CreateShotBody, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import create_or_update_shot
+
+    try:
+        shot = create_or_update_shot(
+            db,
+            project_id,
+            shot_id=body.shot_id,
+            scene_id=body.scene_id,
+            sheet_id=body.sheet_id,
+            intent=body.intent,
+            character_ids=body.character_ids,
+            prop_entity_ids=body.prop_entity_ids,
+            camera=body.camera,
+            generator=body.generator,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"shot": shot.model_dump()}
+
+
+@router.get("/projects/{project_id}/shots/{shot_id}")
+def api_get_shot(
+    project_id: str, shot_id: str, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import get_shot
+
+    try:
+        shot = get_shot(db, project_id, shot_id)
+    except Exception as etc:
+        raise _service_error(etc) from etc
+    return {"shot": shot.model_dump()}
+
+
+@router.post("/projects/{project_id}/shots/{shot_id}/generate")
+def api_generate_shot(
+    project_id: str,
+    shot_id: str,
+    body: GenerateShotBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import generate_candidates
+
+    try:
+        shot = generate_candidates(
+            db,
+            project_id,
+            shot_id,
+            local_enabled=body.local_enabled,
+            api_enabled=body.api_enabled,
+            local_family=body.local_family,
+            api_model=body.api_model,
+            candidate_count=body.candidate_count,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"shot": shot.model_dump()}
+
+
+@router.post("/projects/{project_id}/shots/{shot_id}/retake")
+def api_retake_shot(
+    project_id: str,
+    shot_id: str,
+    body: RetakeShotBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import retake_shot
+
+    try:
+        shot = retake_shot(
+            db,
+            project_id,
+            shot_id,
+            correction=body.correction,
+            local_enabled=body.local_enabled,
+            api_enabled=body.api_enabled,
+            local_family=body.local_family,
+            api_model=body.api_model,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"shot": shot.model_dump()}
+
+
+@router.post("/projects/{project_id}/shots/{shot_id}/approve")
+def api_approve_candidate(
+    project_id: str,
+    shot_id: str,
+    body: ApproveCandidateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import approve_candidate
+
+    try:
+        shot = approve_candidate(db, project_id, shot_id, body.candidate_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"shot": shot.model_dump()}
+
+
+@router.post("/projects/{project_id}/shots/{shot_id}/send-to-timeline")
+def api_send_shot_to_timeline(
+    project_id: str,
+    shot_id: str,
+    body: SendShotToTimelineBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import send_approved_to_timeline
+
+    try:
+        result = send_approved_to_timeline(
+            db, project_id, shot_id, batch_block_id=body.batch_block_id
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    if not result.get("ok"):
+        error = result.get("error") or "TIMELINE_HANDOFF_FAILED"
+        status = 400 if error in {"SCENE_ID_REQUIRED", "NO_APPROVED_TAKE"} else 502
+        raise HTTPException(
+            status,
+            {"error": error, "message": result.get("message") or "Timeline handoff failed."},
+        )
+    return {"timeline": result, "clips_sent": result.get("clips_sent") or 1}

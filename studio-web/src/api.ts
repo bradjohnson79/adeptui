@@ -3623,6 +3623,54 @@ export const api = {
     req<{ ok: boolean; findings: Array<{ severity: string; message: string; code?: string }> }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/preflight`,
     ),
+  directorTimelineSetContinuityPolicy: (
+    projectId: string,
+    sceneId: string,
+    body: { configuredTailDuration: number },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/continuity-policy`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  directorTimelineRetakeBatch: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    body?: { mode?: string; userCorrection?: Record<string, unknown>; continuityAware?: boolean },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/retake`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+    ),
+  directorTimelineActivateTake: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/activate-take`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId }) },
+    ),
+  directorTimelineRetryBridge: (projectId: string, sceneId: string, bridgeId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/bridges/${encodeURIComponent(bridgeId)}/retry`,
+      { method: "POST" },
+    ),
+  directorTimelineContinueWithoutBridge: (projectId: string, sceneId: string, bridgeId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/bridges/${encodeURIComponent(bridgeId)}/continue-without`,
+      { method: "POST" },
+    ),
+  directorTimelineReconcileDownstream: (
+    projectId: string,
+    sceneId: string,
+    body?: { spendApiCredits?: boolean },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/reconcile-downstream`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+    ),
+  directorTimelineKeepExistingDownstream: (projectId: string, sceneId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/keep-existing-downstream`,
+      { method: "POST" },
+    ),
   knowledgebaseModels: () => req<any[]>("/api/knowledgebase/generation/models"),
   knowledgebaseModel: (id: string) => req<any>(`/api/knowledgebase/generation/models/${id}`),
   knowledgebaseDoc: (path: string) =>
@@ -4120,6 +4168,99 @@ export const api = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+        },
+      ),
+    workspace: (projectId: string, query?: { sheet_id?: string; scene_id?: string; shot_id?: string }) => {
+      const params = new URLSearchParams();
+      if (query?.sheet_id) params.set("sheet_id", query.sheet_id);
+      if (query?.scene_id) params.set("scene_id", query.scene_id);
+      if (query?.shot_id) params.set("shot_id", query.shot_id);
+      const qs = params.toString();
+      return req<import("./components/CoDirector/SceneCreator/types").SceneCreatorWorkspace>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/workspace${qs ? `?${qs}` : ""}`,
+        { cache: "no-store" },
+      );
+    },
+    upsertShot: (
+      projectId: string,
+      body: {
+        sheet_id: string;
+        scene_id?: string;
+        shot_id?: string;
+        intent?: string;
+        character_ids?: string[];
+        prop_entity_ids?: string[];
+        camera?: Record<string, unknown>;
+        generator?: Record<string, unknown>;
+      },
+    ) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    getShot: (projectId: string, shotId: string) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}`,
+        { cache: "no-store" },
+      ),
+    generateShot: (
+      projectId: string,
+      shotId: string,
+      body: {
+        local_enabled: boolean;
+        api_enabled: boolean;
+        local_family?: string;
+        api_model?: string;
+        candidate_count?: number;
+      },
+    ) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    retakeShot: (
+      projectId: string,
+      shotId: string,
+      body: {
+        correction: string;
+        local_enabled: boolean;
+        api_enabled: boolean;
+        local_family?: string;
+        api_model?: string;
+      },
+    ) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/retake`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+    approveCandidate: (projectId: string, shotId: string, candidateId: string) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ candidate_id: candidateId }),
+        },
+      ),
+    sendShotToTimeline: (projectId: string, shotId: string, body?: { batch_block_id?: string }) =>
+      req<{ timeline: Record<string, unknown>; clips_sent: number }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/send-to-timeline`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {}),
         },
       ),
   },

@@ -61,6 +61,13 @@ def send_scene_batch_to_timeline(
         The ``export_to_timeline`` result dict (``{ok, batchBlockId, clips, ...}``
         on success; ``{ok: False, error, ...}`` on failure).
     """
+    if not (scene_id or "").strip():
+        return {
+            "ok": False,
+            "error": "SCENE_ID_REQUIRED",
+            "message": "Send to Timeline needs a Scene. Create or select one first.",
+        }
+
     batch = load_scene_batch(db, project_id, batch_id)
     if batch is None:
         return {
@@ -90,6 +97,64 @@ def send_scene_batch_to_timeline(
         result["batch_id"] = batch_id
         result["ers_package_id"] = batch.ers_package_id
         result["clips_sent"] = len(clips)
+    return result
+
+
+def send_approved_shot_to_timeline(
+    db: Session,
+    project_id: str,
+    shot: Any,
+    candidate: Any,
+    *,
+    batch_block_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Send one approved Scene Creator take to Timeline. Unapproved candidates are ineligible."""
+    scene_id = str(getattr(shot, "scene_id", "") or "").strip()
+    if not scene_id:
+        return {
+            "ok": False,
+            "error": "SCENE_ID_REQUIRED",
+            "message": "This shot is not bound to a Scene.",
+        }
+    asset_id = str(getattr(candidate, "asset_id", "") or "").strip()
+    if not asset_id:
+        return {
+            "ok": False,
+            "error": "NO_APPROVED_TAKE",
+            "message": "Approve a take before sending to Timeline.",
+        }
+    cine = getattr(getattr(shot, "camera", None), "cinematic", None)
+    framing = getattr(cine, "framing", "") or "scene"
+    name = f"{getattr(candidate, 'take_label', 'Take') or 'Take'} — {framing}"
+    clips = [
+        {
+            "clipId": f"scene_shot_{shot.id}_{candidate.id}",
+            "assetId": asset_id,
+            "name": name,
+            "shot_index": 0,
+            "shot_prompt": getattr(shot, "intent", "") or getattr(shot, "prompt", ""),
+            "character_ids": list(getattr(shot, "character_ids", None) or []),
+            "prop_ids": list(getattr(shot, "prop_entity_ids", None) or []),
+            "ers_package_id": getattr(shot, "ers_package_id", "") or "",
+            "sheet_id": getattr(shot, "sheet_id", "") or "",
+            "source_scene": scene_id,
+            "approved_take": True,
+            "role": "start",
+        }
+    ]
+    result = export_to_timeline(
+        db,
+        project_id,
+        scene_id,
+        clips,
+        label=name,
+        batch_block_id=batch_block_id,
+    )
+    if result.get("ok"):
+        result["shot_id"] = shot.id
+        result["candidate_id"] = candidate.id
+        result["sheet_id"] = getattr(shot, "sheet_id", "")
+        result["clips_sent"] = 1
     return result
 
 

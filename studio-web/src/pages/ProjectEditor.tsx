@@ -35,7 +35,7 @@ import { Txt2VidPanel } from "../components/Txt2VidPanel";
 import { CinematicImageStudio } from "../components/image-studio/CinematicImageStudio";
 import { LibraryPanel } from "../components/LibraryPanel";
 import { MarketplacePanel } from "../components/MarketplacePanel";
-import { SceneMasterSheetWorkspace } from "../components/SceneMasterSheetWorkspace";
+import { SceneCreatorWorkspace } from "../components/scene-creator/SceneCreatorWorkspace";
 import { AvatarStudioWorkspace } from "../components/AvatarStudioWorkspace";
 import { VoiceStudioShell } from "../components/VoiceStudioShell";
 import { CharacterProfileWorkspace } from "../components/CharacterProfileWorkspace";
@@ -687,12 +687,10 @@ export default function ProjectEditor() {
           onRefresh={refresh}
           onAskCoDirector={(p) => openCoDirector(p)}
         />
-      ) : tab === "mastersheet" ? (
-        <SceneMasterSheetWorkspace
+      ) : tab === "scenecreator" || tab === "mastersheet" ? (
+        <SceneCreatorWorkspace
           project={project}
-          sceneId={selectedScene}
-          onChange={refresh}
-          onGoSpatial={() => go("spatial")}
+          onGo={(next) => go((next === "spatial_map" ? "spatial" : next) as typeof tab)}
         />
       ) : tab === "avatar" ? (
         <AvatarStudioWorkspace project={project} onChange={refresh} onGo={go} />

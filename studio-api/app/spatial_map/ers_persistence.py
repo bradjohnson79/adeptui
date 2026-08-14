@@ -28,6 +28,7 @@ from .ers_contracts import (
     EnvironmentReferencePackage,
     PropEntity,
     SceneGenerationBatch,
+    SceneShot,
 )
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 ERS_CATEGORY = "spatial_ers"
 BATCH_CATEGORY = "scene_batch"
 PROP_CATEGORY = "prop_entity"
+SHOT_CATEGORY = "scene_shot"
 
 
 def _now() -> str:
@@ -125,7 +127,13 @@ def _list_trait_values(db: Session, *, project_id: str, category: str) -> list[s
 # ---------------------------------------------------------------------------
 
 
-def save_ers_package(db: Session, project_id: str, package: EnvironmentReferencePackage) -> None:
+def save_ers_package(
+    db: Session,
+    project_id: str,
+    package: EnvironmentReferencePackage,
+    *,
+    provenance: str = "ers_generate",
+) -> None:
     package.updated_at = _now()
     if not package.created_at:
         package.created_at = _now()
@@ -135,7 +143,7 @@ def save_ers_package(db: Session, project_id: str, package: EnvironmentReference
         category=ERS_CATEGORY,
         key=package.id,
         value=_model_dump_json(package),
-        provenance="ers_generate",
+        provenance=provenance,
     )
 
 
@@ -228,6 +236,45 @@ def load_prop_entity(db: Session, project_id: str, tag: str) -> PropEntity | Non
     except Exception as exc:
         logger.error("Failed to load prop entity %s: %s", tag, exc)
         return None
+
+
+def save_scene_shot(db: Session, project_id: str, shot: SceneShot) -> None:
+    shot.updated_at = _now()
+    if not shot.created_at:
+        shot.created_at = _now()
+    _upsert_trait(
+        db,
+        project_id=project_id,
+        category=SHOT_CATEGORY,
+        key=shot.id,
+        value=_model_dump_json(shot),
+        provenance="scene_creator",
+    )
+
+
+def load_scene_shot(db: Session, project_id: str, shot_id: str) -> SceneShot | None:
+    raw = _load_trait_value(db, project_id=project_id, category=SHOT_CATEGORY, key=shot_id)
+    if not raw:
+        return None
+    try:
+        return SceneShot.model_validate_json(raw)
+    except Exception as exc:
+        logger.error("Failed to load scene shot %s: %s", shot_id, exc)
+        return None
+
+
+def list_scene_shots(db: Session, project_id: str, *, scene_id: str | None = None) -> list[SceneShot]:
+    shots: list[SceneShot] = []
+    for raw in _list_trait_values(db, project_id=project_id, category=SHOT_CATEGORY):
+        try:
+            shot = SceneShot.model_validate_json(raw)
+        except Exception:
+            continue
+        if scene_id and shot.scene_id != scene_id:
+            continue
+        shots.append(shot)
+    shots.sort(key=lambda s: s.created_at or "")
+    return shots
 
 
 def list_prop_entities(db: Session, project_id: str) -> list[PropEntity]:

@@ -293,6 +293,19 @@ export const WORKSPACES = {
     order: 30,
     description: "Scene continuity master sheet.",
     capabilityBadges: ["Scenes"],
+    commandPalette: false,
+    menuHidden: true,
+  },
+  scenecreator: {
+    label: "Scene Creator",
+    labelKey: "sceneCreator",
+    group: "create",
+    futureDestination: "sceneSheets",
+    compatibilityAliases: ["scene-creator", "sceneCreator"],
+    menuGroup: "production",
+    order: 30,
+    description: "Create scene shots from an Environment Reference Sheet and send approved takes to the Timeline.",
+    capabilityBadges: ["Scenes"],
     commandPalette: true,
   },
   avatar: {
@@ -371,6 +384,7 @@ export const WORKSPACES = {
     capabilityBadges: ["Continuity", "Review"],
     toolbarEligible: true,
     commandPalette: true,
+    menuHidden: true,
   },
   magi: {
     label: "MAGI Editor",
@@ -485,6 +499,7 @@ export function resolveWorkspace(value: unknown): EditorTab | null {
   if (resolved === "editor") return "magi";
   // Wave 4C: Director product renamed Timeline — never surface two products.
   if (resolved === "director") return "timeline";
+  if (resolved === "mastersheet") return "scenecreator";
   // M4.7: writing entry points resolve to Scriptwriter Studio.
   // Storyboard remains available via workspace=storyboard / script-storyboard.
   if (normalized === "script-writer" || normalized === "writer") return "scriptwriter";

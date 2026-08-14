@@ -27,7 +27,8 @@ const TAB_LABELS: Partial<Record<EditorTab, string>> = {
   imagegen: "Image Generation",
   txt2vid: "Text to Video",
   library: "Library",
-  mastersheet: "Scene Master Sheet",
+  mastersheet: "Scene Creator",
+  scenecreator: "Scene Creator",
   avatar: "Avatar Studio",
   home: "Project Home",
 };
@@ -261,12 +262,12 @@ export function ProjectHome({
       <div className="project-dash-grid">
         <ActivityFeed items={activityItems} />
         <section className="dash-card">
-          <h2>Scene Master Sheets</h2>
+          <h2>Scene Creator</h2>
           <p className="muted" style={{ marginBottom: "0.75rem" }}>
-            Structured whole-scene packages — what exists in the scene (not a collage).
+            Turn an Environment Reference Sheet into scene-shot images, then send an approved look to the Timeline.
           </p>
-          <button type="button" className="primary" onClick={() => onGo("mastersheet")}>
-            Open Scene Master Sheet
+          <button type="button" className="primary" onClick={() => onGo("scenecreator")}>
+            Open Scene Creator
           </button>
           <button type="button" style={{ marginLeft: "0.4rem" }} onClick={() => onGo("library")}>
             Browse in Library

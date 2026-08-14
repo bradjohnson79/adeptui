@@ -1,12 +1,8 @@
 /**
  * Scene Creator API client.
  *
- * Thin facade over `api.sceneCreator` (defined in studio-web/src/api.ts) so
- * Scene Creator components import a single named module. All endpoints map
- * 1:1 to the backend router in studio-api/app/scene_creator/router.py.
- *
- * Law #9 (every control wired): every method calls a real backend endpoint.
- * Law #14 (project isolation): every call is scoped by projectId.
+ * Thin facade over `api.sceneCreator` so Scene Creator components import a
+ * single named module. Express and Standard share this client.
  */
 import { api } from "../../../api";
 import type {
@@ -15,6 +11,8 @@ import type {
   ListBatchesResponse,
   ParseShotsResponse,
   RegenerateShotResponse,
+  SceneCreatorWorkspace,
+  SceneShot,
   SendToTimelineResponse,
 } from "./types";
 
@@ -38,6 +36,25 @@ export type SendToTimelineInput = {
   batch_block_id?: string;
 };
 
+export type UpsertShotInput = {
+  sheet_id: string;
+  scene_id?: string;
+  shot_id?: string;
+  intent?: string;
+  character_ids?: string[];
+  prop_entity_ids?: string[];
+  camera?: Record<string, unknown>;
+  generator?: Record<string, unknown>;
+};
+
+export type GenerateShotInput = {
+  local_enabled: boolean;
+  api_enabled: boolean;
+  local_family?: string;
+  api_model?: string;
+  candidate_count?: number;
+};
+
 export const sceneCreatorApi = {
   parseShots: (projectId: string, rawText: string): Promise<ParseShotsResponse> =>
     api.sceneCreator.parseShots(projectId, rawText),
@@ -57,4 +74,27 @@ export const sceneCreatorApi = {
     batchId: string,
     body: SendToTimelineInput,
   ): Promise<SendToTimelineResponse> => api.sceneCreator.sendToTimeline(projectId, batchId, body),
+  workspace: (
+    projectId: string,
+    query?: { sheet_id?: string; scene_id?: string; shot_id?: string },
+  ): Promise<SceneCreatorWorkspace> => api.sceneCreator.workspace(projectId, query),
+  upsertShot: (projectId: string, body: UpsertShotInput): Promise<{ shot: SceneShot }> =>
+    api.sceneCreator.upsertShot(projectId, body),
+  getShot: (projectId: string, shotId: string): Promise<{ shot: SceneShot }> =>
+    api.sceneCreator.getShot(projectId, shotId),
+  generateShot: (projectId: string, shotId: string, body: GenerateShotInput): Promise<{ shot: SceneShot }> =>
+    api.sceneCreator.generateShot(projectId, shotId, body),
+  retakeShot: (
+    projectId: string,
+    shotId: string,
+    body: { correction: string } & GenerateShotInput,
+  ): Promise<{ shot: SceneShot }> => api.sceneCreator.retakeShot(projectId, shotId, body),
+  approveCandidate: (projectId: string, shotId: string, candidateId: string): Promise<{ shot: SceneShot }> =>
+    api.sceneCreator.approveCandidate(projectId, shotId, candidateId),
+  sendShotToTimeline: (
+    projectId: string,
+    shotId: string,
+    body?: { batch_block_id?: string },
+  ): Promise<{ timeline: Record<string, unknown>; clips_sent: number }> =>
+    api.sceneCreator.sendShotToTimeline(projectId, shotId, body),
 };

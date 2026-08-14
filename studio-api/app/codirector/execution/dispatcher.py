@@ -196,6 +196,12 @@ def _dispatch_capability_handler(
             "frame_metadata": ctx.get("frame_metadata"),
             "reference_asset_id": ctx.get("reference_asset_id"),
             "plan_data": ctx.get("plan_data"),
+            "spatial_map_id": ctx.get("spatial_map_id") or ctx.get("spatialMapId"),
+            "ers_package_id": ctx.get("ers_package_id"),
+            "shot_requests_raw": ctx.get("shot_requests_raw"),
+            "output_count": ctx.get("output_count"),
+            "name": ctx.get("name"),
+            "description": ctx.get("description"),
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
 
@@ -280,6 +286,7 @@ def _dispatch_capability_handler_plan_only(
             "project_style": ctx.get("project_style", ""),
             "scene_context": ctx.get("scene_context"),
             "character_names": ctx.get("character_names"),
+            "spatial_map_id": ctx.get("spatial_map_id") or ctx.get("spatialMapId"),
             "plan_only": True,
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}

@@ -135,6 +135,117 @@ PROP_SLOT_LABELS: tuple[str, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Scene Creator Express / Standard — Scene ≠ Shot ≠ Candidate (frozen)
+# Creator-facing ERS identity is sheetId. Package UUIDs stay internal.
+# ---------------------------------------------------------------------------
+
+CinematicShotSize = Literal[
+    "wide",
+    "medium_wide",
+    "medium",
+    "close_up",
+    "extreme_close_up",
+]
+CinematicMotion = Literal["static", "pan", "tilt", "dolly", "handheld"]
+CinematicFraming = Literal["single", "two_shot", "group", "over_shoulder", "pov"]
+CandidateSource = Literal["local", "api"]
+CandidateStatus = Literal["queued", "generating", "complete", "failed"]
+
+
+class CinematicShotControls(BaseModel):
+    """HOW the shot is interpreted. Never written back to Spatial Map."""
+
+    shot_size: str = "medium_wide"
+    motion: str = "static"
+    framing: str = "two_shot"
+
+
+class SceneCreatorCamera(BaseModel):
+    """WHERE from Spatial Map + HOW from Scene Creator.
+
+    Spatial fields (slot, orientation, FOV) are snapshots. Cinematic overrides
+    stay on the shot and are never silently written back to Spatial Map.
+    """
+
+    camera_id: str = ""
+    camera_slot: Optional[int] = None  # 0-3 display as C1-C4; None = Default Camera
+    label: str = "Default Camera"
+    orientation: str = ""
+    fov_preset: str = ""
+    yaw_degrees: Optional[float] = None
+    lens_mm: Optional[float] = None
+    cinematic: CinematicShotControls = Field(default_factory=CinematicShotControls)
+
+
+class GeneratorSourceSelection(BaseModel):
+    """User Control Law: an unchecked source produces zero jobs to that source."""
+
+    local_enabled: bool = True
+    api_enabled: bool = False
+    local_family: str = ""
+    api_provider: str = ""
+    api_model: str = ""
+
+
+class SceneShotTakeMemory(BaseModel):
+    """Adept UI Take Law — same product law as Timeline Re-Take.
+
+    User correction is a DELTA. Take A remains authoritative until Take B
+    is approved. Do not collapse into one opaque prompt.
+    """
+
+    originalTakeIntent: dict = Field(default_factory=dict)
+    sceneErsState: dict = Field(default_factory=dict)
+    characterIdentity: dict = Field(default_factory=dict)
+    blocking: dict = Field(default_factory=dict)
+    camera: dict = Field(default_factory=dict)
+    takeState: dict = Field(default_factory=dict)
+    userCorrection: dict = Field(default_factory=dict)
+
+
+class SceneShotCandidate(BaseModel):
+    """One generated visual take of a Shot. Never a Shot itself."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    shot_id: str = ""
+    index: int = 0
+    job_id: str = ""
+    asset_id: Optional[str] = None
+    status: CandidateStatus = "queued"
+    source: CandidateSource = "local"
+    family: str = ""
+    model: str = ""
+    seed: Optional[int] = None
+    provenance_label: str = ""
+    take_label: str = ""
+    error: str = ""
+    created_at: str = ""
+
+
+class SceneShot(BaseModel):
+    """One shot inside a Studio Scene. Owns intent, ERS, blocking, camera, prompt, candidates."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project_id: str
+    scene_id: str  # required Studio Scene row — never empty
+    sheet_id: str  # canonical creator-facing ERS identity
+    ers_package_id: str = ""  # resolved internally; UI must not require this
+    ers_runtime: bool = False  # True when package was constructed without regen
+    intent: str = ""
+    prompt: str = ""
+    character_ids: list[str] = Field(default_factory=list)
+    prop_entity_ids: list[str] = Field(default_factory=list)
+    camera: SceneCreatorCamera = Field(default_factory=SceneCreatorCamera)
+    generator: GeneratorSourceSelection = Field(default_factory=GeneratorSourceSelection)
+    candidates: list[SceneShotCandidate] = Field(default_factory=list)
+    approved_candidate_id: Optional[str] = None
+    take_memory: SceneShotTakeMemory = Field(default_factory=SceneShotTakeMemory)
+    generation_batch_id: Optional[str] = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
 def normalize_prop_tag(label: str) -> str:
     """Normalize a human prop label into a project-safe tag.
 
