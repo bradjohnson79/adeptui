@@ -128,14 +128,32 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
         const propOptions: SavedOption[] = [];
         const seen = new Set<string>();
+        try {
+          const projectProps = await api.propCreator.list(projectId, true);
+          for (const prop of projectProps.props || []) {
+            const visual = prop.approved_asset_id || prop.library_asset_id || "";
+            if (!prop.id || seen.has(`project:${prop.id}`)) continue;
+            seen.add(`project:${prop.id}`);
+            if (visual) seen.add(`library:${visual}`);
+            propOptions.push({
+              id: prop.id,
+              name: prop.display_label || prop.tag || "Prop",
+              assetId: visual || null,
+              source: "project",
+            });
+          }
+        } catch {
+          // project props are optional until Prop Creator is used
+        }
         for (const character of characters) {
           try {
             const propsRes = (await api.listCharacterProps(projectId, character.id)) as {
               items?: Array<{ id: string; name: string; library_asset_id?: string | null }>;
             };
             for (const prop of propsRes.items || []) {
-              if (!prop.id || seen.has(prop.id)) continue;
-              seen.add(prop.id);
+              if (!prop.id || seen.has(`character:${prop.id}`)) continue;
+              seen.add(`character:${prop.id}`);
+              if (prop.library_asset_id) seen.add(`library:${prop.library_asset_id}`);
               propOptions.push({
                 id: prop.id,
                 name: prop.name,
@@ -153,8 +171,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           for (const asset of items) {
             const tag = String(asset.tag || "").toLowerCase();
             if (!tag.includes("prop") && !tag.startsWith("#")) continue;
-            if (seen.has(asset.id)) continue;
-            seen.add(asset.id);
+            if (seen.has(`library:${asset.id}`)) continue;
+            seen.add(`library:${asset.id}`);
             const name = (asset.tag || asset.filename || "Prop").replace(/^#/, "");
             propOptions.push({ id: asset.id, name, assetId: asset.id, source: "library" });
           }
@@ -481,11 +499,12 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     async (slot: SlotDef, option: SavedOption) => {
       if (!document || !option.id) return;
       try {
-        const isCharacterProp = option.source !== "library";
+        const isProjectProp = option.source === "project";
+        const isCharacterProp = option.source === "character";
         const updated = await spatialMapApi.placeProp(projectId, document.id, {
           label: option.name,
           assetId: option.assetId || null,
-          propId: isCharacterProp ? option.id : null,
+          propId: isProjectProp || isCharacterProp ? option.id : null,
           category: "prop",
           state: "default",
           tag: option.name,

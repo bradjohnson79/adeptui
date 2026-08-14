@@ -212,11 +212,21 @@ function CharactersPropsBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }
             {c.name}
           </button>
         ))}
-        {props.map((p) => (
-          <span key={p.tag} className="scene-creator-core__chip" data-testid="scene-creator-prop-chip">
-            #{p.display_label}
-          </span>
-        ))}
+        {props.map((p) => {
+          const id = p.prop_id || p.tag;
+          const on = Boolean(p.prop_id && sc.propIds.includes(p.prop_id));
+          return (
+            <button
+              key={id}
+              type="button"
+              className={on ? "scene-creator-core__chip is-on" : "scene-creator-core__chip"}
+              data-testid="scene-creator-prop-chip"
+              onClick={() => p.prop_id && sc.toggleProp(p.prop_id)}
+            >
+              #{p.display_label}
+            </button>
+          );
+        })}
         {!chars.length && !props.length ? <span className="muted">Place characters and props on the Spatial Map.</span> : null}
       </div>
     </div>

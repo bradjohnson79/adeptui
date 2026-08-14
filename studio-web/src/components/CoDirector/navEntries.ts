@@ -15,6 +15,7 @@ export type ContentTab =
   | "story"
   | "script"
   | "characters"
+  | "prop_creator"
   | "spatial_map"
   | "scene_creator";
 
@@ -49,6 +50,7 @@ export const CONTENT_NAV: ContentNavItem[] = [
   { kind: "tab", id: "story", label: "Story" },
   { kind: "tab", id: "scriptwriter", label: "Script Writer" },
   { kind: "tab", id: "characters", label: "Character Creator" },
+  { kind: "tab", id: "prop_creator", label: "Prop Creator" },
   { kind: "tab", id: "spatial_map", label: "Spatial Map" },
   { kind: "tab", id: "scene_creator", label: "Scene Creator" },
   { kind: "tab", id: "library", label: "Library" },

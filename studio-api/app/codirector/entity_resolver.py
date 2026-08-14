@@ -320,9 +320,13 @@ def _prop_metadata(db: Session, project_id: str, prop_ids: list[str]) -> list[di
                 out.append(
                     {
                         "id": prop.id,
+                        "prop_id": prop.id,
                         "tag": prop.tag,
                         "display_label": prop.display_label,
-                        "library_asset_id": prop.library_asset_id,
+                        "approved_asset_id": (prop.approved_asset_id or "").strip() or None,
+                        "library_asset_id": (prop.approved_asset_id or "").strip()
+                        or (prop.library_asset_id or "").strip(),
+                        "description": (prop.description or prop.notes or "").strip(),
                         "notes": prop.notes,
                     }
                 )
@@ -370,8 +374,9 @@ def compile_shot_prompt(
             if ref_id and ref_id not in reference_image_ids:
                 reference_image_ids.append(ref_id)
     for prop in prop_meta:
-        if prop.get("library_asset_id") and prop["library_asset_id"] not in reference_image_ids:
-            reference_image_ids.append(prop["library_asset_id"])
+        visual = (prop.get("approved_asset_id") or prop.get("library_asset_id") or "").strip()
+        if visual and visual not in reference_image_ids:
+            reference_image_ids.append(visual)
 
     directional_ref: dict[str, Any] = {}
     if ers_package and shot.orientation in {"north", "east", "south", "west"}:
@@ -393,6 +398,9 @@ def compile_shot_prompt(
         prompt_parts.append("Characters: " + ", ".join(char_names))
     if prop_labels:
         prompt_parts.append("Props: " + ", ".join(prop_labels))
+    prop_facts = [p.get("description") for p in prop_meta if p.get("description")]
+    if prop_facts:
+        prompt_parts.append("Prop details: " + " ".join(prop_facts))
     if shot.framing:
         prompt_parts.append(f"Framing: {shot.framing}")
     if shot.angle:

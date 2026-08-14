@@ -101,7 +101,7 @@ export type SavedOption = {
   name: string;
   thumbnailUrl?: string | null;
   assetId?: string | null;
-  source?: "character" | "library";
+  source?: "project" | "character" | "library";
 };
 
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";

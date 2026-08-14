@@ -21,6 +21,7 @@ import { LibraryMediaGrid } from "./library/LibraryMediaGrid";
 import { ScriptwriterInlineEditor } from "./scriptwriter/ScriptwriterInlineEditor";
 import { CharacterCompactView } from "./characters/CharacterCompactView";
 import { SpatialMapPanel } from "./SpatialMap/SpatialMapPanel";
+import { PropCreatorPanel } from "./PropCreator/PropCreatorPanel";
 import {
   CoDirectorDevelopmentPanel,
   CoDirectorPitchLaunchPanel,
@@ -560,6 +561,15 @@ export function CoDirectorProjectContent({
               />
             ) : (
               <p className="muted">Select a project to open Character Creator.</p>
+            )}
+          </div>
+        )}
+        {tab === "prop_creator" && (
+          <div data-testid="codirector-content-prop-creator">
+            {projectId ? (
+              <PropCreatorPanel projectId={projectId} onGoTab={onGoTab} />
+            ) : (
+              <p className="muted">Select a project to open Prop Creator.</p>
             )}
           </div>
         )}

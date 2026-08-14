@@ -61,4 +61,17 @@ describe("Scene Creator contracts", () => {
     expect(express).toContain("RetakeBlock");
     expect(express).toContain("{sc.approved ? <RetakeBlock");
   });
+
+  it("wires placed project props onto the shot as toggle chips", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./SceneCreatorCore.tsx", import.meta.url), "utf8"),
+    );
+    expect(src).toContain("sc.toggleProp");
+    expect(src).toContain("scene-creator-prop-chip");
+    const hook = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./useSceneCreator.ts", import.meta.url), "utf8"),
+    );
+    expect(hook).toContain("prop_id");
+    expect(hook).toContain("toggleProp");
+  });
 });

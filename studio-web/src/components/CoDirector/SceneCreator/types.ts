@@ -96,9 +96,13 @@ export type ResolvedCharacter = {
 
 /** A prop resolved from the spatial map, available as #tag. */
 export type ResolvedProp = {
+  prop_id?: string | null;
   tag: string;
   display_label: string;
   position_label: string;
+  approved_asset_id?: string | null;
+  library_asset_id?: string | null;
+  description?: string;
 };
 
 /** One shot suggestion from Co-Director. */

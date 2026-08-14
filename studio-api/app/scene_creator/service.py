@@ -23,6 +23,7 @@ from ..spatial_map.ers_contracts import (
 )
 from ..spatial_map.ers_persistence import (
     list_scene_shots,
+    load_prop_entity_by_id,
     load_scene_shot,
     save_scene_shot,
 )
@@ -139,12 +140,14 @@ def hydrate_workspace(
                     )
                 else:
                     props.append(
-                        {
-                            "tag": (placement.get("label") or "prop"),
-                            "display_label": placement.get("label") or "Prop",
-                            "position_label": _position_summary(placement),
-                            "library_asset_id": placement.get("assetId") or placement.get("propId"),
-                        }
+                        _hydrate_prop(
+                            db,
+                            project_id,
+                            prop_id=str(placement.get("propId") or placement.get("prop_id") or ""),
+                            asset_id=str(placement.get("assetId") or placement.get("asset_id") or ""),
+                            label=str(placement.get("label") or placement.get("tag") or "Prop"),
+                            position_label=_position_summary(placement),
+                        )
                     )
         except ErsResolveError as exc:
             resolved = {"error": str(exc)}
@@ -166,12 +169,14 @@ def hydrate_workspace(
                 )
             for p in latest.props or []:
                 props.append(
-                    {
-                        "tag": p.label or "prop",
-                        "display_label": p.label or "Prop",
-                        "position_label": _position_summary(p.model_dump()),
-                        "library_asset_id": p.assetId,
-                    }
+                    _hydrate_prop(
+                        db,
+                        project_id,
+                        prop_id=p.propId or "",
+                        asset_id=p.assetId or "",
+                        label=p.label or p.tag or "Prop",
+                        position_label=_position_summary(p.model_dump()),
+                    )
                 )
             if not cameras:
                 for index, cam in enumerate(latest.cameras or []):
@@ -268,6 +273,8 @@ def create_or_update_shot(
         shot.character_ids = list(character_ids)
     if prop_entity_ids is not None:
         shot.prop_entity_ids = list(prop_entity_ids)
+    if not shot.prop_entity_ids:
+        shot.prop_entity_ids = _placed_project_prop_ids(db, project_id, sheet_id)
     if camera:
         shot.camera = SceneCreatorCamera.model_validate(camera)
     if generator:
@@ -299,6 +306,9 @@ def _enqueue_shot_candidates(
     )
 
     has_reference = bool(any((package.directional_assets or {}).values()) or shot.character_ids)
+    shot.prop_entity_ids = _ensure_placed_project_props(db, project_id, shot)
+    if any(shot.prop_entity_ids):
+        has_reference = True
     plans = build_candidate_plans(
         local_enabled=local_enabled,
         api_enabled=api_enabled,
@@ -654,6 +664,82 @@ def _seed_take_memory(shot: SceneShot, package: Any, user_correction: dict[str, 
         },
         userCorrection=dict(user_correction or {}),
     )
+
+
+def _ensure_placed_project_props(db: Session, project_id: str, shot: SceneShot) -> list[str]:
+    """Union placed approved PropEntity ids onto the shot so Scene Creator consumes them."""
+    placed = _placed_project_prop_ids(db, project_id, shot.sheet_id)
+    merged = list(dict.fromkeys([*(shot.prop_entity_ids or []), *placed]))
+    shot.prop_entity_ids = merged
+    return merged
+
+
+def _placed_project_prop_ids(db: Session, project_id: str, sheet_id: str = "") -> list[str]:
+    ids: list[str] = []
+    placements: list[dict[str, Any]] = []
+    if (sheet_id or "").strip():
+        try:
+            package, _runtime = resolve_ers_for_sheet(db, project_id, sheet_id)
+            placements.extend([p for p in (package.placements or []) if isinstance(p, dict)])
+        except Exception:
+            placements = []
+    if not placements:
+        try:
+            from ..spatial_map.service import list_documents
+
+            maps = list_documents(db, project_id)
+        except Exception:
+            maps = []
+        if maps:
+            placements.extend(p.model_dump() for p in (maps[0].props or []))
+    for placement in placements:
+        prop_id = str(placement.get("propId") or placement.get("prop_id") or "").strip()
+        if not prop_id or prop_id in ids:
+            continue
+        entity = load_prop_entity_by_id(db, project_id, prop_id)
+        if entity is None:
+            continue
+        if not (entity.approved_asset_id or "").strip():
+            continue
+        ids.append(entity.id)
+    return ids
+
+
+def _hydrate_prop(
+    db: Session,
+    project_id: str,
+    *,
+    prop_id: str = "",
+    asset_id: str = "",
+    label: str = "Prop",
+    position_label: str = "",
+) -> dict[str, Any]:
+    """Resolve a Spatial Map / ERS placement to an approved PropEntity when possible."""
+    entity = load_prop_entity_by_id(db, project_id, prop_id) if (prop_id or "").strip() else None
+    visual = ""
+    description = ""
+    tag = (label or "prop").strip() or "prop"
+    display = (label or "Prop").strip() or "Prop"
+    resolved_id = (prop_id or "").strip() or None
+    approved = None
+    if entity:
+        approved = (entity.approved_asset_id or "").strip() or None
+        visual = approved or (entity.library_asset_id or "").strip()
+        description = (entity.description or entity.notes or "").strip()
+        tag = entity.tag or tag
+        display = entity.display_label or display
+        resolved_id = entity.id
+    else:
+        visual = (asset_id or "").strip()
+    return {
+        "prop_id": resolved_id,
+        "tag": tag,
+        "display_label": display,
+        "position_label": position_label,
+        "approved_asset_id": approved,
+        "library_asset_id": visual,
+        "description": description,
+    }
 
 
 def _position_summary(p: dict[str, Any]) -> str:

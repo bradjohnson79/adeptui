@@ -8,7 +8,7 @@ queries always filter by ``project_id`` to preserve project isolation
 Three trait categories are used:
 - ``spatial_ers``   : ``EnvironmentReferencePackage`` keyed by package id
 - ``scene_batch``   : ``SceneGenerationBatch`` keyed by batch id
-- ``prop_entity``   : ``PropEntity`` keyed by normalized prop tag
+- ``prop_entity``   : ``PropEntity`` keyed by prop id (legacy rows may use tag)
 
 Amendment #3 (SPATIAL AUTHORITY): the ERS package snapshots spatial map
 placements at generation time and never writes back to the spatial map.
@@ -89,6 +89,21 @@ def _upsert_trait(
                 created_at=_now(),
             )
         )
+    db.commit()
+
+
+def _delete_trait(db: Session, *, project_id: str, category: str, key: str) -> None:
+    from ..db import ProjectTraitRow
+
+    (
+        db.query(ProjectTraitRow)
+        .filter(
+            ProjectTraitRow.project_id == project_id,
+            ProjectTraitRow.category == category,
+            ProjectTraitRow.key == key,
+        )
+        .delete(synchronize_session=False)
+    )
     db.commit()
 
 
@@ -217,11 +232,17 @@ def save_prop_entity(db: Session, project_id: str, prop: PropEntity) -> None:
     prop.updated_at = _now()
     if not prop.created_at:
         prop.created_at = _now()
+    # Prefer stable id key. Drop a leftover tag-keyed row if this prop was saved
+    # under the old scheme.
+    if prop.tag and prop.tag != prop.id:
+        existing_tag = load_prop_entity(db, project_id, prop.tag)
+        if existing_tag and existing_tag.id == prop.id:
+            _delete_trait(db, project_id=project_id, category=PROP_CATEGORY, key=prop.tag)
     _upsert_trait(
         db,
         project_id=project_id,
         category=PROP_CATEGORY,
-        key=prop.tag,
+        key=prop.id,
         value=_model_dump_json(prop),
         provenance="prop_entity",
     )
@@ -229,13 +250,42 @@ def save_prop_entity(db: Session, project_id: str, prop: PropEntity) -> None:
 
 def load_prop_entity(db: Session, project_id: str, tag: str) -> PropEntity | None:
     raw = _load_trait_value(db, project_id=project_id, category=PROP_CATEGORY, key=tag)
-    if not raw:
+    if raw:
+        try:
+            return PropEntity.model_validate_json(raw)
+        except Exception as exc:
+            logger.error("Failed to load prop entity %s: %s", tag, exc)
+            return None
+    for prop in list_prop_entities(db, project_id):
+        if prop.tag == tag or prop.id == tag:
+            return prop
+    return None
+
+
+def load_prop_entity_by_id(db: Session, project_id: str, prop_id: str) -> PropEntity | None:
+    raw = _load_trait_value(db, project_id=project_id, category=PROP_CATEGORY, key=prop_id)
+    if raw:
+        try:
+            return PropEntity.model_validate_json(raw)
+        except Exception as exc:
+            logger.error("Failed to load prop entity %s: %s", prop_id, exc)
+            return None
+    for prop in list_prop_entities(db, project_id):
+        if prop.id == prop_id:
+            return prop
+    return None
+
+
+def delete_prop_entity(db: Session, project_id: str, prop_id: str) -> PropEntity | None:
+    prop = load_prop_entity_by_id(db, project_id, prop_id)
+    if prop is None:
         return None
-    try:
-        return PropEntity.model_validate_json(raw)
-    except Exception as exc:
-        logger.error("Failed to load prop entity %s: %s", tag, exc)
-        return None
+    _delete_trait(db, project_id=project_id, category=PROP_CATEGORY, key=prop.id)
+    if prop.tag and prop.tag != prop.id:
+        leftover = load_prop_entity(db, project_id, prop.tag)
+        if leftover and leftover.id == prop.id:
+            _delete_trait(db, project_id=project_id, category=PROP_CATEGORY, key=prop.tag)
+    return prop
 
 
 def save_scene_shot(db: Session, project_id: str, shot: SceneShot) -> None:

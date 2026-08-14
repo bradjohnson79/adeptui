@@ -127,11 +127,27 @@ export function PlacementSlot({
             data-testid={`${slot.kind}-select-${slot.index}`}
           >
             <option value="">{isCharacter ? "Select Saved Character" : "Select Saved Prop"}</option>
-            {savedOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
+            {isCharacter
+              ? savedOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))
+              : (["project", "character", "library"] as const).map((source) => {
+                  const group = savedOptions.filter((o) => (o.source || "library") === source);
+                  if (!group.length) return null;
+                  const label =
+                    source === "project" ? "Project Props" : source === "character" ? "Character Props" : "Library";
+                  return (
+                    <optgroup key={source} label={label}>
+                      {group.map((option) => (
+                        <option key={`${option.source || "library"}:${option.id}`} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
           </select>
         </div>
       ) : (

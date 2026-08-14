@@ -47,6 +47,7 @@ function normalizeContentTab(value: string | null | undefined): ContentTab {
     value === "story" ||
     value === "script" ||
     value === "characters" ||
+    value === "prop_creator" ||
     value === "spatial_map" ||
     value === "scene_creator"
   ) {

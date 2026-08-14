@@ -100,19 +100,29 @@ class SceneGenerationBatch(BaseModel):
 
 
 class PropEntity(BaseModel):
-    """A project-scoped prop/reference object backing a #prop tag.
+    """A project-scoped prop backing a #prop tag.
 
-    The Library image asset anchors visual identity (spec §17, §57).
-    The tag is the normalized project-safe friendly reference
-    (e.g. "Coffee Cup" -> "coffee-cup"). Amendment #5.
+    Identity:
+    - ``id`` is canonical propId.
+    - ``approved_asset_id`` is canonical visual identity.
+    - ``library_asset_id`` may only *mirror* approved_asset_id after Use This Prop.
+    - ``reference_asset_id`` is the creator-supplied source; removing it must not
+      delete the approved identity.
+    Drafts may omit approved_asset_id. Spatial Map production picker is approved-only.
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     project_id: str
-    tag: str  # normalized: lowercase, hyphenated, e.g. "coffee-cup"
-    display_label: str  # human-friendly, e.g. "Coffee Cup"
-    library_asset_id: str  # mandatory — anchors visual identity
+    tag: str = ""  # normalized friendly reference, e.g. "coffee-cup"
+    display_label: str = ""
+    library_asset_id: str = ""  # mirror of approved_asset_id after approval; empty on draft
     notes: str = ""
+    visual_style: str = ""
+    description: str = ""
+    reference_asset_id: Optional[str] = None
+    approved_asset_id: Optional[str] = None
+    candidates: list["PropCandidate"] = Field(default_factory=list)
+    generator: "GeneratorSourceSelection" = Field(default_factory=lambda: GeneratorSourceSelection())
     created_at: str = ""
     updated_at: str = ""
 
@@ -223,6 +233,26 @@ class SceneShotCandidate(BaseModel):
     created_at: str = ""
 
 
+class PropCandidate(BaseModel):
+    """One generated identity look of a project Prop. Never a Prop itself."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    prop_id: str = ""
+    index: int = 0
+    job_id: str = ""
+    asset_id: Optional[str] = None
+    status: CandidateStatus = "queued"
+    source: CandidateSource = "local"
+    family: str = ""
+    model: str = ""
+    seed: Optional[int] = None
+    provenance_label: str = ""
+    conditioning: Literal["reference_conditioned", "description_guided"] = "description_guided"
+    take_label: str = ""
+    error: str = ""
+    created_at: str = ""
+
+
 class SceneShot(BaseModel):
     """One shot inside a Studio Scene. Owns intent, ERS, blocking, camera, prompt, candidates."""
 
@@ -262,3 +292,6 @@ def normalize_prop_tag(label: str) -> str:
     s = re.sub(r"-+", "-", s)
     s = s.strip("-")
     return s or "prop"
+
+
+PropEntity.model_rebuild()

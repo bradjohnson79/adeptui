@@ -4264,6 +4264,65 @@ export const api = {
         },
       ),
   },
+  propCreator: {
+    workspace: (projectId: string, propId?: string) => {
+      const qs = propId ? `?prop_id=${encodeURIComponent(propId)}` : "";
+      return req<import("./components/CoDirector/PropCreator/types").PropCreatorWorkspace>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/workspace${qs}`,
+        { cache: "no-store" },
+      );
+    },
+    list: (projectId: string, approvedOnly = false) =>
+      req<{ props: import("./components/CoDirector/PropCreator/types").PropEntity[] }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props${approvedOnly ? "?approved_only=true" : ""}`,
+        { cache: "no-store" },
+      ),
+    upsert: (
+      projectId: string,
+      body: {
+        prop_id?: string;
+        name: string;
+        visual_style?: string;
+        description?: string;
+        reference_asset_id?: string | null;
+        clear_reference?: boolean;
+        generator?: Record<string, unknown>;
+      },
+    ) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    get: (projectId: string, propId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}`,
+        { cache: "no-store" },
+      ),
+    generate: (
+      projectId: string,
+      propId: string,
+      body: { local_enabled: boolean; api_enabled: boolean; local_family?: string; api_model?: string; candidate_count?: number },
+    ) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/generate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    approve: (projectId: string, propId: string, candidateId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/approve`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidate_id: candidateId }) },
+      ),
+    retry: (projectId: string, propId: string, candidateId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/candidates/${encodeURIComponent(candidateId)}/retry`,
+        { method: "POST" },
+      ),
+    delete: (projectId: string, propId: string) =>
+      req<{ ok: boolean; prop_id: string; library_assets_kept: boolean; spatial_unlinked: number }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}`,
+        { method: "DELETE" },
+      ),
+  },
   minimaxH3: {
     capability: (territory = resolveMiniMaxH3Territory()) =>
       req<Record<string, unknown>>(`/api/minimax-h3/capability?territory=${encodeURIComponent(territory)}`),

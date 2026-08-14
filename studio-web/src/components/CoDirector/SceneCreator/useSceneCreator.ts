@@ -48,13 +48,17 @@ export function useSceneCreator(projectId: string) {
     }
   }, []);
 
-  const applyShot = useCallback((next: SceneShot | null) => {
+  const applyShot = useCallback((next: SceneShot | null, placedPropIds: string[] = []) => {
     setShot(next);
-    if (!next) return;
+    if (!next) {
+      if (placedPropIds.length) setPropIds(placedPropIds);
+      return;
+    }
     setIntent(next.intent || next.prompt || "");
     setCamera(next.camera || defaultCamera());
     setCharacterIds(next.character_ids || []);
-    setPropIds(next.prop_entity_ids || []);
+    const fromShot = next.prop_entity_ids || [];
+    setPropIds(fromShot.length ? fromShot : placedPropIds);
     setLocalEnabled(next.generator?.local_enabled !== false);
     setLocalFamily(next.generator?.local_family || "");
     setSceneId(next.scene_id || "");
@@ -71,7 +75,8 @@ export function useSceneCreator(projectId: string) {
       setWorkspace(data);
       setSheetId(data.selected_sheet_id || "");
       setSceneId(data.selected_scene_id || "");
-      applyShot(data.selected_shot);
+      const placed = (data.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id));
+      applyShot(data.selected_shot, placed);
       return data;
     },
     [applyShot, projectId, sceneId, sheetId, shot?.id],
@@ -101,7 +106,7 @@ export function useSceneCreator(projectId: string) {
         void sceneCreatorApi
           .getShot(projectId, shotId)
           .then((res) => {
-            applyShot(res.shot);
+            applyShot(res.shot, (workspace?.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id)));
             const pending = (res.shot.candidates || []).some(
               (c) => c.status === "queued" || c.status === "generating",
             );
@@ -110,7 +115,7 @@ export function useSceneCreator(projectId: string) {
           .catch(() => undefined);
       }, 2000);
     },
-    [applyShot, projectId, stopPoll],
+    [applyShot, projectId, stopPoll, workspace?.props],
   );
 
   const persistShot = useCallback(async () => {
@@ -248,8 +253,9 @@ export function useSceneCreator(projectId: string) {
     setIntent("");
     setCamera(defaultCamera());
     setCorrection("");
+    setPropIds((workspace?.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id)));
     setNotice("New shot. Write what happens, then Generate.");
-  }, []);
+  }, [workspace?.props]);
 
   const setCinematic = useCallback((patch: Partial<CinematicShotControls>) => {
     setCamera((prev) => ({ ...prev, cinematic: { ...prev.cinematic, ...patch } }));
@@ -278,6 +284,10 @@ export function useSceneCreator(projectId: string) {
 
   const toggleCharacter = useCallback((id: string) => {
     setCharacterIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }, []);
+
+  const toggleProp = useCallback((id: string) => {
+    setPropIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }, []);
 
   const apiAvailable = workspace?.api_generation_available === true;
@@ -319,6 +329,7 @@ export function useSceneCreator(projectId: string) {
     setCinematic,
     pickCamera,
     toggleCharacter,
+    toggleProp,
     persistShot,
   };
 }
