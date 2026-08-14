@@ -11,6 +11,12 @@ import {
 
 export const CHARACTER_SHEET_START_ERROR_PREFIX = "Character Sheet generation could not start:";
 
+/** Amendment F5 — normal Character Creator / Express product UX. */
+export const CHARACTER_SHEET_PRODUCT_CANDIDATE_COUNT = 4;
+
+/** Minimal live proof only. Do not use as the product default. */
+export const CHARACTER_SHEET_E2E_CANDIDATE_COUNT = 1;
+
 type Sources = { local: GeneratorSourceState; api: GeneratorSourceState };
 
 export function characterGenerateBlockReason(input: {
@@ -48,6 +54,8 @@ export function buildCharacterSheetStartBody(input: {
   hasReference: boolean;
   localOptions?: GeneratorOption[];
   apiOptions?: GeneratorOption[];
+  /** Override only for E2E/minimal live proof. Product default is 4. */
+  candidateCount?: number;
 }): {
   candidateCount: number;
   visualStyle?: string;
@@ -86,8 +94,12 @@ export function buildCharacterSheetStartBody(input: {
         )
       : "UNSUPPORTED";
   const wire = generationModeWireValue(mode);
+  const candidateCount = Math.max(
+    1,
+    Math.min(6, input.candidateCount ?? CHARACTER_SHEET_PRODUCT_CANDIDATE_COUNT),
+  );
   return {
-    candidateCount: 1,
+    candidateCount,
     visualStyle: input.profileVisualStyle || undefined,
     includeDetails: false,
     includePerformance: false,

@@ -6,7 +6,7 @@
  * User Control Law: only enqueues to the enabled source pools. If neither
  * source is enabled, generation is refused with a visible error.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { GenerationProgressBar } from "./GenerationProgressBar";
 import {
@@ -31,8 +31,8 @@ type Props = {
 };
 
 function readCandidates(pack: unknown): CharacterCandidate[] {
-  const p = pack as { candidates?: CharacterCandidate[] } | undefined;
-  return (p?.candidates || []) as CharacterCandidate[];
+  const p = pack as { pack?: { candidates?: CharacterCandidate[] }; candidates?: CharacterCandidate[] } | undefined;
+  return (p?.pack?.candidates || p?.candidates || []) as CharacterCandidate[];
 }
 
 function viewsTerminal(c: CharacterCandidate): boolean {
@@ -70,6 +70,25 @@ export function CharacterSheetGenerator({
     disabled,
   });
   const canGenerate = !blockReason && !generating && !disabled;
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.getCharacterVisualSheet(projectId, characterId);
+        const cands = readCandidates(res);
+        if (!cancelled && cands.length) {
+          setCandidates(cands);
+          onCandidates(cands);
+        }
+      } catch {
+        /* no pack yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, characterId, onCandidates]);
 
   const poll = useCallback(
     async (attemptsLeft: number) => {

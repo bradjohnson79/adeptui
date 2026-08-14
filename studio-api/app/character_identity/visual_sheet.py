@@ -554,6 +554,26 @@ def _krea_model_display(model_id: str) -> str:
     return mid
 
 
+# Creator-facing local family names for candidate provenance.
+# Keep these short; never show a raw family id (illustrious, qwen2512).
+_PROVENANCE_FAMILY_NAMES: dict[str, str] = {
+    "illustrious": "Illustrious XL",
+    "qwen2512": "Qwen Image 2512",
+    "qwen": "Qwen Image 2512",
+    "zimage": "Z-Image Turbo",
+    "flux": "FLUX.1 Kontext",
+    "krea2": "Local Krea 2",
+}
+
+
+def _local_family_display(family: str | None, model: str | None) -> str:
+    raw = str(family or model or "").strip()
+    key = raw.lower().split(".", 1)[0]
+    if key in _PROVENANCE_FAMILY_NAMES:
+        return _PROVENANCE_FAMILY_NAMES[key]
+    return raw or ""
+
+
 def _candidate_provenance_label(
     *,
     provider_kind: str,
@@ -570,8 +590,11 @@ def _candidate_provenance_label(
     if provider_kind == "api" and ("krea" in blob or (provider or "").lower() == "krea"):
         name = _krea_model_display(str(hosted_model_id or selected_source or model or ""))
         core = f"{pool} — Krea / {name}"
-    else:
+    elif provider_kind == "api":
         name = selected_source or hosted_model_id or model or ""
+        core = f"{pool} — {name}" if name else pool
+    else:
+        name = _local_family_display(selected_source, model)
         core = f"{pool} — {name}" if name else pool
     if conditioning_mode == CONDITIONING_REFERENCE_CONDITIONED:
         return f"{core} — Reference Conditioned"
@@ -1494,6 +1517,18 @@ def start_visual_sheet_generation(
                 reference_locked=bool(stage1_route.get("referenceLocked")), lineage=stage1_lineage
             )
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
+            provenance = _candidate_provenance_label(
+                provider_kind=str(stage1_route.get("providerKind") or "local"),
+                provider=stage1_lineage.get("provider"),
+                model=stage1_lineage.get("model"),
+                hosted_model_id=stage1_route.get("hostedModelId"),
+                selected_source=str(
+                    stage1_route.get("selectedSource")
+                    or stage1_route.get("modelFamilyPreference")
+                    or ""
+                ),
+                conditioning_mode=stage1_route.get("conditioningMode"),
+            )
             entry = {
                 "jobId": hero_job["jobId"],
                 "role": "hero_identity",
@@ -1515,6 +1550,7 @@ def start_visual_sheet_generation(
                 "providerKind": stage1_route.get("providerKind") or "local",
                 "selectedSource": stage1_route.get("selectedSource"),
                 "hostedModelId": stage1_route.get("hostedModelId"),
+                "provenance": provenance,
                 "error": None,
                 "lowReferenceFidelity": low_fidelity,
                 "stage2Enabled": bool(stage2_route),
@@ -1551,6 +1587,7 @@ def start_visual_sheet_generation(
                 "providerKind": stage1_route.get("providerKind") or "local",
                 "selectedSource": stage1_route.get("selectedSource"),
                 "hostedModelId": stage1_route.get("hostedModelId"),
+                "provenance": provenance,
                 "error": None,
                 "lowReferenceFidelity": low_fidelity,
                 "stage2Enabled": bool(stage2_route),
@@ -1868,6 +1905,15 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "providerKind": item.get("providerKind") or "local",
             "selectedSource": item.get("selectedSource"),
             "hostedModelId": item.get("hostedModelId"),
+            "provenance": item.get("provenance")
+            or _candidate_provenance_label(
+                provider_kind=str(item.get("providerKind") or "local"),
+                provider=item.get("provider"),
+                model=item.get("model"),
+                hosted_model_id=item.get("hostedModelId"),
+                selected_source=str(item.get("selectedSource") or item.get("model") or ""),
+                conditioning_mode=item.get("conditioningMode"),
+            ),
             "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
             "stage2Enabled": bool(item.get("stage2Enabled")),
             "stage2Generator": item.get("stage2Generator"),

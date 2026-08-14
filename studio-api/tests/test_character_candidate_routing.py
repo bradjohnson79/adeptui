@@ -450,6 +450,32 @@ def test_api_only_krea_routes_like_kie_no_zimage():
     ) == "API — Krea / Krea 2 Turbo — Profile Guided"
 
 
+def test_local_illustrious_provenance_is_profile_guided_display_name():
+    from app.character_identity.visual_sheet import _candidate_provenance_label
+
+    assert _candidate_provenance_label(
+        provider_kind="local",
+        provider="comfyui",
+        model="illustrious",
+        hosted_model_id=None,
+        selected_source="illustrious",
+        conditioning_mode=CONDITIONING_PROFILE_GUIDED,
+    ) == "LOCAL — Illustrious XL — Profile Guided"
+
+
+def test_local_zimage_provenance_is_reference_conditioned_display_name():
+    from app.character_identity.visual_sheet import _candidate_provenance_label
+
+    assert _candidate_provenance_label(
+        provider_kind="local",
+        provider="comfyui",
+        model="zimage",
+        hosted_model_id=None,
+        selected_source="zimage",
+        conditioning_mode=CONDITIONING_REFERENCE_CONDITIONED,
+    ) == "LOCAL — Z-Image Turbo — Reference Conditioned"
+
+
 def test_local_krea2_is_profile_guided_no_silent_zimage():
     plan = _build_candidate_routing_plan(
         candidate_count=2,

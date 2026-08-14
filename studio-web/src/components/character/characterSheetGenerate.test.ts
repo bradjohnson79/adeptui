@@ -20,7 +20,7 @@ describe("Character Sheet generate request", () => {
       sources,
       hasReference: true,
     });
-    expect(body.candidateCount).toBe(1);
+    expect(body.candidateCount).toBe(4);
     expect(body.generationMode).toBe("profile_guided");
     expect(body.generatorSources.local?.family).toBe("illustrious");
     expect(body.generatorSources.api).toBeNull();
@@ -106,6 +106,26 @@ describe("Character Sheet generate request", () => {
     await start("proj", "char", body);
     expect(start).toHaveBeenCalledTimes(1);
     expect(start.mock.calls[0][2].generationMode).toBe("profile_guided");
-    expect(start.mock.calls[0][2].candidateCount).toBe(1);
+    expect(start.mock.calls[0][2].candidateCount).toBe(4);
+  });
+
+  it("E2E override may send candidateCount=1 without changing the product default", () => {
+    const body = buildCharacterSheetStartBody({
+      sources: {
+        local: { enabled: true, selectedId: "illustrious" },
+        api: { enabled: false, selectedId: "" },
+      },
+      hasReference: true,
+      candidateCount: 1,
+    });
+    expect(body.candidateCount).toBe(1);
+    const product = buildCharacterSheetStartBody({
+      sources: {
+        local: { enabled: true, selectedId: "illustrious" },
+        api: { enabled: false, selectedId: "" },
+      },
+      hasReference: true,
+    });
+    expect(product.candidateCount).toBe(4);
   });
 });

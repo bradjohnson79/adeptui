@@ -79,6 +79,8 @@ export type CharacterCandidate = {
   conditioningMode?: "PROFILE_GUIDED" | "REFERENCE_CONDITIONED" | null;
   selectedSource?: string | null;
   hostedModelId?: string | null;
+  /** Creator-facing provenance, e.g. LOCAL — Illustrious XL — Profile Guided */
+  provenance?: string | null;
 };
 
 /** Truthful per-candidate generation stage derived from backend state. */
@@ -96,6 +98,54 @@ export const SHEET_VIEW_LABELS: Record<string, string> = {
   full_body_back: "Back",
   closeup_front: "Close-Up",
 };
+
+const LOCAL_FAMILY_PROVENANCE: Record<string, string> = {
+  illustrious: "Illustrious XL",
+  qwen2512: "Qwen Image 2512",
+  qwen: "Qwen Image 2512",
+  zimage: "Z-Image Turbo",
+  flux: "FLUX.1 Kontext",
+  krea2: "Local Krea 2",
+};
+
+function kreaModelNameFromCandidate(c: CharacterCandidate): string {
+  const hosted = String(c.hostedModelId || c.selectedSource || c.model || "");
+  const low = hosted.toLowerCase();
+  if (low.includes("turbo")) return "Krea 2 Turbo";
+  if (low.includes("medium")) return "Krea 2 Medium";
+  if (low.includes("large")) return "Krea 2 Large";
+  if (low.includes("raw")) return "Krea 2 RAW";
+  return String(c.model || c.modelVariant || hosted || "Krea 2");
+}
+
+/** Creator-facing candidate provenance. Never show a raw family id as the product label. */
+export function characterSheetProvenanceLabel(c: CharacterCandidate): string {
+  if (c.provenance && c.provenance.trim()) return c.provenance.trim();
+  const src = `${c.generator || ""} ${c.provider || ""} ${c.hostedModelId || ""} ${c.selectedSource || ""}`.toLowerCase();
+  const isKrea = src.includes("krea");
+  const kind = c.providerKind || (isKrea && (c.hostedModelId || "").includes("fal") ? "api" : "");
+  const mode =
+    c.conditioningMode === "PROFILE_GUIDED"
+      ? " — Profile Guided"
+      : c.conditioningMode === "REFERENCE_CONDITIONED"
+        ? " — Reference Conditioned"
+        : "";
+  if (
+    kind === "api" ||
+    src.includes("api") ||
+    src.includes("cloud") ||
+    (c.provider && !["comfy", "comfyui", "local"].includes(String(c.provider).toLowerCase()))
+  ) {
+    if (isKrea) return `API — Krea / ${kreaModelNameFromCandidate(c)}${mode}`;
+    const modelName = c.model || c.modelVariant || "";
+    return `API — ${[c.provider, modelName].filter(Boolean).join(" / ") || "cloud"}${mode}`;
+  }
+  const familyKey = String(c.selectedSource || c.model || c.workflowKey || "")
+    .toLowerCase()
+    .split(".")[0];
+  const display = LOCAL_FAMILY_PROVENANCE[familyKey] || c.modelVariant || c.model || familyKey;
+  return display ? `LOCAL — ${display}${mode}` : "LOCAL";
+}
 
 /** Derive a truthful stage for a candidate from its backend state. */
 export function candidateStage(c: CharacterCandidate): CandidateStage {
