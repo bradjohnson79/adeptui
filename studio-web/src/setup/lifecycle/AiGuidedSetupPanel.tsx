@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import { HostedProvidersSetupPanel } from "../../components/HostedProvidersSetupPanel";
+import { filterCloudProviders, isApiKeyCatalogComponent } from "../../components/hostedProviderSetupCopy";
 import type { InstallJob } from "../../contracts/installJobs";
 import type {
   LifecycleCloudProvider,
@@ -126,7 +127,7 @@ export function AiGuidedSetupPanel({
   const grouped = useMemo(() => {
     const buckets = new Map<string, Map<string, SetupComponentStatus[]>>();
     status.components.forEach((component) => {
-      if (component.category === "API Providers" || component.group === "API Providers") return;
+      if (isApiKeyCatalogComponent(component)) return;
       const groups = component.surfaceGroups?.length ? component.surfaceGroups : [component.group || "Utilities"];
       const subgroup = component.subgroup || "General";
       groups.forEach((group) => {
@@ -142,7 +143,7 @@ export function AiGuidedSetupPanel({
 
   const recommended = useMemo(() => {
     const ranked = status.components
-      .filter((component) => matchesIntent(component, brief))
+      .filter((component) => !isApiKeyCatalogComponent(component) && matchesIntent(component, brief))
       .sort((a, b) => {
         const text = brief.toLowerCase();
         const preferred = (id: string) => {
@@ -393,7 +394,7 @@ export function AiGuidedSetupPanel({
           </div>
         </div>
         <div className="setup-component-grid">
-          {cloudProviders.filter((provider) => !["kie", "fal", "wavespeed"].includes(String(provider.providerId))).map((provider) => (
+          {filterCloudProviders(cloudProviders).map((provider) => (
             <article key={provider.providerId} className="setup-component-card">
               <header className="setup-card-header">
                 <div>

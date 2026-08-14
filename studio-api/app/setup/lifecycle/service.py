@@ -1143,6 +1143,8 @@ def list_cloud_providers() -> dict[str, Any]:
         if provider.get("kind") != "cloud":
             continue
         provider_id = str(provider.get("providerId") or "")
+        if provider_id.strip().lower() in {"kie", "fal", "wavespeed", "kie.ai", "fal.ai", "wavespeed.ai"}:
+            continue
         secret_name = _IMAGE_PROVIDER_KEYS.get(provider_id)
         status = secret_status(secret_name) if secret_name else {"configured": False, "state": "missing"}
         providers.append(

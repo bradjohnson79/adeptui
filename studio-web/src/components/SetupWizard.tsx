@@ -34,6 +34,7 @@ import { AddCustomCapability } from "./docker-runtime/AddCustomCapability";
 import { PromptIntelligenceBenchmarkDashboard } from "./CoDirector/PromptIntelligenceBenchmarkDashboard";
 import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
 import { HostedProvidersSetupPanel } from "./HostedProvidersSetupPanel";
+import { isApiKeyCatalogComponent } from "./hostedProviderSetupCopy";
 import { ModelStoragePanel } from "./ModelStoragePanel";
 import { PanelHeading } from "./HelpTip";
 import { AddSourceWorkflow } from "./install/AddSourceWorkflow";
@@ -1524,7 +1525,11 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
   }
 
   const hiddenCatalogCategories = new Set(["Avatar Runtimes", "API Providers"]);
-  const visibleComponents = status.components.filter((component) => !hiddenCatalogCategories.has(component.category || ""));
+  const visibleComponents = status.components.filter((component) => {
+    if (hiddenCatalogCategories.has(component.category || "")) return false;
+    if (isApiKeyCatalogComponent(component)) return false;
+    return true;
+  });
   const required = visibleComponents.filter((component) => component.required);
   const optional = visibleComponents.filter((component) => !component.required);
   const preparing = trackedOperationIds.length > 0 || status.overall_status === "preparing";

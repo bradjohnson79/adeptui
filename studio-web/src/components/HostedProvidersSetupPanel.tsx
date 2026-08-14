@@ -4,11 +4,15 @@ import {
   API_KEY_INPUT_TYPE,
   API_KEY_PROVIDER_BADGE,
   API_KEY_PROVIDERS_CATEGORY,
+  API_KEY_REMOVE_LABEL,
   API_KEY_SAVE_LABEL,
   SETUP_PROVIDERS,
   apiKeyProviderStatusLabel,
   apiKeyProviderStatusTone,
+  apiKeyRemovedCopy,
+  apiKeyUpdatedCopy,
   classifyProbeError,
+  maskedKeyPlaceholder,
   type ProbeOutcome,
 } from "./hostedProviderSetupCopy";
 
@@ -125,7 +129,7 @@ function HostedProviderSetupCard({
           value={keyValue}
           disabled={busy}
           onChange={(e) => onKeyChange(e.target.value)}
-          placeholder={configured ? "Paste to replace…" : "Paste API key…"}
+          placeholder={configured ? maskedKeyPlaceholder(card?.apiKeyStatus?.hint) : "Paste API key..."}
         />
       </div>
       <div className="setup-card-actions">
@@ -136,7 +140,7 @@ function HostedProviderSetupCard({
           disabled={busy || !keyValue.trim()}
           onClick={onConnect}
         >
-          {busy ? "Saving…" : API_KEY_SAVE_LABEL}
+          {busy ? "Updating..." : API_KEY_SAVE_LABEL}
         </button>
         <button
           type="button"
@@ -160,7 +164,7 @@ function HostedProviderSetupCard({
           disabled={busy || !configured}
           onClick={onClear}
         >
-          Clear
+          {API_KEY_REMOVE_LABEL}
         </button>
         {card?.keysUrl ? (
           <a
@@ -339,9 +343,12 @@ export function HostedProvidersSetupPanel({
                 void run(meta.id, async () => {
                   const apiKey = (keys[meta.id] || "").trim();
                   if (!apiKey) {
-                    throw new Error(`Paste a ${meta.title} API key to save.`);
+                    throw new Error(`Paste a ${meta.title} API key to update.`);
                   }
                   const result = await api.hostedProvidersConnect(meta.id, apiKey);
+                  if (result && result.ok === false) {
+                    throw Object.assign(new Error(result.message || "Provider rejected this API key."), { status: 400 });
+                  }
                   const liveBalance = result?.probe?.balance ?? result?.provider?.availableBalance;
                   if (liveBalance != null) {
                     setProbeBalances((prev) => ({ ...prev, [meta.id]: liveBalance }));
@@ -349,7 +356,7 @@ export function HostedProvidersSetupPanel({
                   setKeys((prev) => ({ ...prev, [meta.id]: "" }));
                   const summary = (result?.summary || result?.discovery?.summary) as DiscoverySummary | undefined;
                   setDiscoverySummary(summary || null);
-                  announce(formatDiscoverySummary(meta.title, summary));
+                  announce(apiKeyUpdatedCopy(meta.title));
                 })
               }
               onTest={() =>
@@ -372,8 +379,8 @@ export function HostedProvidersSetupPanel({
               }
               onClear={() =>
                 void run(meta.id, async () => {
-                  if (!window.confirm(`Clear the saved ${meta.title} API key from this machine?`)) {
-                    announce(`${meta.title}: clear cancelled.`);
+                  if (!window.confirm(`Remove the saved ${meta.title} API key from this machine?`)) {
+                    announce("Remove cancelled.");
                     return;
                   }
                   await api.hostedProvidersClear(meta.id);
@@ -385,7 +392,7 @@ export function HostedProvidersSetupPanel({
                     return next;
                   });
                   setDiscoverySummary(null);
-                  announce(`${meta.title}: API key cleared.`);
+                  announce(apiKeyRemovedCopy());
                 })
               }
               onPreferred={() =>
