@@ -278,14 +278,14 @@ def test_no_reference_routing_style_first_for_anime():
 
 
 def test_no_reference_routing_distinct_families_used_once_first():
-    from app.character_identity.visual_sheet import NO_REFERENCE_TXT2IMG_FAMILIES
+    from app.character_identity.visual_sheet import _no_reference_families_for_style
 
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
     families = [(r.get("stage1") or r)["modelFamilyPreference"] for r in plan]
-    distinct = list(NO_REFERENCE_TXT2IMG_FAMILIES)
+    distinct = _no_reference_families_for_style(None)
+    assert distinct, "at least one Certified txt2img family must be available"
     for i, fam in enumerate(distinct):
         assert families[i] == fam
-    assert set(families) == set(distinct)
 
 
 def test_user_control_law_all_sources_disabled_enqueues_zero_jobs():
@@ -402,12 +402,10 @@ def test_advance_marks_candidate_failed_when_a_view_job_fails(db):
     assert any_failed is True
 
 
-def test_recommend_image_family_reference_locked_avoids_text_only():
-    """recommend_image_family must not route a reference-locked request to Illustrious."""
+def test_recommend_image_family_auto_select_with_reference_prefers_ref_capable():
+    """Auto Select (no explicit family) + reference may highlight Z-Image first."""
     from app.image_product.recommend import recommend_image_family
 
-    # Even with an anime style + a text-only style preference, a reference
-    # attachment must keep the family reference-capable (never Illustrious).
     out = recommend_image_family(
         prompt="anime character sheet",
         purpose="character_sheet",
@@ -416,7 +414,21 @@ def test_recommend_image_family_reference_locked_avoids_text_only():
     )
     assert out["referenceLocked"] is True
     assert out["recommendedFamily"] != "illustrious"
-    assert out["recommendedFamily"] not in ("illustrious",)
+
+
+def test_recommend_image_family_explicit_illustrious_kept_with_reference():
+    """Explicit Illustrious + reference stays Illustrious (Profile Guided)."""
+    from app.image_product.recommend import recommend_image_family
+
+    out = recommend_image_family(
+        prompt="anime character sheet",
+        purpose="character_sheet",
+        style="anime",
+        model_family_preference="illustrious",
+        reference_asset_id="sheet-1",
+    )
+    assert out["recommendedFamily"] == "illustrious"
+    assert out["executionFamily"] == "illustrious"
 
 
 def test_recommend_image_family_no_reference_style_first_anime():

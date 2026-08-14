@@ -29,7 +29,7 @@ def test_qwen_present_certified_and_txt2img_only():
     q = opts["qwen2512"]
     assert q["status"] == "Certified"
     assert q["executable"] is True
-    assert q["supportsReferences"] is False  # txt2img-only → disabled with a reference
+    assert q["supportsReferences"] is False  # txt2img-only → Profile Guided when a reference is attached
     assert q["label"] == "Qwen Image 2512"
 
 

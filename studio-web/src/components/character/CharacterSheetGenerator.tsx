@@ -4,20 +4,27 @@
  * resulting composed-sheet candidates for selection.
  *
  * User Control Law: only enqueues to the enabled source pools. If neither
- * source is enabled, generation is a no-op.
+ * source is enabled, generation is refused with a visible error.
  */
 import { useCallback, useRef, useState } from "react";
 import { api } from "../../api";
 import { GenerationProgressBar } from "./GenerationProgressBar";
+import {
+  buildCharacterSheetStartBody,
+  characterGenerateBlockReason,
+  formatCharacterSheetStartError,
+} from "./characterSheetGenerate";
 import type { CharacterCandidate, CharacterProfile, GeneratorSourceState } from "./types";
 
 type Sources = { local: GeneratorSourceState; api: GeneratorSourceState };
+type Phase = "idle" | "starting" | "generating";
 
 type Props = {
   projectId: string;
   characterId: string;
   profile: CharacterProfile | null;
   sources: Sources;
+  hasReference?: boolean;
   disabled?: boolean;
   onCandidates: (candidates: CharacterCandidate[]) => void;
   retryHandlerRef?: { current: ((candidate: CharacterCandidate) => void) | null };
@@ -44,25 +51,34 @@ export function CharacterSheetGenerator({
   characterId,
   profile,
   sources,
+  hasReference = false,
   disabled,
   onCandidates,
   retryHandlerRef,
 }: Props) {
-  const [generating, setGenerating] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState("");
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
-  const pollingRef = useRef(false);
+  const inFlightRef = useRef(false);
 
+  const generating = phase !== "idle";
   const anyEnabled = sources.local.enabled || sources.api.enabled;
-  const canGenerate =
-    !!profile?.name?.trim() && anyEnabled && !generating && !disabled;
+  const blockReason = characterGenerateBlockReason({
+    name: profile?.name,
+    sources,
+    generating,
+    disabled,
+  });
+  const canGenerate = !blockReason && !generating && !disabled;
 
   const poll = useCallback(
     async (attemptsLeft: number) => {
       if (attemptsLeft <= 0) {
-        pollingRef.current = false;
-        setGenerating(false);
-        setMessage("");
+        inFlightRef.current = false;
+        setPhase("idle");
+        setMessage(
+          formatCharacterSheetStartError("Local runtime did not finish in time. You can retry."),
+        );
         return;
       }
       try {
@@ -73,15 +89,14 @@ export function CharacterSheetGenerator({
           setCandidates(cands);
           onCandidates(cands);
         }
-        // Keep polling until every required view is terminal (16 views for a 4x4 pack).
         const allDone = cands.length > 0 && cands.every(viewsTerminal);
         if (
           allDone ||
           pack?.status === "READY_FOR_OWNER" ||
           pack?.status === "OWNER_APPROVED"
         ) {
-          pollingRef.current = false;
-          setGenerating(false);
+          inFlightRef.current = false;
+          setPhase("idle");
           setMessage("");
           return;
         }
@@ -94,47 +109,48 @@ export function CharacterSheetGenerator({
   );
 
   const generate = useCallback(async () => {
-    if (!canGenerate || pollingRef.current) return;
-    setGenerating(true);
-    setMessage("Generating character sheets…");
+    if (inFlightRef.current) return;
+    const reason = characterGenerateBlockReason({
+      name: profile?.name,
+      sources,
+      generating: false,
+      disabled,
+    });
+    if (reason) {
+      setMessage(reason);
+      return;
+    }
+    inFlightRef.current = true;
+    setPhase("starting");
+    setMessage("Starting…");
     onCandidates([]);
     setCandidates([]);
     try {
-      const res = await api.startCharacterVisualSheet(projectId, characterId, {
-        candidateCount: 4,
-        visualStyle: profile?.visual_style || undefined,
-        includeDetails: false,
-        includePerformance: false,
-        // User Control Law: pass enabled source pools only.
-        generatorSources: {
-          local: sources.local.enabled
-            ? {
-                family: sources.local.selectedId || undefined,
-                stage2Family: sources.local.stage2Enabled
-                  ? sources.local.stage2SelectedId || undefined
-                  : undefined,
-                stage2Enabled: sources.local.stage2Enabled || false,
-              }
-            : null,
-          api: sources.api.enabled ? { model: sources.api.selectedId || undefined } : null,
-        },
-      } as Record<string, unknown>);
+      const body = buildCharacterSheetStartBody({
+        profileVisualStyle: profile?.visual_style,
+        sources,
+        hasReference,
+      });
+      setPhase("generating");
+      setMessage("Generating…");
+      const res = await api.startCharacterVisualSheet(projectId, characterId, body);
       const initial = readCandidates((res as { pack?: unknown }).pack);
       setCandidates(initial);
       onCandidates(initial);
-      pollingRef.current = true;
       void poll(180);
     } catch (e) {
-      setGenerating(false);
-      setMessage(e instanceof Error ? e.message : "Generation failed to start.");
+      inFlightRef.current = false;
+      setPhase("idle");
+      setMessage(formatCharacterSheetStartError(e));
     }
-  }, [canGenerate, projectId, characterId, profile, sources, onCandidates, poll]);
+  }, [disabled, projectId, characterId, profile, sources, hasReference, onCandidates, poll]);
 
   const retryCandidate = useCallback(
     async (candidate: CharacterCandidate) => {
       const idx = candidate.candidateIndex;
-      if (idx == null) return;
-      setGenerating(true);
+      if (idx == null || inFlightRef.current) return;
+      inFlightRef.current = true;
+      setPhase("generating");
       setMessage("Retrying failed candidate…");
       try {
         const res = await api.retryCharacterVisualSheetCandidate(projectId, characterId, idx);
@@ -143,13 +159,11 @@ export function CharacterSheetGenerator({
           setCandidates(next);
           onCandidates(next);
         }
-        if (!pollingRef.current) {
-          pollingRef.current = true;
-          void poll(180);
-        }
+        void poll(180);
       } catch (e) {
-        if (!pollingRef.current) setGenerating(false);
-        setMessage(e instanceof Error ? e.message : "Retry failed to start.");
+        inFlightRef.current = false;
+        setPhase("idle");
+        setMessage(formatCharacterSheetStartError(e));
       }
     },
     [projectId, characterId, onCandidates, poll],
@@ -160,6 +174,9 @@ export function CharacterSheetGenerator({
       void retryCandidate(c);
     };
   }
+
+  const buttonLabel =
+    phase === "starting" ? "Starting…" : phase === "generating" ? "Generating…" : "Generate Character Sheet";
 
   return (
     <div className="character-core__generate">
@@ -173,7 +190,7 @@ export function CharacterSheetGenerator({
         disabled={!canGenerate}
         onClick={() => void generate()}
       >
-        {generating ? "Generating…" : "Generate Character Sheet"}
+        {buttonLabel}
       </button>
       {!anyEnabled ? (
         <p className="character-core__hint" data-testid="generator-none-hint">

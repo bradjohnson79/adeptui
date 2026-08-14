@@ -7321,6 +7321,7 @@ export const api = {
         local?: { family?: string; stage2Family?: string; stage2Enabled?: boolean } | null;
         api?: { model?: string } | null;
       };
+      generationMode?: "profile_guided" | "reference_conditioned";
     },
   ) =>
     req<{ ok: boolean; pack: any }>(

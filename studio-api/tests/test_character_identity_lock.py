@@ -56,3 +56,12 @@ def test_identity_violation_detector_flags_drift_and_accepts_positive_blocks():
     assert "forbidden trait present: human ears" in findings
     assert "forbidden trait present: Anadriya resemblance" in findings
     assert "incorrect markings language: use light-circuitry markings (not tattoos)" in findings
+
+
+def test_gender_presentation_is_compiled_when_saved():
+    blueprint = extract_character_blueprint({"name": "Korri", "gender_presentation": "female"})
+    assert blueprint["gender_presentation"] == "female"
+    from app.image_prompting.qwen_2512.identity_lock import build_identity_anchor
+
+    anchor = build_identity_anchor(blueprint)
+    assert "female" in anchor

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.image_product.collections import add_assets, create_collection, list_collections
 from app.image_product.compile import compile_image_request
 from app.image_product.presets import BUILTIN_PRESETS, apply_preset_to_request, list_presets
@@ -181,3 +183,25 @@ def test_wave3_gate_structure():
     assert "wave3Go" in gate
     assert "missingRequirements" in gate
     assert isinstance(gate["missingRequirements"], list)
+
+
+def test_forced_illustrious_workflow_does_not_silent_fallback_to_zimage(monkeypatch):
+    import app.image_runtime.contract as contract
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("Image workflow not Certified: illustrious.txt2img")
+
+    monkeypatch.setattr(contract, "resolve_image_workflow", boom)
+    with pytest.raises(RuntimeError, match="illustrious"):
+        compile_image_request(
+            "test-w3-force-illustrious",
+            {
+                "prompt": "anime character sheet",
+                "purpose": "character_sheet",
+                "modelFamilyPreference": "illustrious",
+                "forceWorkflowKey": "illustrious.txt2img",
+                "allow_force_workflow_key": True,
+                "width": 1024,
+                "height": 1024,
+            },
+        )

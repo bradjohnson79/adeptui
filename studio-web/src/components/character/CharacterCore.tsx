@@ -148,6 +148,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           characterId={characterId}
           profile={profile}
           sources={sources}
+          hasReference={hasReference}
           onCandidates={setCandidates}
           retryHandlerRef={retryHandlerRef}
         />

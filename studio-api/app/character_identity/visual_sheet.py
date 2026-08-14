@@ -102,10 +102,9 @@ REFERENCE_REPRODUCTION_DIRECTIVE = (
 # closely; higher values drop reference conditioning.
 REFERENCE_FIDELITY_DENOISE = 0.68
 
-# Certified txt2img families available for no-reference candidate routing, in
-# preference order. Each is used once before any reuse. Sourced from the
-# Certified READY registry (zimage.txt2img, qwen2512.txt2img).
-NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage")
+# Certified txt2img families available for no-reference / Profile Guided
+# candidate routing, in preference order. Each is used once before any reuse.
+NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage", "illustrious")
 
 # Reference-capable Certified workflow for reference-locked candidates. This is
 # the only Certified workflow that consumes reference pixels today; until more
@@ -118,9 +117,12 @@ REFERENCE_FIDELITY_MODE_FULL = "zimage_ref_edit"
 
 # --- Stage 2 Identity-Lock + Style Refinement Pipeline ---
 #
-# When a Character Reference is attached, Stage 1 runs a reference-capable
-# identity engine (e.g. zimage.ref_edit) to lock the character identity. Stage 2
-# is optional: it uses a real img2img/edit/refinement workflow (e.g. flux.img2img)
+# When a Character Reference is attached:
+# * Reference-capable families (e.g. Z-Image) run REFERENCE_CONDITIONED Stage 1
+#   with pixels (zimage.ref_edit).
+# * Txt2img-only families (Illustrious / Qwen) run PROFILE_GUIDED Stage 1 with
+#   no pixels. They are never silently redirected to Z-Image.
+# Stage 2 is optional: a real img2img/edit/refinement workflow (e.g. flux.img2img)
 # to improve visual style / finish while preserving identity. Stage 2 receives
 # the Stage 1 output as its source image, never the original reference.
 # Truthfulness Law: if no real compatible Stage 2 workflow exists, Stage 2 is
@@ -151,6 +153,15 @@ CANDIDATE_SHEET_VIEW_ROLES: tuple[str, ...] = (
     "full_body_back",
     "closeup_front",
 )
+
+# View-only instructions appended to one shared Character Profile base prompt.
+# Identity facts stay unchanged between views.
+PROFILE_GUIDED_VIEW_INSTRUCTIONS: dict[str, str] = {
+    "hero_identity": "FRONT: front-facing, full-body neutral stance",
+    "full_body_side_left": "SIDE: strict side-profile, full-body neutral stance",
+    "full_body_back": "BACK: back-facing, full-body neutral stance",
+    "closeup_front": "CLOSE-UP: front-facing close-up portrait",
+}
 
 # 2x2 grid layout (row-major): front, side / back, front-close-up.
 CHARACTER_SHEET_GRID_COLS = 2
@@ -291,9 +302,13 @@ def _compile_visual_prompt(
     style_profile: dict[str, Any] | None = None,
     reference_locked: bool = False,
 ) -> Any:
+    v_instruction = PROFILE_GUIDED_VIEW_INSTRUCTIONS.get(role, "")
+    goal = prompt_goal.strip()
+    if v_instruction:
+        goal = f"{goal}. {v_instruction}"
     return compile_character_image_prompt(
         _compiler_payload(profile),
-        prompt_goal=prompt_goal,
+        prompt_goal=goal,
         composition=composition,
         style_profile=style_profile or QWEN_VISUAL_SHEET_STYLE,
         references=references,
@@ -372,10 +387,10 @@ def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
 def _family_supports_references(family: str) -> bool:
     """True when the family has a Certified workflow that can consume reference pixels.
 
-    Consults the Certified registry's ``supportsReferences`` capability. Used
-    by the reference-first routing guard so a reference-locked candidate is
-    never routed to a text-only family (e.g. Illustrious) that would silently
-    drop reference conditioning.
+    Consults the Certified registry's ``supportsReferences`` capability.
+    Reference-capable families with an attached reference run REFERENCE_CONDITIONED.
+    Txt2img-only families (Illustrious / Qwen) stay PROFILE_GUIDED — they are
+    never silently dropped or redirected to Z-Image.
     """
     try:
         from ..image_runtime.certified_registry import list_workflows
@@ -1220,6 +1235,7 @@ def start_visual_sheet_generation(
     candidate_count: int = 1,
     visual_style: Optional[str] = None,
     generator_sources: Optional[dict[str, Any]] = None,
+    generation_mode: Optional[str] = None,
 ) -> dict[str, Any]:
     """Enqueue real certified image jobs for a Generated Character Image Profile.
 
@@ -1299,12 +1315,11 @@ def start_visual_sheet_generation(
         # the full-body instruction supplements, never rewrites.
         #
         # Amendment 3 — Candidate Diversity + Reference Fidelity:
-        # * When a Character Reference / Reference Sheet is attached, the
-        #   reference image is the primary visual authority and its PIXELS
-        #   participate in conditioning (routed to zimage.ref_edit, the only
-        #   Certified reference-capable workflow). The Character Profile
-        #   becomes supplemental and must not override visible reference
-        #   features.
+        # * Reference-capable family + attached reference → REFERENCE_CONDITIONED
+        #   (pixels participate).
+        # * Txt2img-only family (Illustrious / Qwen) + attached reference →
+        #   PROFILE_GUIDED (profile + style prompt, no pixels). Never forced
+        #   onto zimage.ref_edit.
         # * Candidate variety comes from different Certified generators / seeds
         #   / interpretation — never from changing the character's identity.
         # * Each distinct Certified generator is used once before reuse; we
@@ -1562,7 +1577,13 @@ def start_visual_sheet_generation(
         "workflows": ["character_sheet", "sequential_identity_prompts", "multi_model_routing"],
         "identityLock": KORRI_LOCK if char_slug == "korri" else "",
         "referenceEditReplaced": True,
-        "referenceLocked": bool(reference_asset_id) if not hero_asset_id else False,
+        "referenceLocked": any(
+            (c.get("conditioningMode") == CONDITIONING_REFERENCE_CONDITIONED) for c in candidates
+        ),
+        "generationMode": (
+            (candidates[0].get("conditioningMode") if candidates else None)
+            or generation_mode
+        ),
         "jobs": jobs,
         "roleAssets": role_assets,
         "candidates": candidates,

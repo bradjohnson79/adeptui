@@ -32,8 +32,8 @@ def build_local_generator_models() -> list[dict[str, Any]]:
     The Character Creator / Character Creator Express dropdown must reflect
     installed + READY + Certified + capability-compatible local generators —
     never a hardcoded list. Each entry carries readiness/capability metadata so
-    the selector can apply reference-aware eligibility (e.g. disable a
-    text-to-image-only family when a Character Reference is attached).
+    the selector can label Profile Guided vs Reference Conditioned. Text-to-image
+    families stay selectable when a Character Reference is attached.
     """
     from .image_runtime.certified_registry import list_workflows
 

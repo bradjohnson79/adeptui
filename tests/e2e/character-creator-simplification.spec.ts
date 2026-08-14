@@ -279,7 +279,7 @@ test.describe("Character Creator Simplification", () => {
     expect(observer.pageErrors, observer.pageErrors.join("\n")).toHaveLength(0);
   });
 
-  test("qwen image dropdown: visible without reference, disabled with reference + reason", async ({
+    test("qwen image dropdown: visible without reference, remains selectable with reference", async ({
     page,
     request,
   }) => {
@@ -326,10 +326,9 @@ test.describe("Character Creator Simplification", () => {
 
     const qwenAfter = page.getByTestId("generator-local-option-qwen2512");
     await expect(qwenAfter).toHaveCount(1);
-    await expect(qwenAfter).toBeDisabled();
-    // Reason is surfaced via title / data attribute.
+    await expect(qwenAfter).not.toBeDisabled();
     const reason = (await qwenAfter.getAttribute("data-disabled-reason")) || (await qwenAfter.getAttribute("title")) || "";
-    expect(reason).toMatch(/text-to-image|Character Reference/i);
+    expect(reason).not.toMatch(/cannot use the attached Character Reference/i);
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qwen-02-disabled-with-reference.png") });
 
     expect(observer.pageErrors, observer.pageErrors.join("\n")).toHaveLength(0);

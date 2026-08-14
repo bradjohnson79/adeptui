@@ -902,6 +902,7 @@ class VisualSheetStartBody(BaseModel):
     # { "local": {"family": str|None}|None, "api": {"model": str|None}|None }
     # A pool set to None (or omitted entirely when neither key present) is disabled.
     generatorSources: Optional[Dict[str, Any]] = None
+    generationMode: Optional[str] = None
 
 
 class VisualSheetApproveBody(BaseModel):
@@ -927,6 +928,7 @@ def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStar
             candidate_count=body.candidateCount if body.candidateCount is not None else 1,
             visual_style=body.visualStyle,
             generator_sources=body.generatorSources,
+            generation_mode=body.generationMode,
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc

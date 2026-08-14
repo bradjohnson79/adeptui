@@ -530,6 +530,46 @@ def test_pin_fal_image_job_marks_cloud_paid_without_submit():
 
 
 
+def test_profile_guided_view_instructions_appended_to_base_prompt():
+    from app.character_identity.visual_sheet import (
+        PROFILE_GUIDED_VIEW_INSTRUCTIONS,
+        _compile_visual_prompt,
+    )
+
+    profile = _korri_canon()
+    pkg = _compile_visual_prompt(
+        profile,
+        prompt_goal="a cinematic full-body character casting reference",
+        composition={"framing": "full body"},
+        references=[],
+        role="hero_identity",
+        reference_locked=False,
+    )
+    assert PROFILE_GUIDED_VIEW_INSTRUCTIONS["hero_identity"] in pkg.prompt
+    side = _compile_visual_prompt(
+        profile,
+        prompt_goal="a cinematic full-body character casting reference",
+        composition={"framing": "full body"},
+        references=[],
+        role="full_body_side_left",
+        reference_locked=False,
+    )
+    assert PROFILE_GUIDED_VIEW_INSTRUCTIONS["full_body_side_left"] in side.prompt
+
+
+def test_cloud_off_illustrious_plan_is_local_only():
+    plan = _build_candidate_routing_plan(
+        candidate_count=1,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "illustrious", "stage2Enabled": False}, "api": None},
+    )
+    assert len(plan) == 1
+    assert plan[0]["stage1"]["providerKind"] == "local"
+    assert plan[0]["stage1"]["modelFamilyPreference"] == "illustrious"
+    assert plan[0]["stage2Enabled"] is False
+    assert plan[0]["stage1"]["hostedModelId"] is None
+
+
 if __name__ == "__main__":
     import pytest
 

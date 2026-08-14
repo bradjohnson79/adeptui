@@ -118,6 +118,9 @@ def extract_character_blueprint(payload: Mapping[str, Any]) -> dict[str, Any]:
         "bio": _text(payload.get("description")),
         "visual_description": _text(payload.get("visual_description")),
         "visual_style": _text(payload.get("visual_style")),
+        "gender_presentation": _text(
+            identity.get("genderPresentation") or payload.get("gender_presentation")
+        ),
         "height_description": _text(identity.get("heightDescription") or payload.get("height_description")),
         "body_type": normalized_body_type,
         "hair_color": _text(hair.get("primary_color") or payload.get("hair_color")),
@@ -155,6 +158,7 @@ def build_identity_anchor(blueprint: Mapping[str, Any]) -> str:
     parts = [
         _text(blueprint.get("name")),
         _text(blueprint.get("role")),
+        _text(blueprint.get("gender_presentation")),
         _text(blueprint.get("species_or_type")).replace("_", " "),
         _text(blueprint.get("age")),
         _text(blueprint.get("height_description")),

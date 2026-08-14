@@ -316,7 +316,11 @@ def compile_image_request(
         )
         allow_draft = False
     except RuntimeError:
-        # Certified ZImage fallback
+        if force_key:
+            # Character Sheet / explicit workflow pin: fail visibly. Never silently
+            # substitute Z-Image for Illustrious, Qwen, or any forced family.
+            raise
+        # Certified ZImage fallback (unpinned requests only)
         contract = resolve_image_workflow(
             "image.edit" if (intent.sourceAssetId or intent.operation == "image.edit") else "image.generate",
             engine="zimage",

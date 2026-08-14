@@ -141,33 +141,11 @@ export function batchProgress(candidates: CharacterCandidate[]): {
   return { doneViews, totalViews, doneSheets, totalSheets, percent };
 }
 
-export type GeneratorSourceKind = "local" | "api";
-
-export type GeneratorOption = {
-  id: string;
-  label: string;
-  family?: string;
-  providerKind?: "local" | "cloud";
-  /** Readiness / Certified state */
-  executable: boolean;
-  status?: string;
-  /** Numeric credit balance only when the provider actually exposes one. */
-  credits?: number | null;
-  /** Human availability when no numeric balance: "Connected" | "Balance unavailable" */
-  availability?: string;
-  /** Family can consume reference pixels (any Certified reference-capable key). */
-  supportsReferences?: boolean;
-  /** Family has a real img2img/edit workflow for Stage 2 style refinement. */
-  supportsEditing?: boolean;
-};
-
-export type GeneratorSourceState = {
-  enabled: boolean;
-  selectedId: string;
-  /** Optional Stage 2 style-refinement engine. */
-  stage2Enabled?: boolean;
-  stage2SelectedId?: string;
-};
+export type {
+  GeneratorOption,
+  GeneratorSourceKind,
+  GeneratorSourceState,
+} from "../generators/types";
 
 export const CHARACTER_STYLE_OPTIONS = [
   { value: "", label: "Select a style…" },
