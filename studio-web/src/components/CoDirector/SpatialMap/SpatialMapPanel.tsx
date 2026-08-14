@@ -565,6 +565,29 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
   }, []);
 
+  const didAutoArmDocId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!document) return;
+    if (didAutoArmDocId.current === document.id) return;
+    if (placementMode) {
+      didAutoArmDocId.current = document.id;
+      return;
+    }
+    const assigned = CHARACTER_SLOTS.map((slot) => {
+      const found = document.characters.find((c) => c.slotIndex === slot.index);
+      return found ? { slot, found } : null;
+    }).filter((row): row is { slot: (typeof CHARACTER_SLOTS)[number]; found: (typeof document.characters)[number] } => !!row);
+    if (!assigned.length) return;
+    const unplaced = assigned.find(({ found }) => {
+      const hasNorm = typeof found.normalizedX === "number" && typeof found.normalizedY === "number";
+      return !hasNorm && (found.gridRow < 0 || found.gridColumn < 0);
+    });
+    const pick = unplaced || assigned[0];
+    const placed = (typeof pick.found.normalizedX === "number" && typeof pick.found.normalizedY === "number") || (pick.found.gridRow >= 0 && pick.found.gridColumn >= 0);
+    beginPlacement(placed ? "move" : "place", "character", pick.found.id, `${pick.slot.label} - ${pick.found.label || pick.found.tag}`, pick.slot.index);
+    didAutoArmDocId.current = document.id;
+  }, [document, placementMode, beginPlacement]);
+
   // ── Slot: remove ──────────────────────────────────────────────────────
   const handleSlotRemove = useCallback(
     async (slot: SlotDef) => {
@@ -1089,6 +1112,24 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                       <span className='spatial-map__active-badge' data-testid={'slot-active-badge-camera-' + String(slot.index)}>ACTIVE</span>
                     ) : null}
                     <span className="spatial-map__slot-label">{slot.label}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      className={`spatial-map__slot-toggle${placementMode?.kind === "camera" && camera && placementMode.id === camera.id ? " is-on" : ""}${!camera ? " is-disabled" : ""}`}
+                      aria-checked={!!(camera && placementMode?.kind === "camera" && placementMode.id === camera.id)}
+                      aria-disabled={!camera}
+                      disabled={!camera}
+                      aria-label={!camera ? `${slot.label} placement unavailable` : `${slot.label} placement ${placementMode?.kind === "camera" && placementMode.id === camera.id ? "on" : "off"}`}
+                      data-testid={`camera-online-${slot.index}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!camera) return;
+                        if (placementMode?.kind === "camera" && placementMode.id === camera.id) clearPlacementMode();
+                        else beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
+                      }}
+                    >
+                      <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
+                    </button>
                     {camera ? (
                       <span className="spatial-map__slot-status">
                         {camera.orientation || "N"} · {String(camera.fovPreset || "medium").toLowerCase()}
@@ -1109,20 +1150,6 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     )}
                     {camera ? (
                       <div className="spatial-map__slot-actions">
-                        <button
-                          type="button"
-                          className={`spatial-map__slot-action spatial-map__slot-toggle${placementMode?.kind === "camera" && placementMode.id === camera.id ? " is-active" : ""}`}
-                          aria-pressed={placementMode?.kind === "camera" && placementMode.id === camera.id}
-                          aria-label={`${placementMode?.kind === "camera" && placementMode.id === camera.id ? "Turn off" : "Turn on"} ${slot.label}`}
-                          data-testid={`camera-online-${slot.index}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (placementMode?.kind === "camera" && placementMode.id === camera.id) clearPlacementMode();
-                            else beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
-                          }}
-                        >
-                          {placementMode?.kind === "camera" && placementMode.id === camera.id ? "ON" : "OFF"}
-                        </button>
                         <button
                           type="button"
                           className="spatial-map__slot-action"

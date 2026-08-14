@@ -92,6 +92,24 @@ export function PlacementSlot({
         ) : null}
         <span className="spatial-map__slot-swatch" style={{ background: color }} aria-hidden="true" />
         <span className="spatial-map__slot-label">{slot.label}</span>
+        <button
+          type="button"
+          role="switch"
+          className={`spatial-map__slot-toggle${placing ? " is-on" : ""}${!isAssigned ? " is-disabled" : ""}`}
+          aria-checked={isAssigned && placing}
+          aria-disabled={!isAssigned}
+          disabled={!isAssigned}
+          aria-label={!isAssigned ? `${slot.label} placement unavailable` : `${slot.label} placement ${placing ? "on" : "off"}`}
+          data-testid={`${slot.kind}-online-${slot.index}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isAssigned) return;
+            if (placing) onToggleOff?.();
+            else onSelect();
+          }}
+        >
+          <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
+        </button>
       </div>
 
       {!isAssigned ? (
@@ -131,20 +149,6 @@ export function PlacementSlot({
           </div>
           {location ? <div className="spatial-map__slot-assigned-loc">Cell {location}</div> : null}
           <div className="spatial-map__slot-actions">
-            <button
-              type="button"
-              className={`spatial-map__slot-action spatial-map__slot-toggle${placing ? " is-active" : ""}`}
-              aria-pressed={placing}
-              aria-label={`${placing ? "Turn off" : "Turn on"} ${slot.label}`}
-              data-testid={`${slot.kind}-online-${slot.index}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (placing) onToggleOff?.();
-                else onSelect();
-              }}
-            >
-              {placing ? "ON" : "OFF"}
-            </button>
           {isAssigned && onToggleVisible ? (
             <button
               type="button"
