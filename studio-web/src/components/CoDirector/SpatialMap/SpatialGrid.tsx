@@ -29,6 +29,8 @@ export type GridPlacement = {
   normalizedY?: number | null;
   slotIndex: number;
   kind: "character" | "prop";
+  label?: string;
+  visible?: boolean;
 };
 
 type Props = {
@@ -41,6 +43,10 @@ type Props = {
   occupiedMessage: string | null;
   gridScale: GridScale;
   placementActive: boolean;
+  showGrid?: boolean;
+  showCircles?: boolean;
+  showLabels?: boolean;
+  zoom?: number;
   onCellClick: (column: number, row: number) => void;
   onSelectPlacement: (placementId: string | null) => void;
   onSelectCamera: (cameraId: string | null) => void;
@@ -61,6 +67,8 @@ export function toGridPlacements(
       normalizedY: c.normalizedY,
       slotIndex: c.slotIndex,
       kind: "character" as const,
+      label: c.label || c.tag,
+      visible: c.visible,
     })),
     ...props.map((p) => ({
       id: p.id,
@@ -72,6 +80,8 @@ export function toGridPlacements(
       normalizedY: p.normalizedY,
       slotIndex: p.slotIndex,
       kind: "prop" as const,
+      label: p.label || p.tag,
+      visible: p.visible,
     })),
   ];
 }
@@ -94,6 +104,12 @@ function markerPosition(
   return null;
 }
 
+function markerModifier(kind: "character" | "prop", slotIndex: number): string {
+  if (kind === "prop") return " spatial-map__marker--prop";
+  const n = Math.min(4, Math.max(1, slotIndex + 1));
+  return ` spatial-map__marker--c${n}`;
+}
+
 export function SpatialGrid({
   imageUrl,
   placements,
@@ -103,11 +119,16 @@ export function SpatialGrid({
   occupiedMessage,
   gridScale,
   placementActive,
+  showGrid = true,
+  showCircles = true,
+  showLabels = true,
+  zoom = 1,
   onCellClick,
   onSelectPlacement,
   onSelectCamera,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(512);
   const [hover, setHover] = useState<{ column: number; row: number } | null>(null);
 
@@ -124,11 +145,25 @@ export function SpatialGrid({
 
   const density = densityForScale(gridScale);
   const cellPx = size / density;
-  const markerSize = Math.max(10, Math.round(cellPx * 0.72));
-  const cameraSize = Math.round(markerSize * 0.68);
+  const cellCircleR = cellPx * 0.4;
+  const markerR = cellCircleR * 0.72;
+  const cameraSize = Math.max(10, Math.round(markerR * 2 * 0.68));
   const center = size / 2;
   const radius = size / 2 - 1;
   const clipId = "spatial-map-circle-clip";
+
+  const validCells = useMemo(() => {
+    const cells: Array<{ column: number; row: number; px: number; py: number }> = [];
+    for (let row = 0; row < density; row += 1) {
+      for (let column = 0; column < density; column += 1) {
+        if (!isValidCell(column, row, density)) continue;
+        const mid = cellCenterNormalized(column, row, density);
+        const pix = normalizedToPixel(mid.x, mid.y, size);
+        cells.push({ column, row, px: pix.px, py: pix.py });
+      }
+    }
+    return cells;
+  }, [density, size]);
 
   const gridPath = useMemo(() => {
     const parts: string[] = [];
@@ -142,9 +177,13 @@ export function SpatialGrid({
 
   const handlePointer = useCallback(
     (clientX: number, clientY: number) => {
-      if (!containerRef.current) return null;
-      const rect = containerRef.current.getBoundingClientRect();
-      return pointerToCell(clientX - rect.left, clientY - rect.top, size, density);
+      const el = viewportRef.current || containerRef.current;
+      if (!el) return null;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      const x = ((clientX - rect.left) / rect.width) * size;
+      const y = ((clientY - rect.top) / rect.height) * size;
+      return pointerToCell(x, y, size, density);
     },
     [density, size],
   );
@@ -178,155 +217,170 @@ export function SpatialGrid({
     (c) => hasNormalized(c.normalizedX, c.normalizedY) || (c.gridRow >= 0 && c.gridColumn >= 0),
   );
 
-  const hoverCenter = hover ? cellCenterNormalized(hover.column, hover.row, density) : null;
-  const hoverPx = hoverCenter ? normalizedToPixel(hoverCenter.x, hoverCenter.y, size) : null;
+  const wrapClass = [
+    "spatial-map__grid-wrap",
+    "spatial-map__grid-wrap--circle",
+    showGrid ? "" : "spatial-map__grid-wrap--hide-grid",
+    showCircles ? "" : "spatial-map__grid-wrap--hide-circles",
+    showLabels ? "" : "spatial-map__grid-wrap--hide-labels",
+  ].filter(Boolean).join(" ");
 
   return (
-    <div className="spatial-map__grid-wrap spatial-map__grid-wrap--circle" ref={containerRef}>
-      <svg
-        className="spatial-map__grid-svg"
-        viewBox={`0 0 ${size} ${size}`}
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHover(null)}
-        role="img"
-        aria-label="Circular spatial map with square placement grid"
-        data-testid="spatial-map-grid"
-        data-grid-detail={gridScale}
-        data-grid-size={density}
-        data-grid-kind="cartesian"
+    <div className={wrapClass} ref={containerRef}>
+      <div
+        className="spatial-map__viewport"
+        ref={viewportRef}
+        style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
+        data-testid="spatial-map-viewport"
+        data-zoom={zoom}
       >
-        <defs>
-          <clipPath id={clipId}>
-            <circle cx={center} cy={center} r={radius} />
-          </clipPath>
-        </defs>
+        <svg
+          className="spatial-map__grid-svg"
+          viewBox={`0 0 ${size} ${size}`}
+          onClick={handleClick}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setHover(null)}
+          role="img"
+          aria-label={placementActive
+            ? "Circular spatial map. Click a cell to place the selected object."
+            : "Circular spatial map with square placement grid. Click a cell to place the selected object."}
+          data-testid="spatial-map-grid"
+          data-grid-detail={gridScale}
+          data-grid-size={density}
+          data-grid-kind="cartesian"
+        >
+          <defs>
+            <clipPath id={clipId}>
+              <circle cx={center} cy={center} r={radius} />
+            </clipPath>
+          </defs>
 
-        <g clipPath={`url(#${clipId})`}>
-          <image href={imageUrl} x="0" y="0" width={size} height={size} preserveAspectRatio="xMidYMid slice" />
-          <path d={gridPath} className="spatial-map__grid-lines" />
+          <g clipPath={`url(#${clipId})`}>
+            <image href={imageUrl} x="0" y="0" width={size} height={size} preserveAspectRatio="xMidYMid slice" />
+            <path d={gridPath} className="spatial-map__grid-lines" />
 
-          {placementActive && hover && hoverPx ? (
-            <rect
-              x={hover.column * cellPx}
-              y={hover.row * cellPx}
-              width={cellPx}
-              height={cellPx}
-              className="spatial-map__hover-cell"
-              data-testid="spatial-map-hover-cell"
-            />
-          ) : null}
-
-          {placedCameras.map((c) => {
-            const px = markerPosition(c.gridColumn, c.gridRow, c.normalizedX, c.normalizedY, density, size);
-            if (!px) return null;
-            const isSelected = selectedCameraId === c.id;
-            return (
-              <g
-                key={`fov-${c.id}`}
-                transform={`translate(${px.px}, ${px.py})`}
-                className="spatial-map__fov-layer"
-              >
-                <CameraFovCone
-                  orientation={c.orientation || "N"}
-                  fovPreset={c.fovPreset || "medium"}
-                  radius={Math.max(cameraSize * 2.6, cellPx * 1.6)}
-                  selected={isSelected}
+            {validCells.map((cell) => {
+              const isTarget = !!(placementActive && hover && hover.column === cell.column && hover.row === cell.row);
+              return (
+                <circle
+                  key={`cell-${cell.column}-${cell.row}`}
+                  className={`spatial-map__cell-circle${isTarget ? " is-place-target" : ""}`}
+                  cx={cell.px}
+                  cy={cell.py}
+                  r={cellCircleR}
+                  data-column={cell.column}
+                  data-row={cell.row}
+                  data-testid={`cell-circle-${cell.column}-${cell.row}`}
                 />
-              </g>
-            );
-          })}
+              );
+            })}
 
-          {placedPlacements.map((p) => {
-            const px = markerPosition(p.gridColumn, p.gridRow, p.normalizedX, p.normalizedY, density, size);
-            if (!px) return null;
-            const isSelected = selectedPlacementId === p.id;
-            const footprint = p.kind === "prop" ? markerSize * 0.9 : markerSize;
-            const initial = (p.tag || "?").replace(/^[@#]/, "").slice(0, 2);
-            return (
-              <g
-                key={p.id}
-                className={`spatial-map__marker${isSelected ? " is-selected" : ""}`}
-                transform={`translate(${px.px}, ${px.py})`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectPlacement(isSelected ? null : p.id);
-                }}
-                style={{ cursor: "pointer" }}
-                data-testid={`placement-marker-${p.id}`}
-                data-kind={p.kind}
-              >
-                <rect
-                  x={-footprint / 2}
-                  y={-footprint / 2}
-                  width={footprint}
-                  height={footprint}
-                  rx={2}
-                  fill={SLOT_COLORS[p.colorKey] || "#fff"}
-                  stroke="rgba(255,255,255,0.85)"
-                  strokeWidth={2}
-                />
-                <text
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={Math.max(8, footprint * 0.38)}
-                  fill="#fff"
-                  fontWeight={700}
+            {placedCameras.map((c) => {
+              const px = markerPosition(c.gridColumn, c.gridRow, c.normalizedX, c.normalizedY, density, size);
+              if (!px) return null;
+              const isSelected = selectedCameraId === c.id;
+              const hidden = c.visible === false;
+              return (
+                <g
+                  key={`fov-${c.id}`}
+                  transform={`translate(${px.px}, ${px.py})`}
+                  className={`spatial-map__fov-layer${hidden ? " spatial-map__camera--hidden" : ""}`}
+                  data-visible={hidden ? "false" : "true"}
                 >
-                  {initial}
-                </text>
-              </g>
-            );
-          })}
+                  <CameraFovCone
+                    orientation={c.orientation || "N"}
+                    fovPreset={c.fovPreset || "medium"}
+                    radius={Math.max(cameraSize * 2.6, cellPx * 1.6)}
+                    selected={isSelected}
+                  />
+                </g>
+              );
+            })}
 
-          {placedCameras.map((c) => {
-            const px = markerPosition(c.gridColumn, c.gridRow, c.normalizedX, c.normalizedY, density, size);
-            if (!px) return null;
-            const isSelected = selectedCameraId === c.id;
+            {placedPlacements.map((p) => {
+              const px = markerPosition(p.gridColumn, p.gridRow, p.normalizedX, p.normalizedY, density, size);
+              if (!px) return null;
+              const isSelected = selectedPlacementId === p.id;
+              const hidden = p.visible === false;
+              const slot = Math.min(4, Math.max(1, p.slotIndex + 1));
+              return (
+                <g
+                  key={p.id}
+                  className={`spatial-map__marker${markerModifier(p.kind, p.slotIndex)}${isSelected ? " is-selected" : ""}${hidden ? " spatial-map__marker--hidden" : ""}`}
+                  transform={`translate(${px.px}, ${px.py})`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectPlacement(isSelected ? null : p.id);
+                  }}
+                  style={{ cursor: "pointer" }}
+                  data-testid={`placement-marker-${p.id}`}
+                  data-kind={p.kind}
+                  data-slot={String(slot)}
+                  data-visible={hidden ? "false" : "true"}
+                >
+                  <title>{p.label || p.tag}</title>
+                  <circle
+                    className="spatial-map__marker-circle"
+                    r={markerR}
+                    fill={SLOT_COLORS[p.colorKey] || "#fff"}
+                    stroke="rgba(255,255,255,0.85)"
+                    strokeWidth={2}
+                  />
+                </g>
+              );
+            })}
+
+            {placedCameras.map((c) => {
+              const px = markerPosition(c.gridColumn, c.gridRow, c.normalizedX, c.normalizedY, density, size);
+              if (!px) return null;
+              const isSelected = selectedCameraId === c.id;
+              const hidden = c.visible === false;
+              return (
+                <g
+                  key={c.id}
+                  className={`spatial-map__camera${isSelected ? " is-selected" : ""}${hidden ? " spatial-map__camera--hidden" : ""}`}
+                  transform={`translate(${px.px}, ${px.py})`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectCamera(isSelected ? null : c.id);
+                  }}
+                  style={{ cursor: "pointer" }}
+                  data-testid={`camera-marker-${c.id}`}
+                  data-visible={hidden ? "false" : "true"}
+                >
+                  <CameraMarker
+                    size={cameraSize}
+                    label={c.cameraSlot >= 0 ? `C${c.cameraSlot + 1}` : c.label}
+                    orientation={c.orientation || "N"}
+                  />
+                  <rect
+                    className="spatial-map__camera-hitbox"
+                    x={-cameraSize / 2}
+                    y={-cameraSize / 2}
+                    width={cameraSize}
+                    height={cameraSize}
+                    fill="transparent"
+                    pointerEvents="all"
+                  />
+                </g>
+              );
+            })}
+          </g>
+
+          <circle cx={center} cy={center} r={radius} className="spatial-map__circle-stroke" />
+
+          {CARDINAL_LABELS.map((label, index) => {
+            const angle = (index / 8) * Math.PI * 2 - Math.PI / 2;
+            const lx = center + (radius - 16) * Math.cos(angle);
+            const ly = center + (radius - 16) * Math.sin(angle);
             return (
-              <g
-                key={c.id}
-                className={`spatial-map__camera${isSelected ? " is-selected" : ""}`}
-                transform={`translate(${px.px}, ${px.py})`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSelectCamera(isSelected ? null : c.id);
-                }}
-                style={{ cursor: "pointer" }}
-                data-testid={`camera-marker-${c.id}`}
-              >
-                <CameraMarker
-                  size={cameraSize}
-                  label={c.cameraSlot >= 0 ? `C${c.cameraSlot + 1}` : c.label}
-                  orientation={c.orientation || "N"}
-                />
-                <rect
-                  className="spatial-map__camera-hitbox"
-                  x={-cameraSize / 2}
-                  y={-cameraSize / 2}
-                  width={cameraSize}
-                  height={cameraSize}
-                  fill="transparent"
-                  pointerEvents="all"
-                />
-              </g>
+              <text key={label} x={lx} y={ly} className="spatial-map__grid-label" textAnchor="middle" dominantBaseline="middle">
+                {label}
+              </text>
             );
           })}
-        </g>
-
-        <circle cx={center} cy={center} r={radius} className="spatial-map__circle-stroke" />
-
-        {CARDINAL_LABELS.map((label, index) => {
-          const angle = (index / 8) * Math.PI * 2 - Math.PI / 2;
-          const lx = center + (radius - 16) * Math.cos(angle);
-          const ly = center + (radius - 16) * Math.sin(angle);
-          return (
-            <text key={label} x={lx} y={ly} className="spatial-map__grid-label" textAnchor="middle" dominantBaseline="middle">
-              {label}
-            </text>
-          );
-        })}
-      </svg>
+        </svg>
+      </div>
 
       {occupiedMessage ? <p className="spatial-map__occupied-message">{occupiedMessage}</p> : null}
     </div>

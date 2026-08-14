@@ -27,6 +27,8 @@ type Props = {
   onMove: () => void;
   onRemove: () => void;
   onUpdateMiniPrompt: (text: string) => void;
+  visible?: boolean;
+  onToggleVisible?: () => void;
 };
 
 export function PlacementSlot({
@@ -41,6 +43,8 @@ export function PlacementSlot({
   onMove,
   onRemove,
   onUpdateMiniPrompt,
+  visible,
+  onToggleVisible,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [miniDraft, setMiniDraft] = useState(placement?.miniPrompt || "");
@@ -70,7 +74,8 @@ export function PlacementSlot({
       role="button"
       tabIndex={0}
       aria-pressed={active}
-      aria-label={`${slot.label}${isAssigned ? `, assigned ${displayName}` : ", empty"}`}
+      aria-current={active && isAssigned ? "true" : undefined}
+      aria-label={`${slot.label}${isAssigned ? `, assigned ${displayName}` : ", empty"}${active && isAssigned ? ", active" : ""}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -79,6 +84,11 @@ export function PlacementSlot({
       }}
     >
       <div className="spatial-map__slot-head">
+        {active && isAssigned ? (
+          <span className="spatial-map__active-badge" data-testid={`slot-active-badge-${slot.kind}-${slot.index}`}>
+            ACTIVE
+          </span>
+        ) : null}
         <span className="spatial-map__slot-swatch" style={{ background: color }} aria-hidden="true" />
         <span className="spatial-map__slot-label">{slot.label}</span>
       </div>
@@ -126,6 +136,21 @@ export function PlacementSlot({
           </div>
           {location ? <div className="spatial-map__slot-assigned-loc">Cell {location}</div> : null}
           <div className="spatial-map__slot-actions">
+          {isAssigned && onToggleVisible ? (
+            <button
+              type="button"
+              className="spatial-map__slot-action"
+              aria-label={`Toggle visibility of ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
+              aria-pressed={(visible ?? placement?.visible) !== false}
+              data-testid={`${slot.kind}-visible-${slot.index}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleVisible();
+              }}
+            >
+              Visible
+            </button>
+          ) : null}
             {!isPlaced ? (
               <button
                 type="button"

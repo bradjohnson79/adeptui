@@ -36,6 +36,8 @@ from app.spatial_map.service import (
     place_character,
     place_prop,
     remove_camera,
+    remove_character,
+    remove_prop,
     update_camera,
     update_character,
     update_document,
@@ -400,12 +402,26 @@ def test_reset_returns_neutral_and_clears_coords_keeps_assignments():
             doc.id,
             SpatialPropPlacementBody(label="Coffee Cup", assetId="asset-library-99", propId=None, gridRow=2, gridColumn=2),
         )
-        doc = create_camera(
-            db,
-            project_id,
-            doc.id,
-            SpatialCameraCreateBody(label="C1", cameraSlot=0, gridRow=5, gridColumn=5, orientation="N", fovPreset="medium"),
-        )
+        for spec in (
+            ("C1", 0, 5, 5, "N", "medium"),
+            ("C2", 1, 5, 4, "NE", "wide"),
+            ("C3", 2, 4, 5, "E", "narrow"),
+            ("C4", 3, 3, 4, "S", "medium"),
+        ):
+            label, slot, row, col, orientation, fov = spec
+            doc = create_camera(
+                db,
+                project_id,
+                doc.id,
+                SpatialCameraCreateBody(
+                    label=label,
+                    cameraSlot=slot,
+                    gridRow=row,
+                    gridColumn=col,
+                    orientation=orientation,
+                    fovPreset=fov,
+                ),
+            )
         doc = update_document(db, project_id, doc.id, SpatialMapUpdateBody(gridScale=3))
         assert doc.gridScale == 3
         assert density_for_scale(doc.gridScale) == 16
@@ -427,7 +443,13 @@ def test_reset_returns_neutral_and_clears_coords_keeps_assignments():
                 SpatialPropPlacementUpdateBody(gridRow=-1, gridColumn=-1, miniPrompt=""),
             )
         for camera in list(doc.cameras):
-            doc = remove_camera(db, project_id, doc.id, camera.id)
+            doc = update_camera(
+                db,
+                project_id,
+                doc.id,
+                camera.id,
+                SpatialCameraUpdateBody(gridRow=-1, gridColumn=-1, normalizedX=None, normalizedY=None),
+            )
         doc = update_document(db, project_id, doc.id, SpatialMapUpdateBody(gridScale=0))
 
         assert doc.gridScale == 0
@@ -444,7 +466,40 @@ def test_reset_returns_neutral_and_clears_coords_keeps_assignments():
         assert doc.props[1].assetId == "asset-library-99"
         assert doc.props[1].propId is None
         assert doc.props[0].gridRow == -1
-        assert doc.cameras == []
+        assert len(doc.cameras) == 4
+        by_label = {cam.label: cam for cam in doc.cameras}
+        assert set(by_label) == {"C1", "C2", "C3", "C4"}
+        assert by_label["C1"].cameraSlot == 0
+        assert by_label["C1"].orientation == "N"
+        assert by_label["C1"].fovPreset == "medium"
+        assert by_label["C2"].cameraSlot == 1
+        assert by_label["C2"].orientation == "NE"
+        assert by_label["C2"].fovPreset == "wide"
+        assert by_label["C3"].cameraSlot == 2
+        assert by_label["C3"].orientation == "E"
+        assert by_label["C3"].fovPreset == "narrow"
+        assert by_label["C4"].cameraSlot == 3
+        assert by_label["C4"].orientation == "S"
+        assert by_label["C4"].fovPreset == "medium"
+        for cam in doc.cameras:
+            assert cam.gridRow == -1
+            assert cam.gridColumn == -1
+            assert cam.normalizedX is None
+            assert cam.normalizedY is None
+        reloaded = get_document(db, project_id, doc.id)
+        assert len(reloaded.cameras) == 4
+        assert {cam.label for cam in reloaded.cameras} == {"C1", "C2", "C3", "C4"}
+        for cam in reloaded.cameras:
+            assert cam.gridRow == -1
+            assert cam.gridColumn == -1
+            assert cam.normalizedX is None
+            assert cam.normalizedY is None
+        assert {cam.label: (cam.orientation, cam.fovPreset, cam.cameraSlot) for cam in reloaded.cameras} == {
+            "C1": ("N", "medium", 0),
+            "C2": ("NE", "wide", 1),
+            "C3": ("E", "narrow", 2),
+            "C4": ("S", "medium", 3),
+        }
     finally:
         db.close()
 
@@ -542,3 +597,308 @@ def test_legacy_document_get_does_not_stamp_cartesian_until_write():
     finally:
         db.close()
 
+def test_visible_default_true_and_false_persists_assignment_and_coords():
+    """Missing visible defaults true. visible=false persists and keeps assignment/coords."""
+    project_id = _create_project()
+    db = _session()
+    try:
+        doc = create_document(db, project_id, SpatialMapCreateBody(title="Visible"))
+        doc = place_character(
+            db,
+            project_id,
+            doc.id,
+            SpatialCharacterPlacementBody(
+                characterId="korri-123",
+                label="Korri",
+                slotIndex=0,
+                colorKey="red",
+                gridRow=4,
+                gridColumn=4,
+            ),
+        )
+        char = doc.characters[0]
+        assert char.visible is True
+        assert char.characterId == "korri-123"
+        assert char.normalizedX is not None
+        nx, ny = char.normalizedX, char.normalizedY
+        hidden = update_character(
+            db,
+            project_id,
+            doc.id,
+            char.id,
+            SpatialCharacterPlacementUpdateBody(visible=False),
+        )
+        entity = hidden.characters[0]
+        assert entity.visible is False
+        assert entity.characterId == "korri-123"
+        assert entity.slotIndex == 0
+        assert entity.normalizedX == nx
+        assert entity.normalizedY == ny
+        assert entity.gridRow == 4
+        assert entity.gridColumn == 4
+        doc = place_prop(
+            db,
+            project_id,
+            doc.id,
+            SpatialPropPlacementBody(label="Cup", assetId="asset-1", visible=False, gridRow=3, gridColumn=3),
+        )
+        prop = doc.props[0]
+        assert prop.visible is False
+        assert prop.assetId == "asset-1"
+        assert prop.normalizedX is not None
+        doc = create_camera(
+            db,
+            project_id,
+            doc.id,
+            SpatialCameraCreateBody(label="C1", cameraSlot=0, orientation="NE", fovPreset="wide", visible=False),
+        )
+        cam = doc.cameras[0]
+        assert cam.visible is False
+        assert cam.cameraSlot == 0
+        reloaded = get_document(db, project_id, doc.id)
+        assert reloaded.characters[0].visible is False
+        assert reloaded.characters[0].characterId == "korri-123"
+        assert reloaded.characters[0].normalizedX == nx
+        assert reloaded.characters[0].normalizedY == ny
+        assert reloaded.props[0].visible is False
+        assert reloaded.props[0].assetId == "asset-1"
+        assert reloaded.cameras[0].visible is False
+        assert reloaded.cameras[0].cameraSlot == 0
+        assert reloaded.cameras[0].orientation == "NE"
+        assert reloaded.cameras[0].fovPreset == "wide"
+        from app.spatial_map.schemas import SpatialCharacterPlacement
+
+        legacy = SpatialCharacterPlacement.model_validate(
+            {"characterId": "hero-1", "label": "Hero", "normalizedX": 0.1, "normalizedY": -0.2}
+        )
+        assert legacy.visible is True
+        assert legacy.characterId == "hero-1"
+        assert legacy.normalizedX == 0.1
+    finally:
+        db.close()
+
+
+def test_add_unplaced_then_place_move_same_placement_id():
+    """ADD creates unplaced (grid -1, normalized null). PLACE/MOVE write cell center on the same id."""
+    project_id = _create_project()
+    db = _session()
+    try:
+        doc = create_document(db, project_id, SpatialMapCreateBody(title="Unplaced Place Move"))
+        doc = place_character(
+            db,
+            project_id,
+            doc.id,
+            SpatialCharacterPlacementBody(characterId="korri-123", label="Korri", slotIndex=1, colorKey="blue"),
+        )
+        placement = doc.characters[0]
+        placement_id = placement.id
+        assert placement.gridRow == -1
+        assert placement.gridColumn == -1
+        assert placement.normalizedX is None
+        assert placement.normalizedY is None
+        placed = update_character(
+            db,
+            project_id,
+            doc.id,
+            placement_id,
+            SpatialCharacterPlacementUpdateBody(gridRow=4, gridColumn=5),
+        )
+        entity = placed.characters[0]
+        assert entity.id == placement_id
+        assert entity.characterId == "korri-123"
+        assert entity.gridRow == 4
+        assert entity.gridColumn == 5
+        assert entity.normalizedX is not None
+        assert entity.normalizedY is not None
+        first_nx, first_ny = entity.normalizedX, entity.normalizedY
+        moved = update_character(
+            db,
+            project_id,
+            doc.id,
+            placement_id,
+            SpatialCharacterPlacementUpdateBody(gridRow=2, gridColumn=3),
+        )
+        moved_entity = moved.characters[0]
+        assert moved_entity.id == placement_id
+        assert moved_entity.characterId == "korri-123"
+        assert moved_entity.gridRow == 2
+        assert moved_entity.gridColumn == 3
+        assert moved_entity.normalizedX != first_nx or moved_entity.normalizedY != first_ny
+        assert len(moved.characters) == 1
+    finally:
+        db.close()
+
+
+def test_camera_coords_only_does_not_reset_orientation_fov():
+    """Set orientation/FOV/visible first; coords-only update must not reset them (exclude_unset)."""
+    project_id = _create_project()
+    db = _session()
+    try:
+        doc = create_document(db, project_id, SpatialMapCreateBody(title="Camera Coords Only"))
+        doc = create_camera(
+            db,
+            project_id,
+            doc.id,
+            SpatialCameraCreateBody(label="C1", cameraSlot=0, orientation="N", fovPreset="medium"),
+        )
+        camera = doc.cameras[0]
+        assert camera.visible is True
+        assert camera.gridRow == -1
+        # Set orientation/FOV/visible first (no coords).
+        doc = update_camera(
+            db,
+            project_id,
+            doc.id,
+            camera.id,
+            SpatialCameraUpdateBody(orientation="NE", fovPreset="wide", visible=False),
+        )
+        camera = doc.cameras[0]
+        assert camera.orientation == "NE"
+        assert camera.fovPreset == "wide"
+        assert camera.yawDegrees == 45
+        assert camera.visible is False
+        assert camera.gridRow == -1
+        assert camera.gridColumn == -1
+        # Then coords only — must not reset orientation/FOV/visible.
+        updated = update_camera(
+            db,
+            project_id,
+            doc.id,
+            camera.id,
+            SpatialCameraUpdateBody(gridRow=5, gridColumn=6),
+        )
+        cam = updated.cameras[0]
+        assert cam.id == camera.id
+        assert cam.orientation == "NE"
+        assert cam.fovPreset == "wide"
+        assert cam.yawDegrees == 45
+        assert cam.visible is False
+        assert cam.gridRow == 5
+        assert cam.gridColumn == 6
+        assert cam.normalizedX is not None
+        reloaded = get_document(db, project_id, doc.id)
+        assert reloaded.cameras[0].orientation == "NE"
+        assert reloaded.cameras[0].fovPreset == "wide"
+        assert reloaded.cameras[0].yawDegrees == 45
+        assert reloaded.cameras[0].visible is False
+        assert reloaded.cameras[0].gridRow == 5
+        assert reloaded.cameras[0].gridColumn == 6
+    finally:
+        db.close()
+
+
+def test_hide_is_not_delete_hidden_entity_remains_in_document():
+    """visible=false hides the marker only. The entity stays in the document; remove_* deletes it."""
+    project_id = _create_project()
+    db = _session()
+    try:
+        doc = create_document(db, project_id, SpatialMapCreateBody(title="Hide Ne Delete"))
+        doc = place_character(
+            db,
+            project_id,
+            doc.id,
+            SpatialCharacterPlacementBody(
+                characterId="korri-123",
+                label="Korri",
+                slotIndex=0,
+                colorKey="red",
+                gridRow=4,
+                gridColumn=4,
+            ),
+        )
+        doc = place_prop(
+            db,
+            project_id,
+            doc.id,
+            SpatialPropPlacementBody(label="Cup", assetId="asset-1", propId="prop-9", gridRow=3, gridColumn=3),
+        )
+        doc = create_camera(
+            db,
+            project_id,
+            doc.id,
+            SpatialCameraCreateBody(label="C1", cameraSlot=0, orientation="NE", fovPreset="wide"),
+        )
+        char_id = doc.characters[0].id
+        prop_id = doc.props[0].id
+        cam_id = doc.cameras[0].id
+        char_nx, char_ny = doc.characters[0].normalizedX, doc.characters[0].normalizedY
+        prop_nx, prop_ny = doc.props[0].normalizedX, doc.props[0].normalizedY
+        assert doc.characters[0].visible is True
+        assert doc.props[0].visible is True
+        assert doc.cameras[0].visible is True
+
+        hidden = update_character(
+            db, project_id, doc.id, char_id, SpatialCharacterPlacementUpdateBody(visible=False)
+        )
+        hidden = update_prop(
+            db, project_id, doc.id, prop_id, SpatialPropPlacementUpdateBody(visible=False)
+        )
+        hidden = update_camera(
+            db, project_id, doc.id, cam_id, SpatialCameraUpdateBody(visible=False)
+        )
+
+        assert len(hidden.characters) == 1
+        assert len(hidden.props) == 1
+        assert len(hidden.cameras) == 1
+        assert hidden.characters[0].id == char_id
+        assert hidden.props[0].id == prop_id
+        assert hidden.cameras[0].id == cam_id
+        assert hidden.characters[0].visible is False
+        assert hidden.props[0].visible is False
+        assert hidden.cameras[0].visible is False
+        assert hidden.characters[0].characterId == "korri-123"
+        assert hidden.characters[0].slotIndex == 0
+        assert hidden.characters[0].normalizedX == char_nx
+        assert hidden.characters[0].normalizedY == char_ny
+        assert hidden.props[0].assetId == "asset-1"
+        assert hidden.props[0].propId == "prop-9"
+        assert hidden.props[0].normalizedX == prop_nx
+        assert hidden.props[0].normalizedY == prop_ny
+        assert hidden.cameras[0].cameraSlot == 0
+        assert hidden.cameras[0].orientation == "NE"
+        assert hidden.cameras[0].fovPreset == "wide"
+
+        reloaded = get_document(db, project_id, doc.id)
+        assert len(reloaded.characters) == 1
+        assert len(reloaded.props) == 1
+        assert len(reloaded.cameras) == 1
+        assert reloaded.characters[0].id == char_id
+        assert reloaded.props[0].id == prop_id
+        assert reloaded.cameras[0].id == cam_id
+        assert reloaded.characters[0].visible is False
+        assert reloaded.props[0].visible is False
+        assert reloaded.cameras[0].visible is False
+        assert reloaded.characters[0].characterId == "korri-123"
+        assert reloaded.characters[0].normalizedX == char_nx
+        assert reloaded.props[0].assetId == "asset-1"
+        assert reloaded.cameras[0].orientation == "NE"
+
+        deleted = remove_character(db, project_id, doc.id, char_id)
+        assert all(item.id != char_id for item in deleted.characters)
+        assert len(deleted.characters) == 0
+        assert len(deleted.props) == 1
+        assert deleted.props[0].id == prop_id
+        assert deleted.props[0].visible is False
+        assert len(deleted.cameras) == 1
+        assert deleted.cameras[0].id == cam_id
+        assert deleted.cameras[0].visible is False
+
+        after_delete = get_document(db, project_id, doc.id)
+        assert len(after_delete.characters) == 0
+        assert len(after_delete.props) == 1
+        assert after_delete.props[0].id == prop_id
+        assert after_delete.props[0].visible is False
+        assert len(after_delete.cameras) == 1
+        assert after_delete.cameras[0].id == cam_id
+        assert after_delete.cameras[0].visible is False
+
+        deleted = remove_prop(db, project_id, doc.id, prop_id)
+        deleted = remove_camera(db, project_id, doc.id, cam_id)
+        assert deleted.props == []
+        assert deleted.cameras == []
+        gone = get_document(db, project_id, doc.id)
+        assert gone.characters == []
+        assert gone.props == []
+        assert gone.cameras == []
+    finally:
+        db.close()

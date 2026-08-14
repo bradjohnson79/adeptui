@@ -5,7 +5,9 @@ import {
   CARDINAL_LABELS,
   cellCenterNormalized,
   cellLabel,
+  cellSizeNormalized,
   cellToNormalized,
+  clampGridScale,
   DEFAULT_GRID_SCALE,
   densityForScale,
   GRID_DENSITY,
@@ -218,3 +220,100 @@ describe("required cartesian engine API", () => {
 function cellSizeFor(density: number): number {
   return 2 / density + 1e-9;
 }
+
+describe("Work Order E frontend-testable geometry", () => {
+  it("click inside a cell square maps to that cell identity, not a fractional offset", () => {
+    const density = 10;
+    const size = 500;
+    const cell = { column: 3, row: 6 };
+    expect(isValidCell(cell.column, cell.row, density)).toBe(true);
+    const center = cellToNormalized(cell.column, cell.row, density);
+    const sizeN = cellSizeNormalized(density);
+    const offset = { x: center.x + sizeN * 0.25, y: center.y + sizeN * 0.25 };
+    const pixel = normalizedToPixel(offset.x, offset.y, size);
+    expect(pointerToCell(pixel.px, pixel.py, size, density)).toEqual(cell);
+    const placed = cellToNormalized(cell.column, cell.row, density);
+    expect(placed).toEqual(center);
+    expect(placed.x).not.toBeCloseTo(offset.x, 6);
+    expect(placed.y).not.toBeCloseTo(offset.y, 6);
+  });
+
+  it("clicks at opposite corners of the same cell still resolve to that cell center", () => {
+    const density = 10;
+    const size = 800;
+    const cell = { column: 4, row: 4 };
+    const center = cellToNormalized(cell.column, cell.row, density);
+    const half = cellSizeNormalized(density) / 2;
+    const insets = [
+      { x: center.x - half + 1e-6, y: center.y - half + 1e-6 },
+      { x: center.x + half - 1e-6, y: center.y + half - 1e-6 },
+    ];
+    for (const pt of insets) {
+      const pixel = normalizedToPixel(pt.x, pt.y, size);
+      expect(pointerToCell(pixel.px, pixel.py, size, density)).toEqual(cell);
+    }
+    expect(cellToNormalized(cell.column, cell.row, density)).toEqual(center);
+  });
+
+  it("zoom is view-only: cell identity and placement coords do not depend on display size", () => {
+    const density = 10;
+    const rel = { x: 0.42, y: 0.58 };
+    const cells = [256, 512, 800, 1024].map((mapSize) =>
+      pointerToCell(rel.x * mapSize, rel.y * mapSize, mapSize, density),
+    );
+    expect(cells[0]).not.toBeNull();
+    for (const cell of cells) {
+      expect(cell).toEqual(cells[0]);
+    }
+    const placed = cellToNormalized(cells[0]!.column, cells[0]!.row, density);
+    for (const mapSize of [256, 512, 800, 1024]) {
+      const again = pointerToCell(rel.x * mapSize, rel.y * mapSize, mapSize, density)!;
+      expect(cellToNormalized(again.column, again.row, density)).toEqual(placed);
+    }
+  });
+
+  it("cellSizeNormalized is 2/density and remap keeps normalized placement stable", () => {
+    const origin = { x: -0.1, y: -0.12 };
+    expect(cellSizeNormalized(5)).toBeCloseTo(0.4, 10);
+    expect(cellSizeNormalized(10)).toBeCloseTo(0.2, 10);
+    expect(cellSizeNormalized(20)).toBeCloseTo(0.1, 10);
+    const at5 = remapPositionToDensity(origin.x, origin.y, 5);
+    const at10 = remapPositionToDensity(origin.x, origin.y, 10);
+    const at20 = remapPositionToDensity(origin.x, origin.y, 20);
+    expect(at5).not.toBeNull();
+    expect(at10).not.toBeNull();
+    expect(at20).not.toBeNull();
+    expect(origin).toEqual({ x: -0.1, y: -0.12 });
+    expect(at5).not.toEqual(at20);
+  });
+
+  it("rejects pointer hits and coordinates outside the valid circle or grid", () => {
+    const density = 10;
+    const size = 500;
+    expect(pointerToCell(0, 0, size, density)).toBeNull();
+    expect(pointerToCell(size - 1, size - 1, size, density)).toBeNull();
+    expect(pointerToCell(-10, 250, size, density)).toBeNull();
+    expect(isValidCell(-1, 4, density)).toBe(false);
+    expect(isValidCell(4, 10, density)).toBe(false);
+    expect(isInsideCircle(1, 1)).toBe(false);
+    expect(isInsideCircle(0, 0)).toBe(true);
+    expect(isCellInsideCircle(0, 0, density)).toBe(false);
+  });
+
+  it("clampGridScale stays on the 11-level density table", () => {
+    expect(clampGridScale(-99)).toBe(-5);
+    expect(clampGridScale(99)).toBe(5);
+    expect(clampGridScale(0.4)).toBe(0);
+    expect(clampGridScale(0.6)).toBe(1);
+    expect(densityForScale(99)).toBe(20);
+    expect(densityForScale(-99)).toBe(5);
+  });
+
+  it("camera orientation wraps on 45-degree cardinals; unknown labels default to 0", () => {
+    expect(orientationToYaw("unknown")).toBe(0);
+    expect(orientationToYaw("s")).toBe(180);
+    expect(yawToOrientation(405)).toBe("NE");
+    expect(rotateOrientation("NW", 1)).toBe("N");
+    expect(rotateOrientation("N", 8)).toBe("N");
+  });
+});

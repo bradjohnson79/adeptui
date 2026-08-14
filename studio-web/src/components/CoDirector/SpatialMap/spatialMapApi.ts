@@ -10,7 +10,8 @@ import { api } from "../../../api";
 import type {
   SpatialMapCreateBody,
   SpatialMapUpdateBody,
-  SpatialMapDocument,
+  SpatialMapDocument,
+
   SpatialCharacterPlacementBody,
   SpatialCharacterPlacementUpdateBody,
   SpatialPropPlacementBody,
@@ -38,6 +39,8 @@ type CameraBody = {
   normalizedY?: number | null;
   gridRow?: number;
   gridColumn?: number;
+  /** Optional. Default true. false hides the marker only; assignment and coords stay. */
+  visible?: boolean;
 };
 
 export const spatialMapApi = {

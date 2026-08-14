@@ -38,6 +38,7 @@ export type SpatialPlacementGridExtension = {
   colorKey: string;
   miniPrompt: string;
   tag: string;
+  visible?: boolean;
 };
 
 export type SpatialPlacement = _SpatialCharacterPlacement & SpatialPlacementGridExtension;
@@ -54,6 +55,7 @@ export type SpatialCamera = _SpatialCamera & {
   normalizedY?: number | null;
   gridRow: number;
   gridColumn: number;
+  visible?: boolean;
 };
 
 export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras"> & {
@@ -87,6 +89,12 @@ export type {
 };
 
 export type SlotKind = "character" | "prop" | "camera";
+
+export type ActivePlacement = {
+  type: SlotKind;
+  slot: number;
+  entityId: string;
+};
 
 export type SavedOption = {
   id: string;

@@ -38,6 +38,7 @@ import { CameraInspector } from "./CameraInspector";
 import {
   cellLabel,
   cellToNormalized,
+  isCellInsideCircle,
   DEFAULT_GRID_SCALE,
   densityForScale,
   gridScaleLabel,
@@ -51,6 +52,7 @@ import {
   CHARACTER_SLOTS,
   PROP_SLOTS,
   type SavedOption,
+  type ActivePlacement,
   type SlotDef,
   type SpatialCamera,
   type SpatialCharacterPlacement,
@@ -82,6 +84,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [selectedPlacementId, setSelectedPlacementId] = useState<string | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [placementMode, setPlacementMode] = useState<PlacementMode>(null);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showCircles, setShowCircles] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
+  const [zoom, setZoom] = useState(1);
   const [occupiedMessage, setOccupiedMessage] = useState<string | null>(null);
   const [savedCharacters, setSavedCharacters] = useState<SavedOption[]>([]);
   const [savedProps, setSavedProps] = useState<SavedOption[]>([]);
@@ -166,6 +172,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       cancelled = true;
     };
   }, [projectId]);
+
+  const activePlacement: ActivePlacement | null = placementMode
+    ? { type: placementMode.kind, slot: activeSlot?.index ?? 0, entityId: placementMode.id }
+    : null;
 
   const clearPlacementMode = useCallback(() => {
     setPlacementMode(null);
@@ -387,6 +397,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       }
 
       const density = densityForScale(gridScale);
+      if (!isCellInsideCircle(column, row, density)) return;
       const center = cellToNormalized(column, row, density);
       const coords = {
         gridRow: row,
@@ -405,7 +416,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           updated = await spatialMapApi.updateProp(projectId, document.id, placementMode.id, coords);
         }
         setDocument(updated);
-        setPlacementMode(null);
+        setPlacementMode({ ...placementMode, action: "move" });
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to place.");
       }
@@ -476,6 +487,44 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         setPlacementMode(null);
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to add prop.");
+      }
+    },
+    [document, projectId],
+  );
+
+
+  const applyVisible = (doc: SpatialMapDocument, kind: 'character' | 'prop' | 'camera', id: string, next: boolean): SpatialMapDocument => {
+    if (kind === 'camera') return { ...doc, cameras: doc.cameras.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+    if (kind === 'character') return { ...doc, characters: doc.characters.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+    return { ...doc, props: doc.props.map((item) => (item.id === id ? { ...item, visible: next } : item)) };
+  };
+
+  const handleToggleVisible = useCallback(
+    async (kind: "character" | "prop" | "camera", id: string, next: boolean) => {
+      if (!document) return;
+      setDocument((prev) => {
+        if (!prev) return prev;
+        if (kind === "camera") {
+          return { ...prev, cameras: prev.cameras.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+        }
+        if (kind === "character") {
+          return { ...prev, characters: prev.characters.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
+        }
+        return { ...prev, props: prev.props.map((item) => (item.id === id ? { ...item, visible: next } : item)) };
+      });
+      try {
+        if (kind === "camera") {
+          const updated = await spatialMapApi.updateCamera(projectId, document.id, id, { visible: next } as never);
+          setDocument(applyVisible(updated, kind, id, next));
+        } else if (kind === "character") {
+          const updated = await spatialMapApi.updateCharacter(projectId, document.id, id, { visible: next } as never);
+          setDocument(applyVisible(updated, kind, id, next));
+        } else {
+          const updated = await spatialMapApi.updateProp(projectId, document.id, id, { visible: next } as never);
+          setDocument(applyVisible(updated, kind, id, next));
+        }
+      } catch {
+        // keep optimistic local state if the PATCH fails
       }
     },
     [document, projectId],
@@ -644,20 +693,20 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       document.cameras.some((c) => c.gridRow >= 0);
     if (hasPlacements) {
       const ok = window.confirm(
-        "Reset map? This clears placement coordinates, mini-prompts, and cameras. Characters, props, the Atlas Shot, and Library assets are kept.",
+        "Reset map? This clears placement coordinates and mini-prompts. Characters, props, cameras, the Atlas Shot, and Library assets are kept.",
       );
       if (!ok) return;
     }
     try {
       let doc = document;
       for (const c of doc.characters) {
-        doc = await spatialMapApi.updateCharacter(projectId, doc.id, c.id, { gridRow: -1, gridColumn: -1, miniPrompt: "" });
+        doc = await spatialMapApi.updateCharacter(projectId, doc.id, c.id, { gridRow: -1, gridColumn: -1, normalizedX: null, normalizedY: null, miniPrompt: "" });
       }
       for (const p of doc.props) {
-        doc = await spatialMapApi.updateProp(projectId, doc.id, p.id, { gridRow: -1, gridColumn: -1, miniPrompt: "" });
+        doc = await spatialMapApi.updateProp(projectId, doc.id, p.id, { gridRow: -1, gridColumn: -1, normalizedX: null, normalizedY: null, miniPrompt: "" });
       }
-      for (const cam of [...doc.cameras]) {
-        doc = await spatialMapApi.removeCamera(projectId, doc.id, cam.id);
+      for (const cam of doc.cameras) {
+        doc = await spatialMapApi.updateCamera(projectId, doc.id, cam.id, { gridRow: -1, gridColumn: -1, normalizedX: null, normalizedY: null });
       }
       // Reset grid scale to neutral.
       doc = await spatialMapApi.updateMap(projectId, doc.id, { gridScale: DEFAULT_GRID_SCALE });
@@ -693,6 +742,18 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const ersExists = !!ersCompositeAssetId;
   const isGenerating = busyOp !== null;
   const selectedCamera = findCamera(selectedCameraId);
+
+  const placementBannerText = (function () {
+    if (!placementMode) return '';
+    const verb = placementMode.action === 'move' ? 'Moving' : 'Placing';
+    const slot = activePlacement ? activePlacement.slot : 0;
+    const type = activePlacement ? activePlacement.type : placementMode.kind;
+    const slotName = type === 'character' ? ('Character ' + String(slot + 1)) : type === 'prop' ? ('Prop ' + String(slot + 1)) : ('C' + String(slot + 1));
+    const raw = placementMode.label || '';
+    const entity = raw.indexOf(' — ') >= 0 ? raw.split(' — ').slice(-1)[0] : raw;
+    if (entity && entity !== slotName) return verb + ': ' + slotName + ' — ' + entity;
+    return verb + ': ' + slotName;
+  })();
 
   return (
     <div className="spatial-map" data-testid="spatial-map-panel">
@@ -831,13 +892,21 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             >
               +
             </button>
+            <span className="spatial-map__grid-scale-label" data-testid="cell-size-label">Cell Size</span>
+          </div>
+
+          <div className="spatial-map__actions" data-testid="map-controls">
+            <button type="button" className="spatial-map__slot-action" aria-label="Show grid" aria-pressed={showGrid} data-testid="map-toggle-grid" onClick={() => setShowGrid((v) => !v)}>Grid</button>
+            <button type="button" className="spatial-map__slot-action" aria-label="Show circles" aria-pressed={showCircles} data-testid="map-toggle-circles" onClick={() => setShowCircles((v) => !v)}>Circles</button>
+            <button type="button" className="spatial-map__slot-action" aria-label="Show labels" aria-pressed={showLabels} data-testid="map-toggle-labels" onClick={() => setShowLabels((v) => !v)}>Labels</button>
+            <button type="button" className="spatial-map__slot-action" data-testid="map-zoom-out" aria-label="Zoom out" disabled={zoom <= 0.75} onClick={() => setZoom((z) => Math.max(0.75, Math.round((z - 0.25) * 100) / 100))}>−</button>
+            <button type="button" className="spatial-map__slot-action" data-testid="map-zoom-in" aria-label="Zoom in" disabled={zoom >= 1.5} onClick={() => setZoom((z) => Math.min(1.5, Math.round((z + 0.25) * 100) / 100))}>+</button>
           </div>
 
           {placementMode ? (
             <div className="spatial-map__placement-banner" data-testid="placement-mode-banner">
               <span>
-                {placementMode.action === "move" ? "Moving" : "Placing"}: {placementMode.label} —{" "}
-                {placementMode.action === "move" ? "Select a new grid square" : "Select a grid square"}
+                {placementBannerText}
               </span>
               <button
                 type="button"
@@ -860,6 +929,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             occupiedMessage={occupiedMessage}
             gridScale={gridScale}
             placementActive={!!placementMode}
+            showGrid={showGrid}
+            showCircles={showCircles}
+            showLabels={showLabels}
+            zoom={zoom}
             onCellClick={handleCellClick}
             onSelectPlacement={(id) => {
               setSelectedPlacementId(id);
@@ -906,12 +979,21 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     active={activeSlot?.kind === "character" && activeSlot?.index === slot.index}
                     savedOptions={savedCharacters}
                     placing={placementMode?.kind === "character" && placementMode.id === placement?.id}
-                    onSelect={() => setActiveSlot({ kind: "character", index: slot.index })}
+                    onSelect={() => {
+                      if (placement) {
+                        const placed = (typeof placement.normalizedX === "number" && typeof placement.normalizedY === "number") || (placement.gridRow >= 0 && placement.gridColumn >= 0);
+                        beginPlacement(placed ? "move" : "place", "character", placement.id, `${slot.label} — ${placement.label || placement.tag}`, slot.index);
+                      } else {
+                        setActiveSlot({ kind: "character", index: slot.index });
+                      }
+                    }}
                     onAdd={(option) => void handleAddCharacter(slot, option)}
                     onPlace={() => placement && beginPlacement("place", "character", placement.id, placement.label || placement.tag, slot.index)}
                     onMove={() => placement && beginPlacement("move", "character", placement.id, placement.label || placement.tag, slot.index)}
                     onRemove={() => void handleSlotRemove(slot)}
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
+                    visible={placement ? placement.visible : undefined}
+                    onToggleVisible={() => placement && void handleToggleVisible("character", placement.id, placement.visible === false)}
                   />
                 );
               })}
@@ -928,12 +1010,21 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     active={activeSlot?.kind === "prop" && activeSlot?.index === slot.index}
                     savedOptions={savedProps}
                     placing={placementMode?.kind === "prop" && placementMode.id === placement?.id}
-                    onSelect={() => setActiveSlot({ kind: "prop", index: slot.index })}
+                    onSelect={() => {
+                      if (placement) {
+                        const placed = (typeof placement.normalizedX === "number" && typeof placement.normalizedY === "number") || (placement.gridRow >= 0 && placement.gridColumn >= 0);
+                        beginPlacement(placed ? "move" : "place", "prop", placement.id, `${slot.label} — ${placement.label || placement.tag}`, slot.index);
+                      } else {
+                        setActiveSlot({ kind: "prop", index: slot.index });
+                      }
+                    }}
                     onAdd={(option) => void handleAddProp(slot, option)}
                     onPlace={() => placement && beginPlacement("place", "prop", placement.id, placement.label || placement.tag, slot.index)}
                     onMove={() => placement && beginPlacement("move", "prop", placement.id, placement.label || placement.tag, slot.index)}
                     onRemove={() => void handleSlotRemove(slot)}
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
+                    visible={placement ? placement.visible : undefined}
+                    onToggleVisible={() => placement && void handleToggleVisible("prop", placement.id, placement.visible === false)}
                   />
                 );
               })}
@@ -951,9 +1042,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                   <div
                     key={`cam-${slot.index}`}
                     className={`spatial-map__camera-slot${activeSlot?.kind === "camera" && activeSlot?.index === slot.index ? " is-active" : ""}${camera ? " is-placed" : ""}`}
-                    onClick={() => camera && setActiveSlot({ kind: "camera", index: slot.index })}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={!!(activeSlot?.kind === "camera" && activeSlot?.index === slot.index)}
+                    aria-current={activeSlot?.kind === "camera" && activeSlot?.index === slot.index && camera ? "true" : undefined}
+                    aria-label={`${slot.label}${camera ? ", assigned" : ", empty"}${activeSlot?.kind === "camera" && activeSlot?.index === slot.index && camera ? ", active" : ""}`}
+                    onClick={() => {
+                      if (!camera) return;
+                      beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        if (!camera) return;
+                        beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
+                      }
+                    }}
                     data-testid={`camera-slot-${slot.index}`}
                   >
+                    {activeSlot && activeSlot.kind === 'camera' && activeSlot.index === slot.index && camera ? (
+                      <span className='spatial-map__active-badge' data-testid={'slot-active-badge-camera-' + String(slot.index)}>ACTIVE</span>
+                    ) : null}
                     <span className="spatial-map__slot-label">{slot.label}</span>
                     {camera ? (
                       <span className="spatial-map__slot-status">
@@ -975,6 +1084,19 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     )}
                     {camera ? (
                       <div className="spatial-map__slot-actions">
+                        <button
+                          type="button"
+                          className="spatial-map__slot-action"
+                          aria-label={`Toggle visibility of ${slot.label}`}
+                          aria-pressed={camera.visible !== false}
+                          data-testid={`camera-visible-${slot.index}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleToggleVisible("camera", camera.id, camera.visible === false);
+                          }}
+                        >
+                          Visible
+                        </button>
                         {!placed ? (
                           <button
                             type="button"

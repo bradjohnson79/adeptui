@@ -345,6 +345,7 @@ def place_character(
             tag=body.tag,
             normalizedX=body.normalizedX,
             normalizedY=body.normalizedY,
+            visible=body.visible,
         )
     )
     _apply_placement_from_body(document.characters[-1], body, document)
@@ -380,6 +381,7 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
             tag=body.tag,
             normalizedX=body.normalizedX,
             normalizedY=body.normalizedY,
+            visible=body.visible,
         )
     )
     _apply_placement_from_body(document.props[-1], body, document)
@@ -450,6 +452,7 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
             gridColumn=body.gridColumn,
             normalizedX=body.normalizedX,
             normalizedY=body.normalizedY,
+            visible=body.visible,
         )
     )
     _apply_placement_from_body(document.cameras[-1], body, document)

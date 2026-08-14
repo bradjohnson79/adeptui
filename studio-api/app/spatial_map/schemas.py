@@ -94,6 +94,7 @@ class SpatialPlacement(BaseModel):
     colorKey: str = ""  # red|blue|orange|green (characters), purple|brown|aqua|gray (props)
     miniPrompt: str = ""  # e.g. "@Korri is standing behind the barista bar."
     tag: str = ""  # "@Korri" or "#coffeecup" — friendly reference, not DB identity
+    visible: bool = True  # false hides marker only; assignment and coords stay
 
 
 class SpatialCharacterPlacement(SpatialPlacement):
@@ -134,6 +135,7 @@ class SpatialCamera(BaseModel):
     normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
+    visible: bool = True  # false hides marker only; assignment and coords stay
 
 
 class SpatialMovementWaypoint(BaseModel):
@@ -310,6 +312,7 @@ class SpatialCharacterPlacementBody(BaseModel):
     colorKey: str = ""
     miniPrompt: str = ""
     tag: str = ""
+    visible: bool = True
 
 
 class SpatialPropPlacementBody(BaseModel):
@@ -335,6 +338,7 @@ class SpatialPropPlacementBody(BaseModel):
     colorKey: str = ""
     miniPrompt: str = ""
     tag: str = ""
+    visible: bool = True
 
 
 class SpatialCameraCreateBody(BaseModel):
@@ -359,6 +363,7 @@ class SpatialCameraCreateBody(BaseModel):
     normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
+    visible: bool = True
 
 
 class SpatialCharacterPlacementUpdateBody(BaseModel):
@@ -384,6 +389,7 @@ class SpatialCharacterPlacementUpdateBody(BaseModel):
     colorKey: Optional[str] = None
     miniPrompt: Optional[str] = None
     tag: Optional[str] = None
+    visible: Optional[bool] = None
 
 
 class SpatialPropPlacementUpdateBody(BaseModel):
@@ -409,6 +415,7 @@ class SpatialPropPlacementUpdateBody(BaseModel):
     colorKey: Optional[str] = None
     miniPrompt: Optional[str] = None
     tag: Optional[str] = None
+    visible: Optional[bool] = None
 
 
 class SpatialCameraUpdateBody(BaseModel):
@@ -433,6 +440,7 @@ class SpatialCameraUpdateBody(BaseModel):
     normalizedY: Optional[float] = None
     gridRow: Optional[int] = None
     gridColumn: Optional[int] = None
+    visible: Optional[bool] = None
 
 
 class SpatialMovementPathCreateBody(BaseModel):
