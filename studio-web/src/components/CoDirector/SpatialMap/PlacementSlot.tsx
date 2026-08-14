@@ -1,17 +1,15 @@
 /**
- * PlacementSlot — one character/prop slot card.
+ * PlacementSlot — Character or Prop slot.
  *
- * Shows a color swatch + accessible label ("Character 1 (Red)"), and either the
- * assigned entity (@Name or #tag) with a compact expandable mini-prompt card,
- * or a "+ Add" button. Mini-prompts use compact expandable cards (amendment
- * #25), NOT 8 large empty textareas. Accessible labels in addition to color
- * (amendment #12, #13, #69).
+ * ADD ≠ PLACE: Add binds a saved entity. Place/Move enter map-placement mode.
+ * No typing. Saved dropdown is the identity mechanism.
  */
 import { useState } from "react";
 import { api } from "../../../api";
+import { cellLabel } from "./gridGeometry";
 import {
-  cellLabel,
   SLOT_COLORS,
+  type SavedOption,
   type SlotDef,
   type SpatialCharacterPlacement,
   type SpatialPropPlacement,
@@ -21,8 +19,12 @@ type Props = {
   slot: SlotDef;
   placement: SpatialCharacterPlacement | SpatialPropPlacement | null;
   active: boolean;
+  savedOptions: SavedOption[];
+  placing: boolean;
   onSelect: () => void;
-  onAdd: () => void;
+  onAdd: (option: SavedOption) => void;
+  onPlace: () => void;
+  onMove: () => void;
   onRemove: () => void;
   onUpdateMiniPrompt: (text: string) => void;
 };
@@ -31,50 +33,44 @@ export function PlacementSlot({
   slot,
   placement,
   active,
+  savedOptions,
+  placing,
   onSelect,
   onAdd,
+  onPlace,
+  onMove,
   onRemove,
   onUpdateMiniPrompt,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [miniDraft, setMiniDraft] = useState(placement?.miniPrompt || "");
-
-  // Keep draft synced when placement changes externally.
-  if (placement && placement.miniPrompt !== miniDraft && !expanded) {
-    // non-effect sync — only when collapsed to avoid clobbering edits
-  }
+  const [pickedId, setPickedId] = useState("");
 
   const color = SLOT_COLORS[slot.colorKey];
   const isCharacter = slot.kind === "character";
   const isAssigned = !!placement;
-  const location = placement && placement.gridRow >= 0 && placement.gridColumn >= 0
-    ? cellLabel(placement.gridRow, placement.gridColumn)
-    : "";
-
-  const handleToggleExpand = () => {
-    if (!isAssigned) return;
-    setExpanded((v) => {
-      if (!v) setMiniDraft(placement?.miniPrompt || "");
-      return !v;
-    });
-  };
-
-  const handleSaveMini = () => {
-    onUpdateMiniPrompt(miniDraft.trim());
-    setExpanded(false);
-  };
-
+  const isPlaced = !!(
+    placement &&
+    ((typeof placement.normalizedX === "number" && typeof placement.normalizedY === "number") ||
+      (placement.gridRow >= 0 && placement.gridColumn >= 0))
+  );
+  const location =
+    isPlaced && placement!.gridRow >= 0 && placement!.gridColumn >= 0
+      ? cellLabel(placement!.gridColumn, placement!.gridRow)
+      : "";
+  const displayName = placement?.label || placement?.tag || "";
+  const picked = savedOptions.find((o) => o.id === pickedId) || null;
   const thumbUrl = placement?.assetId ? api.assetUrl(placement.assetId) : null;
 
   return (
     <div
-      className={`spatial-map__slot-card${active ? " is-active" : ""}`}
+      className={`spatial-map__slot-card${active ? " is-active" : ""}${placing ? " is-placing" : ""}`}
       data-testid={`spatial-map-slot-${slot.kind}-${slot.index}`}
       onClick={onSelect}
       role="button"
       tabIndex={0}
       aria-pressed={active}
-      aria-label={`${slot.label}${isAssigned ? `, assigned ${placement?.tag || ""}` : ", empty"}`}
+      aria-label={`${slot.label}${isAssigned ? `, assigned ${displayName}` : ", empty"}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -88,17 +84,33 @@ export function PlacementSlot({
       </div>
 
       {!isAssigned ? (
-        <button
-          type="button"
-          className="spatial-map__slot-add"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd();
-          }}
-          aria-label={`Add ${isCharacter ? "character" : "prop"} to ${slot.label}`}
-        >
-          + Add {isCharacter ? "Character" : "Prop"}
-        </button>
+        <div className="spatial-map__slot-assign" onClick={(e) => e.stopPropagation()}>
+          <select
+            className="spatial-map__slot-select"
+            value={pickedId}
+            onChange={(e) => setPickedId(e.target.value)}
+            aria-label={`Select saved ${isCharacter ? "character" : "prop"} for ${slot.label}`}
+            data-testid={`${slot.kind}-select-${slot.index}`}
+          >
+            <option value="">{isCharacter ? "Select Saved Character" : "Select Saved Prop"}</option>
+            {savedOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="spatial-map__slot-add"
+            disabled={!picked}
+            title={!picked ? `Select a saved ${isCharacter ? "character" : "prop"} first` : undefined}
+            onClick={() => picked && onAdd(picked)}
+            aria-label={`Add ${picked?.name || (isCharacter ? "character" : "prop")} to ${slot.label}`}
+            data-testid={`${slot.kind}-add-${slot.index}`}
+          >
+            Add
+          </button>
+        </div>
       ) : (
         <div className="spatial-map__slot-assigned">
           <div className="spatial-map__slot-assigned-tag">
@@ -110,57 +122,90 @@ export function PlacementSlot({
                 loading="lazy"
               />
             ) : null}
-            {placement?.tag || "(unnamed)"}
+            {displayName}
           </div>
           {location ? <div className="spatial-map__slot-assigned-loc">Cell {location}</div> : null}
-          {!expanded ? (
-            <div className="spatial-map__slot-mini" onClick={handleToggleExpand} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") handleToggleExpand(); }}>
-              {placement?.miniPrompt ? placement.miniPrompt : "Add a mini prompt…"}
-            </div>
-          ) : (
-            <>
-              <textarea
-                className="spatial-map__slot-mini-input"
-                value={miniDraft}
-                onChange={(e) => setMiniDraft(e.target.value)}
-                placeholder={
-                  isCharacter
-                    ? `e.g. ${placement?.tag || "@Korri"} is standing behind the Barista bar.`
-                    : `e.g. ${placement?.tag || "#coffee-cup"} sits on the counter.`
-                }
-                rows={2}
-                aria-label={`Mini prompt for ${slot.label}`}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <div className="spatial-map__slot-actions">
-                <button type="button" className="spatial-map__slot-action" onClick={(e) => { e.stopPropagation(); handleSaveMini(); }}>
-                  Save
-                </button>
-                <button type="button" className="spatial-map__slot-action" onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
-                  Cancel
-                </button>
-              </div>
-            </>
-          )}
           <div className="spatial-map__slot-actions">
-            {placement && !expanded ? (
-              <button type="button" className="spatial-map__slot-action" onClick={(e) => { e.stopPropagation(); handleToggleExpand(); }}>
-                Edit mini prompt
+            {!isPlaced ? (
+              <button
+                type="button"
+                className="spatial-map__slot-action"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlace();
+                }}
+                aria-label={`Place ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
+                data-testid={`${slot.kind}-place-${slot.index}`}
+              >
+                Place
               </button>
-            ) : null}
+            ) : (
+              <button
+                type="button"
+                className="spatial-map__slot-action"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onMove();
+                }}
+                aria-label={`Move ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
+                data-testid={`${slot.kind}-move-${slot.index}`}
+              >
+                Move
+              </button>
+            )}
             <button
               type="button"
               className="spatial-map__slot-action danger"
               onClick={(e) => {
                 e.stopPropagation();
-                if (window.confirm(`Remove ${placement?.tag || "this placement"} from ${slot.label}?`)) {
+                if (window.confirm(`Remove ${displayName || "this placement"} from ${slot.label}? The saved ${isCharacter ? "character" : "prop"} is kept.`)) {
                   onRemove();
                 }
               }}
+              aria-label={`Remove ${displayName || (isCharacter ? "character" : "prop")} from ${slot.label}`}
+              data-testid={`${slot.kind}-remove-${slot.index}`}
             >
               Remove
             </button>
           </div>
+          <button
+            type="button"
+            className="spatial-map__slot-more"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => {
+                if (!v) setMiniDraft(placement?.miniPrompt || "");
+                return !v;
+              });
+            }}
+          >
+            {expanded ? "Hide note" : "More"}
+          </button>
+          {expanded ? (
+            <>
+              <textarea
+                className="spatial-map__slot-mini-input"
+                value={miniDraft}
+                onChange={(e) => setMiniDraft(e.target.value)}
+                rows={2}
+                aria-label={`Note for ${slot.label}`}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <div className="spatial-map__slot-actions">
+                <button
+                  type="button"
+                  className="spatial-map__slot-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdateMiniPrompt(miniDraft.trim());
+                    setExpanded(false);
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       )}
     </div>

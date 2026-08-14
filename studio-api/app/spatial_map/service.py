@@ -12,7 +12,15 @@ from .capture_intelligence import build_scene_capture_plan
 from .collage import create_collage as create_spatial_collage
 from .collage import upsert_view as upsert_collage_view
 from .errors import SpatialMapErrorCode, raise_http_error
-from .limits import enforce_camera_limit, enforce_character_limit, enforce_prop_limit
+from .grid import (
+    apply_cell_placement,
+    clamp_grid_scale,
+    derive_cell_from_normalized,
+    migrate_document,
+    normalized_to_world,
+    refresh_derived_cells,
+)
+from .limits import CAMERA_LIMIT, enforce_camera_limit, enforce_character_limit, enforce_prop_limit
 from .models import SpatialMapDocumentRow, ensure_tables as ensure_model_tables
 from .reference_bundle import compile_reference_bundle, creative_position_labels
 from .schemas import (
@@ -95,7 +103,13 @@ def _parse_document(row: SpatialMapDocumentRow) -> SpatialMapDocument:
             title=row.title,
         )
     doc.warnings = consistency_warnings(doc)
+    migrate_document(doc)
     return doc
+
+
+def _load_document(db: Session, row: SpatialMapDocumentRow) -> SpatialMapDocument:
+    # GET/list may migrate in memory for the response; persist only on explicit write.
+    return _parse_document(row)
 
 
 def _next_version(current: str | None) -> str:
@@ -130,6 +144,85 @@ def _save_document(db: Session, row: SpatialMapDocumentRow, document: SpatialMap
     return _parse_document(row)
 
 
+def _apply_placement_from_values(
+    entity: Any,
+    document: SpatialMapDocument,
+    *,
+    grid_row: int | None,
+    grid_column: int | None,
+    normalized_x: float | None,
+    normalized_y: float | None,
+    clear_if_negative_cells: bool = False,
+) -> None:
+    """Shared Cartesian placement for characters, props, and cameras.
+
+    Normalized coords are the physical authority. Create bodies default
+    gridRow/gridColumn to -1, which must not wipe a provided normalized pair.
+    Explicit update of both cells to -1 still clears placement (Reset).
+    """
+    from .grid import density_for_scale
+
+    cell_density = density_for_scale(document.gridScale)
+    has_norm = normalized_x is not None and normalized_y is not None
+    has_cell = (
+        grid_row is not None
+        and grid_column is not None
+        and int(grid_row) >= 0
+        and int(grid_column) >= 0
+    )
+    wants_clear = (
+        grid_row is not None
+        and grid_column is not None
+        and int(grid_row) < 0
+        and int(grid_column) < 0
+    )
+    if has_cell:
+        apply_cell_placement(entity, int(grid_column), int(grid_row), cell_density, document.bounds)
+        return
+    if wants_clear and (clear_if_negative_cells or not has_norm):
+        entity.gridRow = -1
+        entity.gridColumn = -1
+        entity.normalizedX = None
+        entity.normalizedY = None
+        return
+    if has_norm:
+        entity.normalizedX = normalized_x
+        entity.normalizedY = normalized_y
+        derive_cell_from_normalized(entity, cell_density)
+        world_x, world_z = normalized_to_world(normalized_x, normalized_y, document.bounds)
+        entity.x = world_x
+        entity.z = world_z
+
+
+def _apply_placement_from_body(entity: Any, body: Any, document: SpatialMapDocument) -> None:
+    _apply_placement_from_values(
+        entity,
+        document,
+        grid_row=getattr(body, "gridRow", None),
+        grid_column=getattr(body, "gridColumn", None),
+        normalized_x=getattr(body, "normalizedX", None),
+        normalized_y=getattr(body, "normalizedY", None),
+        clear_if_negative_cells=False,
+    )
+
+
+def _sync_coords_after_update(entity: Any, updates: dict[str, Any], document: SpatialMapDocument) -> None:
+    coord_keys = {"gridRow", "gridColumn", "normalizedX", "normalizedY"}
+    if not coord_keys.intersection(updates):
+        return
+    norm_in_update = "normalizedX" in updates and "normalizedY" in updates
+    cell_in_update = "gridRow" in updates and "gridColumn" in updates
+    _apply_placement_from_values(
+        entity,
+        document,
+        grid_row=updates["gridRow"] if "gridRow" in updates else (None if norm_in_update else getattr(entity, "gridRow", None)),
+        grid_column=updates["gridColumn"] if "gridColumn" in updates else (None if norm_in_update else getattr(entity, "gridColumn", None)),
+        normalized_x=updates["normalizedX"] if "normalizedX" in updates else (None if cell_in_update else getattr(entity, "normalizedX", None)),
+        normalized_y=updates["normalizedY"] if "normalizedY" in updates else (None if cell_in_update else getattr(entity, "normalizedY", None)),
+        clear_if_negative_cells=cell_in_update,
+    )
+
+
 def list_documents(db: Session, project_id: str) -> list[SpatialMapDocument]:
     _project_or_404(db, project_id)
     rows = (
@@ -138,7 +231,7 @@ def list_documents(db: Session, project_id: str) -> list[SpatialMapDocument]:
         .order_by(SpatialMapDocumentRow.updated_at.desc())
         .all()
     )
-    return [_parse_document(row) for row in rows]
+    return [_load_document(db, row) for row in rows]
 
 
 def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) -> SpatialMapDocument:
@@ -159,6 +252,8 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
         masterEnvironmentPrompt=(body.masterEnvironmentPrompt or "").strip(),
         providerHonesty=body.providerHonesty,
         assignedSceneIds=[body.sceneId] if body.sceneId else [],
+        placementGrid="cartesian-v1",
+        gridScale=0,
         createdAt=now,
         updatedAt=now,
     )
@@ -180,7 +275,7 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
 
 def get_document(db: Session, project_id: str, document_id: str) -> SpatialMapDocument:
     _project_or_404(db, project_id)
-    return _parse_document(_row_or_404(db, project_id, document_id))
+    return _load_document(db, _row_or_404(db, project_id, document_id))
 
 
 def update_document(db: Session, project_id: str, document_id: str, body: SpatialMapUpdateBody) -> SpatialMapDocument:
@@ -210,7 +305,8 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
     if body.providerHonesty is not None:
         document.providerHonesty = body.providerHonesty
     if body.gridScale is not None:
-        document.gridScale = max(-3, min(3, body.gridScale))
+        document.gridScale = clamp_grid_scale(body.gridScale)
+        refresh_derived_cells(document)
     return _save_document(db, row, document)
 
 
@@ -247,8 +343,11 @@ def place_character(
             colorKey=body.colorKey,
             miniPrompt=body.miniPrompt,
             tag=body.tag,
+            normalizedX=body.normalizedX,
+            normalizedY=body.normalizedY,
         )
     )
+    _apply_placement_from_body(document.characters[-1], body, document)
     return _save_document(db, row, document)
 
 
@@ -279,8 +378,11 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
             colorKey=body.colorKey,
             miniPrompt=body.miniPrompt,
             tag=body.tag,
+            normalizedX=body.normalizedX,
+            normalizedY=body.normalizedY,
         )
     )
+    _apply_placement_from_body(document.props[-1], body, document)
     return _save_document(db, row, document)
 
 
@@ -297,6 +399,7 @@ def update_character(
     updates = body.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(placement, key, value)
+    _sync_coords_after_update(placement, updates, document)
     return _save_document(db, row, document)
 
 
@@ -313,6 +416,7 @@ def update_prop(
     updates = body.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(placement, key, value)
+    _sync_coords_after_update(placement, updates, document)
     return _save_document(db, row, document)
 
 
@@ -342,8 +446,13 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
             cameraSlot=body.cameraSlot,
             orientation=body.orientation,
             fovPreset=body.fovPreset,
+            gridRow=body.gridRow,
+            gridColumn=body.gridColumn,
+            normalizedX=body.normalizedX,
+            normalizedY=body.normalizedY,
         )
     )
+    _apply_placement_from_body(document.cameras[-1], body, document)
     return _save_document(db, row, document)
 
 
@@ -361,9 +470,19 @@ def update_camera(
     if updates.get("hero"):
         for existing in document.cameras:
             existing.hero = existing.id == camera_id
+    # If orientation is updated but yawDegrees is not, sync yawDegrees for downstream ERS.
+    if "orientation" in updates and "yawDegrees" not in updates:
+        updates["yawDegrees"] = _orientation_to_yaw(updates["orientation"])
     for key, value in updates.items():
         setattr(camera, key, value)
+    _sync_coords_after_update(camera, updates, document)
     return _save_document(db, row, document)
+
+
+def _orientation_to_yaw(orientation: str | None) -> float:
+    from .grid import orientation_to_yaw
+
+    return orientation_to_yaw(orientation)
 
 
 def remove_character(db: Session, project_id: str, document_id: str, placement_id: str) -> SpatialMapDocument:
@@ -552,8 +671,8 @@ def consistency_warnings(document: SpatialMapDocument) -> list[str]:
         warnings.append("Spatial Map exceeds the certified 4-character limit.")
     if len(document.props) > 4:
         warnings.append("Spatial Map exceeds the certified 4-prop limit.")
-    if len(document.cameras) > 8:
-        warnings.append("Spatial Map exceeds the certified 8-camera limit.")
+    if len(document.cameras) > CAMERA_LIMIT:
+        warnings.append(f"Spatial Map exceeds the certified {CAMERA_LIMIT}-camera limit.")
     if not document.cameras:
         warnings.append("No camera has been placed yet.")
     if not document.backgroundAssetId and not document.masterEnvironmentPrompt:

@@ -84,8 +84,10 @@ class SpatialPlacement(BaseModel):
     pitchDegrees: float = 0.0
     rollDegrees: float = 0.0
     scale: float = 1.0
-    # Grid placement extension (Spatial Map V1).
-    # 10x10 grid; gridRow/gridColumn are 0-9.
+    # Cartesian placement. normalizedX/Y are the physical authority [-1, 1].
+    # gridRow/gridColumn are derived at the current Placement Precision density.
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
     slotIndex: int = -1  # 0-3 for V1's 4 slots per type
@@ -128,6 +130,10 @@ class SpatialCamera(BaseModel):
     cameraSlot: int = -1
     orientation: str = "N"  # N, NE, E, SE, S, SW, W, NW
     fovPreset: str = "medium"  # narrow, medium, wide
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
+    gridRow: int = -1
+    gridColumn: int = -1
 
 
 class SpatialMovementWaypoint(BaseModel):
@@ -240,7 +246,8 @@ class SpatialMapDocument(BaseModel):
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
-    gridScale: int = 0  # -3 .. +3, 0 = Neutral
+    gridScale: int = 0  # -5 .. +5, 0 = Neutral (10x10)
+    placementGrid: str = ""  # cartesian-v1 after migration; empty triggers one-shot polar conversion
     anchors: list[SpatialAnchor] = Field(default_factory=list)
     characters: list[SpatialCharacterPlacement] = Field(default_factory=list)
     props: list[SpatialPropPlacement] = Field(default_factory=list)
@@ -280,7 +287,7 @@ class SpatialMapUpdateBody(BaseModel):
 
 
 class SpatialCharacterPlacementBody(BaseModel):
-    characterId: str
+    characterId: str = Field(min_length=1)
     label: str
     assetId: Optional[str] = None
     anchorId: Optional[str] = None
@@ -295,7 +302,8 @@ class SpatialCharacterPlacementBody(BaseModel):
     pose: str = ""
     expression: str = ""
     eyeLine: str = ""
-    # V1 circular grid placement fields
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
     slotIndex: int = -1
@@ -319,7 +327,8 @@ class SpatialPropPlacementBody(BaseModel):
     pitchDegrees: float = 0.0
     rollDegrees: float = 0.0
     scale: float = 1.0
-    # V1 circular grid placement fields
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
     slotIndex: int = -1
@@ -346,6 +355,10 @@ class SpatialCameraCreateBody(BaseModel):
     cameraSlot: int = -1
     orientation: str = "N"
     fovPreset: str = "medium"
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
+    gridRow: int = -1
+    gridColumn: int = -1
 
 
 class SpatialCharacterPlacementUpdateBody(BaseModel):
@@ -363,7 +376,8 @@ class SpatialCharacterPlacementUpdateBody(BaseModel):
     pose: Optional[str] = None
     expression: Optional[str] = None
     eyeLine: Optional[str] = None
-    # V1 circular grid placement fields
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
     gridRow: Optional[int] = None
     gridColumn: Optional[int] = None
     slotIndex: Optional[int] = None
@@ -387,7 +401,8 @@ class SpatialPropPlacementUpdateBody(BaseModel):
     pitchDegrees: Optional[float] = None
     rollDegrees: Optional[float] = None
     scale: Optional[float] = None
-    # V1 circular grid placement fields
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
     gridRow: Optional[int] = None
     gridColumn: Optional[int] = None
     slotIndex: Optional[int] = None
@@ -414,6 +429,10 @@ class SpatialCameraUpdateBody(BaseModel):
     cameraSlot: Optional[int] = None
     orientation: Optional[str] = None
     fovPreset: Optional[str] = None
+    normalizedX: Optional[float] = None
+    normalizedY: Optional[float] = None
+    gridRow: Optional[int] = None
+    gridColumn: Optional[int] = None
 
 
 class SpatialMovementPathCreateBody(BaseModel):

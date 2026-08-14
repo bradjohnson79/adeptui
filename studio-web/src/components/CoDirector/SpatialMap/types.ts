@@ -3,7 +3,7 @@
  * studio-api/app/spatial_map/schemas.py.
  *
  * The shared contract in `studio-web/src/contracts/spatialMapM411.ts` is frozen.
- * We extend it here locally with the V1 circular/radial grid fields and camera
+ * We extend it here locally with the V1 Cartesian grid fields and camera
  * blocking fields, casting through the existing `api.spatialMap` client.
  */
 import type {
@@ -11,7 +11,7 @@ import type {
   SpatialCharacterPlacement as _SpatialCharacterPlacement,
   SpatialPropPlacement as _SpatialPropPlacement,
   SpatialMapCreateBody,
-  SpatialMapUpdateBody,
+  SpatialMapUpdateBody as _SpatialMapUpdateBody,
   SpatialMapListResponse,
   SpatialMapDocumentResponse,
   SpatialCharacterPlacementBody as _SpatialCharacterPlacementBody,
@@ -28,12 +28,14 @@ import type {
 
 export type { GridScale } from "./gridGeometry";
 
-/** Circular/radial grid placement extension (V1). */
+/** Cartesian grid placement extension. */
 export type SpatialPlacementGridExtension = {
-  gridRow: number; // ring index, 0 = innermost, -1 = unplaced
-  gridColumn: number; // spoke index 0..7 (N, NE, E...), -1 = unplaced
-  slotIndex: number; // 0-3, -1 = none
-  colorKey: string; // red|blue|orange|green (characters), purple|brown|aqua|gray (props)
+  normalizedX?: number | null;
+  normalizedY?: number | null;
+  gridRow: number;
+  gridColumn: number;
+  slotIndex: number;
+  colorKey: string;
   miniPrompt: string;
   tag: string;
 };
@@ -46,18 +48,23 @@ export type SpatialPropPlacement = Omit<_SpatialPropPlacement, keyof SpatialPlac
 
 export type SpatialCamera = _SpatialCamera & {
   cameraSlot: number;
-  orientation: string; // N, NE, E, SE, S, SW, W, NW
-  fovPreset: string; // narrow, medium, wide
+  orientation: string;
+  fovPreset: string;
+  normalizedX?: number | null;
+  normalizedY?: number | null;
+  gridRow: number;
+  gridColumn: number;
 };
 
-export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras" | "gridScale"> & {
+export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras"> & {
   characters: SpatialCharacterPlacement[];
   props: SpatialPropPlacement[];
   cameras: SpatialCamera[];
   gridScale: number;
+  placementGrid?: string;
 };
 
-/** Body types extended with V1 circular grid fields. */
+/** Body types extended with V1 Cartesian grid fields. */
 export type SpatialCharacterPlacementBody = _SpatialCharacterPlacementBody & Partial<SpatialPlacementGridExtension>;
 
 export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
@@ -66,9 +73,10 @@ export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<Spati
 
 export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
 
+export type SpatialMapUpdateBody = _SpatialMapUpdateBody & { gridScale?: number };
+
 export type {
   SpatialMapCreateBody,
-  SpatialMapUpdateBody,
   SpatialMapListResponse,
   SpatialMapDocumentResponse,
   ProviderHonestyMode,
@@ -79,6 +87,14 @@ export type {
 };
 
 export type SlotKind = "character" | "prop" | "camera";
+
+export type SavedOption = {
+  id: string;
+  name: string;
+  thumbnailUrl?: string | null;
+  assetId?: string | null;
+  source?: "character" | "library";
+};
 
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
 

@@ -88,7 +88,7 @@ def test_spatial_map_limits_enforced(client) -> None:
     assert over.status_code == 409
     assert over.json()["detail"]["code"] == "PROP_LIMIT_REACHED"
 
-    for index in range(8):
+    for index in range(4):
         res = client.post(
             f"/api/spatial-map/projects/{project_id}/maps/{document_id}/cameras",
             json={"label": f"Cam {index}", "yawDegrees": index * 45},

@@ -2,7 +2,7 @@
  * Spatial Map API client — thin typed wrapper over the existing
  * `api.spatialMap` client in `studio-web/src/api.ts`.
  *
- * Reuses the shared client (Law #17). The V1 circular-grid fields and camera
+ * Reuses the shared client (Law #17). The V1 Cartesian grid fields and camera
  * blocking fields are now accepted by the backend; the small casts below are
  * only because the frozen M411 contract types in `api.ts` predate those fields.
  */
@@ -10,10 +10,7 @@ import { api } from "../../../api";
 import type {
   SpatialMapCreateBody,
   SpatialMapUpdateBody,
-  SpatialMapDocument,
-  SpatialCharacterPlacement,
-  SpatialPropPlacement,
-  SpatialCamera,
+  SpatialMapDocument,
   SpatialCharacterPlacementBody,
   SpatialCharacterPlacementUpdateBody,
   SpatialPropPlacementBody,
@@ -37,6 +34,10 @@ type CameraBody = {
   cameraSlot?: number;
   orientation?: string;
   fovPreset?: string;
+  normalizedX?: number | null;
+  normalizedY?: number | null;
+  gridRow?: number;
+  gridColumn?: number;
 };
 
 export const spatialMapApi = {
@@ -161,11 +162,4 @@ export const spatialMapApi = {
     return res.document as unknown as SpatialMapDocument;
   },
 
-  isCharacterPlacement(p: SpatialCharacterPlacement | SpatialPropPlacement): p is SpatialCharacterPlacement {
-    return (p as SpatialCharacterPlacement).characterId !== undefined;
-  },
-
-  isCamera(p: unknown): p is SpatialCamera {
-    return (p as SpatialCamera).cameraSlot !== undefined;
-  },
 };
