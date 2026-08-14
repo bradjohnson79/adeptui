@@ -52,6 +52,7 @@ import {
   CHARACTER_SLOTS,
   PROP_SLOTS,
   type SavedOption,
+  SLOT_COLORS,
   type ActivePlacement,
   type SlotDef,
   type SpatialCamera,
@@ -176,6 +177,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const activePlacement: ActivePlacement | null = placementMode
     ? { type: placementMode.kind, slot: activeSlot?.index ?? 0, entityId: placementMode.id }
     : null;
+
+  const ghostColor = (() => {
+    if (!placementMode || !activeSlot) return undefined;
+    if (activeSlot.kind === "character") return SLOT_COLORS[CHARACTER_SLOTS[activeSlot.index]?.colorKey || "red"];
+    if (activeSlot.kind === "prop") return SLOT_COLORS[PROP_SLOTS[activeSlot.index]?.colorKey || "purple"];
+    return SLOT_COLORS.gray;
+  })();
 
   const clearPlacementMode = useCallback(() => {
     setPlacementMode(null);
@@ -453,8 +461,15 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           normalizedY: null,
         });
         setDocument(updated);
-        setActiveSlot({ kind: "character", index: slot.index });
-        setPlacementMode(null);
+        const created = updated.characters.find((c) => c.slotIndex === slot.index);
+        if (created) {
+          setPlacementMode({ action: "place", kind: "character", id: created.id, label: `${slot.label} — ${created.label || created.tag}` });
+          setActiveSlot({ kind: "character", index: slot.index });
+          setSelectedPlacementId(created.id);
+          setSelectedCameraId(null);
+        } else {
+          setActiveSlot({ kind: "character", index: slot.index });
+        }
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to add character.");
       }
@@ -483,8 +498,15 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           normalizedY: null,
         });
         setDocument(updated);
-        setActiveSlot({ kind: "prop", index: slot.index });
-        setPlacementMode(null);
+        const created = updated.props.find((item) => item.slotIndex === slot.index);
+        if (created) {
+          setPlacementMode({ action: "place", kind: "prop", id: created.id, label: `${slot.label} — ${created.label || created.tag}` });
+          setActiveSlot({ kind: "prop", index: slot.index });
+          setSelectedPlacementId(created.id);
+          setSelectedCameraId(null);
+        } else {
+          setActiveSlot({ kind: "prop", index: slot.index });
+        }
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to add prop.");
       }
@@ -612,7 +634,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         if (newCamera) {
           setSelectedCameraId(newCamera.id);
           setSelectedPlacementId(null);
-          setPlacementMode(null);
+          setPlacementMode({ action: "place", kind: "camera", id: newCamera.id, label: slot.label });
         }
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to add camera.");
@@ -933,6 +955,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             showCircles={showCircles}
             showLabels={showLabels}
             zoom={zoom}
+            ghostColor={ghostColor}
             onCellClick={handleCellClick}
             onSelectPlacement={(id) => {
               setSelectedPlacementId(id);
@@ -994,6 +1017,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
                     visible={placement ? placement.visible : undefined}
                     onToggleVisible={() => placement && void handleToggleVisible("character", placement.id, placement.visible === false)}
+                    onToggleOff={clearPlacementMode}
                   />
                 );
               })}
@@ -1025,6 +1049,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
                     visible={placement ? placement.visible : undefined}
                     onToggleVisible={() => placement && void handleToggleVisible("prop", placement.id, placement.visible === false)}
+                    onToggleOff={clearPlacementMode}
                   />
                 );
               })}
@@ -1084,6 +1109,20 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     )}
                     {camera ? (
                       <div className="spatial-map__slot-actions">
+                        <button
+                          type="button"
+                          className={`spatial-map__slot-action spatial-map__slot-toggle${placementMode?.kind === "camera" && placementMode.id === camera.id ? " is-active" : ""}`}
+                          aria-pressed={placementMode?.kind === "camera" && placementMode.id === camera.id}
+                          aria-label={`${placementMode?.kind === "camera" && placementMode.id === camera.id ? "Turn off" : "Turn on"} ${slot.label}`}
+                          data-testid={`camera-online-${slot.index}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (placementMode?.kind === "camera" && placementMode.id === camera.id) clearPlacementMode();
+                            else beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
+                          }}
+                        >
+                          {placementMode?.kind === "camera" && placementMode.id === camera.id ? "ON" : "OFF"}
+                        </button>
                         <button
                           type="button"
                           className="spatial-map__slot-action"

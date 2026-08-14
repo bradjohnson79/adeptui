@@ -12,7 +12,7 @@ import { Timeline } from "../components/Timeline";
 import { AssetTray, PromptComposer } from "../components/AssetTray";
 import { AdvancedPanel, JobPanel } from "../components/JobPanel";
 import { GpuVramPanel } from "../components/GpuVramPanel";
-import { SpatialMapStudio } from "../components/spatial-map/SpatialMapStudio";
+import { SpatialMapPanel } from "../components/CoDirector/SpatialMap/SpatialMapPanel";
 import { ScriptStoryboardWorkspace } from "../components/ScriptStoryboardWorkspace";
 import { StoryboardStudio } from "../components/storyboard-studio/StoryboardStudio";
 import { useBindCoDirectorWorkspace, useOpenCoDirector } from "../components/CoDirector";
@@ -819,12 +819,7 @@ export default function ProjectEditor() {
           />
         </div>
       ) : tab === "spatial" ? (
-        <SpatialMapStudio
-          project={project}
-          scene={project.scenes.find((s) => s.id === selectedScene) || project.scenes[0]}
-          onChange={refresh}
-          onGoTimeline={() => go("timeline")}
-        />
+        <SpatialMapPanel projectId={project.id} onGoTab={go} />
       ) : tab === "script" ? (
         <StoryboardStudio project={project} onChange={refresh} onGo={go} />
       ) : tab === "shotlist" ? (

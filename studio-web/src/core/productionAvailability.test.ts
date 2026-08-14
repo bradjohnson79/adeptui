@@ -39,11 +39,16 @@ test("optional-missing does NOT block generation (only affected generator gates)
   // LTX 2.5 text encoder is optional at the runtime level. A missing optional
   // component must not flip ALL generation to "Requires setup" — only the
   // affected generator's preflight should block.
+  // Production leak: health.missing_models / missing_model_component_ids may list
+  // optional krea2_models even when missingRequiredModelComponentIds is [].
+  // An empty required array must NOT ||-fall-through into those all-missing IDs.
   const avail = resolveProductionAvailability(
     makeHealth({
+      missing_model_component_ids: ["krea2_models"],
+      missing_models: ["krea2_models"],
       comfy: {
         reachable: true,
-        missingModelComponentIds: ["ltx_2_5_text_encoder"],
+        missingModelComponentIds: ["ltx_2_5_text_encoder", "krea2_models"],
         missingRequiredModelComponentIds: [],
         models: [{ componentId: "ltx_2_5_text_encoder", required: false, present: false }],
       },

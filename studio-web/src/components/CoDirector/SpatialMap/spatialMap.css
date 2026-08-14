@@ -103,6 +103,10 @@
   stroke: rgba(45, 212, 191, 0.45);
 }
 
+.spatial-map__ghost-cursor {
+  pointer-events: none;
+}
+
 .spatial-map__grid-wrap--hide-grid .spatial-map__grid-lines,
 .spatial-map__grid-wrap--hide-circles .spatial-map__cell-circle,
 .spatial-map__grid-wrap--hide-labels .spatial-map__grid-label {
@@ -414,6 +418,19 @@
 .spatial-map__slot-action.danger:hover {
   color: var(--danger, #f87171);
   border-color: var(--danger, #f87171);
+}
+
+.spatial-map__slot-toggle {
+  min-width: 2.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.spatial-map__slot-toggle.is-active,
+.spatial-map__slot-toggle[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--accent-deep) 0%, var(--accent) 55%, #14b8a6 100%);
+  color: var(--btn-primary-fg, #06201c);
+  border-color: transparent;
 }
 
 .spatial-map__slot-remove {

@@ -48,11 +48,15 @@ function comfyOffline(health: Health | null, healthError: unknown): ProductAvail
   // component (e.g. LTX 2.5 text encoder) must not block ALL generation — only the
   // affected generator. Other generators remain available. The previous logic used
   // the total missing count, which over-blocked when an optional component was missing.
-  const missingRequired =
-    health.comfy?.missingRequiredModelComponentIds?.length
-    || health.missing_model_component_ids?.length
-    || health.missing_models?.length
-    || 0;
+  // If the required-missing list is present (including []), use ONLY that length.
+  // [].length is 0 / falsy, so || would leak into all-missing IDs (optional
+  // krea2_models, etc.) and wrongly block every generation tool.
+  const requiredMissingIds = health.comfy?.missingRequiredModelComponentIds;
+  const missingRequired = Array.isArray(requiredMissingIds)
+    ? requiredMissingIds.length
+    : (health.missing_model_component_ids?.length
+      || health.missing_models?.length
+      || 0);
   const missingOptional =
     (health.comfy?.missingModelComponentIds?.length || health.missing_model_component_ids?.length || health.missing_models?.length || 0)
     - missingRequired;

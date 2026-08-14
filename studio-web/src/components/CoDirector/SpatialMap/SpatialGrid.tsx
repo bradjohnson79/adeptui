@@ -47,6 +47,7 @@ type Props = {
   showCircles?: boolean;
   showLabels?: boolean;
   zoom?: number;
+  ghostColor?: string;
   onCellClick: (column: number, row: number) => void;
   onSelectPlacement: (placementId: string | null) => void;
   onSelectCamera: (cameraId: string | null) => void;
@@ -123,6 +124,7 @@ export function SpatialGrid({
   showCircles = true,
   showLabels = true,
   zoom = 1,
+  ghostColor,
   onCellClick,
   onSelectPlacement,
   onSelectCamera,
@@ -274,6 +276,29 @@ export function SpatialGrid({
                 />
               );
             })}
+
+            {placementActive && hover && ghostColor ? (
+              (() => {
+                const mid = cellCenterNormalized(hover.column, hover.row, density);
+                const pix = normalizedToPixel(mid.x, mid.y, size);
+                return (
+                  <circle
+                    className="spatial-map__ghost-cursor"
+                    cx={pix.px}
+                    cy={pix.py}
+                    r={cellCircleR}
+                    fill={ghostColor}
+                    fillOpacity={0.35}
+                    stroke={ghostColor}
+                    strokeOpacity={0.85}
+                    strokeWidth={2}
+                    pointerEvents="none"
+                    aria-hidden="true"
+                    data-testid="spatial-map-ghost-cursor"
+                  />
+                );
+              })()
+            ) : null}
 
             {placedCameras.map((c) => {
               const px = markerPosition(c.gridColumn, c.gridRow, c.normalizedX, c.normalizedY, density, size);

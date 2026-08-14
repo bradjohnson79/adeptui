@@ -29,6 +29,7 @@ type Props = {
   onUpdateMiniPrompt: (text: string) => void;
   visible?: boolean;
   onToggleVisible?: () => void;
+  onToggleOff?: () => void;
 };
 
 export function PlacementSlot({
@@ -45,6 +46,7 @@ export function PlacementSlot({
   onUpdateMiniPrompt,
   visible,
   onToggleVisible,
+  onToggleOff,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [miniDraft, setMiniDraft] = useState(placement?.miniPrompt || "");
@@ -63,7 +65,6 @@ export function PlacementSlot({
       ? cellLabel(placement!.gridColumn, placement!.gridRow)
       : "";
   const displayName = placement?.label || placement?.tag || "";
-  const picked = savedOptions.find((o) => o.id === pickedId) || null;
   const thumbUrl = placement?.assetId ? api.assetUrl(placement.assetId) : null;
 
   return (
@@ -98,7 +99,12 @@ export function PlacementSlot({
           <select
             className="spatial-map__slot-select"
             value={pickedId}
-            onChange={(e) => setPickedId(e.target.value)}
+            onChange={(e) => {
+              const id = e.target.value;
+              setPickedId(id);
+              const option = savedOptions.find((o) => o.id === id);
+              if (option) onAdd(option);
+            }}
             aria-label={`Select saved ${isCharacter ? "character" : "prop"} for ${slot.label}`}
             data-testid={`${slot.kind}-select-${slot.index}`}
           >
@@ -109,17 +115,6 @@ export function PlacementSlot({
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="spatial-map__slot-add"
-            disabled={!picked}
-            title={!picked ? `Select a saved ${isCharacter ? "character" : "prop"} first` : undefined}
-            onClick={() => picked && onAdd(picked)}
-            aria-label={`Add ${picked?.name || (isCharacter ? "character" : "prop")} to ${slot.label}`}
-            data-testid={`${slot.kind}-add-${slot.index}`}
-          >
-            Add
-          </button>
         </div>
       ) : (
         <div className="spatial-map__slot-assigned">
@@ -136,6 +131,20 @@ export function PlacementSlot({
           </div>
           {location ? <div className="spatial-map__slot-assigned-loc">Cell {location}</div> : null}
           <div className="spatial-map__slot-actions">
+            <button
+              type="button"
+              className={`spatial-map__slot-action spatial-map__slot-toggle${placing ? " is-active" : ""}`}
+              aria-pressed={placing}
+              aria-label={`${placing ? "Turn off" : "Turn on"} ${slot.label}`}
+              data-testid={`${slot.kind}-online-${slot.index}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (placing) onToggleOff?.();
+                else onSelect();
+              }}
+            >
+              {placing ? "ON" : "OFF"}
+            </button>
           {isAssigned && onToggleVisible ? (
             <button
               type="button"
