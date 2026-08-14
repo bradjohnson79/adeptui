@@ -22,8 +22,8 @@ from .media_ops import export_pack, mux_audio, stitch_videos
 from .mouth_tracker import Roi, track_mouth_rois
 from .references import inject_spatial_and_camera, resolve_prompt
 from .spatial import parse_spatial_map, spatial_prompt_notes
-from .fal_catalog import build_fal_arguments, is_fal_engine
-from .fal_client import download_url, extract_video_url, run_fal_model, upload_file_to_fal
+from .fal_catalog import build_fal_arguments, build_fal_image_arguments, is_fal_engine
+from .fal_client import download_url, extract_image_url, extract_video_url, run_fal_model, upload_file_to_fal
 from .secrets_store import get_secret
 from .vram_profiles import clamp_frames, resolve_render_plan
 from .workflows import (
@@ -2633,6 +2633,10 @@ class JobQueue:
 
         params = self._job_params(job)
         edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
+        fal_image_model = str(params.get("falImageModelId") or "").strip()
+        if fal_image_model:
+            await self._imagegen_fal(db, job, project, params, fal_image_model, edit_op=edit_op)
+            return
 
         # Retry path: reuse validated but unregistered output (no silent regeneration)
         pending = params.get("validated_output_path")
@@ -3001,6 +3005,80 @@ class JobQueue:
             job.message = f"output_valid_but_unregistered: {reg_exc}"
             db.commit()
             raise RuntimeError(f"output_valid_but_unregistered: {reg_exc}") from reg_exc
+
+
+    async def _imagegen_fal(
+        self,
+        db: Session,
+        job: Job,
+        project: Project,
+        params: dict,
+        model_id: str,
+        *,
+        edit_op: str = "generate",
+    ) -> None:
+        """Dispatch a still-image job through the existing fal queue client. Not Comfy."""
+        from .image_runtime.output_gate import validate_image_output
+        from .image_runtime.job_model import ImageJobStage
+
+        api_key = get_secret("fal_api_key")
+        if not api_key:
+            raise RuntimeError(
+                "Hosted AI Provider credential not configured. Open Setup → AI Providers "
+                "(Kie.ai · WaveSpeed.ai · fal.ai)."
+            )
+        prompt = str(params.get("prompt") or "").strip()
+        if not prompt and isinstance(params.get("imageIntent"), dict):
+            prompt = str(params["imageIntent"].get("prompt") or "").strip()
+        if not prompt:
+            raise RuntimeError("Fal image generate requires a prompt")
+        width = int(params.get("width") or 1024)
+        height = int(params.get("height") or 1024)
+        seed = int(params.get("seed") if params.get("seed") is not None else 0)
+        args = build_fal_image_arguments(
+            model_id=model_id, prompt=prompt, width=width, height=height, seed=seed
+        )
+        job.stage = ImageJobStage.SAMPLING.value
+        job.message = f"fal.ai · {model_id}"
+        job.comfy_prompt_id = model_id[:64]
+        db.commit()
+
+        async def on_progress(p: float, msg: str) -> None:
+            job.progress = min(0.95, max(0.05, p))
+            job.message = (msg or f"fal {model_id}")[:4000]
+            job.updated_at = datetime.utcnow()
+            db.commit()
+
+        async def on_request_id(request_id: str) -> None:
+            self._record_fal_request_id(db, job, model_id=model_id, request_id=request_id)
+
+        result = await run_fal_model(
+            model_id, args, api_key, on_progress=on_progress, on_request_id=on_request_id
+        )
+        image_url = extract_image_url(result)
+        tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"imagegen_fal_{uuid.uuid4().hex[:8]}.png"
+        await download_url(image_url, tmp_path)
+        job.stage = ImageJobStage.VALIDATING.value
+        job.message = "Output Gate validation"
+        db.commit()
+        gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
+        if not gate.ok:
+            raise RuntimeError(f"Fal image failed output validation: {gate.errors}")
+        await self._imagegen_commit_asset(
+            db,
+            job,
+            project,
+            params,
+            tmp_path,
+            gate,
+            edit_op=edit_op,
+            prompt=prompt,
+            seed=seed,
+            model=str(params.get("hostedModelId") or model_id),
+            contract_key=model_id,
+        )
 
     async def _imagegen_commit_asset(
         self,

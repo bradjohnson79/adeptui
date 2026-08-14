@@ -159,11 +159,26 @@ CHARACTER_SHEET_TILE_SIZE = 1024
 
 COMPOSITION_INTENT_CHARACTER_SHEET = "character_sheet_composed"
 
-# Certified families that are text-only (cannot consume reference pixels). A
-# reference-locked candidate must NEVER route to one of these — enforced in
-# ``_build_candidate_routing_plan`` as the reference-first hierarchy guard so
-# an attached reference never silently downgrades to a text-only family.
-TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious"})
+# Conditioning modes persisted on each candidate for truthful provenance.
+# REFERENCE_CONDITIONED: generator can consume reference pixels (source_asset_id set).
+# PROFILE_GUIDED: txt2img-only family (Illustrious / Qwen) — profile prompt, no pixels.
+CONDITIONING_PROFILE_GUIDED = "PROFILE_GUIDED"
+CONDITIONING_REFERENCE_CONDITIONED = "REFERENCE_CONDITIONED"
+
+# Certified families that are text-only (cannot consume reference pixels).
+# These remain selectable when a reference is attached; they run as
+# PROFILE_GUIDED. Never silently redirected to zimage.ref_edit.
+TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious", "qwen2512", "qwen"})
+
+# Local Krea 2 inference target. RAW is reachable only via an explicit raw id.
+KREA_LOCAL_TXT2IMG_KEY = "krea2.turbo_txt2img"
+KREA_HOSTED_MODEL_LABELS: dict[str, str] = {
+    "krea2-turbo-fal": "Krea 2 Turbo",
+    "krea2-medium-fal": "Krea 2 Medium",
+    "krea2-large-fal": "Krea 2 Large",
+    "krea2-turbo-local": "Krea 2 Turbo",
+    "krea2-raw-local": "Krea 2 RAW",
+}
 
 
 def _resolve_style_profile(visual_style: str | None) -> dict[str, Any]:
@@ -415,6 +430,225 @@ def _stage2_workflow_key(family: str) -> str | None:
     return None
 
 
+def _parse_generator_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
+    """Normalize creator source toggles. Omitted sources keep legacy local-auto routing."""
+    if generator_sources is None:
+        return {
+            "explicit": False,
+            "local_enabled": True,
+            "api_enabled": False,
+            "chosen_local": "",
+            "chosen_api": "",
+            "stage2_enabled": False,
+            "chosen_stage2_family": "",
+        }
+    local = generator_sources.get("local")
+    api = generator_sources.get("api")
+    chosen_local = ""
+    chosen_stage2 = ""
+    stage2_enabled = False
+    if isinstance(local, dict):
+        chosen_local = _normalize_local_family(str(local.get("family") or local.get("selected") or ""))
+        chosen_stage2 = str(local.get("stage2Family") or "").strip().lower()
+        stage2_enabled = bool(local.get("stage2Enabled"))
+    if chosen_local in {"", "auto"}:
+        chosen_local = ""
+    if chosen_stage2 in {"", "auto"}:
+        chosen_stage2 = ""
+    chosen_api = ""
+    if isinstance(api, dict):
+        chosen_api = str(api.get("model") or api.get("selected") or "").strip()
+    return {
+        "explicit": True,
+        "local_enabled": bool(local),
+        "api_enabled": bool(api),
+        "chosen_local": chosen_local,
+        "chosen_api": chosen_api,
+        "stage2_enabled": stage2_enabled,
+        "chosen_stage2_family": chosen_stage2,
+    }
+
+
+
+def _fal_image_model_id(hosted_model_id: str | None) -> str | None:
+    """Fal still-image endpoint for a hosted dock id, or None."""
+    try:
+        from ..fal_catalog import fal_image_model_id_for_dock
+
+        return fal_image_model_id_for_dock(hosted_model_id)
+    except Exception:
+        return None
+
+
+def _hosted_family_for_model(model_id: str) -> str:
+    """Map a hosted dock model id (nano-banana-kie) to an image-product family."""
+    if not model_id:
+        return ""
+    try:
+        from ..production_control.runtime_map import image_family_for_dock_model
+
+        fam = image_family_for_dock_model(model_id)
+        if fam:
+            return str(fam)
+    except Exception:
+        pass
+    mid = str(model_id).lower()
+    if "nano-banana" in mid or mid.startswith("imagen"):
+        return "imagen"
+    if "flux" in mid:
+        return "flux"
+    if "krea" in mid:
+        return "krea2"
+    return mid.split("-")[0] if mid else ""
+
+
+def _normalize_local_family(family: str) -> str:
+    fam = (family or "").strip().lower()
+    if fam in {"", "auto"}:
+        return ""
+    if fam in {"krea", "krea-2", "krea_2", "krea2-turbo", "krea2-turbo-local", "krea2-raw-local"}:
+        return "krea2"
+    return fam
+
+
+def _txt2img_workflow_key(family: str, hosted_model_id: str | None = None) -> str:
+    fam = (family or "").strip().lower()
+    mid = (hosted_model_id or "").lower()
+    if fam == "krea2" or "krea" in mid:
+        if "raw" in mid:
+            return "krea2.raw_txt2img"
+        return KREA_LOCAL_TXT2IMG_KEY
+    return f"{fam}.txt2img" if fam else "imagen.txt2img"
+
+
+def _krea_model_display(model_id: str) -> str:
+    mid = (model_id or "").strip()
+    if mid in KREA_HOSTED_MODEL_LABELS:
+        return KREA_HOSTED_MODEL_LABELS[mid]
+    low = mid.lower()
+    if "krea" in low and "turbo" in low:
+        return "Krea 2 Turbo"
+    if "krea" in low and "medium" in low:
+        return "Krea 2 Medium"
+    if "krea" in low and "large" in low:
+        return "Krea 2 Large"
+    if "krea" in low and "raw" in low:
+        return "Krea 2 RAW"
+    if "krea" in low:
+        return mid or "Krea 2"
+    return mid
+
+
+def _candidate_provenance_label(
+    *,
+    provider_kind: str,
+    provider: str | None,
+    model: str | None,
+    hosted_model_id: str | None,
+    selected_source: str | None,
+    conditioning_mode: str | None,
+) -> str:
+    pool = "API" if provider_kind == "api" else "LOCAL"
+    blob = " ".join(
+        str(x or "") for x in (provider, hosted_model_id, selected_source, model)
+    ).lower()
+    if provider_kind == "api" and ("krea" in blob or (provider or "").lower() == "krea"):
+        name = _krea_model_display(str(hosted_model_id or selected_source or model or ""))
+        core = f"{pool} — Krea / {name}"
+    else:
+        name = selected_source or hosted_model_id or model or ""
+        core = f"{pool} — {name}" if name else pool
+    if conditioning_mode == CONDITIONING_REFERENCE_CONDITIONED:
+        return f"{core} — Reference Conditioned"
+    if conditioning_mode == CONDITIONING_PROFILE_GUIDED:
+        return f"{core} — Profile Guided"
+    return core
+
+
+def _hosted_provider_label(model_id: str) -> str:
+    mid = (model_id or "").lower()
+    # Krea ids may also contain a host suffix (krea2-turbo-fal). Krea wins.
+    if "krea" in mid:
+        return "krea"
+    if "kie" in mid:
+        return "kie"
+    if "fal" in mid:
+        return "fal"
+    if "wavespeed" in mid:
+        return "wavespeed"
+    return "api"
+
+
+def _reference_workflow_key(family: str) -> str | None:
+    """Certified workflow that consumes reference pixels for this family, if any."""
+    if not family:
+        return None
+    if family == REFERENCE_LOCKED_FAMILY:
+        return REFERENCE_LOCKED_WORKFLOW_KEY
+    try:
+        from ..image_runtime.certified_registry import get_workflow, list_workflows
+
+        for key in (f"{family}.ref_edit", f"{family}.edit", f"{family}.img2img"):
+            wf = get_workflow(key)
+            if wf and wf.status == "Certified" and bool((wf.capabilities or {}).get("supportsReferences")):
+                return key
+        for wf in list_workflows(model_family=family):
+            if wf.status != "Certified":
+                continue
+            if bool((wf.capabilities or {}).get("supportsReferences")):
+                return wf.workflow_key
+    except Exception:
+        return None
+    return None
+
+
+def _build_stage1_route(
+    *,
+    family: str,
+    reference_asset_id: str | None,
+    provider_kind: str,
+    hosted_model_id: str | None = None,
+    selected_source: str = "",
+) -> dict[str, Any]:
+    """Build one candidate Stage 1 route. Selected family is authoritative."""
+    supports_ref = bool(family and _family_supports_references(family))
+    ref_key = _reference_workflow_key(family) if supports_ref else None
+    selected = selected_source or hosted_model_id or family
+    if reference_asset_id and supports_ref and ref_key and provider_kind != "api":
+        return {
+            "modelFamilyPreference": family,
+            "workflowKey": ref_key,
+            "referenceAssetId": reference_asset_id,
+            "referenceLocked": True,
+            "referenceFidelityMode": (
+                REFERENCE_FIDELITY_MODE_LIMITED if family == "zimage" else REFERENCE_FIDELITY_MODE_FULL
+            ),
+            "source_asset_id": reference_asset_id,
+            "denoise": REFERENCE_FIDELITY_DENOISE if family == "zimage" else None,
+            "conditioningMode": CONDITIONING_REFERENCE_CONDITIONED,
+            "providerKind": provider_kind,
+            "hostedModelId": hosted_model_id,
+            "selectedSource": selected,
+        }
+    # Hosted API, or txt2img-only local family, or no reference: PROFILE_GUIDED
+    # when a reference exists (pixels do not participate). No-reference stays unlocked.
+    mode = CONDITIONING_PROFILE_GUIDED if reference_asset_id else None
+    workflow = _txt2img_workflow_key(family, hosted_model_id)
+    return {
+        "modelFamilyPreference": family,
+        "workflowKey": workflow,
+        "referenceAssetId": None,
+        "referenceLocked": False,
+        "referenceFidelityMode": None,
+        "source_asset_id": None,
+        "denoise": None,
+        "conditioningMode": mode,
+        "providerKind": provider_kind,
+        "hostedModelId": hosted_model_id,
+        "selectedSource": selected,
+    }
+
+
 def _build_candidate_routing_plan(
     *,
     candidate_count: int,
@@ -422,142 +656,111 @@ def _build_candidate_routing_plan(
     visual_style: str | None = None,
     generator_sources: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Per-candidate routing plan drawn from the Certified READY registry.
+    """Per-candidate routing plan honoring the selected Local / API source.
 
-    Reference-first hierarchy (Amendment 3 + Phase 5): when a reference image is
-    attached it is the visual authority — Stage 1 routes to a Certified
-    reference-capable workflow (``zimage.ref_edit``) so reference PIXELS
-    participate in conditioning. An optional Stage 2 style engine may then refine
-    the Stage 1 output via a real img2img/edit workflow. Stage 2 receives the
-    Stage 1 output, never the original reference.
-
-    A reference-locked candidate NEVER routes to a text-only family (e.g.
-    Illustrious) for Stage 1 — enforced explicitly below. Stage 2 is only enabled
-    when a real certified editing workflow exists for the selected family.
-
-    No-reference: each distinct Certified txt2img family is used once before any
-    reuse; remaining slots reuse a family with a different seed. Anime/realistic-
-    anime styles prefer Illustrious XL first. We never fabricate distinctness.
+    Product laws:
+    * Selected source/model is authoritative — no silent Comfy/Z-Image substitute.
+    * LOCAL ON / API OFF = zero API jobs. LOCAL OFF / API ON = zero local jobs.
+    * BOTH ON = both pools participate (prefer distinct families).
+    * Reference + reference-capable family → REFERENCE_CONDITIONED (pixels).
+    * Reference + txt2img-only (Illustrious / Qwen) → PROFILE_GUIDED (no pixels).
+    * Auto Select may mix the two modes when both family kinds exist.
     """
-    # User Control Law: when the caller explicitly passes generator_sources with
-    # BOTH pools disabled, refuse to enqueue any jobs (zero-job guarantee) rather
-    # than silently falling back. Omitted (None) preserves legacy default routing.
-    if generator_sources is not None:
-        _local = generator_sources.get("local")
-        _api = generator_sources.get("api")
-        if not _local and not _api:
-            raise ValueError(
-                "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
-            )
-    plan: list[dict[str, Any]] = []
-    # Explicit Local Generator selection (User Control Law + user authority):
-    # when the creator picked a specific local family (not Auto Select), honor it
-    # for no-reference candidates instead of style routing. ""/"auto" → style routing.
-    chosen_local = ""
-    chosen_stage2_family = ""
-    stage2_enabled = False
-    if generator_sources is not None:
-        _loc = generator_sources.get("local")
-        if isinstance(_loc, dict):
-            chosen_local = str(_loc.get("family") or "").strip().lower()
-            chosen_stage2_family = str(_loc.get("stage2Family") or "").strip().lower()
-            stage2_enabled = bool(_loc.get("stage2Enabled"))
-    if chosen_local in {"", "auto"}:
-        chosen_local = ""
-    if chosen_stage2_family in {"", "auto"}:
-        chosen_stage2_family = ""
+    parsed = _parse_generator_sources(generator_sources)
+    if parsed["explicit"] and not parsed["local_enabled"] and not parsed["api_enabled"]:
+        raise ValueError(
+            "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
+        )
+    if parsed["explicit"] and parsed["api_enabled"] and not parsed["local_enabled"] and not parsed["chosen_api"]:
+        raise ValueError("Cloud generator is enabled but no API model is selected.")
 
-    # Resolve Stage 2 config (if requested and real).
     stage2: dict[str, Any] | None = None
-    if stage2_enabled and chosen_stage2_family:
-        stage2_key = _stage2_workflow_key(chosen_stage2_family)
+    if parsed["stage2_enabled"] and parsed["chosen_stage2_family"]:
+        stage2_key = _stage2_workflow_key(parsed["chosen_stage2_family"])
         if stage2_key:
             stage2 = {
-                "modelFamilyPreference": chosen_stage2_family,
+                "modelFamilyPreference": parsed["chosen_stage2_family"],
                 "workflowKey": stage2_key,
                 "referenceAssetId": None,
                 "referenceLocked": False,
                 "referenceFidelityMode": None,
-                "source_asset_id": None,  # set to Stage 1 output at runtime
+                "source_asset_id": None,
                 "denoise": STAGE2_DEFAULT_DENOISE,
             }
 
-    if reference_asset_id:
-        # Reference-first guard: the resolved family must be reference-capable
-        # and must NOT be a text-only family. zimage.ref_edit is the only
-        # Certified reference-capable workflow today; this guard keeps the
-        # hierarchy honest as more families become Certified.
-        if REFERENCE_LOCKED_FAMILY in TEXT_ONLY_FAMILIES or not _family_supports_references(
-            REFERENCE_LOCKED_FAMILY
-        ):
-            raise RuntimeError(
-                "Reference-locked candidate routing requires a Certified "
-                "reference-capable workflow; zimage.ref_edit is not reference-capable "
-                "or is text-only. Refusing to silently downgrade reference conditioning."
-            )
-        # Reference-locked: only reference-capable families are eligible. If the
-        # creator explicitly chose a text-only family for a reference-locked
-        # generation, refuse rather than silently downgrade reference conditioning.
-        if chosen_local and (
-            chosen_local in TEXT_ONLY_FAMILIES or not _family_supports_references(chosen_local)
-        ):
-            raise ValueError(
-                f"{chosen_local} requires text-to-image generation and cannot use the attached Character Reference."
-            )
+    local_families: list[str] = []
+    if (not parsed["explicit"]) or parsed["local_enabled"]:
+        if parsed["chosen_local"]:
+            local_families = [parsed["chosen_local"]]
+        else:
+            local_families = list(_no_reference_families_for_style(visual_style))
+            if not local_families:
+                local_families = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
+
+    api_model = parsed["chosen_api"] if parsed["api_enabled"] else ""
+    api_family = _hosted_family_for_model(api_model) if api_model else ""
+
+    slots: list[dict[str, Any]] = []
+    if parsed["explicit"] and parsed["api_enabled"] and not parsed["local_enabled"]:
         for _i in range(candidate_count):
-            plan.append(
+            slots.append(
                 {
-                    "stage1": {
-                        "modelFamilyPreference": REFERENCE_LOCKED_FAMILY,
-                        "workflowKey": REFERENCE_LOCKED_WORKFLOW_KEY,
-                        "referenceAssetId": reference_asset_id,
-                        "referenceLocked": True,
-                        "referenceFidelityMode": REFERENCE_FIDELITY_MODE_LIMITED,
-                        "source_asset_id": reference_asset_id,
-                        "denoise": REFERENCE_FIDELITY_DENOISE,
-                    },
-                    "stage2": stage2,
-                    "stage2Enabled": bool(stage2),
+                    "providerKind": "api",
+                    "family": api_family or api_model,
+                    "hostedModelId": api_model,
+                    "selectedSource": api_model,
                 }
             )
-        return plan
-    if chosen_local and _candidate_family_executable(chosen_local):
-        # Honor the explicit Certified local family for every candidate (different seeds).
-        for _i in range(candidate_count):
-            plan.append(
+    elif parsed["explicit"] and parsed["local_enabled"] and parsed["api_enabled"] and api_model:
+        for i in range(candidate_count):
+            if i % 2 == 1:
+                slots.append(
+                    {
+                        "providerKind": "api",
+                        "family": api_family or api_model,
+                        "hostedModelId": api_model,
+                        "selectedSource": api_model,
+                    }
+                )
+            else:
+                fam = local_families[(i // 2) % len(local_families)] if local_families else "zimage"
+                slots.append(
+                    {
+                        "providerKind": "local",
+                        "family": fam,
+                        "hostedModelId": None,
+                        "selectedSource": fam,
+                    }
+                )
+    else:
+        for i in range(candidate_count):
+            fam = local_families[i % len(local_families)] if local_families else "zimage"
+            slots.append(
                 {
-                    "stage1": {
-                        "modelFamilyPreference": chosen_local,
-                        "workflowKey": f"{chosen_local}.txt2img",
-                        "referenceAssetId": None,
-                        "referenceLocked": False,
-                        "referenceFidelityMode": None,
-                        "source_asset_id": None,
-                        "denoise": None,
-                    },
-                    "stage2": stage2,
-                    "stage2Enabled": bool(stage2),
+                    "providerKind": "local",
+                    "family": fam,
+                    "hostedModelId": None,
+                    "selectedSource": fam,
                 }
             )
-        return plan
-    distinct = _no_reference_families_for_style(visual_style)
-    for i in range(candidate_count):
-        fam = distinct[i % len(distinct)]
-        plan.append(
-            {
-                "stage1": {
-                    "modelFamilyPreference": fam,
-                    "workflowKey": f"{fam}.txt2img",
-                    "referenceAssetId": None,
-                    "referenceLocked": False,
-                    "referenceFidelityMode": None,
-                    "source_asset_id": None,
-                    "denoise": None,
-                },
-                "stage2": stage2,
-                "stage2Enabled": bool(stage2),
-            }
+
+    plan: list[dict[str, Any]] = []
+    for slot in slots:
+        stage1 = _build_stage1_route(
+            family=str(slot["family"] or ""),
+            reference_asset_id=reference_asset_id,
+            provider_kind=str(slot["providerKind"]),
+            hosted_model_id=slot.get("hostedModelId"),
+            selected_source=str(slot.get("selectedSource") or ""),
         )
+        use_stage2 = stage2 if slot["providerKind"] == "local" else None
+        entry = {
+            "stage1": stage1,
+            "stage2": use_stage2,
+            "stage2Enabled": bool(use_stage2),
+            **stage1,
+        }
+        plan.append(entry)
     return plan
 
 
@@ -878,6 +1081,7 @@ def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool,
                 continue
         elif job.status in ("failed", "error", "cancelled"):
             vj["status"] = job.status
+            vj["error"] = job.message or job.status
             all_done = False
             any_failed = True
             continue
@@ -906,6 +1110,7 @@ def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool,
                     continue
             elif stage2_job.status in ("failed", "error", "cancelled"):
                 vj["stage2Status"] = stage2_job.status
+                vj["error"] = stage2_job.message or stage2_job.status
                 all_done = False
                 any_failed = True
                 continue
@@ -1114,6 +1319,7 @@ def start_visual_sheet_generation(
         )
         reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []
+        pack_generator_sources = generator_sources
         view_specs = _candidate_view_specs()
         for _i in range(candidate_count):
             route = routing_plan[_i]
@@ -1142,7 +1348,7 @@ def start_visual_sheet_generation(
                     role=vrole,
                     extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
                     style_profile=style_profile,
-                    reference_locked=reference_locked,
+                    reference_locked=bool(stage1_route.get("referenceLocked")),
                 )
                 vtag = f"{char_slug}_{vrole}" + (f"_c{_i + 1}" if candidate_count > 1 else "")
                 vjob = _enqueue_txt2img(
@@ -1157,7 +1363,13 @@ def start_visual_sheet_generation(
                     source_asset_id=stage1_route.get("source_asset_id"),
                     denoise=stage1_route.get("denoise"),
                     seed=seed,
-                    force_workflow_key=stage1_route.get("workflowKey"),
+                    force_workflow_key=(
+                        None
+                        if stage1_route.get("providerKind") == "api"
+                        else stage1_route.get("workflowKey")
+                    ),
+                    provider_kind=str(stage1_route.get("providerKind") or "local"),
+                    hosted_model_id=stage1_route.get("hostedModelId"),
                     prompt_metadata={
                         "promptFamily": vprompt.prompt_family,
                         "promptModel": vprompt.model_key,
@@ -1173,9 +1385,11 @@ def start_visual_sheet_generation(
                         "fullBody": vrole != "closeup_front",
                         "workflowKey": stage1_route["workflowKey"],
                         "modelFamily": stage1_route["modelFamilyPreference"],
-                        "referenceLocked": reference_locked,
-                        "referenceAssetId": reference_asset_id,
+                        "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                        "referenceAssetId": stage1_route.get("referenceAssetId"),
                         "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
+                        "conditioningMode": stage1_route.get("conditioningMode"),
+                        "providerKind": stage1_route.get("providerKind") or "local",
                         "seed": seed,
                         "stage": 1,
                     },
@@ -1200,7 +1414,8 @@ def start_visual_sheet_generation(
                         "seed": seed,
                         "modelFamily": stage1_route["modelFamilyPreference"],
                         "workflowKey": stage1_route["workflowKey"],
-                        "referenceLocked": reference_locked,
+                        "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                        "error": None,
                         # Stage 2 fields (populated when Stage 1 completes).
                         "stage2Enabled": bool(stage2_route),
                         "stage2Route": stage2_route,
@@ -1234,10 +1449,34 @@ def start_visual_sheet_generation(
                 )
             # jobs["hero"] points at the front view job (legacy + e2e compat).
             hero_job = view_jobs[0]
-            stage1_lineage = _workflow_lineage(stage1_route["workflowKey"])
+            if stage1_route.get("providerKind") == "api":
+                hosted = str(stage1_route.get("hostedModelId") or stage1_route.get("selectedSource") or "")
+                provider = _hosted_provider_label(hosted)
+                model_name = _krea_model_display(hosted) if provider == "krea" else hosted
+                stage1_lineage = {
+                    "workflowKey": stage1_route.get("workflowKey"),
+                    "generator": hosted,
+                    "provider": provider,
+                    "model": model_name,
+                    "modelVariant": model_name,
+                    "supportsReferences": stage1_route.get("conditioningMode")
+                    == CONDITIONING_REFERENCE_CONDITIONED,
+                    "providerKind": "api",
+                    "provenance": _candidate_provenance_label(
+                        provider_kind="api",
+                        provider=provider,
+                        model=model_name,
+                        hosted_model_id=hosted,
+                        selected_source=str(stage1_route.get("selectedSource") or hosted),
+                        conditioning_mode=stage1_route.get("conditioningMode"),
+                    ),
+                }
+            else:
+                stage1_lineage = _workflow_lineage(stage1_route["workflowKey"])
+                stage1_lineage["providerKind"] = "local"
             stage2_lineage = _workflow_lineage(stage2_route["workflowKey"]) if stage2_route else None
             low_fidelity = _low_reference_fidelity(
-                reference_locked=reference_locked, lineage=stage1_lineage
+                reference_locked=bool(stage1_route.get("referenceLocked")), lineage=stage1_lineage
             )
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             entry = {
@@ -1256,7 +1495,12 @@ def start_visual_sheet_generation(
                 "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
                 "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
                 "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
-                "referenceLocked": reference_locked,
+                "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                "conditioningMode": stage1_route.get("conditioningMode"),
+                "providerKind": stage1_route.get("providerKind") or "local",
+                "selectedSource": stage1_route.get("selectedSource"),
+                "hostedModelId": stage1_route.get("hostedModelId"),
+                "error": None,
                 "lowReferenceFidelity": low_fidelity,
                 "stage2Enabled": bool(stage2_route),
                 "stage2Generator": stage2_lineage.get("generator") if stage2_lineage else None,
@@ -1287,7 +1531,12 @@ def start_visual_sheet_generation(
                 "referenceAssetIds": [reference_asset_id] if reference_asset_id else [],
                 "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
                 "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
-                "referenceLocked": reference_locked,
+                "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                "conditioningMode": stage1_route.get("conditioningMode"),
+                "providerKind": stage1_route.get("providerKind") or "local",
+                "selectedSource": stage1_route.get("selectedSource"),
+                "hostedModelId": stage1_route.get("hostedModelId"),
+                "error": None,
                 "lowReferenceFidelity": low_fidelity,
                 "stage2Enabled": bool(stage2_route),
                 "stage2Generator": stage2_lineage.get("generator") if stage2_lineage else None,
@@ -1318,6 +1567,7 @@ def start_visual_sheet_generation(
         "roleAssets": role_assets,
         "candidates": candidates,
         "candidateCount": candidate_count,
+        "generatorSources": generator_sources,
         "includeDetails": include_details,
         "includePerformance": include_performance,
         "characterName": name,
@@ -1367,11 +1617,8 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                         _attach_role(db, project_id, character_id, aid, "hero_identity")
                     hero_meta["assetId"] = aid
             elif job.status == "failed":
-                pack["status"] = "FAILED"
-                pack["error"] = job.message or "hero generation failed"
-                pack["jobs"] = jobs
-                pack["roleAssets"] = role_assets
-                return _save_pack(db, project_id, character_id, pack)
+                hero_meta["status"] = "failed"
+                hero_meta["error"] = job.message or "hero generation failed"
         jobs["hero"] = hero_meta
 
     # Poll sibling hero candidates (only present when candidate_count > 1)
@@ -1386,6 +1633,10 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 aid = _job_params(job).get("output_asset_id")
                 if aid:
                     item["assetId"] = aid
+            elif job.status in ("failed", "error", "cancelled"):
+                item["status"] = "failed"
+                if not item.get("error"):
+                    item["error"] = job.message or job.status
         # Preserve per-candidate lineage (generator/provider/model/workflowKey/
         # seed/referenceAssetIds/compositionIntent/referenceFidelityMode) recorded
         # at enqueue time — only update the live status/assetId fields above.
@@ -1411,6 +1662,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "sheetAssetId": item.get("sheetAssetId"),
                 "sourceAssetIds": item.get("sourceAssetIds") or [],
                 "viewJobs": item.get("viewJobs") or [],
+                "error": item.get("error"),
             }
             for item in hero_candidates
         ]
@@ -1443,13 +1695,20 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 for vj in view_jobs
             )
             if stage1_failed:
-                failed_views = [
-                    (vj.get("role") or f"view {vj.get('viewIndex')}")
-                    for vj in view_jobs
-                    if vj.get("status") in ("failed", "error", "cancelled", "missing")
-                ]
+                failed_bits: list[str] = []
+                for vj in view_jobs:
+                    if vj.get("status") not in ("failed", "error", "cancelled", "missing"):
+                        continue
+                    role = vj.get("role") or f"view {vj.get('viewIndex')}"
+                    msg = str(vj.get("error") or "").strip()
+                    if not msg and vj.get("jobId"):
+                        failed_job = db.get(Job, vj.get("jobId"))
+                        if failed_job and failed_job.message:
+                            msg = str(failed_job.message)
+                            vj["error"] = msg
+                    failed_bits.append(f"{role}: {msg}" if msg else str(role))
                 centry["status"] = "failed"
-                centry["error"] = "view generation failed: " + ", ".join(failed_views or ["unknown"])
+                centry["error"] = "; ".join(failed_bits) or "view generation failed"
                 continue
             # Stage 2 failed but Stage 1 succeeded.
             centry["status"] = "stage2_failed"
@@ -1556,7 +1815,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 # pack-level role_assets / hero_identity so multi-candidate
                 # generation does not collide on shared role keys. Other
                 # candidates keep their views as lineage only.
-                if int(centry.get("candidateIndex") or 0) == 0:
+                if not primary_sheet_set:
                     for vj in view_jobs:
                         role_assets[vj.get("role")] = vj.get("assetId")
                     role_assets["hero_identity"] = sheet_asset.id
@@ -1584,6 +1843,10 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "compositionIntent": item.get("compositionIntent"),
             "referenceFidelityMode": item.get("referenceFidelityMode"),
             "referenceLocked": bool(item.get("referenceLocked")),
+            "conditioningMode": item.get("conditioningMode"),
+            "providerKind": item.get("providerKind") or "local",
+            "selectedSource": item.get("selectedSource"),
+            "hostedModelId": item.get("hostedModelId"),
             "lowReferenceFidelity": bool(item.get("lowReferenceFidelity")),
             "stage2Enabled": bool(item.get("stage2Enabled")),
             "stage2Generator": item.get("stage2Generator"),
@@ -1609,7 +1872,14 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
         pack["jobs"] = jobs
         pack["roleAssets"] = role_assets
         pack["phase"] = "awaiting_hero"
-        pack["status"] = "GENERATING"
+        if candidate_entries and all(str(c.get("status") or "") == "failed" for c in candidate_entries):
+            pack["status"] = "FAILED"
+            pack["error"] = pack.get("error") or next(
+                (c.get("error") for c in candidate_entries if c.get("error")),
+                "all candidates failed",
+            )
+        else:
+            pack["status"] = "GENERATING"
         return _save_pack(db, project_id, character_id, pack)
 
     # Coverage pack: sequential Qwen-Image-2512 txt2img per role with compiled identity prompts.
@@ -1964,6 +2234,116 @@ def _attach_role(db: Session, project_id: str, character_id: str, asset_id: str,
     )
 
 
+
+def retry_visual_sheet_candidate(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    candidate_index: int,
+) -> dict[str, Any]:
+    """Re-enqueue failed views for one candidate. Other candidates are left alone."""
+    pack = get_visual_sheet_pack(db, project_id, character_id)
+    jobs = dict(pack.get("jobs") or {})
+    entries: list[dict[str, Any]] = []
+    if isinstance(jobs.get("hero_candidates"), list):
+        entries = list(jobs["hero_candidates"])
+    elif jobs.get("hero"):
+        entries = [jobs["hero"]]
+    centry = next(
+        (e for e in entries if int(e.get("candidateIndex") or 0) == int(candidate_index)),
+        None,
+    )
+    if not centry:
+        raise ValueError(f"Candidate {candidate_index} not found")
+    profile = service.get_profile(db, project_id, character_id).model_dump()
+    style_profile = _resolve_style_profile(profile.get("visual_style") or "")
+    references = service.list_references(db, project_id, character_id)
+    view_specs = {spec[0]: spec for spec in _candidate_view_specs()}
+    seed = int(centry.get("seed") or _candidate_seed(character_id, candidate_index))
+    family = str(centry.get("model") or (str(centry.get("workflowKey") or "zimage").split(".")[0]))
+    provider_kind = str(centry.get("providerKind") or "local")
+    hosted = centry.get("hostedModelId")
+    source_id = None
+    denoise = None
+    force_key = centry.get("workflowKey") if provider_kind != "api" else None
+    if centry.get("conditioningMode") == CONDITIONING_REFERENCE_CONDITIONED:
+        refs = list(centry.get("referenceAssetIds") or [])
+        source_id = str(refs[0]) if refs else None
+        if family == "zimage":
+            denoise = REFERENCE_FIDELITY_DENOISE
+    char_slug = pack.get("characterSlug") or "character"
+    candidate_count = int(pack.get("candidateCount") or 1)
+    view_jobs = list(centry.get("viewJobs") or [])
+    for vj in view_jobs:
+        terminal_fail = vj.get("status") in ("failed", "error", "cancelled", "missing")
+        if not terminal_fail and vj.get("assetId"):
+            continue
+        vrole = str(vj.get("role") or "")
+        spec = view_specs.get(vrole)
+        if not spec:
+            continue
+        _role, vgoal, vcomposition, vneg = spec
+        composition = dict(vcomposition)
+        composition["candidate_index"] = int(candidate_index)
+        vprompt = _compile_visual_prompt(
+            profile,
+            prompt_goal=vgoal,
+            composition=composition,
+            references=references,
+            role=vrole,
+            extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
+            style_profile=style_profile,
+            reference_locked=bool(centry.get("referenceLocked")),
+        )
+        vtag = f"{char_slug}_{vrole}_retry" + (f"_c{int(candidate_index) + 1}" if candidate_count > 1 else "")
+        vjob = _enqueue_txt2img(
+            db,
+            project_id,
+            character_id=character_id,
+            prompt=vprompt.prompt,
+            negative_prompt=vprompt.negative_prompt,
+            tag=vtag,
+            role=vrole,
+            model_family_preference=family,
+            source_asset_id=source_id,
+            denoise=denoise,
+            seed=seed,
+            force_workflow_key=force_key,
+            provider_kind=provider_kind,
+            hosted_model_id=hosted,
+            prompt_metadata={
+                "candidateIndex": int(candidate_index),
+                "viewRole": vrole,
+                "workflowKey": force_key or vj.get("workflowKey"),
+                "modelFamily": family,
+                "referenceLocked": bool(centry.get("referenceLocked")),
+                "conditioningMode": centry.get("conditioningMode"),
+                "providerKind": provider_kind,
+                "retry": True,
+            },
+        )
+        vj["jobId"] = vjob.id
+        vj["status"] = vjob.status
+        vj["assetId"] = None
+        vj["error"] = None
+    centry["viewJobs"] = view_jobs
+    centry["status"] = "queued"
+    centry["error"] = None
+    centry["sheetAssetId"] = None
+    centry["assetId"] = None
+    if isinstance(jobs.get("hero_candidates"), list):
+        jobs["hero_candidates"] = entries
+        if entries and int(entries[0].get("candidateIndex") or 0) == int(candidate_index):
+            jobs["hero"] = centry
+    elif jobs.get("hero"):
+        jobs["hero"] = centry
+    pack["jobs"] = jobs
+    pack["status"] = "GENERATING"
+    pack["error"] = None
+    pack["phase"] = "hero"
+    return _save_pack(db, project_id, character_id, pack)
+
+
 def _enqueue_character_sheet(
     db: Session,
     project_id: str,
@@ -2018,6 +2398,8 @@ def _enqueue_txt2img(
     denoise: float | None = None,
     seed: int | None = None,
     force_workflow_key: str | None = None,
+    provider_kind: str = "local",
+    hosted_model_id: str | None = None,
 ) -> Job:
     from ..storyboard_jobs import enqueue_imagegen_job
 
@@ -2052,6 +2434,47 @@ def _enqueue_txt2img(
         body["denoise"] = denoise
     if seed is not None:
         body["seed"] = seed
+    if provider_kind == "api":
+        hosted = hosted_model_id or model_family_preference
+        family = _hosted_family_for_model(str(hosted)) or model_family_preference
+        body["modelFamilyPreference"] = family
+        body["model"] = hosted
+        body["lockModelFamily"] = True
+        body["providerPreference"] = "cloud"
+        body["hostedModelId"] = hosted
+        # Never pin a local Comfy workflow for an API-only candidate.
+        body.pop("forceWorkflowKey", None)
+        body.pop("allow_force_workflow_key", None)
+        if not source_asset_id:
+            body.pop("source_asset_id", None)
+        job = enqueue_imagegen_job(db, project_id, body)
+        try:
+            params = json.loads(job.params_json or "{}")
+        except Exception:
+            params = {}
+        runtime_key = str((params.get("imageRuntime") or {}).get("workflowKey") or "")
+        fal_id = _fal_image_model_id(str(hosted))
+        if fal_id:
+            # Existing fal queue client can dispatch this still-image endpoint.
+            # Pin it so the worker submits through Fal, never Comfy.
+            params["cloudPaid"] = True
+            params["falImageModelId"] = fal_id
+            params["hostedModelId"] = hosted
+            params["providerPreference"] = "cloud"
+            job.params_json = json.dumps(params)
+            db.commit()
+            db.refresh(job)
+            return job
+        cloud_paid = bool(params.get("cloudPaid"))
+        if not cloud_paid and not runtime_key.startswith("imagen."):
+            job.status = "failed"
+            job.message = (
+                f"API model {hosted} resolved to local workflow {runtime_key or 'unknown'}; "
+                "refusing silent Comfy/Z-Image substitute."
+            )
+            db.commit()
+            db.refresh(job)
+        return job
     if force_workflow_key:
         body["forceWorkflowKey"] = force_workflow_key
         body["allow_force_workflow_key"] = True

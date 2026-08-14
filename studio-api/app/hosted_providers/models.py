@@ -16,6 +16,13 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
             "fal": {"providerModelId": "fal-ai/flux/dev", "status": "Available but Uncertified"},
         },
     },
+    "Krea 2": {
+        "displayName": "Krea 2",
+        "modality": "image",
+        "mappings": {
+            "fal": {"providerModelId": "fal-ai/krea-2/turbo", "status": "Available but Uncertified"},
+        },
+    },
     "Seedance": {
         "displayName": "Seedance",
         "modality": "video",

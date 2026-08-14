@@ -73,6 +73,12 @@ export type CharacterCandidate = {
   viewJobs?: CharacterViewJob[];
   /** Error message when the candidate failed. */
   error?: string | null;
+  /** local | api — never infer from a truthy Comfy provider string. */
+  providerKind?: "local" | "api";
+  /** PROFILE_GUIDED | REFERENCE_CONDITIONED */
+  conditioningMode?: "PROFILE_GUIDED" | "REFERENCE_CONDITIONED" | null;
+  selectedSource?: string | null;
+  hostedModelId?: string | null;
 };
 
 /** Truthful per-candidate generation stage derived from backend state. */
@@ -175,6 +181,8 @@ export const CHARACTER_STYLE_OPTIONS = [
   { value: "watercolor", label: "Watercolor" },
   { value: "oil_painting", label: "Oil Painting" },
   { value: "documentary_realism", label: "Photorealistic" },
+  { value: "cartoon", label: "Cartoon" },
+  { value: "concept_art", label: "Concept Art" },
 ];
 
 export const CHARACTER_GENDER_OPTIONS = [

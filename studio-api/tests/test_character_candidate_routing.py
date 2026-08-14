@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.character_identity.visual_sheet import (
     COMPOSITION_INTENT_FULL_BODY_CASTING,
+    CONDITIONING_PROFILE_GUIDED,
+    CONDITIONING_REFERENCE_CONDITIONED,
     NO_REFERENCE_TXT2IMG_FAMILIES,
     REFERENCE_FIDELITY_MODE_LIMITED,
     REFERENCE_FIDELITY_DENOISE,
@@ -73,28 +75,35 @@ def test_resolve_reference_asset_id_returns_none_when_no_reference_attached():
 
 
 def test_reference_locked_routing_uses_zimage_ref_edit_with_source_pixels():
-    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-123")
+    """Explicit Z-Image + reference stays REFERENCE_CONDITIONED with pixels."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-123",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
     assert len(plan) == 4
     for route in plan:
         stage1 = route["stage1"]
         assert stage1["modelFamilyPreference"] == REFERENCE_LOCKED_FAMILY
         assert stage1["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
-        # The reference asset ID is passed as source_asset_id so its PIXELS
-        # participate in conditioning (img2img latent path), not prompt text.
         assert stage1["source_asset_id"] == "sheet-123"
         assert stage1["referenceAssetId"] == "sheet-123"
         assert stage1["referenceLocked"] is True
         assert stage1["referenceFidelityMode"] == REFERENCE_FIDELITY_MODE_LIMITED
-        # Fidelity-first denoise is applied so the reference latent is preserved.
         assert stage1["denoise"] == REFERENCE_FIDELITY_DENOISE
+        assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
+        assert stage1["providerKind"] == "local"
 
 
 def test_reference_locked_routing_records_honest_limited_mode():
-    """Only one Certified reference-capable model exists today — record honestly."""
-    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
+    """Explicit Z-Image + reference records limited fidelity honestly."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
     modes = {route["stage1"]["referenceFidelityMode"] for route in plan}
     assert REFERENCE_FIDELITY_MODE_LIMITED in modes
-    # All candidates use the SAME reference-capable workflow (no fabrication).
     keys = {route["stage1"]["workflowKey"] for route in plan}
     assert keys == {REFERENCE_LOCKED_WORKFLOW_KEY}
 
@@ -267,11 +276,13 @@ def test_no_reference_prompt_does_not_emit_reference_reproduction_block():
 
 
 def test_reference_sheet_is_passed_as_source_pixels_not_filename():
-    """The routing plan carries the sheet asset id as source_asset_id (pixels)."""
-    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-abc")
+    """Z-Image + reference carries the sheet asset id as source_asset_id (pixels)."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-abc",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
     for route in plan:
-        # source_asset_id drives the img2img latent path — the sheet's pixels
-        # participate in conditioning. The prompt never relies on the filename.
         assert route["stage1"]["source_asset_id"] == "sheet-abc"
         assert route["stage1"]["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
 
@@ -283,8 +294,13 @@ def test_regeneration_preserves_reference_lock_and_routing():
     """Re-running the routing plan from the same references yields the same lock."""
     refs = [{"reference_role": "reference_image", "asset_id": "sheet-1"}]
     ref_id = _resolve_reference_asset_id(refs)
-    plan_a = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=ref_id)
-    plan_b = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=ref_id)
+    sources = {"local": {"family": "zimage"}, "api": None}
+    plan_a = _build_candidate_routing_plan(
+        candidate_count=4, reference_asset_id=ref_id, generator_sources=sources
+    )
+    plan_b = _build_candidate_routing_plan(
+        candidate_count=4, reference_asset_id=ref_id, generator_sources=sources
+    )
     assert plan_a == plan_b
     for route in plan_a:
         assert route["stage1"]["referenceLocked"] is True
@@ -293,12 +309,225 @@ def test_regeneration_preserves_reference_lock_and_routing():
 
 def test_regeneration_after_reference_detached_drops_reference_lock():
     """If the creator detaches the reference, regeneration is no longer locked."""
-    plan_with = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
-    plan_without = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
+    sources = {"local": {"family": "zimage"}, "api": None}
+    plan_with = _build_candidate_routing_plan(
+        candidate_count=4, reference_asset_id="sheet-1", generator_sources=sources
+    )
+    plan_without = _build_candidate_routing_plan(
+        candidate_count=4, reference_asset_id=None, generator_sources=sources
+    )
     assert all(r["stage1"]["referenceLocked"] for r in plan_with)
     assert all(not r["stage1"]["referenceLocked"] for r in plan_without)
     assert all(r["stage1"]["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_with)
     assert all(r["stage1"]["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY for r in plan_without)
+
+
+def test_illustrious_with_reference_is_profile_guided_no_source_pixels():
+    plan = _build_candidate_routing_plan(
+        candidate_count=2,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "illustrious"}, "api": None},
+    )
+    assert len(plan) == 2
+    for route in plan:
+        stage1 = route["stage1"]
+        assert stage1["modelFamilyPreference"] == "illustrious"
+        assert stage1["workflowKey"] == "illustrious.txt2img"
+        assert stage1["source_asset_id"] is None
+        assert stage1["referenceLocked"] is False
+        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+        assert stage1["providerKind"] == "local"
+
+
+def test_qwen_with_reference_is_profile_guided_no_source_pixels():
+    plan = _build_candidate_routing_plan(
+        candidate_count=2,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "qwen2512"}, "api": None},
+    )
+    assert len(plan) == 2
+    for route in plan:
+        stage1 = route["stage1"]
+        assert stage1["modelFamilyPreference"] == "qwen2512"
+        assert stage1["workflowKey"] == "qwen2512.txt2img"
+        assert stage1["source_asset_id"] is None
+        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+
+
+def test_api_only_does_not_plan_comfy_or_zimage_jobs():
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": None, "api": {"model": "nano-banana-kie"}},
+    )
+    assert len(plan) == 4
+    for route in plan:
+        stage1 = route["stage1"]
+        assert stage1["providerKind"] == "api"
+        assert stage1["hostedModelId"] == "nano-banana-kie"
+        assert stage1["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY
+        assert stage1["modelFamilyPreference"] != "zimage"
+        assert "comfy" not in str(stage1["workflowKey"]).lower()
+        assert stage1["source_asset_id"] is None
+        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+
+
+def test_both_pools_mix_local_and_api_candidates():
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={
+            "local": {"family": "zimage"},
+            "api": {"model": "nano-banana-kie"},
+        },
+    )
+    kinds = [r["stage1"]["providerKind"] for r in plan]
+    assert "local" in kinds
+    assert "api" in kinds
+    local = [r["stage1"] for r in plan if r["stage1"]["providerKind"] == "local"]
+    api = [r["stage1"] for r in plan if r["stage1"]["providerKind"] == "api"]
+    assert all(s["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED for s in local)
+    assert all(s["source_asset_id"] == "sheet-1" for s in local)
+    assert all(s["hostedModelId"] == "nano-banana-kie" for s in api)
+    assert all(s["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY for s in api)
+
+
+def test_auto_select_with_reference_may_mix_conditioning_modes():
+    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
+    modes = {r["stage1"]["conditioningMode"] for r in plan}
+    families = {r["stage1"]["modelFamilyPreference"] for r in plan}
+    # Auto may mix; at least one planned family must be honest about its mode.
+    for route in plan:
+        stage1 = route["stage1"]
+        if stage1["modelFamilyPreference"] in {"illustrious", "qwen2512", "qwen"}:
+            assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+            assert stage1["source_asset_id"] is None
+        if stage1["modelFamilyPreference"] == "zimage":
+            assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
+            assert stage1["source_asset_id"] == "sheet-1"
+    assert families
+
+
+
+def test_api_only_krea_routes_like_kie_no_zimage():
+    """Hosted Krea uses the same generatorSources.api.model plan as Kie."""
+    from app.character_identity.visual_sheet import (
+        KREA_LOCAL_TXT2IMG_KEY,
+        _candidate_provenance_label,
+        _hosted_family_for_model,
+        _hosted_provider_label,
+        _krea_model_display,
+    )
+
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": None, "api": {"model": "krea2-turbo-fal"}},
+    )
+    assert len(plan) == 4
+    for route in plan:
+        stage1 = route["stage1"]
+        assert stage1["providerKind"] == "api"
+        assert stage1["hostedModelId"] == "krea2-turbo-fal"
+        assert stage1["selectedSource"] == "krea2-turbo-fal"
+        assert stage1["modelFamilyPreference"] == "krea2"
+        assert stage1["workflowKey"] == KREA_LOCAL_TXT2IMG_KEY
+        assert stage1["workflowKey"] != REFERENCE_LOCKED_WORKFLOW_KEY
+        assert stage1["modelFamilyPreference"] != "zimage"
+        assert "comfy" not in str(stage1["workflowKey"]).lower()
+        assert stage1["source_asset_id"] is None
+        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+    assert _hosted_family_for_model("krea2-turbo-fal") == "krea2"
+    assert _hosted_provider_label("krea2-turbo-fal") == "krea"
+    assert _krea_model_display("krea2-turbo-fal") == "Krea 2 Turbo"
+    assert _candidate_provenance_label(
+        provider_kind="api",
+        provider="krea",
+        model="Krea 2 Turbo",
+        hosted_model_id="krea2-turbo-fal",
+        selected_source="krea2-turbo-fal",
+        conditioning_mode=CONDITIONING_PROFILE_GUIDED,
+    ) == "API — Krea / Krea 2 Turbo — Profile Guided"
+
+
+def test_local_krea2_is_profile_guided_no_silent_zimage():
+    plan = _build_candidate_routing_plan(
+        candidate_count=2,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "krea2"}, "api": None},
+    )
+    assert len(plan) == 2
+    for route in plan:
+        stage1 = route["stage1"]
+        assert stage1["providerKind"] == "local"
+        assert stage1["modelFamilyPreference"] == "krea2"
+        assert stage1["workflowKey"] == "krea2.turbo_txt2img"
+        assert stage1["source_asset_id"] is None
+        assert stage1["referenceLocked"] is False
+        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+
+
+def test_auto_select_does_not_default_to_krea():
+    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
+    first = plan[0]["stage1"]["modelFamilyPreference"]
+    assert first != "krea2"
+    assert first in NO_REFERENCE_TXT2IMG_FAMILIES
+    families = [r["stage1"]["modelFamilyPreference"] for r in plan]
+    assert families[0] != "krea2"
+
+
+def test_krea_medium_and_large_are_model_specific():
+    from app.character_identity.visual_sheet import _krea_model_display, _hosted_family_for_model
+
+    assert _hosted_family_for_model("krea2-medium-fal") == "krea2"
+    assert _hosted_family_for_model("krea2-large-fal") == "krea2"
+    assert _krea_model_display("krea2-medium-fal") == "Krea 2 Medium"
+    assert _krea_model_display("krea2-large-fal") == "Krea 2 Large"
+    plan = _build_candidate_routing_plan(
+        candidate_count=1,
+        reference_asset_id=None,
+        generator_sources={"local": None, "api": {"model": "krea2-large-fal"}},
+    )
+    assert plan[0]["stage1"]["hostedModelId"] == "krea2-large-fal"
+    assert plan[0]["stage1"]["providerKind"] == "api"
+
+
+
+
+def test_fal_krea_dock_ids_resolve_to_fal_endpoints():
+    from app.character_identity.visual_sheet import _fal_image_model_id
+    from app.fal_catalog import build_fal_image_arguments, fal_image_model_id_for_dock
+    from app.fal_client import extract_image_url
+
+    assert fal_image_model_id_for_dock("krea2-turbo-fal") == "fal-ai/krea-2/turbo"
+    assert fal_image_model_id_for_dock("krea2-medium-fal") == "krea/v2/medium/text-to-image"
+    assert fal_image_model_id_for_dock("krea2-large-fal") == "krea/v2/large/text-to-image"
+    assert _fal_image_model_id("krea2-turbo-fal") == "fal-ai/krea-2/turbo"
+    assert _fal_image_model_id("nano-banana-kie") is None
+    args = build_fal_image_arguments(
+        model_id="fal-ai/krea-2/turbo", prompt="a character sheet", width=1024, height=1024, seed=7
+    )
+    assert args["prompt"] == "a character sheet"
+    assert args["seed"] == 7
+    assert args["image_size"] == {"width": 1024, "height": 1024}
+    med = build_fal_image_arguments(model_id="krea/v2/medium/text-to-image", prompt="x", width=1024, height=1024)
+    assert med["aspect_ratio"] == "1:1"
+    assert extract_image_url({"images": [{"url": "https://fal.media/x.png"}]}) == "https://fal.media/x.png"
+
+
+def test_pin_fal_image_job_marks_cloud_paid_without_submit():
+    """Enqueue pin is a params write only — never calls fal.run."""
+    from app.character_identity.visual_sheet import _fal_image_model_id
+
+    hosted = "krea2-turbo-fal"
+    fal_id = _fal_image_model_id(hosted)
+    params = {"cloudPaid": False, "imageRuntime": {"workflowKey": "zimage.txt2img"}}
+    assert fal_id == "fal-ai/krea-2/turbo"
+    params["cloudPaid"] = True
+    params["falImageModelId"] = fal_id
+    assert params["cloudPaid"] is True
+    assert not str(params["imageRuntime"]["workflowKey"]).startswith("comfy")
+
 
 
 if __name__ == "__main__":

@@ -216,6 +216,11 @@ def test_comfy_health_optional_missing_does_not_degrade_runtime(setup_data_dir: 
     # so it must NOT be in missingRequiredModelComponentIds.
     assert "ltx_2_5_text_encoder" in missing_all
     assert "ltx_2_5_text_encoder" not in missing_required
+    missing_optional = payload.get("missingOptionalModelComponentIds", [])
+    assert "ltx_2_5_text_encoder" in missing_optional
+    assert "krea2_models" in missing_all
+    assert "krea2_models" not in missing_required
+    assert "krea2_models" in missing_optional
 
 
 # ── _eval_models_video LTX 2.5 requires all three ────────────────────────
@@ -296,3 +301,71 @@ def test_status_probe_optional_missing_stays_healthy() -> None:
 
     result = asyncio.run(_probe_comfy(FakeCtx()))
     assert result["status"] == "healthy", f"optional-missing must stay healthy, got {result['status']}"
+
+def test_health_endpoint_top_level_missing_lists_exclude_optional(monkeypatch) -> None:
+    """Top-level missing_models / missing_model_component_ids must stay required-only.
+
+    Optional krea2_models belongs on missing_optional_* so a frontend ||-fallthrough
+    from empty missingRequiredModelComponentIds cannot treat Krea 2 as required.
+    """
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.routers import api as api_mod
+
+    fake = {
+        "reachable": True,
+        "status": "ready",
+        "version": "0.3.0",
+        "nodeCatalogAvailable": True,
+        "reasonCode": None,
+        "recommendedAction": None,
+        "message": "ComfyUI is reachable.",
+        "models": [
+            {"componentId": "ltx_checkpoint", "name": "LTX Checkpoint", "required": True, "present": True},
+            {"componentId": "krea2_models", "name": "Krea 2 Turbo (+RAW) Models", "required": False, "present": False},
+        ],
+        "missingModelComponentIds": ["krea2_models"],
+        "missingRequiredModelComponentIds": [],
+        "missingOptionalModelComponentIds": ["krea2_models"],
+    }
+
+    async def _fake_comfy_health(*_a, **_k):
+        return fake
+
+    monkeypatch.setattr("app.comfy_health.comfy_health", _fake_comfy_health)
+
+    fake_caps = SimpleNamespace(
+        callable=[],
+        blockers=[],
+        capabilities=[],
+        deferred=[],
+        counts={},
+        readinessTotal=0,
+    )
+    monkeypatch.setattr(
+        "app.capabilities.service.get_capabilities",
+        AsyncMock(return_value=fake_caps),
+    )
+    monkeypatch.setattr(
+        "app.codirector.service.get_health",
+        AsyncMock(return_value=SimpleNamespace(
+            provider_id=None,
+            status="unavailable",
+            reachable=False,
+            model_available=False,
+            selected_model=None,
+        )),
+    )
+    monkeypatch.setattr(api_mod, "_probe_bible_storage", lambda: "ready")
+
+    payload = asyncio.run(api_mod.health())
+    data = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+    assert "krea2_models" not in (data.get("missing_model_component_ids") or [])
+    assert "Krea 2 Turbo (+RAW) Models" not in (data.get("missing_models") or [])
+    assert data.get("missing_optional_model_component_ids") == ["krea2_models"]
+    assert "Krea 2 Turbo (+RAW) Models" in (data.get("missing_optional_models") or [])
+    assert (data.get("comfy") or {}).get("missingRequiredModelComponentIds") == []
+    assert data.get("comfy_status") == "ready"
+

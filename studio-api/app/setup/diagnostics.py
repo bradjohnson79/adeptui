@@ -190,7 +190,7 @@ def _verify_krea2_files(location: str | None) -> Verification:
     return Verification(
         False,
         not any(found),
-        "required_models_missing",
+        "optional_models_missing",
         "One or more Krea 2 model files are missing.",
         str(roots[0]) if roots else None,
         details=tuple(details),

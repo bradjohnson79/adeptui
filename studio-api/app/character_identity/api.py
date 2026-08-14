@@ -933,6 +933,26 @@ def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStar
     return {"ok": True, "pack": pack}
 
 
+class VisualSheetRetryBody(BaseModel):
+    candidateIndex: int = 0
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/visual-sheet/retry")
+def retry_visual_sheet(project_id: str, character_id: str, body: VisualSheetRetryBody, db: Session = Depends(get_db)):
+    """Re-enqueue failed views for one candidate. Does not restart the pack."""
+    _require_flag()
+    _project(db, project_id)
+    from .visual_sheet import retry_visual_sheet_candidate
+
+    try:
+        pack = retry_visual_sheet_candidate(
+            db, project_id, character_id, int(body.candidateIndex),
+        )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
+    return {"ok": True, "pack": pack}
+
+
 @router.post("/projects/{project_id}/characters/{character_id}/visual-sheet/advance")
 def advance_visual_sheet(project_id: str, character_id: str, db: Session = Depends(get_db)):
     """Poll jobs, attach role-mapped assets, enqueue next sheet phase."""

@@ -150,3 +150,18 @@ def test_no_hardcoded_api_in_empty_catalog(isolated_catalog):
     save_catalog({"activeProviderId": None, "models": [], "emptyReason": "no_provider"})
     for modality in ("llm", "video", "image", "audio"):
         assert dock_api_models(modality)["models"] == []
+
+
+def test_fal_catalog_includes_hosted_krea2():
+    from app.hosted_providers.discovery import _PROVIDER_CATALOG
+    from app.production_control.runtime_map import image_family_for_dock_model
+
+    fal = _PROVIDER_CATALOG["fal"]
+    by_id = {row["dockModelId"]: row for row in fal}
+    assert "krea2-turbo-fal" in by_id
+    assert by_id["krea2-turbo-fal"]["providerModelId"] == "fal-ai/krea-2/turbo"
+    assert by_id["krea2-medium-fal"]["providerModelId"] == "krea/v2/medium/text-to-image"
+    assert by_id["krea2-large-fal"]["providerModelId"] == "krea/v2/large/text-to-image"
+    assert image_family_for_dock_model("krea2-turbo-fal") == "krea2"
+    assert image_family_for_dock_model("krea2-medium-fal") == "krea2"
+

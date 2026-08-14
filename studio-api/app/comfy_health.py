@@ -162,6 +162,8 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
         "recommendedAction": "start_comfyui",
         "models": [],
         "missingModelComponentIds": [],
+        "missingRequiredModelComponentIds": [],
+        "missingOptionalModelComponentIds": [],
         "checkedAt": _now(),
     }
 
@@ -177,6 +179,11 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
         ]
         payload["missingRequiredModelComponentIds"] = [
             item["componentId"] for item in payload["models"] if item["required"] and not item["present"]
+        ]
+        payload["missingOptionalModelComponentIds"] = [
+            item["componentId"]
+            for item in payload["models"]
+            if (not item["required"]) and not item["present"]
         ]
         return payload
 
@@ -213,10 +220,16 @@ async def comfy_health(*, include_nodes: bool = True) -> dict[str, Any]:
     missing_required = [
         item["componentId"] for item in payload["models"] if item["required"] and not item["present"]
     ]
+    missing_optional = [
+        item["componentId"]
+        for item in payload["models"]
+        if (not item["required"]) and not item["present"]
+    ]
     # Expose the required-only subset explicitly so downstream consumers (status probe,
     # capability layer, UI) can distinguish "a required model is missing" (runtime-relevant)
     # from "an optional/generator-specific component is missing" (generator-relevant only).
     payload["missingRequiredModelComponentIds"] = missing_required
+    payload["missingOptionalModelComponentIds"] = missing_optional
     if missing_required:
         payload["status"] = "degraded"
         payload["reasonCode"] = MODEL_MISSING

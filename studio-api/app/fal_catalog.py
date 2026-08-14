@@ -85,6 +85,61 @@ FAL_MODELS: dict[FalEngine, FalModel] = {
 FAL_IMAGE_MODELS: dict[str, FalModel] = {}
 
 
+
+# Dock id -> fal still-image endpoint. Video engines stay in FAL_MODELS.
+# These are the same providerModelIds as hosted_providers.discovery fal image rows.
+FAL_IMAGE_ENDPOINT_BY_DOCK: dict[str, str] = {
+    "krea2-turbo-fal": "fal-ai/krea-2/turbo",
+    "krea2-medium-fal": "krea/v2/medium/text-to-image",
+    "krea2-large-fal": "krea/v2/large/text-to-image",
+    "flux-fal": "fal-ai/flux/dev",
+}
+
+
+def fal_image_model_id_for_dock(dock_model_id: str | None) -> str | None:
+    """Resolve a Production Dock / Character API model id to a fal still-image endpoint."""
+    mid = (dock_model_id or "").strip()
+    if not mid:
+        return None
+    if mid in FAL_IMAGE_ENDPOINT_BY_DOCK:
+        return FAL_IMAGE_ENDPOINT_BY_DOCK[mid]
+    try:
+        from .hosted_providers.discovery import _PROVIDER_CATALOG
+
+        for row in _PROVIDER_CATALOG.get("fal") or []:
+            if str(row.get("dockModelId") or "") != mid:
+                continue
+            if str(row.get("modality") or "") != "image":
+                continue
+            pid = str(row.get("providerModelId") or "").strip()
+            if pid:
+                return pid
+    except Exception:
+        pass
+    return None
+
+
+def build_fal_image_arguments(
+    *,
+    model_id: str,
+    prompt: str,
+    width: int = 1024,
+    height: int = 1024,
+    seed: int = -1,
+) -> dict[str, Any]:
+    """Minimal still-image payload for fal queue submit. Does not start a job."""
+    args: dict[str, Any] = {"prompt": prompt, "num_images": 1}
+    if seed is not None and int(seed) >= 0:
+        args["seed"] = int(seed)
+    mid = (model_id or "").strip()
+    w, h = int(width or 1024), int(height or 1024)
+    if mid.startswith("krea/v2"):
+        args["aspect_ratio"] = "1:1" if w == h else ("16:9" if w > h else "9:16")
+    else:
+        args["image_size"] = {"width": w, "height": h}
+    return args
+
+
 def is_fal_engine(engine: str | None) -> bool:
     return (engine or "") in FAL_MODELS
 

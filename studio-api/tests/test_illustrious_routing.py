@@ -260,19 +260,27 @@ def test_no_reference_non_anime_plan_keeps_default_order():
 
 
 def test_reference_locked_plan_stays_zimage_ref_edit_with_anime_style(monkeypatch):
+    """Explicit Illustrious + reference is PROFILE_GUIDED, not forced onto zimage."""
     from app.character_identity import visual_sheet
 
-    monkeypatch.setattr(visual_sheet, "_candidate_family_executable", lambda fam: fam == "illustrious" or fam in {"qwen2512", "zimage"})
+    monkeypatch.setattr(
+        visual_sheet,
+        "_candidate_family_executable",
+        lambda fam: fam == "illustrious" or fam in {"qwen2512", "zimage"},
+    )
     plan = visual_sheet._build_candidate_routing_plan(
-        candidate_count=4, reference_asset_id="sheet-1", visual_style="anime"
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        visual_style="anime",
+        generator_sources={"local": {"family": "illustrious"}, "api": None},
     )
     assert len(plan) == 4
     for route in plan:
-        assert route["stage1"]["modelFamilyPreference"] == visual_sheet.REFERENCE_LOCKED_FAMILY
-        assert route["stage1"]["workflowKey"] == visual_sheet.REFERENCE_LOCKED_WORKFLOW_KEY
-        assert route["stage1"]["referenceLocked"] is True
-        # Illustrious never used for reference-locked candidates (Reference Law).
-        assert route["stage1"]["modelFamilyPreference"] != "illustrious"
+        assert route["stage1"]["modelFamilyPreference"] == "illustrious"
+        assert route["stage1"]["workflowKey"] == "illustrious.txt2img"
+        assert route["stage1"]["source_asset_id"] is None
+        assert route["stage1"]["conditioningMode"] == visual_sheet.CONDITIONING_PROFILE_GUIDED
+        assert route["stage1"]["providerKind"] == "local"
 
 
 def _illustrious_certified() -> bool:

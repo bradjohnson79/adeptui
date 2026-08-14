@@ -239,7 +239,7 @@
   font-size: 11px;
   letter-spacing: 0.03em;
   color: var(--text-muted, #7c8496);
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .character-core__actions {

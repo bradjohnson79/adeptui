@@ -221,4 +221,117 @@ test.describe("Character Creator Simplification", () => {
     const serverErrors = observer.apiFailures.filter((f) => f.status >= 500);
     expect(serverErrors, serverErrors.map((f) => `${f.method} ${f.status} ${f.url}`).join("\n")).toHaveLength(0);
   });
+
+  test("generation UX: progress bar, per-candidate spinner, completion, and provenance", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(720_000); // GPU Character Sheet generation (4 views) exceeds the default 120s.
+    const observer: Observer = { consoleErrors: [], pageErrors: [], failedRequests: [], apiFailures: [] };
+    attachObservers(page, observer);
+
+    await page.goto(`${BASE}/project/${projectId}?workspace=characters`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(1500);
+
+    // Create + name a character (no reference → txt2img generators eligible).
+    await page.getByTestId("character-create").click();
+    await expect(page.getByTestId("character-core")).toBeVisible({ timeout: 15000 });
+    await page.getByTestId("character-field-name").fill("E2E Gen Hero");
+    await page.waitForTimeout(1200); // debounce save
+
+    // Enable Local generator + pick Auto Select (style routing).
+    const localEnable = page.getByTestId("generator-local-enable");
+    if (!(await localEnable.isChecked())) await localEnable.check();
+    await expect(page.getByTestId("generator-local-select")).toBeEnabled();
+
+    // Start Character Sheet generation.
+    await page.getByTestId("character-generate").click();
+
+    // Progress bar appears.
+    await expect(page.getByTestId("generation-progress")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByTestId("generation-progress-label")).toContainText(/views complete|character sheets complete|Preparing/);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gen-ux-01-progress.png") });
+
+    // At least one per-candidate spinner while generating (best-effort; gen may be fast).
+    const loading = page.locator('[data-testid^="candidate-loading-"]');
+    const anyLoading = await loading.first().isVisible().catch(() => false);
+    if (anyLoading) {
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gen-ux-02-spinners.png") });
+    }
+
+    // Wait for completion: first candidate reaches a terminal state.
+    const firstCandidate = page.getByTestId("character-candidate-0");
+    await expect(firstCandidate).toHaveAttribute("data-stage", /complete|failed/, { timeout: 600_000 });
+    const stage = await firstCandidate.getAttribute("data-stage");
+    // On success, spinner is gone and provenance is shown.
+    if (stage === "complete") {
+      await expect(page.getByTestId("candidate-loading-0")).toHaveCount(0);
+      await expect(page.getByTestId("candidate-provenance-0")).toContainText(/LOCAL|API/);
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gen-ux-03-complete.png") });
+    } else {
+      // Failure state must show an error, not an infinite loader.
+      await expect(page.getByTestId("candidate-error-0")).toBeVisible();
+      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "gen-ux-03-failed.png") });
+    }
+
+    expect(observer.pageErrors, observer.pageErrors.join("\n")).toHaveLength(0);
+  });
+
+  test("qwen image dropdown: visible without reference, disabled with reference + reason", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    const observer: Observer = { consoleErrors: [], pageErrors: [], failedRequests: [], apiFailures: [] };
+    attachObservers(page, observer);
+
+    await page.goto(`${BASE}/project/${projectId}?workspace=characters`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.waitForTimeout(1500);
+
+    await page.getByTestId("character-create").click();
+    await expect(page.getByTestId("character-core")).toBeVisible({ timeout: 15000 });
+    await page.getByTestId("character-field-name").fill("E2E Qwen Hero");
+    await page.waitForTimeout(1200);
+
+    // Enable Local generator; NO reference attached.
+    const localEnable = page.getByTestId("generator-local-enable");
+    if (!(await localEnable.isChecked())) await localEnable.check();
+    const select = page.getByTestId("generator-local-select");
+    await expect(select).toBeEnabled();
+
+    // Qwen Image 2512 must be present and selectable (no reference).
+    const qwen = page.getByTestId("generator-local-option-qwen2512");
+    await expect(qwen).toHaveCount(1);
+    await expect(qwen).not.toBeDisabled();
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qwen-01-visible-no-reference.png") });
+
+    // Attach a Character Reference → Qwen becomes visible but DISABLED with a reason.
+    const selectedId = await page.getByTestId("character-select").inputValue();
+    const asset = await uploadLibraryImage(request, projectId);
+    const attach = await request.post(`${API}/api/projects/${projectId}/characters/${selectedId}/references`, {
+      data: { asset_id: asset.id, reference_role: "reference_image", source_type: "upload" },
+    });
+    expect(attach.ok(), `attach reference failed: ${await attach.text()}`).toBeTruthy();
+
+    // Reload so the selector recomputes with hasReference=true.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1800);
+    await expect(page.getByTestId("character-core")).toBeVisible({ timeout: 15000 });
+    const localEnable2 = page.getByTestId("generator-local-enable");
+    if (!(await localEnable2.isChecked())) await localEnable2.check();
+
+    const qwenAfter = page.getByTestId("generator-local-option-qwen2512");
+    await expect(qwenAfter).toHaveCount(1);
+    await expect(qwenAfter).toBeDisabled();
+    // Reason is surfaced via title / data attribute.
+    const reason = (await qwenAfter.getAttribute("data-disabled-reason")) || (await qwenAfter.getAttribute("title")) || "";
+    expect(reason).toMatch(/text-to-image|Character Reference/i);
+    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qwen-02-disabled-with-reference.png") });
+
+    expect(observer.pageErrors, observer.pageErrors.join("\n")).toHaveLength(0);
+  });
 });

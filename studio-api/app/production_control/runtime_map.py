@@ -23,6 +23,9 @@ IMAGE_FAMILY_BY_MODEL: dict[str, str] = {
     "flux-kie": "flux",
     "flux-fal": "flux",
     "nano-banana-kie": "imagen",
+    "krea2-turbo-fal": "krea2",
+    "krea2-medium-fal": "krea2",
+    "krea2-large-fal": "krea2",
 }
 
 # Dock model id → video engine id used by resolve_engine_id / workflow_resolver

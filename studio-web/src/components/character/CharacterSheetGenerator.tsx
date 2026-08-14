@@ -20,11 +20,23 @@ type Props = {
   sources: Sources;
   disabled?: boolean;
   onCandidates: (candidates: CharacterCandidate[]) => void;
+  retryHandlerRef?: { current: ((candidate: CharacterCandidate) => void) | null };
 };
 
 function readCandidates(pack: unknown): CharacterCandidate[] {
   const p = pack as { candidates?: CharacterCandidate[] } | undefined;
   return (p?.candidates || []) as CharacterCandidate[];
+}
+
+function viewsTerminal(c: CharacterCandidate): boolean {
+  const views = c.viewJobs || [];
+  if (!views.length) {
+    return c.status === "failed" || c.status === "done" || !!c.sheetAssetId || !!c.assetId;
+  }
+  return views.every(
+    (v) =>
+      ["done", "failed", "error", "cancelled", "missing"].includes(v.status || "") || !!v.assetId,
+  );
 }
 
 export function CharacterSheetGenerator({
@@ -34,6 +46,7 @@ export function CharacterSheetGenerator({
   sources,
   disabled,
   onCandidates,
+  retryHandlerRef,
 }: Props) {
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
@@ -60,22 +73,12 @@ export function CharacterSheetGenerator({
           setCandidates(cands);
           onCandidates(cands);
         }
-        // Done when every candidate reached a terminal state (complete or failed).
-        const allDone =
-          cands.length > 0 &&
-          cands.every((c) => {
-            const failed =
-              c.status === "failed" ||
-              (c.viewJobs || []).some((v) =>
-                ["failed", "error", "cancelled", "missing"].includes(v.status || ""),
-              );
-            return failed || c.status === "done" || c.assetId || c.sheetAssetId;
-          });
+        // Keep polling until every required view is terminal (16 views for a 4x4 pack).
+        const allDone = cands.length > 0 && cands.every(viewsTerminal);
         if (
           allDone ||
           pack?.status === "READY_FOR_OWNER" ||
-          pack?.status === "OWNER_APPROVED" ||
-          pack?.status === "FAILED"
+          pack?.status === "OWNER_APPROVED"
         ) {
           pollingRef.current = false;
           setGenerating(false);
@@ -120,12 +123,43 @@ export function CharacterSheetGenerator({
       setCandidates(initial);
       onCandidates(initial);
       pollingRef.current = true;
-      void poll(120);
+      void poll(180);
     } catch (e) {
       setGenerating(false);
       setMessage(e instanceof Error ? e.message : "Generation failed to start.");
     }
   }, [canGenerate, projectId, characterId, profile, sources, onCandidates, poll]);
+
+  const retryCandidate = useCallback(
+    async (candidate: CharacterCandidate) => {
+      const idx = candidate.candidateIndex;
+      if (idx == null) return;
+      setGenerating(true);
+      setMessage("Retrying failed candidate…");
+      try {
+        const res = await api.retryCharacterVisualSheetCandidate(projectId, characterId, idx);
+        const next = readCandidates((res as { pack?: unknown }).pack);
+        if (next.length) {
+          setCandidates(next);
+          onCandidates(next);
+        }
+        if (!pollingRef.current) {
+          pollingRef.current = true;
+          void poll(180);
+        }
+      } catch (e) {
+        if (!pollingRef.current) setGenerating(false);
+        setMessage(e instanceof Error ? e.message : "Retry failed to start.");
+      }
+    },
+    [projectId, characterId, onCandidates, poll],
+  );
+
+  if (retryHandlerRef) {
+    retryHandlerRef.current = (c) => {
+      void retryCandidate(c);
+    };
+  }
 
   return (
     <div className="character-core__generate">

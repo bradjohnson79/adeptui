@@ -12,10 +12,11 @@ _FAMILY_LABELS: dict[str, str] = {
     "illustrious": "Illustrious XL 1.0 (Anime)",
     "zimage": "Z-Image Turbo",
     "flux": "FLUX.1 Kontext [dev]",
+    "krea2": "Local Krea 2",
 }
 
 # Preferred dropdown ordering for known families (Auto Select is always first).
-_FAMILY_ORDER: tuple[str, ...] = ("qwen2512", "zimage", "illustrious", "flux")
+_FAMILY_ORDER: tuple[str, ...] = ("qwen2512", "zimage", "illustrious", "flux", "krea2")
 
 
 def _family_label(family: str, variant: str) -> str:
@@ -88,6 +89,30 @@ def build_local_generator_models() -> list[dict[str, Any]]:
         for f in families.values()
         if f["_gen"] and f["executable"] and f["status"] == "Certified"
     ]
+
+    # Character Sheet candidate source: Local Krea 2 is a real local family.
+    # Workflows may still be Draft — keep status honest and never make it Auto default.
+    krea_entry = families.get("krea2")
+    if krea_entry and not any(o.get("id") == "krea2" for o in ready):
+        executable = bool(krea_entry["_gen"] and krea_entry["executable"])
+        if not executable:
+            try:
+                from .setup.diagnostics import verify_component
+
+                executable = bool(verify_component("krea2_models").healthy)
+            except Exception:
+                executable = False
+        ready.append(
+            {
+                "id": "krea2",
+                "label": _family_label("krea2", ""),
+                "group": "local",
+                "status": krea_entry["status"],
+                "supportsReferences": bool(krea_entry["supportsReferences"]),
+                "supportsEditing": bool(krea_entry["supportsEditing"]),
+                "executable": executable,
+            }
+        )
 
     def _sort(opt: dict[str, Any]) -> tuple[int, str]:
         try:

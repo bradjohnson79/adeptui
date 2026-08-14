@@ -21,10 +21,25 @@ type Props = {
   onRetry?: (candidate: CharacterCandidate) => void;
 };
 
+function kreaModelName(c: CharacterCandidate): string {
+  const hosted = String(c.hostedModelId || c.selectedSource || c.model || "");
+  const low = hosted.toLowerCase();
+  if (low.includes("turbo")) return "Krea 2 Turbo";
+  if (low.includes("medium")) return "Krea 2 Medium";
+  if (low.includes("large")) return "Krea 2 Large";
+  if (low.includes("raw")) return "Krea 2 RAW";
+  return String(c.model || c.modelVariant || hosted || "Krea 2");
+}
+
 function provenanceLabel(c: CharacterCandidate): string {
-  const src = (c.generator || c.provider || "").toLowerCase();
+  const src = `${c.generator || ""} ${c.provider || ""} ${c.hostedModelId || ""} ${c.selectedSource || ""}`.toLowerCase();
+  const isKrea = src.includes("krea");
+  const kind = c.providerKind || (isKrea && (c.hostedModelId || "").includes("fal") ? "api" : "");
   const modelName = c.model || c.modelVariant || "";
-  if (src.includes("api") || src.includes("cloud") || c.provider) {
+  if (kind === "api" || src.includes("api") || src.includes("cloud") || (c.provider && !["comfy", "comfyui", "local"].includes(String(c.provider).toLowerCase()))) {
+    if (isKrea) {
+      return `API — Krea / ${kreaModelName(c)}`;
+    }
     return `API — ${[c.provider, modelName].filter(Boolean).join(" / ") || "cloud"}`;
   }
   const model = modelName || c.workflowKey || "";

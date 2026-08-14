@@ -199,7 +199,9 @@ async def health():
     model root for three filenames and returned a raw exception string when anything threw.
     Model presence now comes from the same component verifiers the Setup Wizard and Source
     Manager use, so a gap names a real component id that a blocker action can act on.
-    `missing_models` is retained as human-readable labels for existing consumers.
+    Top-level `missing_models` / `missing_model_component_ids` are REQUIRED-only
+    (human-readable labels + component ids). Optional gaps are on
+    `missing_optional_models` / `missing_optional_model_component_ids`.
     """
     from ..comfy_health import comfy_health
     from ..feature_flags import feature_flags
@@ -216,7 +218,25 @@ async def health():
 
     reachable = bool(payload.get("reachable"))
     models = payload.get("models") or []
-    missing = [str(item.get("name") or item.get("componentId")) for item in models if not item.get("present")]
+    # Top-level missing_* lists are REQUIRED-only. Optional gaps (e.g. krea2_models)
+    # live on missing_optional_* / nested comfy.missingOptionalModelComponentIds so a
+    # falsy empty required array cannot ||-fall through into optional IDs.
+    required_missing = [item for item in models if item.get("required") and not item.get("present")]
+    optional_missing = [item for item in models if (not item.get("required")) and not item.get("present")]
+    missing = [str(item.get("name") or item.get("componentId")) for item in required_missing]
+    optional_missing_labels = [str(item.get("name") or item.get("componentId")) for item in optional_missing]
+    raw_required_ids = payload.get("missingRequiredModelComponentIds")
+    required_missing_ids = (
+        [str(x) for x in raw_required_ids]
+        if isinstance(raw_required_ids, list)
+        else [str(item.get("componentId")) for item in required_missing]
+    )
+    raw_optional_ids = payload.get("missingOptionalModelComponentIds")
+    optional_missing_ids = (
+        [str(x) for x in raw_optional_ids]
+        if isinstance(raw_optional_ids, list)
+        else [str(item.get("componentId")) for item in optional_missing]
+    )
 
     caps = None
     provider = None
@@ -331,7 +351,9 @@ async def health():
         comfy_reachable=reachable,
         comfy=payload,
         missing_models=missing,
-        missing_model_component_ids=list(payload.get("missingModelComponentIds") or []),
+        missing_model_component_ids=required_missing_ids,
+        missing_optional_models=optional_missing_labels,
+        missing_optional_model_component_ids=optional_missing_ids,
         comfy_status=str(payload.get("status") or "unknown"),
         comfy_version=payload.get("version"),
         node_catalog_available=bool(payload.get("nodeCatalogAvailable")),

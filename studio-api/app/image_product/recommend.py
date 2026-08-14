@@ -108,6 +108,8 @@ def _why(family: str, purpose: str, prompt: str) -> str:
         "imagen": "Best match for high-quality cloud editing and polished stills.",
         "zimage": "Certified local fallback workflow when Qwen-Image-2512 is not yet executable.",
         "illustrious": "Illustrious XL 1.0 — preferred SDXL anime/animation/stylized/realistic-anime engine for anime-leaning styles.",
+        "krea2": "Krea 2 — selectable Character Sheet source. Never the Auto Select default.",
+        "krea": "Krea 2 — selectable Character Sheet source. Never the Auto Select default.",
     }
     base = reasons.get(family, reasons["qwen2512"])
     if purpose:
@@ -158,6 +160,8 @@ def recommend_image_family(
     preferred = (model_family_preference or "").strip().lower() or None
     if preferred in {"qwen-image-2512", "qwen_image_2512"}:
         preferred = "qwen2512"
+    if preferred in {"krea", "krea-2", "krea_2"}:
+        preferred = "krea2"
 
     # Reference-first hierarchy (Amendment 3 / Phase 5): when a reference image
     # is attached it is the visual authority. Reference-capable Certified
@@ -214,7 +218,7 @@ def recommend_image_family(
     if reference_locked and style_preferred in _TEXT_ONLY_FAMILIES:
         style_preferred = ""
 
-    if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious"}:
+    if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious", "krea2", "krea"}:
         primary = preferred
     elif style_preferred and _executable(style_preferred):
         primary = style_preferred

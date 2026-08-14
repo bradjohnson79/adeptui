@@ -183,10 +183,15 @@ def test_missing_krea2_files_produce_not_installed(krea2_root: Path) -> None:
     assert turbo is not None
     descriptor = _from_local_model(turbo)
     assert descriptor.readiness == "not_installed"
+    assert descriptor.metadata.get("capabilityLabel") != "Certified"
+    assert descriptor.metadata.get("lifecycle") != "Installed"
 
     raw = get_model("krea2-raw-local")
     assert raw is not None
-    assert _from_local_model(raw).readiness == "not_installed"
+    raw_desc = _from_local_model(raw)
+    assert raw_desc.readiness == "not_installed"
+    assert raw_desc.metadata.get("capabilityLabel") != "Certified"
+    assert raw_desc.metadata.get("lifecycle") != "Installed"
 
 
 def test_installed_krea2_files_map_to_static_readiness(krea2_root: Path) -> None:
@@ -219,7 +224,7 @@ def test_krea2_files_verifier_missing(krea2_root: Path) -> None:
     result = verify_component("krea2_models")
     assert result.healthy is False
     assert result.absent is True
-    assert result.issue_code == "required_models_missing"
+    assert result.issue_code == "optional_models_missing"
     assert any("Turbo checkpoint" in detail for detail in result.details)
 
 

@@ -83,3 +83,17 @@ def test_every_option_has_capability_metadata():
         assert "status" in o
         assert "executable" in o
         assert o["group"] == "local"
+
+
+def test_krea2_listed_as_local_not_auto_default():
+    opts = build_local_generator_models()
+    by_id = {o["id"]: o for o in opts}
+    assert opts[0]["id"] == "auto"
+    assert "krea2" in by_id
+    krea = by_id["krea2"]
+    assert krea["label"] == "Local Krea 2"
+    assert krea["group"] == "local"
+    assert krea["status"] in {"Draft", "Certified"}
+    # Auto Select stays first; Krea is never the default slot.
+    assert opts[1]["id"] != "krea2"
+

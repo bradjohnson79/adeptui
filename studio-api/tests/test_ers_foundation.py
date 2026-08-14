@@ -148,3 +148,116 @@ def test_ers_export_registers_assets(client, isolated_data_dir: Path) -> None:
         assert any(Path(item.filePath or "").is_file() for item in reloaded.exports if item.exportKind == "offline_html")
     finally:
         db.close()
+
+def test_ers_generate_handler_builds_jobs_from_plan_request_prompt(monkeypatch) -> None:
+    """ers.generate must read ImageGenerationPlan.request.prompt, not .prompt.
+
+    ImageGenerationPlan exposes request / shotIntent / creativeDirection.
+    Accessing plan.prompt raises AttributeError and aborts the handler
+    before any ERS sheet or child jobs are created.
+    """
+    from app.codirector.capabilities.handlers import ers_generate
+    from app.environment_reference_sheet.contracts import (
+        DirectionalViewRecord,
+        SpatialMapReference,
+    )
+    from app.image_pipeline.orchestrator import prepare_plan
+    from app.spatial_map.schemas import SpatialMapDocument
+
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    execution_id = "279a7474-d93c-4dc7-8936-4b649ef06255"
+
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium, hanging gardens, cool daylight.",
+        scene_id="scene-1",
+    )
+    sheet.spatialMap = SpatialMapReference(
+        mapId=spatial_map_id,
+        northLockDirection="north",
+    )
+    sheet.directionalViews = [
+        DirectionalViewRecord(
+            direction=direction,
+            title=f"{direction.title()} View",
+            prompt=f"{direction.title()} view of the glass-roofed atrium.",
+            sourceDirection=direction,
+            status="planned",
+        )
+        for direction in ("north", "east", "south", "west")
+    ]
+
+    contract_plan = prepare_plan(
+        {
+            "projectId": project_id,
+            "prompt": "North view of the glass-roofed atrium.",
+            "purpose": "ers-north-view",
+        }
+    )
+    try:
+        unused = contract_plan.prompt  # noqa: F841
+        raise AssertionError("ImageGenerationPlan.prompt should not exist")
+    except AttributeError:
+        pass
+    assert contract_plan.request.prompt
+
+    captured_bodies: list[dict] = []
+
+    class _Job:
+        def __init__(self, job_id: str) -> None:
+            self.id = job_id
+
+    def _fake_enqueue(db, enqueue_project_id, body, scene_id=None):
+        captured_bodies.append(dict(body))
+        return _Job(f"job-ers-{body['creativeContext']['direction']}")
+
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.store.list_sheets",
+        lambda pid: [sheet],
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.attach_spatial_map",
+        lambda db, current, spatial_map_id: current,
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.compose_sheet_metadata",
+        lambda current: current,
+    )
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _fake_enqueue)
+    monkeypatch.setattr(
+        "app.spatial_map.service.get_document",
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+    )
+    monkeypatch.setattr(
+        "app.spatial_map.ers_persistence.save_ers_package",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.store.save_sheet",
+        lambda current: None,
+    )
+
+    result = ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id=execution_id,
+        spatial_map_id=spatial_map_id,
+        scene_id="scene-1",
+    )
+
+    expected_prompts = [view.prompt for view in sheet.directionalViews]
+    assert [body["prompt"] for body in captured_bodies] == expected_prompts
+    assert len(result["child_jobs"]) == 5
+    assert [job["status"] for job in result["child_jobs"][:4]] == ["queued"] * 4
+    assert [job["metadata"]["direction"] for job in result["child_jobs"][:4]] == [
+        "north",
+        "east",
+        "south",
+        "west",
+    ]
+    assert result["sheet_id"] == sheet.sheetId
+    assert result["ers_package_id"]
+    assert result["spatial_map_id"] == spatial_map_id
+

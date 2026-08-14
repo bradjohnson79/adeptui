@@ -512,10 +512,14 @@ class HealthOut(BaseModel):
     ok: bool
     comfy_reachable: bool
     comfy: dict[str, Any] = Field(default_factory=dict)
-    #: Human-readable labels, kept for existing consumers.
+    #: Human-readable labels for REQUIRED gaps only, kept for existing consumers.
     missing_models: list[str] = Field(default_factory=list)
-    #: Setup/Source Manager component ids for the same gaps, so a blocker action can act on them.
+    #: Setup/Source Manager component ids for the same REQUIRED gaps.
     missing_model_component_ids: list[str] = Field(default_factory=list)
+    #: Human-readable labels for optional/generator-specific gaps (e.g. Krea 2).
+    missing_optional_models: list[str] = Field(default_factory=list)
+    #: Optional/generator-specific component ids; never mixed into missing_model_component_ids.
+    missing_optional_model_component_ids: list[str] = Field(default_factory=list)
     comfy_status: str = "unknown"
     comfy_version: Optional[str] = None
     node_catalog_available: bool = False

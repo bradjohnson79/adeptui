@@ -7273,6 +7273,15 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet/advance`,
       { method: "POST", body: "{}" },
     ),
+  retryCharacterVisualSheetCandidate: (
+    projectId: string,
+    characterId: string,
+    candidateIndex: number,
+  ) =>
+    req<{ ok: boolean; pack: any }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet/retry`,
+      { method: "POST", body: JSON.stringify({ candidateIndex }) },
+    ),
   getCharacterVisualSheet: (projectId: string, characterId: string) =>
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet`,

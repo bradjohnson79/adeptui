@@ -138,7 +138,7 @@ def handle(
         # The plan carries the prompt + spatial map payload. Build the
         # imagegen body with the canonical enqueue surface.
         body: dict[str, Any] = {
-            "prompt": plan.prompt or sheet.description,
+            "prompt": plan.request.prompt or sheet.description,
             "negative_prompt": "",
             "width": 1280,
             "height": 720,

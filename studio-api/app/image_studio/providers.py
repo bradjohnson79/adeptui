@@ -17,6 +17,9 @@ _FAMILY_FALLBACK: dict[str, str] = {
     "flux-kie": "flux",
     "flux-fal": "flux",
     "nano-banana-kie": "imagen",
+    "krea2-turbo-fal": "krea2",
+    "krea2-medium-fal": "krea2",
+    "krea2-large-fal": "krea2",
     "hidream-local": "hidream",
     "flux-schnell-local": "flux",
     "flux-dev-local": "flux",
@@ -77,6 +80,24 @@ _HINTS: dict[str, dict[str, Any]] = {
         "nativeResolutions": ["1K", "2K"],
         "upscaleSupported": False,
         "licenseNote": "Hosted Imagen-class via Kie — provider terms apply",
+        "costHint": "Paid hosted API",
+    },
+    "krea2-turbo-fal": {
+        "nativeResolutions": ["1K", "2K"],
+        "upscaleSupported": False,
+        "licenseNote": "Hosted Krea 2 Turbo via fal — provider terms apply",
+        "costHint": "Paid hosted API",
+    },
+    "krea2-medium-fal": {
+        "nativeResolutions": ["1K"],
+        "upscaleSupported": False,
+        "licenseNote": "Hosted Krea 2 Medium via fal — provider terms apply",
+        "costHint": "Paid hosted API",
+    },
+    "krea2-large-fal": {
+        "nativeResolutions": ["1K"],
+        "upscaleSupported": False,
+        "licenseNote": "Hosted Krea 2 Large via fal — provider terms apply",
         "costHint": "Paid hosted API",
     },
     "hidream-local": {
@@ -207,12 +228,22 @@ def _from_local_model(model: Any) -> ImageProviderDescriptor:
     source: Literal["local", "hosted", "docker"] = (
         "docker" if exec_class == "docker_local" else "local"
     )
+    readiness = _local_readiness(model)
+    capability_label = getattr(model, "capabilityLabel", None)
+    lifecycle = getattr(model, "lifecycle", None)
+    # Static catalog may say Certified/Installed; never advertise that while
+    # the Setup-gated weights are not on disk.
+    if readiness == "not_installed":
+        if capability_label in {"Certified", "Installed"}:
+            capability_label = "Requires Setup"
+        if lifecycle in {"Installed", "Certified"}:
+            lifecycle = "Not Installed"
     metadata = {
-        "capabilityLabel": getattr(model, "capabilityLabel", None),
+        "capabilityLabel": capability_label,
         "executionClass": exec_class,
         "supports": list(getattr(model, "supports", None) or []),
         "estimatedVramGb": getattr(model, "estimatedVramGb", None),
-        "lifecycle": getattr(model, "lifecycle", None),
+        "lifecycle": lifecycle,
     }
     caps = _workflow_capabilities(mid)
     if caps:
@@ -224,7 +255,7 @@ def _from_local_model(model: Any) -> ImageProviderDescriptor:
         displayName=str(getattr(model, "label", mid) or mid),
         family=_family_for(mid),
         source=source,
-        readiness=_local_readiness(model),
+        readiness=readiness,
         imageCapable=True,
         licenseNote=hints.get("licenseNote"),
         costHint=hints.get("costHint", "Local GPU"),

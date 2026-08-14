@@ -172,15 +172,17 @@ export function GeneratorSourceSelector({
   const setApi = (patch: Partial<GeneratorSourceState>) =>
     onChange({ local: value.local, api: { ...value.api, ...patch } });
 
-  // Reference-aware eligibility: when a Character Reference is attached, only
-  // reference-capable Certified local generators are selectable as Identity Engines.
-  // Text-to-image-only families (e.g. Qwen Image 2512) stay VISIBLE but disabled with a clear
-  // reason — never silently hidden.
-  const isIdentityEligible = (o: GeneratorOption) => !hasReference || !!o.supportsReferences;
+  // True incompatibility only: missing/non-executable runtime. A reference does
+  // NOT disable Illustrious/Qwen — they run Profile Guided (no reference pixels).
+  const isIdentityEligible = (o: GeneratorOption) => o.executable !== false;
   const identityDisabledReason = (o: GeneratorOption) =>
-    hasReference && !o.supportsReferences
-      ? `${o.label} requires text-to-image generation and cannot use the attached Character Reference.`
+    o.executable === false
+      ? `${o.label} is not available (runtime, model, or provider missing).`
       : null;
+  const conditioningLabel = (o: GeneratorOption) => {
+    if (!hasReference) return null;
+    return o.supportsReferences ? "Reference Conditioned" : "Profile Guided";
+  };
 
   const canEnableStage2 = value.local.enabled && styleOptions.length > 0;
   const selectedStyle = styleOptions.find((o) => o.id === value.local.stage2SelectedId) ||
@@ -224,6 +226,7 @@ export function GeneratorSourceSelector({
           <option value="">Auto Select</option>
           {identityList.map((o) => {
             const ineligible = !isIdentityEligible(o);
+            const mode = conditioningLabel(o);
             return (
               <option
                 key={o.id}
@@ -231,11 +234,12 @@ export function GeneratorSourceSelector({
                 disabled={ineligible}
                 data-testid={`generator-local-option-${o.id}`}
                 data-disabled-reason={identityDisabledReason(o) || undefined}
-                title={identityDisabledReason(o) || undefined}
+                title={identityDisabledReason(o) || mode || undefined}
               >
                 {o.label}
                 {o.id === recommendedLocalId ? " (Recommended)" : ""}
-                {ineligible ? " — unavailable for this reference" : ""}
+                {mode ? ` — ${mode}` : ""}
+                {ineligible ? " — unavailable" : ""}
               </option>
             );
           })}
@@ -257,6 +261,15 @@ export function GeneratorSourceSelector({
                 executable: true,
               },
             )}
+          </p>
+        ) : null}
+        {value.local.enabled && hasReference ? (
+          <p className="character-core__hint" data-testid="generator-local-mode">
+            {!value.local.selectedId
+              ? "Mode: Auto Select may mix Profile Guided and Reference Conditioned"
+              : identityOptions.find((o) => o.id === value.local.selectedId)?.supportsReferences
+                ? "Mode: Reference Conditioned"
+                : "Mode: Profile Guided"}
           </p>
         ) : null}
       </div>
@@ -321,11 +334,20 @@ export function GeneratorSourceSelector({
           {apiOptions.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
+              {hasReference ? (o.supportsReferences ? " — Reference Conditioned" : " — Profile Guided") : ""}
             </option>
           ))}
         </select>
         {value.api.enabled && value.api.selectedId ? (
           <CreditLabel opt={apiOptions.find((o) => o.id === value.api.selectedId) || { id: "", label: "", executable: true }} />
+        ) : null}
+        {value.api.enabled && hasReference ? (
+          <p className="character-core__hint" data-testid="generator-api-mode">
+            Mode:{" "}
+            {apiOptions.find((o) => o.id === value.api.selectedId)?.supportsReferences
+              ? "Reference Conditioned"
+              : "Profile Guided"}
+          </p>
         ) : null}
       </div>
     </div>

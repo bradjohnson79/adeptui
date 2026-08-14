@@ -3,7 +3,7 @@
  * shared building blocks. Used by BOTH the Co-Director Express surface and the
  * standalone Character Creator so they share schema, hydration, and behavior.
  */
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { CharacterActions } from "./CharacterActions";
 import { CharacterCandidateGrid } from "./CharacterCandidateGrid";
@@ -35,6 +35,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   });
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [notice, setNotice] = useState("");
+  const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
 
   const hero = useMemo(() => getHeroIdentity(references), [references]);
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
@@ -148,11 +149,13 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           profile={profile}
           sources={sources}
           onCandidates={setCandidates}
+          retryHandlerRef={retryHandlerRef}
         />
         <CharacterCandidateGrid
           candidates={candidates}
           selectedAssetId={selectedAssetId}
           onApprove={(c) => void handleApprove(c)}
+          onRetry={(c) => retryHandlerRef.current?.(c)}
         />
       </div>
 

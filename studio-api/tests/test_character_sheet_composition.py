@@ -237,20 +237,28 @@ def test_advance_composes_four_views_into_one_sheet_with_lineage(db, tmp_path):
 
 
 def test_reference_locked_routing_never_uses_text_only_family():
-    """An attached reference must NEVER route to a text-only family (Illustrious)."""
-    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
+    """Explicit Z-Image + reference stays on the reference-capable family."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
     for route in plan:
-        assert route["modelFamilyPreference"] == REFERENCE_LOCKED_FAMILY
-        assert route["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
-        assert route["modelFamilyPreference"] not in TEXT_ONLY_FAMILIES
-        assert route["referenceLocked"] is True
+        stage1 = route.get("stage1") or route
+        assert stage1["modelFamilyPreference"] == REFERENCE_LOCKED_FAMILY
+        assert stage1["workflowKey"] == REFERENCE_LOCKED_WORKFLOW_KEY
+        assert stage1["modelFamilyPreference"] not in TEXT_ONLY_FAMILIES
+        assert stage1["referenceLocked"] is True
 
 
 def test_reference_locked_routing_prefers_reference_capable_family():
-    plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id="sheet-1")
-    # zimage.ref_edit is the only Certified reference-capable workflow today.
-    assert all(r["modelFamilyPreference"] == "zimage" for r in plan)
-    assert all(r["source_asset_id"] == "sheet-1" for r in plan)
+    plan = _build_candidate_routing_plan(
+        candidate_count=4,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
+    assert all((r.get("stage1") or r)["modelFamilyPreference"] == "zimage" for r in plan)
+    assert all((r.get("stage1") or r)["source_asset_id"] == "sheet-1" for r in plan)
 
 
 def test_no_reference_routing_style_first_for_anime():
@@ -264,16 +272,16 @@ def test_no_reference_routing_style_first_for_anime():
 
     distinct = _no_reference_families_for_style("anime")
     assert distinct, "anime style must resolve to at least one family"
-    assert plan[0]["modelFamilyPreference"] == distinct[0]
-    assert plan[0]["referenceLocked"] is False
-    assert plan[0]["source_asset_id"] is None
+    assert (plan[0].get("stage1") or plan[0])["modelFamilyPreference"] == distinct[0]
+    assert (plan[0].get("stage1") or plan[0])["referenceLocked"] is False
+    assert (plan[0].get("stage1") or plan[0])["source_asset_id"] is None
 
 
 def test_no_reference_routing_distinct_families_used_once_first():
     from app.character_identity.visual_sheet import NO_REFERENCE_TXT2IMG_FAMILIES
 
     plan = _build_candidate_routing_plan(candidate_count=4, reference_asset_id=None)
-    families = [r["modelFamilyPreference"] for r in plan]
+    families = [(r.get("stage1") or r)["modelFamilyPreference"] for r in plan]
     distinct = list(NO_REFERENCE_TXT2IMG_FAMILIES)
     for i, fam in enumerate(distinct):
         assert families[i] == fam
@@ -305,6 +313,93 @@ def test_user_control_law_omitted_sources_preserves_default_routing():
     """Legacy callers that omit generator_sources get unchanged default routing."""
     plan = _build_candidate_routing_plan(candidate_count=2, reference_asset_id=None)
     assert len(plan) == 2
+
+
+def test_explicit_local_family_overrides_style_routing():
+    """An explicit Local Generator selection (e.g. Qwen) must be honored even when
+    the style is anime (which would otherwise route to Illustrious). User authority."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=2,
+        reference_asset_id=None,
+        visual_style="anime",
+        generator_sources={"local": {"family": "qwen2512"}, "api": None},
+    )
+    assert len(plan) == 2
+    for route in plan:
+        assert (route.get("stage1") or route)["modelFamilyPreference"] == "qwen2512"
+        assert (route.get("stage1") or route)["workflowKey"] == "qwen2512.txt2img"
+        assert (route.get("stage1") or route)["referenceLocked"] is False
+
+
+def test_explicit_auto_select_falls_back_to_style_routing():
+    """Auto Select (empty/auto family) keeps style-based routing for anime."""
+    from app.character_identity.visual_sheet import _no_reference_families_for_style
+
+    plan = _build_candidate_routing_plan(
+        candidate_count=2,
+        reference_asset_id=None,
+        visual_style="anime",
+        generator_sources={"local": {"family": "auto"}, "api": None},
+    )
+    distinct = _no_reference_families_for_style("anime")
+    assert (plan[0].get("stage1") or plan[0])["modelFamilyPreference"] == distinct[0]
+
+
+def test_explicit_text_only_family_rejected_when_reference_attached():
+    """Qwen + reference is PROFILE_GUIDED (no pixels), not rejected or forced to Z-Image."""
+    from app.character_identity.visual_sheet import CONDITIONING_PROFILE_GUIDED
+
+    plan = _build_candidate_routing_plan(
+        candidate_count=1,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "qwen2512"}, "api": None},
+    )
+    stage1 = plan[0].get("stage1") or plan[0]
+    assert stage1["modelFamilyPreference"] == "qwen2512"
+    assert stage1["workflowKey"] == "qwen2512.txt2img"
+    assert stage1["source_asset_id"] is None
+    assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+
+
+def test_explicit_reference_capable_family_allowed_when_reference_attached():
+    """Choosing the reference-capable family (zimage) with a reference is honored."""
+    plan = _build_candidate_routing_plan(
+        candidate_count=1,
+        reference_asset_id="sheet-1",
+        generator_sources={"local": {"family": "zimage"}, "api": None},
+    )
+    assert len(plan) == 1
+    assert (plan[0].get("stage1") or plan[0])["modelFamilyPreference"] == "zimage"
+    assert (plan[0].get("stage1") or plan[0])["referenceLocked"] is True
+
+
+def test_advance_marks_candidate_failed_when_a_view_job_fails(db):
+    """Stuck-'generating' fix: a failed side/back/close-up view must surface a
+    truthful candidate failure instead of leaving the candidate stuck."""
+    from app.character_identity.visual_sheet import _poll_candidate_views
+
+    # One done view + one failed view + two running.
+    jobs = []
+    for status in ("done", "failed", "running", "running"):
+        j = Job(
+            id=str(uuid.uuid4()),
+            project_id="proj-sheet",
+            kind="imagegen",
+            status=status,
+            params_json=json.dumps({"output_asset_id": str(uuid.uuid4())} if status == "done" else {}),
+        )
+        db.add(j)
+        jobs.append(j)
+    db.commit()
+    candidate = {
+        "viewJobs": [
+            {"jobId": j.id, "role": r, "viewIndex": i}
+            for i, (j, r) in enumerate(zip(jobs, CANDIDATE_SHEET_VIEW_ROLES))
+        ]
+    }
+    all_done, any_failed, _ = _poll_candidate_views(db, candidate)
+    assert all_done is False
+    assert any_failed is True
 
 
 def test_recommend_image_family_reference_locked_avoids_text_only():

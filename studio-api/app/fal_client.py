@@ -228,6 +228,26 @@ def extract_video_url(result: dict[str, Any]) -> str:
     raise FalApiError(f"No video URL in fal result keys={list(result.keys())}")
 
 
+
+def extract_image_url(result: dict[str, Any]) -> str:
+    images = result.get("images")
+    if isinstance(images, list) and images:
+        first = images[0]
+        if isinstance(first, dict) and first.get("url"):
+            return str(first["url"])
+        if isinstance(first, str) and first.startswith("http"):
+            return first
+    image = result.get("image")
+    if isinstance(image, dict) and image.get("url"):
+        return str(image["url"])
+    if isinstance(image, str) and image.startswith("http"):
+        return image
+    data = result.get("data")
+    if isinstance(data, dict):
+        return extract_image_url(data)
+    raise FalApiError(f"No image URL in fal result keys={list(result.keys())}")
+
+
 def _headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Key {api_key}", "Accept": "application/json"}
 
