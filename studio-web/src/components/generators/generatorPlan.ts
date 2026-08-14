@@ -1,8 +1,8 @@
 /**
  * Shared generator plan helpers for Prop Creator (and later other products).
  *
- * Consumes Character Creator plan types / inventory normalize / payload builder.
- * Do not edit Character files. Do not start a second model registry.
+ * Uses the committed shared plan in ./sharedGeneratorPlan.
+ * Do not import Character Creator files. Do not start a second model registry.
  *
  * Prop product math: one candidate image per batch (not Character 4-view sheets).
  */
@@ -27,7 +27,7 @@ import {
   type CharacterSheetGeneratorSourcesPayload,
   type GenerationPlanSummary,
   type NormalizedDiscoveredImageModel,
-} from "../character/characterGeneratorPlan";
+} from "./sharedGeneratorPlan";
 import type { GeneratorOption } from "./types";
 
 export {
