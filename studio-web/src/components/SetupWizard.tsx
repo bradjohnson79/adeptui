@@ -1523,7 +1523,8 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
     );
   }
 
-  const visibleComponents = status.components.filter((component) => component.category !== "Avatar Runtimes");
+  const hiddenCatalogCategories = new Set(["Avatar Runtimes", "API Providers"]);
+  const visibleComponents = status.components.filter((component) => !hiddenCatalogCategories.has(component.category || ""));
   const required = visibleComponents.filter((component) => component.required);
   const optional = visibleComponents.filter((component) => !component.required);
   const preparing = trackedOperationIds.length > 0 || status.overall_status === "preparing";

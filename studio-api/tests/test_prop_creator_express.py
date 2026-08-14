@@ -184,7 +184,18 @@ def test_reference_keeps_txt2img_as_description_guided(monkeypatch) -> None:
             {"id": "qwen_image", "label": "Qwen Image", "executable": True, "supportsReferences": False},
         ),
     )
-    plans = build_prop_candidate_plans(local_enabled=True, api_enabled=False, has_reference=True, seed=4)
+    plans = build_prop_candidate_plans(
+        has_reference=True,
+        seed=4,
+        generator_sources={
+            "local": [
+                {"modelId": "zimage", "enabled": True, "batchCount": 1},
+                {"modelId": "illustrious", "enabled": True, "batchCount": 1},
+                {"modelId": "qwen_image", "enabled": True, "batchCount": 1},
+            ],
+            "api": None,
+        },
+    )
     by_family = {p["family"]: p for p in plans}
     assert by_family["zimage"]["conditioning"] == "reference_conditioned"
     assert "Reference Conditioned" in by_family["zimage"]["provenance_label"]
@@ -201,17 +212,19 @@ def test_local_off_and_api_off_is_zero_jobs() -> None:
         assert "Enable a Local or API generator" in str(exc)
 
 
-def test_api_on_when_unwired_is_not_available() -> None:
+def test_api_on_when_unwired_without_model_is_zero_jobs() -> None:
     assert hosted_image_generation_available() is False
     try:
         build_prop_candidate_plans(local_enabled=False, api_enabled=True)
-        raise AssertionError("expected API unavailable")
+        raise AssertionError("expected ValueError")
     except ValueError as exc:
-        assert "API Generation — Not Available" in str(exc)
+        assert "Enable a Local or API generator" in str(exc)
+        assert "Not Available" not in str(exc)
 
 
-def test_api_on_with_local_on_still_refuses_fake_api(monkeypatch) -> None:
+def test_api_on_with_local_on_does_not_raise_not_available(monkeypatch) -> None:
     monkeypatch.setattr(prop_gen, "hosted_image_generation_available", lambda: False)
+    monkeypatch.setattr(prop_gen, "discovered_hosted_image_models", lambda: [])
     monkeypatch.setattr(
         prop_gen,
         "list_local_generator_families",
@@ -219,11 +232,12 @@ def test_api_on_with_local_on_still_refuses_fake_api(monkeypatch) -> None:
             {"id": "zimage", "label": "Z-Image Turbo", "executable": True, "supportsReferences": True}
         ),
     )
-    try:
-        build_prop_candidate_plans(local_enabled=True, api_enabled=True)
-        raise AssertionError("expected API unavailable")
-    except ValueError as exc:
-        assert "API Generation — Not Available" in str(exc)
+    plans = build_prop_candidate_plans(
+        local_enabled=True, api_enabled=True, local_family="zimage", candidate_count=2
+    )
+    assert len(plans) == 2
+    assert all(p["source"] == "local" for p in plans)
+    assert all(p["family"] == "zimage" for p in plans)
 
 
 def test_generate_attaches_pixels_only_on_reference_conditioned(monkeypatch) -> None:
@@ -253,8 +267,19 @@ def test_generate_attaches_pixels_only_on_reference_conditioned(monkeypatch) -> 
             name="Mug",
             reference_asset_id="ref-pixels",
         )
-        generate_candidates(db, project_id, prop.id, local_enabled=True, api_enabled=False)
-        assert len(captured) == 4
+        generate_candidates(
+            db,
+            project_id,
+            prop.id,
+            generator_sources={
+                "local": [
+                    {"modelId": "zimage", "enabled": True, "batchCount": 1},
+                    {"modelId": "illustrious", "enabled": True, "batchCount": 1},
+                ],
+                "api": None,
+            },
+        )
+        assert len(captured) == 2
         zimage = [b for b in captured if b["modelFamilyPreference"] == "zimage"]
         illustrious = [b for b in captured if b["modelFamilyPreference"] == "illustrious"]
         assert zimage

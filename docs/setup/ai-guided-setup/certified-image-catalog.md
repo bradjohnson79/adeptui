@@ -60,8 +60,13 @@ Image cloud providers stay in a separate `Cloud Providers` section. The registry
 Current creator-facing recommendation rules:
 
 - photoreal character -> `FLUX.1 Kontext Dev`
-- anime/stylized -> `Sana 1.5`, `Qwen-Image-2512`, `Z-Image Turbo`
+- anime/stylized / anime poster / anime episode stills -> `Sana 1.5`, `Qwen-Image-2512`, `Z-Image Turbo`
 - fast preview -> `FLUX.1 Schnell`
+- product mockup (image-only) -> `FLUX.1 Dev`, `Qwen-Image-2512`
+- short film / cinematic video -> `HunyuanVideo 1.5` (then 13B / WAN / LTX)
+- commercial / branded product video -> `WAN 2.2` (not `fal_key`)
+- talking presenter -> LongCat / InfiniteTalk / MuseTalk / EchoMimic
+- storyboard -> `FLUX.1 Dev`, Essential Cinematic Pack, LTX (workspace previs; no fake storyboard installer)
 
 ## Production Dock wiring
 

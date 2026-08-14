@@ -87,3 +87,147 @@
   border-radius: 8px;
   border: 1px solid var(--border, #2c3346);
 }
+
+.prop-creator-core__chip {
+  border: 1px solid var(--border, #2c3346);
+  background: var(--panel-2, #1c2130);
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.prop-creator-core__chip.is-on {
+  border-color: var(--accent, #4a8);
+  background: color-mix(in srgb, var(--accent, #4a8) 18%, transparent);
+}
+
+.prop-creator-core__chip.is-draft {
+  opacity: 0.88;
+}
+
+.prop-creator-standard {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  grid-template-rows: minmax(0, 1fr) 160px;
+  gap: 0.75rem;
+  height: calc(100vh - 7rem);
+  min-height: 520px;
+  padding: 0.75rem;
+}
+
+.prop-creator-standard__browser,
+.prop-creator-standard__preview,
+.prop-creator-standard__inspector,
+.prop-creator-standard__strip {
+  background: var(--panel, #151924);
+  border: 1px solid var(--border, #2c3346);
+  border-radius: 12px;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.prop-creator-standard__preview {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.prop-creator-standard__preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.prop-creator-standard__browser {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.prop-creator-standard__inspector {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+.prop-creator-standard__strip {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.prop-creator-standard__strip .prop-creator-core__candidates {
+  display: flex;
+  flex-wrap: nowrap;
+  grid-template-columns: none;
+  width: 100%;
+}
+
+.prop-creator-standard__strip .prop-creator-core__card {
+  min-width: 140px;
+  flex: 0 0 140px;
+}
+
+.prop-creator-standard__strip .prop-creator-core__thumb {
+  height: 88px;
+  aspect-ratio: auto;
+}
+
+.prop-creator-standard__strip .prop-creator-core__thumb img {
+  object-fit: cover;
+}
+
+.prop-creator-standard__browser-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.prop-creator-standard__accordion {
+  border-bottom: 1px solid var(--border, #2c3346);
+  padding: 0.45rem 0 0.65rem;
+}
+
+.prop-creator-standard__accordion > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary, #b7bfd0);
+  margin-bottom: 0.4rem;
+}
+
+.prop-creator-standard__history {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.prop-creator-core__notice,
+.prop-creator-core__error {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  font-weight: 650;
+}
+
+.prop-creator-core__notice {
+  color: var(--ok, var(--status-positive));
+  background: color-mix(in srgb, var(--ok, var(--status-positive)) 16%, var(--panel-solid, var(--panel-2, transparent)));
+  border: 1px solid color-mix(in srgb, var(--ok, var(--status-positive)) 45%, var(--border-glass, var(--border, transparent)));
+}
+
+.prop-creator-core__notice.is-info {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.prop-creator-core__error {
+  color: var(--danger, var(--status-danger));
+  background: color-mix(in srgb, var(--danger, var(--status-danger)) 12%, var(--panel-solid, var(--panel-2, transparent)));
+  border: 1px solid color-mix(in srgb, var(--danger, var(--status-danger)) 40%, var(--border-glass, var(--border, transparent)));
+}

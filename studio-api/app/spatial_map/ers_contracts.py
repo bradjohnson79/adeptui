@@ -25,7 +25,7 @@ headings.
 from __future__ import annotations
 
 import uuid
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -196,6 +196,11 @@ class GeneratorSourceSelection(BaseModel):
     local_family: str = ""
     api_provider: str = ""
     api_model: str = ""
+    local_models: list[dict[str, Any]] = Field(default_factory=list)
+    api_models: list[dict[str, Any]] = Field(default_factory=list)
+    style_engine_enabled: bool = False
+    style_engine_model_id: str = ""
+    generator_sources: Optional[dict[str, Any]] = None
 
 
 class SceneShotTakeMemory(BaseModel):

@@ -4287,6 +4287,9 @@ export const api = {
         reference_asset_id?: string | null;
         clear_reference?: boolean;
         generator?: Record<string, unknown>;
+        use_as_identity?: boolean;
+        approved_asset_id?: string | null;
+        library_asset_id?: string | null;
       },
     ) =>
       req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
@@ -4301,7 +4304,26 @@ export const api = {
     generate: (
       projectId: string,
       propId: string,
-      body: { local_enabled: boolean; api_enabled: boolean; local_family?: string; api_model?: string; candidate_count?: number },
+      body: {
+        local_enabled: boolean;
+        api_enabled: boolean;
+        local_family?: string;
+        api_model?: string;
+        candidate_count?: number;
+        generatorSources?: {
+          local: Array<{ family: string; enabled: boolean; batchCount: number }> | null;
+          api: Array<{
+            model: string;
+            providerId: string;
+            modelId: string;
+            enabled: boolean;
+            batchCount: number;
+          }> | null;
+          styleEngine?: { enabled: boolean; family?: string };
+          stage2Enabled?: boolean;
+          stage2Family?: string;
+        };
+      },
     ) =>
       req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
         `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/generate`,
@@ -4321,6 +4343,15 @@ export const api = {
       req<{ ok: boolean; prop_id: string; library_assets_kept: boolean; spatial_unlinked: number }>(
         `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}`,
         { method: "DELETE" },
+      ),
+    useAsIdentity: (projectId: string, propId: string, assetId: string) =>
+      req<{ prop: import("./components/CoDirector/PropCreator/types").PropEntity }>(
+        `/api/prop-creator/projects/${encodeURIComponent(projectId)}/props/${encodeURIComponent(propId)}/use-as-identity`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ asset_id: assetId }),
+        },
       ),
   },
   minimaxH3: {
@@ -5212,6 +5243,44 @@ export const api = {
     moveProp: (projectId: string, documentId: string, placementId: string, body: SpatialPropPlacementUpdateBody) =>
       req<SpatialMapDocumentResponse>(
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/props/${placementId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      ),
+    attachProp: (
+      projectId: string,
+      documentId: string,
+      placementId: string,
+      body: {
+        attachedCharacterId?: string | null;
+        attachedCharacterSlot?: number | null;
+        relationship: string;
+        attachmentPoint?: string | null;
+      }
+    ) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/props/${placementId}/attach`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      ),
+    detachProp: (projectId: string, documentId: string, placementId: string) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/props/${placementId}/detach`,
+        { method: "POST" }
+      ),
+    updatePropRelationship: (
+      projectId: string,
+      documentId: string,
+      placementId: string,
+      body: { relationship: string; attachmentPoint?: string | null }
+    ) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/props/${placementId}/relationship`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

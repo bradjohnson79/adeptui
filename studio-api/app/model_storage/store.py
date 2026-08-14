@@ -107,6 +107,24 @@ def get_roots() -> dict[str, str]:
     return dict(load_model_storage()["roots"])
 
 
+def preferred_root() -> Path:
+    """Canonical Adept model/runtime install root (Model Storage preferredRoot)."""
+    state = load_model_storage()
+    raw = str(state.get("preferredRoot") or "").strip()
+    if not raw:
+        roots = state.get("roots") if isinstance(state.get("roots"), dict) else {}
+        raw = str(roots.get("default") or DEFAULT_PREFERRED_ROOT).strip()
+    return Path(raw)
+
+
+def category_root(category: str) -> Path:
+    """Category-specific Model Storage root, falling back to preferredRoot."""
+    roots = get_roots()
+    cat = (category or "default").strip().lower()
+    raw = str(roots.get(cat) or roots.get("default") or DEFAULT_PREFERRED_ROOT).strip()
+    return Path(raw)
+
+
 def krea2_image_root() -> Path:
     """Krea 2 subtree under the Model Storage "image" category root."""
     roots = get_roots()

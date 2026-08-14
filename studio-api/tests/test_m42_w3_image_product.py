@@ -205,3 +205,25 @@ def test_forced_illustrious_workflow_does_not_silent_fallback_to_zimage(monkeypa
                 "height": 1024,
             },
         )
+
+
+def test_forced_zimage_ref_edit_keeps_engine_preference_against_qwen_recommend():
+    compiled = compile_image_request(
+        "test-w3-force-zimage-ref",
+        {
+            "prompt": "character sheet from reference",
+            "purpose": "character_sheet",
+            "modelFamilyPreference": "zimage",
+            "lockModelFamily": True,
+            "forceWorkflowKey": "zimage.ref_edit",
+            "allow_force_workflow_key": True,
+            "source_asset_id": "ref-asset-1",
+            "width": 1024,
+            "height": 1024,
+        },
+    )
+    intent = compiled["imageIntent"]
+    runtime = compiled["imageRuntime"]
+    assert runtime["workflowKey"] == "zimage.ref_edit"
+    assert intent["enginePreference"] == "zimage"
+    assert intent["sourceAssetId"] == "ref-asset-1"

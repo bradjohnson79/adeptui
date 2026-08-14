@@ -32,7 +32,7 @@ SOURCE_FAILED = "failed"
 
 
 def component_kind(definition: ComponentDefinition) -> str:
-    if definition.installer == "credentials" or definition.verifier == "fal_key":
+    if definition.installer == "credentials" or definition.verifier in ("fal_key", "kie_key", "wavespeed_key"):
         return KIND_CREDENTIAL
     if definition.installer == "asset_pack" or definition.verifier == "asset_pack":
         return KIND_DOWNLOADABLE_PACK

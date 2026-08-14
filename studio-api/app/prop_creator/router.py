@@ -23,6 +23,7 @@ from .service import (
     get_prop,
     list_props,
     retry_candidate,
+    use_as_prop_identity,
     workspace,
 )
 
@@ -39,6 +40,8 @@ class UpsertBody(BaseModel):
     reference_asset_id: str | None = None
     clear_reference: bool = False
     generator: dict[str, Any] | None = None
+    use_as_identity: bool = False
+    identity_asset_id: str = ""
 
 
 class GenerateBody(BaseModel):
@@ -47,10 +50,16 @@ class GenerateBody(BaseModel):
     local_family: str = ""
     api_model: str = ""
     candidate_count: int = 4
+    generatorSources: dict[str, Any] | None = None
 
 
 class ApproveBody(BaseModel):
     candidate_id: str
+
+
+class UseAsIdentityBody(BaseModel):
+    asset_id: str = ""
+    source_type: str = "library"
 
 
 def _project(db: Session, project_id: str) -> None:
@@ -92,6 +101,8 @@ def post_prop(project_id: str, body: UpsertBody, db: Session = Depends(get_db)):
             reference_asset_id=body.reference_asset_id,
             clear_reference=body.clear_reference,
             generator=body.generator,
+            use_as_identity=body.use_as_identity,
+            identity_asset_id=body.identity_asset_id,
         )
         return {"prop": prop.model_dump()}
     except PropCreatorError as exc:
@@ -120,6 +131,7 @@ def post_generate(project_id: str, prop_id: str, body: GenerateBody, db: Session
             local_family=body.local_family,
             api_model=body.api_model,
             candidate_count=body.candidate_count,
+            generator_sources=body.generatorSources,
         )
         return {"prop": prop.model_dump()}
     except PropCreatorError as exc:
@@ -136,6 +148,24 @@ def post_approve(project_id: str, prop_id: str, body: ApproveBody, db: Session =
     except PropCreatorError as exc:
         raise _err(exc) from exc
 
+
+
+
+@router.post("/projects/{project_id}/props/{prop_id}/use-as-identity")
+def post_use_as_identity(project_id: str, prop_id: str, body: UseAsIdentityBody, db: Session = Depends(get_db)):
+    _project(db, project_id)
+    try:
+        return {
+            "prop": use_as_prop_identity(
+                db,
+                project_id,
+                prop_id,
+                asset_id=body.asset_id,
+                source_type=body.source_type,
+            ).model_dump()
+        }
+    except PropCreatorError as exc:
+        raise _err(exc) from exc
 
 @router.post("/projects/{project_id}/props/{prop_id}/candidates/{candidate_id}/retry")
 def post_retry(project_id: str, prop_id: str, candidate_id: str, db: Session = Depends(get_db)):

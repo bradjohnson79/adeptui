@@ -5,6 +5,14 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from .attachment import (
+    AttachmentPoint,
+    PlacementMode,
+    PropAttachmentError,
+    PropRelationship,
+    validate_prop_attachment,
+)
+
 
 CoordinateSystem = Literal["adept-world-v1"]
 ProviderHonestyMode = Literal["approximate_translation", "native_coordinates"]
@@ -38,6 +46,8 @@ SpatialMapTypedErrorCode = Literal[
     "PATH_SUBJECT_NOT_FOUND",
     "ASSIGNMENT_INVALID",
     "REFERENCE_BUNDLE_TARGET_INVALID",
+    "ATTACHMENT_INVALID",
+    "CHARACTER_HAS_ATTACHED_PROPS",
 ]
 
 REQUIRED_360_DIRECTIONS: tuple[str, ...] = (
@@ -106,10 +116,30 @@ class SpatialCharacterPlacement(SpatialPlacement):
 
 
 class SpatialPropPlacement(SpatialPlacement):
+    # Attached / unplaced XOR: leftover independent world coords are None.
+    # Independent placed props still receive float x/y/z from grid apply.
+    x: Optional[float] = None
+    y: Optional[float] = None
+    z: Optional[float] = None
     propId: Optional[str] = None
     category: str = ""
     state: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
+    # Frozen character-prop attachment. attachedCharacterSlot is 1-4
+    # (Character 1-4). Existing slotIndex is 0-3; mapping is
+    # attachedCharacterSlot = slotIndex + 1. See attachment.py.
+    placementMode: PlacementMode = "independent"
+    attachedCharacterSlot: Optional[int] = None
+    attachedCharacterId: Optional[str] = None
+    relationship: Optional[PropRelationship] = None
+    attachmentPoint: Optional[AttachmentPoint] = None
+
+    @model_validator(mode="after")
+    def _attachment_law(self) -> "SpatialPropPlacement":
+        try:
+            return validate_prop_attachment(self)
+        except PropAttachmentError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class SpatialCamera(BaseModel):
@@ -339,6 +369,18 @@ class SpatialPropPlacementBody(BaseModel):
     miniPrompt: str = ""
     tag: str = ""
     visible: bool = True
+    placementMode: PlacementMode = "independent"
+    attachedCharacterSlot: Optional[int] = None
+    attachedCharacterId: Optional[str] = None
+    relationship: Optional[PropRelationship] = None
+    attachmentPoint: Optional[AttachmentPoint] = None
+
+    @model_validator(mode="after")
+    def _attachment_law(self) -> "SpatialPropPlacementBody":
+        try:
+            return validate_prop_attachment(self)
+        except PropAttachmentError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class SpatialCameraCreateBody(BaseModel):
@@ -416,6 +458,40 @@ class SpatialPropPlacementUpdateBody(BaseModel):
     miniPrompt: Optional[str] = None
     tag: Optional[str] = None
     visible: Optional[bool] = None
+    placementMode: Optional[PlacementMode] = None
+    attachedCharacterSlot: Optional[int] = None
+    attachedCharacterId: Optional[str] = None
+    relationship: Optional[PropRelationship] = None
+    attachmentPoint: Optional[AttachmentPoint] = None
+
+
+
+class SpatialPropAttachBody(BaseModel):
+    attachedCharacterId: Optional[str] = None
+    attachedCharacterSlot: Optional[int] = None
+    relationship: PropRelationship
+    attachmentPoint: Optional[AttachmentPoint] = None
+
+    @model_validator(mode="after")
+    def _attachment_law(self) -> "SpatialPropAttachBody":
+        try:
+            validate_prop_attachment(
+                {
+                    "placementMode": "attached",
+                    "attachedCharacterId": self.attachedCharacterId,
+                    "attachedCharacterSlot": self.attachedCharacterSlot,
+                    "relationship": self.relationship,
+                    "attachmentPoint": self.attachmentPoint,
+                }
+            )
+        except PropAttachmentError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
+class SpatialPropRelationshipUpdateBody(BaseModel):
+    relationship: PropRelationship
+    attachmentPoint: Optional[AttachmentPoint] = None
 
 
 class SpatialCameraUpdateBody(BaseModel):

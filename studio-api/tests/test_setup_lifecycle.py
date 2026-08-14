@@ -160,3 +160,138 @@ def test_preview_install_does_not_execute_mutation(monkeypatch: pytest.MonkeyPat
     assert "Source Manager" in preview.summary
     assert called["install"] is False
 
+
+
+
+def _search_ids(query: str) -> set[str]:
+    from app.setup.lifecycle.service import search_components
+
+    return {item["componentId"] for item in search_components(query)["items"]}
+
+
+def _search_reasons(query: str) -> dict[str, str]:
+    from app.setup.lifecycle.service import search_components
+
+    return {item["componentId"]: item["reason"] for item in search_components(query)["items"]}
+
+
+def test_search_photoreal_character_keeps_kontext(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("photoreal character")
+    reasons = _search_reasons("photoreal character")
+    assert "flux1_kontext_dev_local" in ids
+    assert "photoreal character" in reasons["flux1_kontext_dev_local"].lower()
+
+
+def test_search_anime_poster_hits_image_anime_path(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("anime poster")
+    reasons = _search_reasons("anime poster")
+    assert {"sana_15_local", "qwen_image_2512_models"} & ids
+    anime_hit = next(component_id for component_id in ("sana_15_local", "qwen_image_2512_models") if component_id in reasons)
+    assert "anime" in reasons[anime_hit].lower()
+
+
+def test_search_fast_preview_hits_schnell(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("fast preview")
+    reasons = _search_reasons("fast preview")
+    assert "flux1_schnell_local" in ids
+    assert "preview" in reasons["flux1_schnell_local"].lower()
+
+
+def test_search_short_film_hits_hunyuan(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("Make a short film")
+    reasons = _search_reasons("Make a short film")
+    assert "hunyuan_video_15" in ids
+    assert "short-film" in reasons["hunyuan_video_15"].lower()
+    assert "fal_key" not in ids
+
+
+def test_search_commercial_hits_wan_not_fal_key(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("Make a commercial")
+    reasons = _search_reasons("Make a commercial")
+    assert "wan_models" in ids
+    assert "fal_key" not in ids
+    assert "commercial" in reasons["wan_models"].lower()
+    assert "fal_key" not in _search_ids("commercial")
+
+
+def test_search_branded_product_video_differs_from_commercial(isolated_lifecycle: Path) -> None:
+    branded = _search_ids("Make a branded product video")
+    commercial = _search_ids("Make a commercial")
+    assert "wan_models" in branded
+    assert "flux1_dev_local" in branded
+    assert "fal_key" not in branded
+    assert branded != commercial
+
+
+def test_search_anime_episode_uses_video_and_image_anime(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("Make an anime episode")
+    assert {"sana_15_local", "qwen_image_2512_models", "zimage_models"} & ids
+    assert "hunyuan_video_15" in ids
+
+
+def test_search_talking_presenter_hits_longcat(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("Create a talking presenter")
+    reasons = _search_reasons("Create a talking presenter")
+    assert "longcat-video-avatar-1-5-local" in ids
+    assert "talking presenter" in reasons["longcat-video-avatar-1-5-local"].lower()
+
+
+def test_search_storyboard_uses_existing_previs_ids(isolated_lifecycle: Path) -> None:
+    ids = _search_ids("Make a storyboard")
+    reasons = _search_reasons("Make a storyboard")
+    assert {"flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint"} & ids
+    storyboard_hit = next(
+        component_id
+        for component_id in ("flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint")
+        if component_id in reasons
+    )
+    assert "storyboard" in reasons[storyboard_hit].lower()
+
+
+def test_production_intent_recommendations_differ(isolated_lifecycle: Path) -> None:
+    queries = [
+        "Make a short film",
+        "Make a commercial",
+        "Make a branded product video",
+        "Make an anime episode",
+        "Create a talking presenter",
+        "Make a storyboard",
+    ]
+    id_sets = [tuple(sorted(_search_ids(query))) for query in queries]
+    assert len(set(id_sets)) == len(queries)
+    reasons = [_search_reasons(query) for query in queries]
+    primary = [
+        reasons[0].get("hunyuan_video_15"),
+        reasons[1].get("wan_models"),
+        reasons[2].get("flux1_dev_local"),
+        reasons[3].get("sana_15_local"),
+        reasons[4].get("longcat-video-avatar-1-5-local"),
+        reasons[5].get("flux1_dev_local") or reasons[5].get("pack_essential_cinematic") or reasons[5].get("ltx_checkpoint"),
+    ]
+    assert all(primary)
+    assert len(set(primary)) == len(primary)
+
+
+def test_search_status_label_comes_from_lifecycle_state(
+    isolated_lifecycle: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.setup.diagnostics import Verification
+    from app.setup.lifecycle.service import lifecycle_state, search_components
+
+    monkeypatch.setattr(
+        "app.setup.lifecycle.service.verify_component",
+        lambda component_id: Verification(
+            healthy=True,
+            absent=False,
+            issue_code=None,
+            summary="Ready",
+            version="2026.08",
+        ),
+    )
+    result = search_components("Make a short film")
+    assert result["items"]
+    for item in result["items"]:
+        state = lifecycle_state(item["componentId"])
+        assert item["statusLabel"] == state.statusLabel
+        assert item["statusLabel"] == "Ready"

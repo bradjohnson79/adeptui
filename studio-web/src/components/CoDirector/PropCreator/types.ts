@@ -15,6 +15,24 @@ export type PropCandidate = {
   error?: string;
 };
 
+export type PropGeneratorPersist = {
+  local_enabled?: boolean;
+  api_enabled?: boolean;
+  local_family?: string;
+  api_model?: string;
+  local?: Array<{ family: string; enabled: boolean; batchCount: number }> | null;
+  api?: Array<{
+    model: string;
+    providerId: string;
+    modelId: string;
+    enabled: boolean;
+    batchCount: number;
+  }> | null;
+  styleEngine?: { enabled: boolean; family?: string };
+  stage2Enabled?: boolean;
+  stage2Family?: string;
+};
+
 export type PropEntity = {
   id: string;
   project_id: string;
@@ -27,12 +45,7 @@ export type PropEntity = {
   reference_asset_id?: string | null;
   approved_asset_id?: string | null;
   candidates: PropCandidate[];
-  generator?: {
-    local_enabled: boolean;
-    api_enabled: boolean;
-    local_family: string;
-    api_model: string;
-  };
+  generator?: PropGeneratorPersist;
   created_at?: string;
   updated_at?: string;
 };
@@ -47,5 +60,16 @@ export type PropCreatorWorkspace = {
 export function candidateProgress(candidates: PropCandidate[]): { done: number; total: number; percent: number } {
   const total = candidates.length;
   const done = candidates.filter((c) => c.status === "complete" || c.status === "failed").length;
+  return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
+}
+
+/** Progress totals = sum of checked batches when live candidates have not arrived yet. */
+export function plannedProgress(
+  candidates: PropCandidate[],
+  plannedTotal: number,
+): { done: number; total: number; percent: number } {
+  const live = candidateProgress(candidates);
+  const total = live.total > 0 ? live.total : Math.max(0, plannedTotal);
+  const done = live.done;
   return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
 }

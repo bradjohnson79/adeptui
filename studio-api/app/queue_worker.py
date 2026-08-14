@@ -2682,11 +2682,14 @@ class JobQueue:
         model = (params.get("model") or intent.enginePreference or "zimage").lower()
         custom_ckpt = params.get("checkpoint") or ""
         reasons: list[str] = []
+        pinned_key = str((pinned or {}).get("workflowKey") or "")
+        if pinned_key.startswith("zimage."):
+            model = "zimage"
 
         zimage_ready = self._zimage_stack_ready()
         if model == "auto":
             model, reasons = self._resolve_ready_still_model("auto")
-        use_zimage = model in ("zimage", "z-image", "z_image")
+        use_zimage = model in ("zimage", "z-image", "z_image") or pinned_key.startswith("zimage.")
         if use_zimage and not zimage_ready:
             alt, alt_reasons = self._resolve_ready_still_model("auto")
             if alt not in ("zimage", "z-image", "z_image"):

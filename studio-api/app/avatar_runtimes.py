@@ -328,7 +328,8 @@ def get_spec(component_id: str) -> AvatarRuntimeSpec:
 
 def runtime_root(component_id: str) -> Path:
     spec = get_spec(component_id)
-    return Path(settings.data_dir) / "runtimes" / "avatar" / spec.runtime_slug
+    from .model_storage.store import category_root
+    return category_root("video") / spec.runtime_slug
 
 
 def _active_runtime_root(component_id: str) -> Path:

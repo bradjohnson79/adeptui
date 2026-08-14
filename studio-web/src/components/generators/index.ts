@@ -15,3 +15,16 @@ export {
 export type { CharacterGenerationMode } from "./types";
 export { GeneratorSourceSelector } from "./GeneratorSourceSelector";
 export type { GeneratorSourceSelectorProps } from "./GeneratorSourceSelector";
+export { GeneratorPlanPanel } from "./GeneratorPlanPanel";
+export type { GeneratorPlanPanelProps } from "./GeneratorPlanPanel";
+export {
+  DEFAULT_GENERATOR_PLAN,
+  buildPropGeneratorSourcesPayload,
+  clampBatchCount,
+  fallbackGenerateScalars,
+  hydrateGeneratorPlan,
+  planHasExecutableWork,
+  propProvenanceLabel,
+  summarizeCandidatePlan,
+} from "./generatorPlan";
+export type { CharacterGeneratorPlan, GeneratorPlan, GeneratorSourcesPayload } from "./generatorPlan";

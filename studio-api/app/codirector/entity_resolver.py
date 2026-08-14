@@ -352,6 +352,26 @@ def compile_shot_prompt(
     char_meta = _character_metadata(db, project_id, shot.characters)
     prop_meta = _prop_metadata(db, project_id, shot.prop_entities)
 
+    from ..spatial_map.ers_projection import compile_structured_blocking
+
+    approved_map = {
+        str(prop.get("id") or prop.get("prop_id") or "").strip(): bool(
+            (prop.get("approved_asset_id") or "").strip()
+        )
+        for prop in prop_meta
+        if str(prop.get("id") or prop.get("prop_id") or "").strip()
+    }
+    name_map = {
+        str(char.get("character_id") or "").strip(): str(char.get("name") or "")
+        for char in char_meta
+        if str(char.get("character_id") or "").strip() and char.get("name")
+    }
+    structured_blocking = compile_structured_blocking(
+        list(ers_package.placements or []) if ers_package else [],
+        prop_approved=approved_map,
+        character_names=name_map,
+    )
+
     # Style layering: project > environment (ERS) > character > user (visual_style).
     # We pass these as discrete keys in creativeContext so downstream consumers
     # can apply them independently (no flattening into one global string).
@@ -394,10 +414,15 @@ def compile_shot_prompt(
     char_names = [c.get("name") for c in char_meta if c.get("name")]
     prop_labels = [p.get("display_label") for p in prop_meta if p.get("display_label")]
     prompt_parts: list[str] = []
-    if char_names:
-        prompt_parts.append("Characters: " + ", ".join(char_names))
-    if prop_labels:
-        prompt_parts.append("Props: " + ", ".join(prop_labels))
+    if structured_blocking.get("lines"):
+        prompt_parts.extend(structured_blocking["lines"])
+        if structured_blocking.get("conceptual_prose"):
+            prompt_parts.append(structured_blocking["conceptual_prose"])
+    else:
+        if char_names:
+            prompt_parts.append("Characters: " + ", ".join(char_names))
+        if prop_labels:
+            prompt_parts.append("Props: " + ", ".join(prop_labels))
     prop_facts = [p.get("description") for p in prop_meta if p.get("description")]
     if prop_facts:
         prompt_parts.append("Prop details: " + " ".join(prop_facts))
@@ -449,6 +474,7 @@ def compile_shot_prompt(
         "orientation": shot.orientation,
         "ers_package_id": ers_package.id if ers_package else "",
         "ers_directional_ref": directional_ref,
+        "structured_blocking": structured_blocking,
         # Layered styles — NOT flattened.
         "style_layers": {
             "project": project_style,

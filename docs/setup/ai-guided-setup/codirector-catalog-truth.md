@@ -35,6 +35,9 @@ These tools are declared in `studio-api/app/codirector/tools/definitions.py`, bo
 | anime recommend | `setup.search_components(query="anime")` | Searches capability tags, badges, strengths, and best-fit metadata from the lifecycle catalog. |
 | Compare Sana vs Qwen | `setup.compare_components([sana_15_local, qwen_image_2512_models])` | Uses the catalog's readiness, VRAM, speed, badges, and use-case metadata. |
 | photoreal character | `setup.search_components(query="photoreal character")` | Returns the same catalog-truth metadata that AI-Guided Setup uses for creator recommendations. |
+| make a short film | `setup.search_components(query="make a short film")` | Maps onto existing Ready video IDs (Hunyuan 1.5 first). |
+| make a commercial | `setup.search_components(query="make a commercial")` | Maps onto WAN / video, not the fal.ai credential. |
+| create a talking presenter | `setup.search_components(query="create a talking presenter")` | Maps onto existing avatar runtimes and reports live Repair / Not Installed honestly. |
 | Repair ComfyUI | `setup.inspect_component(comfyui_hunyuan_nodes)` + `setup.diagnose_failure(comfyui_hunyuan_nodes)` + `setup.list_repair_options(comfyui_hunyuan_nodes)` | Keeps repair discussion on the trusted install-job/runtime boundary. |
 
 ## Backing APIs behind those tools

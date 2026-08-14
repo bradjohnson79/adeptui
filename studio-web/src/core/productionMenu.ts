@@ -232,6 +232,15 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         workspace: "scenecreator",
       },
       {
+        id: "propcreator",
+        label: "Prop Creator",
+        description: "Create project Prop identities and approve a production look",
+        helpLabel: "What is Prop Creator?",
+        helpContent: "Create and refine project Props — description, reference, generated looks, and an approved identity used by Spatial Map and Scene Creator.",
+        action: "workspace",
+        workspace: "propcreator",
+      },
+      {
         id: "spatial",
         label: "Spatial Map",
         description: "Plan environments, blocking, and spatial relationships",

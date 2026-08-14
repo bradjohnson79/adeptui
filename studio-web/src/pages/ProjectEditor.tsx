@@ -36,6 +36,7 @@ import { CinematicImageStudio } from "../components/image-studio/CinematicImageS
 import { LibraryPanel } from "../components/LibraryPanel";
 import { MarketplacePanel } from "../components/MarketplacePanel";
 import { SceneCreatorWorkspace } from "../components/scene-creator/SceneCreatorWorkspace";
+import { PropCreatorWorkspace } from "../components/prop-creator/PropCreatorWorkspace";
 import { AvatarStudioWorkspace } from "../components/AvatarStudioWorkspace";
 import { VoiceStudioShell } from "../components/VoiceStudioShell";
 import { CharacterProfileWorkspace } from "../components/CharacterProfileWorkspace";
@@ -692,6 +693,8 @@ export default function ProjectEditor() {
           project={project}
           onGo={(next) => go((next === "spatial_map" ? "spatial" : next) as typeof tab)}
         />
+      ) : tab === "propcreator" ? (
+        <PropCreatorWorkspace project={project} onGo={go} />
       ) : tab === "avatar" ? (
         <AvatarStudioWorkspace project={project} onChange={refresh} onGo={go} />
       ) : tab === "voicestudio" ? (

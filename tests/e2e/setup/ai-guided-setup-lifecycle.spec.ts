@@ -56,7 +56,7 @@ async function mockAiGuidedLifecycle(page: Page, state: { statusById: Record<str
           subgroup: "Local Models",
           surfaceGroups: ["Video"],
           lifecycle_status_label: state.statusById.hunyuan_video_13b === "ready" ? "Ready" : "Not Installed",
-          bestFor: ["Long-form local video", "High-fidelity motion"],
+          bestFor: ["Long-form local video", "High-fidelity motion", "short film", "make a short film"],
           badges: ["Video", "Local GPU"],
         }),
         componentFixture({
@@ -204,8 +204,14 @@ test.describe("@critical ai-guided setup lifecycle", () => {
       await expect(page.getByText("Source Manager runs verified sources")).toBeVisible();
       await expect(page.getByRole("link", { name: /Open Source Manager/i })).toHaveCount(0);
 
-      await page.getByPlaceholder("photoreal character, anime poster, fast preview, product mockup").fill("anime poster");
+      await expect(page.getByText("Try prompts like")).toBeVisible();
+      await expect(page.getByText("make a short film")).toBeVisible();
+      await page.getByPlaceholder("Describe the film, video, scene, or production you want to create...").fill("anime poster");
       await expect(page.getByText("Strong fit for anime and stylized illustration work.")).toBeVisible();
+      await page.getByPlaceholder("Describe the film, video, scene, or production you want to create...").fill("make a short film");
+      await expect(page.getByText("Best fit for short-film and cinematic video generation.")).toBeVisible();
+      await expect(page.getByText("Hunyuan Video 13B").first()).toBeVisible();
+      await expect(page.locator(".setup-requirement").filter({ hasText: "Not Installed" }).first()).toBeVisible();
     } finally {
       await deleteProject(request, project.id);
     }

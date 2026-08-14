@@ -321,7 +321,10 @@ def test_avatar_runtime_component_registration_uses_isolated_runtime_path(
     assert component.installer == "avatar_runtime"
     assert component.verifier == "avatar_runtime"
     assert component.category == "Avatar Runtimes"
-    assert suggested_install_path("musetalk-1-5-local").endswith("runtimes\\avatar\\musetalk-1-5")
+    from app.model_storage.store import category_root
+
+    expected = str(category_root("video") / "musetalk-1-5")
+    assert suggested_install_path("musetalk-1-5-local") == expected
 
 
 def test_avatar_runtime_install_requires_confirm_download_models(

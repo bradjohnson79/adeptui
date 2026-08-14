@@ -7,15 +7,16 @@
  * only because the frozen M411 contract types in `api.ts` predate those fields.
  */
 import { api } from "../../../api";
-import type {
-  SpatialMapCreateBody,
-  SpatialMapUpdateBody,
-  SpatialMapDocument,
-
-  SpatialCharacterPlacementBody,
-  SpatialCharacterPlacementUpdateBody,
-  SpatialPropPlacementBody,
-  SpatialPropPlacementUpdateBody,
+import {
+  validatePropAttachment,
+  type SpatialMapCreateBody,
+  type SpatialMapUpdateBody,
+  type SpatialMapDocument,
+  type SpatialCharacterPlacementBody,
+  type SpatialCharacterPlacementUpdateBody,
+  type SpatialPropPlacementBody,
+  type SpatialPropPlacementUpdateBody,
+  type SpatialPropAttachmentFields,
 } from "./types";
 
 type CameraBody = {
@@ -162,6 +163,50 @@ export const spatialMapApi = {
 
   async removeCamera(projectId: string, documentId: string, cameraId: string): Promise<SpatialMapDocument> {
     const res = await api.spatialMap.removeCamera(projectId, documentId, cameraId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async attachProp(
+    projectId: string,
+    documentId: string,
+    placementId: string,
+    fields: SpatialPropAttachmentFields,
+  ): Promise<SpatialMapDocument> {
+    const body = validatePropAttachment({
+      placementMode: "attached",
+      attachedCharacterSlot: fields.attachedCharacterSlot,
+      attachedCharacterId: fields.attachedCharacterId,
+      relationship: fields.relationship,
+      attachmentPoint: fields.attachmentPoint,
+    });
+    const res = await api.spatialMap.attachProp(projectId, documentId, placementId, {
+      attachedCharacterSlot: body.attachedCharacterSlot,
+      attachedCharacterId: body.attachedCharacterId,
+      relationship: body.relationship as string,
+      attachmentPoint: body.attachmentPoint,
+    });
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async detachProp(
+    projectId: string,
+    documentId: string,
+    placementId: string,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.detachProp(projectId, documentId, placementId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
+  async updatePropRelationship(
+    projectId: string,
+    documentId: string,
+    placementId: string,
+    fields: Pick<SpatialPropAttachmentFields, "relationship" | "attachmentPoint">,
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.updatePropRelationship(projectId, documentId, placementId, {
+      relationship: fields.relationship as string,
+      attachmentPoint: fields.attachmentPoint,
+    });
     return res.document as unknown as SpatialMapDocument;
   },
 

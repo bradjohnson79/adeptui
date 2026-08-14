@@ -22,6 +22,8 @@ class SpatialMapErrorCode(str, Enum):
     PATH_SUBJECT_NOT_FOUND = "PATH_SUBJECT_NOT_FOUND"
     ASSIGNMENT_INVALID = "ASSIGNMENT_INVALID"
     REFERENCE_BUNDLE_TARGET_INVALID = "REFERENCE_BUNDLE_TARGET_INVALID"
+    ATTACHMENT_INVALID = "ATTACHMENT_INVALID"
+    CHARACTER_HAS_ATTACHED_PROPS = "CHARACTER_HAS_ATTACHED_PROPS"
 
 
 ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
@@ -89,6 +91,16 @@ ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
         "status": 400,
         "explanation": "Spatial reference bundles only support image or video targets.",
         "recovery": "Retry with target='image' or target='video'.",
+    },
+    SpatialMapErrorCode.ATTACHMENT_INVALID: {
+        "status": 400,
+        "explanation": "The requested character-prop attachment is invalid.",
+        "recovery": "Use attachedCharacterId or attachedCharacterSlot 1-4 and a relationship; attached props cannot also have an independent grid position.",
+    },
+    SpatialMapErrorCode.CHARACTER_HAS_ATTACHED_PROPS: {
+        "status": 409,
+        "explanation": "This character still has attached props.",
+        "recovery": "Detach Props to Unplaced, then remove the character.",
     },
 }
 

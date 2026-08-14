@@ -181,7 +181,11 @@ def apply_image_dock_preference(project_id: str, body: dict[str, Any]) -> dict[s
     out = dict(body or {})
     explicit = out.get("modelFamilyPreference") or out.get("model")
     # Treat legacy hardcodes as non-override when caller left default zimage without lock.
-    locked = bool(out.get("lockModelFamily") or out.get("modelLocked"))
+    locked = bool(
+        out.get("lockModelFamily")
+        or out.get("modelLocked")
+        or out.get("forceWorkflowKey")
+    )
     if not explicit or (not locked and explicit in ("zimage", "auto", "default")):
         style_family = _style_preferred_family(out.get("creativeContext"))
         chosen = (

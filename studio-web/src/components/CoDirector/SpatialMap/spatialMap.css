@@ -420,9 +420,36 @@
   border-color: var(--danger, #f87171);
 }
 
+.spatial-map__placement-arm {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.spatial-map__placement-active-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  color: var(--muted, #8aa4b5);
+  white-space: nowrap;
+}
+
+.spatial-map__placement-active-label.is-on {
+  color: var(--accent, #2dd4bf);
+}
+
+.spatial-map__active-badge.is-placement-active {
+  color: var(--accent, #2dd4bf);
+  border-color: color-mix(in srgb, var(--accent, #2dd4bf) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 18%, transparent);
+}
+
 .spatial-map__slot-head .spatial-map__slot-toggle,
 .spatial-map__camera-slot .spatial-map__slot-toggle {
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .spatial-map__slot-toggle {
@@ -955,4 +982,90 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
 .spatial-map__camera-inspector-btn--danger:hover {
   border-color: var(--danger, #f87171);
   color: var(--danger, #f87171);
+}
+
+/* —— Character-prop attachment (Workstreams C+D) —— */
+.spatial-map__attach-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.spatial-map__attach-tag {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding: 0.08rem 0.3rem;
+  border-radius: 0.22rem;
+  color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--accent, #2dd4bf) 35%, transparent);
+  background: color-mix(in srgb, var(--accent, #2dd4bf) 12%, transparent);
+}
+
+.spatial-map__attach-editor,
+.spatial-map__character-inspector {
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 0.45rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.45rem 0;
+}
+
+.spatial-map__attach-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.spatial-map__attach-field select {
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  color: var(--ink);
+  border-radius: 0.3rem;
+  padding: 0.25rem 0.35rem;
+}
+
+.spatial-map__attach-error {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #f87171;
+}
+
+.spatial-map__attach-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.spatial-map__attach-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.spatial-map__attach-row-label {
+  font-size: 0.75rem;
+  color: var(--ink);
+}
+
+.spatial-map__attach-empty {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.spatial-map__prop-badge-label {
+  pointer-events: none;
+  font-weight: 700;
+}
+
+.spatial-map__slot-card.is-attached {
+  border-color: color-mix(in srgb, var(--accent, #2dd4bf) 40%, var(--line, rgba(148, 220, 255, 0.18)));
 }

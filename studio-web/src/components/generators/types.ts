@@ -9,6 +9,10 @@ export type GeneratorOption = {
   label: string;
   family?: string;
   providerKind?: "local" | "cloud";
+  /** Setup registry provider id (API models). Never identify an API model by display name alone. */
+  providerId?: string;
+  /** Provider model id (API models). */
+  modelId?: string;
   /** Readiness / Certified state */
   executable: boolean;
   status?: string;
@@ -16,6 +20,7 @@ export type GeneratorOption = {
   credits?: number | null;
   /** Human availability when no numeric balance: "Connected" | "Balance unavailable" */
   availability?: string;
+  capabilities?: string[];
   /** Family can consume reference pixels (any Certified reference-capable key). */
   supportsReferences?: boolean;
   /** Family has a real img2img/edit workflow for Stage 2 style refinement. */

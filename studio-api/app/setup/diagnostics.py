@@ -14,6 +14,12 @@ from typing import Any
 from ..avatar_runtimes import verify_runtime as verify_avatar_runtime
 from ..config import settings
 from ..secrets_store import secret_status
+
+_CREDENTIAL_VERIFIERS = {
+    "fal_key": ("fal_api_key", "fal.ai"),
+    "kie_key": ("kie_api_key", "Kie.ai"),
+    "wavespeed_key": ("wavespeed_api_key", "WaveSpeed.ai"),
+}
 from .catalog import ComponentDefinition, get_component
 from .paths import ensure_configured_paths
 from .state import load_state, update_state
@@ -278,33 +284,35 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
     if component.verifier == "ollama_service":
         return _service(settings.ollama_url, "/api/tags", "Ollama")
 
-    if component.verifier == "fal_key":
-        status = secret_status("fal_api_key")
+    credential = _CREDENTIAL_VERIFIERS.get(component.verifier)
+    if credential:
+        secret_name, label = credential
+        status = secret_status(secret_name)
         state = status.get("state") or "missing"
         message = str(status.get("message") or "")
         if state == "verified":
             return Verification(
                 True, False, None,
-                "The fal.ai key was accepted by fal.ai.",
+                f"The {label} key was accepted by {label}.",
                 version=str(status.get("verifiedAt") or ""),
                 details=((message,) if message else ()),
             )
         if state == "invalid":
             return Verification(
                 False, False, "credential_invalid",
-                "fal.ai rejected the configured API key.",
+                f"{label} rejected the configured API key.",
                 details=((message,) if message else ()),
                 recommendation="configure", requires_user_interaction=True,
             )
         if state == "unverified":
             return Verification(
                 False, False, "credential_unverified",
-                "The fal.ai key is configured but has not been verified with the service.",
+                f"The {label} key is configured but has not been verified with the service.",
                 details=((message,) if message else ()),
                 recommendation="configure", requires_user_interaction=True,
             )
         return Verification(
-            False, True, "credential_missing", "A fal.ai API key is not configured.",
+            False, True, "credential_missing", f"A {label} API key is not configured.",
             recommendation="configure", requires_user_interaction=True,
         )
 

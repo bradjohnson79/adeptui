@@ -52,12 +52,12 @@ _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
         "supportedResolutions": ["1024x1024", "1216x832", "832x1216"],
         "strengths": ["Photoreal detail", "Lighting realism", "Production stills"],
         "weaknesses": ["Slower than preview models", "Needs larger VRAM"],
-        "bestFor": ["Photoreal concepts", "Marketing stills", "Character key art"],
+        "bestFor": ["Photoreal concepts", "Marketing stills", "Character key art", "storyboard", "product mockup", "make a storyboard", "make a branded product video"],
         "badges": ["Photoreal", "Production Quality", "Reference Images", "Inpainting"],
         "group": "Image Generation",
         "subgroup": "Local Models",
         "experimental": False,
-        "capabilityTags": ["photoreal", "cinematic", "marketing"],
+        "capabilityTags": ["photoreal", "cinematic", "marketing", "storyboard", "product mockup"],
     },
     "flux1_schnell_local": {
         "parameterCount": "12B",
@@ -100,7 +100,7 @@ _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
         "supportedResolutions": ["1024x1024", "1328x768", "768x1328"],
         "strengths": ["Balanced realism", "Typography", "Flexible styles"],
         "weaknesses": ["Less context following than Kontext", "Needs tuned steps"],
-        "bestFor": ["General stills", "Poster design", "Style exploration"],
+        "bestFor": ["General stills", "Poster design", "Style exploration", "anime poster", "product mockup", "make an anime episode"],
         "badges": ["Photoreal", "Illustration", "Text Rendering", "Reference Images"],
         "group": "Image Generation",
         "subgroup": "Local Models",
@@ -116,7 +116,7 @@ _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
         "supportedResolutions": ["1024x1024", "1344x768", "768x1344"],
         "strengths": ["Speed", "Simple local setup", "Strong fallback"],
         "weaknesses": ["Less detailed than flagship families", "Weak text rendering"],
-        "bestFor": ["Fast preview", "Fallback renders", "Low-VRAM stills"],
+        "bestFor": ["Fast preview", "Fallback renders", "Low-VRAM stills", "anime poster", "make an anime episode"],
         "badges": ["Fast Preview", "Illustration"],
         "group": "Image Generation",
         "subgroup": "Local Models",
@@ -132,7 +132,7 @@ _LOCAL_IMAGE_COMPONENTS: dict[str, dict[str, Any]] = {
         "supportedResolutions": ["1024x1024", "1280x720", "720x1280"],
         "strengths": ["Stylized art", "Anime leaning", "Fast composition"],
         "weaknesses": ["Less photoreal", "Lower fidelity small text"],
-        "bestFor": ["Anime", "Illustration", "Stylized concept art"],
+        "bestFor": ["Anime", "Illustration", "Stylized concept art", "anime poster", "make an anime episode"],
         "badges": ["Anime", "Illustration", "Fast Preview"],
         "group": "Image Generation",
         "subgroup": "Local Models",
@@ -308,7 +308,31 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "surfaceGroups": ["API Providers"],
         "capabilityTags": ["cloud", "credentials", "provider"],
         "badges": ["Credentials", "Cloud"],
-        "bestFor": ["Hosted providers", "Cloud render routing", "Commercial image models"],
+        "bestFor": ["Hosted providers", "Cloud render routing", "hosted image APIs"],
+        "strengths": ["Encrypted local storage", "Shared by setup-aware surfaces"],
+        "weaknesses": ["No provider access until verified"],
+        "lifecycleActions": {"install": False, "repair": True, "calibrate": False, "certify": False},
+        "surfaceEntryPoints": {"dock": True, "coDirector": True},
+    },
+    "kie_key": {
+        "group": "API Providers",
+        "subgroup": "Credentials",
+        "surfaceGroups": ["API Providers"],
+        "capabilityTags": ["cloud", "credentials", "provider"],
+        "badges": ["Credentials", "Cloud"],
+        "bestFor": ["Hosted providers", "Cloud render routing", "hosted image APIs"],
+        "strengths": ["Encrypted local storage", "Shared by setup-aware surfaces"],
+        "weaknesses": ["No provider access until verified"],
+        "lifecycleActions": {"install": False, "repair": True, "calibrate": False, "certify": False},
+        "surfaceEntryPoints": {"dock": True, "coDirector": True},
+    },
+    "wavespeed_key": {
+        "group": "API Providers",
+        "subgroup": "Credentials",
+        "surfaceGroups": ["API Providers"],
+        "capabilityTags": ["cloud", "credentials", "provider"],
+        "badges": ["Credentials", "Cloud"],
+        "bestFor": ["Hosted providers", "Cloud render routing", "hosted image APIs"],
         "strengths": ["Encrypted local storage", "Shared by setup-aware surfaces"],
         "weaknesses": ["No provider access until verified"],
         "lifecycleActions": {"install": False, "repair": True, "calibrate": False, "certify": False},
@@ -320,7 +344,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "surfaceGroups": ["Music"],
         "capabilityTags": ["music", "audio", "local"],
         "badges": ["Music", "Local GPU"],
-        "bestFor": ["Music beds", "Local soundtrack ideation"],
+        "bestFor": ["Music beds", "Local soundtrack ideation", "make a short film", "make a commercial"],
         "strengths": ["Project-local music generation", "GPU-first sandbox"],
         "weaknesses": ["Requires local sandbox install", "CPU-only runtime is blocked"],
         "lifecycleActions": {"install": False, "repair": True, "calibrate": True, "certify": True},
@@ -332,7 +356,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "surfaceGroups": ["Music"],
         "capabilityTags": ["ambience", "sfx", "audio", "local"],
         "badges": ["Ambience", "SFX", "Local GPU"],
-        "bestFor": ["Ambience beds", "Sound effects", "Room tone"],
+        "bestFor": ["Ambience beds", "Sound effects", "Room tone", "make a branded product video"],
         "strengths": ["Local ambience and SFX runtime", "GPU-first sandbox"],
         "weaknesses": ["Not for music generation", "CPU-only runtime is blocked"],
         "lifecycleActions": {"install": False, "repair": True, "calibrate": True, "certify": True},
@@ -342,11 +366,81 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "group": "Video",
         "subgroup": "Local Models",
         "surfaceGroups": ["Video"],
+        "capabilityTags": ["video", "image-to-video", "previz", "storyboard"],
+        "badges": ["Video", "Local GPU"],
+        "bestFor": ["storyboard motion", "image-to-video", "previz", "make a storyboard", "make a short film"],
+    },
+    "ltx_2_5_checkpoint": {
+        "group": "Video",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Video"],
+        "capabilityTags": ["video", "image-to-video", "previz", "storyboard"],
+        "badges": ["Video", "Local GPU"],
+        "bestFor": ["storyboard motion", "image-to-video", "previz", "make a storyboard"],
     },
     "wan_models": {
         "group": "Video",
         "subgroup": "Local Models",
         "surfaceGroups": ["Video"],
+        "capabilityTags": ["video", "commercial", "branded", "product video"],
+        "badges": ["Video", "Local GPU"],
+        "bestFor": ["branded product video", "commercial", "product video", "make a commercial", "make a branded product video", "make a short film"],
+    },
+    "hunyuan_video_15": {
+        "group": "Video",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Video"],
+        "capabilityTags": ["video", "short film", "film", "cinematic video"],
+        "badges": ["Video", "Local GPU"],
+        "bestFor": ["short film", "film", "cinematic video", "make a short film", "make an anime episode"],
+    },
+    "hunyuan_video_13b": {
+        "group": "Video",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Video"],
+        "capabilityTags": ["video", "short film", "high-resource film"],
+        "badges": ["Video", "Local GPU"],
+        "bestFor": ["short film", "high-resource film", "make a short film"],
+    },
+    "longcat-video-avatar-1-5-local": {
+        "group": "Avatar",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Avatar", "Motion"],
+        "capabilityTags": ["avatar", "talking presenter", "presenter", "talking"],
+        "badges": ["Avatar"],
+        "bestFor": ["talking presenter", "talking avatars", "presenter", "create a talking presenter"],
+    },
+    "infinitetalk-local": {
+        "group": "Avatar",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Avatar", "Motion"],
+        "capabilityTags": ["avatar", "talking presenter", "talking avatars"],
+        "badges": ["Avatar"],
+        "bestFor": ["talking presenter", "talking avatars", "create a talking presenter"],
+    },
+    "musetalk-1-5-local": {
+        "group": "Avatar",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Avatar", "Motion"],
+        "capabilityTags": ["avatar", "talking presenter", "talking avatars"],
+        "badges": ["Avatar"],
+        "bestFor": ["talking presenter", "talking avatars", "create a talking presenter"],
+    },
+    "echomimic-v2-local": {
+        "group": "Avatar",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Avatar", "Motion"],
+        "capabilityTags": ["avatar", "talking presenter", "talking avatars"],
+        "badges": ["Avatar"],
+        "bestFor": ["talking presenter", "talking avatars", "create a talking presenter"],
+    },
+    "index_tts2": {
+        "group": "Voice",
+        "subgroup": "Local Models",
+        "surfaceGroups": ["Voice"],
+        "capabilityTags": ["voice", "audio", "dialogue"],
+        "badges": ["Voice"],
+        "bestFor": ["Voice performance", "make a short film", "make a commercial", "create a talking presenter"],
     },
     "pack_essential_photoreal": {
         "group": "Creative Packs",
@@ -364,7 +458,7 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "surfaceGroups": ["Creative Packs"],
         "capabilityTags": ["pack", "anime", "creative"],
         "badges": ["Creative Pack", "Anime"],
-        "bestFor": ["Anime expressions", "Stylized reference packs"],
+        "bestFor": ["Anime expressions", "Stylized reference packs", "anime poster", "make an anime episode"],
         "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
         "surfaceEntryPoints": {"dock": True, "coDirector": True},
     },
@@ -372,9 +466,9 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "group": "Creative Packs",
         "subgroup": "Essential Packs",
         "surfaceGroups": ["Creative Packs"],
-        "capabilityTags": ["pack", "cinematic", "creative"],
+        "capabilityTags": ["pack", "cinematic", "creative", "storyboard"],
         "badges": ["Creative Pack", "Cinematic"],
-        "bestFor": ["Lighting looks", "Cinematic scene setups"],
+        "bestFor": ["Lighting looks", "Cinematic scene setups", "storyboard", "make a storyboard", "make a short film"],
         "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
         "surfaceEntryPoints": {"dock": True, "coDirector": True},
     },
@@ -784,6 +878,29 @@ def recommendation_reason(component_id: str, intent: str) -> str:
         return "Best fit for anime or stylized illustration intent."
     if component_id == "flux1_schnell_local" and any(word in text for word in ("fast", "preview", "quick")):
         return "Best fit for quick preview passes."
+    if component_id in {"hunyuan_video_15", "wan_models"} and "anime" in text and "episode" in text:
+        return "Best fit for anime episode video generation."
+    if component_id in {"hunyuan_video_15", "hunyuan_video_13b", "wan_models", "ltx_checkpoint", "ltx_2_5_checkpoint"} and (
+        "film" in text or ("short" in text and "preview" not in text)
+    ) and "commercial" not in text and "branded" not in text:
+        return "Best fit for short-film and cinematic video generation."
+    if component_id in {"wan_models", "hunyuan_video_15"} and (
+        "commercial" in text or "branded" in text or ("product" in text and "video" in text)
+    ):
+        return "Best fit for commercial and branded product video."
+    if component_id in {
+        "longcat-video-avatar-1-5-local",
+        "infinitetalk-local",
+        "musetalk-1-5-local",
+        "echomimic-v2-local",
+    } and any(word in text for word in ("talking", "presenter", "avatar")):
+        return "Best fit for a talking presenter / avatar performance."
+    if component_id in {"flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint", "ltx_2_5_checkpoint"} and any(
+        word in text for word in ("storyboard", "previz", "previs")
+    ):
+        return "Best fit for storyboard frames and motion previs."
+    if component_id in {"flux1_dev_local", "qwen_image_2512_models"} and ("product" in text and "mockup" in text):
+        return "Best fit for product mockup stills."
     return "Matches the requested capability tags and certified setup posture."
 
 

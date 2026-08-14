@@ -17,8 +17,10 @@ from .schemas import (
     SpatialMapCreateBody,
     SpatialMapUpdateBody,
     SpatialMovementPathCreateBody,
+    SpatialPropAttachBody,
     SpatialPropPlacementBody,
     SpatialPropPlacementUpdateBody,
+    SpatialPropRelationshipUpdateBody,
     Spatial360ViewUpsertBody,
     SpatialVariantCreateBody,
 )
@@ -33,17 +35,20 @@ from .service import (
     create_variant,
     get_document,
     list_documents,
+    attach_prop,
     place_character,
     place_prop,
     remove_camera,
     remove_character,
     remove_prop,
     assign_to_scene,
+    detach_prop,
     update_camera,
     update_character,
     update_collage_view,
     update_document,
     update_prop,
+    update_prop_relationship,
 )
 
 router = APIRouter(prefix="/spatial-map", tags=["spatial-map-m411"])
@@ -100,9 +105,18 @@ def api_remove_character(
     project_id: str,
     document_id: str,
     placement_id: str,
+    detachAttachedProps: bool = False,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return {"document": remove_character(db, project_id, document_id, placement_id).model_dump()}
+    return {
+        "document": remove_character(
+            db,
+            project_id,
+            document_id,
+            placement_id,
+            detach_attached_props=detachAttachedProps,
+        ).model_dump()
+    }
 
 
 @router.post("/projects/{project_id}/maps/{document_id}/props")
@@ -134,6 +148,40 @@ def api_remove_prop(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return {"document": remove_prop(db, project_id, document_id, placement_id).model_dump()}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/props/{placement_id}/attach")
+def api_attach_prop(
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    body: SpatialPropAttachBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": attach_prop(db, project_id, document_id, placement_id, body).model_dump()}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/props/{placement_id}/detach")
+def api_detach_prop(
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {"document": detach_prop(db, project_id, document_id, placement_id).model_dump()}
+
+
+@router.patch("/projects/{project_id}/maps/{document_id}/props/{placement_id}/relationship")
+def api_update_prop_relationship(
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    body: SpatialPropRelationshipUpdateBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return {
+        "document": update_prop_relationship(db, project_id, document_id, placement_id, body).model_dump()
+    }
 
 
 @router.post("/projects/{project_id}/maps/{document_id}/cameras")

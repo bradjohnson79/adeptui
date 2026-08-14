@@ -16,6 +16,13 @@ import {
   pointerToCell,
   type GridScale,
 } from "./gridGeometry";
+import {
+  attachedBadgeFor,
+  formatCharacterAttachmentTooltip,
+  isAttachedProp,
+  visibleAttachedPropsForCharacter,
+  type AttachedBadge,
+} from "./attachmentUi";
 import { SLOT_COLORS } from "./types";
 import type { SpatialCamera, SpatialCharacterPlacement, SpatialPropPlacement, SlotColorKey } from "./types";
 
@@ -31,6 +38,8 @@ export type GridPlacement = {
   kind: "character" | "prop";
   label?: string;
   visible?: boolean;
+  attachedBadge?: AttachedBadge | null;
+  tooltip?: string;
 };
 
 type Props = {
@@ -57,21 +66,27 @@ export function toGridPlacements(
   characters: SpatialCharacterPlacement[],
   props: SpatialPropPlacement[],
 ): GridPlacement[] {
+  const independentProps = props.filter((p) => !isAttachedProp(p));
   return [
-    ...characters.map((c) => ({
-      id: c.id,
-      tag: c.tag || c.label,
-      colorKey: (c.colorKey as SlotColorKey) || "red",
-      gridRow: c.gridRow,
-      gridColumn: c.gridColumn,
-      normalizedX: c.normalizedX,
-      normalizedY: c.normalizedY,
-      slotIndex: c.slotIndex,
-      kind: "character" as const,
-      label: c.label || c.tag,
-      visible: c.visible,
-    })),
-    ...props.map((p) => ({
+    ...characters.map((c) => {
+      const visibleAttached = visibleAttachedPropsForCharacter(c, props);
+      return {
+        id: c.id,
+        tag: c.tag || c.label,
+        colorKey: (c.colorKey as SlotColorKey) || "red",
+        gridRow: c.gridRow,
+        gridColumn: c.gridColumn,
+        normalizedX: c.normalizedX,
+        normalizedY: c.normalizedY,
+        slotIndex: c.slotIndex,
+        kind: "character" as const,
+        label: c.label || c.tag,
+        visible: c.visible,
+        attachedBadge: attachedBadgeFor(visibleAttached),
+        tooltip: formatCharacterAttachmentTooltip(c, visibleAttached),
+      };
+    }),
+    ...independentProps.map((p) => ({
       id: p.id,
       tag: p.tag || p.label,
       colorKey: (p.colorKey as SlotColorKey) || "purple",
@@ -343,7 +358,7 @@ export function SpatialGrid({
                   data-slot={String(slot)}
                   data-visible={hidden ? "false" : "true"}
                 >
-                  <title>{p.label || p.tag}</title>
+                  <title>{p.tooltip || p.label || p.tag}</title>
                   <circle
                     className="spatial-map__marker-circle"
                     r={markerR}
@@ -351,6 +366,31 @@ export function SpatialGrid({
                     stroke="rgba(255,255,255,0.85)"
                     strokeWidth={2}
                   />
+                  {p.kind === "character" && p.attachedBadge ? (
+                    <g
+                      className="spatial-map__prop-badge"
+                      transform={`translate(${markerR * 0.78}, ${-markerR * 0.78})`}
+                      data-testid={`character-prop-badge-${p.id}`}
+                      data-badge={p.attachedBadge.type === "single" ? p.attachedBadge.slotLabel : `+${p.attachedBadge.count}`}
+                    >
+                      <circle
+                        className="spatial-map__prop-badge-circle"
+                        r={Math.max(6, markerR * 0.38)}
+                        fill="#1b1230"
+                        stroke="rgba(255,255,255,0.9)"
+                        strokeWidth={1.2}
+                      />
+                      <text
+                        className="spatial-map__prop-badge-label"
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fontSize={Math.max(7, markerR * 0.36)}
+                        fill="#fff"
+                      >
+                        {p.attachedBadge.type === "single" ? p.attachedBadge.slotLabel : `+${p.attachedBadge.count}`}
+                      </text>
+                    </g>
+                  ) : null}
                 </g>
               );
             })}

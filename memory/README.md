@@ -58,10 +58,16 @@ Creator message
 - **Cross-check**: `app/codirector/status/` (runner, registry, probe_context)
 - **Beta runtime**: `scripts/beta_runtime/` (supervisor, web_server)
 
+## Binding laws (read first)
+
+- `/memory/files/MODEL_INSTALL_ROOT.md` — new model/runtime installs land under `D:\01_Models` (Model Storage `preferredRoot`). Do not move `data_dir`; do not set `STUDIO_COMFY_MODELS_DIR` to that root. (2026-08-14)
+- `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` — UI complete ≠ feature complete. Hosted defects require hosted verification. Independent verifier required. (2026-08-14)
+
 ## Fresh Start Reading Order
 
 1. `/memory/README.md` — this file
-2. `/memory/phases/phase-spatial-map-ers-scene-creator.md` — Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
+2. `/memory/FULL_STACK_E2E_COMPLETION_LAW.md` — full-stack E2E completion law (binding)
+3. `/memory/phases/phase-spatial-map-ers-scene-creator.md` — Spatial Map + Atlas + ERS + Scene Creator (latest, 2026-08-11)
 3. `/memory/session-2026-08-11.md` — session memory for Spatial Map implementation day
 4. `/memory/phases/phase-10-11-final.md` — Co-Director 2.0 certification summary
 5. `/memory/project/state.md` — current project state

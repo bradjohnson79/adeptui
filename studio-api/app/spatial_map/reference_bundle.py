@@ -72,6 +72,7 @@ def compile_reference_bundle(
     creator_labels = {
         placement.id: creative_position_labels(x=placement.x, y=placement.y, z=placement.z)["summary"]
         for placement in [*document.characters, *document.props]
+        if getattr(placement, "placementMode", None) != "attached"
     }
     available_directions = [view.direction for view in document.collage.views] if document.collage else []
     directional_prompts = (
@@ -224,6 +225,13 @@ def _character_summary(bundle: SpatialReferenceBundle, item) -> str:
 
 def _prop_summary(bundle: SpatialReferenceBundle, item) -> str:
     label = item.label or item.propId or "Prop"
+    if getattr(item, "placementMode", None) == "attached":
+        details = [f"{label} attached"]
+        if item.relationship:
+            details.append(str(item.relationship).replace("_", " "))
+        if item.attachmentPoint and item.attachmentPoint != "unspecified":
+            details.append(str(item.attachmentPoint).replace("_", " "))
+        return ", ".join(part for part in details if part).strip()
     position = bundle.creatorPositionLabels.get(item.id) or creative_position_labels(
         x=item.x,
         y=item.y,

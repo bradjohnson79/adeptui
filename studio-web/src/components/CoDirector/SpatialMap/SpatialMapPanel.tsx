@@ -31,10 +31,26 @@ import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
 import { ErsResultDisplay } from "./ErsResultDisplay";
+import { CharacterInspector } from "./CharacterInspector";
 import { PlacementSlot } from "./PlacementSlot";
+import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import { SpatialGrid, toGridPlacements } from "./SpatialGrid";
 import { spatialMapApi } from "./spatialMapApi";
 import { CameraInspector } from "./CameraInspector";
+import {
+  assignedSpatialMapCharacters,
+  attachedPropsForCharacter,
+  independentAssignedProps,
+  INDEPENDENT_ATTACHMENT,
+  isAttachedProp,
+  normalizeMapDocumentProps,
+} from "./attachmentUi";
+import {
+  ENTITY_ENABLED_SWITCH_LABEL,
+  isEntityEnabled,
+  placementSwitchAriaLabel,
+  slotPlacementBadge,
+} from "./placementArm";
 import {
   cellLabel,
   cellToNormalized,
@@ -59,6 +75,7 @@ import {
   type SpatialCharacterPlacement,
   type SpatialMapDocument,
   type SpatialPropPlacement,
+  propPlacementIdentity,
 } from "./types";
 import "./spatialMap.css";
 
@@ -90,6 +107,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [showLabels, setShowLabels] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [occupiedMessage, setOccupiedMessage] = useState<string | null>(null);
+  const [attachmentEditor, setAttachmentEditor] = useState<
+    | { source: "prop"; propId: string }
+    | { source: "character"; characterId: string; propId?: string }
+    | null
+  >(null);
   const [savedCharacters, setSavedCharacters] = useState<SavedOption[]>([]);
   const [savedProps, setSavedProps] = useState<SavedOption[]>([]);
   const [busyOp, setBusyOp] = useState<PendingCoDirectorOp>(null);
@@ -106,7 +128,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     setBusy({ loading: true, error: null });
     try {
       const doc = await spatialMapApi.getMostRecentMap(projectId);
-      setDocument(doc);
+      setDocument(doc ? normalizeMapDocumentProps(doc) : null);
     } catch (err) {
       setBusy({ loading: false, error: err instanceof Error ? err.message : String(err) });
       return;
@@ -439,7 +461,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         } else if (placementMode.kind === "character") {
           updated = await spatialMapApi.updateCharacter(projectId, document.id, placementMode.id, coords);
         } else {
-          updated = await spatialMapApi.updateProp(projectId, document.id, placementMode.id, coords);
+          updated = await spatialMapApi.updateProp(projectId, document.id, placementMode.id, {
+            ...coords,
+            ...INDEPENDENT_ATTACHMENT,
+          });
         }
         setDocument(updated);
         setPlacementMode({ ...placementMode, action: "move" });
@@ -499,13 +524,12 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     async (slot: SlotDef, option: SavedOption) => {
       if (!document || !option.id) return;
       try {
-        const isProjectProp = option.source === "project";
-        const isCharacterProp = option.source === "character";
+        const identity = propPlacementIdentity(option);
         const updated = await spatialMapApi.placeProp(projectId, document.id, {
           label: option.name,
           assetId: option.assetId || null,
-          propId: isProjectProp || isCharacterProp ? option.id : null,
-          category: "prop",
+          propId: identity.propId,
+          category: identity.category,
           state: "default",
           tag: option.name,
           slotIndex: slot.index,
@@ -515,8 +539,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           gridColumn: -1,
           normalizedX: null,
           normalizedY: null,
+          placementMode: "independent",
+          attachedCharacterSlot: null,
+          attachedCharacterId: null,
+          relationship: null,
+          attachmentPoint: null,
         });
-        setDocument(updated);
+        setDocument(normalizeMapDocumentProps(updated));
         const created = updated.props.find((item) => item.slotIndex === slot.index);
         if (created) {
           setPlacementMode({ action: "place", kind: "prop", id: created.id, label: `${slot.label} — ${created.label || created.tag}` });
@@ -583,6 +612,63 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       setSelectedCameraId(null);
     }
   }, []);
+
+  const assignedCharacters = useMemo(
+    () => assignedSpatialMapCharacters(document?.characters || []),
+    [document?.characters],
+  );
+
+  const handleApplyAttachment = useCallback(
+    async (propId: string, payload: PropAttachmentApply) => {
+      if (!document || !payload.relationship) return;
+      try {
+        const existing = document.props.find((item) => item.id === propId);
+        const sameCharacter = !!(
+          existing &&
+          isAttachedProp(existing) &&
+          existing.attachedCharacterSlot === payload.attachedCharacterSlot &&
+          (existing.attachedCharacterId || "") === (payload.attachedCharacterId || "")
+        );
+        const updated = sameCharacter
+          ? await spatialMapApi.updatePropRelationship(projectId, document.id, propId, {
+              relationship: payload.relationship,
+              attachmentPoint: payload.attachmentPoint,
+            })
+          : await spatialMapApi.attachProp(projectId, document.id, propId, {
+              placementMode: "attached",
+              attachedCharacterSlot: payload.attachedCharacterSlot,
+              attachedCharacterId: payload.attachedCharacterId,
+              relationship: payload.relationship,
+              attachmentPoint: payload.attachmentPoint,
+            });
+        setDocument(normalizeMapDocumentProps(updated));
+        setAttachmentEditor(null);
+        if (placementMode?.id === propId) {
+          setPlacementMode(null);
+          setOccupiedMessage(null);
+        }
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Failed to attach prop.");
+      }
+    },
+    [document, projectId, placementMode],
+  );
+
+  const handleDetachAndPlace = useCallback(
+    async (prop: SpatialPropPlacement) => {
+      if (!document) return;
+      try {
+        const updated = await spatialMapApi.detachProp(projectId, document.id, prop.id);
+        setDocument(normalizeMapDocumentProps(updated));
+        setAttachmentEditor(null);
+        // Arm this prop as the active independent placement; next cell click places it.
+        beginPlacement("place", "prop", prop.id, prop.label || prop.tag, Math.max(0, prop.slotIndex));
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Failed to detach prop.");
+      }
+    },
+    [document, projectId, beginPlacement],
+  );
 
   const didAutoArmDocId = useRef<string | null>(null);
   useEffect(() => {
@@ -806,6 +892,18 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const ersExists = !!ersCompositeAssetId;
   const isGenerating = busyOp !== null;
   const selectedCamera = findCamera(selectedCameraId);
+  const selectedCharacter = selectedPlacementId
+    ? document?.characters.find((c) => c.id === selectedPlacementId) || null
+    : null;
+  const editorProp = attachmentEditor?.propId
+    ? document?.props.find((item) => item.id === attachmentEditor.propId) || null
+    : null;
+  const editorCharacter = attachmentEditor?.source === "character"
+    ? document?.characters.find((c) => c.id === attachmentEditor.characterId) || null
+    : null;
+  const editorAssigned = editorCharacter
+    ? assignedCharacters.find((c) => c.id === editorCharacter.characterId) || assignedSpatialMapCharacters([editorCharacter])[0] || null
+    : null;
 
   const placementBannerText = (function () {
     if (!placementMode) return '';
@@ -1031,6 +1129,39 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             />
           ) : null}
 
+          {selectedCharacter ? (
+            <CharacterInspector
+              character={selectedCharacter}
+              assigned={assignedCharacters.find((c) => c.id === selectedCharacter.characterId) || assignedSpatialMapCharacters([selectedCharacter])[0] || null}
+              attached={attachedPropsForCharacter(selectedCharacter, document?.props || [])}
+              onAttachProp={() => setAttachmentEditor({ source: "character", characterId: selectedCharacter.id })}
+              onEditAttachment={(prop) => setAttachmentEditor({ source: "character", characterId: selectedCharacter.id, propId: prop.id })}
+              onDetachAndPlace={(prop) => void handleDetachAndPlace(prop)}
+            />
+          ) : null}
+
+          {attachmentEditor ? (
+            <PropAttachmentEditor
+              key={`${attachmentEditor.source}-${attachmentEditor.source === "character" ? (attachmentEditor.propId || attachmentEditor.characterId) : attachmentEditor.propId}`}
+              characters={assignedCharacters}
+              props={attachmentEditor.source === "character" && !attachmentEditor.propId ? independentAssignedProps(document?.props || []) : undefined}
+              requirePropChoice={attachmentEditor.source === "character" && !attachmentEditor.propId}
+              lockCharacter={attachmentEditor.source === "character"}
+              initial={{
+                propPlacementId: editorProp?.id,
+                attachedCharacterSlot: editorProp?.attachedCharacterSlot || editorAssigned?.slot || null,
+                attachedCharacterId: editorProp?.attachedCharacterId || editorAssigned?.id || null,
+                relationship: editorProp?.relationship || "held",
+                attachmentPoint: editorProp?.attachmentPoint || "right_hand",
+              }}
+              onCancel={() => setAttachmentEditor(null)}
+              onApply={(payload) => {
+                const propId = payload.propPlacementId || attachmentEditor.propId;
+                if (propId) void handleApplyAttachment(propId, payload);
+              }}
+            />
+          ) : null}
+
           <div className="spatial-map__slots">
             <div className="spatial-map__slot-group">
               <p className="spatial-map__slot-group-title">Characters</p>
@@ -1059,7 +1190,6 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
                     visible={placement ? placement.visible : undefined}
                     onToggleVisible={() => placement && void handleToggleVisible("character", placement.id, placement.visible === false)}
-                    onToggleOff={clearPlacementMode}
                   />
                 );
               })}
@@ -1078,6 +1208,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     placing={placementMode?.kind === "prop" && placementMode.id === placement?.id}
                     onSelect={() => {
                       if (placement) {
+                        const prop = placement as SpatialPropPlacement;
+                        if (isAttachedProp(prop)) {
+                          setActiveSlot({ kind: "prop", index: slot.index });
+                          setSelectedPlacementId(placement.id);
+                          setSelectedCameraId(null);
+                          return;
+                        }
                         const placed = (typeof placement.normalizedX === "number" && typeof placement.normalizedY === "number") || (placement.gridRow >= 0 && placement.gridColumn >= 0);
                         beginPlacement(placed ? "move" : "place", "prop", placement.id, `${slot.label} — ${placement.label || placement.tag}`, slot.index);
                       } else {
@@ -1091,7 +1228,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     onUpdateMiniPrompt={(text) => void handleUpdateMiniPrompt(slot, text)}
                     visible={placement ? placement.visible : undefined}
                     onToggleVisible={() => placement && void handleToggleVisible("prop", placement.id, placement.visible === false)}
-                    onToggleOff={clearPlacementMode}
+                    onAttach={() => placement && setAttachmentEditor({ source: "prop", propId: placement.id })}
+                    onEditAttachment={() => placement && setAttachmentEditor({ source: "prop", propId: placement.id })}
+                    onDetachAndPlace={() => placement && void handleDetachAndPlace(placement as SpatialPropPlacement)}
+                    assignedCharacters={assignedCharacters}
+                    onApplyAttachment={(payload) => placement && void handleApplyAttachment(placement.id, payload)}
                   />
                 );
               })}
@@ -1105,6 +1246,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                   ((typeof camera.normalizedX === "number" && typeof camera.normalizedY === "number") ||
                     (camera.gridRow >= 0 && camera.gridColumn >= 0))
                 );
+                const cameraEnabled = !!(camera && isEntityEnabled(camera.visible));
+                const cameraPlacing = !!(camera && placementMode?.kind === "camera" && placementMode.id === camera.id);
                 return (
                   <div
                     key={`cam-${slot.index}`}
@@ -1127,28 +1270,37 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     }}
                     data-testid={`camera-slot-${slot.index}`}
                   >
-                    {activeSlot && activeSlot.kind === 'camera' && activeSlot.index === slot.index && camera ? (
-                      <span className='spatial-map__active-badge' data-testid={'slot-active-badge-camera-' + String(slot.index)}>ACTIVE</span>
+                    {slotPlacementBadge(cameraPlacing) ? (
+                      <span className="spatial-map__active-badge is-placement-active" data-testid={'slot-active-badge-camera-' + String(slot.index)}>
+                        {slotPlacementBadge(true)}
+                      </span>
                     ) : null}
                     <span className="spatial-map__slot-label">{slot.label}</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      className={`spatial-map__slot-toggle${placementMode?.kind === "camera" && camera && placementMode.id === camera.id ? " is-on" : ""}${!camera ? " is-disabled" : ""}`}
-                      aria-checked={!!(camera && placementMode?.kind === "camera" && placementMode.id === camera.id)}
-                      aria-disabled={!camera}
-                      disabled={!camera}
-                      aria-label={!camera ? `${slot.label} placement unavailable` : `${slot.label} placement ${placementMode?.kind === "camera" && placementMode.id === camera.id ? "on" : "off"}`}
-                      data-testid={`camera-online-${slot.index}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!camera) return;
-                        if (placementMode?.kind === "camera" && placementMode.id === camera.id) clearPlacementMode();
-                        else beginPlacement(placed ? "move" : "place", "camera", camera.id, slot.label, slot.index);
-                      }}
-                    >
-                      <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
-                    </button>
+                    <div className="spatial-map__placement-arm">
+                      <span
+                        className={`spatial-map__placement-active-label${cameraEnabled ? " is-on" : ""}`}
+                        data-testid={`camera-enabled-label-${slot.index}`}
+                      >
+                        {ENTITY_ENABLED_SWITCH_LABEL}
+                      </span>
+                      <button
+                        type="button"
+                        role="switch"
+                        className={`spatial-map__slot-toggle${cameraEnabled ? " is-on" : ""}${!camera ? " is-disabled" : ""}`}
+                        aria-checked={cameraEnabled}
+                        aria-disabled={!camera}
+                        disabled={!camera}
+                        aria-label={placementSwitchAriaLabel(slot.label, cameraEnabled, { assigned: !!camera })}
+                        data-testid={`camera-online-${slot.index}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!camera) return;
+                          void handleToggleVisible("camera", camera.id, camera.visible === false);
+                        }}
+                      >
+                        <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
+                      </button>
+                    </div>
                     {camera ? (
                       <span className="spatial-map__slot-status">
                         {camera.orientation || "N"} · {String(camera.fovPreset || "medium").toLowerCase()}

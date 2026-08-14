@@ -23,6 +23,16 @@ from .grid import (
 from .limits import CAMERA_LIMIT, enforce_camera_limit, enforce_character_limit, enforce_prop_limit
 from .models import SpatialMapDocumentRow, ensure_tables as ensure_model_tables
 from .reference_bundle import compile_reference_bundle, creative_position_labels
+from .attachment import (
+    PropAttachmentError,
+    apply_attach,
+    apply_detach,
+    apply_relationship_update,
+    clear_independent_grid_position,
+    has_independent_grid_position,
+    props_attached_to_character,
+    validate_prop_attachment,
+)
 from .schemas import (
     SpatialAssignSceneBody,
     SpatialCamera,
@@ -39,9 +49,11 @@ from .schemas import (
     SpatialMapUpdateBody,
     SpatialMovementPath,
     SpatialMovementPathCreateBody,
+    SpatialPropAttachBody,
     SpatialPropPlacement,
     SpatialPropPlacementBody,
     SpatialPropPlacementUpdateBody,
+    SpatialPropRelationshipUpdateBody,
     SpatialReferenceBundle,
     SpatialVariantCreateBody,
 )
@@ -127,7 +139,51 @@ def _find_item(items: list[Any], item_id: str, *, kind: str) -> Any:
     raise raise_http_error(SpatialMapErrorCode.PLACEMENT_NOT_FOUND, placementId=item_id, placementType=kind)
 
 
+def _raise_attachment_invalid(exc: Exception | str) -> None:
+    raise raise_http_error(SpatialMapErrorCode.ATTACHMENT_INVALID, str(exc))
+
+
+def _body_has_independent_grid(body: Any) -> bool:
+    nx = getattr(body, "normalizedX", None)
+    ny = getattr(body, "normalizedY", None)
+    if nx is not None and ny is not None:
+        return True
+    try:
+        row = int(getattr(body, "gridRow", -1))
+        col = int(getattr(body, "gridColumn", -1))
+    except (TypeError, ValueError):
+        return False
+    return row >= 0 and col >= 0
+
+
+def _updates_write_independent_grid(updates: dict[str, Any]) -> bool:
+    keys = {"normalizedX", "normalizedY", "gridRow", "gridColumn"}
+    if not keys.intersection(updates):
+        return False
+    has_norm = updates.get("normalizedX") is not None and updates.get("normalizedY") is not None
+    row = updates.get("gridRow")
+    col = updates.get("gridColumn")
+    has_cell = False
+    if row is not None and col is not None:
+        try:
+            has_cell = int(row) >= 0 and int(col) >= 0
+        except (TypeError, ValueError):
+            has_cell = False
+    return bool(has_norm or has_cell)
+
+
+def _validate_document_attachments(document: SpatialMapDocument) -> None:
+    for prop in document.props:
+        try:
+            validate_prop_attachment(prop)
+        except PropAttachmentError as exc:
+            _raise_attachment_invalid(exc)
+        if getattr(prop, "placementMode", None) == "attached" and has_independent_grid_position(prop):
+            _raise_attachment_invalid("attached prop cannot have an independent grid position")
+
+
 def _save_document(db: Session, row: SpatialMapDocumentRow, document: SpatialMapDocument) -> SpatialMapDocument:
+    _validate_document_attachments(document)
     document.updatedAt = _now()
     if not document.createdAt:
         document.createdAt = document.updatedAt
@@ -356,35 +412,44 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
     enforce_prop_limit(len(document.props))
-    document.props.append(
-        SpatialPropPlacement(
-            label=body.label,
-            propId=body.propId,
-            assetId=body.assetId,
-            anchorId=body.anchorId,
-            notes=body.notes,
-            category=body.category,
-            state=body.state,
-            x=body.x,
-            y=body.y,
-            z=body.z,
-            yawDegrees=body.yawDegrees,
-            pitchDegrees=body.pitchDegrees,
-            rollDegrees=body.rollDegrees,
-            scale=body.scale,
-            providerHonesty=document.providerHonesty,
-            gridRow=body.gridRow,
-            gridColumn=body.gridColumn,
-            slotIndex=body.slotIndex,
-            colorKey=body.colorKey,
-            miniPrompt=body.miniPrompt,
-            tag=body.tag,
-            normalizedX=body.normalizedX,
-            normalizedY=body.normalizedY,
-            visible=body.visible,
-        )
+    placement = SpatialPropPlacement(
+        label=body.label,
+        propId=body.propId,
+        assetId=body.assetId,
+        anchorId=body.anchorId,
+        notes=body.notes,
+        category=body.category,
+        state=body.state,
+        x=body.x,
+        y=body.y,
+        z=body.z,
+        yawDegrees=body.yawDegrees,
+        pitchDegrees=body.pitchDegrees,
+        rollDegrees=body.rollDegrees,
+        scale=body.scale,
+        providerHonesty=document.providerHonesty,
+        gridRow=body.gridRow,
+        gridColumn=body.gridColumn,
+        slotIndex=body.slotIndex,
+        colorKey=body.colorKey,
+        miniPrompt=body.miniPrompt,
+        tag=body.tag,
+        normalizedX=body.normalizedX,
+        normalizedY=body.normalizedY,
+        visible=body.visible,
+        placementMode=body.placementMode,
+        attachedCharacterSlot=body.attachedCharacterSlot,
+        attachedCharacterId=body.attachedCharacterId,
+        relationship=body.relationship,
+        attachmentPoint=body.attachmentPoint,
     )
-    _apply_placement_from_body(document.props[-1], body, document)
+    if placement.placementMode == "attached":
+        if _body_has_independent_grid(body):
+            _raise_attachment_invalid("attached prop cannot have an independent grid position")
+        clear_independent_grid_position(placement)
+    else:
+        _apply_placement_from_body(placement, body, document)
+    document.props.append(placement)
     return _save_document(db, row, document)
 
 
@@ -401,6 +466,8 @@ def update_character(
     updates = body.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(placement, key, value)
+    # Character move updates only this character. Attached props keep attachment
+    # and must not receive independent grid positions from the move.
     _sync_coords_after_update(placement, updates, document)
     return _save_document(db, row, document)
 
@@ -418,7 +485,16 @@ def update_prop(
     updates = body.model_dump(exclude_unset=True)
     for key, value in updates.items():
         setattr(placement, key, value)
-    _sync_coords_after_update(placement, updates, document)
+    try:
+        validate_prop_attachment(placement)
+    except PropAttachmentError as exc:
+        _raise_attachment_invalid(exc)
+    if placement.placementMode == "attached":
+        if _updates_write_independent_grid(updates):
+            _raise_attachment_invalid("attached prop cannot have an independent grid position")
+        clear_independent_grid_position(placement)
+    else:
+        _sync_coords_after_update(placement, updates, document)
     return _save_document(db, row, document)
 
 
@@ -488,10 +564,36 @@ def _orientation_to_yaw(orientation: str | None) -> float:
     return orientation_to_yaw(orientation)
 
 
-def remove_character(db: Session, project_id: str, document_id: str, placement_id: str) -> SpatialMapDocument:
+def remove_character(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    *,
+    detach_attached_props: bool = False,
+) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
-    _find_item(document.characters, placement_id, kind="character")
+    character = _find_item(document.characters, placement_id, kind="character")
+    attached = props_attached_to_character(document.props, character)
+    if attached and not detach_attached_props:
+        raise raise_http_error(
+            SpatialMapErrorCode.CHARACTER_HAS_ATTACHED_PROPS,
+            f"Character has {len(attached)} attached prop(s). Detach Props to Unplaced before removing.",
+            attachedPropCount=len(attached),
+            attachedProps=[
+                {
+                    "id": prop.id,
+                    "propId": prop.propId,
+                    "label": prop.label,
+                    "relationship": prop.relationship,
+                    "attachmentPoint": prop.attachmentPoint,
+                }
+                for prop in attached
+            ],
+        )
+    for prop in attached:
+        apply_detach(prop)
     document.characters = [item for item in document.characters if item.id != placement_id]
     return _save_document(db, row, document)
 
@@ -499,8 +601,64 @@ def remove_character(db: Session, project_id: str, document_id: str, placement_i
 def remove_prop(db: Session, project_id: str, document_id: str, placement_id: str) -> SpatialMapDocument:
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
-    _find_item(document.props, placement_id, kind="prop")
+    placement = _find_item(document.props, placement_id, kind="prop")
+    # Clear attachment first, then unlink the map placement only.
+    # Do not delete PropEntity / Library assets.
+    apply_detach(placement)
     document.props = [item for item in document.props if item.id != placement_id]
+    return _save_document(db, row, document)
+
+
+def attach_prop(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    body: SpatialPropAttachBody,
+) -> SpatialMapDocument:
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    placement = _find_item(document.props, placement_id, kind="prop")
+    try:
+        apply_attach(
+            placement,
+            attached_character_id=body.attachedCharacterId,
+            attached_character_slot=body.attachedCharacterSlot,
+            relationship=body.relationship,
+            attachment_point=body.attachmentPoint,
+        )
+    except PropAttachmentError as exc:
+        _raise_attachment_invalid(exc)
+    return _save_document(db, row, document)
+
+
+def detach_prop(db: Session, project_id: str, document_id: str, placement_id: str) -> SpatialMapDocument:
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    placement = _find_item(document.props, placement_id, kind="prop")
+    apply_detach(placement)
+    return _save_document(db, row, document)
+
+
+def update_prop_relationship(
+    db: Session,
+    project_id: str,
+    document_id: str,
+    placement_id: str,
+    body: SpatialPropRelationshipUpdateBody,
+) -> SpatialMapDocument:
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    placement = _find_item(document.props, placement_id, kind="prop")
+    try:
+        apply_relationship_update(
+            placement,
+            relationship=body.relationship,
+            attachment_point=body.attachmentPoint,
+            update_attachment_point="attachmentPoint" in body.model_fields_set,
+        )
+    except PropAttachmentError as exc:
+        _raise_attachment_invalid(exc)
     return _save_document(db, row, document)
 
 

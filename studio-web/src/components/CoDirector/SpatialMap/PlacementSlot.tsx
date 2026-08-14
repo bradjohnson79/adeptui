@@ -8,6 +8,20 @@ import { useState } from "react";
 import { api } from "../../../api";
 import { cellLabel } from "./gridGeometry";
 import {
+  characterSlotTag,
+  formatAttachmentPointLabel,
+  formatRelationshipLabel,
+  isAttachedProp,
+  type AssignedCharacterOption,
+} from "./attachmentUi";
+import {
+  ENTITY_ENABLED_SWITCH_LABEL,
+  isEntityEnabled,
+  placementSwitchAriaLabel,
+  slotPlacementBadge,
+} from "./placementArm";
+import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
+import {
   SLOT_COLORS,
   type SavedOption,
   type SlotDef,
@@ -29,7 +43,11 @@ type Props = {
   onUpdateMiniPrompt: (text: string) => void;
   visible?: boolean;
   onToggleVisible?: () => void;
-  onToggleOff?: () => void;
+  onAttach?: () => void;
+  onEditAttachment?: () => void;
+  onDetachAndPlace?: () => void;
+  assignedCharacters?: AssignedCharacterOption[];
+  onApplyAttachment?: (payload: PropAttachmentApply) => void;
 };
 
 export function PlacementSlot({
@@ -46,7 +64,11 @@ export function PlacementSlot({
   onUpdateMiniPrompt,
   visible,
   onToggleVisible,
-  onToggleOff,
+  onAttach,
+  onEditAttachment,
+  onDetachAndPlace,
+  assignedCharacters,
+  onApplyAttachment,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [miniDraft, setMiniDraft] = useState(placement?.miniPrompt || "");
@@ -55,8 +77,11 @@ export function PlacementSlot({
   const color = SLOT_COLORS[slot.colorKey];
   const isCharacter = slot.kind === "character";
   const isAssigned = !!placement;
+  const propPlacement = !isCharacter && placement ? (placement as SpatialPropPlacement) : null;
+  const attached = !!(propPlacement && isAttachedProp(propPlacement));
   const isPlaced = !!(
     placement &&
+    !attached &&
     ((typeof placement.normalizedX === "number" && typeof placement.normalizedY === "number") ||
       (placement.gridRow >= 0 && placement.gridColumn >= 0))
   );
@@ -66,17 +91,19 @@ export function PlacementSlot({
       : "";
   const displayName = placement?.label || placement?.tag || "";
   const thumbUrl = placement?.assetId ? api.assetUrl(placement.assetId) : null;
+  const enabled = isAssigned && isEntityEnabled(visible ?? placement?.visible);
 
   return (
     <div
-      className={`spatial-map__slot-card${active ? " is-active" : ""}${placing ? " is-placing" : ""}`}
+      className={`spatial-map__slot-card${active ? " is-active" : ""}${placing ? " is-placing" : ""}${attached ? " is-attached" : ""}`}
       data-testid={`spatial-map-slot-${slot.kind}-${slot.index}`}
+      data-placement-mode={propPlacement ? (attached ? "attached" : "independent") : undefined}
       onClick={onSelect}
       role="button"
       tabIndex={0}
       aria-pressed={active}
       aria-current={active && isAssigned ? "true" : undefined}
-      aria-label={`${slot.label}${isAssigned ? `, assigned ${displayName}` : ", empty"}${active && isAssigned ? ", active" : ""}`}
+      aria-label={`${slot.label}${isAssigned ? `, assigned ${displayName}` : ", empty"}${active && isAssigned ? ", active" : ""}${attached ? ", attached" : ""}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -85,31 +112,38 @@ export function PlacementSlot({
       }}
     >
       <div className="spatial-map__slot-head">
-        {active && isAssigned ? (
-          <span className="spatial-map__active-badge" data-testid={`slot-active-badge-${slot.kind}-${slot.index}`}>
-            ACTIVE
+        {slotPlacementBadge(placing) ? (
+          <span className="spatial-map__active-badge is-placement-active" data-testid={`slot-active-badge-${slot.kind}-${slot.index}`}>
+            {slotPlacementBadge(placing)}
           </span>
         ) : null}
         <span className="spatial-map__slot-swatch" style={{ background: color }} aria-hidden="true" />
         <span className="spatial-map__slot-label">{slot.label}</span>
-        <button
-          type="button"
-          role="switch"
-          className={`spatial-map__slot-toggle${placing ? " is-on" : ""}${!isAssigned ? " is-disabled" : ""}`}
-          aria-checked={isAssigned && placing}
-          aria-disabled={!isAssigned}
-          disabled={!isAssigned}
-          aria-label={!isAssigned ? `${slot.label} placement unavailable` : `${slot.label} placement ${placing ? "on" : "off"}`}
-          data-testid={`${slot.kind}-online-${slot.index}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!isAssigned) return;
-            if (placing) onToggleOff?.();
-            else onSelect();
-          }}
-        >
-          <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
-        </button>
+        <div className="spatial-map__placement-arm">
+          <span
+            className={`spatial-map__placement-active-label${enabled ? " is-on" : ""}`}
+            data-testid={`${slot.kind}-enabled-label-${slot.index}`}
+          >
+            {ENTITY_ENABLED_SWITCH_LABEL}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            className={`spatial-map__slot-toggle${enabled ? " is-on" : ""}${!isAssigned ? " is-disabled" : ""}`}
+            aria-checked={enabled}
+            aria-disabled={!isAssigned}
+            disabled={!isAssigned}
+            aria-label={placementSwitchAriaLabel(slot.label, enabled, { assigned: isAssigned, attached })}
+            data-testid={`${slot.kind}-online-${slot.index}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isAssigned) return;
+              onToggleVisible?.();
+            }}
+          >
+            <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       {!isAssigned ? (
@@ -163,7 +197,27 @@ export function PlacementSlot({
             ) : null}
             {displayName}
           </div>
-          {location ? <div className="spatial-map__slot-assigned-loc">Cell {location}</div> : null}
+          {attached && propPlacement ? (
+            <div className="spatial-map__attach-tags" data-testid={`prop-attach-tags-${slot.index}`}>
+              {characterSlotTag(propPlacement.attachedCharacterSlot) ? (
+                <span className="spatial-map__attach-tag" data-testid={`prop-attach-tag-slot-${slot.index}`}>
+                  {characterSlotTag(propPlacement.attachedCharacterSlot)}
+                </span>
+              ) : null}
+              {propPlacement.relationship ? (
+                <span className="spatial-map__attach-tag" data-testid={`prop-attach-tag-rel-${slot.index}`}>
+                  {formatRelationshipLabel(propPlacement.relationship)}
+                </span>
+              ) : null}
+              {propPlacement.attachmentPoint ? (
+                <span className="spatial-map__attach-tag" data-testid={`prop-attach-tag-point-${slot.index}`}>
+                  {formatAttachmentPointLabel(propPlacement.attachmentPoint)}
+                </span>
+              ) : null}
+            </div>
+          ) : location ? (
+            <div className="spatial-map__slot-assigned-loc">Cell {location}</div>
+          ) : null}
           <div className="spatial-map__slot-actions">
           {isAssigned && onToggleVisible ? (
             <button
@@ -180,32 +234,77 @@ export function PlacementSlot({
               Visible
             </button>
           ) : null}
-            {!isPlaced ? (
-              <button
-                type="button"
-                className="spatial-map__slot-action"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPlace();
-                }}
-                aria-label={`Place ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
-                data-testid={`${slot.kind}-place-${slot.index}`}
-              >
-                Place
-              </button>
+            {attached ? (
+              <>
+                <button
+                  type="button"
+                  className="spatial-map__slot-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditAttachment?.();
+                  }}
+                  aria-label={`Edit attachment for ${displayName || "prop"}`}
+                  data-testid={`prop-edit-attachment-${slot.index}`}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="spatial-map__slot-action"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDetachAndPlace?.();
+                  }}
+                  aria-label={`Detach and place ${displayName || "prop"}`}
+                  data-testid={`prop-detach-place-${slot.index}`}
+                >
+                  Detach & Place
+                </button>
+              </>
             ) : (
-              <button
-                type="button"
-                className="spatial-map__slot-action"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onMove();
-                }}
-                aria-label={`Move ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
-                data-testid={`${slot.kind}-move-${slot.index}`}
-              >
-                Move
-              </button>
+              <>
+                {!isPlaced ? (
+                  <button
+                    type="button"
+                    className="spatial-map__slot-action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPlace();
+                    }}
+                    aria-label={`Place ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
+                    data-testid={`${slot.kind}-place-${slot.index}`}
+                  >
+                    Place
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="spatial-map__slot-action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMove();
+                    }}
+                    aria-label={`Move ${displayName || (isCharacter ? "character" : "prop")} on ${slot.label}`}
+                    data-testid={`${slot.kind}-move-${slot.index}`}
+                  >
+                    Move
+                  </button>
+                )}
+                {!isCharacter && onAttach ? (
+                  <button
+                    type="button"
+                    className="spatial-map__slot-action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAttach();
+                    }}
+                    aria-label={`Attach ${displayName || "prop"} to character`}
+                    data-testid={`prop-attach-${slot.index}`}
+                  >
+                    Attach to Character
+                  </button>
+                ) : null}
+              </>
             )}
             <button
               type="button"
@@ -233,10 +332,51 @@ export function PlacementSlot({
               });
             }}
           >
-            {expanded ? "Hide note" : "More"}
+            {expanded ? "Hide" : "More"}
           </button>
           {expanded ? (
             <>
+              {!isCharacter && onApplyAttachment ? (
+                <div
+                  className="spatial-map__slot-association"
+                  data-testid={`slot-association-${slot.index}`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <p className="spatial-map__slot-assigned-tag">Association</p>
+                  <PropAttachmentEditor
+                    characters={assignedCharacters || []}
+                    initial={{
+                      propPlacementId: propPlacement?.id,
+                      attachedCharacterSlot: propPlacement?.attachedCharacterSlot || null,
+                      attachedCharacterId: propPlacement?.attachedCharacterId || null,
+                      relationship: propPlacement?.relationship || "held",
+                      attachmentPoint: propPlacement?.attachmentPoint || "right_hand",
+                    }}
+                    onCancel={() => setExpanded(false)}
+                    onApply={(payload) => {
+                      onApplyAttachment(payload);
+                      setExpanded(false);
+                    }}
+                  />
+                  {attached && onDetachAndPlace ? (
+                    <div className="spatial-map__slot-actions">
+                      <button
+                        type="button"
+                        className="spatial-map__slot-action"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDetachAndPlace();
+                          setExpanded(false);
+                        }}
+                        aria-label={`Detach and place ${displayName || "prop"}`}
+                        data-testid={`prop-detach-place-more-${slot.index}`}
+                      >
+                        Detach & Place
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <textarea
                 className="spatial-map__slot-mini-input"
                 value={miniDraft}

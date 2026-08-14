@@ -79,6 +79,7 @@ def handle(
     from ....environment_reference_sheet.store import list_sheets, save_sheet
     from ....spatial_map.ers_contracts import EnvironmentReferencePackage
     from ....spatial_map.ers_persistence import save_ers_package
+    from ....spatial_map.ers_projection import project_document_placements
     from ....spatial_map.service import get_document
 
     # 1. Find or create the ERS for this spatial map.
@@ -202,10 +203,7 @@ def handle(
         project_id=project_id,
         scene_layout_id=spatial_map_id,
         atlas_asset_id=spatial_document.backgroundAssetId,
-        placements=[
-            placement.model_dump() for placement in spatial_document.characters
-        ]
-        + [placement.model_dump() for placement in spatial_document.props],
+        placements=project_document_placements(spatial_document),
         style_context={"visual_style": visual_style or ""},
         orientation="atlas-north-up",
         directional_assets={d: None for d in _DIRECTIONS},

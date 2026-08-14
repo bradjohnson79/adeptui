@@ -308,6 +308,18 @@ export const WORKSPACES = {
     capabilityBadges: ["Scenes"],
     commandPalette: true,
   },
+  propcreator: {
+    label: "Prop Creator",
+    labelKey: "propCreator",
+    group: "create",
+    futureDestination: "sceneSheets",
+    compatibilityAliases: ["prop-creator", "propCreator"],
+    menuGroup: "characters",
+    order: 12,
+    description: "Create project Prop identities, approve a look, and use them on the Spatial Map and in Scene Creator.",
+    capabilityBadges: ["Props"],
+    commandPalette: true,
+  },
   avatar: {
     label: "Avatar Studio",
     labelKey: "avatar",

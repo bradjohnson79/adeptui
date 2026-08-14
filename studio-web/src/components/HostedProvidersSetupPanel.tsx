@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import {
+  API_KEY_INPUT_TYPE,
+  API_KEY_PROVIDER_BADGE,
+  API_KEY_PROVIDERS_CATEGORY,
+  API_KEY_SAVE_LABEL,
+  SETUP_PROVIDERS,
+  apiKeyProviderStatusLabel,
+  apiKeyProviderStatusTone,
+  classifyProbeError,
+  type ProbeOutcome,
+} from "./hostedProviderSetupCopy";
 
 type ProviderId = "kie" | "wavespeed" | "fal";
 
@@ -19,53 +30,11 @@ type ProviderCardData = {
   healthStatus?: string;
   keysUrl?: string;
   supportedModalities?: string[];
+  certifiedModels?: string[];
+  executableCapabilities?: string[];
+  availableBalance?: string | number | null;
   estimatedPricing?: string;
 };
-
-const SETUP_PROVIDERS: { id: ProviderId; title: string; blurb: string }[] = [
-  {
-    id: "kie",
-    title: "Kie.ai",
-    blurb: "Recommended hosted provider for image and video generation (BYOK).",
-  },
-  {
-    id: "wavespeed",
-    title: "WaveSpeed.ai",
-    blurb: "Hosted generation alternative with WaveSpeed Access Key (BYOK).",
-  },
-  {
-    id: "fal",
-    title: "fal.ai",
-    blurb: "Hosted fal.ai key for certified cloud video and image routes (BYOK).",
-  },
-];
-
-function statusTone(card?: ProviderCardData | null): string {
-  const state = String(card?.apiKeyStatus?.state || card?.connectionStatus || "").toLowerCase();
-  if (state.includes("verified") || state.includes("connected") || card?.apiKeyStatus?.configured) {
-    return "ready";
-  }
-  if (state.includes("invalid") || state.includes("error") || state.includes("fail")) {
-    return "error";
-  }
-  if (state.includes("checking") || state.includes("loading")) {
-    return "pending";
-  }
-  return "attention";
-}
-
-function statusLabel(card?: ProviderCardData | null, busy?: boolean): string {
-  if (busy) return "Working…";
-  if (!card) return "Checking…";
-  if (card.apiKeyStatus?.configured) {
-    const state = card.apiKeyStatus.state || card.connectionStatus || "Configured";
-    if (String(state).toLowerCase().includes("verified") || String(state).toLowerCase().includes("connected")) {
-      return "Ready";
-    }
-    return "Configured";
-  }
-  return "Needs API key";
-}
 
 function HostedProviderSetupCard({
   meta,
@@ -73,6 +42,7 @@ function HostedProviderSetupCard({
   keyValue,
   busy,
   preferred,
+  lastOutcome,
   onKeyChange,
   onConnect,
   onTest,
@@ -84,13 +54,15 @@ function HostedProviderSetupCard({
   keyValue: string;
   busy: boolean;
   preferred: boolean;
+  lastOutcome?: ProbeOutcome;
   onKeyChange: (value: string) => void;
   onConnect: () => void;
   onTest: () => void;
   onClear: () => void;
   onPreferred: () => void;
 }) {
-  const tone = statusTone(card);
+  const label = apiKeyProviderStatusLabel({ card, busy, lastOutcome });
+  const tone = apiKeyProviderStatusTone(label);
   const configured = Boolean(card?.apiKeyStatus?.configured);
   const inputId = `setup-hosted-key-${meta.id}`;
 
@@ -98,7 +70,7 @@ function HostedProviderSetupCard({
     <article
       className={`setup-component-card download-source-card status-${tone}`}
       data-testid={`setup-hosted-provider-${meta.id}`}
-      data-status={statusLabel(card, busy)}
+      data-status={label}
     >
       <header className="setup-card-header">
         <div>
@@ -106,11 +78,11 @@ function HostedProviderSetupCard({
             {meta.title}
             {card?.recommended ? " · Recommended" : ""}
           </h3>
-          <span className="setup-requirement">Hosted API Provider</span>
+          <span className="setup-requirement">{API_KEY_PROVIDER_BADGE}</span>
         </div>
         <span className="setup-status" data-state={tone}>
           <span className="setup-status-mark" aria-hidden="true" />
-          {statusLabel(card, busy)}
+          {label}
         </span>
       </header>
       <p className="setup-component-description">
@@ -130,6 +102,15 @@ function HostedProviderSetupCard({
         {(card?.supportedModalities || []).length > 0 && (
           <span>Modalities {(card?.supportedModalities || []).join(", ")}</span>
         )}
+        {(card?.certifiedModels || []).length > 0 && (
+          <span>Certified {(card?.certifiedModels || []).join(", ")}</span>
+        )}
+        {(card?.executableCapabilities || []).length > 0 && (
+          <span>Capabilities {(card?.executableCapabilities || []).join(", ")}</span>
+        )}
+        {card?.availableBalance != null && card.availableBalance !== "" && (
+          <span>Balance {String(card.availableBalance)}</span>
+        )}
         {preferred && <span>Preferred provider</span>}
         {card?.estimatedPricing && <span>{card.estimatedPricing}</span>}
       </div>
@@ -138,7 +119,7 @@ function HostedProviderSetupCard({
         <input
           id={inputId}
           data-testid={`setup-hosted-key-input-${meta.id}`}
-          type="password"
+          type={API_KEY_INPUT_TYPE}
           autoComplete="off"
           spellCheck={false}
           value={keyValue}
@@ -155,7 +136,7 @@ function HostedProviderSetupCard({
           disabled={busy || !keyValue.trim()}
           onClick={onConnect}
         >
-          {busy ? "Saving…" : configured ? "Replace & Verify" : "Save & Verify"}
+          {busy ? "Saving…" : API_KEY_SAVE_LABEL}
         </button>
         <button
           type="button"
@@ -250,6 +231,8 @@ export function HostedProvidersSetupPanel({
   const [compatEndpoints, setCompatEndpoints] = useState<
     { id: string; displayName?: string; baseUrl?: string; discoveredModels?: string[] }[]
   >([]);
+  const [probeOutcomes, setProbeOutcomes] = useState<Record<string, ProbeOutcome>>({});
+  const [probeBalances, setProbeBalances] = useState<Record<string, string | number>>({});
 
   const announce = (message: string | null, isError = false) => {
     if (isError) {
@@ -292,9 +275,15 @@ export function HostedProvidersSetupPanel({
     setPanelError(null);
     try {
       await fn();
+      setProbeOutcomes((prev) => ({ ...prev, [providerId]: null }));
       await refresh();
     } catch (error: unknown) {
-      announce(error instanceof Error ? error.message : String(error), true);
+      const message = error instanceof Error ? error.message : String(error);
+      const status = error && typeof error === "object" && "status" in error
+        ? Number((error as { status?: number }).status)
+        : undefined;
+      setProbeOutcomes((prev) => ({ ...prev, [providerId]: classifyProbeError(message, status) }));
+      announce(message, true);
     } finally {
       setBusyId(null);
     }
@@ -303,17 +292,22 @@ export function HostedProvidersSetupPanel({
   const byId = (id: ProviderId) => providers.find((p) => p.providerId === id) || null;
 
   return (
-    <section className="setup-component-section" aria-labelledby="hosted-api-providers-heading">
-      <div className="setup-section-heading">
+    <details
+      className="panel setup-component-section setup-api-key-providers"
+      data-testid="setup-api-key-providers"
+      open
+      aria-labelledby="api-key-providers-heading"
+    >
+      <summary className="setup-section-heading">
         <div>
-          <h2 id="hosted-api-providers-heading">Hosted API Providers</h2>
+          <h2 id="api-key-providers-heading">{API_KEY_PROVIDERS_CATEGORY}</h2>
           <p>
-            Add Kie.ai and WaveSpeed.ai API keys (and fal.ai) for Production Dock API mode. Keys stay encrypted on
+            Add Kie.ai, fal.ai, and WaveSpeed.ai API keys for Production Dock API mode. Keys stay encrypted on
             this machine — React never calls providers directly.
           </p>
         </div>
         <span>3 providers</span>
-      </div>
+      </summary>
       {panelMessage && (
         <p className="setup-message" role="status" data-testid="setup-hosted-providers-message">
           {panelMessage}
@@ -326,7 +320,11 @@ export function HostedProvidersSetupPanel({
       )}
       <div className="setup-component-grid download-sources-grid setup-hosted-providers-grid">
         {SETUP_PROVIDERS.map((meta) => {
-          const card = byId(meta.id);
+          const raw = byId(meta.id);
+          const balance = raw?.availableBalance ?? probeBalances[meta.id];
+          const card = raw
+            ? { ...raw, availableBalance: balance ?? raw.availableBalance }
+            : raw;
           return (
             <HostedProviderSetupCard
               key={meta.id}
@@ -335,6 +333,7 @@ export function HostedProvidersSetupPanel({
               keyValue={keys[meta.id] || ""}
               busy={busyId === meta.id}
               preferred={preferred === meta.id}
+              lastOutcome={probeOutcomes[meta.id] || null}
               onKeyChange={(value) => setKeys((prev) => ({ ...prev, [meta.id]: value }))}
               onConnect={() =>
                 void run(meta.id, async () => {
@@ -343,6 +342,10 @@ export function HostedProvidersSetupPanel({
                     throw new Error(`Paste a ${meta.title} API key to save.`);
                   }
                   const result = await api.hostedProvidersConnect(meta.id, apiKey);
+                  const liveBalance = result?.probe?.balance ?? result?.provider?.availableBalance;
+                  if (liveBalance != null) {
+                    setProbeBalances((prev) => ({ ...prev, [meta.id]: liveBalance }));
+                  }
                   setKeys((prev) => ({ ...prev, [meta.id]: "" }));
                   const summary = (result?.summary || result?.discovery?.summary) as DiscoverySummary | undefined;
                   setDiscoverySummary(summary || null);
@@ -352,6 +355,10 @@ export function HostedProvidersSetupPanel({
               onTest={() =>
                 void run(meta.id, async () => {
                   const result = await api.hostedProvidersTest(meta.id);
+                  const liveBalance = result?.probe?.balance ?? result?.provider?.availableBalance;
+                  if (liveBalance != null) {
+                    setProbeBalances((prev) => ({ ...prev, [meta.id]: liveBalance }));
+                  }
                   const summary = (result?.summary || result?.discovery?.summary) as DiscoverySummary | undefined;
                   if (summary) {
                     setDiscoverySummary(summary);
@@ -371,6 +378,12 @@ export function HostedProvidersSetupPanel({
                   }
                   await api.hostedProvidersClear(meta.id);
                   setKeys((prev) => ({ ...prev, [meta.id]: "" }));
+                  setProbeOutcomes((prev) => ({ ...prev, [meta.id]: null }));
+                  setProbeBalances((prev) => {
+                    const next = { ...prev };
+                    delete next[meta.id];
+                    return next;
+                  });
                   setDiscoverySummary(null);
                   announce(`${meta.title}: API key cleared.`);
                 })
@@ -463,7 +476,7 @@ export function HostedProvidersSetupPanel({
           API key
           <input
             data-testid="openai-compat-api-key"
-            type="password"
+            type={API_KEY_INPUT_TYPE}
             autoComplete="off"
             value={compatKey}
             onChange={(e) => setCompatKey(e.target.value)}
@@ -562,6 +575,6 @@ export function HostedProvidersSetupPanel({
         </button>{" "}
         for full capability matrix and preference details.
       </p>
-    </section>
+    </details>
   );
 }

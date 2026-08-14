@@ -315,10 +315,25 @@ def compile_image_request(
             provider_preference=intent.providerPreference,
         )
         allow_draft = False
+        if force_key:
+            forced_family = str(
+                getattr(contract, "model_family", None) or str(force_key).split(".", 1)[0]
+            ).strip()
+            if forced_family:
+                intent.enginePreference = forced_family
+                family = forced_family
     except RuntimeError:
         if force_key:
             # Character Sheet / explicit workflow pin: fail visibly. Never silently
             # substitute Z-Image for Illustrious, Qwen, or any forced family.
+            raise
+        purpose = str(body.get("purpose") or "")
+        creative_ctx = body.get("creativeContext") or {}
+        if not isinstance(creative_ctx, dict):
+            creative_ctx = {}
+        objective = str(creative_ctx.get("objective") or "")
+        if purpose == "project_prop" or objective == "project_prop":
+            # Prop Creator pins the requested family. Never silently become zimage.
             raise
         # Certified ZImage fallback (unpinned requests only)
         contract = resolve_image_workflow(

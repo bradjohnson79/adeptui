@@ -41,11 +41,67 @@ export type SpatialPlacementGridExtension = {
   visible?: boolean;
 };
 
+/** Frozen character-prop attachment. Names match studio-api attachment.py. */
+export type PlacementMode = "independent" | "attached";
+export type PropRelationship =
+  | "held"
+  | "carried"
+  | "worn"
+  | "using"
+  | "interacting"
+  | "associated";
+export type AttachmentPoint =
+  | "left_hand"
+  | "right_hand"
+  | "both_hands"
+  | "head"
+  | "upper_body"
+  | "lower_body"
+  | "back"
+  | "waist"
+  | "wrist"
+  | "shoulder"
+  | "unspecified";
+/** Product Character 1-4. Not slotIndex (0-3). Mapping: slot = slotIndex + 1. */
+export type AttachedCharacterSlot = 1 | 2 | 3 | 4;
+
+export const PLACEMENT_MODES = ["independent", "attached"] as const;
+export const PROP_RELATIONSHIPS = [
+  "held",
+  "carried",
+  "worn",
+  "using",
+  "interacting",
+  "associated",
+] as const;
+export const ATTACHMENT_POINTS = [
+  "left_hand",
+  "right_hand",
+  "both_hands",
+  "head",
+  "upper_body",
+  "lower_body",
+  "back",
+  "waist",
+  "wrist",
+  "shoulder",
+  "unspecified",
+] as const;
+export const ATTACHED_CHARACTER_SLOTS = [1, 2, 3, 4] as const;
+
+export type SpatialPropAttachmentFields = {
+  placementMode: PlacementMode;
+  attachedCharacterSlot: AttachedCharacterSlot | null;
+  attachedCharacterId: string | null;
+  relationship: PropRelationship | null;
+  attachmentPoint: AttachmentPoint | null;
+};
+
 export type SpatialPlacement = _SpatialCharacterPlacement & SpatialPlacementGridExtension;
 
 export type SpatialCharacterPlacement = Omit<_SpatialCharacterPlacement, keyof SpatialPlacementGridExtension> & SpatialPlacementGridExtension;
 
-export type SpatialPropPlacement = Omit<_SpatialPropPlacement, keyof SpatialPlacementGridExtension> & SpatialPlacementGridExtension;
+export type SpatialPropPlacement = Omit<_SpatialPropPlacement, keyof SpatialPlacementGridExtension> & SpatialPlacementGridExtension & SpatialPropAttachmentFields;
 
 export type SpatialCamera = _SpatialCamera & {
   cameraSlot: number;
@@ -71,9 +127,9 @@ export type SpatialCharacterPlacementBody = _SpatialCharacterPlacementBody & Par
 
 export type SpatialCharacterPlacementUpdateBody = _SpatialCharacterPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
 
-export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<SpatialPlacementGridExtension>;
+export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields>;
 
-export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension>;
+export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields>;
 
 export type SpatialMapUpdateBody = _SpatialMapUpdateBody & { gridScale?: number };
 
@@ -104,6 +160,22 @@ export type SavedOption = {
   source?: "project" | "character" | "library";
 };
 
+/** Project PropEntity.id is the only value allowed in SpatialPropPlacement.propId. */
+export type PropPlacementIdentity = {
+  propId: string | null;
+  category: "project" | "character_prop" | "prop";
+};
+
+export function propPlacementIdentity(option: Pick<SavedOption, "id" | "source">): PropPlacementIdentity {
+  if (option.source === "project") {
+    return { propId: option.id, category: "project" };
+  }
+  if (option.source === "character") {
+    return { propId: null, category: "character_prop" };
+  }
+  return { propId: null, category: "prop" };
+}
+
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
 
 export type SlotDef = {
@@ -113,6 +185,8 @@ export type SlotDef = {
   kind: SlotKind;
 };
 
+// CHARACTER_SLOTS.index is 0-based slotIndex. Product attachedCharacterSlot is 1-4.
+// Mapping: attachedCharacterSlot = slotIndex + 1. Never store 0-based in attachedCharacterSlot.
 export const CHARACTER_SLOTS: SlotDef[] = [
   { index: 0, colorKey: "red", label: "Character 1 (Red)", kind: "character" },
   { index: 1, colorKey: "blue", label: "Character 2 (Blue)", kind: "character" },
@@ -155,4 +229,70 @@ export function normalizePropTag(label: string): string {
 export function characterTag(name: string): string {
   const trimmed = name.trim();
   return trimmed ? `@${trimmed}` : "";
+}
+
+export type PropAttachmentInput = {
+  placementMode?: PlacementMode | null;
+  attachedCharacterSlot?: AttachedCharacterSlot | number | null;
+  attachedCharacterId?: string | null;
+  relationship?: PropRelationship | string | null;
+  attachmentPoint?: AttachmentPoint | string | null;
+};
+
+/** Map existing 0-based slotIndex to product attachedCharacterSlot (1-4). */
+export function attachedSlotFromSlotIndex(slotIndex: number | null | undefined): AttachedCharacterSlot | null {
+  if (slotIndex === 0 || slotIndex === 1 || slotIndex === 2 || slotIndex === 3) {
+    return (slotIndex + 1) as AttachedCharacterSlot;
+  }
+  return null;
+}
+
+/** Map product attachedCharacterSlot (1-4) to existing 0-based slotIndex. */
+export function slotIndexFromAttachedSlot(attachedCharacterSlot: AttachedCharacterSlot): number {
+  return attachedCharacterSlot - 1;
+}
+
+function isAttachedSlot(value: unknown): value is AttachedCharacterSlot {
+  return value === 1 || value === 2 || value === 3 || value === 4;
+}
+
+export function normalizePropAttachment<T extends PropAttachmentInput>(prop: T): T {
+  const mode = prop.placementMode === "attached" ? "attached" : "independent";
+  if (mode !== "attached") {
+    prop.placementMode = "independent";
+    prop.attachedCharacterSlot = null;
+    prop.attachedCharacterId = null;
+    prop.relationship = null;
+    prop.attachmentPoint = null;
+    return prop;
+  }
+  prop.placementMode = "attached";
+  if (typeof prop.attachedCharacterId === "string" && !prop.attachedCharacterId.trim()) {
+    prop.attachedCharacterId = null;
+  }
+  return prop;
+}
+
+export function validatePropAttachment<T extends PropAttachmentInput>(prop: T): T {
+  normalizePropAttachment(prop);
+  if (prop.placementMode !== "attached") {
+    return prop;
+  }
+  const slot = prop.attachedCharacterSlot;
+  if (slot != null && !isAttachedSlot(slot)) {
+    throw new Error(
+      "attachedCharacterSlot must be 1-4 (Character 1-4); do not use slotIndex 0-3 here (mapping: attachedCharacterSlot = slotIndex + 1)",
+    );
+  }
+  const hasCharacter = Boolean(prop.attachedCharacterId && String(prop.attachedCharacterId).trim()) || isAttachedSlot(slot);
+  if (!hasCharacter) {
+    throw new Error("attached prop requires attachedCharacterId or attachedCharacterSlot (1-4)");
+  }
+  if (!PROP_RELATIONSHIPS.includes(prop.relationship as (typeof PROP_RELATIONSHIPS)[number])) {
+    throw new Error("attached prop requires relationship (held|carried|worn|using|interacting|associated)");
+  }
+  if (prop.attachmentPoint != null && !ATTACHMENT_POINTS.includes(prop.attachmentPoint as (typeof ATTACHMENT_POINTS)[number])) {
+    throw new Error(`invalid attachmentPoint: ${prop.attachmentPoint}`);
+  }
+  return prop;
 }

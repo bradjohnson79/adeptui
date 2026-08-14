@@ -155,6 +155,17 @@ def test_runtime_map_image_and_video(isolated_prefs):
     assert body["modelFamilyPreference"] == "qwen2512"
     assert body["productionDock"]["activeModelId"] == "qwen-image-2512-local"
 
+    locked = apply_image_dock_preference(
+        "proj-map",
+        {
+            "prompt": "character sheet",
+            "modelFamilyPreference": "zimage",
+            "forceWorkflowKey": "zimage.ref_edit",
+            "lockModelFamily": True,
+        },
+    )
+    assert locked["modelFamilyPreference"] == "zimage"
+
     dock = apply_video_dock_preference("proj-map", engine_hint="auto")
     assert dock["engine"] == "ltx"
     assert dock["activeModelId"] == "ltx-local"

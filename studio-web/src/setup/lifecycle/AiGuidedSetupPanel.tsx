@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
+import { HostedProvidersSetupPanel } from "../../components/HostedProvidersSetupPanel";
 import type { InstallJob } from "../../contracts/installJobs";
 import type {
   LifecycleCloudProvider,
@@ -42,6 +43,39 @@ function creatorRecommendation(component: SetupComponentStatus, brief: string): 
   if (component.id === "flux1_schnell_local" && (text.includes("preview") || text.includes("fast"))) {
     return "Best fit for quick creative previews before a final-quality pass.";
   }
+  if (
+    ["hunyuan_video_15", "hunyuan_video_13b", "wan_models", "ltx_checkpoint", "ltx_2_5_checkpoint"].includes(component.id)
+    && (text.includes("film") || (text.includes("short") && !text.includes("preview")))
+    && !text.includes("commercial")
+    && !text.includes("branded")
+  ) {
+    return "Best fit for short-film and cinematic video generation.";
+  }
+  if (
+    ["wan_models", "hunyuan_video_15"].includes(component.id)
+    && (text.includes("commercial") || text.includes("branded") || (text.includes("product") && text.includes("video")))
+  ) {
+    return "Best fit for commercial and branded product video.";
+  }
+  if (
+    ["longcat-video-avatar-1-5-local", "infinitetalk-local", "musetalk-1-5-local", "echomimic-v2-local"].includes(component.id)
+    && (text.includes("talking") || text.includes("presenter") || text.includes("avatar"))
+  ) {
+    return "Best fit for a talking presenter / avatar performance.";
+  }
+  if (
+    ["flux1_dev_local", "pack_essential_cinematic", "ltx_checkpoint", "ltx_2_5_checkpoint"].includes(component.id)
+    && (text.includes("storyboard") || text.includes("previz") || text.includes("previs"))
+  ) {
+    return "Best fit for storyboard frames and motion previs.";
+  }
+  if (
+    ["flux1_dev_local", "qwen_image_2512_models"].includes(component.id)
+    && text.includes("product")
+    && text.includes("mockup")
+  ) {
+    return "Best fit for product mockup stills.";
+  }
   return component.lifecycle?.recommendations?.[0] || "Matches this setup goal and current certified posture.";
 }
 
@@ -70,7 +104,7 @@ export function AiGuidedSetupPanel({
   onRepair: (component: SetupComponentStatus) => void;
   onVerify: (component: SetupComponentStatus) => void;
 }) {
-  const [brief, setBrief] = useState("photoreal character");
+  const [brief, setBrief] = useState("make a short film");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [plan, setPlan] = useState<LifecycleInstallPlan | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -92,6 +126,7 @@ export function AiGuidedSetupPanel({
   const grouped = useMemo(() => {
     const buckets = new Map<string, Map<string, SetupComponentStatus[]>>();
     status.components.forEach((component) => {
+      if (component.category === "API Providers" || component.group === "API Providers") return;
       const groups = component.surfaceGroups?.length ? component.surfaceGroups : [component.group || "Utilities"];
       const subgroup = component.subgroup || "General";
       groups.forEach((group) => {
@@ -109,12 +144,50 @@ export function AiGuidedSetupPanel({
     const ranked = status.components
       .filter((component) => matchesIntent(component, brief))
       .sort((a, b) => {
-        const preferred = (id: string) =>
-          id === "flux1_kontext_dev_local" ? 0
-          : id === "sana_15_local" ? 1
-          : id === "qwen_image_2512_models" ? 2
-          : id === "zimage_models" ? 3
-          : 9;
+        const text = brief.toLowerCase();
+        const preferred = (id: string) => {
+          if (text.includes("talking") || text.includes("presenter") || text.includes("avatar")) {
+            if (id === "longcat-video-avatar-1-5-local") return 0;
+            if (id === "infinitetalk-local") return 1;
+            if (id === "musetalk-1-5-local") return 2;
+            if (id === "echomimic-v2-local") return 3;
+            return 9;
+          }
+          if (text.includes("storyboard") || text.includes("previz") || text.includes("previs")) {
+            if (id === "flux1_dev_local") return 0;
+            if (id === "pack_essential_cinematic") return 1;
+            if (id === "ltx_checkpoint") return 2;
+            if (id === "ltx_2_5_checkpoint") return 3;
+            return 9;
+          }
+          if (text.includes("commercial") || text.includes("branded") || (text.includes("product") && text.includes("video"))) {
+            if (id === "wan_models") return 0;
+            if (id === "hunyuan_video_15") return 1;
+            if (id === "flux1_dev_local") return 2;
+            if (id === "index_tts2") return 3;
+            return 9;
+          }
+          if (text.includes("film") || (text.includes("short") && !text.includes("preview"))) {
+            if (id === "hunyuan_video_15") return 0;
+            if (id === "hunyuan_video_13b") return 1;
+            if (id === "wan_models") return 2;
+            if (id === "ltx_checkpoint") return 3;
+            return 9;
+          }
+          if (text.includes("product") && text.includes("mockup")) {
+            if (id === "flux1_dev_local") return 0;
+            if (id === "qwen_image_2512_models") return 1;
+            return 9;
+          }
+          if (id === "flux1_kontext_dev_local") return 0;
+          if (id === "sana_15_local") return 1;
+          if (id === "qwen_image_2512_models") return 2;
+          if (id === "zimage_models") return 3;
+          if (id === "hunyuan_video_15") return 4;
+          if (id === "wan_models") return 5;
+          if (id === "longcat-video-avatar-1-5-local") return 6;
+          return 9;
+        };
         return preferred(a.id) - preferred(b.id);
       });
     if (focusedComponent && !ranked.some((component) => component.id === focusedComponent.id)) {
@@ -158,7 +231,7 @@ export function AiGuidedSetupPanel({
       <div className="setup-section-heading">
         <div>
           <h2 id="ai-guided-setup-heading">AI-Guided Setup</h2>
-          <p>Describe the kind of work you want to do, then review certified options, install plans, and safety checks.</p>
+          <p>Tell Adept UI what you want to create. We'll recommend the tools, models, and production setup you need.</p>
         </div>
       </div>
 
@@ -168,10 +241,10 @@ export function AiGuidedSetupPanel({
           <input
             value={brief}
             onChange={(event) => setBrief(event.target.value)}
-            placeholder="photoreal character, anime poster, fast preview, product mockup"
+            placeholder="Describe the film, video, scene, or production you want to create..."
           />
         </label>
-        <p className="muted">Try prompts like `photoreal character`, `anime poster`, or `fast preview`.</p>
+        <p className="muted">Try prompts like “make a short film”, “make a commercial”, or “make a branded product video”.</p>
         {focusedComponent ? (
           <p className="muted">
             Opened for <strong>{focusedComponent.name}</strong>. Review the plan here, then let Source Manager run the approved install or repair.
@@ -310,6 +383,8 @@ export function AiGuidedSetupPanel({
         ))}
       </div>
 
+      <HostedProvidersSetupPanel onMessage={setMessage} />
+
       <div className="setup-component-section">
         <div className="setup-section-heading">
           <div>
@@ -318,7 +393,7 @@ export function AiGuidedSetupPanel({
           </div>
         </div>
         <div className="setup-component-grid">
-          {cloudProviders.map((provider) => (
+          {cloudProviders.filter((provider) => !["kie", "fal", "wavespeed"].includes(String(provider.providerId))).map((provider) => (
             <article key={provider.providerId} className="setup-component-card">
               <header className="setup-card-header">
                 <div>

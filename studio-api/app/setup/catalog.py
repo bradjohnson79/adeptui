@@ -55,6 +55,8 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "comfy_service": DEPENDENCY_TYPE_RUNTIME,
     "ollama_service": DEPENDENCY_TYPE_RUNTIME,
     "fal_key": DEPENDENCY_TYPE_CREDENTIAL,
+    "kie_key": DEPENDENCY_TYPE_CREDENTIAL,
+    "wavespeed_key": DEPENDENCY_TYPE_CREDENTIAL,
 }
 
 
@@ -355,6 +357,16 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
     ComponentDefinition(
         "fal_key", "fal.ai API Key", "Cloud generation credentials stored encrypted locally.", False,
         0, 0, (), "fal_key", "credentials",
+        category="API Providers",
+    ),
+    ComponentDefinition(
+        "kie_key", "Kie.ai API Key", "Cloud generation credentials stored encrypted locally.", False,
+        0, 0, (), "kie_key", "credentials",
+        category="API Providers",
+    ),
+    ComponentDefinition(
+        "wavespeed_key", "WaveSpeed.ai API Key", "Cloud generation credentials stored encrypted locally.", False,
+        0, 0, (), "wavespeed_key", "credentials",
         category="API Providers",
     ),
     ComponentDefinition(
