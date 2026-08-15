@@ -216,6 +216,7 @@ function TakeStripButton({
       className={className}
       data-testid="scene-creator-strip-take"
       data-status={cand.status}
+      data-candidate-id={cand.id}
       data-approved={approved ? "true" : "false"}
       data-superseded={cand.superseded ? "true" : "false"}
       onClick={() => {

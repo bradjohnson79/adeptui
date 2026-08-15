@@ -294,6 +294,7 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     test.setTimeout(JOB_WAIT_MS + 60_000);
     attachObserver(page, testInfo);
     await openSceneCreator(page);
+    await page.getByTestId("cine-tile-c1").click();
     const jobsBefore = await listJobs(request);
     const previewPosts: string[] = [];
     page.on("request", (req) => {
@@ -312,22 +313,24 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const ws = await getWorkspace(request);
     const shot = ws.selected_shot;
     expect(shot, "workspace must have a selected shot").toBeTruthy();
-    const generating = (shot!.candidates || []).filter((c) => c.status === "queued" || c.status === "generating");
-    const newest = [...(shot!.candidates || [])].reverse()[0];
-    if (newest?.job_id) await waitJobDone(request, newest.job_id);
+    let newJobs: Array<{ id: string; kind?: string; status?: string }> = [];
+    await expect
+      .poll(async () => {
+        const jobsAfter = await listJobs(request);
+        newJobs = jobsAfter.filter((j) => !jobsBefore.some((b) => b.id === j.id));
+        return newJobs.length;
+      }, { timeout: 45_000 })
+      .toBe(1);
+    if (newJobs[0]?.id) await waitJobDone(request, newJobs[0].id);
     const after = await getShot(request, shot!.id);
-    const preview = [...(after.candidates || [])].reverse().find((c) => (c.quality_profile || "").toLowerCase() === "draft")
-      || [...(after.candidates || [])].reverse()[0];
+    const preview = (after.candidates || []).find((c) => c.job_id === newJobs[0]?.id)
+      || [...(after.candidates || [])].reverse().find((c) => (c.quality_profile || "").toLowerCase() === "draft");
     expect(preview, "preview candidate must exist").toBeTruthy();
     const cine = await getCine(request);
-    if (preview?.camera_state_hash && cine.selected_camera_id) {
-      const cam = cine.cameras?.find((c) => c.cameraId === cine.selected_camera_id);
-      if (cam?.cameraStateHash) expect(preview.camera_state_hash).toBe(cam.cameraStateHash);
+    const cam = cine.cameras?.find((c) => c.cameraId === cine.selected_camera_id);
+    if (preview?.camera_state_hash && cam?.cameraStateHash) {
+      expect(preview.camera_state_hash).toBe(cam.cameraStateHash);
     }
-    const jobsAfter = await listJobs(request);
-    const newJobs = jobsAfter.filter((j) => !jobsBefore.some((b) => b.id === j.id));
-    expect(newJobs.length, `preview must enqueue one job, got ${newJobs.map((j) => j.id).join(",")}`).toBeLessThanOrEqual(1);
-    expect(generating.length + (newest ? 1 : 0)).toBeGreaterThan(0);
   });
 
   test("duplicate preview click enqueues exactly one job", async ({ page, request }, testInfo) => {
@@ -461,8 +464,16 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       expect(body.operation).toBe(step.op);
       expect(body.sourceAssetId, `${step.op} must send sourceAssetId`).toBeTruthy();
       expect(body.maskAssetId, `${step.op} must send maskAssetId`).toBeTruthy();
-      const shot = await getShot(request, shotId!);
-      const cand = [...(shot.candidates || [])].reverse().find((c) => c.kind === "region_edit");
+      let cand: ShotCandidate | undefined;
+      await expect
+        .poll(async () => {
+          const shot = await getShot(request, shotId!);
+          cand = [...(shot.candidates || [])]
+            .reverse()
+            .find((c) => c.kind === "region_edit" && c.edit_operation === step.op);
+          return Boolean(cand?.job_id || cand?.id);
+        }, { timeout: 45_000 })
+        .toBeTruthy();
       expect(cand, `${step.op} candidate`).toBeTruthy();
       expect(cand!.edit_operation).toBe(step.op);
       hashes.push(cand!.camera_state_hash || "");
@@ -540,13 +551,19 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       const value = await zimage.getAttribute("value");
       if (value) await local.selectOption(value);
     }
+    const lock = page.getByTestId("cine-lock");
+    if (await lock.isDisabled()) {
+      await page.getByTestId("cine-preview").click();
+      await expect(lock).toBeEnabled({ timeout: JOB_WAIT_MS });
+    }
+    if (await lock.isEnabled()) await lock.click();
     const posts: string[] = [];
     page.on("request", (req) => {
       if (req.method() === "POST" && /cinematographer\/final/.test(req.url())) posts.push(req.postData() || "");
     });
     const jobsBefore = await listJobs(request);
     const generate = page.getByTestId("scene-creator-generate");
-    await expect(generate).toBeEnabled({ timeout: 20_000 });
+    await expect(generate).toBeEnabled({ timeout: 45_000 });
     await generate.dblclick({ delay: 30 }).catch(async () => {
       await generate.click();
       await generate.click();
@@ -581,22 +598,28 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     expect(shot).toBeTruthy();
     const complete = (shot!.candidates || []).filter((c) => c.status === "complete" && c.asset_id);
     expect(complete.length, "need two complete takes to approve/supersede").toBeGreaterThanOrEqual(2);
-    const first = complete[0];
-    const second = complete[complete.length - 1];
+    const currentApprovedId = shot!.approved_candidate_id || complete[complete.length - 1].id;
+    const other = complete.find((c) => c.id !== currentApprovedId) || complete[0];
     const jobsBefore = await listJobs(request);
-    await page.getByTestId("scene-creator-strip-take").nth(complete.length - 1).click();
+    await page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${other.id}"]`).click();
     const approve = page.getByTestId("scene-creator-approve");
     if (await approve.count()) await approve.click();
+    await expect
+      .poll(async () => (await getShot(request, shot!.id)).approved_candidate_id, { timeout: 20_000 })
+      .toBe(other.id);
     const after = await getShot(request, shot!.id);
-    const prev = (after.candidates || []).find((c) => c.id === first.id);
-    expect(after.approved_candidate_id).toBeTruthy();
-    if (prev && after.approved_candidate_id !== first.id) {
+    const prev = (after.candidates || []).find((c) => c.id === currentApprovedId);
+    expect(after.approved_candidate_id).toBe(other.id);
+    if (prev && currentApprovedId !== other.id) {
       expect(prev.superseded).toBe(true);
     }
-    await page.getByTestId("scene-creator-strip-take").first().click();
+    await page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${currentApprovedId}"]`).click();
     if (await approve.count()) await approve.click();
+    await expect
+      .poll(async () => (await getShot(request, shot!.id)).approved_candidate_id, { timeout: 20_000 })
+      .toBe(currentApprovedId);
     const rolled = await getShot(request, shot!.id);
-    expect((rolled.candidates || []).some((c) => c.id === second.id)).toBe(true);
+    expect((rolled.candidates || []).some((c) => c.id === other.id)).toBe(true);
     const jobsAfter = await listJobs(request);
     expect(jobsAfter.length).toBe(jobsBefore.length);
   });
