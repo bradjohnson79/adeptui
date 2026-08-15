@@ -62,6 +62,19 @@ export function useSceneCreator(projectId: string) {
   const [correction, setCorrection] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const orientGenRef = useRef(0);
+  const inFlightRef = useRef(false);
+
+  const beginSubmit = () => {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
+    setBusy(true);
+    return true;
+  };
+
+  const endSubmit = () => {
+    inFlightRef.current = false;
+    setBusy(false);
+  };
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -230,7 +243,7 @@ export function useSceneCreator(projectId: string) {
 
   const retake = useCallback(async () => {
     if (!shot) return;
-    setBusy(true);
+    if (!beginSubmit()) return;
     setError(null);
     try {
       const current = await persistShot();
@@ -248,13 +261,13 @@ export function useSceneCreator(projectId: string) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      endSubmit();
     }
   }, [applyShot, apiEnabled, apiModel, correction, localEnabled, localFamily, persistShot, projectId, shot, startPoll]);
 
   const sendToTimeline = useCallback(async () => {
     if (!shot) return;
-    setBusy(true);
+    if (!beginSubmit()) return;
     setError(null);
     try {
       const res = await sceneCreatorApi.sendShotToTimeline(projectId, shot.id);
@@ -262,7 +275,7 @@ export function useSceneCreator(projectId: string) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      endSubmit();
     }
   }, [projectId, shot]);
 
@@ -520,7 +533,7 @@ export function useSceneCreator(projectId: string) {
 
   const previewCamera = useCallback(async () => {
     if (!sceneId || !selectedCameraId) return;
-    setBusy(true);
+    if (!beginSubmit()) return;
     setError(null);
     setNotice(null);
     try {
@@ -536,11 +549,11 @@ export function useSceneCreator(projectId: string) {
       applyPack(res.cinematographer, selectedCameraId);
       applyShot(res.shot);
       startPoll(res.shot.id);
-      setNotice("Preview started. This is a draft look, not the final image.");
+      setNotice("Generating preview…");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      endSubmit();
     }
   }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, startPoll]);
 
@@ -555,7 +568,7 @@ export function useSceneCreator(projectId: string) {
       setError(VISUAL_INHERITANCE_BLOCKED_MESSAGE);
       return;
     }
-    setBusy(true);
+    if (!beginSubmit()) return;
     setError(null);
     setNotice(null);
     try {
@@ -571,11 +584,11 @@ export function useSceneCreator(projectId: string) {
       applyPack(res.cinematographer, selectedCameraId);
       applyShot(res.shot);
       startPoll(res.shot.id);
-      setNotice("Final quality render started.");
+      setNotice("Final rendering…");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      endSubmit();
     }
   }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, shot, startPoll]);
 
@@ -655,12 +668,14 @@ export function useSceneCreator(projectId: string) {
       local_family?: string;
       local_enabled?: boolean;
       api_enabled?: boolean;
+      expand?: string;
+      feather?: string;
     }) => {
       if (!shot?.id) {
         setError("Generate a look first, then paint the region to change.");
         return;
       }
-      setBusy(true);
+      if (!beginSubmit()) return;
       setError(null);
       setNotice(null);
       try {
@@ -672,12 +687,53 @@ export function useSceneCreator(projectId: string) {
         });
         applyShot(res.shot);
         startPoll(res.shot.id);
-        setNotice("Region edit started. The approved look stays until you approve this take.");
+        setNotice("Generating region edit…");
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setBusy(false);
+        endSubmit();
       }
+    },
+    retryFailed: async (candidateId: string) => {
+      if (!shot?.id) return;
+      const cand = shot.candidates.find((item) => item.id === candidateId);
+      if (!cand || cand.status !== "failed") return;
+      if (cand.kind === "region_edit") {
+        const edits = ((shot.take_memory?.userCorrection?.region_edits as Array<Record<string, unknown>>) || []).find(
+          (edit) => edit.candidate_id === cand.id,
+        );
+        if (!edits?.maskAssetId && !cand.mask_id) {
+          setError("Paint the region again, then Generate Inpaint.");
+          return;
+        }
+        if (!beginSubmit()) return;
+        setError(null);
+        try {
+          const res = await sceneCreatorApi.regionEdit(projectId, shot.id, {
+            operation: String(edits?.operation || cand.edit_operation || "modify"),
+            prompt: String(edits?.prompt || ""),
+            maskAssetId: String(edits?.maskAssetId || cand.mask_id || ""),
+            sourceAssetId: String(edits?.sourceAssetId || cand.source_preview_asset_id || ""),
+            stage: (cand.quality_profile || "preview") === "final" ? "final" : "preview",
+            local_family: localFamily,
+            local_enabled: localEnabled,
+            api_enabled: false,
+          });
+          applyShot(res.shot);
+          startPoll(res.shot.id);
+          setNotice("Generating region edit…");
+        } catch (err) {
+          setError(err instanceof Error ? err.message : String(err));
+        } finally {
+          endSubmit();
+        }
+        return;
+      }
+      if ((cand.quality_profile || "").toLowerCase() === "draft") {
+        await previewCamera();
+        return;
+      }
+      await finalRender();
     },
   };
 }

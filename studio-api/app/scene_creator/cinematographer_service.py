@@ -204,6 +204,9 @@ def generate_camera_preview(
         save_pack(db, project_id, pack)
         raise
     cand = cands[0] if cands else None
+    if cand and cand.id not in {c.id for c in (shot.candidates or [])}:
+        shot.candidates = list(shot.candidates or []) + [cand]
+        save_scene_shot(db, project_id, shot)
     rec.lineage.previewJobId = cand.job_id if cand else ""
     rec.lineage.previewAssetId = cand.asset_id or "" if cand else ""
     rec.lineage.previewStateVersion = rec.cameraStateVersion
@@ -253,7 +256,8 @@ def generate_camera_final(
         camera_record=rec,
         index_offset=len(shot.candidates or []),
     )
-    shot.candidates = list(shot.candidates or []) + list(cands)
+    existing_ids = {c.id for c in (shot.candidates or [])}
+    shot.candidates = list(shot.candidates or []) + [c for c in cands if c.id not in existing_ids]
     rec.lineage.finalJobId = cands[0].job_id if cands else rec.lineage.finalJobId
     rec.lineage.finalStateVersion = rec.cameraStateVersion
     save_pack(db, project_id, pack)

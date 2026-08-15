@@ -547,3 +547,62 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.scene-creator-strip-take {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 7.5rem;
+  max-width: 8.5rem;
+  padding: 0.25rem;
+  border-radius: 8px;
+}
+
+.scene-creator-strip-take img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.scene-creator-strip-take__label {
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.scene-creator-strip-take.is-approved {
+  outline: 2px solid var(--accent, #4a8);
+}
+
+.scene-creator-strip-take.is-superseded {
+  opacity: 0.72;
+}
+
+.scene-creator-source-line,
+.scene-creator-model-guard,
+.scene-creator-inpaint-warning,
+.scene-creator-failed-summary {
+  font-size: 0.8rem;
+}
+
+.scene-creator-inpaint-warning,
+.scene-creator-failed-summary {
+  color: var(--danger, #c33);
+}
+
+.scene-creator-model-guard {
+  border: 1px solid color-mix(in srgb, var(--danger, #c33) 45%, transparent);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  margin: 0.4rem 0;
+}
+
+.scene-creator-error-detail {
+  max-height: 6rem;
+  overflow: auto;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  background: var(--panel-2, #1c2130);
+  padding: 0.4rem;
+  border-radius: 6px;
+}

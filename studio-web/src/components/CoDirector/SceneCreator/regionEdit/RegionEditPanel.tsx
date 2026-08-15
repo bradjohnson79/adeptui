@@ -4,12 +4,18 @@ import type { SceneCinematographerPack } from "../cinematographer/cameraCommandE
 import type { SceneShot } from "../types";
 import { useInpaintSession } from "./inpaintSession";
 import {
+  EXPAND_PRESETS,
+  FEATHER_PRESETS,
   formatInpaintCollapsedSummary,
+  formatMaskSummary,
   inferRegionEditStage,
   isMaskStale,
   listRegionEditSources,
+  MASK_TOO_SMALL_PERCENT,
   REGION_EDIT_OPERATIONS,
   regionEditCapability,
+  type ExpandPreset,
+  type FeatherPreset,
   type RegionEditOperation,
 } from "./regionEdit";
 
@@ -22,6 +28,8 @@ export type RegionEditRequest = {
   local_family: string;
   local_enabled: boolean;
   api_enabled: boolean;
+  expand?: ExpandPreset;
+  feather?: FeatherPreset;
 };
 
 export function RegionEditPanel({
@@ -59,6 +67,8 @@ export function RegionEditPanel({
     maskCameraVersion: session.maskCameraVersion,
     currentCameraVersion: source?.cameraStateVersion ?? null,
   });
+  const coverage = session.hasMask ? session.coverage || session.maskRef.current?.measureCoverage() || 0 : 0;
+  const tooSmall = session.hasMask && coverage < MASK_TOO_SMALL_PERCENT;
   const collapsed = formatInpaintCollapsedSummary(shot, session.hasMask);
 
   useEffect(() => {
@@ -70,6 +80,9 @@ export function RegionEditPanel({
 
   const generate = async () => {
     if (!source?.assetId || unsupported || !session.hasMask) return;
+    const liveCoverage = session.maskRef.current?.measureCoverage() || coverage;
+    session.setCoverage(liveCoverage);
+    if (liveCoverage < MASK_TOO_SMALL_PERCENT) return;
     const png = (await session.maskRef.current?.exportPng()) || "";
     if (!png) return;
     setSaving(true);
@@ -92,6 +105,8 @@ export function RegionEditPanel({
         local_family: localFamily,
         local_enabled: localEnabled,
         api_enabled: false,
+        expand: session.expand,
+        feather: session.feather,
       });
     } finally {
       setSaving(false);
@@ -186,6 +201,34 @@ export function RegionEditPanel({
             ))}
           </select>
         </label>
+        <div className="scene-creator-core__row">
+          <span className="scene-creator-core__label">Expand</span>
+          {EXPAND_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={session.expand === preset.id ? "primary" : "ghost"}
+              data-testid={`scene-creator-inpaint-expand-${preset.id}`}
+              onClick={() => session.setExpand(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <div className="scene-creator-core__row">
+          <span className="scene-creator-core__label">Edge</span>
+          {FEATHER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              className={session.feather === preset.id ? "primary" : "ghost"}
+              data-testid={`scene-creator-inpaint-feather-${preset.id}`}
+              onClick={() => session.setFeather(preset.id)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
         <label className="scene-creator-core__label">
           Prompt
           <textarea
@@ -196,6 +239,19 @@ export function RegionEditPanel({
             placeholder="Remove the background extra behind Korri."
           />
         </label>
+        {session.hasMask ? (
+          <p
+            className={tooSmall ? "scene-creator-inpaint-warning" : "muted"}
+            data-testid="scene-creator-inpaint-mask-summary"
+          >
+            {formatMaskSummary({
+              coverage,
+              sourceLabel: source?.label || "Preview",
+              operation: session.operation,
+              tooSmall,
+            })}
+          </p>
+        ) : null}
         {stale ? (
           <p className="muted" data-testid="scene-creator-inpaint-mask-stale">
             This mask was painted on an older camera look. Paint again on the current frame.
@@ -209,6 +265,7 @@ export function RegionEditPanel({
           onClick={() => {
             session.maskRef.current?.clear();
             session.setHasMask(false);
+            session.setCoverage(0);
           }}
         >
           Clear Mask
@@ -221,6 +278,7 @@ export function RegionEditPanel({
             unsupported ||
             !source?.assetId ||
             !session.hasMask ||
+            tooSmall ||
             stale ||
             !session.prompt.trim() ||
             busy ||

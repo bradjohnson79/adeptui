@@ -37,6 +37,14 @@ from .generation import (
     hosted_image_generation_available,
     list_local_generator_families,
 )
+from .region_edit_profiles import (
+    MASK_TOO_SMALL_MESSAGE,
+    assert_mask_large_enough,
+    compile_operation_prompt,
+    creator_facing_job_error,
+    format_take_label,
+    operation_profile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +73,47 @@ CINEMATIC_FRAMING_LABELS = {
 
 class SceneCreatorError(ValueError):
     pass
+
+
+def _in_flight_candidate(
+    shot: SceneShot,
+    *,
+    quality_profile: str,
+    camera_hash: str = "",
+    kind: str = "",
+    operation: str = "",
+    source_asset_id: str = "",
+) -> SceneShotCandidate | None:
+    quality = (quality_profile or "final").lower()
+    wanted_kind = (kind or "").strip().lower()
+    for cand in reversed(list(shot.candidates or [])):
+        if cand.status not in {"queued", "generating"}:
+            continue
+        cand_kind = str(getattr(cand, "kind", "") or "").lower()
+        cand_quality = str(getattr(cand, "quality_profile", "") or "final").lower()
+        if wanted_kind == "region_edit":
+            if cand_kind != "region_edit":
+                continue
+            if operation and str(cand.edit_operation or "") != operation:
+                continue
+        else:
+            if cand_kind == "region_edit":
+                continue
+            if cand_quality != quality and not (quality == "draft" and cand_quality in {"draft", "preview"}):
+                continue
+        if camera_hash and str(cand.camera_state_hash or "") and str(cand.camera_state_hash) != camera_hash:
+            continue
+        if source_asset_id:
+            parent = next((c for c in shot.candidates if c.id == cand.parent_candidate_id), None)
+            parent_asset = str(getattr(parent, "asset_id", "") or "") if parent else ""
+            approved_src = str(getattr(cand, "approved_edited_preview_asset_id", "") or "")
+            if source_asset_id not in {parent_asset, approved_src, str(cand.source_preview_asset_id or "")}:
+                if str(getattr(cand, "mask_id", "") or "") and not parent_asset:
+                    pass
+                elif source_asset_id not in {approved_src, parent_asset}:
+                    continue
+        return cand
+    return None
 
 
 def ensure_scene_id(db: Session, project_id: str, scene_id: str = "") -> Scene:
@@ -381,6 +430,16 @@ def _enqueue_shot_candidates(
 
     extras = apply_region_edit_compile(body_base, shot, quality_profile=quality_profile)
     inheritance = str(extras.get("strategy") or "")
+    camera_hash = str(getattr(camera_record, "cameraStateHash", "") or "")
+    source_id = str(extras.get("sourceAssetId") or "")
+    reuse = _in_flight_candidate(
+        shot,
+        quality_profile="draft" if draft else "final",
+        camera_hash=camera_hash,
+        source_asset_id=source_id,
+    )
+    if reuse is not None:
+        return [reuse]
 
     candidates: list[SceneShotCandidate] = []
     for plan in plans:
@@ -406,20 +465,22 @@ def _enqueue_shot_candidates(
             else:
                 ctx["workflowKey"] = f"{plan['family']}.txt2img"
             if camera_record is not None:
-                existing = ctx.get("cinematographer")
-                if not (isinstance(existing, dict) and (existing.get("prose") or existing.get("instruction") or existing.get("pose"))):
-                    try:
-                        from .cinematographer import compile_camera_context
+                try:
+                    from .cinematographer import compile_camera_context
 
-                        ctx["cinematographer"] = compile_camera_context(camera_record)
-                    except Exception:
-                        ctx["cinematographer"] = {
-                            "cameraId": getattr(camera_record, "cameraId", ""),
-                            "cameraSlot": getattr(camera_record, "cameraSlot", None),
-                            "cameraStateVersion": getattr(camera_record, "cameraStateVersion", None),
-                            "cameraStateHash": getattr(camera_record, "cameraStateHash", ""),
-                            "locked": bool(getattr(getattr(camera_record, "lineage", None), "locked", False)),
-                        }
+                    ctx["cinematographer"] = compile_camera_context(camera_record)
+                except Exception:
+                    ctx["cinematographer"] = {
+                        "cameraId": getattr(camera_record, "cameraId", ""),
+                        "cameraSlot": getattr(camera_record, "cameraSlot", None),
+                        "cameraStateVersion": getattr(camera_record, "cameraStateVersion", None),
+                        "cameraStateHash": getattr(camera_record, "cameraStateHash", ""),
+                        "locked": bool(getattr(getattr(camera_record, "lineage", None), "locked", False)),
+                    }
+                cine = ctx.get("cinematographer") if isinstance(ctx.get("cinematographer"), dict) else {}
+                ctx["cameraStateVersion"] = cine.get("cameraStateVersion") or getattr(camera_record, "cameraStateVersion", None)
+                ctx["cameraStateHash"] = cine.get("cameraStateHash") or getattr(camera_record, "cameraStateHash", "") or ""
+                ctx["sourceCameraId"] = cine.get("cameraId") or getattr(camera_record, "cameraId", "") or ""
         if plan["source"] == "api":
             hosted = (api_model or plan.get("model") or "").strip()
             if not hosted:
@@ -450,7 +511,7 @@ def _enqueue_shot_candidates(
         elif inheritance == "A":
             provenance = f"{provenance} — Image Edit"
         approved = _approved_candidate(shot)
-        parent_id = approved.id if approved and getattr(approved, "kind", "") == "region_edit" else None
+        parent_id = approved.id if approved else None
         source_preview = ""
         edited_preview = ""
         if isinstance(body_base.get("creativeContext"), dict):
@@ -467,7 +528,11 @@ def _enqueue_shot_candidates(
                 model=plan["model"],
                 seed=plan["seed"],
                 provenance_label=provenance,
-                take_label="Preview" if draft else f"Take {chr(ord('A') + min(index, 25))}",
+                take_label=format_take_label(
+                    index=index,
+                    kind="",
+                    quality_profile="draft" if draft else "final",
+                ),
                 error=error,
                 camera_state_version=getattr(camera_record, "cameraStateVersion", None),
                 camera_state_hash=getattr(camera_record, "cameraStateHash", "") or "",
@@ -477,6 +542,14 @@ def _enqueue_shot_candidates(
                 final_strategy=str(inheritance or ""),
                 source_preview_asset_id=source_preview or None,
                 approved_edited_preview_asset_id=edited_preview or None,
+                final_model_id=str(extras.get("finalModelId") or plan["family"] or ""),
+                final_workflow_key=str(
+                    extras.get("workflowKey")
+                    or (body_base.get("creativeContext") or {}).get("workflowKey")
+                    or ""
+                ),
+                region_edit_ids=list(extras.get("regionEditIds") or []),
+                mask_asset_ids=list(extras.get("maskAssetIds") or []),
             )
         )
     return candidates
@@ -595,7 +668,7 @@ def retake_shot(
         index_offset=len(prior),
         camera_record=_camera_record_for_shot(db, project_id, shot),
     )
-    shot.candidates = prior + new_cands
+    shot.candidates = prior + [c for c in new_cands if c.id not in {p.id for p in prior}]
     shot.approved_candidate_id = approved_id
     shot.take_memory = memory
     save_scene_shot(db, project_id, shot)
@@ -621,7 +694,9 @@ def approve_candidate(
         prev = next((c for c in shot.candidates if c.id == prev_id), None)
         if prev and prev.asset_id:
             _set_asset_approval(db, project_id, prev.asset_id, approved=False)
+            prev.superseded = True
 
+    candidate.superseded = False
     shot.approved_candidate_id = candidate.id
     if getattr(candidate, "kind", "") == "region_edit":
         correction = dict(shot.take_memory.userCorrection or {})
@@ -658,6 +733,12 @@ def send_approved_to_timeline(
     candidate = _approved_candidate(shot)
     if candidate is None or not candidate.asset_id:
         raise SceneCreatorError("Approve a take before sending to Timeline.")
+    memory = shot.take_memory or SceneShotTakeMemory()
+    take_state = dict(memory.takeState or {})
+    last_export = str(take_state.get("lastTimelineAssetId") or "")
+    last_result = take_state.get("lastTimelineResult") if isinstance(take_state.get("lastTimelineResult"), dict) else None
+    if last_export == candidate.asset_id and last_result:
+        return last_result
     scene_id = (shot.scene_id or "").strip()
     if not scene_id:
         raise SceneCreatorError("This shot is not bound to a Scene.")
@@ -667,13 +748,22 @@ def send_approved_to_timeline(
 
     from .timeline_handoff import send_approved_shot_to_timeline
 
-    return send_approved_shot_to_timeline(
+    result = send_approved_shot_to_timeline(
         db,
         project_id,
         shot,
         candidate,
         batch_block_id=batch_block_id,
     )
+    if result.get("ok"):
+        memory = shot.take_memory or SceneShotTakeMemory()
+        take_state = dict(memory.takeState or {})
+        take_state["lastTimelineAssetId"] = candidate.asset_id
+        take_state["lastTimelineResult"] = result
+        memory.takeState = take_state
+        shot.take_memory = memory
+        save_scene_shot(db, project_id, shot)
+    return result
 
 
 def get_shot(db: Session, project_id: str, shot_id: str) -> SceneShot:
@@ -730,7 +820,9 @@ def _sync_candidate_jobs(db: Session, project_id: str, shot: SceneShot) -> None:
             candidate.status = "complete" if candidate.asset_id else "generating"
         elif status in {"failed", "error", "cancelled"}:
             candidate.status = "failed"
-            candidate.error = job.message or candidate.error
+            creator, detail = creator_facing_job_error(job.message or candidate.error or "")
+            candidate.error = creator
+            candidate.error_detail = detail or candidate.error_detail
         elif status in {"running", "preview"}:
             candidate.status = "generating"
         else:
@@ -1275,16 +1367,7 @@ def _region_edit_workflow(family: str, caps: dict[str, Any]) -> tuple[str, str, 
 
 
 def _region_edit_correction_text(operation: str, prompt: str) -> str:
-    text = (prompt or "").strip()
-    if operation == "remove":
-        return f"Do not include the removed extra. {text}".strip()
-    if operation == "replace":
-        return f"Replace the marked region: {text}".strip()
-    if operation == "add":
-        return f"Add in the marked region: {text}".strip()
-    if operation == "modify":
-        return f"Modify the marked region: {text}".strip()
-    return text
+    return compile_operation_prompt(operation, prompt)
 
 
 def _compile_region_edit_runtime(
@@ -1297,13 +1380,20 @@ def _compile_region_edit_runtime(
     masks: list[dict[str, Any]],
     operation: str,
     seed: int | None = None,
+    expand: str | None = None,
+    feather: str | None = None,
 ) -> dict[str, Any]:
     """Pin inpaint/edit workflow. Never silent-fallback to Z-Image or txt2img."""
     workflow_key, runtime_op, capability_label = _region_edit_workflow(family, caps)
     from ..image_runtime.contract import resolve_image_workflow
 
+    compiled_prompt = compile_operation_prompt(operation, prompt)
+    profile = operation_profile(operation, expand=expand, feather=feather)
+    denoise = float(profile["denoise"])
+    grow = int(profile["grow_mask_by"])
+
     present_inputs = {
-        "prompt": prompt,
+        "prompt": compiled_prompt,
         "reference_image": True,
         "mask": True,
     }
@@ -1328,10 +1418,11 @@ def _compile_region_edit_runtime(
             {
                 "operation": "image.edit",
                 "sourceAssetId": source_asset_id,
-                "prompt": prompt,
+                "prompt": compiled_prompt,
                 "masks": masks,
                 "modelFamilyPreference": family,
                 "seed": seed,
+                "denoise": denoise,
             },
         )
         rec = compiled.get("recommendation") or {}
@@ -1341,6 +1432,8 @@ def _compile_region_edit_runtime(
         compiled.setdefault("metadata", {})
         compiled["capabilityLabel"] = "Image Edit"
         compiled["workflowKey"] = pinned_key
+        compiled["denoise"] = denoise
+        compiled["grow_mask_by"] = grow
         return compiled
 
     if "txt2img" in (contract.workflow_key or ""):
@@ -1355,34 +1448,37 @@ def _compile_region_edit_runtime(
     elif operation == "replace" and caps.get("supportsInpaint"):
         product_op = "image.object_replace"
 
+    meta = {
+        "purpose": "scene_region_edit",
+        "edit_operation": operation,
+        "edit_op": operation,
+        "editOperation": product_op,
+        "capabilityLabel": capability_label,
+        "denoise": denoise,
+        "grow_mask_by": grow,
+        "expand": profile["expand"],
+        "feather": profile["feather"],
+        "masks": masks,
+    }
     edit_intent = ImageEditIntent(
         projectId=project_id,
         sourceAssetIds=[source_asset_id],
         operation=product_op,
-        prompt=prompt,
+        prompt=compiled_prompt,
         masks=masks,
         layers=default_edit_layers(),
-        metadata={
-            "purpose": "scene_region_edit",
-            "edit_operation": operation,
-            "capabilityLabel": capability_label,
-        },
+        metadata=meta,
     )
     intent = ImageIntent(
         projectId=project_id,
         operation=runtime_op,  # type: ignore[arg-type]
         purpose="scene_region_edit",
-        prompt=prompt,
+        prompt=compiled_prompt,
         enginePreference=family,
         providerPreference="local",
         sourceAssetId=source_asset_id,
         seed=seed,
-        metadata={
-            "edit_op": operation,
-            "editOperation": product_op,
-            "masks": masks,
-            "capabilityLabel": capability_label,
-        },
+        metadata=meta,
     )
     return {
         "imageEditIntent": edit_intent.to_dict(),
@@ -1395,6 +1491,9 @@ def _compile_region_edit_runtime(
         },
         "capabilityLabel": capability_label,
         "workflowKey": contract.workflow_key,
+        "denoise": denoise,
+        "grow_mask_by": grow,
+        "compiledPrompt": compiled_prompt,
     }
 
 
@@ -1412,6 +1511,8 @@ def region_edit_shot(
     local_enabled: bool = True,
     api_enabled: bool = False,
     api_model: str = "",
+    expand: str = "",
+    feather: str = "",
 ) -> SceneShot:
     """Append a region-edit take. Does not mutate camera lock or clear approval."""
     if api_enabled and not local_enabled:
@@ -1437,9 +1538,30 @@ def region_edit_shot(
     if not caps.get("supportsInpaint") and not caps.get("supportsEditing"):
         raise SceneCreatorError(REGION_EDIT_UNSUPPORTED_MESSAGE)
 
+    try:
+        from ..image_product.masks import get_mask_path
+
+        mask_path = get_mask_path(project_id, mask_id)
+        if mask_path:
+            assert_mask_large_enough(mask_path)
+    except ValueError as exc:
+        raise SceneCreatorError(MASK_TOO_SMALL_MESSAGE) from exc
+
     source_id, parent = resolve_region_edit_source(
         db, project_id, shot, source_asset_id=source_asset_id
     )
+    parent_hash = getattr(parent, "camera_state_hash", "") if parent else ""
+    reuse = _in_flight_candidate(
+        shot,
+        quality_profile="draft" if (stage or "preview").lower() == "preview" else "final",
+        camera_hash=str(parent_hash or ""),
+        kind="region_edit",
+        operation=op,
+        source_asset_id=source_id,
+    )
+    if reuse is not None:
+        return shot
+
     masks = [{"maskAssetId": mask_id, "maskId": mask_id, "role": "replace" if op == "replace" else "include"}]
     compiled = _compile_region_edit_runtime(
         project_id,
@@ -1449,6 +1571,8 @@ def region_edit_shot(
         source_asset_id=source_id,
         masks=masks,
         operation=op,
+        expand=expand,
+        feather=feather,
     )
     workflow_key = str(compiled.get("workflowKey") or (compiled.get("imageRuntime") or {}).get("workflowKey") or "")
     if "txt2img" in workflow_key:
@@ -1456,11 +1580,28 @@ def region_edit_shot(
 
     from ..image_product.edit_service import _enqueue_compiled
 
+    rec = _camera_record_for_shot(db, project_id, shot)
+    cine_ctx: dict[str, Any] = {}
+    if rec is not None:
+        try:
+            from .cinematographer import compile_camera_context
+
+            cine_ctx = compile_camera_context(rec)
+        except Exception:
+            cine_ctx = {
+                "cameraId": getattr(rec, "cameraId", ""),
+                "cameraStateVersion": getattr(rec, "cameraStateVersion", None),
+                "cameraStateHash": getattr(rec, "cameraStateHash", ""),
+            }
+
     body = {
         "sceneId": shot.scene_id,
         "shotId": shot.id,
         "tag": f"scene_region_edit_{shot.id[:8]}",
         "masks": masks,
+        "denoise": compiled.get("denoise"),
+        "grow_mask_by": compiled.get("grow_mask_by"),
+        "creativeContext": {"cinematographer": cine_ctx} if cine_ctx else {},
     }
     try:
         job_info = _enqueue_compiled(db, project_id=project_id, compiled=compiled, body=body)
@@ -1501,7 +1642,12 @@ def region_edit_shot(
         family=family,
         model=family,
         provenance_label=provenance,
-        take_label=f"Region Edit {chr(ord('A') + min(len(prior), 25))}",
+        take_label=format_take_label(
+            index=len(prior),
+            kind="region_edit",
+            quality_profile=quality,
+            operation=op,
+        ),
         error=error,
         camera_state_version=parent_version,
         camera_state_hash=parent_hash or "",
@@ -1511,6 +1657,10 @@ def region_edit_shot(
         parent_candidate_id=parent.id if parent else None,
         mask_id=mask_id,
         edit_operation=op,
+        source_preview_asset_id=getattr(parent, "asset_id", None) if parent else None,
+        final_model_id=family,
+        final_workflow_key=workflow_key,
+        mask_asset_ids=[mask_id],
     )
 
     memory = shot.take_memory or SceneShotTakeMemory()
@@ -1529,6 +1679,8 @@ def region_edit_shot(
             "family": family,
             "capability_label": capability_label,
             "workflow_key": workflow_key,
+            "denoise": compiled.get("denoise"),
+            "grow_mask_by": compiled.get("grow_mask_by"),
             "approved": False,
         }
     )

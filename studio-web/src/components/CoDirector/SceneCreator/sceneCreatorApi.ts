@@ -168,6 +168,8 @@ export const sceneCreatorApi = {
       local_enabled?: boolean;
       api_enabled?: boolean;
       api_model?: string;
+      expand?: string;
+      feather?: string;
     },
   ): Promise<{ shot: SceneShot }> => api.sceneCreator.regionEdit(projectId, shotId, body),
 };

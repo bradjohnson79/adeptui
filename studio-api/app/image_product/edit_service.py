@@ -44,6 +44,9 @@ def _enqueue_compiled(
         "refs": body.get("refs") or [],
         "masks": edit_intent.get("masks") or [],
         "tag": body.get("tag") or "imageedit",
+        "denoise": (intent.get("metadata") or {}).get("denoise"),
+        "grow_mask_by": (intent.get("metadata") or {}).get("grow_mask_by"),
+        "creativeContext": body.get("creativeContext") if isinstance(body.get("creativeContext"), dict) else {},
     }
     job = Job(
         id=str(uuid.uuid4()),

@@ -3,6 +3,7 @@ import type { SceneShot } from "../types";
 import {
   compileRegionEditFinalPrompt,
   formatInpaintCollapsedSummary,
+  formatMaskSummary,
   inferRegionEditStage,
   isMaskStale,
   listRegionEditSources,
@@ -11,6 +12,16 @@ import {
   approvedLookBlocksFinal,
   shotWithSelectedFamily,
   UNSUPPORTED_REGION_EDIT_MESSAGE,
+  MASK_TOO_SMALL_MESSAGE,
+  MODEL_GUARD_MESSAGE,
+  recommendedFinalCopy,
+  growMaskBy,
+  featherPx,
+  defaultExpandFor,
+  defaultFeatherFor,
+  creatorFacingCandidateError,
+  candidateSourceLine,
+  finalFromLine,
 } from "./regionEdit";
 
 function shot(partial: Partial<SceneShot> = {}): SceneShot {
@@ -391,5 +402,125 @@ describe("inpaint source list and collapsed summary", () => {
         false,
       ),
     ).toBe("1 approved edit");
+  });
+});
+
+describe("mask coverage and model guard copy", () => {
+  it("formats mask summary and too-small", () => {
+    expect(
+      formatMaskSummary({ coverage: 4.8, sourceLabel: "Preview C", operation: "modify", tooSmall: false }),
+    ).toContain("4.8%");
+    expect(
+      formatMaskSummary({ coverage: 0.1, sourceLabel: "Preview C", operation: "modify", tooSmall: true }),
+    ).toBe(MASK_TOO_SMALL_MESSAGE);
+  });
+
+  it("maps expand/feather presets to real values", () => {
+    expect(growMaskBy("wide")).toBe(14);
+    expect(growMaskBy("tight")).toBe(2);
+    expect(featherPx("soft")).toBe(8);
+    expect(featherPx("hard")).toBe(0);
+    expect(defaultExpandFor("add")).toBe("wide");
+    expect(defaultFeatherFor("remove")).toBe("hard");
+  });
+
+  it("shows T2I preflight copy when inheritance is blocked", () => {
+    expect(MODEL_GUARD_MESSAGE).toContain("cannot preserve your approved image edits");
+    expect(recommendedFinalCopy(shot({ approved_candidate_id: "e1", candidates: [
+      {
+        id: "e1",
+        shot_id: "s1",
+        index: 0,
+        job_id: "j",
+        asset_id: "edited",
+        status: "complete",
+        source: "local",
+        family: "zimage",
+        model: "zimage",
+        provenance_label: "LOCAL",
+        take_label: "Inpaint B — Remove",
+        kind: "region_edit",
+      },
+    ] }))).toContain("Z-Image");
+  });
+
+  it("maps output-gate errors to creator copy", () => {
+    const parsed = creatorFacingCandidateError("Output Gate failed: masked region did not change meaningfully");
+    expect(parsed.gate).toBe(true);
+    expect(parsed.summary).toContain("did not change the selected region enough");
+    expect(parsed.detail).not.toMatch(/Traceback|File \".+\.py\"/);
+  });
+
+  it("never advertises qwen.edit", () => {
+    expect(MODEL_GUARD_MESSAGE.toLowerCase()).not.toContain("qwen.edit");
+    expect(recommendedFinalCopy(shot({ approved_candidate_id: "e1", candidates: [
+      {
+        id: "e1",
+        shot_id: "s1",
+        index: 0,
+        job_id: "j",
+        asset_id: "edited",
+        status: "complete",
+        source: "local",
+        family: "zimage",
+        model: "zimage",
+        provenance_label: "LOCAL",
+        take_label: "Inpaint B — Remove",
+        kind: "region_edit",
+      },
+    ] })).toLowerCase()).not.toContain("qwen.edit");
+  });
+
+  it("labels compare-with-source and final inheritance", () => {
+    const parent = {
+      id: "p1",
+      shot_id: "s1",
+      index: 0,
+      job_id: "j0",
+      asset_id: "preview",
+      status: "complete" as const,
+      source: "local" as const,
+      family: "zimage",
+      model: "zimage",
+      provenance_label: "LOCAL",
+      take_label: "Preview A",
+    };
+    const edited = {
+      id: "e1",
+      shot_id: "s1",
+      index: 1,
+      job_id: "j1",
+      asset_id: "edited",
+      status: "complete" as const,
+      source: "local" as const,
+      family: "zimage",
+      model: "zimage",
+      provenance_label: "LOCAL",
+      take_label: "Inpaint B — Remove",
+      kind: "region_edit",
+      parent_candidate_id: "p1",
+      edit_operation: "remove",
+      final_model_id: "zimage",
+    };
+    const finalCand = {
+      id: "f1",
+      shot_id: "s1",
+      index: 2,
+      job_id: "j2",
+      asset_id: "final",
+      status: "complete" as const,
+      source: "local" as const,
+      family: "zimage",
+      model: "zimage",
+      provenance_label: "LOCAL",
+      take_label: "Final C",
+      quality_profile: "final",
+      parent_candidate_id: "e1",
+      final_strategy: "A",
+    };
+    const s = shot({ candidates: [parent, edited, finalCand], approved_candidate_id: "e1" });
+    expect(candidateSourceLine(edited, s)).toContain("Preview A");
+    expect(candidateSourceLine(edited, s)).toContain("Remove");
+    expect(finalFromLine(finalCand, s)).toContain("Inpaint B — Remove");
   });
 });

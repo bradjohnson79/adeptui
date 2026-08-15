@@ -12,7 +12,7 @@ import {
   previewIsStale,
   type SceneCameraRecord,
 } from "./cameraCommandEngine";
-import { approvedLookBlocksFinal, compileRegionEditFinalPrompt, shotWithSelectedFamily } from "../regionEdit/regionEdit";
+import { approvedLookBlocksFinal, compileRegionEditFinalPrompt, MODEL_GUARD_MESSAGE, shotWithSelectedFamily } from "../regionEdit/regionEdit";
 
 type Props = { sc: ReturnType<typeof useSceneCreator> };
 
@@ -192,7 +192,7 @@ export function CinematographerPanel({ sc }: Props) {
           disabled={!selected || sc.busy || !sc.intent.trim() || (!sc.localEnabled && (!sc.apiEnabled || !sc.apiModel))}
           onClick={() => void sc.previewCamera()}
         >
-          Generate Low-Res Preview
+          {sc.busy || selected?.lineage?.previewStatus === "generating" ? "Generating preview…" : "Generate Low-Res Preview"}
         </button>
         <button
           type="button"
@@ -210,9 +210,14 @@ export function CinematographerPanel({ sc }: Props) {
           disabled={!selected || sc.busy || !lockIsValid(selected) || blocksFinal || inheritanceBlocked}
           onClick={() => void sc.finalRender()}
         >
-          {sc.generating ? "Rendering…" : "Final Quality Render"}
+          {sc.generating || sc.busy ? "Final rendering…" : "Final Quality Render"}
         </button>
       </div>
+      {inheritanceBlocked ? (
+        <p className="muted" data-testid="scene-creator-final-guard">
+          {MODEL_GUARD_MESSAGE} Choose Z-Image or FLUX.
+        </p>
+      ) : null}
     </section>
   );
 }

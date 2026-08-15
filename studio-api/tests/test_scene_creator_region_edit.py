@@ -633,3 +633,158 @@ def test_sync_final_assets_from_shots_overwrites_stale_lineage() -> None:
     )
     assert sync_final_assets_from_shots(pack, [shot]) is True
     assert pack.cameras[0].lineage.finalAssetId == "library-asset"
+
+
+def test_operation_profiles_pin_denoise_and_grow(monkeypatch) -> None:
+    from app.scene_creator.region_edit_profiles import operation_profile
+
+    add = operation_profile("add", expand="wide")
+    assert add["denoise"] == 0.94
+    assert add["grow_mask_by"] == 14
+    modify = operation_profile("modify")
+    assert 0.78 <= modify["denoise"] <= 0.85
+    assert modify["grow_mask_by"] == 8
+    remove = operation_profile("remove", expand="tight")
+    assert remove["grow_mask_by"] == 2
+
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
+    db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    try:
+        edited = region_edit_shot(
+            db,
+            project_id,
+            shot.id,
+            operation="add",
+            prompt="a handmade ceramic coffee cup",
+            mask_asset_id="mask-add",
+            source_asset_id=asset_id,
+            local_family="zimage",
+            expand="wide",
+        )
+        meta = ((captured.get("compiled") or {}).get("imageIntent") or {}).get("metadata") or {}
+        assert meta["denoise"] == 0.94
+        assert meta["grow_mask_by"] == 14
+        assert "Create the described object" in str(((captured.get("compiled") or {}).get("imageIntent") or {}).get("prompt") or "")
+        assert edited.candidates[-1].take_label.startswith("Inpaint")
+        assert "Add" in edited.candidates[-1].take_label
+        assert captured["body"]["grow_mask_by"] == 14
+        ctx = captured["body"].get("creativeContext") or {}
+        assert isinstance(ctx, dict)
+        if ctx.get("cinematographer"):
+            assert isinstance(ctx["cinematographer"], dict)
+    finally:
+        db.close()
+
+
+def test_mask_too_small_blocks_enqueue(monkeypatch, tmp_path) -> None:
+    from PIL import Image
+
+    from app.scene_creator.region_edit_profiles import MASK_TOO_SMALL_MESSAGE, assert_mask_large_enough
+
+    tiny = tmp_path / "tiny-mask.png"
+    Image.new("RGBA", (100, 100), (0, 0, 0, 0)).save(tiny)
+    try:
+        assert_mask_large_enough(tiny)
+        raise AssertionError("empty mask must be rejected")
+    except ValueError as exc:
+        assert MASK_TOO_SMALL_MESSAGE in str(exc)
+
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
+    db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    try:
+        monkeypatch.setattr(
+            "app.image_product.masks.get_mask_path",
+            lambda pid, mid: str(tiny),
+        )
+        try:
+            region_edit_shot(
+                db,
+                project_id,
+                shot.id,
+                operation="modify",
+                prompt="irritated expression",
+                mask_asset_id="mask-tiny",
+                source_asset_id=asset_id,
+                local_family="zimage",
+            )
+            raise AssertionError("tiny mask must not enqueue")
+        except SceneCreatorError as exc:
+            assert MASK_TOO_SMALL_MESSAGE in str(exc)
+        assert captured.get("compiled") is None
+    finally:
+        db.close()
+
+
+def test_duplicate_region_edit_reuses_in_flight(monkeypatch) -> None:
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
+    db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    try:
+        first = region_edit_shot(
+            db,
+            project_id,
+            shot.id,
+            operation="remove",
+            prompt="the extra person",
+            mask_asset_id="mask-dup",
+            source_asset_id=asset_id,
+            local_family="zimage",
+        )
+        second = region_edit_shot(
+            db,
+            project_id,
+            shot.id,
+            operation="remove",
+            prompt="the extra person",
+            mask_asset_id="mask-dup",
+            source_asset_id=asset_id,
+            local_family="zimage",
+        )
+        edits = [c for c in second.candidates if c.kind == "region_edit"]
+        assert len(edits) == 1
+        assert first.candidates[-1].id == second.candidates[-1].id
+        assert captured.get("compiled")
+    finally:
+        db.close()
+
+
+def test_creator_facing_output_gate_message() -> None:
+    from app.scene_creator.region_edit_profiles import OUTPUT_GATE_CREATOR_MESSAGE, creator_facing_job_error
+
+    msg, detail = creator_facing_job_error("Output Gate failed: Inpaint output: masked region did not change meaningfully.")
+    assert "did not change the selected region enough" in msg
+    assert "Z-Image" in msg
+    assert "Output Gate" in detail
+    assert OUTPUT_GATE_CREATOR_MESSAGE.splitlines()[0] in msg
+
+
+def test_approve_marks_previous_superseded_not_deleted(monkeypatch) -> None:
+    _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
+    db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    try:
+        parent.asset_id = asset_id
+        parent.status = "complete"
+        save_scene_shot(db, project_id, shot)
+        edited = region_edit_shot(
+            db,
+            project_id,
+            shot.id,
+            operation="modify",
+            prompt="irritated expression",
+            mask_asset_id="mask-expr",
+            source_asset_id=asset_id,
+            local_family="zimage",
+        )
+        child = edited.candidates[-1]
+        child.status = "complete"
+        child.asset_id = "asset-edit-2"
+        save_scene_shot(db, project_id, edited)
+        approved = approve_candidate(db, project_id, edited.id, child.id)
+        prev = next(c for c in approved.candidates if c.id == parent.id)
+        assert prev.superseded is True
+        assert approved.approved_candidate_id == child.id
+        assert len(approved.candidates) == 2
+        rolled = approve_candidate(db, project_id, approved.id, parent.id)
+        assert rolled.approved_candidate_id == parent.id
+        assert any(c.id == child.id for c in rolled.candidates)
+    finally:
+        db.close()

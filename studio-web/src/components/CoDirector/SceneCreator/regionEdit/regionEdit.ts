@@ -14,6 +14,121 @@ export const UNSUPPORTED_REGION_EDIT_MESSAGE =
 export const VISUAL_INHERITANCE_BLOCKED_MESSAGE =
   "This generator cannot keep the painted correction. Choose Z-Image or FLUX for Final Quality Render.";
 
+export const MODEL_GUARD_MESSAGE = "This model cannot preserve your approved image edits.";
+
+export const MASK_TOO_SMALL_MESSAGE = "Mask too small";
+export const MASK_TOO_SMALL_PERCENT = 0.4;
+
+export const EXPAND_PRESETS = [
+  { id: "tight" as const, label: "Tight", grow: 2 },
+  { id: "normal" as const, label: "Normal", grow: 6 },
+  { id: "wide" as const, label: "Wide", grow: 14 },
+];
+
+export const FEATHER_PRESETS = [
+  { id: "hard" as const, label: "Hard", px: 0 },
+  { id: "soft" as const, label: "Soft", px: 8 },
+];
+
+export type ExpandPreset = (typeof EXPAND_PRESETS)[number]["id"];
+export type FeatherPreset = (typeof FEATHER_PRESETS)[number]["id"];
+
+export function defaultExpandFor(operation: RegionEditOperation): ExpandPreset {
+  return operation === "add" ? "wide" : "normal";
+}
+
+export function defaultFeatherFor(operation: RegionEditOperation): FeatherPreset {
+  return operation === "remove" ? "hard" : "soft";
+}
+
+export function featherPx(preset: FeatherPreset): number {
+  return FEATHER_PRESETS.find((item) => item.id === preset)?.px ?? 0;
+}
+
+export function growMaskBy(preset: ExpandPreset): number {
+  return EXPAND_PRESETS.find((item) => item.id === preset)?.grow ?? 6;
+}
+
+export function compatibleFinalFamilies(): { id: string; label: string; capability: string }[] {
+  return [
+    { id: "zimage", label: "Z-Image", capability: "Native Image Edit" },
+    { id: "flux", label: "FLUX", capability: "Image Edit" },
+  ];
+}
+
+export function recommendedFinalCopy(shot: SceneShot | null): string {
+  if (!countApprovedRegionEdits(shot)) return "";
+  return "Your approved preview contains region edits.\nRecommended final renderers:\n• Z-Image — Native Image Edit\n• FLUX — Image Edit";
+}
+
+export function maskCoveragePercentFromCanvas(canvas: HTMLCanvasElement | null): number {
+  if (!canvas || !canvas.width || !canvas.height) return 0;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return 0;
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let painted = 0;
+  const total = canvas.width * canvas.height;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] >= 128 || data[i + 1] >= 128 || data[i + 2] >= 128 || data[i + 3] >= 128) painted += 1;
+  }
+  return total ? (painted / total) * 100 : 0;
+}
+
+export function formatMaskSummary(input: {
+  coverage: number;
+  sourceLabel: string;
+  operation: string;
+  tooSmall: boolean;
+}): string {
+  if (input.tooSmall) return MASK_TOO_SMALL_MESSAGE;
+  const op = input.operation ? input.operation[0].toUpperCase() + input.operation.slice(1) : "Edit";
+  return `Masked area: ${input.coverage.toFixed(1)}% of image · Source: ${input.sourceLabel} · Operation: ${op}`;
+}
+
+export function creatorFacingCandidateError(raw: string): { summary: string; gate: boolean; detail: string } {
+  const detail = (raw || "").trim();
+  const low = detail.toLowerCase();
+  if (low.includes("did not change meaningfully") || low.includes("identical to source") || low.includes("did not change the selected region")) {
+    return {
+      summary: "Edit did not change the selected region enough.",
+      gate: true,
+      detail,
+    };
+  }
+  if (low.includes("output gate") || low.includes("quality gate")) {
+    return { summary: "Output did not pass quality gate.", gate: true, detail };
+  }
+  return { summary: "Generation failed", gate: false, detail };
+}
+
+export function candidateSourceLine(cand: SceneShotCandidate, shot: SceneShot | null): string {
+  const parent = (shot?.candidates || []).find((item) => item.id === cand.parent_candidate_id);
+  const sourceLabel = parent?.take_label || (cand.source_preview_asset_id ? "Preview" : "");
+  const model = cand.final_model_id || cand.family || "";
+  const modelLabel = model === "zimage" ? "Z-Image" : model === "flux" ? "FLUX" : model;
+  if (cand.kind === "region_edit") {
+    const op = (cand.edit_operation || "edit").replace(/^\w/, (c) => c.toUpperCase());
+    return `Source: ${sourceLabel || "Preview"} · Edit: ${op}${modelLabel ? ` · Model: ${modelLabel}` : ""}`;
+  }
+  if ((cand.quality_profile || "").toLowerCase() === "final" || cand.final_strategy) {
+    const strategy = cand.final_strategy === "A" ? "A — Image Edit" : cand.final_strategy || "";
+    const from = parent?.take_label || sourceLabel;
+    return `Source: ${from || "Preview"}${strategy ? ` · Strategy: ${strategy}` : ""}`;
+  }
+  return sourceLabel ? `Source: ${sourceLabel}` : "";
+}
+
+export function finalFromLine(cand: SceneShotCandidate, shot: SceneShot | null): string {
+  if ((cand.quality_profile || "").toLowerCase() !== "final" && cand.kind !== "region_edit") return "";
+  if (!cand.final_strategy && (cand.quality_profile || "") !== "final") return "";
+  const parent = (shot?.candidates || []).find((item) => item.id === cand.parent_candidate_id);
+  if (!parent) return "";
+  if ((cand.quality_profile || "").toLowerCase() === "final" && cand.kind !== "region_edit") {
+    return `${cand.take_label} from ${parent.take_label}`;
+  }
+  return "";
+}
+
 export const REGION_EDIT_OPERATIONS: { id: RegionEditOperation; label: string }[] = [
   { id: "remove", label: "Remove" },
   { id: "replace", label: "Replace" },

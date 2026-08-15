@@ -247,6 +247,12 @@ class SceneShotCandidate(BaseModel):
     final_strategy: str = ""
     source_preview_asset_id: Optional[str] = None
     approved_edited_preview_asset_id: Optional[str] = None
+    final_model_id: str = ""
+    final_workflow_key: str = ""
+    region_edit_ids: list[str] = Field(default_factory=list)
+    mask_asset_ids: list[str] = Field(default_factory=list)
+    error_detail: str = ""
+    superseded: bool = False
 
 
 class PropCandidate(BaseModel):

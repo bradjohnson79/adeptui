@@ -32,6 +32,8 @@ class RegionEditBody(BaseModel):
     local_enabled: bool = True
     api_enabled: bool = False
     api_model: str = ""
+    expand: str = ""
+    feather: str = ""
 
 
 def _require_project(db: Session, project_id: str) -> Project:
@@ -75,6 +77,8 @@ def api_region_edit_shot(
             local_enabled=body.local_enabled,
             api_enabled=body.api_enabled,
             api_model=body.api_model,
+            expand=body.expand,
+            feather=body.feather,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

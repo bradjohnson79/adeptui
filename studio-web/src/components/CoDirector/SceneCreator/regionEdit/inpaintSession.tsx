@@ -4,7 +4,13 @@
  */
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ImageMaskEditorHandle } from "../../../imageEdit/ImageMaskEditor";
-import type { RegionEditOperation } from "./regionEdit";
+import {
+  defaultExpandFor,
+  defaultFeatherFor,
+  type ExpandPreset,
+  type FeatherPreset,
+  type RegionEditOperation,
+} from "./regionEdit";
 
 export type InpaintTool = "brush" | "erase";
 
@@ -19,6 +25,12 @@ type InpaintSessionValue = {
   setPrompt: (prompt: string) => void;
   operation: RegionEditOperation;
   setOperation: (operation: RegionEditOperation) => void;
+  expand: ExpandPreset;
+  setExpand: (expand: ExpandPreset) => void;
+  feather: FeatherPreset;
+  setFeather: (feather: FeatherPreset) => void;
+  coverage: number;
+  setCoverage: (coverage: number) => void;
   sourceId: string;
   setSourceId: (id: string) => void;
   hasMask: boolean;
@@ -39,6 +51,9 @@ export function InpaintSessionProvider({ children }: { children: ReactNode }) {
   const [brushSize, setBrushSize] = useState(24);
   const [prompt, setPrompt] = useState("");
   const [operation, setOperation] = useState<RegionEditOperation>("remove");
+  const [expand, setExpand] = useState<ExpandPreset>("normal");
+  const [feather, setFeather] = useState<FeatherPreset>("hard");
+  const [coverage, setCoverage] = useState(0);
   const [sourceId, setSourceId] = useState("");
   const [hasMask, setHasMask] = useState(false);
   const [maskSourceAssetId, setMaskSourceAssetId] = useState("");
@@ -56,7 +71,17 @@ export function InpaintSessionProvider({ children }: { children: ReactNode }) {
       prompt,
       setPrompt,
       operation,
-      setOperation,
+      setOperation: (next: RegionEditOperation) => {
+        setOperation(next);
+        setExpand(defaultExpandFor(next));
+        setFeather(defaultFeatherFor(next));
+      },
+      expand,
+      setExpand,
+      feather,
+      setFeather,
+      coverage,
+      setCoverage,
       sourceId,
       setSourceId,
       hasMask,
@@ -74,6 +99,9 @@ export function InpaintSessionProvider({ children }: { children: ReactNode }) {
       brushSize,
       prompt,
       operation,
+      expand,
+      feather,
+      coverage,
       sourceId,
       hasMask,
       maskSourceAssetId,

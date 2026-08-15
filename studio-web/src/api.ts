@@ -4408,6 +4408,8 @@ export const api = {
         local_enabled?: boolean;
         api_enabled?: boolean;
         api_model?: string;
+        expand?: string;
+        feather?: string;
       },
     ) =>
       req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(

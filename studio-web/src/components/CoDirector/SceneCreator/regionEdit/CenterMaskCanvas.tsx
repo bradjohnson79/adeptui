@@ -40,10 +40,12 @@ export function CenterMaskCanvas({
         fill
         tool={session.tool}
         brushSize={session.brushSize}
+        feather={session.feather === "soft" ? 8 : 0}
         overlayOpacity={session.accordionOpen ? 0.45 : 0}
         interactive={session.maskInteractive}
         onChange={(next) => {
           session.setHasMask(next);
+          session.setCoverage(session.maskRef.current?.measureCoverage() || 0);
           if (next) {
             session.setMaskSourceAssetId(sourceAssetId);
             session.setMaskCameraVersion(cameraVersion ?? null);

@@ -6,12 +6,24 @@ import { useMemo, useState } from "react";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
+import type { SceneShotCandidate } from "./types";
 import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
 import { CenterMaskCanvas } from "./regionEdit/CenterMaskCanvas";
 import { InpaintSessionProvider, useInpaintSession } from "./regionEdit/inpaintSession";
-import { listRegionEditSources } from "./regionEdit/regionEdit";
+import {
+  candidateSourceLine,
+  compatibleFinalFamilies,
+  compileRegionEditFinalPrompt,
+  countApprovedRegionEdits,
+  creatorFacingCandidateError,
+  finalFromLine,
+  listRegionEditSources,
+  MODEL_GUARD_MESSAGE,
+  recommendedFinalCopy,
+  shotWithSelectedFamily,
+} from "./regionEdit/regionEdit";
 import { RegionEditPanel } from "./regionEdit/RegionEditPanel";
 import "./sceneCreator.css";
 
@@ -160,19 +172,90 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
       </aside>
       <div className="scene-creator-standard__strip" data-testid="scene-creator-take-strip">
         {(sc.shot?.candidates || []).map((cand) => (
-          <button
-            key={cand.id}
-            type="button"
-            onClick={() => cand.status === "complete" && cand.asset_id && void sc.approve(cand.id)}
-          >
-            {cand.asset_id ? (
-              <img src={api.assetUrl(cand.asset_id)} alt={cand.take_label} />
-            ) : (
-              <span className="muted">{cand.take_label}</span>
-            )}
-          </button>
+          <TakeStripButton key={cand.id} cand={cand} sc={sc} />
         ))}
       </div>
+    </div>
+  );
+}
+
+function TakeStripButton({
+  cand,
+  sc,
+}: {
+  cand: SceneShotCandidate;
+  sc: ReturnType<typeof useSceneCreator>;
+}) {
+  const approved = cand.id === sc.shot?.approved_candidate_id;
+  const [compare, setCompare] = useState(false);
+  const parent = (sc.shot?.candidates || []).find((item) => item.id === cand.parent_candidate_id);
+  const showAsset = compare && parent?.asset_id ? parent.asset_id : cand.asset_id;
+  return (
+    <button
+      key={cand.id}
+      type="button"
+      className={
+        approved
+          ? "scene-creator-strip-take is-approved"
+          : cand.superseded
+            ? "scene-creator-strip-take is-superseded"
+            : "scene-creator-strip-take"
+      }
+      data-testid="scene-creator-strip-take"
+      data-approved={approved ? "true" : "false"}
+      data-superseded={cand.superseded ? "true" : "false"}
+      onClick={() => cand.status === "complete" && cand.asset_id && void sc.approve(cand.id)}
+      onPointerDown={() => parent?.asset_id && setCompare(true)}
+      onPointerUp={() => setCompare(false)}
+      onPointerLeave={() => setCompare(false)}
+    >
+      {showAsset ? (
+        <img src={api.assetUrl(showAsset)} alt={cand.take_label} />
+      ) : (
+        <span className="muted">
+          {cand.status === "failed" ? "Failed" : cand.status === "queued" || cand.status === "generating" ? "Generating…" : cand.take_label}
+        </span>
+      )}
+      <span className="scene-creator-strip-take__label">
+        {cand.take_label}
+        {approved ? " · Approved" : cand.superseded ? " · Previously approved" : ""}
+      </span>
+    </button>
+  );
+}
+
+function PreviewFrame({ sc, assetId }: { sc: ReturnType<typeof useSceneCreator>; assetId: string }) {
+  const approved = sc.approved;
+  const [compare, setCompare] = useState(false);
+  const parent = (sc.shot?.candidates || []).find((item) => item.id === approved?.parent_candidate_id);
+  const shown = compare && parent?.asset_id ? parent.asset_id : assetId;
+  const sourceLine = approved ? candidateSourceLine(approved, sc.shot) : "";
+  const fromLine = approved ? finalFromLine(approved, sc.shot) : "";
+  return (
+    <div className="scene-creator-preview-hero" data-testid="scene-creator-preview-image">
+      <img src={api.assetUrl(shown)} alt="Scene frame" />
+      {sourceLine ? (
+        <p className="scene-creator-source-line" data-testid="scene-creator-source-line">
+          {sourceLine}
+        </p>
+      ) : null}
+      {fromLine ? (
+        <p className="muted" data-testid="scene-creator-final-from">
+          {fromLine}
+        </p>
+      ) : null}
+      {parent?.asset_id ? (
+        <button
+          type="button"
+          className="ghost"
+          data-testid="scene-creator-compare-source"
+          onPointerDown={() => setCompare(true)}
+          onPointerUp={() => setCompare(false)}
+          onPointerLeave={() => setCompare(false)}
+        >
+          Compare With Source
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -219,9 +302,11 @@ function StandardPreview({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
           />
         </div>
       ) : assetId ? (
-        <img src={api.assetUrl(assetId)} alt="Scene frame" data-testid="scene-creator-preview-image" />
+        <PreviewFrame sc={sc} assetId={assetId} />
+      ) : sc.generating ? (
+        <p className="muted" data-testid="scene-creator-preview-empty">Generating preview…</p>
       ) : (
-        <p className="muted">Generate a look, then approve one to see it here.</p>
+        <p className="muted" data-testid="scene-creator-preview-empty">No preview yet</p>
       )}
     </div>
   );
@@ -329,6 +414,9 @@ function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   const apiModels = sc.workspace?.api_models || [];
   const hasApi = apiModels.length > 0;
   const caps = sc.workspace?.preview_capabilities;
+  const liveShot = shotWithSelectedFamily(sc.shot, sc.localFamily);
+  const inheritanceBlocked = Boolean(liveShot && compileRegionEditFinalPrompt(liveShot).visualInheritanceBlocked);
+  const recommended = recommendedFinalCopy(sc.shot);
   let apiLabel = caps?.api?.noneLabel || "API Generation — Not Available";
   if (hasApi && sc.apiEnabled && sc.apiModel) {
     apiLabel = "Standard-Cost Preview Only — cloud previews cost the same as a full image unless the provider says otherwise.";
@@ -356,10 +444,39 @@ function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
         >
           <option value="">Auto Select</option>
           {(sc.workspace?.local_families || []).map((fam) => (
-            <option key={fam.id} value={fam.id}>{fam.label}</option>
+            <option key={fam.id} value={fam.id}>
+              {fam.label}
+              {fam.regionEditLabel ? ` — ${fam.regionEditLabel}` : ""}
+            </option>
           ))}
         </select>
       </label>
+      {inheritanceBlocked ? (
+        <div className="scene-creator-model-guard" data-testid="scene-creator-model-guard">
+          <p>{MODEL_GUARD_MESSAGE}</p>
+          <p className="muted">Choose:</p>
+          <div className="scene-creator-core__row">
+            {compatibleFinalFamilies().map((fam) => (
+              <button
+                key={fam.id}
+                type="button"
+                className="primary"
+                data-testid={`scene-creator-guard-${fam.id}`}
+                onClick={() => sc.setLocalFamily(fam.id)}
+              >
+                {fam.label}
+              </button>
+            ))}
+          </div>
+          <p className="muted" data-testid="scene-creator-model-recommend">
+            {recommended}
+          </p>
+        </div>
+      ) : countApprovedRegionEdits(sc.shot) ? (
+        <p className="muted" data-testid="scene-creator-model-recommend">
+          {recommended}
+        </p>
+      ) : null}
       <label className="scene-creator-core__row">
         <input
           type="checkbox"
@@ -477,6 +594,41 @@ function StatusBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   );
 }
 
+function FailedCandidateBody({
+  cand,
+  sc,
+}: {
+  cand: SceneShotCandidate;
+  sc: ReturnType<typeof useSceneCreator>;
+}) {
+  const [details, setDetails] = useState(false);
+  const parsed = creatorFacingCandidateError(cand.error || cand.error_detail || "");
+  return (
+    <div data-testid="scene-creator-failed-card">
+      <p className="scene-creator-failed-summary">Generation failed</p>
+      <p className="muted">{parsed.gate ? "Output did not pass quality gate." : parsed.summary}</p>
+      {parsed.gate ? (
+        <p className="muted" data-testid="scene-creator-gate-hint">
+          Edit did not change the selected region enough. Try expanding the mask, strengthening the prompt, or switching to Z-Image / FLUX.
+        </p>
+      ) : null}
+      <div className="scene-creator-core__row">
+        <button type="button" className="primary" data-testid="scene-creator-retry" disabled={sc.busy} onClick={() => void sc.retryFailed(cand.id)}>
+          Retry
+        </button>
+        <button type="button" className="ghost" data-testid="scene-creator-error-details" onClick={() => setDetails((v) => !v)}>
+          Details
+        </button>
+      </div>
+      {details && (cand.error_detail || cand.error) ? (
+        <pre className="scene-creator-error-detail" data-testid="scene-creator-error-detail">
+          {cand.error_detail || cand.error}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
 function CandidateGrid({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   const candidates = sc.shot?.candidates || [];
   if (!candidates.length) return null;
@@ -494,13 +646,17 @@ function CandidateGrid({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
               {cand.asset_id ? (
                 <img src={api.assetUrl(cand.asset_id)} alt={cand.take_label} data-testid="scene-creator-result-image" />
               ) : (
-                <span className="muted">{cand.status === "failed" ? "Failed" : "Generating…"}</span>
+                <span className="muted">
+                  {cand.status === "failed" ? "Generation failed" : cand.status === "queued" || cand.status === "generating" ? "Generating…" : "Waiting"}
+                </span>
               )}
             </div>
             <div className="scene-creator-core__card-body">
               <strong>{cand.take_label}</strong>
-              <span className="muted">{cand.provenance_label}</span>
-              {cand.status === "complete" ? (
+              <span className="muted">{candidateSourceLine(cand, sc.shot) || cand.provenance_label}</span>
+              {cand.status === "failed" ? (
+                <FailedCandidateBody cand={cand} sc={sc} />
+              ) : cand.status === "complete" ? (
                 <button
                   type="button"
                   className="primary"
@@ -508,9 +664,13 @@ function CandidateGrid({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
                   disabled={sc.busy}
                   onClick={() => void sc.approve(cand.id)}
                 >
-                  {approved ? "Approved" : "Use This Look"}
+                  {approved ? "Approved" : cand.superseded ? "Use This Look again" : "Use This Look"}
                 </button>
-              ) : null}
+              ) : (
+                <span className="muted">
+                  {cand.quality_profile === "final" ? "Final rendering…" : cand.kind === "region_edit" ? "Generating region edit…" : "Generating preview…"}
+                </span>
+              )}
             </div>
           </article>
         );

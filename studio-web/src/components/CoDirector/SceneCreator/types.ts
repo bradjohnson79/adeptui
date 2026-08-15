@@ -177,6 +177,12 @@ export type SceneShotCandidate = {
   final_strategy?: string;
   source_preview_asset_id?: string | null;
   approved_edited_preview_asset_id?: string | null;
+  final_model_id?: string;
+  final_workflow_key?: string;
+  region_edit_ids?: string[];
+  mask_asset_ids?: string[];
+  error_detail?: string;
+  superseded?: boolean;
 };
 
 export type SceneShot = {

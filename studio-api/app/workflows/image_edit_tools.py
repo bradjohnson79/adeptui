@@ -22,6 +22,7 @@ def build_zimage_inpaint_workflow(
     filename_prefix: str = "studio/zimg_inpaint",
     use_clip_vision: bool = True,
     inpaint_mode: str = "vae_encode_for_inpaint",
+    grow_mask_by: int = 6,
 ) -> dict[str, Any]:
     """
     Z-Image inpaint graph. Prefers VAEEncodeForInpaint + optional SetLatentNoiseMask;
@@ -98,7 +99,7 @@ def build_zimage_inpaint_workflow(
                 "pixels": ["4", 0],
                 "vae": ["3", 0],
                 "mask": ["5b", 0],
-                "grow_mask_by": 6,
+                "grow_mask_by": max(0, int(grow_mask_by)),
             },
         }
         latent_ref = ["13", 0]

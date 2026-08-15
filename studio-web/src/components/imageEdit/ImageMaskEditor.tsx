@@ -5,6 +5,7 @@ export type MaskTool = "brush" | "erase" | "rect";
 export type ImageMaskEditorHandle = {
   exportPng: () => Promise<string>;
   clear: () => void;
+  measureCoverage: () => number;
 };
 
 export const ImageMaskEditor = forwardRef<
@@ -235,6 +236,19 @@ export const ImageMaskEditor = forwardRef<
     () => ({
       exportPng: exportMask,
       clear: clearMask,
+      measureCoverage: () => {
+        const maskCanvas = maskCanvasRef.current;
+        if (!maskCanvas || !maskCanvas.width) return 0;
+        const ctx = maskCanvas.getContext("2d");
+        if (!ctx) return 0;
+        const data = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+        let painted = 0;
+        const total = maskCanvas.width * maskCanvas.height;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] >= 128 || data[i + 1] >= 128 || data[i + 2] >= 128) painted += 1;
+        }
+        return total ? (painted / total) * 100 : 0;
+      },
     }),
     [exportMask],
   );
