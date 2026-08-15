@@ -2,9 +2,11 @@
  * Playwright E2E — Character Creator Kie three-model sheet
  * (Nano Banana + GPT Image 2 + Seedream, batch 1) on Schnick Coffee / Korri.
  *
- * Observes the live Beta generate. If a sheet is already queued/running or
- * cards show Generating, this spec WAIT/ASSERTs only — it never clicks
- * Generate (a second click would double-charge).
+ * Observes the live Beta generate. If a sheet is already queued/running,
+ * cards show Generating, or leftover terminal SUCCESS cards are present
+ * (Use This Look / complete four-panel / done with image), this spec
+ * WAIT/ASSERTs only — it never clicks Generate (a second click would
+ * double-charge). Idle leftover FAILED cards (no success) may Generate once.
  *
  * Character Sheet law: ONE four-panel image per model — Front, Side, Back,
  * Close-Up in a SINGLE output. Not four jobs + PIL stitch. A success card
@@ -435,9 +437,31 @@ test.describe("Character Creator Kie three-model sheet", () => {
       (await loadingCards.count()) > 0 ||
       generateBusy;
 
-    // Double-charge guard: skip Generate only for REAL queued/running jobs.
-    // Do not let packHasCards / leftover failed cards skip this live generate.
-    const mustWait = inFlightFromApi || inFlightFromUi;
+    // Leftover SUCCESS (Use This Look / complete four-panel / done with image)
+    // is observe-only: do not reset those cards or click Generate (second wave).
+    // Idle leftover FAILED cards (no success) may still Generate once.
+    const leftoverHasSuccessFromApi =
+      leftoverTerminal &&
+      packCandidates.some((c) => {
+        const s = String(c.status || "").toLowerCase();
+        if (/^(failed|error|cancelled)$/i.test(s) || !!c.error) return false;
+        return (
+          /^(done|complete|ready)$/i.test(s) ||
+          !!c.sheetAssetId ||
+          !!c.assetId
+        );
+      });
+    const leftoverHasSuccessFromUi =
+      leftoverFromUi &&
+      ((await page
+        .locator('[data-testid^="character-candidate-"][data-stage="complete"]')
+        .count()) > 0 ||
+        (await page.getByRole("button", { name: /use this look/i }).count()) > 0);
+    const leftoverHasSuccess = leftoverHasSuccessFromApi || leftoverHasSuccessFromUi;
+
+    // Double-charge guard: skip Generate for REAL queued/running jobs AND
+    // leftover terminal SUCCESS. Do not let leftover failed-only cards skip Generate.
+    const mustWait = inFlightFromApi || inFlightFromUi || leftoverHasSuccess;
 
     if (!mustWait) {
       const resetIds = [
@@ -724,6 +748,7 @@ test.describe("Character Creator Kie three-model sheet", () => {
       leftoverResetClicked,
       leftoverTerminal,
       leftoverFromUi,
+      leftoverHasSuccess,
       mustWait,
       inFlightFromApi,
       inFlightFromUi,
