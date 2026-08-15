@@ -436,7 +436,8 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const ws = await getWorkspace(request);
     const shotId = ws.selected_shot?.id;
     expect(shotId).toBeTruthy();
-    const hashes: string[] = [];
+    const cineBefore = await getCine(request);
+    const hashBefore = cineBefore.cameras?.find((c) => c.cameraId === cineBefore.selected_camera_id)?.cameraStateHash || "";
     for (const step of ops) {
       await page.getByTestId("scene-creator-inpaint-clear").click().catch(() => undefined);
       await openAccordion(page, "scene-creator-inpaint-accordion");
@@ -483,13 +484,12 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
         .toBeTruthy();
       expect(cand, `${step.op} candidate`).toBeTruthy();
       expect(cand!.edit_operation).toBe(step.op);
-      hashes.push(cand!.camera_state_hash || "");
       if (cand!.job_id) await waitJobDone(request, cand!.job_id);
       await expect(page.getByTestId("scene-creator-strip-take").first()).toBeVisible();
     }
-    const cine = await getCine(request);
-    const cam = cine.cameras?.find((c) => c.cameraId === cine.selected_camera_id);
-    if (hashes[1] && cam?.cameraStateHash) expect(hashes[1]).toBe(cam.cameraStateHash);
+    const cineAfter = await getCine(request);
+    const hashAfter = cineAfter.cameras?.find((c) => c.cameraId === cineAfter.selected_camera_id)?.cameraStateHash || "";
+    if (hashBefore) expect(hashAfter).toBe(hashBefore);
   });
 
   test("model guard: approved edit + Qwen T2I does not send txt2img final", async ({
