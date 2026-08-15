@@ -9,7 +9,7 @@ import { GeneratorPlanPanel } from "../../generators/GeneratorPlanPanel";
 import "../../generators/generatorSource.css";
 import { CharacterReferenceAssetPicker } from "../characters/CharacterReferenceAssetPicker";
 import { candidateStatusLabel, plannedCandidateCount, propGenerateBlockReason } from "./propGenerator";
-import { plannedProgress } from "./types";
+import { candidateErrorMessage, candidateIsFailed, plannedProgress } from "./types";
 import { PROP_PROFILE_SAVED_NOTICE, usePropCreator, type PropCreatorVariant } from "./usePropCreator";
 import { loadPropUsage, type PropUsageCounts } from "./propUsage";
 import "./propCreator.css";
@@ -544,6 +544,8 @@ function CandidateGrid({ pc }: { pc: ReturnType<typeof usePropCreator> }) {
       {candidates.map((cand) => {
         const approved = cand.asset_id && cand.asset_id === pc.prop?.approved_asset_id;
         const statusLabel = candidateStatusLabel(cand.status);
+        const failed = candidateIsFailed(cand);
+        const failMessage = failed ? candidateErrorMessage(cand) : "";
         return (
           <article
             key={cand.id}
@@ -554,8 +556,13 @@ function CandidateGrid({ pc }: { pc: ReturnType<typeof usePropCreator> }) {
             <div className="prop-creator-core__thumb">
               {cand.asset_id && cand.status === "complete" ? (
                 <img src={api.assetUrl(cand.asset_id)} alt={cand.take_label} data-testid="prop-creator-result-image" />
-              ) : cand.status === "failed" ? (
-                <span className="muted" data-testid="prop-creator-result-failed">Failed</span>
+              ) : failed ? (
+                <span className="muted" data-testid="prop-creator-result-failed">
+                  Failed
+                  {failMessage ? (
+                    <span data-testid="prop-creator-result-failed-msg">{failMessage}</span>
+                  ) : null}
+                </span>
               ) : (
                 <span className="muted" data-testid="prop-creator-result-generating">Generating</span>
               )}
@@ -575,7 +582,7 @@ function CandidateGrid({ pc }: { pc: ReturnType<typeof usePropCreator> }) {
                   {approved ? "Using This Prop" : "Use This Prop"}
                 </button>
               ) : null}
-              {cand.status === "failed" ? (
+              {failed ? (
                 <button
                   type="button"
                   className="ghost"

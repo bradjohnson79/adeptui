@@ -49,7 +49,7 @@ def test_kie_official_model_strings_for_new_docks():
     assert kie_image_model_id_for_dock("seedream-kie") == "seedream/5-pro-text-to-image"
     assert kie_image_model_id_for_dock("gpt-image-2-kie", image_to_image=True) == "gpt-image-2-image-to-image"
     assert kie_image_model_id_for_dock("seedream-kie", image_to_image=True) == "seedream/5-pro-image-to-image"
-    assert kie_image_model_id_for_dock("nano-banana-kie") == "nano-banana"
+    assert kie_image_model_id_for_dock("nano-banana-kie") == "nano-banana-2"
     assert kie_image_model_id_for_dock("flux-kie") == "flux"
 
 
@@ -59,8 +59,8 @@ def test_kie_image_model_id_for_dock_aliases():
         kie_image_model_id_for_dock,
     )
 
-    assert kie_image_model_id_for_dock("nano-banana-kie") == "nano-banana"
-    assert kie_image_model_id_for_dock("nano-banana") == "nano-banana"
+    assert kie_image_model_id_for_dock("nano-banana-kie") == "nano-banana-2"
+    assert kie_image_model_id_for_dock("nano-banana") == "nano-banana-2"
     assert kie_image_model_id_for_dock("gpt-image-2-kie") == "gpt-image-2-text-to-image"
     assert kie_image_model_id_for_dock("gpt-image-2") == "gpt-image-2-text-to-image"
     assert kie_image_model_id_for_dock("seedream-kie") == "seedream/5-pro-text-to-image"
@@ -69,3 +69,61 @@ def test_kie_image_model_id_for_dock_aliases():
         {"data": {"state": "success", "resultJson": '{"resultUrls":["https://cdn.example/a.png"]}'}}
     )
     assert url == "https://cdn.example/a.png"
+
+
+def test_kie_aspect_from_pixels_nearest_enum():
+    from app.hosted_providers.adapters.kie_adapter import (
+        kie_aspect_from_pixels,
+        normalize_kie_aspect,
+    )
+
+    assert kie_aspect_from_pixels(1920, 1080) == "16:9"
+    assert kie_aspect_from_pixels(1080, 1920) == "9:16"
+    assert kie_aspect_from_pixels(1024, 1024) == "1:1"
+    assert normalize_kie_aspect("16:9") == "16:9"
+    assert normalize_kie_aspect("1920:1080") == "16:9"
+    assert normalize_kie_aspect("auto") == "auto"
+    assert normalize_kie_aspect(None, width=1920, height=1080) == "16:9"
+
+
+def test_submit_kie_image_task_surfaces_body_msg(monkeypatch):
+    from app.hosted_providers.adapters.kie_adapter import submit_kie_image_task
+
+    class _Resp:
+        status_code = 200
+        text = '{"code":422,"msg":"aspect_ratio enum invalid"}'
+
+        def json(self):
+            return {"code": 422, "msg": "aspect_ratio enum invalid", "data": {}}
+
+    class _Client:
+        def __init__(self, **_kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+        async def post(self, *_a, **_k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "app.hosted_providers.adapters.kie_adapter.httpx.AsyncClient",
+        _Client,
+    )
+    out = asyncio.run(
+        submit_kie_image_task(
+            "test-key",
+            model="gpt-image-2-text-to-image",
+            prompt="test liveness one frame",
+            aspect_ratio="16:9",
+        )
+    )
+    assert out["ok"] is False
+    assert out["httpStatus"] == 200
+    assert out["taskId"] is None
+    assert "httpStatus=200" in out["message"]
+    assert "code=422" in out["message"]
+    assert "aspect_ratio enum invalid" in out["message"]

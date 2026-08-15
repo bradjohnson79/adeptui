@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_GENERATOR_PLAN, type CharacterGeneratorPlan } from "../../generators/generatorPlan";
 import { persistGeneratorPayload, propGenerateRequest, sourcesFromPropGenerator } from "./propGenerator";
 import { propCreatorApi } from "./propCreatorApi";
-import type { PropCreatorWorkspace, PropEntity } from "./types";
+import { candidateIsFinished, type PropCreatorWorkspace, type PropEntity } from "./types";
 
 export type PropCreatorVariant = "express" | "standard";
 
@@ -76,14 +76,42 @@ export function usePropCreator(projectId: string) {
     setUseAsIdentity(Boolean(refId && approved && refId === approved));
   }, []);
 
+  const startPoll = useCallback(
+    (propId: string) => {
+      stopPoll();
+      const tick = () => {
+        void propCreatorApi
+          .get(projectId, propId)
+          .then((res) => {
+            applyProp(res.prop);
+            // GET hydrates live job status (including failed + job.message).
+            const pending = (res.prop.candidates || []).some((c) => !candidateIsFinished(c));
+            if (!pending) stopPoll();
+          })
+          .catch(() => undefined);
+      };
+      tick();
+      pollRef.current = setInterval(tick, 2000);
+    },
+    [applyProp, projectId, stopPoll],
+  );
+
   const refresh = useCallback(
     async (propId?: string) => {
       const data = await propCreatorApi.workspace(projectId, propId || prop?.id);
       setWorkspace(data);
       applyProp(data.selected_prop);
+      // Workspace list is last-saved and does not hydrate live jobs.
+      // Resume the existing GET poller so failed imagegen jobs leave Generating.
+      const selected = data.selected_prop;
+      if (selected && (selected.candidates || []).some((c) => !candidateIsFinished(c))) {
+        startPoll(selected.id);
+      } else {
+        stopPoll();
+      }
       return data;
     },
-    [applyProp, projectId, prop?.id],
+    [applyProp, projectId, prop?.id, startPoll, stopPoll],
   );
 
   useEffect(() => {
@@ -106,23 +134,6 @@ export function usePropCreator(projectId: string) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
-
-  const startPoll = useCallback(
-    (propId: string) => {
-      stopPoll();
-      pollRef.current = setInterval(() => {
-        void propCreatorApi
-          .get(projectId, propId)
-          .then((res) => {
-            applyProp(res.prop);
-            const pending = (res.prop.candidates || []).some((c) => c.status === "queued" || c.status === "generating");
-            if (!pending) stopPoll();
-          })
-          .catch(() => undefined);
-      }, 2000);
-    },
-    [applyProp, projectId, stopPoll],
-  );
 
   const persist = useCallback(
     async (opts?: { useAsIdentity?: boolean }) => {
@@ -296,7 +307,7 @@ export function usePropCreator(projectId: string) {
     setNotice("Unsaved changes cleared.");
   }, [applyProp, newProp, prop]);
 
-  const generating = (prop?.candidates || []).some((c) => c.status === "queued" || c.status === "generating");
+  const generating = (prop?.candidates || []).some((c) => !candidateIsFinished(c));
 
   return {
     workspace,

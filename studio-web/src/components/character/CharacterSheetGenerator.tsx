@@ -15,7 +15,7 @@ import {
   formatCharacterSheetStartError,
 } from "./characterSheetGenerate";
 import type { CharacterGeneratorPlan } from "./characterGeneratorPlan";
-import type { CharacterCandidate, CharacterProfile, GeneratorOption } from "./types";
+import { viewIsFinished, type CharacterCandidate, type CharacterProfile, type GeneratorOption } from "./types";
 
 type Phase = "idle" | "starting" | "generating";
 
@@ -40,12 +40,10 @@ function readCandidates(pack: unknown): CharacterCandidate[] {
 function viewsTerminal(c: CharacterCandidate): boolean {
   const views = c.viewJobs || [];
   if (!views.length) {
-    return c.status === "failed" || c.status === "done" || !!c.sheetAssetId || !!c.assetId;
+    const status = String(c.status || "").trim().toLowerCase();
+    return status === "failed" || status === "error" || status === "cancelled" || status === "done" || !!c.sheetAssetId || !!c.assetId;
   }
-  return views.every(
-    (v) =>
-      ["done", "failed", "error", "cancelled", "missing"].includes(v.status || "") || !!v.assetId,
-  );
+  return views.every(viewIsFinished);
 }
 
 export function CharacterSheetGenerator({
@@ -76,25 +74,6 @@ export function CharacterSheetGenerator({
   });
   const canGenerate = !blockReason && !generating && !disabled;
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await api.getCharacterVisualSheet(projectId, characterId);
-        const cands = readCandidates(res);
-        if (!cancelled && cands.length) {
-          setCandidates(cands);
-          onCandidates(cands);
-        }
-      } catch {
-        /* no pack yet */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, characterId, onCandidates]);
-
   const poll = useCallback(
     async (attemptsLeft: number) => {
       if (attemptsLeft <= 0) {
@@ -107,17 +86,20 @@ export function CharacterSheetGenerator({
       }
       try {
         const adv = await api.advanceCharacterVisualSheet(projectId, characterId);
-        const pack = (adv as { pack?: { candidates?: CharacterCandidate[]; status?: string } }).pack;
-        const cands = readCandidates(pack);
+        const pack = (adv as { pack?: { candidates?: CharacterCandidate[]; status?: string }; status?: string }).pack
+          || (adv as { candidates?: CharacterCandidate[]; status?: string });
+        const cands = readCandidates(adv);
         if (cands.length) {
           setCandidates(cands);
           onCandidates(cands);
         }
+        const packStatus = String(pack?.status || "").toUpperCase();
         const allDone = cands.length > 0 && cands.every(viewsTerminal);
         if (
           allDone ||
-          pack?.status === "READY_FOR_OWNER" ||
-          pack?.status === "OWNER_APPROVED"
+          packStatus === "FAILED" ||
+          packStatus === "READY_FOR_OWNER" ||
+          packStatus === "OWNER_APPROVED"
         ) {
           inFlightRef.current = false;
           setPhase("idle");
@@ -131,6 +113,34 @@ export function CharacterSheetGenerator({
     },
     [projectId, characterId, onCandidates],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.getCharacterVisualSheet(projectId, characterId);
+        const cands = readCandidates(res);
+        if (!cancelled && cands.length) {
+          setCandidates(cands);
+          onCandidates(cands);
+          // GET returns the last saved pack and does not hydrate live job
+          // status. Resume the existing advance poller so failed imagegen
+          // jobs leave "Generating..." without a second poller.
+          if (!cands.every(viewsTerminal) && !inFlightRef.current) {
+            inFlightRef.current = true;
+            setPhase("generating");
+            setMessage("Generating…");
+            void poll(180);
+          }
+        }
+      } catch {
+        /* no pack yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, characterId, onCandidates, poll]);
 
   const generate = useCallback(async () => {
     if (inFlightRef.current) return;

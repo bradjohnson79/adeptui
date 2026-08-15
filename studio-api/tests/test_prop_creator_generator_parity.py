@@ -318,6 +318,176 @@ def test_api_row_fails_honestly_without_local_substitute(monkeypatch) -> None:
         db.close()
 
 
+
+def test_discovered_hosted_image_models_uses_all_keyed(monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def _dock(modality, scope=None):
+        seen["modality"] = modality
+        seen["scope"] = scope
+        return {
+            "scope": "all_keyed",
+            "models": [
+                {"id": "nano-banana-kie", "providerId": "kie", "modality": "image"},
+                {"id": "flux-fal", "providerId": "fal", "modality": "image"},
+            ],
+        }
+
+    monkeypatch.setattr("app.hosted_providers.discovery.dock_api_models", _dock)
+    rows = prop_gen.discovered_hosted_image_models()
+    assert seen["modality"] == "image"
+    assert [r["id"] for r in rows] == ["nano-banana-kie", "flux-fal"]
+    assert all(r["providerId"] != "wavespeed" for r in rows)
+
+
+def test_api_kie_plan_family_is_kie_not_imagen(monkeypatch) -> None:
+    _catalog(monkeypatch)
+    plans = build_prop_candidate_plans(
+        seed=21,
+        generator_sources={
+            "local": None,
+            "api": [
+                {"modelId": "nano-banana-kie", "providerId": "kie", "enabled": True, "batchCount": 1},
+                {"modelId": "flux-kie", "providerId": "kie", "enabled": True, "batchCount": 1},
+            ],
+        },
+    )
+    assert [p["family"] for p in plans] == ["kie", "kie"]
+    assert plans[0]["kie_image_model_id"] == "nano-banana-2"
+    assert plans[1]["kie_image_model_id"] == "flux"
+
+
+def test_enqueue_kie_pins_official_id(monkeypatch) -> None:
+    from app.db import Job, Project, SessionLocal, init_db
+    from app.prop_creator.service import create_or_update_prop, generate_candidates
+
+    _catalog(monkeypatch)
+    captured: list[dict] = []
+
+    def _enqueue(_db, _project_id, body):
+        captured.append(dict(body))
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=_project_id,
+            kind="imagegen",
+            status="queued",
+            params_json=json.dumps(
+                {
+                    "cloudPaid": True,
+                    "kieImageModelId": body.get("kieImageModelId"),
+                    "hostedModelId": body.get("hostedModelId"),
+                    "imageRuntime": {"workflowKey": "kie:%s" % (body.get("kieImageModelId") or "")},
+                }
+            ),
+        )
+        _db.add(job)
+        _db.commit()
+        _db.refresh(job)
+        return job
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    monkeypatch.setattr("app.secrets_store.get_secret", lambda _name: "test-kie-key")
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(uuid.uuid4())
+        db.add(Project(id=project_id, name="Kie Pin"))
+        db.commit()
+        prop = create_or_update_prop(db, project_id, name="Mug")
+        generated = generate_candidates(
+            db,
+            project_id,
+            prop.id,
+            generator_sources={
+                "local": None,
+                "api": [
+                    {"modelId": "nano-banana-kie", "providerId": "kie", "enabled": True, "batchCount": 2},
+                ],
+            },
+        )
+        assert len(generated.candidates) == 2
+        assert all(c.status == "queued" for c in generated.candidates)
+        assert len(captured) == 2
+        for body in captured:
+            assert body.get("kieImageModelId") == "nano-banana-2"
+            assert body.get("hostedModelId") == "nano-banana-kie"
+            assert body.get("modelFamilyPreference") == "kie"
+            assert body.get("providerPreference") == "cloud"
+        job = db.get(Job, generated.candidates[0].job_id)
+        params = json.loads(job.params_json or "{}")
+        assert params.get("kieImageModelId") == "nano-banana-2"
+        assert params.get("cloudPaid") is True
+        assert (params.get("imageRuntime") or {}).get("workflowKey") == "kie:nano-banana-2"
+    finally:
+        db.close()
+
+
+def test_enqueue_fal_does_not_false_pin_kie_via_flux_family(monkeypatch) -> None:
+    from app.db import Job, Project, SessionLocal, init_db
+    from app.prop_creator.service import create_or_update_prop, generate_candidates
+
+    _catalog(monkeypatch)
+    captured: list[dict] = []
+
+    def _enqueue(_db, _project_id, body):
+        captured.append(dict(body))
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=_project_id,
+            kind="imagegen",
+            status="queued",
+            params_json=json.dumps(
+                {
+                    "cloudPaid": False,
+                    "hostedModelId": body.get("hostedModelId"),
+                    "imageRuntime": {"workflowKey": "zimage.txt2img"},
+                }
+            ),
+        )
+        _db.add(job)
+        _db.commit()
+        _db.refresh(job)
+        return job
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    monkeypatch.setattr(
+        "app.fal_catalog.fal_image_model_id_for_dock",
+        lambda mid: "fal-ai/flux/dev" if mid == "flux-fal" else None,
+    )
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(uuid.uuid4())
+        db.add(Project(id=project_id, name="Fal Pin"))
+        db.commit()
+        prop = create_or_update_prop(db, project_id, name="Chair")
+        generated = generate_candidates(
+            db,
+            project_id,
+            prop.id,
+            generator_sources={
+                "local": None,
+                "api": [
+                    {"modelId": "flux-fal", "providerId": "fal", "enabled": True, "batchCount": 1},
+                ],
+            },
+        )
+        assert len(generated.candidates) == 1
+        assert generated.candidates[0].status == "queued"
+        assert len(captured) == 1
+        body = captured[0]
+        assert body.get("hostedModelId") == "flux-fal"
+        assert body.get("kieImageModelId") in (None, "")
+        assert body.get("modelFamilyPreference") != "flux"
+        job = db.get(Job, generated.candidates[0].job_id)
+        params = json.loads(job.params_json or "{}")
+        assert params.get("falImageModelId") == "fal-ai/flux/dev"
+        assert params.get("kieImageModelId") in (None, "")
+        assert params.get("cloudPaid") is True
+    finally:
+        db.close()
+
+
 def test_use_as_prop_identity_points_at_existing_asset() -> None:
     from app.db import Asset, Project, SessionLocal, init_db
     from app.prop_creator.service import create_or_update_prop, use_as_prop_identity

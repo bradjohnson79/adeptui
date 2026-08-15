@@ -50,6 +50,8 @@ export type CharacterViewJob = {
   modelFamily?: string;
   workflowKey?: string;
   referenceLocked?: boolean;
+  /** Job message when this view reached a terminal error status. */
+  error?: string | null;
 };
 
 export type CharacterCandidate = {
@@ -162,21 +164,49 @@ export function characterSheetProvenanceLabel(c: CharacterCandidate): string {
   return display ? `LOCAL — ${display}${mode}` : "LOCAL";
 }
 
+/** Terminal error statuses already returned by visual-sheet job hydration. */
+export const VIEW_FAIL_STATUSES = ["failed", "error", "cancelled", "missing"] as const;
+
+function normStatus(status?: string | null): string {
+  return String(status || "").trim().toLowerCase();
+}
+
+export function viewIsFailed(v: CharacterViewJob): boolean {
+  return (VIEW_FAIL_STATUSES as readonly string[]).includes(normStatus(v.status));
+}
+
+/** A view is finished when it succeeded or reached a terminal error. */
+export function viewIsFinished(v: CharacterViewJob): boolean {
+  const status = normStatus(v.status);
+  return status === "done" || !!v.assetId || (VIEW_FAIL_STATUSES as readonly string[]).includes(status);
+}
+
+export function candidateErrorMessage(c: CharacterCandidate): string {
+  const own = String(c.error || "").trim();
+  if (own) return own;
+  const views = c.viewJobs || [];
+  const bits = views
+    .filter(viewIsFailed)
+    .map((v) => String(v.error || "").trim())
+    .filter(Boolean);
+  return bits[0] || "";
+}
+
 /** Derive a truthful stage for a candidate from its backend state. */
 export function candidateStage(c: CharacterCandidate): CandidateStage {
   const views = c.viewJobs || [];
+  const status = normStatus(c.status);
   const anyFailed =
-    c.status === "failed" ||
-    views.some((v) => ["failed", "error", "cancelled", "missing"].includes(v.status || ""));
+    (VIEW_FAIL_STATUSES as readonly string[]).includes(status) || views.some(viewIsFailed);
   if (anyFailed) return "failed";
-  if (c.status === "done" || c.sheetAssetId || c.assetId) return "complete";
-  if (c.status === "assembling") return "assembling";
+  if (status === "done" || c.sheetAssetId || c.assetId) return "complete";
+  if (status === "assembling") return "assembling";
   // All views done but no composed sheet yet → assembling.
-  if (views.length && views.every((v) => v.status === "done" || v.assetId) && !c.sheetAssetId) {
+  if (views.length && views.every((v) => normStatus(v.status) === "done" || v.assetId) && !c.sheetAssetId) {
     return "assembling";
   }
-  const anyRunning = views.some((v) => v.status === "running");
-  if (anyRunning || c.status === "generating") return "generating";
+  const anyRunning = views.some((v) => normStatus(v.status) === "running");
+  if (anyRunning || status === "generating") return "generating";
   return "queued";
 }
 
@@ -195,11 +225,12 @@ export function batchProgress(candidates: CharacterCandidate[]): {
   for (const c of candidates) {
     const views = c.viewJobs || [];
     totalViews += views.length;
-    doneViews += views.filter((v) => v.status === "done" || v.assetId).length;
+    doneViews += views.filter(viewIsFinished).length;
     if (candidateStage(c) === "complete") doneSheets += 1;
   }
   // Percent reflects real completed units: finished views + a finished sheet
-  // counts its assembly. No fake smoothing.
+  // counts its assembly. Failed views count as finished so a failed batch
+  // does not look hung at 0 of N.
   const units = totalViews + totalSheets; // views + one assembly step per sheet
   const done = doneViews + doneSheets;
   const percent = units > 0 ? Math.round((done / units) * 100) : 0;

@@ -85,7 +85,7 @@ _RECORD_URL = "https://api.kie.ai/api/v1/jobs/recordInfo"
 # Keep existing flux / nano-banana dock ids unchanged.
 KIE_IMAGE_T2I_BY_DOCK: dict[str, str] = {
     "flux-kie": "flux",
-    "nano-banana-kie": "nano-banana",
+    "nano-banana-kie": "nano-banana-2",
     "gpt-image-2-kie": "gpt-image-2-text-to-image",
     "seedream-kie": "seedream/5-pro-text-to-image",
 }
@@ -96,6 +96,7 @@ KIE_IMAGE_I2I_BY_DOCK: dict[str, str] = {
 
 _KIE_DOCK_ALIASES: dict[str, str] = {
     "nano-banana": "nano-banana-kie",
+    "nano-banana-2": "nano-banana-kie",
     "nano-banana-kie": "nano-banana-kie",
     "gpt-image-2": "gpt-image-2-kie",
     "gpt-image-2-kie": "gpt-image-2-kie",
@@ -106,6 +107,79 @@ _KIE_DOCK_ALIASES: dict[str, str] = {
     "flux": "flux-kie",
     "flux-kie": "flux-kie",
 }
+
+
+
+# Kie createTask aspect_ratio enums (docs.kie.ai). Never send raw pixel pairs.
+KIE_IMAGE_ASPECTS: tuple[str, ...] = (
+    "1:1",
+    "16:9",
+    "9:16",
+    "4:3",
+    "3:4",
+    "3:2",
+    "2:3",
+    "21:9",
+)
+KIE_ALLOWED_ASPECTS: frozenset[str] = frozenset(KIE_IMAGE_ASPECTS + ("auto",))
+
+
+def kie_aspect_from_pixels(
+    width: int | float | None,
+    height: int | float | None,
+    *,
+    default: str = "16:9",
+) -> str:
+    """Nearest Kie aspect enum for pixel dims. Never returns raw pixels."""
+    try:
+        w = float(width or 0)
+        h = float(height or 0)
+    except (TypeError, ValueError):
+        return default
+    if w <= 0 or h <= 0:
+        return default
+    ratio = w / h
+    best = default
+    best_delta: float | None = None
+    for label in KIE_IMAGE_ASPECTS:
+        aw_s, ah_s = label.split(":")
+        ar = float(aw_s) / float(ah_s)
+        delta = abs(ratio - ar)
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best = label
+    return best
+
+
+def normalize_kie_aspect(
+    aspect_ratio: str | None = None,
+    *,
+    width: int | float | None = None,
+    height: int | float | None = None,
+    default: str = "16:9",
+) -> str:
+    """Accept a Kie enum, or map pixel-like '1920:1080' / dims to the nearest enum."""
+    raw = (aspect_ratio or "").strip()
+    if raw in KIE_ALLOWED_ASPECTS:
+        return raw
+    if raw:
+        sep = None
+        if ":" in raw:
+            sep = ":"
+        elif "x" in raw.lower():
+            sep = "x" if "x" in raw else "X"
+            if "X" in raw and "x" not in raw:
+                sep = "X"
+        if sep:
+            parts = raw.split(sep)
+            if len(parts) == 2:
+                try:
+                    return kie_aspect_from_pixels(float(parts[0]), float(parts[1]), default=default)
+                except ValueError:
+                    pass
+    if width is not None or height is not None:
+        return kie_aspect_from_pixels(width, height, default=default)
+    return default
 
 
 def kie_image_model_id_for_dock(dock_model_id: str | None, *, image_to_image: bool = False) -> str | None:
@@ -192,7 +266,7 @@ async def submit_kie_image_task(
     if input_urls:
         payload["input"]["input_urls"] = list(input_urls)
     if aspect_ratio:
-        payload["input"]["aspect_ratio"] = aspect_ratio
+        payload["input"]["aspect_ratio"] = normalize_kie_aspect(aspect_ratio)
     try:
         async with httpx.AsyncClient(timeout=timeout_sec) as client:
             response = await client.post(
@@ -208,16 +282,37 @@ async def submit_kie_image_task(
     except Exception:
         body = None
     task_id = None
+    kie_code = None
+    kie_msg = None
     if isinstance(body, dict):
+        kie_code = body.get("code")
+        kie_msg = body.get("msg") or body.get("message")
         data = body.get("data") if isinstance(body.get("data"), dict) else body
         if isinstance(data, dict):
             task_id = data.get("taskId") or data.get("task_id") or data.get("id")
+            if kie_msg is None:
+                kie_msg = data.get("msg") or data.get("message")
+            if kie_code is None:
+                kie_code = data.get("code")
+    ok = response.status_code < 400 and bool(task_id)
+    message = None
+    if not ok:
+        parts = ["httpStatus=" + str(response.status_code)]
+        if kie_code is not None:
+            parts.append("code=" + str(kie_code))
+        if kie_msg:
+            parts.append("msg=" + str(kie_msg))
+        elif response.text:
+            parts.append("body=" + response.text[:400])
+        message = "Kie createTask failed: " + " ".join(parts)
     return {
-        "ok": response.status_code < 400 and bool(task_id),
+        "ok": ok,
         "httpStatus": response.status_code,
         "taskId": task_id,
         "payload": body,
         "model": model_id,
+        "code": kie_code,
+        "message": message,
         "mock": False,
     }
 

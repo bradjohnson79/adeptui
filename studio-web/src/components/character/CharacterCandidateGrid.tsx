@@ -10,7 +10,7 @@
  *  - failed              → spinner removed, error state + Retry. Never an infinite loader.
  */
 import { api } from "../../api";
-import { candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, SHEET_VIEW_LABELS } from "./types";
+import { candidateErrorMessage, candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, SHEET_VIEW_LABELS } from "./types";
 import type { CharacterCandidate } from "./types";
 
 type Props = {
@@ -55,6 +55,7 @@ export function CharacterCandidateGrid({
         const ready = stage === "complete";
         const failed = stage === "failed";
         const busy = stage === "queued" || stage === "generating" || stage === "assembling";
+        const failMessage = failed ? candidateErrorMessage(c) : "";
         return (
           <div
             key={c.jobId || assetId || `cand-${i}`}
@@ -91,8 +92,8 @@ export function CharacterCandidateGrid({
                   role="alert"
                 >
                   <span className="character-core__candidate-error-title">Generation failed</span>
-                  {c.error ? (
-                    <span className="character-core__candidate-error-msg">{c.error}</span>
+                  {failMessage ? (
+                    <span className="character-core__candidate-error-msg">{failMessage}</span>
                   ) : null}
                 </div>
               ) : (

@@ -57,9 +57,31 @@ export type PropCreatorWorkspace = {
   local_families: Array<{ id: string; label: string; executable?: boolean; supportsReferences?: boolean }>;
 };
 
+/** Terminal error statuses already returned by prop GET job hydration. */
+export const CANDIDATE_FAIL_STATUSES = ["failed", "error", "cancelled", "missing"] as const;
+
+function normStatus(status?: string | null): string {
+  return String(status || "").trim().toLowerCase();
+}
+
+export function candidateIsFailed(c: PropCandidate): boolean {
+  return (CANDIDATE_FAIL_STATUSES as readonly string[]).includes(normStatus(c.status));
+}
+
+/** A look is finished when it succeeded or reached a terminal error. */
+export function candidateIsFinished(c: PropCandidate): boolean {
+  const status = normStatus(c.status);
+  return status === "complete" || status === "done" || !!c.asset_id || candidateIsFailed(c);
+}
+
+export function candidateErrorMessage(c: PropCandidate): string {
+  return String(c.error || "").trim();
+}
+
 export function candidateProgress(candidates: PropCandidate[]): { done: number; total: number; percent: number } {
   const total = candidates.length;
-  const done = candidates.filter((c) => c.status === "complete" || c.status === "failed").length;
+  // Failed looks count as finished so a failed batch does not hang at 0 of N.
+  const done = candidates.filter(candidateIsFinished).length;
   return { done, total, percent: total ? Math.round((done / total) * 100) : 0 };
 }
 

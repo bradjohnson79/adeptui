@@ -46,11 +46,17 @@ def _is_auto_family(family: str) -> bool:
 
 
 def discovered_hosted_image_models() -> list[dict[str, Any]]:
-    """Image models already present in hosted-provider discovery. Not a Certified check."""
-    try:
-        from ..hosted_providers.model_store import models_for_modality
+    """Image rows from the shared all_keyed catalog. Not a Certified check.
 
-        return list(models_for_modality("image") or [])
+    Uses dock_api_models("image") — image defaults to every provider whose key
+    probe is verified. Do not invent WaveSpeed (or other) rows when the key is
+    missing. Do not use models_for_modality (primary-provider shortlist).
+    """
+    try:
+        from ..hosted_providers.discovery import dock_api_models
+
+        payload = dock_api_models("image") or {}
+        return [m for m in (payload.get("models") or []) if isinstance(m, dict)]
     except Exception:
         return []
 
@@ -183,10 +189,18 @@ def _api_plan(
         mode = "reference_conditioned"
     else:
         mode = "description_guided"
-    family = _hosted_family_for_model(mid) or "hosted"
+    kie_official = None
+    try:
+        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+
+        kie_official = kie_image_model_id_for_dock(mid)
+    except Exception:
+        kie_official = None
+    family = "kie" if kie_official else (_hosted_family_for_model(mid) or "hosted")
     return {
         "source": "api",
         "family": family,
+        "kie_image_model_id": kie_official,
         "model": label,
         "model_id": mid or label,
         "label": label,

@@ -3031,6 +3031,7 @@ class JobQueue:
         from .hosted_providers.adapters.kie_adapter import (
             extract_kie_image_url,
             kie_image_model_id_for_dock,
+            normalize_kie_aspect,
             poll_kie_task,
             submit_kie_image_task,
         )
@@ -3051,9 +3052,7 @@ class JobQueue:
             raise RuntimeError("Kie image generate requires a prompt")
         width = int(params.get("width") or 1024)
         height = int(params.get("height") or 1024)
-        aspect = "1:1"
-        if width > 0 and height > 0:
-            aspect = f"{width}:{height}"
+        aspect = normalize_kie_aspect(params.get("aspect"), width=width, height=height)
         job.stage = ImageJobStage.SAMPLING.value
         job.message = f"Kie.ai · {official}"
         job.comfy_prompt_id = official[:64]
