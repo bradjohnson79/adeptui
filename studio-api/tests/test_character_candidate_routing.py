@@ -52,13 +52,55 @@ def _korri_canon() -> dict:
 # --- Reference asset resolution ---
 
 
-def test_resolve_reference_asset_id_returns_reference_image_role():
+def test_resolve_reference_asset_id_prefers_attached_character_reference():
     refs = [
-        {"reference_role": "hero_identity", "asset_id": "asset-hero"},
-        {"reference_role": "reference_image", "asset_id": "asset-ref"},
+        {
+            "reference_role": "hero_identity",
+            "asset_id": "asset-stale-hero",
+            "created_at": "2026-08-13T06:15:12Z",
+        },
+        {
+            "reference_role": "reference_image",
+            "asset_id": "asset-ref",
+            "created_at": "2026-08-14T18:48:06Z",
+        },
     ]
-    # hero_identity is canonical authority and counts as the reference lock.
-    assert _resolve_reference_asset_id(refs) == "asset-hero"
+    # Creator-attached Character Reference wins over generated hero_identity rows.
+    assert _resolve_reference_asset_id(refs) == "asset-ref"
+
+
+def test_resolve_reference_asset_id_prefers_newest_reference_image():
+    refs = [
+        {
+            "reference_role": "reference_image",
+            "asset_id": "older-ref",
+            "created_at": "2026-08-14T10:00:00Z",
+        },
+        {
+            "reference_role": "reference_image",
+            "asset_id": "newer-ref",
+            "created_at": "2026-08-14T18:48:06Z",
+        },
+    ]
+    assert _resolve_reference_asset_id(refs) == "newer-ref"
+
+
+def test_resolve_reference_asset_id_uses_canonical_hero_when_no_reference_image():
+    refs = [
+        {
+            "reference_role": "hero_identity",
+            "asset_id": "generated-hero",
+            "canonical": False,
+            "created_at": "2026-08-14T19:44:58Z",
+        },
+        {
+            "reference_role": "hero_identity",
+            "asset_id": "canonical-hero",
+            "canonical": True,
+            "created_at": "2026-08-13T06:15:12Z",
+        },
+    ]
+    assert _resolve_reference_asset_id(refs) == "canonical-hero"
 
 
 def test_resolve_reference_asset_id_returns_reference_image_when_no_hero():

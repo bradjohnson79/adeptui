@@ -15,7 +15,7 @@ import {
   formatCharacterSheetStartError,
 } from "./characterSheetGenerate";
 import type { CharacterGeneratorPlan } from "./characterGeneratorPlan";
-import { viewIsFinished, type CharacterCandidate, type CharacterProfile, type GeneratorOption } from "./types";
+import { normalizeCharacterCandidate, viewIsFinished, type CharacterCandidate, type CharacterProfile, type GeneratorOption } from "./types";
 
 type Phase = "idle" | "starting" | "generating";
 
@@ -33,8 +33,9 @@ type Props = {
 };
 
 function readCandidates(pack: unknown): CharacterCandidate[] {
-  const p = pack as { pack?: { candidates?: CharacterCandidate[] }; candidates?: CharacterCandidate[] } | undefined;
-  return (p?.pack?.candidates || p?.candidates || []) as CharacterCandidate[];
+  const p = pack as { pack?: { candidates?: unknown[] }; candidates?: unknown[] } | undefined;
+  const raw = p?.pack?.candidates || p?.candidates || [];
+  return raw.map(normalizeCharacterCandidate);
 }
 
 function viewsTerminal(c: CharacterCandidate): boolean {

@@ -182,6 +182,13 @@ def normalize_kie_aspect(
     return default
 
 
+def strengthen_kie_character_sheet_prompt(prompt: str, *, model: str | None = None) -> str:
+    """Nano Banana / GPT Image 2 / Seedream 5 Pro four-panel turnaround strengthen."""
+    from ...character_identity.four_view_sheet import strengthen_four_view_prompt
+
+    return strengthen_four_view_prompt(prompt)
+
+
 def kie_image_model_id_for_dock(dock_model_id: str | None, *, image_to_image: bool = False) -> str | None:
     mid = (dock_model_id or "").strip()
     if not mid:
@@ -194,6 +201,19 @@ def kie_image_model_id_for_dock(dock_model_id: str | None, *, image_to_image: bo
     return KIE_IMAGE_T2I_BY_DOCK.get(dock)
 
 
+def resolve_official_kie_image_model(
+    model_id: str | None,
+    params: dict | None = None,
+    *,
+    image_to_image: bool = False,
+) -> str:
+    """Official Market id from kieImageModelId / dock map / model_id. Always a string."""
+    src = params if isinstance(params, dict) else {}
+    pinned = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
+    mapped = kie_image_model_id_for_dock(pinned or model_id, image_to_image=image_to_image)
+    return mapped or pinned or str(model_id or "").strip()
+
+
 def is_kie_image_dock(model_id: str | None) -> bool:
     mid = (model_id or "").strip()
     if not mid:
@@ -202,49 +222,169 @@ def is_kie_image_dock(model_id: str | None) -> bool:
     return dock in KIE_IMAGE_T2I_BY_DOCK
 
 
-def extract_kie_image_url(payload: Any) -> str | None:
-    """Pull the first http(s) image URL out of a Kie recordInfo payload."""
-    import json as _json
+KIE_POLL_ATTEMPTS = 90
+KIE_POLL_INTERVAL_SEC = 2.0
+KIE_GENERATING_STATES: frozenset[str] = frozenset(
+    {"waiting", "queuing", "queued", "pending", "generating", "running", "processing"}
+)
+KIE_FAIL_STATES: frozenset[str] = frozenset({"fail", "failed", "error"})
 
-    if isinstance(payload, str) and payload.startswith("http"):
-        return payload
+
+def _first_http_url(val: Any) -> str | None:
+    if isinstance(val, str):
+        s = val.strip()
+        if s.startswith("http://") or s.startswith("https://"):
+            return s
+        if s.startswith("{") or s.startswith("["):
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                return None
+            return _first_http_url(parsed)
+        return None
+    if isinstance(val, list):
+        for item in val:
+            found = _first_http_url(item)
+            if found:
+                return found
+        return None
+    if isinstance(val, dict):
+        for key in ("url", "image_url", "imageUrl", "resultUrl"):
+            found = _first_http_url(val.get(key))
+            if found:
+                return found
+    return None
+
+
+def extract_kie_image_url(payload: Any) -> str | None:
+    """Pull the first http(s) image URL out of a Kie recordInfo payload.
+
+    Official docs: data.resultJson is a JSON *string* containing resultUrls.
+    """
+    if isinstance(payload, str):
+        return _first_http_url(payload)
     if not isinstance(payload, dict):
         return None
+    # Unwrap poll_kie_task envelope if the caller passed the whole poll dict.
+    nested = payload.get("payload")
+    if nested is not None and nested is not payload:
+        found = extract_kie_image_url(nested)
+        if found:
+            return found
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
     if not isinstance(data, dict):
         return None
-    blobs: list[Any] = [data]
-    for key in ("resultJson", "result_json"):
-        raw = data.get(key)
-        if isinstance(raw, str):
-            try:
-                parsed = _json.loads(raw)
-            except Exception:
-                parsed = None
-            if parsed is not None:
-                blobs.append(parsed)
-        elif isinstance(raw, (dict, list)):
-            blobs.append(raw)
+    blobs: list[Any] = [payload, data]
+    for src in (payload, data):
+        if not isinstance(src, dict):
+            continue
+        for key in ("resultJson", "result_json"):
+            raw = src.get(key)
+            if isinstance(raw, str):
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = None
+                if parsed is not None:
+                    blobs.append(parsed)
+            elif isinstance(raw, (dict, list)):
+                blobs.append(raw)
+    url_keys = (
+        "resultUrls",
+        "result_urls",
+        "urls",
+        "output",
+        "images",
+        "resultUrl",
+        "firstFrameUrl",
+    )
     for blob in blobs:
         if isinstance(blob, dict):
-            for key in ("resultUrls", "result_urls", "urls", "output", "images"):
-                val = blob.get(key)
-                if isinstance(val, str) and val.startswith("http"):
-                    return val
-                if isinstance(val, list) and val:
-                    first = val[0]
-                    if isinstance(first, str) and first.startswith("http"):
-                        return first
-                    if isinstance(first, dict):
-                        for uk in ("url", "image_url", "imageUrl"):
-                            u = first.get(uk)
-                            if isinstance(u, str) and u.startswith("http"):
-                                return u
-        if isinstance(blob, list) and blob:
-            first = blob[0]
-            if isinstance(first, str) and first.startswith("http"):
-                return first
+            for key in url_keys:
+                found = _first_http_url(blob.get(key))
+                if found:
+                    return found
+        found = _first_http_url(blob)
+        if found:
+            return found
     return None
+
+
+def kie_record_data(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    if isinstance(payload.get("payload"), dict):
+        payload = payload["payload"]
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    return data if isinstance(data, dict) else {}
+
+
+def kie_fail_message(payload: Any, task_id: str, state: str | None = None) -> str:
+    """Honest Kie failCode+failMsg. Never a traceback."""
+    data = kie_record_data(payload)
+    fail_code = data.get("failCode")
+    if fail_code in (None, ""):
+        fail_code = data.get("fail_code")
+    fail_msg = data.get("failMsg") or data.get("fail_msg")
+    st = str(state or data.get("state") or "fail").strip() or "fail"
+    parts = [f"Kie task {task_id} failed (state={st})"]
+    if fail_code not in (None, ""):
+        parts.append("code=" + str(fail_code))
+    if fail_msg:
+        parts.append("msg=" + str(fail_msg))
+    return " ".join(parts)
+
+
+def kie_poll_timeout_message(task_id: str, last_state: str | None) -> str:
+    """Timeout after poll loop. Still-generating is not 'no image URL'."""
+    state = (last_state or "").strip() or "unknown"
+    if state.lower() in KIE_GENERATING_STATES or state.lower() in {"", "unknown"}:
+        return f"Kie task {task_id} still generating (state={state})"
+    return f"Kie task {task_id} produced no image URL (state={state})"
+
+
+
+SEEDREAM_QUALITY_DEFAULT = "basic"
+SEEDREAM_QUALITY_ALLOWED: frozenset[str] = frozenset({"basic", "high"})
+
+
+def _is_seedream_model(model_id: str | None) -> bool:
+    return (model_id or "").startswith("seedream/")
+
+
+def _kie_ref_url_field(model_id: str | None) -> str:
+    """Official Kie input array name. Seedream uses image_urls; GPT uses input_urls; Nano Banana uses image_input."""
+    mid = (model_id or "").strip()
+    if mid.startswith("seedream/"):
+        return "image_urls"
+    if mid.startswith("nano-banana"):
+        return "image_input"
+    return "input_urls"
+
+
+def build_kie_create_task_body(
+    *,
+    model: str,
+    prompt: str,
+    input_urls: list[str] | None = None,
+    aspect_ratio: str = "1:1",
+    quality: str | None = None,
+) -> dict[str, Any]:
+    """Build the official createTask JSON. Seedream requires prompt+aspect_ratio+quality (docs.kie.ai)."""
+    model_id = (model or "").strip()
+    inp: dict[str, Any] = {"prompt": prompt or ""}
+    aspect = normalize_kie_aspect(aspect_ratio)
+    if aspect:
+        inp["aspect_ratio"] = aspect
+    if _is_seedream_model(model_id):
+        q = (quality or SEEDREAM_QUALITY_DEFAULT).strip().lower()
+        if q not in SEEDREAM_QUALITY_ALLOWED:
+            q = SEEDREAM_QUALITY_DEFAULT
+        inp["quality"] = q
+    urls = [u.strip() for u in (input_urls or []) if isinstance(u, str) and u.strip()]
+    if urls:
+        inp[_kie_ref_url_field(model_id)] = urls
+    return {"model": model_id, "input": inp}
 
 
 async def submit_kie_image_task(
@@ -254,6 +394,7 @@ async def submit_kie_image_task(
     prompt: str,
     input_urls: list[str] | None = None,
     aspect_ratio: str = "1:1",
+    quality: str | None = None,
     timeout_sec: float = 30.0,
 ) -> dict[str, Any]:
     key = (api_key or "").strip()
@@ -262,11 +403,13 @@ async def submit_kie_image_task(
     model_id = (model or "").strip()
     if not model_id:
         return {"ok": False, "error": "NO_MODEL", "message": "No Kie model string supplied.", "mock": False}
-    payload: dict[str, Any] = {"model": model_id, "input": {"prompt": prompt or ""}}
-    if input_urls:
-        payload["input"]["input_urls"] = list(input_urls)
-    if aspect_ratio:
-        payload["input"]["aspect_ratio"] = normalize_kie_aspect(aspect_ratio)
+    payload = build_kie_create_task_body(
+        model=model_id,
+        prompt=prompt or "",
+        input_urls=input_urls,
+        aspect_ratio=aspect_ratio,
+        quality=quality,
+    )
     try:
         async with httpx.AsyncClient(timeout=timeout_sec) as client:
             response = await client.post(
@@ -310,6 +453,7 @@ async def submit_kie_image_task(
         "httpStatus": response.status_code,
         "taskId": task_id,
         "payload": body,
+        "request": payload,
         "model": model_id,
         "code": kie_code,
         "message": message,
@@ -337,19 +481,38 @@ async def poll_kie_task(api_key: str, task_id: str, *, timeout_sec: float = 15.0
     except Exception:
         body = None
     state = None
+    fail_code = None
+    fail_msg = None
+    kie_code = None
+    kie_msg = None
     if isinstance(body, dict):
+        kie_code = body.get("code")
+        kie_msg = body.get("msg") or body.get("message")
         data = body.get("data") if isinstance(body.get("data"), dict) else body
         if isinstance(data, dict):
             state = data.get("state") or data.get("status")
+            fail_code = data.get("failCode")
+            if fail_code in (None, ""):
+                fail_code = data.get("fail_code")
+            fail_msg = data.get("failMsg") or data.get("fail_msg")
+    image_url = extract_kie_image_url(body)
+    st = str(state or "").lower()
+    failed = st in KIE_FAIL_STATES
+    message = kie_fail_message(body, tid, st) if failed else None
     return {
-        "ok": response.status_code < 400,
+        "ok": response.status_code < 400 and not failed,
         "httpStatus": response.status_code,
         "taskId": tid,
         "state": state,
         "payload": body,
+        "imageUrl": image_url,
+        "failCode": fail_code,
+        "failMsg": fail_msg,
+        "code": kie_code,
+        "msg": kie_msg,
+        "message": message,
         "mock": False,
     }
-
 
 
 # Restored Market enqueue + Gemini chat so adapters.__init__ imports stay valid.

@@ -25,6 +25,17 @@ from .visual_gates import (
     propose_visual_directions,
     set_gate_status,
 )
+from .four_view_sheet import (
+    FOUR_VIEW_SHEET_REQUEST,
+    REQUIRED_VIEWS,
+    apply_layout_assessment_to_candidate,
+    assess_four_view_layout,
+    attach_four_view_sheet_intent,
+    candidate_layout_noncompliant,
+    four_view_sheet_intent,
+    public_job_error,
+    strengthen_four_view_prompt,
+)
 
 PACK_TRAIT_KEY = "visual_sheet_pack"
 
@@ -328,12 +339,14 @@ def _compiler_payload(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sheet_request_for_role(role: str) -> dict[str, Any]:
-    """Each enqueued view is one image. Multi-panel assembly is PIL, not the model.
+    """Enable compiler character-sheet mode for the single four-panel job.
 
-    Enabling compiler "character sheet mode" on a single view tells models such as
-    Illustrious to emit a collage/grid instead of the requested camera. That is
-    forbidden for Character Sheet view jobs.
+    Coverage/detail single-view jobs use non-sheet roles and still get {}.
+    The Character Sheet candidate job (hero_identity / four_view_sheet) asks
+    the model for Front, Side, Back, and Close-Up in ONE output.
     """
+    if role in {"hero_identity", "four_view_sheet", "character_sheet"}:
+        return dict(FOUR_VIEW_SHEET_REQUEST)
     return {}
 
 
@@ -347,10 +360,13 @@ def _compile_visual_prompt(
     extra_negative_constraints: list[str] | None = None,
     style_profile: dict[str, Any] | None = None,
     reference_locked: bool = False,
+    sheet_request: dict[str, Any] | None = None,
 ) -> Any:
     v_instruction = PROFILE_GUIDED_VIEW_INSTRUCTIONS.get(role, "")
     goal = prompt_goal.strip()
-    if v_instruction:
+    # Four-view single-output (hosted API) must not append a single-camera instruction.
+    four_view = bool(sheet_request and sheet_request.get("layout") == "four_view")
+    if v_instruction and not four_view:
         goal = f"{goal}. {v_instruction}"
     return compile_character_image_prompt(
         _compiler_payload(profile),
@@ -358,7 +374,7 @@ def _compile_visual_prompt(
         composition=composition,
         style_profile=style_profile or QWEN_VISUAL_SHEET_STYLE,
         references=references,
-        sheet_request=_sheet_request_for_role(role),
+        sheet_request=sheet_request if sheet_request is not None else _sheet_request_for_role(role),
         extra_negative_constraints=extra_negative_constraints or [],
         reference_locked=reference_locked,
     )
@@ -1469,7 +1485,7 @@ def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool,
                 continue
         elif job.status in ("failed", "error", "cancelled"):
             vj["status"] = job.status
-            vj["error"] = job.message or job.status
+            vj["error"] = public_job_error(job.message) or job.status
             all_done = False
             any_failed = True
             continue
@@ -1498,7 +1514,7 @@ def _poll_candidate_views(db: Session, candidate: dict[str, Any]) -> tuple[bool,
                     continue
             elif stage2_job.status in ("failed", "error", "cancelled"):
                 vj["stage2Status"] = stage2_job.status
-                vj["error"] = stage2_job.message or stage2_job.status
+                vj["error"] = public_job_error(stage2_job.message) or stage2_job.status
                 all_done = False
                 any_failed = True
                 continue
@@ -1604,17 +1620,68 @@ def save_visual_sheet_preferences(
     return _save_pack(db, project_id, character_id, pack)
 
 
+def _hydrate_candidate_layout(db: Session, item: dict[str, Any]) -> bool:
+    """Recompute layout flags from image dimensions + four_view intent."""
+    if not isinstance(item, dict):
+        return False
+    before = item.get("layoutNoncompliant")
+    path = None
+    aid = item.get("sheetAssetId") or item.get("assetId")
+    if aid:
+        asset = db.get(Asset, str(aid))
+        if asset and getattr(asset, "path", None):
+            path = asset.path
+    blob = item.get("layoutAssessment") or item.get("characterSheetLayout") or {}
+    w = blob.get("width") if isinstance(blob, dict) else None
+    h = blob.get("height") if isinstance(blob, dict) else None
+    if path or (w and h):
+        assessment = assess_four_view_layout(path, width=w, height=h)
+        apply_layout_assessment_to_candidate(item, assessment)
+    else:
+        flag = candidate_layout_noncompliant(item)
+        item["layoutNoncompliant"] = flag
+        item["layout_noncompliant"] = flag
+    return item.get("layoutNoncompliant") != before
+
+
+def hydrate_visual_sheet_layout(db: Session, pack: dict[str, Any]) -> bool:
+    """Walk pack candidates / hero entries and recompute layout flags."""
+    if not isinstance(pack, dict):
+        return False
+    changed = False
+    jobs = pack.get("jobs") if isinstance(pack.get("jobs"), dict) else {}
+    items: list[Any] = []
+    if isinstance(jobs.get("hero_candidates"), list):
+        items.extend(jobs["hero_candidates"])
+    if isinstance(jobs.get("hero"), dict):
+        items.append(jobs["hero"])
+    if isinstance(pack.get("candidates"), list):
+        items.extend(pack["candidates"])
+    seen: set[int] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = id(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        if _hydrate_candidate_layout(db, item):
+            changed = True
+    return changed
+
+
 def get_visual_sheet_pack(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
     service.get_profile(db, project_id, character_id)
     data = _load_pack_raw(db, character_id)
     if not data:
         return {"characterId": character_id, "status": "NOT_STARTED", "jobs": {}, "roleAssets": {}}
-    # Keep Character Sheet / Close-Ups / etc. tabs populated from pack assets
     healed = heal_pack_references(db, project_id, character_id)
     if healed:
         data = _load_pack_raw(db, character_id) or data
         data["referencesHealed"] = healed
     data["characterId"] = character_id
+    if hydrate_visual_sheet_layout(db, data):
+        _save_pack(db, project_id, character_id, data)
     return data
 
 
@@ -1734,135 +1801,105 @@ def start_visual_sheet_generation(
         reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []
         pack_generator_sources = generator_sources
-        view_specs = _candidate_view_specs()
         for _i, route in enumerate(routing_plan):
             stage1_route = route["stage1"]
             stage2_route = route.get("stage2")
             seed = _candidate_seed(character_id, _i)
-            # Phase 5: enqueue the 4 required views for this candidate. The
-            # front view reuses role="hero_identity" (legacy + e2e compat) and
-            # the full-body casting composition; the other three views use
-            # their turnaround/close-up coverage compositions. All 4 views
-            # share the same seed + routing so identity is structurally
-            # consistent across the sheet.
+            # ONE four-panel Character Sheet job per candidate x generator.
+            # role="hero_identity" is kept for legacy + e2e pack keys.
             #
             # Two-stage pipeline: Stage 1 locks identity (reference-capable or
             # txt2img). Stage 2 is an optional real img2img/edit refinement that
             # runs on the Stage 1 output after it completes.
             view_jobs: list[dict[str, Any]] = []
-            for vidx, (vrole, vgoal, vcomposition, vneg) in enumerate(view_specs):
-                composition = dict(vcomposition)
-                composition["candidate_index"] = _i
-                vprompt = _compile_visual_prompt(
-                    profile,
-                    prompt_goal=vgoal,
-                    composition=composition,
-                    references=references,
-                    role=vrole,
-                    extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
-                    style_profile=style_profile,
-                    reference_locked=bool(stage1_route.get("referenceLocked")),
-                )
-                vtag = f"{char_slug}_{vrole}" + (f"_c{_i + 1}" if candidate_count > 1 else "")
-                vjob = _enqueue_txt2img(
-                    db,
-                    project_id,
-                    character_id=character_id,
-                    prompt=vprompt.prompt,
-                    negative_prompt=vprompt.negative_prompt,
-                    tag=vtag,
-                    role=vrole,
-                    model_family_preference=stage1_route["modelFamilyPreference"],
-                    source_asset_id=stage1_route.get("source_asset_id"),
-                    denoise=stage1_route.get("denoise"),
-                    seed=seed,
-                    force_workflow_key=(
-                        None
-                        if stage1_route.get("providerKind") == "api"
-                        else stage1_route.get("workflowKey")
-                    ),
-                    provider_kind=str(stage1_route.get("providerKind") or "local"),
-                    hosted_model_id=stage1_route.get("hostedModelId"),
-                    prompt_metadata={
-                        "promptFamily": vprompt.prompt_family,
-                        "promptModel": vprompt.model_key,
-                        "promptValidationOk": vprompt.validation.get("ok"),
-                        "sheetMode": vprompt.metadata.get("sheetMode"),
-                        "candidateIndex": _i,
-                        "candidateCount": candidate_count,
-                        "viewIndex": vidx,
-                        "viewRole": _canonical_view_role(vrole),
-                        "batchIndex": int(route.get("batchIndex") or (_i + 1)),
-                        "batchOf": int(route.get("batchOf") or candidate_count),
-                        "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
-                        if vrole != "hero_identity"
-                        else COMPOSITION_INTENT_FULL_BODY_CASTING,
-                        "fullBody": vrole != "closeup_front",
-                        "workflowKey": stage1_route["workflowKey"],
-                        "modelFamily": stage1_route["modelFamilyPreference"],
-                        "referenceLocked": bool(stage1_route.get("referenceLocked")),
-                        "referenceAssetId": stage1_route.get("referenceAssetId"),
-                        "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
-                        "conditioningMode": stage1_route.get("conditioningMode"),
-                        "providerKind": stage1_route.get("providerKind") or "local",
-                        "seed": seed,
-                        "stage": 1,
-                    },
-                )
-                stage2_prompt = (
-                    f"{STAGE2_IDENTITY_PRESERVATION_PROMPT} {vprompt.prompt}"
-                    if stage2_route
-                    else None
-                )
-                stage2_negative = (
-                    f"{STAGE2_STYLE_ONLY_NEGATIVE}, {vprompt.negative_prompt}"
-                    if stage2_route
-                    else None
-                )
-                view_jobs.append(
-                    {
-                        "jobId": vjob.id,
-                        "role": vrole,
-                        "viewRole": _canonical_view_role(vrole),
-                        "viewIndex": vidx,
-                        "status": vjob.status,
-                        "assetId": None,
-                        "seed": seed,
-                        "modelFamily": stage1_route["modelFamilyPreference"],
-                        "workflowKey": stage1_route["workflowKey"],
-                        "referenceLocked": bool(stage1_route.get("referenceLocked")),
-                        "error": None,
-                        # Stage 2 fields (populated when Stage 1 completes).
-                        "stage2Enabled": bool(stage2_route),
-                        "stage2Route": stage2_route,
-                        "stage2JobId": None,
-                        "stage2AssetId": None,
-                        "stage2Status": None,
-                        "stage2Prompt": stage2_prompt,
-                        "stage2Negative": stage2_negative,
-                        "stage2PromptMetadata": {
-                            "promptFamily": vprompt.prompt_family,
-                            "promptModel": vprompt.model_key,
-                            "promptValidationOk": vprompt.validation.get("ok"),
-                            "sheetMode": vprompt.metadata.get("sheetMode"),
-                            "candidateIndex": _i,
-                            "candidateCount": candidate_count,
-                            "viewIndex": vidx,
-                            "viewRole": _canonical_view_role(vrole),
-                            "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
-                            if vrole != "hero_identity"
-                            else COMPOSITION_INTENT_FULL_BODY_CASTING,
-                            "fullBody": vrole != "closeup_front",
-                            "workflowKey": stage2_route["workflowKey"] if stage2_route else None,
-                            "modelFamily": stage2_route["modelFamilyPreference"] if stage2_route else None,
-                            "referenceLocked": False,
-                            "referenceAssetId": None,
-                            "referenceFidelityMode": None,
-                            "seed": seed,
-                            "stage": 2,
-                        } if stage2_route else None,
-                    }
-                )
+            # Product law: ONE four-panel image per candidate x generator.
+            # Do not enqueue four view jobs and PIL-stitch them.
+            provider_kind = str(stage1_route.get("providerKind") or "local")
+            composition = {"candidate_index": _i, "layout": "four_view"}
+            vprompt = _compile_visual_prompt(
+                profile,
+                prompt_goal="a professional four-panel character turnaround sheet",
+                composition=composition,
+                references=references,
+                role="hero_identity",
+                extra_negative_constraints=[],
+                style_profile=style_profile,
+                reference_locked=bool(stage1_route.get("referenceLocked")),
+                sheet_request=_sheet_request_for_role("hero_identity"),
+            )
+            prompt_text = strengthen_four_view_prompt(vprompt.prompt)
+            vtag = f"{char_slug}_four_view" + (f"_c{_i + 1}" if candidate_count > 1 else "")
+            vjob = _enqueue_txt2img(
+                db,
+                project_id,
+                character_id=character_id,
+                prompt=prompt_text,
+                negative_prompt=vprompt.negative_prompt,
+                tag=vtag,
+                role="hero_identity",
+                model_family_preference=stage1_route["modelFamilyPreference"],
+                source_asset_id=stage1_route.get("source_asset_id"),
+                denoise=stage1_route.get("denoise"),
+                seed=seed,
+                force_workflow_key=(
+                    None if provider_kind == "api" else stage1_route.get("workflowKey")
+                ),
+                provider_kind=provider_kind,
+                hosted_model_id=stage1_route.get("hostedModelId"),
+                sheet_layout="four_view",
+                prompt_metadata={
+                    "promptFamily": vprompt.prompt_family,
+                    "promptModel": vprompt.model_key,
+                    "promptValidationOk": vprompt.validation.get("ok"),
+                    "sheetMode": True,
+                    "candidateIndex": _i,
+                    "candidateCount": candidate_count,
+                    "viewIndex": 0,
+                    "viewRole": "four_view_sheet",
+                    "batchIndex": int(route.get("batchIndex") or (_i + 1)),
+                    "batchOf": int(route.get("batchOf") or candidate_count),
+                    "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
+                    "fullBody": True,
+                    "workflowKey": stage1_route["workflowKey"],
+                    "modelFamily": stage1_route["modelFamilyPreference"],
+                    "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                    "referenceAssetId": stage1_route.get("referenceAssetId"),
+                    "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
+                    "conditioningMode": stage1_route.get("conditioningMode"),
+                    "providerKind": provider_kind,
+                    "seed": seed,
+                    "stage": 1,
+                    "layout": "four_view",
+                    "requiredViews": list(REQUIRED_VIEWS),
+                    "referenceMode": "identity_preservation",
+                    "fourViewSingleOutput": True,
+                },
+            )
+            view_jobs.append(
+                {
+                    "jobId": vjob.id,
+                    "role": "hero_identity",
+                    "viewRole": "four_view_sheet",
+                    "viewIndex": 0,
+                    "status": vjob.status,
+                    "assetId": None,
+                    "seed": seed,
+                    "modelFamily": stage1_route["modelFamilyPreference"],
+                    "workflowKey": stage1_route["workflowKey"],
+                    "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                    "error": public_job_error(vjob.message) if vjob.status in ("failed", "error") else None,
+                    "stage2Enabled": False,
+                    "stage2Route": None,
+                    "stage2JobId": None,
+                    "stage2AssetId": None,
+                    "stage2Status": None,
+                    "stage2Prompt": None,
+                    "stage2Negative": None,
+                    "stage2PromptMetadata": None,
+                    "fourViewSingleOutput": True,
+                }
+            )
+            is_api_sheet = provider_kind == "api"
             # jobs["hero"] points at the front view job (legacy + e2e compat).
             hero_job = view_jobs[0]
             if stage1_route.get("providerKind") == "api":
@@ -1949,6 +1986,15 @@ def start_visual_sheet_generation(
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
                 "stage2SourceAssetIds": [],
+                "layout": "four_view",
+                "fourViewSingleOutput": True,
+                "requiredViews": list(REQUIRED_VIEWS),
+                "referenceMode": "identity_preservation",
+                "characterSheetIntent": four_view_sheet_intent(),
+                "layoutNoncompliant": False,
+                "layout_noncompliant": False,
+                "layoutVerified": None,
+                "layoutNote": None,
             }
             hero_candidate_jobs.append(entry)
             candidates.append({
@@ -1990,6 +2036,15 @@ def start_visual_sheet_generation(
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
                 "stage2SourceAssetIds": [],
+                "layout": "four_view",
+                "fourViewSingleOutput": True,
+                "requiredViews": list(REQUIRED_VIEWS),
+                "referenceMode": "identity_preservation",
+                "characterSheetIntent": four_view_sheet_intent(),
+                "layoutNoncompliant": False,
+                "layout_noncompliant": False,
+                "layoutVerified": None,
+                "layoutNote": None,
             })
         jobs["hero"] = hero_candidate_jobs[0]
         jobs["hero_candidates"] = hero_candidate_jobs
@@ -2066,7 +2121,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                     hero_meta["assetId"] = aid
             elif job.status == "failed":
                 hero_meta["status"] = "failed"
-                hero_meta["error"] = job.message or "hero generation failed"
+                hero_meta["error"] = public_job_error(job.message) or "hero generation failed"
         jobs["hero"] = hero_meta
 
     # Poll sibling hero candidates (only present when candidate_count > 1)
@@ -2084,7 +2139,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             elif job.status in ("failed", "error", "cancelled"):
                 item["status"] = "failed"
                 if not item.get("error"):
-                    item["error"] = job.message or job.status
+                    item["error"] = public_job_error(job.message) or job.status
         # Preserve per-candidate lineage (generator/provider/model/workflowKey/
         # seed/referenceAssetIds/compositionIntent/referenceFidelityMode) recorded
         # at enqueue time — only update the live status/assetId fields above.
@@ -2110,7 +2165,16 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "sheetAssetId": item.get("sheetAssetId"),
                 "sourceAssetIds": item.get("sourceAssetIds") or [],
                 "viewJobs": item.get("viewJobs") or [],
-                "error": item.get("error"),
+                "error": public_job_error(item.get("error")) or item.get("error"),
+                "layout": item.get("layout"),
+                "fourViewSingleOutput": bool(item.get("fourViewSingleOutput")),
+                "requiredViews": item.get("requiredViews") or list(REQUIRED_VIEWS),
+                "referenceMode": item.get("referenceMode") or "identity_preservation",
+                "layoutVerified": item.get("layoutVerified"),
+                "layoutNote": item.get("layoutNote"),
+                "layoutNoncompliant": candidate_layout_noncompliant(item),
+                "layout_noncompliant": candidate_layout_noncompliant(item),
+                "characterSheetIntent": item.get("characterSheetIntent"),
                 "conditioningMode": item.get("conditioningMode"),
                 "providerKind": item.get("providerKind") or "local",
                 "selectedSource": item.get("selectedSource"),
@@ -2125,11 +2189,8 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             for item in hero_candidates
         ]
 
-    # Phase 5: compose each candidate's 4 views into ONE canonical Character
-    # Sheet asset. The composed sheet becomes the creator-facing candidate
-    # ``assetId`` and ``role_assets["hero_identity"]``; the 4 source view assets
-    # are retained as lineage (``sourceAssetIds``) and their roles are marked
-    # satisfied so the coverage flow does not duplicate them.
+    # Attach the single four-panel output as the creator-facing candidate
+    # asset. Never PIL-stitch four tiles for CC/CD sheets.
     _hero_candidates = jobs.get("hero_candidates")
     candidate_entries: list[dict[str, Any]] = []
     if isinstance(_hero_candidates, list):
@@ -2142,148 +2203,57 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
         if not isinstance(view_jobs, list) or not view_jobs:
             continue
         if centry.get("sheetAssetId"):
+            sheet_asset = db.get(Asset, str(centry.get("sheetAssetId")))
+            assessment = assess_four_view_layout(sheet_asset.path if sheet_asset else None)
+            apply_layout_assessment_to_candidate(centry, assessment)
             continue
+        # CC/CD product law: ONE four-panel imagegen job. Never fall through
+        # to CANDIDATE_SHEET_VIEW_ROLES x _enqueue_txt2img x PIL compose.
         all_done, any_failed, final_asset_ids = _poll_candidate_views(db, centry)
         if any_failed:
-            # Stage 1 failure is a hard candidate failure. Stage 2 failure is
-            # recoverable: preserve Stage 1 identity-locked assets and mark the
-            # candidate as stage2_failed so the UI can offer the Stage 1 sheet.
-            stage1_failed = any(
-                vj.get("status") in ("failed", "error", "cancelled", "missing")
-                for vj in view_jobs
-            )
-            if stage1_failed:
-                failed_bits: list[str] = []
-                for vj in view_jobs:
-                    if vj.get("status") not in ("failed", "error", "cancelled", "missing"):
-                        continue
-                    role = vj.get("role") or f"view {vj.get('viewIndex')}"
-                    msg = str(vj.get("error") or "").strip()
-                    if not msg and vj.get("jobId"):
-                        failed_job = db.get(Job, vj.get("jobId"))
-                        if failed_job and failed_job.message:
-                            msg = str(failed_job.message)
-                            vj["error"] = msg
-                    failed_bits.append(f"{role}: {msg}" if msg else str(role))
-                centry["status"] = "failed"
-                centry["error"] = "; ".join(failed_bits) or "view generation failed"
-                continue
-            # Stage 2 failed but Stage 1 succeeded.
-            centry["status"] = "stage2_failed"
-            centry["stage2Failed"] = True
-            centry["stage2SourceAssetIds"] = [
-                str(vj.get("assetId")) for vj in view_jobs if vj.get("assetId")
-            ]
-            centry["error"] = (
-                "Stage 2 style refinement failed. The identity-locked Stage 1 views are preserved; "
-                "you can use the Stage 1 result or retry."
-            )
+            failed_bits: list[str] = []
+            for vj in view_jobs:
+                if vj.get("status") not in ("failed", "error", "cancelled", "missing"):
+                    continue
+                role = vj.get("role") or "four_view_sheet"
+                msg = public_job_error(vj.get("error"))
+                if not msg and vj.get("jobId"):
+                    failed_job = db.get(Job, vj.get("jobId"))
+                    if failed_job and failed_job.message:
+                        msg = public_job_error(failed_job.message)
+                        vj["error"] = msg
+                failed_bits.append(f"{role}: {msg}" if msg else str(role))
+            centry["status"] = "failed"
+            centry["error"] = "; ".join(failed_bits) or "four-view sheet generation failed"
             continue
         if not all_done:
-            # Stage 1 may be complete while Stage 2 is enabled but not yet enqueued.
-            stage1_all_done = all(vj.get("status") == "done" and vj.get("assetId") for vj in view_jobs)
-            stage2_pending = any(
-                vj.get("stage2Enabled") and not vj.get("stage2JobId")
-                for vj in view_jobs
-            )
-            if stage1_all_done and stage2_pending:
-                # Enqueue Stage 2 style refinement jobs using Stage 1 outputs as source.
-                for vj in view_jobs:
-                    if not vj.get("stage2Enabled") or vj.get("stage2JobId"):
-                        continue
-                    stage2_route = vj.get("stage2Route")
-                    stage1_aid = vj.get("assetId")
-                    if not stage2_route or not stage1_aid:
-                        continue
-                    stage2_tag = f"{char_slug}_{vj.get('role')}_stage2"
-                    if int(pack.get("candidateCount") or 1) > 1:
-                        stage2_tag += f"_c{int(centry.get('candidateIndex') or 0) + 1}"
-                    stage2_prompt = str(vj.get("stage2Prompt") or "")
-                    stage2_negative = str(vj.get("stage2Negative") or "")
-                    stage2_metadata = dict(vj.get("stage2PromptMetadata") or {})
-                    stage2_metadata["stage1AssetId"] = stage1_aid
-                    stage2_job = _enqueue_txt2img(
-                        db,
-                        project_id,
-                        character_id=character_id,
-                        prompt=stage2_prompt,
-                        negative_prompt=stage2_negative,
-                        tag=stage2_tag,
-                        role=str(vj.get("role") or "view"),
-                        model_family_preference=stage2_route["modelFamilyPreference"],
-                        source_asset_id=str(stage1_aid),
-                        denoise=stage2_route.get("denoise"),
-                        seed=vj.get("seed"),
-                        force_workflow_key=stage2_route.get("workflowKey"),
-                        prompt_metadata=stage2_metadata,
-                    )
-                    vj["stage2JobId"] = stage2_job.id
-                    vj["stage2Status"] = stage2_job.status
-                centry["status"] = "generating_stage2"
-                continue
-            # Surface per-view status on the candidate for the UI.
             centry["status"] = "generating"
             continue
-        validation = _validate_candidate_view_consistency(view_jobs)
-        if not validation.get("ok"):
+        aid = str(final_asset_ids[0]) if final_asset_ids else ""
+        if not aid:
             centry["status"] = "failed"
-            centry["error"] = "identity consistency check failed: " + "; ".join(validation.get("reasons") or [])
+            centry["error"] = "four-view sheet job produced no asset"
             continue
-        source_asset_ids = validation["assetIds"]
-        # Resolve on-disk paths for the 4 source view assets (composition input).
-        view_paths: list[str] = []
-        for aid in source_asset_ids:
-            a = db.get(Asset, aid)
-            if not a or not a.path:
-                centry["status"] = "failed"
-                centry["error"] = f"missing source view asset path for {aid}"
-                break
-            view_paths.append(a.path)
-        else:
-            # All 4 views are done and validated — surface a truthful
-            # "assembling" stage before the synchronous grid composition so the
-            # UI can show Assembly progress rather than implying views are still
-            # rendering.
-            centry["status"] = "assembling"
-            try:
-                out_path = _composed_sheet_output_path(
-                    project_id, character_id, int(centry.get("candidateIndex") or 0)
-                )
-                composed_path = _compose_character_sheet_grid(view_paths, str(out_path))
-                lineage = _candidate_sheet_lineage(centry, view_jobs)
-                stage1_source_asset_ids = [
-                    str(vj.get("assetId")) for vj in view_jobs if vj.get("assetId")
-                ]
-                sheet_asset = _ingest_composed_sheet_asset(
-                    db,
-                    project_id,
-                    character_id=character_id,
-                    candidate_index=int(centry.get("candidateIndex") or 0),
-                    composed_path=composed_path,
-                    source_asset_ids=source_asset_ids,
-                    lineage=lineage,
-                    stage1_source_asset_ids=stage1_source_asset_ids,
-                )
-                centry["sheetAssetId"] = sheet_asset.id
-                centry["assetId"] = sheet_asset.id
-                centry["sourceAssetIds"] = source_asset_ids
-                centry["stage1SourceAssetIds"] = stage1_source_asset_ids
-                centry["status"] = "done"
-                # Only the first candidate (candidateIndex 0) populates the
-                # pack-level role_assets / hero_identity so multi-candidate
-                # generation does not collide on shared role keys. Other
-                # candidates keep their views as lineage only.
-                if not primary_sheet_set:
-                    for vj in view_jobs:
-                        role_assets[vj.get("role")] = vj.get("assetId")
-                    role_assets["hero_identity"] = sheet_asset.id
-                    _attach_role(db, project_id, character_id, sheet_asset.id, "hero_identity")
-                    primary_sheet_set = True
-            except Exception as exc:  # pragma: no cover - defensive
-                centry["status"] = "failed"
-                centry["error"] = f"character sheet composition failed: {exc}"
+        sheet_asset = db.get(Asset, aid)
+        assessment = assess_four_view_layout(sheet_asset.path if sheet_asset else None)
+        apply_layout_assessment_to_candidate(centry, assessment)
+        centry["characterSheetIntent"] = four_view_sheet_intent()
+        # Keep the asset visible. Stamp the FE flag; do not fake-pass or hide.
+        centry["sheetAssetId"] = aid
+        centry["assetId"] = aid
+        centry["sourceAssetIds"] = [aid]
+        centry["status"] = "done"
+        if not primary_sheet_set:
+            role_assets["hero_identity"] = aid
+            _attach_role(db, project_id, character_id, aid, "hero_identity")
+            primary_sheet_set = True
+        continue
+
     # Mirror candidate sheet state back into pack["candidates"].
     def _mirror_candidate(item: dict[str, Any]) -> dict[str, Any]:
+        # Recompute from pixels / stored dimensions; do not keep a stale true.
+        _hydrate_candidate_layout(db, item)
+        layout_noncompliant = candidate_layout_noncompliant(item)
         return {
             "assetId": item.get("assetId"),
             "jobId": item.get("jobId"),
@@ -2307,6 +2277,10 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "hostedModelId": item.get("hostedModelId"),
             "providerId": item.get("providerId") or "",
             "modelId": item.get("modelId"),
+            "characterSheetIntent": item.get("characterSheetIntent"),
+            "characterSheetLayout": item.get("characterSheetLayout"),
+            "layoutNoncompliant": layout_noncompliant,
+            "layout_noncompliant": layout_noncompliant,
             "batchIndex": item.get("batchIndex"),
             "batchOf": item.get("batchOf"),
             "autoSelect": bool(item.get("autoSelect")),
@@ -2331,7 +2305,13 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "sheetAssetId": item.get("sheetAssetId"),
             "sourceAssetIds": item.get("sourceAssetIds") or [],
             "viewJobs": item.get("viewJobs") or [],
-            "error": item.get("error"),
+            "error": public_job_error(item.get("error")) or item.get("error"),
+            "layout": item.get("layout") or "four_view",
+            "fourViewSingleOutput": bool(item.get("fourViewSingleOutput", True)),
+            "requiredViews": item.get("requiredViews") or list(REQUIRED_VIEWS),
+            "referenceMode": item.get("referenceMode") or "identity_preservation",
+            "layoutVerified": item.get("layoutVerified"),
+            "layoutNote": item.get("layoutNote"),
         }
 
     if isinstance(jobs.get("hero_candidates"), list):
@@ -2730,8 +2710,8 @@ def retry_visual_sheet_candidate(
     profile = service.get_profile(db, project_id, character_id).model_dump()
     style_profile = _resolve_style_profile(profile.get("visual_style") or "")
     references = service.list_references(db, project_id, character_id)
-    view_specs = {spec[0]: spec for spec in _candidate_view_specs()}
     seed = int(centry.get("seed") or _candidate_seed(character_id, candidate_index))
+    four_view_retry = True  # CC/CD: never re-enqueue 4 tile jobs
     family = str(
         centry.get("selectedSource")
         or centry.get("modelFamily")
@@ -2750,63 +2730,69 @@ def retry_visual_sheet_candidate(
     char_slug = pack.get("characterSlug") or "character"
     candidate_count = int(pack.get("candidateCount") or 1)
     view_jobs = list(centry.get("viewJobs") or [])
+    if four_view_retry:
+        view_jobs = view_jobs[:1] or [{"role": "hero_identity", "viewRole": "four_view_sheet", "status": "failed"}]
     for vj in view_jobs:
         terminal_fail = vj.get("status") in ("failed", "error", "cancelled", "missing")
         if not terminal_fail and vj.get("assetId"):
             continue
         vrole = str(vj.get("role") or "")
-        spec = view_specs.get(vrole)
-        if not spec:
+        if four_view_retry:
+            vprompt = _compile_visual_prompt(
+                profile,
+                prompt_goal="a professional four-panel character turnaround sheet",
+                composition={"candidate_index": int(candidate_index), "layout": "four_view"},
+                references=references,
+                role="hero_identity",
+                extra_negative_constraints=[],
+                style_profile=style_profile,
+                reference_locked=bool(centry.get("referenceLocked")),
+                sheet_request=_sheet_request_for_role("hero_identity"),
+            )
+            vtag = f"{char_slug}_four_view_retry" + (f"_c{int(candidate_index) + 1}" if candidate_count > 1 else "")
+            vjob = _enqueue_txt2img(
+                db,
+                project_id,
+                character_id=character_id,
+                prompt=strengthen_four_view_prompt(vprompt.prompt),
+                negative_prompt=vprompt.negative_prompt,
+                tag=vtag,
+                role="hero_identity",
+                model_family_preference=family,
+                source_asset_id=source_id,
+                denoise=denoise,
+                seed=seed,
+                force_workflow_key=force_key,
+                provider_kind=provider_kind,
+                hosted_model_id=hosted,
+                sheet_layout="four_view",
+                prompt_metadata={
+                    "candidateIndex": int(candidate_index),
+                    "viewRole": "four_view_sheet",
+                    "batchIndex": int(centry.get("batchIndex") or 1),
+                    "batchOf": int(centry.get("batchOf") or 1),
+                    "workflowKey": force_key or vj.get("workflowKey"),
+                    "modelFamily": family,
+                    "referenceLocked": bool(centry.get("referenceLocked")),
+                    "conditioningMode": centry.get("conditioningMode"),
+                    "providerKind": provider_kind,
+                    "providerId": centry.get("providerId") or "",
+                    "modelId": centry.get("modelId") or hosted or family,
+                    "layout": "four_view",
+                    "requiredViews": list(REQUIRED_VIEWS),
+                    "referenceMode": "identity_preservation",
+                    "fourViewSingleOutput": True,
+                    "retry": True,
+                },
+            )
+            vj["jobId"] = vjob.id
+            vj["role"] = "hero_identity"
+            vj["viewRole"] = "four_view_sheet"
+            vj["status"] = vjob.status
+            vj["assetId"] = None
+            vj["error"] = None
+            vj["fourViewSingleOutput"] = True
             continue
-        _role, vgoal, vcomposition, vneg = spec
-        composition = dict(vcomposition)
-        composition["candidate_index"] = int(candidate_index)
-        vprompt = _compile_visual_prompt(
-            profile,
-            prompt_goal=vgoal,
-            composition=composition,
-            references=references,
-            role=vrole,
-            extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
-            style_profile=style_profile,
-            reference_locked=bool(centry.get("referenceLocked")),
-        )
-        vtag = f"{char_slug}_{vrole}_retry" + (f"_c{int(candidate_index) + 1}" if candidate_count > 1 else "")
-        vjob = _enqueue_txt2img(
-            db,
-            project_id,
-            character_id=character_id,
-            prompt=vprompt.prompt,
-            negative_prompt=vprompt.negative_prompt,
-            tag=vtag,
-            role=vrole,
-            model_family_preference=family,
-            source_asset_id=source_id,
-            denoise=denoise,
-            seed=seed,
-            force_workflow_key=force_key,
-            provider_kind=provider_kind,
-            hosted_model_id=hosted,
-            prompt_metadata={
-                "candidateIndex": int(candidate_index),
-                "viewRole": _canonical_view_role(vrole),
-                "batchIndex": int(centry.get("batchIndex") or 1),
-                "batchOf": int(centry.get("batchOf") or 1),
-                "workflowKey": force_key or vj.get("workflowKey"),
-                "modelFamily": family,
-                "referenceLocked": bool(centry.get("referenceLocked")),
-                "conditioningMode": centry.get("conditioningMode"),
-                "providerKind": provider_kind,
-                "providerId": centry.get("providerId") or "",
-                "modelId": centry.get("modelId") or hosted or family,
-                "retry": True,
-            },
-        )
-        vj["jobId"] = vjob.id
-        vj["viewRole"] = _canonical_view_role(vrole)
-        vj["status"] = vjob.status
-        vj["assetId"] = None
-        vj["error"] = None
     centry["viewJobs"] = view_jobs
     centry["status"] = "queued"
     centry["error"] = None
@@ -2881,6 +2867,7 @@ def _enqueue_txt2img(
     force_workflow_key: str | None = None,
     provider_kind: str = "local",
     hosted_model_id: str | None = None,
+    sheet_layout: str | None = None,
 ) -> Job:
     from ..storyboard_jobs import enqueue_imagegen_job
 
@@ -2906,7 +2893,19 @@ def _enqueue_txt2img(
         "purpose": "character_sheet",
         "presetId": "builtin-character-sheet",
         "creativeContext": creative_context,
+        "role": role,
+        "viewRole": role,
     }
+    if sheet_layout == "four_view":
+        attach_four_view_sheet_intent(body)
+        body["prompt"] = strengthen_four_view_prompt(prompt)
+        body["role"] = role
+        body["viewRole"] = "four_view_sheet"
+        creative_context.update(body.get("characterSheetIntent") or {})
+        creative_context["layout"] = "four_view"
+        creative_context["fourViewSingleOutput"] = True
+        creative_context["viewRole"] = "four_view_sheet"
+        body["creativeContext"] = creative_context
     # Reference-locked candidates route to a reference-capable edit workflow
     # (zimage.ref_edit) by supplying the reference asset as the source image so
     # its PIXELS participate in conditioning — not merely a filename in the prompt.
@@ -3218,3 +3217,4 @@ def _resolve_sheet_roles_by_tag(db: Session, project_id: str, character_name: st
         if hit:
             out[role] = hit.id
     return out
+

@@ -77,6 +77,8 @@ export type CharacterCandidate = {
   viewJobs?: CharacterViewJob[];
   /** Error message when the candidate failed. */
   error?: string | null;
+  /** Optional API stamp: result is not a four-view Character Sheet. */
+  layoutNoncompliant?: boolean;
   /** local | api — never infer from a truthy Comfy provider string. */
   providerKind?: "local" | "api";
   /** PROFILE_GUIDED | REFERENCE_CONDITIONED */
@@ -93,7 +95,21 @@ export type CharacterCandidate = {
   modelId?: string | null;
 };
 
-/** Truthful per-candidate generation stage derived from backend state. */
+/** True when the API stamps this result as not a four-view Character Sheet. */
+export function isLayoutNoncompliant(c: CharacterCandidate | Record<string, unknown> | null | undefined): boolean {
+  if (!c || typeof c !== "object") return false;
+  const rec = c as Record<string, unknown>;
+  return rec.layoutNoncompliant === true || rec.layout_noncompliant === true;
+}
+
+/** Hydrate a pack candidate; map snake_case layout_noncompliant onto the typed field. */
+export function normalizeCharacterCandidate(raw: unknown): CharacterCandidate {
+  const rec = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const c = { ...rec } as CharacterCandidate;
+  if (isLayoutNoncompliant(rec)) c.layoutNoncompliant = true;
+  return c;
+}
+
 export type CandidateStage =
   | "queued"
   | "generating"
@@ -181,13 +197,59 @@ export function viewIsFinished(v: CharacterViewJob): boolean {
   return status === "done" || !!v.assetId || (VIEW_FAIL_STATUSES as readonly string[]).includes(status);
 }
 
+const DETAILS_SPLIT = /---\s*details\s*---/i;
+
+/** Keep the short job summary; never show worker traceback on a candidate card. */
+function shortJobMessage(raw: string): string {
+  const text = String(raw || "");
+  const cut = text.search(DETAILS_SPLIT);
+  return (cut >= 0 ? text.slice(0, cut) : text).trim();
+}
+
+/** Replace raw sheet-view role keys (hero_identity) with creator labels (Front). */
+function rewriteSheetViewLabels(text: string): string {
+  let out = text;
+  for (const [role, label] of Object.entries(SHEET_VIEW_LABELS)) {
+    const re = new RegExp(`(^|[,;]\\s*)${role}(?=\\s*:|\\s*$|\\s*[,;])`, "g");
+    out = out.replace(re, `$1${label}`);
+  }
+  return out.replace(/:\s*$/, "").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Creator label for the first failed sheet view (Front / Side / Back / Close-Up). */
+export function candidateFailedViewLabel(c: CharacterCandidate): string {
+  const views = c.viewJobs || [];
+  const firstFailed = views.find(viewIsFailed);
+  if (firstFailed) {
+    const key = String(firstFailed.role || firstFailed.viewRole || "").trim();
+    if (SHEET_VIEW_LABELS[key]) return SHEET_VIEW_LABELS[key];
+    if (key) return key;
+  }
+  const raw = String(c.error || "");
+  for (const [role, label] of Object.entries(SHEET_VIEW_LABELS)) {
+    const re = new RegExp(`(^|[,;]\\s*)${escapeRegExp(role)}(?=\\s*:|\\s*$|\\s*[,;])`);
+    if (re.test(raw)) return label;
+  }
+  return "";
+}
+
+/** Failed-card title: "Generation failed — Front" (or without a view when unknown). */
+export function candidateFailedTitle(c: CharacterCandidate): string {
+  const label = candidateFailedViewLabel(c);
+  return label ? `Generation failed — ${label}` : "Generation failed";
+}
+
 export function candidateErrorMessage(c: CharacterCandidate): string {
-  const own = String(c.error || "").trim();
+  const own = rewriteSheetViewLabels(shortJobMessage(String(c.error || "")));
   if (own) return own;
   const views = c.viewJobs || [];
   const bits = views
     .filter(viewIsFailed)
-    .map((v) => String(v.error || "").trim())
+    .map((v) => rewriteSheetViewLabels(shortJobMessage(String(v.error || ""))))
     .filter(Boolean);
   return bits[0] || "";
 }
@@ -208,6 +270,13 @@ export function candidateStage(c: CharacterCandidate): CandidateStage {
   const anyRunning = views.some((v) => normStatus(v.status) === "running");
   if (anyRunning || status === "generating") return "generating";
   return "queued";
+}
+
+/** Use This Look is only for a complete, layout-compliant sheet. */
+export function canUseCharacterLook(c: CharacterCandidate): boolean {
+  if (isLayoutNoncompliant(c)) return false;
+  const assetId = c.sheetAssetId || c.assetId;
+  return candidateStage(c) === "complete" && !!assetId;
 }
 
 /** Aggregate batch progress across all candidates (honest, view-based). */

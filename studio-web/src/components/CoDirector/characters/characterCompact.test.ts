@@ -197,23 +197,21 @@ test("Amendment F4: draft merge — undefined draft fields preserve server value
   assert.equal(merged.visual_description, "draft desc");
 });
 
-// Amendment F5 (binding #6): Character Creator MUST always send candidateCount=4
-// at the request boundary.
-const EXPECTED_CANDIDATE_COUNT = 4;
+// Per-generator batches replace Amendment F5's global candidateCount=4.
+const EXPECTED_DEFAULT_BATCH_COUNT = 1;
 
 function buildGenerateRequest(profile: any, candidateCount: number) {
   return { candidateCount, visualStyle: profile.visual_style, includeDetails: false };
 }
 
-test("Amendment F5: Character Creator generate request always sends candidateCount=4", () => {
-  const req = buildGenerateRequest({ visual_style: "anime" }, EXPECTED_CANDIDATE_COUNT);
-  assert.equal(req.candidateCount, 4);
-  assert.equal(req.candidateCount, EXPECTED_CANDIDATE_COUNT);
+test("Character Creator default is one sheet per enabled generator", () => {
+  const req = buildGenerateRequest({ visual_style: "anime" }, EXPECTED_DEFAULT_BATCH_COUNT);
+  assert.equal(req.candidateCount, 1);
 });
 
-test("Amendment F5: candidateCount is never the backend default of 1", () => {
-  const req = buildGenerateRequest({ visual_style: "anime" }, EXPECTED_CANDIDATE_COUNT);
-  assert.notEqual(req.candidateCount, 1);
+test("Character Creator no longer sends a hidden global candidateCount of 4", () => {
+  const req = buildGenerateRequest({ visual_style: "anime" }, EXPECTED_DEFAULT_BATCH_COUNT);
+  assert.notEqual(req.candidateCount, 4);
 });
 
 // Amendment F6 (binding #5): single-select vs multi-select state model separation.

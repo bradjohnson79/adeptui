@@ -1,11 +1,17 @@
-﻿import { describe, expect, it } from "vitest";
+﻿import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 import {
   batchProgress,
+  canUseCharacterLook,
   candidateErrorMessage,
   candidateStage,
+  isLayoutNoncompliant,
+  normalizeCharacterCandidate,
   viewIsFinished,
   type CharacterCandidate,
 } from "./types";
+
+const gridSrc = readFileSync(new URL("./CharacterCandidateGrid.tsx", import.meta.url), "utf8");
 
 function kieFailedCandidate(index: number, message: string): CharacterCandidate {
   return {
@@ -78,5 +84,74 @@ describe("character sheet failed-job hydration", () => {
     const progress = batchProgress(candidates);
     expect(progress.doneViews).toBe(2);
     expect(progress.totalViews).toBe(4);
+  });
+
+  it("rewrites hero_identity to Front and strips --- details --- traceback", () => {
+    const details = "hero_identity: Kie createTask failed for nano-banana\n\n--- details ---\nTraceback (most recent call last):\n  File \"queue_worker.py\", line 1";
+    const c: CharacterCandidate = {
+      status: "failed",
+      error: details,
+      viewJobs: [
+        { role: "hero_identity", status: "failed", error: details },
+      ],
+    };
+    expect(gridSrc).toContain(">Generation failed:</span>");
+    expect(candidateErrorMessage(c)).toBe("Front: Kie createTask failed for nano-banana");
+    expect(candidateErrorMessage(c)).not.toContain("details");
+    expect(candidateErrorMessage(c)).not.toContain("Traceback");
+    expect(candidateErrorMessage(c)).not.toContain("hero_identity");
+  });
+
+  it("shows Front when the failed view role has no short job message", () => {
+    const c: CharacterCandidate = {
+      status: "failed",
+      error: "hero_identity:",
+      viewJobs: [{ role: "hero_identity", status: "failed" }],
+    };
+    expect(gridSrc).toContain(">Generation failed:</span>");
+    expect(candidateErrorMessage(c)).toBe("Front");
+  });
+});
+
+describe("character sheet layout-noncompliant hook", () => {
+  it("normalizes snake_case layout_noncompliant onto the candidate", () => {
+    const c = normalizeCharacterCandidate({
+      status: "done",
+      sheetAssetId: "sheet-1",
+      layout_noncompliant: true,
+    });
+    expect(c.layoutNoncompliant).toBe(true);
+    expect(isLayoutNoncompliant(c)).toBe(true);
+  });
+
+  it("reads camelCase layoutNoncompliant from the wire", () => {
+    const c = normalizeCharacterCandidate({
+      status: "done",
+      sheetAssetId: "sheet-1",
+      layoutNoncompliant: true,
+    });
+    expect(isLayoutNoncompliant(c)).toBe(true);
+    expect(canUseCharacterLook(c)).toBe(false);
+  });
+
+  it("does not treat a layout-noncompliant complete result as a usable look", () => {
+    const c: CharacterCandidate = {
+      status: "done",
+      sheetAssetId: "sheet-1",
+      assetId: "sheet-1",
+      layoutNoncompliant: true,
+    };
+    expect(candidateStage(c)).toBe("complete");
+    expect(canUseCharacterLook(c)).toBe(false);
+    expect(isLayoutNoncompliant({ layout_noncompliant: true })).toBe(true);
+    expect(isLayoutNoncompliant({})).toBe(false);
+  });
+
+  it("still allows Use This Look when the flag is absent", () => {
+    const c: CharacterCandidate = {
+      status: "done",
+      sheetAssetId: "sheet-1",
+    };
+    expect(canUseCharacterLook(c)).toBe(true);
   });
 });

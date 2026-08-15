@@ -42,3 +42,11 @@ async def chat_fal(api_key: str, *, prompt: str, model: str = "google/gemini-2.5
         if isinstance(result.get("data"), dict):
             output = str(result["data"].get("output") or output)
     return {"ok": True, "providerId": "fal", "modelId": "fal-ai/any-llm", "output": output, "raw": result, "mock": False}
+
+
+
+def strengthen_fal_character_sheet_prompt(prompt: str, *, model: str | None = None) -> str:
+    """fal still-image four-panel turnaround strengthen."""
+    from ...character_identity.four_view_sheet import strengthen_four_view_prompt
+
+    return strengthen_four_view_prompt(prompt)

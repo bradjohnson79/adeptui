@@ -185,27 +185,33 @@ def test_advance_composes_four_views_into_one_sheet_with_lineage(db, tmp_path):
     pack = start_visual_sheet_generation(db, "proj-sheet", profile.id, include_details=False)
     hero = pack["jobs"]["hero"]
     view_jobs = hero["viewJobs"]
-    assert len(view_jobs) == 4
+    assert len(view_jobs) == 1, "one four-panel job per candidate, not four tiles"
+    assert hero.get("fourViewSingleOutput") is True
+    assert hero.get("layout") == "four_view"
+    assert hero.get("requiredViews") == [
+        "full_body_front",
+        "full_body_side",
+        "full_body_back",
+        "head_shoulders_closeup",
+    ]
 
-    # Complete each of the 4 view jobs with a real PNG output asset.
-    source_ids: list[str] = []
-    for i, vj in enumerate(view_jobs):
-        job = db.get(Job, vj["jobId"])
-        asset_id = str(uuid.uuid4())
-        asset_path = _make_png(tmp_path / f"src_{i}.png")
-        db.add(
-            Asset(
-                id=asset_id,
-                project_id="proj-sheet",
-                tag=f"view_{vj['role']}",
-                kind="image",
-                filename=Path(asset_path).name,
-                path=asset_path,
-            )
+    # Complete the single four-view job with a square PNG (aspect compatible, not verified).
+    vj = view_jobs[0]
+    job = db.get(Job, vj["jobId"])
+    asset_id = str(uuid.uuid4())
+    asset_path = _make_png(tmp_path / "sheet_0.png")
+    db.add(
+        Asset(
+            id=asset_id,
+            project_id="proj-sheet",
+            tag="character_sheet",
+            kind="image",
+            filename=Path(asset_path).name,
+            path=asset_path,
         )
-        job.status = "done"
-        job.params_json = json.dumps({"output_asset_id": asset_id})
-        source_ids.append(asset_id)
+    )
+    job.status = "done"
+    job.params_json = json.dumps({"output_asset_id": asset_id})
     db.commit()
 
     advanced = advance_visual_sheet_pack(db, "proj-sheet", profile.id)
@@ -213,22 +219,15 @@ def test_advance_composes_four_views_into_one_sheet_with_lineage(db, tmp_path):
     assert candidates, "expected at least one candidate after advance"
     cand = candidates[0]
     sheet_id = cand.get("sheetAssetId") or cand.get("assetId")
-    assert sheet_id, "composed sheet asset id must be set"
-    assert cand.get("assetId") == sheet_id, "creator-facing assetId is the composed sheet"
-    # 4 source views retained as lineage.
-    assert set(cand.get("sourceAssetIds") or []) == set(source_ids)
-    # role_assets hero_identity points to the composed sheet.
+    assert sheet_id == asset_id, "creator-facing assetId is the single four-view output"
+    assert cand.get("fourViewSingleOutput") is True
+    # Square/unverified is not a single-pose fail. Flag is for tall portraits.
+    assert cand.get("layoutNoncompliant") is False
+    assert cand.get("layout_noncompliant") is False
     role_assets = advanced.get("roleAssets") or {}
     assert role_assets.get("hero_identity") == sheet_id
-    # The composed sheet asset exists in the Library with lineage metadata.
     sheet_asset = db.get(Asset, sheet_id)
     assert sheet_asset is not None
-    assert sheet_asset.tag == "character_sheet"
-    meta = json.loads(sheet_asset.prompt_meta_json or "{}")
-    assert meta.get("compositionIntent") == COMPOSITION_INTENT_CHARACTER_SHEET
-    assert set(meta.get("sourceAssetIds") or []) == set(source_ids)
-    # No binary duplication: 4 source assets remain distinct from the sheet.
-    assert sheet_id not in source_ids
 
 
 # ---------------------------------------------------------------------------

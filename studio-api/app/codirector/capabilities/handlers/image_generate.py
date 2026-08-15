@@ -92,6 +92,18 @@ def handle(
         workflow_key = f"{model_family}.txt2img"
 
     # Build the generation request.
+    low_prompt = (prompt or "").lower()
+    wants_sheet = any(
+        token in low_prompt
+        for token in (
+            "character sheet",
+            "four-view",
+            "four view",
+            "turnaround sheet",
+            "four-panel",
+            "four panel",
+        )
+    )
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": "",
@@ -99,17 +111,27 @@ def handle(
         "height": 720,
         "tag": f"codirector_image_generate_{execution_id[:8]}",
         "modelFamilyPreference": model_family,
-        "purpose": "codirector_image_generate",
-        "aspectRatio": aspect_ratio,
+        "purpose": "character_sheet" if wants_sheet else "codirector_image_generate",
+        "aspectRatio": "1:1" if wants_sheet else aspect_ratio,
         "batchCount": max(1, min(count, 8)),
         "creativeContext": {
-            "objective": "image_generate",
+            "objective": "character_sheet" if wants_sheet else "image_generate",
             "executionId": execution_id,
             "characterId": resolved_character_id or "",
             "characterName": resolved_character_name or "",
             "workflowKey": workflow_key,
         },
     }
+    if wants_sheet:
+        from ....character_identity.four_view_sheet import (
+            attach_four_view_sheet_intent,
+            strengthen_four_view_prompt,
+        )
+
+        attach_four_view_sheet_intent(body)
+        body["prompt"] = strengthen_four_view_prompt(prompt)
+        body["width"] = 1024
+        body["height"] = 1024
 
     if reference_asset_id:
         body["referenceImage"] = reference_asset_id

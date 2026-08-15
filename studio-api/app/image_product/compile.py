@@ -133,6 +133,22 @@ def compile_image_request(
             body.setdefault("modelFamilyPreference", preset_applied.get("modelFamilyPreference"))
 
     purpose = str(body.get("purpose") or "")
+    try:
+        from ..character_identity.four_view_sheet import (
+            attach_four_view_sheet_intent,
+            is_single_image_four_view,
+            strengthen_four_view_prompt,
+            four_view_sheet_intent,
+        )
+        # Full Character Sheet (not a per-view tile): stamp law BEFORE the adapter.
+        # A single reference is identity conditioning only and does not change layout.
+        if is_single_image_four_view(body):
+            attach_four_view_sheet_intent(body)
+            if body.get("prompt"):
+                body["prompt"] = strengthen_four_view_prompt(str(body.get("prompt") or ""))
+            purpose = "character_sheet"
+    except Exception:
+        pass
     operation = str(body.get("operation") or "image.generate")
     if body.get("edit") or body.get("source_asset_id") or body.get("sourceAssetId"):
         operation = "image.edit"
@@ -325,11 +341,28 @@ def compile_image_request(
             "spatialCameraId": body.get("spatialCameraId") or spatial_block.get("cameraId"),
             "spatialSummary": spatial_block.get("summary"),
             "panelId": body.get("panel_id") or body.get("panelId"),
+            "characterSheetIntent": body.get("characterSheetIntent") or (
+                four_view_sheet_intent() if str(body.get("layout") or "") == "four_view" else None
+            ),
+            "layout": body.get("layout"),
+            "requiredViews": body.get("requiredViews"),
+            "referenceMode": body.get("referenceMode"),
+            "fourViewSingleOutput": body.get("fourViewSingleOutput"),
             "batchIndex": body.get("batchIndex"),
             "guidance": body.get("guidance"),
             "edit_op": body.get("edit_op") or body.get("editOp"),
         },
     )
+    try:
+        from ..character_identity.four_view_sheet import (
+            four_view_sheet_intent,
+            is_four_view_sheet_request,
+        )
+
+        if is_four_view_sheet_request(body) or str(body.get("layout") or "") == "four_view":
+            intent.metadata = {**intent.metadata, **four_view_sheet_intent()}
+    except Exception:
+        pass
 
     kie_route = _kie_image_route(body)
     if kie_route:

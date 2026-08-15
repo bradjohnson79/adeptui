@@ -10,7 +10,7 @@
  *  - failed              → spinner removed, error state + Retry. Never an infinite loader.
  */
 import { api } from "../../api";
-import { candidateErrorMessage, candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, SHEET_VIEW_LABELS } from "./types";
+import { candidateErrorMessage, candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, isLayoutNoncompliant, SHEET_VIEW_LABELS } from "./types";
 import type { CharacterCandidate } from "./types";
 
 type Props = {
@@ -50,16 +50,18 @@ export function CharacterCandidateGrid({
         // Creator-facing image is the composed canonical sheet.
         const assetId = c.sheetAssetId || c.assetId || null;
         const src = assetId ? api.assetUrl(assetId) : "";
-        const isSelected = selectedAssetId && assetId === selectedAssetId;
+        const layoutNoncompliant = isLayoutNoncompliant(c);
+        const isSelected = !layoutNoncompliant && !!selectedAssetId && assetId === selectedAssetId;
         const stage = candidateStage(c);
         const ready = stage === "complete";
         const failed = stage === "failed";
         const busy = stage === "queued" || stage === "generating" || stage === "assembling";
         const failMessage = failed ? candidateErrorMessage(c) : "";
+        const canApprove = ready && !!assetId && !layoutNoncompliant;
         return (
           <div
             key={c.jobId || assetId || `cand-${i}`}
-            className={`character-core__candidate${isSelected ? " is-selected" : ""}${failed ? " is-failed" : ""}`}
+            className={`character-core__candidate${isSelected ? " is-selected" : ""}${failed ? " is-failed" : ""}${layoutNoncompliant ? " is-layout-noncompliant" : ""}`}
             data-testid={`character-candidate-${i}`}
             data-stage={stage}
           >
@@ -91,7 +93,7 @@ export function CharacterCandidateGrid({
                   data-testid={`candidate-error-${i}`}
                   role="alert"
                 >
-                  <span className="character-core__candidate-error-title">Generation failed</span>
+                  <span className="character-core__candidate-error-title">Generation failed:</span>
                   {failMessage ? (
                     <span className="character-core__candidate-error-msg">{failMessage}</span>
                   ) : null}
@@ -109,7 +111,16 @@ export function CharacterCandidateGrid({
                   {characterSheetBatchLabel(c)}
                 </span>
               ) : null}
-              {failed && onRetry ? (
+              {layoutNoncompliant ? (
+                <span
+                  className="character-core__candidate-layout-flag"
+                  data-testid={`candidate-layout-noncompliant-${i}`}
+                  role="status"
+                >
+                  layout noncompliant / not a four-view sheet
+                </span>
+              ) : null}
+              {(failed || layoutNoncompliant) && onRetry ? (
                 <button
                   type="button"
                   className="character-core__button"
@@ -119,17 +130,18 @@ export function CharacterCandidateGrid({
                 >
                   Retry
                 </button>
-              ) : (
+              ) : null}
+              {!failed ? (
                 <button
                   type="button"
                   className="character-core__button primary"
                   data-testid={`candidate-approve-${i}`}
-                  disabled={disabled || !ready || !assetId}
+                  disabled={disabled || !canApprove}
                   onClick={() => onApprove(c)}
                 >
                   {isSelected ? "Selected" : "Use This Look"}
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         );

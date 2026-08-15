@@ -455,3 +455,14 @@
   color: var(--text-muted, #7c8496);
   word-break: break-word;
 }
+
+.character-core__candidate.is-layout-noncompliant {
+  border-color: var(--warn, #d4a017);
+}
+
+.character-core__candidate-layout-flag {
+  font-size: 11px;
+  color: var(--warn, #d4a017);
+  word-break: break-word;
+}
+

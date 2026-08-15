@@ -367,12 +367,16 @@ class JobQueue:
                     fc = classify_exception(exc)
                     payload = failure_payload(fc, message=str(exc)[:500], compute_consumed=True)
                     summary = str(exc).strip().splitlines()[0][:280] or "Job failed"
-                    detail = traceback.format_exc()[-1500:]
+                    if summary.startswith("Kie "):
+                        message = summary[:4000]
+                    else:
+                        detail = traceback.format_exc()[-1500:]
+                        message = f"{summary}\n\n--- details ---\n{detail}"
                     self._set_status(
                         job_id,
                         "failed",
                         0,
-                        f"{summary}\n\n--- details ---\n{detail}",
+                        message,
                         video_runtime_patch={
                             "stage": "failed",
                             "failure": payload,
@@ -2669,8 +2673,36 @@ class JobQueue:
 
         style = params.get("style") or ""
         prompt = (intent.prompt or params.get("prompt") or "").strip()
+        from .character_identity.four_view_sheet import (
+            assess_four_view_layout,
+            attach_four_view_sheet_intent,
+            is_single_image_four_view,
+            strengthen_four_view_prompt,
+        )
+
+        four_view = is_single_image_four_view(params) or is_single_image_four_view(
+            intent.metadata if isinstance(intent.metadata, dict) else {}
+        )
+        if four_view:
+            params = attach_four_view_sheet_intent(params)
+            prompt = strengthen_four_view_prompt(prompt)
+            intent.prompt = prompt
+            if isinstance(intent.metadata, dict):
+                intent.metadata = {**intent.metadata, **(params.get("characterSheetIntent") or {})}
         if style and isinstance(style, str):
             prompt = f"{prompt}, {style}".strip(", ")
+        try:
+            from .character_identity.four_view_sheet import (
+                is_single_image_four_view,
+                strengthen_local_character_sheet_prompt,
+            )
+            if is_single_image_four_view(params) or is_single_image_four_view(intent_block or {}):
+                prompt = strengthen_local_character_sheet_prompt(
+                    prompt, family=str(intent.enginePreference or params.get("model") or "")
+                )
+                intent.prompt = prompt
+        except Exception:
+            pass
         negative = intent.negativePrompt or params.get("negative") or project.negative_prompt
         seed = int(
             intent.seed
@@ -2970,6 +3002,16 @@ class JobQueue:
             gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
         if not gate.ok:
             raise RuntimeError(f"Output Gate failed: {'; '.join(gate.errors)}")
+        if four_view:
+            assessment = assess_four_view_layout(tmp_path)
+            params["characterSheetLayout"] = assessment
+            params["layoutAssessment"] = assessment
+            params["layoutVerified"] = bool(assessment.get("verified"))
+            params["layoutNote"] = assessment.get("note")
+            params["layoutNoncompliant"] = bool(assessment.get("layoutNoncompliant"))
+            params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
+            job.params_json = json.dumps(params)
+            db.commit()
 
         job.stage = ImageJobStage.REGISTERING_ASSET.value
         job.message = "Registering asset"
@@ -3029,8 +3071,14 @@ class JobQueue:
         import uuid
 
         from .hosted_providers.adapters.kie_adapter import (
+            KIE_FAIL_STATES,
+            KIE_POLL_ATTEMPTS,
+            KIE_POLL_INTERVAL_SEC,
             extract_kie_image_url,
+            kie_fail_message,
             kie_image_model_id_for_dock,
+            kie_poll_timeout_message,
+            resolve_official_kie_image_model,
             normalize_kie_aspect,
             poll_kie_task,
             submit_kie_image_task,
@@ -3044,39 +3092,75 @@ class JobQueue:
                 "Hosted AI Provider credential not configured. Open Setup → AI Providers "
                 "(Kie.ai · WaveSpeed.ai · fal.ai)."
             )
-        official = kie_image_model_id_for_dock(model_id) or model_id
         prompt = str(params.get("prompt") or "").strip()
         if not prompt and isinstance(params.get("imageIntent"), dict):
             prompt = str(params["imageIntent"].get("prompt") or "").strip()
         if not prompt:
             raise RuntimeError("Kie image generate requires a prompt")
+        from .character_identity.four_view_sheet import (
+            attach_four_view_sheet_intent,
+            assess_four_view_layout,
+            four_view_sheet_intent,
+            is_sheet_tile_request,
+            is_single_image_four_view,
+        )
+        from .hosted_providers.adapters.kie_adapter import strengthen_kie_character_sheet_prompt
+        # Bind official BEFORE strengthen_kie_character_sheet_prompt (UnboundLocalError if later).
+        official = resolve_official_kie_image_model(model_id, params)
+        four_view = is_single_image_four_view(params)
+        if four_view:
+            params = attach_four_view_sheet_intent(params)
+            prompt = strengthen_kie_character_sheet_prompt(prompt, model=official)
+        elif str(params.get("purpose") or "") == "character_sheet" or is_sheet_tile_request(params):
+            params.setdefault("characterSheetIntent", four_view_sheet_intent())
         width = int(params.get("width") or 1024)
         height = int(params.get("height") or 1024)
         aspect = normalize_kie_aspect(params.get("aspect"), width=width, height=height)
+        if four_view and aspect in {"9:16", "3:4", "2:3"}:
+            aspect = "1:1"
+        ref_urls = []
+        for key in ("input_urls", "image_urls", "image_input"):
+            raw = params.get(key)
+            if isinstance(raw, list):
+                ref_urls.extend(str(u).strip() for u in raw if str(u).strip().startswith("http"))
+        official = resolve_official_kie_image_model(
+            model_id, params, image_to_image=bool(ref_urls)
+        )
         job.stage = ImageJobStage.SAMPLING.value
         job.message = f"Kie.ai · {official}"
         job.comfy_prompt_id = official[:64]
         db.commit()
-        submitted = await submit_kie_image_task(api_key, model=official, prompt=prompt, aspect_ratio=aspect)
+        submitted = await submit_kie_image_task(
+            api_key,
+            model=official,
+            prompt=prompt,
+            input_urls=ref_urls or None,
+            aspect_ratio=aspect,
+            quality=str(params.get("quality") or params.get("kieQuality") or "") or None,
+        )
         if not submitted.get("ok") or not submitted.get("taskId"):
             raise RuntimeError(submitted.get("message") or f"Kie createTask failed for {official}")
         task_id = str(submitted["taskId"])
         image_url = None
-        for _ in range(45):
+        last_state = ""
+        for _ in range(KIE_POLL_ATTEMPTS):
             polled = await poll_kie_task(api_key, task_id)
             state = str(polled.get("state") or "").lower()
-            image_url = extract_kie_image_url(polled.get("payload"))
+            last_state = state
+            image_url = polled.get("imageUrl") or extract_kie_image_url(polled.get("payload"))
             if image_url:
                 break
-            if state in {"fail", "failed", "error"}:
-                raise RuntimeError(f"Kie task {task_id} failed ({state})")
+            if state in KIE_FAIL_STATES:
+                raise RuntimeError(
+                    polled.get("message") or kie_fail_message(polled.get("payload"), task_id, state)
+                )
             job.progress = min(0.9, float(job.progress or 0.05) + 0.02)
             job.message = f"Kie.ai · {official} · {state or 'queued'}"
             job.updated_at = datetime.utcnow()
             db.commit()
-            await asyncio.sleep(2)
+            await asyncio.sleep(KIE_POLL_INTERVAL_SEC)
         if not image_url:
-            raise RuntimeError(f"Kie task {task_id} produced no image URL")
+            raise RuntimeError(kie_poll_timeout_message(task_id, last_state))
         tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = tmp_dir / f"imagegen_kie_{uuid.uuid4().hex[:8]}.png"
@@ -3087,6 +3171,16 @@ class JobQueue:
         gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
         if not gate.ok:
             raise RuntimeError(f"Kie image failed output validation: {gate.errors}")
+        if four_view:
+            assessment = assess_four_view_layout(tmp_path)
+            params["characterSheetLayout"] = assessment
+            params["layoutAssessment"] = assessment
+            params["layoutVerified"] = bool(assessment.get("verified"))
+            params["layoutNote"] = assessment.get("note")
+            params["layoutNoncompliant"] = bool(assessment.get("layoutNoncompliant"))
+            params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
+            job.params_json = json.dumps(params)
+            db.commit()
         await self._imagegen_commit_asset(
             db,
             job,
@@ -3127,6 +3221,13 @@ class JobQueue:
             prompt = str(params["imageIntent"].get("prompt") or "").strip()
         if not prompt:
             raise RuntimeError("Fal image generate requires a prompt")
+        try:
+            from .character_identity.four_view_sheet import is_single_image_four_view
+            from .hosted_providers.adapters.fal_adapter import strengthen_fal_character_sheet_prompt
+            if is_single_image_four_view(params):
+                prompt = strengthen_fal_character_sheet_prompt(prompt, model=model_id)
+        except Exception:
+            pass
         width = int(params.get("width") or 1024)
         height = int(params.get("height") or 1024)
         seed = int(params.get("seed") if params.get("seed") is not None else 0)
@@ -3161,6 +3262,23 @@ class JobQueue:
         gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
         if not gate.ok:
             raise RuntimeError(f"Fal image failed output validation: {gate.errors}")
+        try:
+            from .character_identity.four_view_sheet import (
+                assess_four_view_layout,
+                is_single_image_four_view,
+            )
+            if is_single_image_four_view(params):
+                assessment = assess_four_view_layout(tmp_path)
+                params["characterSheetLayout"] = assessment
+                params["layoutAssessment"] = assessment
+                params["layoutVerified"] = bool(assessment.get("verified"))
+                params["layoutNote"] = assessment.get("note")
+                params["layoutNoncompliant"] = bool(assessment.get("layoutNoncompliant"))
+                params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
+                job.params_json = json.dumps(params)
+                db.commit()
+        except Exception:
+            pass
         await self._imagegen_commit_asset(
             db,
             job,
