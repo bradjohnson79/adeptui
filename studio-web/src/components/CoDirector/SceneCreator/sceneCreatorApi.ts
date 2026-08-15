@@ -109,6 +109,17 @@ export const sceneCreatorApi = {
       character_id?: string;
       prop_id?: string;
       shot_id?: string;
+      orientation3d?: {
+        yawDegrees?: number;
+        pitchDegrees?: number;
+        rollDegrees?: number;
+        zoom?: number;
+        enabled?: boolean;
+        targetLock?: boolean;
+        axisLocks?: { yaw?: boolean; pitch?: boolean; roll?: boolean; zoom?: boolean };
+        snapId?: string;
+        source?: "discrete" | "gizmo";
+      };
     },
   ): Promise<{ cinematographer: SceneCinematographerPack }> =>
     api.sceneCreator.cinematographerCommand(projectId, sceneId, body),
@@ -144,4 +155,19 @@ export const sceneCreatorApi = {
       api_model?: string;
     },
   ) => api.sceneCreator.cinematographerFinal(projectId, sceneId, body),
+  regionEdit: (
+    projectId: string,
+    shotId: string,
+    body: {
+      operation: string;
+      prompt: string;
+      maskAssetId: string;
+      sourceAssetId?: string;
+      stage?: "preview" | "final";
+      local_family?: string;
+      local_enabled?: boolean;
+      api_enabled?: boolean;
+      api_model?: string;
+    },
+  ): Promise<{ shot: SceneShot }> => api.sceneCreator.regionEdit(projectId, shotId, body),
 };

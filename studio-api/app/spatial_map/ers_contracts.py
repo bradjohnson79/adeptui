@@ -240,6 +240,13 @@ class SceneShotCandidate(BaseModel):
     camera_state_hash: str = ""
     source_camera_id: str = ""
     quality_profile: str = ""
+    kind: str = ""
+    parent_candidate_id: Optional[str] = None
+    mask_id: Optional[str] = None
+    edit_operation: Optional[str] = None
+    final_strategy: str = ""
+    source_preview_asset_id: Optional[str] = None
+    approved_edited_preview_asset_id: Optional[str] = None
 
 
 class PropCandidate(BaseModel):

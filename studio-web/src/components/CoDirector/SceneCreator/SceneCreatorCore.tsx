@@ -2,11 +2,17 @@
  * SceneCreatorCore — shared Express + Standard views over useSceneCreator.
  * Express stays light. Advanced controls live in Standard.
  */
+import { useMemo, useState } from "react";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
+import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
+import { CenterMaskCanvas } from "./regionEdit/CenterMaskCanvas";
+import { InpaintSessionProvider, useInpaintSession } from "./regionEdit/inpaintSession";
+import { listRegionEditSources } from "./regionEdit/regionEdit";
+import { RegionEditPanel } from "./regionEdit/RegionEditPanel";
 import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
@@ -58,9 +64,17 @@ export function SceneCreatorCore({ projectId, variant, onGoTab }: SceneCreatorCo
   }
 
   if (variant === "standard") {
-    return <StandardLayout sc={sc} onGoTab={onGoTab} />;
+    return (
+      <InpaintSessionProvider>
+        <StandardLayout sc={sc} onGoTab={onGoTab} />
+      </InpaintSessionProvider>
+    );
   }
-  return <ExpressLayout sc={sc} onGoTab={onGoTab} />;
+  return (
+    <InpaintSessionProvider>
+      <ExpressLayout sc={sc} onGoTab={onGoTab} />
+    </InpaintSessionProvider>
+  );
 }
 
 type LayoutProps = {
@@ -74,6 +88,9 @@ function ExpressLayout({ sc, onGoTab }: LayoutProps) {
       <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
       <CharactersPropsBlock sc={sc} />
       <CinematographerPanel sc={sc} />
+      <OrientationAccordion sc={sc} />
+      <RegionEditBlock sc={sc} />
+      <ExpressMaskStage sc={sc} />
       <ShotPromptBlock sc={sc} />
       <GeneratorBlock sc={sc} />
       <ActionsBlock sc={sc} />
@@ -85,10 +102,20 @@ function ExpressLayout({ sc, onGoTab }: LayoutProps) {
 }
 
 function StandardLayout({ sc, onGoTab }: LayoutProps) {
-  const approved = sc.approved;
-  const previewId = approved?.asset_id || sc.shot?.candidates.find((c) => c.asset_id)?.asset_id;
+  const [toolsOpen, setToolsOpen] = useState(false);
   return (
-    <div className="scene-creator-standard" data-testid="scene-creator-standard">
+    <div
+      className={toolsOpen ? "scene-creator-standard is-tools-open" : "scene-creator-standard"}
+      data-testid="scene-creator-standard"
+    >
+      <button
+        type="button"
+        className="scene-creator-standard__tools-toggle"
+        data-testid="scene-creator-tools-toggle"
+        onClick={() => setToolsOpen((open) => !open)}
+      >
+        Tools
+      </button>
       <aside className="scene-creator-standard__browser" data-testid="scene-creator-browser">
         <p className="scene-creator-core__label">Scenes</p>
         {(sc.workspace?.scenes || []).map((scene) => (
@@ -115,14 +142,12 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
             Shot {index + 1}
           </button>
         ))}
+        <hr className="scene-creator-standard__tool-rule" />
+        <OrientationAccordion sc={sc} />
+        <hr className="scene-creator-standard__tool-rule" />
+        <RegionEditBlock sc={sc} />
       </aside>
-      <div className="scene-creator-standard__preview">
-        {previewId ? (
-          <img src={api.assetUrl(previewId)} alt="Approved take" data-testid="scene-creator-preview-image" />
-        ) : (
-          <p className="muted">Generate a look, then approve one to see it here.</p>
-        )}
-      </div>
+      <StandardPreview sc={sc} />
       <aside className="scene-creator-standard__inspector">
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
         <CharactersPropsBlock sc={sc} />
@@ -148,6 +173,75 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function usePreviewAsset(sc: ReturnType<typeof useSceneCreator>) {
+  const session = useInpaintSession();
+  const sources = useMemo(
+    () =>
+      listRegionEditSources({
+        shot: sc.shot,
+        cinematographer: sc.cinematographer,
+        selectedCameraId: sc.selectedCameraId,
+      }),
+    [sc.shot, sc.cinematographer, sc.selectedCameraId],
+  );
+  const source = sources.find((item) => item.id === session.sourceId) || sources[0] || null;
+  const fallback =
+    sc.approved?.asset_id || sc.shot?.candidates.find((c) => c.asset_id)?.asset_id || "";
+  const preferSource = session.accordionOpen || session.hasMask;
+  const assetId = preferSource && source?.assetId ? source.assetId : fallback || source?.assetId || "";
+  return { assetId, source, session };
+}
+
+function StandardPreview({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const { assetId, source, session } = usePreviewAsset(sc);
+  const inpaintMode = session.maskInteractive;
+  const showMask = session.accordionOpen || session.hasMask;
+  return (
+    <div
+      className={inpaintMode ? "scene-creator-standard__preview is-inpaint" : "scene-creator-standard__preview"}
+      data-testid="scene-creator-preview"
+    >
+      {inpaintMode ? (
+        <p className="scene-creator-inpaint-banner" data-testid="scene-creator-inpaint-mode">
+          INPAINT MODE
+        </p>
+      ) : null}
+      {assetId && showMask ? (
+        <div data-testid="scene-creator-preview-image" className="scene-creator-preview-hero">
+          <CenterMaskCanvas
+            imageUrl={api.assetUrl(assetId)}
+            sourceAssetId={source?.assetId || assetId}
+            cameraVersion={source?.cameraStateVersion ?? null}
+          />
+        </div>
+      ) : assetId ? (
+        <img src={api.assetUrl(assetId)} alt="Scene frame" data-testid="scene-creator-preview-image" />
+      ) : (
+        <p className="muted">Generate a look, then approve one to see it here.</p>
+      )}
+    </div>
+  );
+}
+
+function ExpressMaskStage({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const { assetId, source, session } = usePreviewAsset(sc);
+  if (!session.accordionOpen || !assetId) return null;
+  return (
+    <div className="scene-creator-express-mask" data-testid="scene-creator-preview">
+      {session.maskInteractive ? (
+        <p className="scene-creator-inpaint-banner" data-testid="scene-creator-inpaint-mode">
+          INPAINT MODE — paint on this image
+        </p>
+      ) : null}
+      <CenterMaskCanvas
+        imageUrl={api.assetUrl(assetId)}
+        sourceAssetId={source?.assetId || assetId}
+        cameraVersion={source?.cameraStateVersion ?? null}
+      />
     </div>
   );
 }
@@ -324,6 +418,21 @@ function ActionsBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
         </span>
       ) : null}
     </div>
+  );
+}
+
+function RegionEditBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  return (
+    <RegionEditPanel
+      projectId={sc.projectId}
+      shot={sc.shot}
+      cinematographer={sc.cinematographer}
+      selectedCameraId={sc.selectedCameraId}
+      localFamily={sc.localFamily}
+      localEnabled={sc.localEnabled}
+      busy={sc.busy}
+      onGenerate={(body) => sc.regionEdit(body)}
+    />
   );
 }
 

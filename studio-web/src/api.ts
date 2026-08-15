@@ -4320,6 +4320,17 @@ export const api = {
         prop_id?: string;
         shot_id?: string;
         user_prompt_delta?: string | null;
+        orientation3d?: {
+          yawDegrees?: number;
+          pitchDegrees?: number;
+          rollDegrees?: number;
+          zoom?: number;
+          enabled?: boolean;
+          targetLock?: boolean;
+          axisLocks?: { yaw?: boolean; pitch?: boolean; roll?: boolean; zoom?: boolean };
+          snapId?: string;
+          source?: "discrete" | "gizmo";
+        };
       },
     ) =>
       req<{ cinematographer: import("./components/CoDirector/SceneCreator/cinematographer/cameraCommandEngine").SceneCinematographerPack }>(
@@ -4382,6 +4393,25 @@ export const api = {
         shot: import("./components/CoDirector/SceneCreator/types").SceneShot;
       }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/cinematographer/final`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    regionEdit: (
+      projectId: string,
+      shotId: string,
+      body: {
+        operation: string;
+        prompt: string;
+        maskAssetId: string;
+        sourceAssetId?: string;
+        stage?: "preview" | "final";
+        local_family?: string;
+        local_enabled?: boolean;
+        api_enabled?: boolean;
+        api_model?: string;
+      },
+    ) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/region-edit`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
   },

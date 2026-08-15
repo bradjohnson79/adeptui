@@ -27,6 +27,8 @@ from ..spatial_map.grid import (
 # Future hook: Save Camera Position Back to Spatial Map (not shipped).
 SAVE_CAMERA_BACK_TO_SPATIAL_MAP = False
 
+logger = logging.getLogger(__name__)
+
 CINEMATOGRAPHER_CATEGORY = "scene_cinematographer"
 
 PreviewStatus = Literal["none", "stale", "generating", "ready", "failed"]
@@ -83,6 +85,7 @@ HASH_FIELDS = (
     "targetEntityId",
     "targetEntityType",
     "orientation",
+    "inclusionPropId",
 )
 
 
@@ -123,6 +126,16 @@ CAMERA_OPERATIONS: list[CameraCommandSpec] = [
     CameraCommandSpec(id="orbit_right", category="orbit", label="Orbit Right", physical=True),
     CameraCommandSpec(id="zoom_in", category="optical", label="Zoom In", optical=True),
     CameraCommandSpec(id="zoom_out", category="optical", label="Zoom Out", optical=True),
+    CameraCommandSpec(id="orient_3d_enable", category="orientation3d", label="Enable 3D Aim"),
+    CameraCommandSpec(id="orient_3d_disable", category="orientation3d", label="Disable 3D Aim"),
+    CameraCommandSpec(id="orient_yaw", category="orientation3d", label="Aim Yaw"),
+    CameraCommandSpec(id="orient_pitch", category="orientation3d", label="Aim Pitch"),
+    CameraCommandSpec(id="orient_roll", category="orientation3d", label="Aim Roll"),
+    CameraCommandSpec(id="orient_zoom", category="orientation3d", label="Optical Zoom", optical=True),
+    CameraCommandSpec(id="orient_target_lock", category="orientation3d", label="Target Lock"),
+    CameraCommandSpec(id="orient_axis_lock", category="orientation3d", label="Axis Lock"),
+    CameraCommandSpec(id="orient_snap", category="orientation3d", label="Snap Aim"),
+    CameraCommandSpec(id="orient_reset", category="orientation3d", label="Reset Aim"),
 ]
 
 OPS_BY_ID = {op.id: op for op in CAMERA_OPERATIONS}
@@ -132,6 +145,21 @@ class PhysicalStepOffset(BaseModel):
     forwardBack: int = 0
     leftRight: int = 0
     vertical: int = 0
+
+
+class AxisLocks(BaseModel):
+    yaw: bool = False
+    pitch: bool = False
+    roll: bool = False
+    zoom: bool = False
+
+
+class Orientation3DState(BaseModel):
+    enabled: bool = False
+    targetLock: bool = False
+    axisLocks: AxisLocks = Field(default_factory=AxisLocks)
+    source: Literal["discrete", "gizmo"] = "discrete"
+    zoom: float = 1.0
 
 
 class CameraPose(BaseModel):
@@ -162,6 +190,7 @@ class CameraPose(BaseModel):
     targetEntityId: str = ""
     targetEntityType: Optional[TargetEntityType] = None
     inclusionPropId: str = ""
+    orientation3d: Orientation3DState = Field(default_factory=Orientation3DState)
 
 
 class CameraLineage(BaseModel):
@@ -234,6 +263,15 @@ def camera_state_hash(pose: CameraPose) -> str:
         "orientation": (pose.orientation or "N").upper(),
         "inclusionPropId": pose.inclusionPropId or "",
     }
+    o3 = pose.orientation3d
+    if o3.enabled:
+        payload["orientation3dEnabled"] = True
+        payload["orientation3dTargetLock"] = bool(o3.targetLock)
+        payload["orientation3dLockYaw"] = bool(o3.axisLocks.yaw)
+        payload["orientation3dLockPitch"] = bool(o3.axisLocks.pitch)
+        payload["orientation3dLockRoll"] = bool(o3.axisLocks.roll)
+        payload["orientation3dLockZoom"] = bool(o3.axisLocks.zoom)
+        payload["orientation3dZoom"] = round(float(o3.zoom or 1.0), 3)
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -309,6 +347,195 @@ def _nudge_fov(pose: CameraPose, delta_index: int) -> None:
     pose.lensMm = FOV_LENS_MM[pose.fovPreset]
 
 
+YAW_SNAP_DEGREES: dict[str, float] = {
+    "front": 0.0,
+    "three_quarter_left": 45.0,
+    "profile_left": 90.0,
+    "rear_three_quarter_left": 135.0,
+    "rear": 180.0,
+    "rear_three_quarter_right": -135.0,
+    "profile_right": -90.0,
+    "three_quarter_right": -45.0,
+}
+
+PITCH_SNAP_DEGREES: dict[str, float] = {
+    "eye_level": 0.0,
+    "slight_high": -12.0,
+    "high": -28.0,
+    "birds_eye": -55.0,
+    "slight_low": 12.0,
+    "low": 22.0,
+    "worms_eye": 45.0,
+}
+
+PITCH_MIN, PITCH_MAX = -60.0, 60.0
+ROLL_MIN, ROLL_MAX = -25.0, 25.0
+ZOOM_MIN, ZOOM_MAX = 0.5, 3.0
+LENS_MIN_MM, LENS_MAX_MM = 18.0, 200.0
+
+
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, float(value)))
+
+
+def wrap_yaw_degrees(degrees: float) -> float:
+    """Wrap yaw to (-180, 180]."""
+    x = float(degrees) % 360.0
+    if x > 180.0:
+        x -= 360.0
+    elif x <= -180.0:
+        x += 360.0
+    if x == -180.0:
+        x = 180.0
+    return x
+
+
+def clamp_pitch_degrees(degrees: float) -> float:
+    return _clamp(degrees, PITCH_MIN, PITCH_MAX)
+
+
+def clamp_roll_degrees(degrees: float) -> float:
+    return _clamp(degrees, ROLL_MIN, ROLL_MAX)
+
+
+def clamp_optical_zoom(zoom: float) -> float:
+    return _clamp(zoom, ZOOM_MIN, ZOOM_MAX)
+
+
+def _nearest_fov_preset(lens_mm: float) -> str:
+    return min(FOV_LENS_MM, key=lambda name: abs(FOV_LENS_MM[name] - float(lens_mm)))
+
+
+def _parse_snap_id(snap_id: str) -> tuple[float | None, float | None]:
+    raw = (snap_id or "").strip().lower().replace("-", "_")
+    if not raw:
+        return None, None
+    if raw in YAW_SNAP_DEGREES and raw not in PITCH_SNAP_DEGREES:
+        return YAW_SNAP_DEGREES[raw], None
+    if raw in PITCH_SNAP_DEGREES and raw not in YAW_SNAP_DEGREES:
+        return None, PITCH_SNAP_DEGREES[raw]
+    yaw_val: float | None = None
+    remainder = raw
+    for key in sorted(YAW_SNAP_DEGREES, key=len, reverse=True):
+        token = f"_{key}_"
+        if raw == key:
+            yaw_val = YAW_SNAP_DEGREES[key]
+            remainder = ""
+            break
+        if raw.startswith(f"{key}_"):
+            yaw_val = YAW_SNAP_DEGREES[key]
+            remainder = raw[len(key) + 1 :]
+            break
+        if raw.endswith(f"_{key}"):
+            yaw_val = YAW_SNAP_DEGREES[key]
+            remainder = raw[: -(len(key) + 1)]
+            break
+        if token in f"_{raw}_":
+            yaw_val = YAW_SNAP_DEGREES[key]
+            remainder = raw.replace(key, "", 1).strip("_")
+            break
+    pitch_val: float | None = None
+    pitch_src = remainder or raw
+    for key in sorted(PITCH_SNAP_DEGREES, key=len, reverse=True):
+        if pitch_src == key or raw == key or raw.startswith(f"{key}_") or raw.endswith(f"_{key}"):
+            pitch_val = PITCH_SNAP_DEGREES[key]
+            break
+    return yaw_val, pitch_val
+
+
+def _apply_optical_zoom(pose: CameraPose, zoom: float, *, baseline_lens_mm: float) -> None:
+    zoom = clamp_optical_zoom(zoom)
+    pose.orientation3d.zoom = zoom
+    base_lens = float(baseline_lens_mm or 0) or 35.0
+    pose.lensMm = _clamp(base_lens * zoom, LENS_MIN_MM, LENS_MAX_MM)
+    pose.fovPreset = _nearest_fov_preset(pose.lensMm)
+
+
+def _restore_orientation_from_baseline(record: SceneCameraRecord) -> None:
+    """Reset aim/optics only. Keep shot type, target, cell, and physical offset."""
+    base = record.baseline
+    cur = record.current
+    cur.yawDegrees = base.yawDegrees
+    cur.pitchDegrees = base.pitchDegrees
+    cur.rollDegrees = base.rollDegrees
+    cur.lensMm = base.lensMm
+    cur.fovPreset = base.fovPreset
+    cur.opticalZoomStep = base.opticalZoomStep
+    cur.orientation = base.orientation
+    cur.orientation3d = base.orientation3d.model_copy(deep=True)
+
+
+def _apply_orientation3d_operation(
+    pose: CameraPose,
+    operation_id: str,
+    patch: dict[str, Any],
+    *,
+    baseline_lens_mm: float,
+) -> None:
+    o3 = pose.orientation3d
+    locks = o3.axisLocks
+    preserved_target = pose.targetEntityId
+    preserved_type = pose.targetEntityType
+
+    if operation_id == "orient_3d_enable":
+        o3.enabled = True
+        o3.source = "gizmo"
+        o3.targetLock = bool(pose.targetEntityId)
+        if "targetLock" in patch:
+            o3.targetLock = bool(patch["targetLock"])
+        return
+    if operation_id == "orient_3d_disable":
+        o3.enabled = False
+        o3.source = "discrete"
+        return
+    if operation_id == "orient_reset":
+        o3.source = "gizmo" if o3.enabled else "discrete"
+        return
+    if operation_id == "orient_target_lock":
+        if "targetLock" in patch:
+            o3.targetLock = bool(patch["targetLock"])
+        else:
+            o3.targetLock = True
+        o3.source = "gizmo"
+        return
+    if operation_id == "orient_axis_lock":
+        axis = patch.get("axisLocks")
+        if isinstance(axis, dict):
+            if "yaw" in axis:
+                o3.axisLocks.yaw = bool(axis["yaw"])
+            if "pitch" in axis:
+                o3.axisLocks.pitch = bool(axis["pitch"])
+            if "roll" in axis:
+                o3.axisLocks.roll = bool(axis["roll"])
+            if "zoom" in axis:
+                o3.axisLocks.zoom = bool(axis["zoom"])
+        o3.source = "gizmo"
+        return
+
+    o3.source = "gizmo"
+    if operation_id in {"orient_yaw", "orient_pitch", "orient_roll", "orient_zoom", "orient_snap"}:
+        o3.enabled = True
+
+    if operation_id == "orient_yaw" and not locks.yaw and "yawDegrees" in patch:
+        pose.yawDegrees = wrap_yaw_degrees(float(patch["yawDegrees"]))
+    elif operation_id == "orient_pitch" and not locks.pitch and "pitchDegrees" in patch:
+        pose.pitchDegrees = clamp_pitch_degrees(float(patch["pitchDegrees"]))
+    elif operation_id == "orient_roll" and not locks.roll and "rollDegrees" in patch:
+        pose.rollDegrees = clamp_roll_degrees(float(patch["rollDegrees"]))
+    elif operation_id == "orient_zoom" and not locks.zoom and "zoom" in patch:
+        _apply_optical_zoom(pose, float(patch["zoom"]), baseline_lens_mm=baseline_lens_mm)
+    elif operation_id == "orient_snap":
+        yaw_val, pitch_val = _parse_snap_id(str(patch.get("snapId") or ""))
+        if yaw_val is not None and not locks.yaw:
+            pose.yawDegrees = wrap_yaw_degrees(yaw_val)
+        if pitch_val is not None and not locks.pitch:
+            pose.pitchDegrees = clamp_pitch_degrees(pitch_val)
+
+    if o3.targetLock:
+        pose.targetEntityId = preserved_target
+        pose.targetEntityType = preserved_type
+
+
 def apply_operation(
     pose: CameraPose,
     operation_id: str,
@@ -321,6 +548,8 @@ def apply_operation(
     character_slot: int | None = None,
     prop_slot: int | None = None,
     held_by_character_id: str = "",
+    orientation_patch: dict[str, Any] | None = None,
+    baseline_lens_mm: float = 35.0,
 ) -> dict[str, Any]:
     spec = validate_command(operation_id, character_id=character_id, prop_id=prop_id)
     orientation = (pose.orientation or "N").upper()
@@ -329,13 +558,17 @@ def apply_operation(
         pose.orientation = "N"
     look = LOOK_DELTA[orientation]
     right = _right_delta(orientation)
+    orienting = spec.category == "orientation3d"
+    keep_target = orienting and pose.orientation3d.targetLock and pose.targetEntityId
 
     if character_id:
         pose.targetEntityId = character_id
         pose.targetEntityType = "character"
-    elif prop_id and spec.needs_subject:
+    elif prop_id and (spec.needs_subject or spec.id == "orient_target_lock"):
         pose.targetEntityId = prop_id
         pose.targetEntityType = "prop"
+    elif keep_target:
+        pass
     if prop_id and character_id:
         pose.inclusionPropId = prop_id
         if held_by_character_id and held_by_character_id == character_id:
@@ -394,6 +627,13 @@ def apply_operation(
         pose.pitchDegrees = 22.0
         pose.heightMeters = max(0.4, min(pose.heightMeters, 1.0))
         pose.y = pose.heightMeters
+    elif spec.category == "orientation3d":
+        _apply_orientation3d_operation(
+            pose,
+            spec.id,
+            orientation_patch or {},
+            baseline_lens_mm=baseline_lens_mm,
+        )
 
     instruction = build_display_instruction(
         pose,
@@ -465,6 +705,20 @@ def build_display_instruction(
         return f"{cam} ORBIT {side}."
     if spec.category == "optical":
         return f"{cam} ZOOM {'IN' if spec.id == 'zoom_in' else 'OUT'}."
+    if spec.category == "orientation3d":
+        words = {
+            "orient_3d_enable": "enable 3D camera aim",
+            "orient_3d_disable": "return to standard camera aim",
+            "orient_yaw": "adjust yaw",
+            "orient_pitch": "adjust pitch",
+            "orient_roll": "adjust roll",
+            "orient_zoom": "adjust optical zoom",
+            "orient_target_lock": "set target lock",
+            "orient_axis_lock": "set axis lock",
+            "orient_snap": "snap camera aim",
+            "orient_reset": "reset 3D camera aim",
+        }
+        return f"{cam} {words.get(spec.id, spec.label.lower())}."
     if spec.category == "angle":
         angle = ANGLE_LABELS[spec.id.replace("_angle", "") if spec.id != "eye_level" else "eye_level"]
         if spec.id == "high_angle":
@@ -678,11 +932,14 @@ def apply_command_to_pack(
     character_slot: int | None = None,
     prop_slot: int | None = None,
     held_by_character_id: str = "",
+    orientation_patch: dict[str, Any] | None = None,
 ) -> SceneCinematographerPack:
     rec = get_camera(pack, camera_id)
     rec.history.append(_snapshot_current(rec))
     if len(rec.history) > 40:
         rec.history = rec.history[-40:]
+    if operation_id == "orient_reset":
+        _restore_orientation_from_baseline(rec)
     result = apply_operation(
         rec.current,
         operation_id,
@@ -694,9 +951,17 @@ def apply_command_to_pack(
         character_slot=character_slot,
         prop_slot=prop_slot,
         held_by_character_id=held_by_character_id,
+        orientation_patch=orientation_patch,
+        baseline_lens_mm=float(rec.baseline.lensMm or 35.0),
     )
     rec.structuredCommand = result["structured"]
-    rec.displayInstruction = result["instruction"]
+    spec = OPS_BY_ID.get(operation_id)
+    # Orientation is a precision layer. Keep the dropdown semantic command
+    # visible instead of replacing it with "adjust yaw".
+    if spec is not None and spec.category == "orientation3d" and rec.displayInstruction:
+        pass
+    else:
+        rec.displayInstruction = result["instruction"]
     bump_after_mutation(rec)
     pack.selected_camera_id = camera_id
     return pack
@@ -771,11 +1036,13 @@ def compile_camera_context(
         lines.append(f"- Prop in composition: {pose.inclusionPropId}{extra}")
     if held_association:
         lines.append(f"- Association: {held_association}")
+    if pose.orientation3d.enabled:
+        lines.extend(_orientation3d_prose_lines(pose))
     if rec.displayInstruction:
         lines.append(rec.displayInstruction)
     if rec.userCameraPromptDelta.strip():
         lines.append(rec.userCameraPromptDelta.strip())
-    return {
+    compiled = {
         "cameraId": rec.cameraId,
         "cameraSlot": rec.cameraSlot,
         "cameraStateVersion": rec.cameraStateVersion,
@@ -787,6 +1054,59 @@ def compile_camera_context(
         "lines": lines,
         "prose": " ".join(lines),
     }
+    if pose.orientation3d.enabled:
+        compiled["orientation3d"] = pose.orientation3d.model_dump()
+    return compiled
+
+
+def _fmt_signed_degrees(value: float) -> str:
+    rounded = round(float(value), 1)
+    if abs(rounded - round(rounded)) < 0.05:
+        return f"{int(round(rounded)):+d}°"
+    return f"{rounded:+.1f}°"
+
+
+def _yaw_cinematic_language(yaw: float) -> str:
+    wrapped = wrap_yaw_degrees(yaw)
+    abs_y = abs(wrapped)
+    if abs_y <= 22.5:
+        return "front"
+    if abs_y <= 67.5:
+        return "three-quarter left" if wrapped > 0 else "three-quarter right"
+    if abs_y <= 112.5:
+        return "profile left" if wrapped > 0 else "profile right"
+    if abs_y <= 157.5:
+        return "rear three-quarter left" if wrapped > 0 else "rear three-quarter right"
+    return "rear"
+
+
+def _pitch_cinematic_language(pitch: float) -> str:
+    if pitch <= -8:
+        return "elevated looking down"
+    if pitch >= 8:
+        return "low angle"
+    return "eye level"
+
+
+def _orientation3d_prose_lines(pose: CameraPose) -> list[str]:
+    o3 = pose.orientation3d
+    lock_label = "on" if o3.targetLock else "off"
+    aim = (
+        f"- 3D camera aim: yaw {_fmt_signed_degrees(pose.yawDegrees)}, "
+        f"pitch {_fmt_signed_degrees(pose.pitchDegrees)}, "
+        f"roll {_fmt_signed_degrees(pose.rollDegrees)}, "
+        f"optical zoom {o3.zoom:.2f}x, target lock {lock_label}."
+    )
+    bits = [_yaw_cinematic_language(pose.yawDegrees), _pitch_cinematic_language(pose.pitchDegrees)]
+    if abs(pose.rollDegrees) >= 3:
+        tilt = "clockwise" if pose.rollDegrees > 0 else "counterclockwise"
+        bits.append(f"subtle Dutch tilt {tilt}")
+    if o3.zoom > 1.0:
+        bits.append("tighter optical framing")
+    elif o3.zoom < 1.0:
+        bits.append("wider optical framing")
+    framing = f"- Framing: {', '.join(bits)}."
+    return [aim, framing]
 
 
 def save_pack(db: Session, project_id: str, pack: SceneCinematographerPack) -> None:

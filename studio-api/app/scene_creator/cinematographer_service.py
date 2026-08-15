@@ -29,10 +29,10 @@ from .cinematographer import (
 )
 from .service import (
     SceneCreatorError,
-    _approved_candidate,
     _enqueue_shot_candidates,
     _job_asset_id,
     _require_shot,
+    approved_look_blocks_final,
     ensure_scene_id,
 )
 
@@ -61,6 +61,21 @@ def hydrate_cinematographer(
     return pack
 
 
+def sync_final_assets_from_shots(pack: SceneCinematographerPack, shots: list[Any]) -> bool:
+    """Point lineage.finalAssetId at the completed final candidate asset."""
+    changed = False
+    for rec in pack.cameras:
+        job_id = rec.lineage.finalJobId
+        if not job_id:
+            continue
+        for shot in shots or []:
+            for cand in getattr(shot, "candidates", None) or []:
+                if cand.job_id == job_id and cand.asset_id and rec.lineage.finalAssetId != cand.asset_id:
+                    rec.lineage.finalAssetId = cand.asset_id
+                    changed = True
+    return changed
+
+
 def apply_cinematographer_command(
     db: Session,
     project_id: str,
@@ -72,6 +87,7 @@ def apply_cinematographer_command(
     prop_id: str = "",
     shot_id: str = "",
     user_prompt_delta: str | None = None,
+    orientation3d: dict[str, Any] | None = None,
 ) -> SceneCinematographerPack:
     pack = hydrate_cinematographer(db, project_id, scene_id=scene_id)
     char_name, char_slot = _entity_label(db, project_id, character_id, kind="character")
@@ -88,6 +104,7 @@ def apply_cinematographer_command(
         character_slot=char_slot,
         prop_slot=prop_slot,
         held_by_character_id=character_id if held else "",
+        orientation_patch=orientation3d,
     )
     if user_prompt_delta is not None:
         rec = get_camera(pack, camera_id)
@@ -217,7 +234,7 @@ def generate_camera_final(
     if not lock_is_valid(rec):
         raise CinematographerError("Lock this camera before the final quality render.")
     shot = _require_shot(db, project_id, shot_id)
-    if _approved_candidate(shot) is not None:
+    if approved_look_blocks_final(shot):
         raise SceneCreatorError("Use Re-Take to change an approved look.")
     _apply_record_to_shot(shot, rec)
     from ..spatial_map.ers_persistence import save_scene_shot
@@ -275,12 +292,14 @@ def _sync_preview_jobs(db: Session, project_id: str, pack: SceneCinematographerP
                 elif status in {"running", "preview", "queued"}:
                     lin.previewStatus = "generating"
         final_id = lin.finalJobId
-        if final_id and not final_id.startswith("failed_") and not lin.finalAssetId:
+        if final_id and not final_id.startswith("failed_"):
             final_job = db.get(Job, final_id)
             if final_job is not None and final_job.project_id == project_id:
                 st = (final_job.status or "").lower()
                 if st in {"done", "completed", "complete", "success"}:
-                    lin.finalAssetId = _job_asset_id(final_job) or lin.finalAssetId
+                    asset_id = _job_asset_id(final_job)
+                    if asset_id:
+                        lin.finalAssetId = asset_id
 
 
 def _apply_record_to_shot(shot: Any, rec: Any) -> None:

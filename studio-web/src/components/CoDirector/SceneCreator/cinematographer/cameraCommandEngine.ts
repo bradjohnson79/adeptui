@@ -27,6 +27,16 @@ export const CAMERA_OPERATIONS = [
   { id: "orbit_right", category: "orbit", label: "Orbit Right", needsSubject: false, physical: true, optical: false },
   { id: "zoom_in", category: "optical", label: "Zoom In", needsSubject: false, physical: false, optical: true },
   { id: "zoom_out", category: "optical", label: "Zoom Out", needsSubject: false, physical: false, optical: true },
+  { id: "orient_3d_enable", category: "orientation3d", label: "Enable 3D Orientation", needsSubject: false, physical: false, optical: false },
+  { id: "orient_3d_disable", category: "orientation3d", label: "Disable 3D Orientation", needsSubject: false, physical: false, optical: false },
+  { id: "orient_yaw", category: "orientation3d", label: "Yaw", needsSubject: false, physical: false, optical: false },
+  { id: "orient_pitch", category: "orientation3d", label: "Pitch", needsSubject: false, physical: false, optical: false },
+  { id: "orient_roll", category: "orientation3d", label: "Roll", needsSubject: false, physical: false, optical: false },
+  { id: "orient_zoom", category: "orientation3d", label: "Optical Zoom", needsSubject: false, physical: false, optical: true },
+  { id: "orient_target_lock", category: "orientation3d", label: "Target Lock", needsSubject: false, physical: false, optical: false },
+  { id: "orient_axis_lock", category: "orientation3d", label: "Axis Lock", needsSubject: false, physical: false, optical: false },
+  { id: "orient_snap", category: "orientation3d", label: "Snap View", needsSubject: false, physical: false, optical: false },
+  { id: "orient_reset", category: "orientation3d", label: "Reset Orientation", needsSubject: false, physical: false, optical: false },
 ] as const;
 
 export type CameraOperationId = (typeof CAMERA_OPERATIONS)[number]["id"];
@@ -106,6 +116,9 @@ export function buildDisplayInstruction(input: {
   if (operation.category === "optical") {
     return `${cam} ZOOM ${operation.id === "zoom_in" ? "IN" : "OUT"}.`;
   }
+  if (operation.category === "orientation3d") {
+    return `${cam} adjust 3D ORIENTATION.`;
+  }
   if (operation.category === "angle") {
     const angle =
       operation.id === "high_angle" ? "HIGH ANGLE" : operation.id === "low_angle" ? "LOW ANGLE" : "EYE LEVEL";
@@ -152,6 +165,14 @@ export type CameraPose = {
   normalizedY: number;
   yawDegrees: number;
   pitchDegrees: number;
+  rollDegrees?: number;
+  orientation3d?: {
+    enabled: boolean;
+    targetLock: boolean;
+    axisLocks?: { yaw?: boolean; pitch?: boolean; roll?: boolean; zoom?: boolean };
+    source?: "discrete" | "gizmo";
+    zoom?: number;
+  };
   heightMeters: number;
   orientation: string;
   fovPreset: string;
@@ -212,6 +233,86 @@ export function previewIsStale(record: SceneCameraRecord): boolean {
   return lin.previewStateVersion !== record.cameraStateVersion;
 }
 
+export type OrientationPatch = {
+  yawDegrees?: number;
+  pitchDegrees?: number;
+  rollDegrees?: number;
+  zoom?: number;
+  enabled?: boolean;
+  targetLock?: boolean;
+  axisLocks?: { yaw?: boolean; pitch?: boolean; roll?: boolean; zoom?: boolean };
+  snapId?: string;
+  source?: "discrete" | "gizmo";
+  characterId?: string;
+  propId?: string;
+};
+
+export function deriveOrientationOperation(patch: OrientationPatch): CameraOperationId {
+  if (patch.snapId) return "orient_snap";
+  const keys = Object.keys(patch).filter((key) => key !== "source");
+  if (patch.enabled === true && keys.every((key) => key === "enabled")) return "orient_3d_enable";
+  if (patch.enabled === false) return "orient_3d_disable";
+  if (patch.targetLock !== undefined && !hasOrientationAngles(patch) && patch.axisLocks === undefined && !patch.snapId) {
+    return "orient_target_lock";
+  }
+  if (patch.axisLocks !== undefined && !hasOrientationAngles(patch) && patch.targetLock === undefined) {
+    return "orient_axis_lock";
+  }
+  if (patch.yawDegrees !== undefined && patch.pitchDegrees === undefined && patch.rollDegrees === undefined && patch.zoom === undefined) {
+    return "orient_yaw";
+  }
+  if (patch.pitchDegrees !== undefined && patch.yawDegrees === undefined && patch.rollDegrees === undefined && patch.zoom === undefined) {
+    return "orient_pitch";
+  }
+  if (patch.rollDegrees !== undefined && patch.yawDegrees === undefined && patch.pitchDegrees === undefined && patch.zoom === undefined) {
+    return "orient_roll";
+  }
+  if (patch.zoom !== undefined && patch.yawDegrees === undefined && patch.pitchDegrees === undefined && patch.rollDegrees === undefined) {
+    return "orient_zoom";
+  }
+  if (patch.yawDegrees !== undefined) return "orient_yaw";
+  if (patch.pitchDegrees !== undefined) return "orient_pitch";
+  if (patch.rollDegrees !== undefined) return "orient_roll";
+  if (patch.zoom !== undefined) return "orient_zoom";
+  return "orient_yaw";
+}
+
+function hasOrientationAngles(patch: OrientationPatch): boolean {
+  return (
+    patch.yawDegrees !== undefined ||
+    patch.pitchDegrees !== undefined ||
+    patch.rollDegrees !== undefined ||
+    patch.zoom !== undefined
+  );
+}
+
+function formatSignedDegrees(value: number): string {
+  const rounded = Math.round(value);
+  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+}
+
+/** Collapsed accordion line: "Not applied" or "Yaw +32° · Pitch -18° · Roll +3° · Zoom 1.35x". */
+export function formatOrientationSummary(pose: Pick<CameraPose, "yawDegrees" | "pitchDegrees" | "rollDegrees" | "orientation3d">): string {
+  if (!pose.orientation3d?.enabled) return "Not applied";
+  const yaw = pose.yawDegrees ?? 0;
+  const pitch = pose.pitchDegrees ?? 0;
+  const roll = pose.rollDegrees ?? 0;
+  const zoom = pose.orientation3d.zoom ?? 1;
+  return `Yaw ${formatSignedDegrees(yaw)}° · Pitch ${formatSignedDegrees(pitch)}° · Roll ${formatSignedDegrees(roll)}° · Zoom ${zoom.toFixed(2)}x`;
+}
+
+/** Collapsed left-tool line: "Not applied" or "C1 · +32° / -18° / +3° · 1.35x". */
+export function formatCollapsedOrientationLine(record: Pick<SceneCameraRecord, "cameraSlot" | "current">): string {
+  const pose = record.current;
+  if (!pose.orientation3d?.enabled) return "Not applied";
+  const slot = (record.cameraSlot ?? 0) + 1;
+  const yaw = formatSignedDegrees(pose.yawDegrees ?? 0);
+  const pitch = formatSignedDegrees(pose.pitchDegrees ?? 0);
+  const roll = formatSignedDegrees(pose.rollDegrees ?? 0);
+  const zoom = pose.orientation3d.zoom ?? 1;
+  return `C${slot} · ${yaw}° / ${pitch}° / ${roll}° · ${zoom.toFixed(2)}x`;
+}
+
 export function groupedOperations(): { category: string; label: string; ops: CameraOperation[] }[] {
   const labels: Record<string, string> = {
     movement: "Camera Movement",
@@ -220,8 +321,9 @@ export function groupedOperations(): { category: string; label: string; ops: Cam
     angle: "Angle",
     orbit: "Orbit / Arc",
     optical: "Optical",
+    orientation3d: "3D Orientation",
   };
-  const order = ["movement", "framing", "dolly", "angle", "orbit", "optical"];
+  const order = ["movement", "framing", "dolly", "angle", "orbit", "optical", "orientation3d"];
   return order.map((category) => ({
     category,
     label: labels[category],

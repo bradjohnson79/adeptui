@@ -12,9 +12,17 @@ import type {
 } from "./types";
 import { DEFAULT_CINEMATIC } from "./types";
 import {
+  deriveOrientationOperation,
   validateCameraCommand,
+  type OrientationPatch,
   type SceneCinematographerPack,
 } from "./cinematographer/cameraCommandEngine";
+import { clampPitch, clampRoll, clampZoom, wrapYaw } from "./cinematographer/orientationMath";
+import {
+  approvedLookBlocksFinal,
+  compileRegionEditFinalPrompt,
+  VISUAL_INHERITANCE_BLOCKED_MESSAGE,
+} from "./regionEdit/regionEdit";
 
 export type SceneCreatorVariant = "express" | "standard";
 
@@ -52,6 +60,7 @@ export function useSceneCreator(projectId: string) {
   const [notice, setNotice] = useState<string | null>(null);
   const [correction, setCorrection] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const orientGenRef = useRef(0);
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) {
@@ -362,6 +371,80 @@ export function useSceneCreator(projectId: string) {
     }
   }, [applyPack, cineCharacterId, cineOperation, cinePropId, projectId, sceneId, selectedCameraId, shot?.id]);
 
+  const applyOrientation = useCallback(
+    async (patch: OrientationPatch) => {
+      if (!sceneId || !selectedCameraId) return;
+      const rec = (cinematographer?.cameras || []).find((c) => c.cameraId === selectedCameraId);
+      const pose = rec?.current;
+      const o3d = pose?.orientation3d;
+      const operation_id = deriveOrientationOperation(patch);
+      const silent = patch.source === "gizmo";
+      if (!silent) {
+        setBusy(true);
+        setError(null);
+      }
+      const gen = ++orientGenRef.current;
+      try {
+        const res = await sceneCreatorApi.cinematographerCommand(projectId, sceneId, {
+          camera_id: selectedCameraId,
+          operation_id,
+          shot_id: shot?.id,
+          character_id: patch.characterId,
+          prop_id: patch.propId,
+          orientation3d: {
+            yawDegrees: wrapYaw(patch.yawDegrees ?? pose?.yawDegrees ?? 0),
+            pitchDegrees: clampPitch(patch.pitchDegrees ?? pose?.pitchDegrees ?? 0),
+            rollDegrees: clampRoll(patch.rollDegrees ?? pose?.rollDegrees ?? 0),
+            zoom: clampZoom(patch.zoom ?? o3d?.zoom ?? 1),
+            enabled: patch.enabled ?? o3d?.enabled ?? true,
+            targetLock: patch.targetLock ?? o3d?.targetLock ?? true,
+            axisLocks: patch.axisLocks ?? o3d?.axisLocks,
+            snapId: patch.snapId,
+            source: patch.source ?? "discrete",
+          },
+        });
+        if (gen === orientGenRef.current) {
+          applyPack(res.cinematographer, selectedCameraId);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!silent) setBusy(false);
+      }
+    },
+    [applyPack, cinematographer, projectId, sceneId, selectedCameraId, shot?.id],
+  );
+
+  const resetOrientation = useCallback(async () => {
+    if (!sceneId || !selectedCameraId) return;
+    setBusy(true);
+    setError(null);
+    const gen = ++orientGenRef.current;
+    try {
+      const res = await sceneCreatorApi.cinematographerCommand(projectId, sceneId, {
+        camera_id: selectedCameraId,
+        operation_id: "orient_reset",
+        shot_id: shot?.id,
+        orientation3d: {
+          yawDegrees: 0,
+          pitchDegrees: 0,
+          rollDegrees: 0,
+          zoom: 1,
+          enabled: true,
+          targetLock: true,
+          source: "discrete",
+        },
+      });
+      if (gen === orientGenRef.current) {
+        applyPack(res.cinematographer, selectedCameraId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [applyPack, projectId, sceneId, selectedCameraId, shot?.id]);
+
   const undoCamera = useCallback(async () => {
     if (!sceneId || !selectedCameraId) return;
     setBusy(true);
@@ -462,8 +545,13 @@ export function useSceneCreator(projectId: string) {
 
   const finalRender = useCallback(async () => {
     if (!sceneId || !selectedCameraId) return;
-    if (shot?.approved_candidate_id) {
+    if (approvedLookBlocksFinal(shot)) {
       setError("Use Re-Take to change an approved look.");
+      return;
+    }
+    const compiled = shot ? compileRegionEditFinalPrompt(shot) : null;
+    if (compiled?.visualInheritanceBlocked) {
+      setError(VISUAL_INHERITANCE_BLOCKED_MESSAGE);
       return;
     }
     setBusy(true);
@@ -488,7 +576,7 @@ export function useSceneCreator(projectId: string) {
     } finally {
       setBusy(false);
     }
-  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, shot?.approved_candidate_id, startPoll]);
+  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, shot, startPoll]);
 
   const apiAvailable = workspace?.api_generation_available === true || apiEnabled;
   const approved = shot?.candidates.find((c) => c.id === shot.approved_candidate_id) || null;
@@ -496,6 +584,7 @@ export function useSceneCreator(projectId: string) {
     || (cinematographer?.cameras || []).some((c) => c.lineage?.previewStatus === "generating");
 
   return {
+    projectId,
     workspace,
     shot,
     sheetId,
@@ -548,11 +637,46 @@ export function useSceneCreator(projectId: string) {
     persistShot,
     selectCinematographerCamera,
     enterCameraCommand,
+    applyOrientation,
+    resetOrientation,
     undoCamera,
     resetCamera,
     lockCamera,
     saveCineDelta,
     previewCamera,
     finalRender,
+    regionEdit: async (body: {
+      operation: string;
+      prompt: string;
+      maskAssetId: string;
+      sourceAssetId?: string;
+      stage?: "preview" | "final";
+      local_family?: string;
+      local_enabled?: boolean;
+      api_enabled?: boolean;
+    }) => {
+      if (!shot?.id) {
+        setError("Generate a look first, then paint the region to change.");
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const res = await sceneCreatorApi.regionEdit(projectId, shot.id, {
+          ...body,
+          local_family: body.local_family || localFamily,
+          local_enabled: body.local_enabled ?? localEnabled,
+          api_enabled: false,
+        });
+        applyShot(res.shot);
+        startPoll(res.shot.id);
+        setNotice("Region edit started. The approved look stays until you approve this take.");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
   };
 }

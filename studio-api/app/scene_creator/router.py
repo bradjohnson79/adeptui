@@ -132,6 +132,7 @@ class CinematographerCommandBody(BaseModel):
     prop_id: str = ""
     shot_id: str = ""
     user_prompt_delta: str | None = None
+    orientation3d: dict[str, Any] | None = None
 
 
 class CinematographerCameraBody(BaseModel):
@@ -586,6 +587,7 @@ def api_cinematographer_command(
             prop_id=body.prop_id,
             shot_id=body.shot_id,
             user_prompt_delta=body.user_prompt_delta,
+            orientation3d=body.orientation3d,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

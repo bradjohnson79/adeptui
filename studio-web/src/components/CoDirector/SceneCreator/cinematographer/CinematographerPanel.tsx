@@ -1,15 +1,18 @@
 /**
  * Scene Creator Cinematographer — four cameras, structured commands, preview/lock/final.
+ * 3D Camera Orientation lives in the left-sidebar tool accordion, not in this panel.
  */
 import { api } from "../../../../api";
 import type { useSceneCreator } from "../useSceneCreator";
 import {
   CAMERA_OPERATIONS,
   canLockCamera,
+  formatOrientationSummary,
   lockIsValid,
   previewIsStale,
   type SceneCameraRecord,
 } from "./cameraCommandEngine";
+import { approvedLookBlocksFinal, compileRegionEditFinalPrompt } from "../regionEdit/regionEdit";
 
 type Props = { sc: ReturnType<typeof useSceneCreator> };
 
@@ -36,6 +39,8 @@ export function CinematographerPanel({ sc }: Props) {
   const selected = cameras.find((c) => c.cameraId === sc.selectedCameraId) || cameras[0] || null;
   const chars = sc.workspace?.characters || [];
   const props = sc.workspace?.props || [];
+  const blocksFinal = approvedLookBlocksFinal(sc.shot);
+  const inheritanceBlocked = Boolean(sc.shot && compileRegionEditFinalPrompt(sc.shot).visualInheritanceBlocked);
 
   return (
     <section className="cine-panel" data-testid="scene-creator-cinematographer">
@@ -96,7 +101,7 @@ export function CinematographerPanel({ sc }: Props) {
           value={sc.cineOperation}
           onChange={(e) => sc.setCineOperation(e.target.value)}
         >
-          {CAMERA_OPERATIONS.map((op) => (
+          {CAMERA_OPERATIONS.filter((op) => op.category !== "orientation3d").map((op) => (
             <option key={op.id} value={op.id}>
               {op.label}
             </option>
@@ -152,6 +157,11 @@ export function CinematographerPanel({ sc }: Props) {
         onBlur={() => void sc.saveCineDelta()}
         placeholder="Camera instruction appears here. You can add a note without changing the camera setup."
       />
+      {selected?.current.orientation3d?.enabled ? (
+        <p className="muted" data-testid="cine-orient-command-line">
+          3D CAMERA · {formatOrientationSummary(selected.current)}
+        </p>
+      ) : null}
 
       {selected ? (
         <p className="muted" data-testid="cine-state-line">
@@ -196,7 +206,7 @@ export function CinematographerPanel({ sc }: Props) {
           type="button"
           className="primary"
           data-testid="scene-creator-generate"
-          disabled={!selected || sc.busy || !lockIsValid(selected) || Boolean(sc.approved)}
+          disabled={!selected || sc.busy || !lockIsValid(selected) || blocksFinal || inheritanceBlocked}
           onClick={() => void sc.finalRender()}
         >
           {sc.generating ? "Rendering…" : "Final Quality Render"}

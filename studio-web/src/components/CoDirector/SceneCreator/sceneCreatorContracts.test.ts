@@ -84,4 +84,35 @@ describe("Scene Creator contracts", () => {
     expect(hook).toContain("prop_id");
     expect(hook).toContain("toggleProp");
   });
+
+  it("keeps the three-zone tool law: left tools, center mask, right camera cards", async () => {
+    const src = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./SceneCreatorCore.tsx", import.meta.url), "utf8"),
+    );
+    const standard = src.slice(src.indexOf("function StandardLayout"), src.indexOf("function usePreviewAsset"));
+    const browser = standard.slice(standard.indexOf("scene-creator-standard__browser"), standard.indexOf("StandardPreview"));
+    const inspector = standard.slice(standard.indexOf("scene-creator-standard__inspector"), standard.indexOf("scene-creator-standard__strip"));
+    expect(browser).toContain("OrientationAccordion");
+    expect(browser).toContain("RegionEditBlock");
+    expect(inspector).toContain("CinematographerPanel");
+    expect(inspector).not.toContain("OrientationAccordion");
+    expect(inspector).not.toContain("RegionEditBlock");
+    expect(standard).toContain("StandardPreview");
+    expect(src).toContain("CenterMaskCanvas");
+    const cine = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./cinematographer/CinematographerPanel.tsx", import.meta.url), "utf8"),
+    );
+    expect(cine).toContain("cine-tile-c${slot + 1}");
+    expect(cine).not.toContain("<OrientationAccordion");
+    expect(cine).not.toContain("function OrientationSection");
+    const inpaint = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./regionEdit/RegionEditPanel.tsx", import.meta.url), "utf8"),
+    );
+    expect(inpaint).not.toContain("ImageMaskEditor");
+    expect(inpaint).toContain("scene-creator-inpaint-source");
+    const css = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./sceneCreator.css", import.meta.url), "utf8"),
+    );
+    expect(css).toContain("grid-template-columns: 220px minmax(0, 1fr) 280px");
+  });
 });

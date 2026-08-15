@@ -476,6 +476,12 @@ try:
 except Exception as exc:  # pragma: no cover
     logger.warning("scene_creator router unavailable: %s", exc)
 try:
+    from .scene_creator.region_edit_router import router as scene_creator_region_edit_router
+
+    app.include_router(scene_creator_region_edit_router, prefix="/api")
+except Exception as exc:  # pragma: no cover
+    logger.warning("scene_creator region_edit router unavailable: %s", exc)
+try:
     from .prop_creator.router import router as prop_creator_router
 
     app.include_router(prop_creator_router, prefix="/api")

@@ -170,6 +170,13 @@ export type SceneShotCandidate = {
   camera_state_hash?: string;
   source_camera_id?: string;
   quality_profile?: string;
+  kind?: string;
+  parent_candidate_id?: string | null;
+  mask_id?: string | null;
+  edit_operation?: string | null;
+  final_strategy?: string;
+  source_preview_asset_id?: string | null;
+  approved_edited_preview_asset_id?: string | null;
 };
 
 export type SceneShot = {
@@ -227,7 +234,15 @@ export type SceneCreatorWorkspace = {
   props: ResolvedProp[];
   api_generation_available: boolean;
   api_models?: { id?: string; modelId?: string; label?: string; name?: string; providerId?: string }[];
-  local_families: { id: string; label: string; executable?: boolean; supportsReferences?: boolean }[];
+  local_families: {
+    id: string;
+    label: string;
+    executable?: boolean;
+    supportsReferences?: boolean;
+    supportsEditing?: boolean;
+    supportsInpaint?: boolean;
+    regionEditLabel?: string;
+  }[];
   has_reference: boolean;
   cinematographer?: import("./cinematographer/cameraCommandEngine").SceneCinematographerPack | null;
   preview_capabilities?: {

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAMERA_OPERATIONS,
   buildDisplayInstruction,
   canLockCamera,
+  deriveOrientationOperation,
+  formatCollapsedOrientationLine,
+  formatOrientationSummary,
   lockIsValid,
   validateCameraCommand,
   type SceneCameraRecord,
@@ -111,5 +115,89 @@ describe("cinematographer command engine", () => {
   it("treats a version bump as stale lock", () => {
     const rec = record({ cameraStateVersion: 8, cameraStateHash: "newhash" });
     expect(lockIsValid(rec)).toBe(false);
+  });
+
+  it("includes 3D orientation operations that do not need a subject", () => {
+    const ids = CAMERA_OPERATIONS.map((op) => op.id);
+    for (const id of [
+      "orient_3d_enable",
+      "orient_3d_disable",
+      "orient_yaw",
+      "orient_pitch",
+      "orient_roll",
+      "orient_zoom",
+      "orient_target_lock",
+      "orient_axis_lock",
+      "orient_snap",
+      "orient_reset",
+    ] as const) {
+      expect(ids).toContain(id);
+      const op = CAMERA_OPERATIONS.find((item) => item.id === id);
+      expect(op?.category).toBe("orientation3d");
+      expect(op?.needsSubject).toBe(false);
+      expect(validateCameraCommand(id, "", "").ok).toBe(true);
+    }
+  });
+
+  it("formats the collapsed 3D orientation summary", () => {
+    expect(
+      formatOrientationSummary({
+        yawDegrees: 32,
+        pitchDegrees: -18,
+        rollDegrees: 3,
+        orientation3d: { enabled: false, targetLock: true, zoom: 1.35 },
+      }),
+    ).toBe("Not applied");
+    expect(
+      formatOrientationSummary({
+        yawDegrees: 32,
+        pitchDegrees: -18,
+        rollDegrees: 3,
+        orientation3d: { enabled: true, targetLock: true, zoom: 1.35 },
+      }),
+    ).toBe("Yaw +32° · Pitch -18° · Roll +3° · Zoom 1.35x");
+  });
+
+  it("formats the left-sidebar collapsed camera line", () => {
+    expect(
+      formatCollapsedOrientationLine(
+        record({
+          cameraSlot: 0,
+          current: {
+            ...record().current,
+            yawDegrees: 32,
+            pitchDegrees: -18,
+            rollDegrees: 3,
+            orientation3d: { enabled: false, targetLock: true, zoom: 1.35 },
+          },
+        }),
+      ),
+    ).toBe("Not applied");
+    expect(
+      formatCollapsedOrientationLine(
+        record({
+          cameraSlot: 0,
+          current: {
+            ...record().current,
+            yawDegrees: 32,
+            pitchDegrees: -18,
+            rollDegrees: 3,
+            orientation3d: { enabled: true, targetLock: true, zoom: 1.35 },
+          },
+        }),
+      ),
+    ).toBe("C1 · +32° / -18° / +3° · 1.35x");
+  });
+
+  it("derives orientation operation ids from a patch", () => {
+    expect(deriveOrientationOperation({ enabled: true })).toBe("orient_3d_enable");
+    expect(deriveOrientationOperation({ yawDegrees: 32 })).toBe("orient_yaw");
+    expect(deriveOrientationOperation({ pitchDegrees: -18 })).toBe("orient_pitch");
+    expect(deriveOrientationOperation({ rollDegrees: 3 })).toBe("orient_roll");
+    expect(deriveOrientationOperation({ zoom: 1.35 })).toBe("orient_zoom");
+    expect(deriveOrientationOperation({ snapId: "front" })).toBe("orient_snap");
+    expect(deriveOrientationOperation({ targetLock: true })).toBe("orient_target_lock");
+    expect(deriveOrientationOperation({ axisLocks: { yaw: true } })).toBe("orient_axis_lock");
+    expect(deriveOrientationOperation({ yawDegrees: 10, pitchDegrees: -8, source: "gizmo" })).toBe("orient_yaw");
   });
 });

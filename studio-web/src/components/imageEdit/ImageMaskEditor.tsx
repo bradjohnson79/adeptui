@@ -1,22 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 export type MaskTool = "brush" | "erase" | "rect";
 
-export function ImageMaskEditor({
-  imageUrl,
-  brushSize = 24,
-  tool = "brush",
-  feather = 0,
-  onExport,
-  onChange,
-}: {
-  imageUrl: string;
-  brushSize?: number;
-  tool?: MaskTool;
-  feather?: number;
-  onExport?: (pngBase64: string) => void;
-  onChange?: (hasMask: boolean) => void;
-}) {
+export type ImageMaskEditorHandle = {
+  exportPng: () => Promise<string>;
+  clear: () => void;
+};
+
+export const ImageMaskEditor = forwardRef<
+  ImageMaskEditorHandle,
+  {
+    imageUrl: string;
+    brushSize?: number;
+    tool?: MaskTool;
+    feather?: number;
+    hideChrome?: boolean;
+    fill?: boolean;
+    overlayOpacity?: number;
+    interactive?: boolean;
+    onExport?: (pngBase64: string) => void;
+    onChange?: (hasMask: boolean) => void;
+  }
+>(function ImageMaskEditor(
+  {
+    imageUrl,
+    brushSize = 24,
+    tool = "brush",
+    feather = 0,
+    hideChrome = false,
+    fill = false,
+    overlayOpacity = 0.45,
+    interactive = true,
+    onExport,
+    onChange,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const maskCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,10 +60,10 @@ export function ImageMaskEditor({
     if (!ctx) return;
     ctx.clearRect(0, 0, dims.w, dims.h);
     ctx.drawImage(img, 0, 0, dims.w, dims.h);
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = overlayOpacity;
     ctx.drawImage(maskCanvas, 0, 0);
     ctx.globalAlpha = 1;
-  }, [dims.w, dims.h]);
+  }, [dims.w, dims.h, overlayOpacity]);
 
   const loadImage = useCallback(() => {
     if (!imageUrl) return;
@@ -53,7 +72,10 @@ export function ImageMaskEditor({
     img.onload = () => {
       imageRef.current = img;
       const maxW = containerRef.current?.clientWidth || 480;
-      const scale = Math.min(1, maxW / img.naturalWidth);
+      const maxH = containerRef.current?.clientHeight || 0;
+      const scaleW = maxW / img.naturalWidth;
+      const scaleH = maxH > 40 ? maxH / img.naturalHeight : 1;
+      const scale = Math.min(1, scaleW, scaleH || 1);
       const w = Math.round(img.naturalWidth * scale);
       const h = Math.round(img.naturalHeight * scale);
       setDims({ w, h });
@@ -155,6 +177,8 @@ export function ImageMaskEditor({
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!interactive) return;
+    e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     drawingRef.current = true;
     const pt = canvasPoint(e);
@@ -166,7 +190,7 @@ export function ImageMaskEditor({
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!drawingRef.current) return;
+    if (!interactive || !drawingRef.current) return;
     const pt = canvasPoint(e);
     if (localTool === "rect" && rectStartRef.current) {
       syncDisplay();
@@ -196,52 +220,70 @@ export function ImageMaskEditor({
     }
   };
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      exportPng: exportMask,
+      clear: clearMask,
+    }),
+    [exportMask],
+  );
+
   return (
-    <div ref={containerRef} className="image-mask-editor">
-      <div className="row" style={{ flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem" }}>
-        {(["brush", "erase", "rect"] as MaskTool[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            className={localTool === t ? "primary" : ""}
-            onClick={() => setLocalTool(t)}
-          >
-            {t === "brush" ? "Brush" : t === "erase" ? "Erase" : "Rect"}
+    <div ref={containerRef} className={fill ? "image-mask-editor image-mask-editor--fill" : "image-mask-editor"}>
+      {hideChrome ? null : (
+        <div className="row" style={{ flexWrap: "wrap", gap: "0.35rem", marginBottom: "0.5rem" }}>
+          {(["brush", "erase", "rect"] as MaskTool[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={localTool === t ? "primary" : ""}
+              onClick={() => setLocalTool(t)}
+            >
+              {t === "brush" ? "Brush" : t === "erase" ? "Erase" : "Rect"}
+            </button>
+          ))}
+          <label className="pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Size
+            <input
+              type="range"
+              min={4}
+              max={96}
+              value={localBrush}
+              onChange={(e) => setLocalBrush(Number(e.target.value))}
+            />
+            {localBrush}
+          </label>
+          <label className="pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Feather
+            <input
+              type="range"
+              min={0}
+              max={32}
+              value={localFeather}
+              onChange={(e) => setLocalFeather(Number(e.target.value))}
+            />
+            {localFeather}
+          </label>
+          <button type="button" onClick={clearMask}>
+            Clear
           </button>
-        ))}
-        <label className="pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          Size
-          <input
-            type="range"
-            min={4}
-            max={96}
-            value={localBrush}
-            onChange={(e) => setLocalBrush(Number(e.target.value))}
-          />
-          {localBrush}
-        </label>
-        <label className="pill" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          Feather
-          <input
-            type="range"
-            min={0}
-            max={32}
-            value={localFeather}
-            onChange={(e) => setLocalFeather(Number(e.target.value))}
-          />
-          {localFeather}
-        </label>
-        <button type="button" onClick={clearMask}>
-          Clear
-        </button>
-        <button type="button" className="primary" onClick={() => void exportMask()}>
-          Export mask
-        </button>
-      </div>
-      <div style={{ position: "relative", display: "inline-block", maxWidth: "100%" }}>
+          <button type="button" className="primary" onClick={() => void exportMask()}>
+            Export mask
+          </button>
+        </div>
+      )}
+      <div className="image-mask-editor__stage">
         <canvas
           ref={displayCanvasRef}
-          style={{ maxWidth: "100%", borderRadius: 8, cursor: "crosshair", touchAction: "none" }}
+          style={{
+            maxWidth: "100%",
+            maxHeight: "100%",
+            borderRadius: 8,
+            cursor: interactive ? "crosshair" : "default",
+            touchAction: "none",
+            pointerEvents: interactive ? "auto" : "none",
+          }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -251,4 +293,6 @@ export function ImageMaskEditor({
       </div>
     </div>
   );
-}
+});
+
+ImageMaskEditor.displayName = "ImageMaskEditor";
