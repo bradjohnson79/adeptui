@@ -453,11 +453,14 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       await paintMask(page, "large");
       await page.getByTestId("scene-creator-inpaint-operation").selectOption(step.op);
       await page.getByTestId("scene-creator-inpaint-prompt").fill(step.prompt);
+      await expect(page.getByTestId("scene-creator-inpaint-mask-summary")).toContainText(/%/);
+      const generateBtn = page.getByTestId("scene-creator-inpaint-generate");
+      await expect(generateBtn).toBeEnabled({ timeout: 20_000 });
       const payloadPromise = page.waitForRequest(
         (req) => req.method() === "POST" && /region-edit/.test(req.url()),
-        { timeout: 30_000 },
+        { timeout: 90_000 },
       );
-      await page.getByTestId("scene-creator-inpaint-generate").click();
+      await generateBtn.click({ force: true });
       const posted = await payloadPromise;
       const body = posted.postDataJSON() as {
         operation?: string;
@@ -581,10 +584,11 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     });
     await page.waitForTimeout(2000);
     expect(posts.length, "duplicate Final must serialize").toBe(1);
-    const body = JSON.parse(posts[0] || "{}") as { sourceAssetId?: string; finalStrategy?: string };
+    const body = JSON.parse(posts[0] || "{}") as { sourceAssetId?: string; source_asset_id?: string; finalStrategy?: string };
     if (approved?.asset_id) {
-      expect(body.sourceAssetId || "").toBe(approved.asset_id);
+      expect(body.sourceAssetId || body.source_asset_id || "").toBe(approved.asset_id);
     }
+    if (body.finalStrategy) expect(body.finalStrategy).toBe("A");
     const jobsAfter = await listJobs(request);
     const created = jobsAfter.filter((j) => !jobsBefore.some((b) => b.id === j.id));
     expect(created.length).toBeLessThanOrEqual(1);

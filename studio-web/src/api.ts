@@ -4386,6 +4386,8 @@ export const api = {
         api_enabled: boolean;
         local_family?: string;
         api_model?: string;
+        sourceAssetId?: string;
+        finalStrategy?: string;
       },
     ) =>
       req<{

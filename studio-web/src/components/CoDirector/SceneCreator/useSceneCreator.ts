@@ -573,6 +573,9 @@ export function useSceneCreator(projectId: string) {
     setNotice(null);
     try {
       const current = await persistShot();
+      const compiledAfter = compileRegionEditFinalPrompt(
+        shotWithSelectedFamily(current, localFamily) || current,
+      );
       const res = await sceneCreatorApi.cinematographerFinal(projectId, sceneId, {
         camera_id: selectedCameraId,
         shot_id: current.id,
@@ -580,6 +583,8 @@ export function useSceneCreator(projectId: string) {
         api_enabled: apiEnabled,
         local_family: localFamily,
         api_model: apiModel,
+        sourceAssetId: compiledAfter.sourceAssetId,
+        finalStrategy: compiledAfter.strategy,
       });
       applyPack(res.cinematographer, selectedCameraId);
       applyShot(res.shot);

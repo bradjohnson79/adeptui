@@ -153,6 +153,8 @@ export const sceneCreatorApi = {
       api_enabled: boolean;
       local_family?: string;
       api_model?: string;
+      sourceAssetId?: string;
+      finalStrategy?: string;
     },
   ) => api.sceneCreator.cinematographerFinal(projectId, sceneId, body),
   regionEdit: (
