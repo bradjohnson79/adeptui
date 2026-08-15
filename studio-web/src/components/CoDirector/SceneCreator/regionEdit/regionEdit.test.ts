@@ -280,6 +280,66 @@ describe("Strategy B compile", () => {
     expect(compileRegionEditFinalPrompt(qwenShot).strategy).toBe("C");
     expect(compileRegionEditFinalPrompt(shotWithSelectedFamily(qwenShot, "zimage")!).strategy).toBe("A");
   });
+
+  it("blocks Qwen T2I when approved look is a Final that inherited region edits", () => {
+    const compiled = compileRegionEditFinalPrompt(
+      shot({
+        approved_candidate_id: "final-1",
+        generator: { local_enabled: true, api_enabled: false, local_family: "qwen2512", api_provider: "", api_model: "" },
+        candidates: [
+          {
+            id: "e1",
+            shot_id: "s1",
+            index: 0,
+            job_id: "j0",
+            asset_id: "edited",
+            status: "complete",
+            source: "local",
+            family: "zimage",
+            model: "zimage",
+            provenance_label: "LOCAL",
+            take_label: "Inpaint B — Remove",
+            kind: "region_edit",
+          },
+          {
+            id: "final-1",
+            shot_id: "s1",
+            index: 1,
+            job_id: "j1",
+            asset_id: "final",
+            status: "complete",
+            source: "local",
+            family: "zimage",
+            model: "zimage",
+            provenance_label: "LOCAL",
+            take_label: "Final C",
+            quality_profile: "final",
+            parent_candidate_id: "e1",
+          },
+        ],
+        take_memory: {
+          originalTakeIntent: {},
+          sceneErsState: {},
+          characterIdentity: {},
+          blocking: {},
+          camera: {},
+          takeState: {},
+          userCorrection: {
+            region_edits: [
+              {
+                operation: "remove",
+                prompt: "the extra person",
+                candidate_id: "e1",
+                approved: true,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(compiled.visualInheritanceBlocked).toBe(true);
+    expect(compiled.strategy).toBe("C");
+  });
 });
 
 describe("stage inference", () => {

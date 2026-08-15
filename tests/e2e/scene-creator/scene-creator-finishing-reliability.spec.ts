@@ -70,7 +70,7 @@ type CinePack = {
   }>;
 };
 
-test.describe.configure({ mode: "serial" });
+test.describe.configure({ mode: "default" });
 
 function attachObserver(page: Page, testInfo: TestInfo) {
   const observer = new AuditObserver(page, testInfo);
@@ -235,10 +235,12 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     await openSceneCreator(page);
     await openAccordion(page, "cine-orient-accordion");
     const yaw = page.getByTestId("cine-orient-yaw");
-    await expect(yaw).toBeVisible();
-    const before = await yaw.inputValue();
+    await expect(yaw).toBeAttached();
+    const yawValue = page.locator(".cine-orient-stepper", { hasText: "Yaw" }).locator(".cine-orient-stepper__value");
+    await expect(yawValue).toBeVisible();
+    const before = ((await yawValue.textContent()) || "").trim();
     await page.getByRole("button", { name: "Yaw up" }).click();
-    await expect.poll(async () => yaw.inputValue()).not.toBe(before);
+    await expect.poll(async () => ((await yawValue.textContent()) || "").trim()).not.toBe(before);
     await page.getByRole("button", { name: "Pitch up" }).click();
     await page.getByRole("button", { name: "Roll up" }).click();
     await page.getByRole("button", { name: "Zoom up" }).click();
@@ -279,7 +281,7 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     await openSceneCreator(page);
     await openAccordion(page, "cine-orient-accordion");
     await openAccordion(page, "scene-creator-inpaint-accordion");
-    await expect(page.getByTestId("cine-orient-yaw")).toBeVisible();
+    await expect(page.locator(".cine-orient-stepper", { hasText: "Yaw" })).toBeVisible();
     await expect(page.getByTestId("scene-creator-inpaint-generate")).toBeVisible();
     await expect(page.getByTestId("cine-tile-c1")).toBeVisible();
     await expect(page.getByTestId("scene-creator-preview")).toBeVisible();
@@ -456,17 +458,27 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
 
   test("model guard: approved edit + Qwen T2I does not send txt2img final", async ({
     page,
+    request,
   }, testInfo) => {
     attachObserver(page, testInfo);
     await openSceneCreator(page);
+    const ws = await getWorkspace(request);
+    const shots = ws.shots || [];
+    const editedIdx = shots.findIndex((s) =>
+      (s.candidates || []).some((c) => c.kind === "region_edit") ||
+      (((s.take_memory as { userCorrection?: { region_edits?: unknown[] } } | undefined)?.userCorrection?.region_edits || []).length > 0),
+    );
+    if (editedIdx >= 0) {
+      const chip = page.getByTestId("scene-creator-browser").getByRole("button", { name: `Shot ${editedIdx + 1}`, exact: true });
+      if (await chip.count()) await chip.click();
+    }
     const local = page.getByTestId("generator-local-select");
     await expect(local).toBeVisible();
     const html = await local.innerHTML();
     expect(html.toLowerCase()).not.toContain("qwen.edit");
-    const options = await local.locator("option").allTextContents();
-    const qwen = options.find((o) => /qwen/i.test(o) && !/edit/i.test(o));
-    if (qwen) {
-      const value = await local.locator("option", { hasText: qwen }).first().getAttribute("value");
+    const qwenOpt = local.locator("option").filter({ hasText: /qwen/i }).first();
+    if (await qwenOpt.count()) {
+      const value = await qwenOpt.getAttribute("value");
       if (value) await local.selectOption(value);
     }
     const finals: string[] = [];

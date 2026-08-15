@@ -355,7 +355,10 @@ export function compileRegionEditFinalPrompt(
   if (approved?.kind === "region_edit" && approved.asset_id && (caps.supportsEditing || caps.supportsInpaint)) {
     return { prompt, sourceAssetId: approved.asset_id, strategy: "A" };
   }
-  if (approved?.kind === "region_edit" && approved.asset_id) {
+  if (
+    (approved?.kind === "region_edit" && approved.asset_id) ||
+    (edits.length > 0 && !(caps.supportsEditing || caps.supportsInpaint))
+  ) {
     return { prompt, strategy: "C", visualInheritanceBlocked: true };
   }
   return { prompt, strategy: "B" };
