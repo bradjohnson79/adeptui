@@ -374,7 +374,6 @@ export function CharacterGeneratorPanel({
           data-testid="generator-api-list"
         >
         {apiGroups.map((group) => {
-          const showHeading = group.models.length > 0;
           const rows = group.models.map((m) => {
           const row = value.apiModels.find((r) => r.providerId === m.providerId && r.modelId === m.modelId) || {
             providerId: m.providerId,
