@@ -50,3 +50,52 @@ def strengthen_fal_character_sheet_prompt(prompt: str, *, model: str | None = No
     from ...character_identity.four_view_sheet import strengthen_four_view_prompt
 
     return strengthen_four_view_prompt(prompt)
+
+
+async def submit(
+    api_key: str,
+    *,
+    model_id: str,
+    arguments: dict[str, Any],
+    on_progress: Any = None,
+    on_request_id: Any = None,
+) -> dict[str, Any]:
+    """Submit via the existing fal queue client (run_fal_model). Not a second client."""
+    from ...fal_client import extract_image_url, run_fal_model
+
+    result = await run_fal_model(
+        model_id, arguments, api_key, on_progress=on_progress, on_request_id=on_request_id
+    )
+    image_url = ""
+    try:
+        image_url = extract_image_url(result) if isinstance(result, dict) else ""
+    except Exception:
+        image_url = ""
+    return {
+        "ok": True,
+        "providerId": "fal",
+        "modelId": model_id,
+        "result": result,
+        "imageUrl": image_url,
+        "mock": False,
+    }
+
+
+async def poll(submitted: dict[str, Any] | None = None, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    """fal queue client already waits; poll returns the completed submit payload."""
+    payload = submitted if isinstance(submitted, dict) else {}
+    return {
+        "ok": bool(payload.get("ok", True)),
+        "state": "completed",
+        "imageUrl": payload.get("imageUrl") or "",
+        "result": payload.get("result") or payload,
+        "mock": False,
+    }
+
+
+async def download(url: str, dest: Any) -> Any:
+    from pathlib import Path
+
+    from ...fal_client import download_url
+
+    return await download_url(str(url), Path(dest))

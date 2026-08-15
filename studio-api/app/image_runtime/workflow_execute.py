@@ -1,7 +1,9 @@
 """Sole production builder import site for image workflows (M42 W2).
 
 QueueWorker and product surfaces must call build_leaf_graph — never import
-builders directly. Allowed builder imports: this module, cert scripts, tests.
+builders directly. Local imagegen goes through local_comfy_adapter.submit,
+which calls build_leaf_graph here. Allowed builder imports: this module,
+local_comfy_adapter, cert scripts, tests.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ def build_leaf_graph(
     moodboard_references: Optional[list[Any]] = None,
     lora_id: Optional[str] = None,
     lora_strength: Optional[float] = None,
+    grow_mask_by: int = 6,
 ) -> dict[str, Any]:
     """Build a Comfy (or adapter) graph from a resolved contract. Builder imports only here."""
     if isinstance(contract, CanonicalImageWorkflowContract):
@@ -120,6 +123,7 @@ def build_leaf_graph(
                 denoise=denoise if denoise != 0.45 else 0.85,
                 filename_prefix=filename_prefix,
                 use_clip_vision=use_clip_vision,
+                grow_mask_by=grow_mask_by,
             )
         except RuntimeError:
             raise

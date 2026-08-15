@@ -97,10 +97,10 @@ export function useCharacterProfile(
   const flushPending = useCallback(async () => {
     const cid = idRef.current;
     const pending = pendingRef.current;
-    pendingRef.current = null;
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!projectId || !cid || !pending) return;
     await api.patchCharacterProfile(projectId, cid, pending);
+    pendingRef.current = null;
     setSavedAt(new Date().toISOString());
   }, [projectId]);
 
@@ -112,7 +112,9 @@ export function useCharacterProfile(
       pendingRef.current = { ...(pendingRef.current || {}), ...fields };
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
-        void flushPending().catch(() => undefined);
+        void flushPending().catch((e) => {
+          setError(e instanceof Error ? e.message : "Failed to save character.");
+        });
       }, 700);
     },
     [projectId, flushPending],

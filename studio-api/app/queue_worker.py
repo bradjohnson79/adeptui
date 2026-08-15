@@ -2624,15 +2624,15 @@ class JobQueue:
         self._set_status(job.id, "done", 1.0, "Txt2Vid complete", str(dest))
 
     async def _imagegen(self, db: Session, job: Job, project: Project) -> None:
-        """Execute-only image path: ImageIntent → pinned contract → workflow_execute → Output Gate."""
+        """Execute-only image path: ImageIntent → pinned contract → LocalComfy submit/poll/download → Output Gate."""
         from .image_runtime.contract import resolve_image_workflow
         from .image_runtime.legacy_adapter import normalize_legacy_image_params
         from .image_runtime.output_gate import validate_image_output
         from .image_runtime.provenance import ImageProvenance
-        from .image_runtime.workflow_execute import (
-            build_leaf_graph,
-            legacy_comfy_workflow_key,
-            prepare_executable_graph,
+        from .image_runtime.local_comfy_adapter import (
+            download as local_comfy_download,
+            poll as local_comfy_poll,
+            submit as local_comfy_submit,
         )
 
         params = self._job_params(job)
@@ -2714,7 +2714,13 @@ class JobQueue:
         steps = int(params.get("steps") or settings.imagegen_default_steps)
         cfg = float(params.get("cfg") or settings.imagegen_default_cfg)
         source_asset_id = intent.sourceAssetId or params.get("source_asset_id")
-        denoise = float(params.get("denoise") or 0.45)
+        meta = intent.metadata or {}
+        denoise = float(
+            params.get("denoise")
+            if params.get("denoise") is not None
+            else (meta.get("denoise") if meta.get("denoise") is not None else 0.45)
+        )
+        grow_mask_by = int(params.get("grow_mask_by") or meta.get("grow_mask_by") or 6)
         model = (params.get("model") or intent.enginePreference or "zimage").lower()
         custom_ckpt = params.get("checkpoint") or ""
         reasons: list[str] = []
@@ -2865,33 +2871,6 @@ class JobQueue:
         db.commit()
 
         outpaint = meta.get("output") or params.get("outpaint") or {}
-        wf = build_leaf_graph(
-            contract,
-            settings=settings,
-            prompt=build_prompt,
-            negative=negative or "blurry, low quality, watermark",
-            width=width,
-            height=height,
-            seed=seed,
-            steps=steps,
-            cfg=cfg,
-            filename_prefix=prefix,
-            reference_image=reference_image,
-            source_image=reference_image,
-            mask_image=mask_image,
-            checkpoint=ckpt if not use_zimage else None,
-            denoise=denoise,
-            outpaint_left=int(outpaint.get("left") or 0),
-            outpaint_top=int(outpaint.get("top") or 0),
-            outpaint_right=int(outpaint.get("right") or (256 if "outpaint" in contract.workflow_key else 0)),
-            outpaint_bottom=int(outpaint.get("bottom") or (256 if "outpaint" in contract.workflow_key else 0)),
-        )
-        wf = prepare_executable_graph(
-            contract,
-            wf,
-            expected_graph_hash=expected_fp,
-            enforce_certified_fingerprint=contract.status == "Certified" and not allow_draft,
-        )
 
         async def on_progress(p: float, msg: str) -> None:
             job.progress = p
@@ -2906,9 +2885,33 @@ class JobQueue:
             job.updated_at = datetime.utcnow()
             db.commit()
 
-        prompt_id = await comfy.queue_prompt(
-            wf, workflow_key=legacy_comfy_workflow_key(contract.workflow_key)
+        submitted = await local_comfy_submit(
+            contract=contract,
+            settings=settings,
+            expected_graph_hash=expected_fp,
+            enforce_certified_fingerprint=contract.status == "Certified" and not allow_draft,
+            prompt=build_prompt,
+            negative=negative or "blurry, low quality, watermark",
+            width=width,
+            height=height,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            filename_prefix=prefix,
+            reference_image=reference_image,
+            source_image=reference_image,
+            mask_image=mask_image,
+            checkpoint=ckpt if not use_zimage else None,
+            denoise=denoise,
+            grow_mask_by=grow_mask_by,
+            outpaint_left=int(outpaint.get("left") or 0),
+            outpaint_top=int(outpaint.get("top") or 0),
+            outpaint_right=int(outpaint.get("right") or (256 if "outpaint" in contract.workflow_key else 0)),
+            outpaint_bottom=int(outpaint.get("bottom") or (256 if "outpaint" in contract.workflow_key else 0)),
         )
+        if not submitted.get("ok") or not submitted.get("taskId"):
+            raise RuntimeError(submitted.get("message") or "Local Comfy submit failed")
+        prompt_id = str(submitted["taskId"])
         job.comfy_prompt_id = prompt_id
         job.stage = ImageJobStage.SAMPLING.value
         ref_hash = None
@@ -2942,8 +2945,11 @@ class JobQueue:
             }
         )
         db.commit()
-        history = await self._wait_comfy(job, prompt_id, on_progress=on_progress)
-        files = comfy.find_output_files(history)
+        polled = await local_comfy_poll(
+            submitted,
+            wait_fn=lambda pid: self._wait_comfy(job, pid, on_progress=on_progress),
+        )
+        files = list(polled.get("files") or [])
         if not files:
             raise RuntimeError(
                 "ComfyUI finished but no image output found. Confirm checkpoint exists and ImageGen workflow nodes are available."
@@ -2953,7 +2959,7 @@ class JobQueue:
         tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = tmp_dir / f"imagegen_{edit_op}_{uuid.uuid4().hex[:8]}{Path(files[0]).suffix or '.png'}"
-        shutil.copy2(files[0], tmp_path)
+        await local_comfy_download(files[0], tmp_path)
 
         job.stage = ImageJobStage.VALIDATING.value
         job.message = "Output Gate validation"
@@ -3074,14 +3080,15 @@ class JobQueue:
             KIE_FAIL_STATES,
             KIE_POLL_ATTEMPTS,
             KIE_POLL_INTERVAL_SEC,
+            download,
             extract_kie_image_url,
             kie_fail_message,
             kie_image_model_id_for_dock,
             kie_poll_timeout_message,
             resolve_official_kie_image_model,
             normalize_kie_aspect,
-            poll_kie_task,
-            submit_kie_image_task,
+            poll,
+            submit,
         )
         from .image_runtime.job_model import ImageJobStage
         from .image_runtime.output_gate import validate_image_output
@@ -3130,7 +3137,7 @@ class JobQueue:
         job.message = f"Kie.ai · {official}"
         job.comfy_prompt_id = official[:64]
         db.commit()
-        submitted = await submit_kie_image_task(
+        submitted = await submit(
             api_key,
             model=official,
             prompt=prompt,
@@ -3144,7 +3151,7 @@ class JobQueue:
         image_url = None
         last_state = ""
         for _ in range(KIE_POLL_ATTEMPTS):
-            polled = await poll_kie_task(api_key, task_id)
+            polled = await poll(api_key, task_id)
             state = str(polled.get("state") or "").lower()
             last_state = state
             image_url = polled.get("imageUrl") or extract_kie_image_url(polled.get("payload"))
@@ -3164,7 +3171,7 @@ class JobQueue:
         tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = tmp_dir / f"imagegen_kie_{uuid.uuid4().hex[:8]}.png"
-        await download_url(image_url, tmp_path)
+        await download(image_url, tmp_path)
         job.stage = ImageJobStage.VALIDATING.value
         job.message = "Output Gate validation"
         db.commit()
@@ -3191,7 +3198,7 @@ class JobQueue:
             edit_op=edit_op,
             prompt=prompt,
             seed=int(params.get("seed") if params.get("seed") is not None else 0),
-            model=str(params.get("hostedModelId") or official),
+            model=str(official or params.get("hostedModelId") or ""),
             contract_key=f"kie:{official}",
         )
 
@@ -3248,14 +3255,24 @@ class JobQueue:
         async def on_request_id(request_id: str) -> None:
             self._record_fal_request_id(db, job, model_id=model_id, request_id=request_id)
 
-        result = await run_fal_model(
-            model_id, args, api_key, on_progress=on_progress, on_request_id=on_request_id
+        from .hosted_providers.adapters import fal_adapter as fal_image_adapter
+
+        submitted = await fal_image_adapter.submit(
+            api_key,
+            model_id=model_id,
+            arguments=args,
+            on_progress=on_progress,
+            on_request_id=on_request_id,
         )
-        image_url = extract_image_url(result)
+        polled = await fal_image_adapter.poll(submitted)
+        image_url = (
+            polled.get("imageUrl")
+            or extract_image_url(polled.get("result") or submitted.get("result") or {})
+        )
         tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = tmp_dir / f"imagegen_fal_{uuid.uuid4().hex[:8]}.png"
-        await download_url(image_url, tmp_path)
+        await fal_image_adapter.download(image_url, tmp_path)
         job.stage = ImageJobStage.VALIDATING.value
         job.message = "Output Gate validation"
         db.commit()
@@ -3315,7 +3332,7 @@ class JobQueue:
         source_asset_id: str | None = None,
         intent_id: str | None = None,
     ) -> None:
-        from .image_runtime.provenance import ImageProvenance
+        from .image_runtime.provenance import ImageProvenance, executed_image_stamp
 
         dest_dir = settings.data_dir / "projects" / project.id / "assets"
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -3333,18 +3350,23 @@ class JobQueue:
         except Exception:
             hist = {}
 
+        stamp_provider, stamp_runtime, stamp_model = executed_image_stamp(
+            params,
+            contract_key=contract_key or str(hist.get("workflowKey") or ""),
+            model=model,
+        )
         provenance = ImageProvenance(
             workflow=contract_key or hist.get("workflowKey"),
             workflowVersion=contract_version or hist.get("workflowVersion"),
-            runtime="comfy",
-            provider="local",
+            runtime=stamp_runtime,
+            provider=stamp_provider,
             references=[ref_hash] if ref_hash else list(params.get("reference_ids") or []),
             prompt=prompt or hist.get("prompt") or "",
             seed=seed or hist.get("seed"),
             parentImages=[parent_id] if parent_id else [],
             validation=gate.to_dict() if hasattr(gate, "to_dict") else dict(gate or {}),
             intentId=intent_id,
-            settings={"checkpoint": ckpt, "model": model, "checksum": getattr(gate, "checksum", None)},
+            settings={"checkpoint": ckpt, "model": stamp_model or str((params.get("imageRuntime") or {}).get("officialModelId") or params.get("officialModelId") or "") or model, "checksum": getattr(gate, "checksum", None)},
         )
 
         intent_metadata = {}

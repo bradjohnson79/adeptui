@@ -35,3 +35,4 @@ export {
   fetchDiscoveredHostedModelRows,
 } from "./discoveredModels";
 export type { DiscoveredHostedModality } from "./discoveredModels";
+export { shortJobMessage } from "./shortJobMessage";

@@ -13,19 +13,61 @@ from .recommend import recommend_image_family
 from .references import normalize_ui_refs
 
 
-def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
-    """If the request selected a Kie API dock, return dock + official Market model."""
+def _request_source(body: dict[str, Any] | None) -> str:
     src = dict(body or {})
+    ctx = src.get("creativeContext") if isinstance(src.get("creativeContext"), dict) else {}
+    return str(
+        src.get("source")
+        or src.get("providerKind")
+        or ctx.get("providerKind")
+        or ctx.get("source")
+        or ""
+    ).strip().lower()
+
+
+def _local_force_key(body: dict[str, Any] | None) -> str:
+    key = str((body or {}).get("forceWorkflowKey") or "").strip()
+    if not key:
+        return ""
+    if key.startswith("kie:") or key.startswith("fal:") or key.startswith("fal-ai/"):
+        return ""
+    return key
+
+
+def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
+    """If the request selected a Kie API dock, return dock + official Market model.
+
+    Local family "flux" / source=local / forceWorkflowKey flux.txt2img is NOT a
+    Kie dock. Bare "flux" and modelFamilyPreference=flux stay local. Hosted
+    flux-kie is a separate path only when the user selected that API model
+    (hostedModelId / kieImageModelId / dock id flux-kie).
+    """
+    src = dict(body or {})
+    if _request_source(src) == "local":
+        return None
+    if _local_force_key(src):
+        return None
     i2i = bool(src.get("source_asset_id") or src.get("sourceAssetId") or src.get("edit"))
     try:
-        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+        from ..hosted_providers.adapters.kie_adapter import (
+            KIE_IMAGE_T2I_BY_DOCK,
+            kie_image_model_id_for_dock,
+        )
     except Exception:
         return None
+    official_ids = set(KIE_IMAGE_T2I_BY_DOCK.values())
+    pinned = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
+    if pinned:
+        official = kie_image_model_id_for_dock(pinned, image_to_image=i2i)
+        if not official and pinned in official_ids:
+            official = pinned
+        if official:
+            dock = str(src.get("hostedModelId") or "").strip() or pinned
+            return {"dock": dock, "official": official}
     for raw in (
         src.get("hostedModelId"),
         src.get("model"),
         src.get("modelId"),
-        src.get("modelFamilyPreference"),
     ):
         dock = str(raw or "").strip()
         if not dock:
@@ -34,6 +76,90 @@ def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
         if official:
             return {"dock": dock, "official": official}
     return None
+
+
+def _fal_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
+    src = dict(body or {})
+    if _request_source(src) == "local":
+        return None
+    if _local_force_key(src):
+        return None
+    try:
+        from ..fal_catalog import fal_image_model_id_for_dock
+    except Exception:
+        return None
+    pinned = str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip()
+    if pinned:
+        dock = str(src.get("hostedModelId") or "").strip() or pinned
+        return {"dock": dock, "official": pinned}
+    for raw in (src.get("hostedModelId"), src.get("model"), src.get("modelId")):
+        dock = str(raw or "").strip()
+        if not dock:
+            continue
+        official = fal_image_model_id_for_dock(dock)
+        if official:
+            return {"dock": dock, "official": official}
+    return None
+
+
+def _hosted_execution_pin(body: dict[str, Any] | None) -> dict[str, Any] | None:
+    src = dict(body or {})
+    if _request_source(src) == "local":
+        return None
+    if _local_force_key(src):
+        return None
+    explicit_kie = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
+    explicit_fal = str(src.get("falImageModelId") or src.get("fal_image_model_id") or "").strip()
+    kie_route = _kie_image_route(src)
+    fal_route = _fal_image_route(src)
+    route = None
+    provider = ""
+    if explicit_kie and kie_route:
+        route, provider = kie_route, "kie"
+    elif explicit_fal and fal_route:
+        route, provider = fal_route, "fal"
+    elif fal_route and not explicit_kie:
+        route, provider = fal_route, "fal"
+    elif kie_route:
+        route, provider = kie_route, "kie"
+    if not route or provider not in {"kie", "fal"}:
+        return None
+    official = str(route.get("official") or "")
+    dock = str(route.get("dock") or official)
+    pin = {
+        "workflowKey": f"{provider}:{official}",
+        "workflowVersion": "1.0.0",
+        "workflowId": f"{provider}:{official}",
+        "modelFamily": provider,
+        "modelVariant": official,
+        "provider": provider,
+        "adapter": provider,
+        "engine": provider,
+        "status": "Certified",
+        "officialModelId": official,
+        "hostedModelId": dock,
+        "canExecute": True,
+        "reason": "hosted " + provider + " adapter " + official,
+    }
+    if provider == "kie":
+        pin["kieImageModelId"] = official
+    else:
+        pin["falImageModelId"] = official
+    return pin
+
+
+def _local_execution_pin(snapshot: dict[str, Any] | None, family: str = "") -> dict[str, Any]:
+    out = dict(snapshot or {})
+    provider = str(out.get("provider") or "local").strip().lower()
+    if provider in {"", "comfy", "comfyui"}:
+        provider = "local"
+    out["provider"] = provider
+    adapter = str(out.get("adapter") or out.get("engine") or "comfy").strip().lower()
+    if adapter in {"", "comfyui", "local"}:
+        adapter = "comfy"
+    out["adapter"] = adapter
+    out["officialModelId"] = str(out.get("officialModelId") or out.get("modelVariant") or out.get("modelFamily") or family or "").strip()
+    return out
 
 
 _ASPECT = {
@@ -99,6 +225,7 @@ def build_creative_context(project_id: str, *, extras: dict[str, Any] | None = N
     for k in (
         "visualLanguage",
         "cinematography",
+        "cinematographer",
         "lighting",
         "continuity",
         "approvedReferences",
@@ -364,43 +491,42 @@ def compile_image_request(
     except Exception:
         pass
 
-    kie_route = _kie_image_route(body)
-    if kie_route:
-        # Selected Kie API dock: pin Market createTask. Never resolve a local workflow.
+    from .resolve import resolve_image_capability
+
+    capability = resolve_image_capability(body)
+    if not capability.get("canExecute"):
+        raise RuntimeError(str(capability.get("reason") or "Image capability refused"))
+
+    hosted_pin = _hosted_execution_pin(body)
+    if hosted_pin:
+        provider = hosted_pin["provider"]
+        official = hosted_pin["officialModelId"]
+        dock = hosted_pin["hostedModelId"]
         intent.providerPreference = "cloud"
-        intent.enginePreference = "kie"
-        official = kie_route["official"]
-        dock = kie_route["dock"]
-        pinned = {
-            "workflowKey": f"kie:{official}",
-            "workflowVersion": "1.0.0",
-            "workflowId": f"kie:{official}",
-            "modelFamily": "kie",
-            "modelVariant": official,
-            "provider": "kie",
-            "engine": "kie",
-            "status": "Certified",
-            "kieImageModelId": official,
-            "hostedModelId": dock,
-        }
-        return {
+        intent.enginePreference = provider
+        out = {
             "imageIntent": intent.model_dump(),
-            "imageRuntime": pinned,
+            "imageRuntime": hosted_pin,
             "recommendation": {
-                "executionFamily": "kie",
-                "recommendedFamily": "kie",
+                "executionFamily": provider,
+                "recommendedFamily": provider,
                 "fallbackApplied": False,
                 "lockModelFamily": True,
-                "whyThisModel": f"Selected Kie.ai model {dock}",
+                "whyThisModel": "Selected " + provider + " model " + str(dock),
                 "estimates": {"costLabel": "Paid hosted API"},
             },
             "promptIntel": prompt_info,
             "creativeContextDigest": creative.get("digest"),
             "presetApplied": preset_applied,
             "allowDraft": False,
-            "kieImageModelId": official,
             "hostedModelId": dock,
+            "officialModelId": official,
         }
+        if provider == "kie":
+            out["kieImageModelId"] = official
+        else:
+            out["falImageModelId"] = official
+        return out
 
     from ..image_runtime.contract import resolve_image_workflow
 
@@ -431,10 +557,21 @@ def compile_image_request(
             if forced_family:
                 intent.enginePreference = forced_family
                 family = forced_family
-    except RuntimeError:
+    except RuntimeError as exc:
         if force_key:
             # Character Sheet / explicit workflow pin: fail visibly. Never silently
             # substitute Z-Image for Illustrious, Qwen, or any forced family.
+            msg = str(exc)
+            low = msg.lower()
+            flux_local = str(family or "").lower() == "flux" or str(force_key).startswith("flux.")
+            missing = any(
+                s in low
+                for s in ("not executable", "not certified", "unknown image workflow")
+            )
+            if flux_local and missing and "not installed" not in low:
+                raise RuntimeError(
+                    "FLUX is Not Installed / not supported locally. " + msg
+                ) from exc
             raise
         if requested_draft or purpose == "scene_shot_preview":
             raise
@@ -468,7 +605,9 @@ def compile_image_request(
             "executionNote": "Preferred family not Certified — using certified ZImage",
         }
 
-    pinned = contract.to_pinned_snapshot()
+    pinned = _local_execution_pin(contract.to_pinned_snapshot(), family)
+    pinned["canExecute"] = True
+    pinned.setdefault("reason", "local comfy path")
     return {
         "imageIntent": intent.model_dump(),
         "imageRuntime": pinned,

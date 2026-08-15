@@ -73,20 +73,34 @@ def generate_images(
             "cloudPaid": intent.get("providerPreference") == "cloud",
             "tag": body.get("tag") or "imagegen",
             "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId") or (pinned or {}).get("hostedModelId"),
+            "officialModelId": (pinned or {}).get("officialModelId") or compiled.get("officialModelId"),
             "kieImageModelId": (
-                body.get("kieImageModelId")
+                (pinned or {}).get("kieImageModelId")
                 or compiled.get("kieImageModelId")
-                or (pinned or {}).get("kieImageModelId")
+                or body.get("kieImageModelId")
+            ),
+            "falImageModelId": (
+                (pinned or {}).get("falImageModelId")
+                or compiled.get("falImageModelId")
+                or body.get("falImageModelId")
             ),
             "providerPreference": intent.get("providerPreference") or body.get("providerPreference"),
             # Reference-fidelity strength (img2img / ref_edit). Lower denoise =
             # more of the reference latent preserved. Character Creator passes a
             # fidelity-first value when a Character Reference is attached.
             "denoise": body.get("denoise"),
+            "grow_mask_by": body.get("grow_mask_by"),
+            "creativeContext": body.get("creativeContext") if isinstance(body.get("creativeContext"), dict) else {},
             "productionDock": dock_meta,
             "preferenceProvenance": (dock_meta or {}).get("provenance"),
         }
-        if params.get("kieImageModelId"):
+        pin_provider = str((pinned or {}).get("provider") or "").strip().lower()
+        if pin_provider == "fal" or params.get("falImageModelId"):
+            params["cloudPaid"] = True
+            params["providerPreference"] = "cloud"
+            params["falImageModelId"] = params.get("falImageModelId") or (pinned or {}).get("officialModelId")
+            params.pop("kieImageModelId", None)
+        elif pin_provider == "kie" or params.get("kieImageModelId"):
             params["cloudPaid"] = True
             params["providerPreference"] = "cloud"
             from ..secrets_store import get_secret

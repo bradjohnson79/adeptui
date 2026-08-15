@@ -22,7 +22,7 @@ type Props = {
 };
 
 function generatorName(c: CharacterCandidate): string {
-  return c.modelVariant || c.model || c.workflowKey || "Local generator";
+  return c.provenance || c.modelVariant || c.model || "Local generator";
 }
 
 /** Friendly current stage for a generating candidate (e.g. "Front / Side"). */

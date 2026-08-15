@@ -86,6 +86,11 @@ describe("character sheet failed-job hydration", () => {
     expect(progress.totalViews).toBe(4);
   });
 
+  it("does not fall back generatorName to workflowKey", () => {
+    expect(gridSrc).toContain("c.provenance || c.modelVariant || c.model || \"Local generator\"");
+    expect(gridSrc).not.toContain("c.workflowKey");
+  });
+
   it("rewrites hero_identity to Front and strips --- details --- traceback", () => {
     const details = "hero_identity: Kie createTask failed for nano-banana\n\n--- details ---\nTraceback (most recent call last):\n  File \"queue_worker.py\", line 1";
     const c: CharacterCandidate = {

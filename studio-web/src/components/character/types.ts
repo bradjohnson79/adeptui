@@ -4,6 +4,8 @@
  * schema — do not fork per-surface types.
  */
 
+import { shortJobMessage } from "../generators/shortJobMessage";
+
 export type CharacterProfile = {
   id: string;
   project_id?: string;
@@ -173,9 +175,8 @@ export function characterSheetProvenanceLabel(c: CharacterCandidate): string {
     const modelName = c.model || c.modelVariant || "";
     return `API — ${[c.provider, modelName].filter(Boolean).join(" / ") || "cloud"}${mode}`;
   }
-  const familyKey = String(c.selectedSource || c.model || c.workflowKey || "")
-    .toLowerCase()
-    .split(".")[0];
+  const familyKey = String(c.selectedSource || c.model || "")
+    .toLowerCase();
   const display = LOCAL_FAMILY_PROVENANCE[familyKey] || c.modelVariant || c.model || familyKey;
   return display ? `LOCAL — ${display}${mode}` : "LOCAL";
 }
@@ -195,15 +196,6 @@ export function viewIsFailed(v: CharacterViewJob): boolean {
 export function viewIsFinished(v: CharacterViewJob): boolean {
   const status = normStatus(v.status);
   return status === "done" || !!v.assetId || (VIEW_FAIL_STATUSES as readonly string[]).includes(status);
-}
-
-const DETAILS_SPLIT = /---\s*details\s*---/i;
-
-/** Keep the short job summary; never show worker traceback on a candidate card. */
-function shortJobMessage(raw: string): string {
-  const text = String(raw || "");
-  const cut = text.search(DETAILS_SPLIT);
-  return (cut >= 0 ? text.slice(0, cut) : text).trim();
 }
 
 /** Replace raw sheet-view role keys (hero_identity) with creator labels (Front). */

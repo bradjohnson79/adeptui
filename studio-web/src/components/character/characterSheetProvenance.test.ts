@@ -36,6 +36,17 @@ describe("characterSheetProvenanceLabel", () => {
     ).toBe("LOCAL — Illustrious XL — Profile Guided");
   });
 
+
+  it("does not split workflowKey on . as family", () => {
+    expect(
+      characterSheetProvenanceLabel({
+        providerKind: "local",
+        provider: "comfyui",
+        workflowKey: "illustrious.txt2img",
+      }),
+    ).toBe("LOCAL");
+  });
+
   it("uses 1-based Batch N of M indexing", () => {
     expect(characterSheetBatchLabel({ batchIndex: 2, batchOf: 3 })).toBe("Batch 2 of 3");
     expect(characterSheetBatchLabel({ batchIndex: 0, batchOf: 2 })).toBe("Batch 0 of 2");

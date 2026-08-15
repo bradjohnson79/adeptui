@@ -753,14 +753,6 @@ def _normalize_local_family(family: str) -> str:
 def _txt2img_workflow_key(family: str, hosted_model_id: str | None = None) -> str:
     fam = (family or "").strip().lower()
     mid = (hosted_model_id or "").lower()
-    try:
-        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
-
-        official = kie_image_model_id_for_dock(hosted_model_id or family)
-        if official:
-            return f"kie:{official}"
-    except Exception:
-        pass
     if fam == "krea2" or "krea" in mid:
         if "raw" in mid:
             return "krea2.raw_txt2img"
@@ -2918,77 +2910,17 @@ def _enqueue_txt2img(
         body["seed"] = seed
     if provider_kind == "api":
         hosted = hosted_model_id or model_family_preference
-        family = _hosted_family_for_model(str(hosted)) or model_family_preference
-        body["modelFamilyPreference"] = family
+        body["source"] = "api"
         body["model"] = hosted
         body["lockModelFamily"] = True
         body["providerPreference"] = "cloud"
         body["hostedModelId"] = hosted
-        # Never pin a local Comfy workflow for an API-only candidate.
         body.pop("forceWorkflowKey", None)
         body.pop("allow_force_workflow_key", None)
         if not source_asset_id:
             body.pop("source_asset_id", None)
-        job = enqueue_imagegen_job(db, project_id, body)
-        try:
-            params = json.loads(job.params_json or "{}")
-        except Exception:
-            params = {}
-        runtime_key = str((params.get("imageRuntime") or {}).get("workflowKey") or "")
-        fal_id = _fal_image_model_id(str(hosted))
-        if fal_id:
-            # Existing fal queue client can dispatch this still-image endpoint.
-            # Pin it so the worker submits through Fal, never Comfy.
-            params["cloudPaid"] = True
-            params["falImageModelId"] = fal_id
-            params["hostedModelId"] = hosted
-            params["providerPreference"] = "cloud"
-            job.params_json = json.dumps(params)
-            db.commit()
-            db.refresh(job)
-            return job
-        kie_id = None
-        try:
-            from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
-            kie_id = kie_image_model_id_for_dock(str(hosted), image_to_image=bool(source_asset_id))
-        except Exception:
-            kie_id = None
-        if kie_id:
-            from ..secrets_store import get_secret
+        return enqueue_imagegen_job(db, project_id, body)
 
-            if not get_secret("kie_api_key"):
-                job.status = "failed"
-                job.message = (
-                    "Kie.ai API key required. Open Setup → AI Providers and add a Kie.ai key."
-                )
-                job.params_json = json.dumps(params)
-                db.commit()
-                db.refresh(job)
-                return job
-            params["cloudPaid"] = True
-            params["kieImageModelId"] = kie_id
-            params["hostedModelId"] = hosted
-            params["providerPreference"] = "cloud"
-            runtime = params.get("imageRuntime") if isinstance(params.get("imageRuntime"), dict) else {}
-            runtime["workflowKey"] = f"kie:{kie_id}"
-            runtime["kieImageModelId"] = kie_id
-            runtime["hostedModelId"] = hosted
-            params["imageRuntime"] = runtime
-            job.params_json = json.dumps(params)
-            db.commit()
-            db.refresh(job)
-            return job
-        cloud_paid = bool(params.get("cloudPaid"))
-        already_kie = str(runtime_key).startswith("kie:") or bool(params.get("kieImageModelId"))
-        if not cloud_paid and not runtime_key.startswith("imagen.") and not already_kie:
-            job.status = "failed"
-            job.message = (
-                f"API model {hosted} resolved to local workflow {runtime_key or 'unknown'}; "
-                "refusing silent Comfy/Z-Image substitute."
-            )
-            db.commit()
-            db.refresh(job)
-        return job
     if force_workflow_key:
         body["forceWorkflowKey"] = force_workflow_key
         body["allow_force_workflow_key"] = True

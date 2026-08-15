@@ -353,12 +353,15 @@ def test_api_kie_plan_family_is_kie_not_imagen(monkeypatch) -> None:
         },
     )
     assert [p["family"] for p in plans] == ["kie", "kie"]
-    assert plans[0]["kie_image_model_id"] == "nano-banana-2"
-    assert plans[1]["kie_image_model_id"] == "flux"
+    assert plans[0]["hosted_model_id"] == "nano-banana-kie"
+    assert plans[1]["hosted_model_id"] == "flux-kie"
+    assert plans[0].get("kie_image_model_id") in (None, "")
+    assert plans[1].get("kie_image_model_id") in (None, "")
 
 
 def test_enqueue_kie_pins_official_id(monkeypatch) -> None:
     from app.db import Job, Project, SessionLocal, init_db
+    from app.image_product.compile import compile_image_request
     from app.prop_creator.service import create_or_update_prop, generate_candidates
 
     _catalog(monkeypatch)
@@ -366,6 +369,8 @@ def test_enqueue_kie_pins_official_id(monkeypatch) -> None:
 
     def _enqueue(_db, _project_id, body):
         captured.append(dict(body))
+        compiled = compile_image_request(_project_id, body)
+        runtime = compiled.get("imageRuntime") or {}
         job = Job(
             id=str(uuid.uuid4()),
             project_id=_project_id,
@@ -373,10 +378,11 @@ def test_enqueue_kie_pins_official_id(monkeypatch) -> None:
             status="queued",
             params_json=json.dumps(
                 {
-                    "cloudPaid": True,
-                    "kieImageModelId": body.get("kieImageModelId"),
-                    "hostedModelId": body.get("hostedModelId"),
-                    "imageRuntime": {"workflowKey": "kie:%s" % (body.get("kieImageModelId") or "")},
+                    "cloudPaid": runtime.get("provider") == "kie",
+                    "kieImageModelId": compiled.get("kieImageModelId") or runtime.get("kieImageModelId"),
+                    "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId"),
+                    "officialModelId": runtime.get("officialModelId"),
+                    "imageRuntime": runtime,
                 }
             ),
         )
@@ -409,21 +415,26 @@ def test_enqueue_kie_pins_official_id(monkeypatch) -> None:
         assert all(c.status == "queued" for c in generated.candidates)
         assert len(captured) == 2
         for body in captured:
-            assert body.get("kieImageModelId") == "nano-banana-2"
             assert body.get("hostedModelId") == "nano-banana-kie"
-            assert body.get("modelFamilyPreference") == "kie"
+            assert body.get("source") == "api"
+            assert body.get("kieImageModelId") in (None, "")
             assert body.get("providerPreference") == "cloud"
         job = db.get(Job, generated.candidates[0].job_id)
         params = json.loads(job.params_json or "{}")
+        runtime = params.get("imageRuntime") or {}
         assert params.get("kieImageModelId") == "nano-banana-2"
         assert params.get("cloudPaid") is True
-        assert (params.get("imageRuntime") or {}).get("workflowKey") == "kie:nano-banana-2"
+        assert runtime.get("workflowKey") == "kie:nano-banana-2"
+        assert runtime.get("provider") == "kie"
+        assert runtime.get("adapter") == "kie"
+        assert runtime.get("officialModelId") == "nano-banana-2"
     finally:
         db.close()
 
 
 def test_enqueue_fal_does_not_false_pin_kie_via_flux_family(monkeypatch) -> None:
     from app.db import Job, Project, SessionLocal, init_db
+    from app.image_product.compile import compile_image_request
     from app.prop_creator.service import create_or_update_prop, generate_candidates
 
     _catalog(monkeypatch)
@@ -431,6 +442,8 @@ def test_enqueue_fal_does_not_false_pin_kie_via_flux_family(monkeypatch) -> None
 
     def _enqueue(_db, _project_id, body):
         captured.append(dict(body))
+        compiled = compile_image_request(_project_id, body)
+        runtime = compiled.get("imageRuntime") or {}
         job = Job(
             id=str(uuid.uuid4()),
             project_id=_project_id,
@@ -438,9 +451,12 @@ def test_enqueue_fal_does_not_false_pin_kie_via_flux_family(monkeypatch) -> None
             status="queued",
             params_json=json.dumps(
                 {
-                    "cloudPaid": False,
-                    "hostedModelId": body.get("hostedModelId"),
-                    "imageRuntime": {"workflowKey": "zimage.txt2img"},
+                    "cloudPaid": runtime.get("provider") == "fal",
+                    "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId"),
+                    "falImageModelId": compiled.get("falImageModelId") or runtime.get("falImageModelId"),
+                    "kieImageModelId": compiled.get("kieImageModelId") or runtime.get("kieImageModelId"),
+                    "officialModelId": runtime.get("officialModelId"),
+                    "imageRuntime": runtime,
                 }
             ),
         )
@@ -477,13 +493,18 @@ def test_enqueue_fal_does_not_false_pin_kie_via_flux_family(monkeypatch) -> None
         assert len(captured) == 1
         body = captured[0]
         assert body.get("hostedModelId") == "flux-fal"
+        assert body.get("source") == "api"
         assert body.get("kieImageModelId") in (None, "")
-        assert body.get("modelFamilyPreference") != "flux"
         job = db.get(Job, generated.candidates[0].job_id)
         params = json.loads(job.params_json or "{}")
+        runtime = params.get("imageRuntime") or {}
         assert params.get("falImageModelId") == "fal-ai/flux/dev"
         assert params.get("kieImageModelId") in (None, "")
         assert params.get("cloudPaid") is True
+        assert runtime.get("provider") == "fal"
+        assert runtime.get("adapter") == "fal"
+        assert runtime.get("officialModelId") == "fal-ai/flux/dev"
+        assert runtime.get("workflowKey") == "fal:fal-ai/flux/dev"
     finally:
         db.close()
 
@@ -521,3 +542,240 @@ def test_use_as_prop_identity_points_at_existing_asset() -> None:
         assert "approved_prop" in labels
     finally:
         db.close()
+
+
+def test_prop_local_flux_job_does_not_call_imagegen_kie(monkeypatch) -> None:
+    """Local flux Prop jobs must not alias to flux-kie or enter _imagegen_kie."""
+    from app.db import Job, Project, SessionLocal, init_db
+    from app.hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+    from app.image_product.compile import compile_image_request
+    from app.prop_creator.service import create_or_update_prop, generate_candidates
+
+    assert kie_image_model_id_for_dock("flux") is None
+    assert kie_image_model_id_for_dock("flux-kie") == "flux"
+
+    _catalog(monkeypatch)
+    compiled_params: list[dict] = []
+
+    def _enqueue(_db, _project_id, body):
+        compiled = compile_image_request(_project_id, body)
+        runtime = compiled.get("imageRuntime") or {}
+        params = {
+            "kieImageModelId": compiled.get("kieImageModelId") or runtime.get("kieImageModelId"),
+            "imageRuntime": runtime,
+            "imageIntent": compiled.get("imageIntent"),
+        }
+        compiled_params.append(params)
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=_project_id,
+            kind="imagegen",
+            status="queued",
+            params_json=json.dumps(params),
+        )
+        _db.add(job)
+        _db.commit()
+        _db.refresh(job)
+        return job
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(uuid.uuid4())
+        db.add(Project(id=project_id, name="Local Flux Isolation"))
+        db.commit()
+        prop = create_or_update_prop(db, project_id, name="Mug")
+        generated = generate_candidates(
+            db,
+            project_id,
+            prop.id,
+            generator_sources={
+                "local": [{"modelId": "flux", "enabled": True, "batchCount": 1}],
+                "api": None,
+            },
+        )
+        assert len(generated.candidates) == 1
+        cand = generated.candidates[0]
+        assert cand.source == "local"
+        assert cand.family == "flux"
+        assert cand.status == "queued"
+        assert compiled_params
+        params = compiled_params[0]
+        kie_image_model = str(params.get("kieImageModelId") or "").strip()
+        assert kie_image_model == ""
+        runtime = params.get("imageRuntime") or {}
+        assert not str(runtime.get("workflowKey") or "").startswith("kie:")
+        assert runtime.get("provider") != "kie"
+        assert runtime.get("engine") != "kie"
+        # queue_worker._imagegen calls _imagegen_kie only when kieImageModelId is set.
+        called: list[str] = []
+        if kie_image_model:
+            called.append("_imagegen_kie")
+        assert called == []
+    finally:
+        db.close()
+
+def test_local_flux_compile_is_not_kie_route() -> None:
+    from app.hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+    from app.image_product.compile import _kie_image_route, compile_image_request
+
+    assert kie_image_model_id_for_dock("flux") is None
+    assert kie_image_model_id_for_dock("flux-kie") == "flux"
+
+    local_body = {
+        "prompt": "a brass mug on a table",
+        "purpose": "project_prop",
+        "modelFamilyPreference": "flux",
+        "model": "flux",
+        "lockModelFamily": True,
+        "source": "local",
+        "forceWorkflowKey": "flux.txt2img",
+        "allow_force_workflow_key": True,
+        "creativeContext": {"objective": "project_prop", "providerKind": "local"},
+    }
+    assert _kie_image_route(local_body) is None
+    assert _kie_image_route({"modelFamilyPreference": "flux", "model": "flux"}) is None
+    hosted = _kie_image_route({"hostedModelId": "flux-kie", "prompt": "a mug"})
+    assert hosted == {"dock": "flux-kie", "official": "flux"}
+    pinned = _kie_image_route({"kieImageModelId": "flux", "hostedModelId": "flux-kie"})
+    assert pinned == {"dock": "flux-kie", "official": "flux"}
+
+    try:
+        compiled = compile_image_request("proj-local-flux", local_body)
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "kie:" not in msg.lower()
+        assert "createtask" not in msg.lower()
+        assert "flux" in msg.lower() or "not installed" in msg.lower()
+        return
+    assert compiled.get("kieImageModelId") in (None, "")
+    wk = str((compiled.get("imageRuntime") or {}).get("workflowKey") or "")
+    assert not wk.startswith("kie:")
+    assert compiled.get("hostedModelId") in (None, "", "flux")
+
+
+def test_local_flux_prop_does_not_call_imagegen_kie(monkeypatch) -> None:
+    """UI-selected local FLUX must not alias to flux-kie or call createTask."""
+    import asyncio
+    import json
+    import uuid
+
+    from app.db import Job, Project, SessionLocal, init_db
+    from app.image_product.compile import _kie_image_route
+    from app.prop_creator.service import create_or_update_prop, generate_candidates
+    from app.queue_worker import JobQueue
+
+    _catalog(monkeypatch)
+    kie_calls: list[str] = []
+
+    async def _spy_kie(self, db, job, project, params, model_id, edit_op="generate"):
+        kie_calls.append(str(model_id))
+        raise AssertionError("local flux must not call _imagegen_kie")
+
+    async def _spy_fal(self, db, job, project, params, model_id, edit_op="generate"):
+        raise AssertionError("local flux must not call _imagegen_fal")
+
+    monkeypatch.setattr(JobQueue, "_imagegen_kie", _spy_kie)
+    monkeypatch.setattr(JobQueue, "_imagegen_fal", _spy_fal)
+
+    captured: list[dict] = []
+
+    def _enqueue(_db, _project_id, body):
+        captured.append(dict(body))
+        assert _kie_image_route(body) is None
+        assert body.get("kieImageModelId") in (None, "")
+        assert body.get("forceWorkflowKey") == "flux.txt2img"
+        assert body.get("source") == "local"
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=_project_id,
+            kind="imagegen",
+            status="queued",
+            params_json=json.dumps(
+                {
+                    "prompt": body.get("prompt"),
+                    "model": "flux",
+                    "source": "local",
+                    "providerPreference": "local",
+                    "forceWorkflowKey": "flux.txt2img",
+                    "imageRuntime": {"workflowKey": "flux.txt2img", "modelFamily": "flux"},
+                    "imageIntent": {
+                        "projectId": _project_id,
+                        "prompt": body.get("prompt"),
+                        "enginePreference": "flux",
+                        "providerPreference": "local",
+                        "operation": "image.generate",
+                        "purpose": "project_prop",
+                        "width": 1024,
+                        "height": 1024,
+                        "metadata": {},
+                    },
+                }
+            ),
+        )
+        _db.add(job)
+        _db.commit()
+        _db.refresh(job)
+        return job
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(uuid.uuid4())
+        project = Project(id=project_id, name="Local Flux")
+        db.add(project)
+        db.commit()
+        prop = create_or_update_prop(db, project_id, name="Mug")
+        generated = generate_candidates(
+            db,
+            project_id,
+            prop.id,
+            generator_sources={
+                "local": [{"modelId": "flux", "enabled": True, "batchCount": 1}],
+                "api": None,
+            },
+        )
+        assert len(generated.candidates) == 1
+        cand = generated.candidates[0]
+        assert cand.source == "local"
+        assert cand.family == "flux"
+        assert "LOCAL" in (cand.provenance_label or "")
+        assert len(captured) == 1
+        body = captured[0]
+        assert body.get("modelFamilyPreference") == "flux"
+        assert body.get("forceWorkflowKey") == "flux.txt2img"
+        assert body.get("source") == "local"
+        assert body.get("kieImageModelId") in (None, "")
+        assert body.get("hostedModelId") in (None, "")
+        assert _kie_image_route(body) is None
+
+        job = db.get(Job, cand.job_id)
+        assert job is not None
+        params = json.loads(job.params_json or "{}")
+        assert params.get("kieImageModelId") in (None, "")
+
+        def _stop_local(*_a, **_k):
+            raise RuntimeError("LOCAL_PATH_REACHED")
+
+        monkeypatch.setattr(
+            "app.image_runtime.contract.resolve_image_workflow",
+            _stop_local,
+        )
+        worker = JobQueue()
+
+        async def _run():
+            await worker._imagegen(db, job, project)
+
+        try:
+            asyncio.run(_run())
+        except RuntimeError as exc:
+            assert "LOCAL_PATH_REACHED" in str(exc)
+        except Exception as exc:
+            assert "local flux must not call" not in str(exc)
+            raise
+        assert kie_calls == []
+    finally:
+        db.close()
+

@@ -314,107 +314,37 @@ def _enqueue_api_job(db: Session, project_id: str, body: dict[str, Any], plan: d
     hosted = str(plan.get("hosted_model_id") or plan.get("model_id") or plan.get("model") or "").strip()
     if not hosted:
         raise PropCreatorError(_fail_api_candidate_error(plan, "No modelId was provided."))
-    kie_id = plan.get("kie_image_model_id")
-    try:
-        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
-
-        kie_id = kie_id or kie_image_model_id_for_dock(
-            hosted, image_to_image=bool(body.get("source_asset_id"))
-        )
-    except Exception:
-        kie_id = kie_id or None
-    fal_id = None
-    try:
-        from ..fal_catalog import fal_image_model_id_for_dock
-
-        fal_id = fal_image_model_id_for_dock(hosted)
-    except Exception:
-        fal_id = None
+    body["source"] = "api"
     body["model"] = hosted
     body["lockModelFamily"] = True
     body["providerPreference"] = "cloud"
     body["hostedModelId"] = hosted
     body.pop("forceWorkflowKey", None)
     body.pop("allow_force_workflow_key", None)
-    if kie_id:
-        # Same pin CC compile._kie_image_route / visual_sheet apply. Official Market id.
-        body["kieImageModelId"] = kie_id
-        body["modelFamilyPreference"] = "kie"
-    elif fal_id:
-        # Do not pass family "flux" — kie_adapter aliases flux → flux-kie and compile
-        # would false-pin kieImageModelId (then demand a Kie key). Scaffold compile
-        # on a Certified local family; falImageModelId is pinned on the job below.
-        body.pop("kieImageModelId", None)
-        body["modelFamilyPreference"] = "zimage"
-    else:
-        try:
-            from .generation import _hosted_family_for_model
-
-            family = _hosted_family_for_model(hosted) or plan.get("family") or hosted
-        except Exception:
-            family = plan.get("family") or hosted
-        # A generic "flux" family aliases to the Kie flux dock. Use the dock id.
-        try:
-            from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
-
-            if family and kie_image_model_id_for_dock(str(family)) and not kie_id:
-                family = hosted
-        except Exception:
-            pass
-        body["modelFamilyPreference"] = family
+    body.pop("kieImageModelId", None)
+    body.pop("falImageModelId", None)
     job = enqueue_imagegen_job(db, project_id, body)
     try:
         params = json.loads(job.params_json or "{}")
     except Exception:
         params = {}
-    runtime_key = str((params.get("imageRuntime") or {}).get("workflowKey") or "")
-    if fal_id:
-        params["cloudPaid"] = True
-        params["falImageModelId"] = fal_id
-        params["hostedModelId"] = hosted
-        params["providerPreference"] = "cloud"
-        params.pop("kieImageModelId", None)
-        job.params_json = json.dumps(params)
-        db.commit()
-        db.refresh(job)
-        return job
-    if kie_id:
-        from ..secrets_store import get_secret
-
-        if not get_secret("kie_api_key"):
-            job.status = "failed"
-            job.message = (
-                "Kie.ai API key required. Open Setup → AI Providers and add a Kie.ai key."
-            )
-            job.params_json = json.dumps(params)
-            db.commit()
-            db.refresh(job)
-            raise PropCreatorError(job.message)
-        params["cloudPaid"] = True
-        params["kieImageModelId"] = kie_id
-        params["hostedModelId"] = hosted
-        params["providerPreference"] = "cloud"
-        runtime = params.get("imageRuntime") if isinstance(params.get("imageRuntime"), dict) else {}
-        runtime["workflowKey"] = f"kie:{kie_id}"
-        runtime["kieImageModelId"] = kie_id
-        runtime["hostedModelId"] = hosted
-        params["imageRuntime"] = runtime
-        job.params_json = json.dumps(params)
-        db.commit()
-        db.refresh(job)
-        return job
+    runtime = params.get("imageRuntime") if isinstance(params.get("imageRuntime"), dict) else {}
+    runtime_key = str(runtime.get("workflowKey") or "")
+    provider = str(runtime.get("provider") or "").strip().lower()
     cloud_paid = bool(params.get("cloudPaid"))
-    already_kie = str(runtime_key).startswith("kie:") or bool(params.get("kieImageModelId"))
-    if not cloud_paid and not runtime_key.startswith("imagen.") and not already_kie:
+    hosted_ok = provider in {"kie", "fal"} or bool(params.get("kieImageModelId") or params.get("falImageModelId"))
+    already_imagen = runtime_key.startswith("imagen.")
+    if not cloud_paid and not hosted_ok and not already_imagen:
         job.status = "failed"
         job.message = (
-            f"API model {hosted} resolved to local workflow {runtime_key or 'unknown'}; "
+            "API model " + hosted + " resolved to local workflow " + (runtime_key or "unknown") + "; "
             "refusing silent Comfy/Z-Image substitute."
         )
         db.commit()
         db.refresh(job)
         raise PropCreatorError(job.message)
     return job
+
 
 
 def _enqueue_plans(
@@ -481,6 +411,8 @@ def _enqueue_plans(
                     status = "queued"
                     error = ""
             else:
+                body["source"] = "local"
+                body["providerPreference"] = "local"
                 if workflow_key:
                     body["forceWorkflowKey"] = workflow_key
                     body["allow_force_workflow_key"] = True

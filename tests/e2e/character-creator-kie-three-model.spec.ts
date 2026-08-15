@@ -705,11 +705,22 @@ test.describe("Character Creator Kie three-model sheet", () => {
             `success card ${i} (${cand.model || cand.modelVariant || "?"}) is a single standalone portrait (img=${imgInfo.w}x${imgInfo.h} sheetAssetId=${cand.sheetAssetId || "none"}), not a four-view sheet. UI must mark layout-noncompliant via candidate-layout-noncompliant-${i} / is-layout-noncompliant / "layout noncompliant / not a four-view sheet".`,
           ).toBeTruthy();
         }
+        const viewJobCount = (cand.viewJobs || []).length;
+        expect(
+          viewJobCount,
+          `success card ${i} must be ONE four-view job, not 4-job+PIL (viewJobs=${viewJobCount})`,
+        ).toBeLessThanOrEqual(1);
+        if (!looksLikeSinglePortrait) {
+          expect(
+            !!cand.fourViewSingleOutput,
+            `success card ${i} must stamp fourViewSingleOutput (one four-panel, not 4-job+PIL)`,
+          ).toBeTruthy();
+        }
         cardReports.push({
           i,
           stage,
           model: cand.model || cand.modelVariant,
-          viewJobCount: (cand.viewJobs || []).length,
+          viewJobCount,
           sheetAssetId: cand.sheetAssetId || null,
           fourViewSingleOutput: !!cand.fourViewSingleOutput,
           refs: refs.length,
@@ -741,6 +752,16 @@ test.describe("Character Creator Kie three-model sheet", () => {
         message: String(job.message || "").split("\n")[0],
       });
     }
+    for (const [model, rows] of Object.entries(perModel)) {
+      expect(
+        rows.length,
+        `${model} Character Sheet must be ONE four-view job, not 4-job+PIL (got ${rows.length} jobs)`,
+      ).toBeLessThanOrEqual(1);
+    }
+    expect(
+      sheetMessages.join("\n"),
+      "Character Sheet must not PIL-stitch four tiles",
+    ).not.toMatch(/compose_grid|PIL stitch|four tiles \+ PIL|2x2 composed from four/i);
 
     writeResult({
       spec: "tests/e2e/character-creator-kie-three-model.spec.ts",

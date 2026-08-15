@@ -104,7 +104,7 @@ _KIE_DOCK_ALIASES: dict[str, str] = {
     "seedream": "seedream-kie",
     "seedream-kie": "seedream-kie",
     "seedream/5-pro-text-to-image": "seedream-kie",
-    "flux": "flux-kie",
+    # Bare flux is local FLUX.1. Do not alias it to the Kie dock.
     "flux-kie": "flux-kie",
 }
 
@@ -220,6 +220,19 @@ def is_kie_image_dock(model_id: str | None) -> bool:
         return False
     dock = _KIE_DOCK_ALIASES.get(mid, mid)
     return dock in KIE_IMAGE_T2I_BY_DOCK
+
+
+def kie_image_supports_i2i(dock_model_id: str | None) -> bool:
+    """True only when the dock has an official I2I Market id. T2I-only docks are false."""
+    mid = (dock_model_id or "").strip()
+    if not mid:
+        return False
+    dock = _KIE_DOCK_ALIASES.get(mid, mid)
+    if dock in KIE_IMAGE_I2I_BY_DOCK:
+        return True
+    if mid in KIE_IMAGE_I2I_BY_DOCK:
+        return True
+    return mid in set(KIE_IMAGE_I2I_BY_DOCK.values())
 
 
 KIE_POLL_ATTEMPTS = 90
@@ -623,3 +636,16 @@ async def chat_kie(
         "raw": data,
         "mock": False,
     }
+
+
+# Adapter verbs — wrappers around the existing Kie client. Not a second client.
+submit = submit_kie_image_task
+poll = poll_kie_task
+
+
+async def download(url: str, dest: Any) -> Any:
+    from pathlib import Path
+
+    from ...fal_client import download_url
+
+    return await download_url(str(url), Path(dest))

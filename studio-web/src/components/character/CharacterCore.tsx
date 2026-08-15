@@ -182,6 +182,16 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     [projectId, characterId, cp],
   );
 
+  const handleSave = useCallback(async () => {
+    const ok = await cp.save({
+      name: profile?.name,
+      gender_presentation: profile?.gender_presentation,
+      visual_style: profile?.visual_style,
+      description: profile?.description,
+    });
+    if (ok) setNotice("Character profile saved");
+  }, [cp, profile]);
+
   const handleDelete = useCallback(async () => {
     const confirmed = window.confirm(
       `Delete ${profile?.name || "this character"}? This cannot be undone.`,
@@ -261,7 +271,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         isSaved={saved}
         canSave={canSave}
         saving={cp.saving}
-        onSave={() => void cp.save()}
+        onSave={() => void handleSave()}
         onReset={() => cp.reset()}
         onDelete={() => void handleDelete()}
       />

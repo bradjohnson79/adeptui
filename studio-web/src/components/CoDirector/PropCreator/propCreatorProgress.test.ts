@@ -35,6 +35,16 @@ describe("prop creator failed-job hydration", () => {
     expect(candidateErrorMessage(c)).toBe("Kie createTask failed for nano-banana");
   });
 
+  it("strips --- details --- traceback from failed-card copy", () => {
+    const c = cand({
+      status: "failed",
+      error: 'ComfyUI prompt failed\n\n--- details ---\nTraceback (most recent call last):\n  File "queue_worker.py", line 1',
+    });
+    expect(candidateErrorMessage(c)).toBe("ComfyUI prompt failed");
+    expect(candidateErrorMessage(c)).not.toContain("details");
+    expect(candidateErrorMessage(c)).not.toContain("Traceback");
+  });
+
   it("treats error/cancelled as failed so cards do not stay Generating", () => {
     expect(candidateIsFailed(cand({ status: "error" }))).toBe(true);
     expect(candidateIsFailed(cand({ status: "cancelled" }))).toBe(true);

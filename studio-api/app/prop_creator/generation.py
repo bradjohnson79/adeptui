@@ -189,18 +189,17 @@ def _api_plan(
         mode = "reference_conditioned"
     else:
         mode = "description_guided"
-    kie_official = None
-    try:
-        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
-
-        kie_official = kie_image_model_id_for_dock(mid)
-    except Exception:
-        kie_official = None
-    family = "kie" if kie_official else (_hosted_family_for_model(mid) or "hosted")
+    pid = (provider_id or "").strip().lower()
+    if pid in {"kie", "kie.ai", "kieai"}:
+        family = "kie"
+    elif pid in {"fal", "fal.ai", "falai"}:
+        family = "fal"
+    else:
+        family = _hosted_family_for_model(mid) or "hosted"
     return {
         "source": "api",
         "family": family,
-        "kie_image_model_id": kie_official,
+        "kie_image_model_id": None,
         "model": label,
         "model_id": mid or label,
         "label": label,

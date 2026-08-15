@@ -65,6 +65,8 @@ def test_kie_image_model_id_for_dock_aliases():
     assert kie_image_model_id_for_dock("gpt-image-2") == "gpt-image-2-text-to-image"
     assert kie_image_model_id_for_dock("seedream-kie") == "seedream/5-pro-text-to-image"
     assert kie_image_model_id_for_dock("unknown-dock") is None
+    assert kie_image_model_id_for_dock("flux") is None
+    assert kie_image_model_id_for_dock("flux-kie") == "flux"
     url = extract_kie_image_url(
         {"data": {"state": "success", "resultJson": '{"resultUrls":["https://cdn.example/a.png"]}'}}
     )
@@ -323,3 +325,15 @@ def test_four_view_intent_not_applied_to_tiles():
     one = assess_four_view_layout(view_count=1, composed=False)
     assert one["layoutNoncompliant"] is True
     assert "single pose" in one["note"]
+
+def test_bare_flux_is_not_a_kie_dock():
+    from app.hosted_providers.adapters.kie_adapter import (
+        is_kie_image_dock,
+        kie_image_model_id_for_dock,
+    )
+
+    assert kie_image_model_id_for_dock("flux") is None
+    assert kie_image_model_id_for_dock("flux-kie") == "flux"
+    assert is_kie_image_dock("flux") is False
+    assert is_kie_image_dock("flux-kie") is True
+

@@ -1,3 +1,5 @@
+import { shortJobMessage } from "../../generators/shortJobMessage";
+
 export type PropCandidate = {
   id: string;
   prop_id: string;
@@ -75,7 +77,7 @@ export function candidateIsFinished(c: PropCandidate): boolean {
 }
 
 export function candidateErrorMessage(c: PropCandidate): string {
-  return String(c.error || "").trim();
+  return shortJobMessage(c.error || "");
 }
 
 export function candidateProgress(candidates: PropCandidate[]): { done: number; total: number; percent: number } {
