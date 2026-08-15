@@ -35,6 +35,8 @@ _VOLATILE_INPUT_KEYS = frozenset(
         "clip_vision_name",
         "ckpt_name",
         "model_name",
+        "denoise",
+        "grow_mask_by",
     }
 )
 

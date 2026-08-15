@@ -113,6 +113,29 @@ def test_build_leaf_graph_no_worker_import():
     assert legacy_comfy_workflow_key("zimage.txt2img") == "image.txt2img"
 
 
+def test_zimage_inpaint_denoise_and_grow_are_not_graph_drift():
+    from app.config import settings
+
+    c = resolve_image_workflow("inpaint", engine="zimage", allow_draft=True)
+    kwargs = dict(
+        settings=settings,
+        prompt="test",
+        source_image="src.png",
+        mask_image="mask.png",
+        width=1024,
+        height=1024,
+        seed=1,
+        steps=8,
+        cfg=1.0,
+    )
+    remove = build_leaf_graph(c, denoise=0.85, grow_mask_by=6, **kwargs)
+    add = build_leaf_graph(c, denoise=0.94, grow_mask_by=12, **kwargs)
+    assert graph_hash(remove) == graph_hash(add)
+    certified = get_workflow("zimage.inpaint").fingerprints.get("graphHash")
+    assert certified
+    assert graph_hash(remove) == certified
+
+
 def test_modern_foundation_ready():
     foundation = evaluate_modern_model_foundation()
     assert foundation["ModernModelFoundationReady"] is True
