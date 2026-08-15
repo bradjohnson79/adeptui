@@ -547,7 +547,11 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     expect(shot).toBeTruthy();
     const approvedRegionEdit = [...(shot!.candidates || [])]
       .reverse()
-      .find((c) => c.kind === "region_edit" && c.status === "complete" && c.asset_id);
+      .find((c) => {
+        if (c.kind !== "region_edit" || c.status !== "complete" || !c.asset_id) return false;
+        const quality = (c.quality_profile || "").toLowerCase();
+        return quality === "draft" || quality === "preview" || quality === "";
+      });
     const approved = approvedRegionEdit
       || (shot!.candidates || []).find((c) => c.id === shot!.approved_candidate_id);
     if (approved?.id && shot!.approved_candidate_id !== approved.id) {
@@ -634,6 +638,10 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const originalBtn = page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${currentApprovedId}"]`);
     await originalBtn.scrollIntoViewIfNeeded();
     await originalBtn.click();
+    if (await approve.count()) await approve.click();
+    await request.post(`${API}/api/scene-creator/projects/${PROJECT_ID}/shots/${shot!.id}/approve`, {
+      data: { candidate_id: currentApprovedId },
+    });
     if (await approve.count()) await approve.click();
     await expect
       .poll(async () => (await getShot(request, shot!.id)).approved_candidate_id, { timeout: 20_000 })
