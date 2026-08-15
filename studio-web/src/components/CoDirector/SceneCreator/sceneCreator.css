@@ -578,6 +578,22 @@
   opacity: 0.72;
 }
 
+.scene-creator-strip-take.is-inspected {
+  outline: 2px solid var(--danger, #c33);
+}
+
+.scene-creator-standard__preview.is-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.scene-creator-failed-summary {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
 .scene-creator-source-line,
 .scene-creator-model-guard,
 .scene-creator-inpaint-warning,

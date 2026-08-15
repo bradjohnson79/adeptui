@@ -115,6 +115,7 @@ function ExpressLayout({ sc, onGoTab }: LayoutProps) {
 
 function StandardLayout({ sc, onGoTab }: LayoutProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [inspectedId, setInspectedId] = useState<string | null>(null);
   return (
     <div
       className={toolsOpen ? "scene-creator-standard is-tools-open" : "scene-creator-standard"}
@@ -159,7 +160,7 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
         <hr className="scene-creator-standard__tool-rule" />
         <RegionEditBlock sc={sc} />
       </aside>
-      <StandardPreview sc={sc} />
+      <StandardPreview sc={sc} inspectedId={inspectedId} />
       <aside className="scene-creator-standard__inspector">
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
         <CharactersPropsBlock sc={sc} />
@@ -172,7 +173,13 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
       </aside>
       <div className="scene-creator-standard__strip" data-testid="scene-creator-take-strip">
         {(sc.shot?.candidates || []).map((cand) => (
-          <TakeStripButton key={cand.id} cand={cand} sc={sc} />
+          <TakeStripButton
+            key={cand.id}
+            cand={cand}
+            sc={sc}
+            inspected={inspectedId === cand.id}
+            onInspect={setInspectedId}
+          />
         ))}
       </div>
     </div>
@@ -182,29 +189,43 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
 function TakeStripButton({
   cand,
   sc,
+  inspected,
+  onInspect,
 }: {
   cand: SceneShotCandidate;
   sc: ReturnType<typeof useSceneCreator>;
+  inspected?: boolean;
+  onInspect?: (id: string | null) => void;
 }) {
   const approved = cand.id === sc.shot?.approved_candidate_id;
   const [compare, setCompare] = useState(false);
   const parent = (sc.shot?.candidates || []).find((item) => item.id === cand.parent_candidate_id);
   const showAsset = compare && parent?.asset_id ? parent.asset_id : cand.asset_id;
+  const className = [
+    "scene-creator-strip-take",
+    approved ? "is-approved" : "",
+    cand.superseded ? "is-superseded" : "",
+    inspected ? "is-inspected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <button
       key={cand.id}
       type="button"
-      className={
-        approved
-          ? "scene-creator-strip-take is-approved"
-          : cand.superseded
-            ? "scene-creator-strip-take is-superseded"
-            : "scene-creator-strip-take"
-      }
+      className={className}
       data-testid="scene-creator-strip-take"
+      data-status={cand.status}
       data-approved={approved ? "true" : "false"}
       data-superseded={cand.superseded ? "true" : "false"}
-      onClick={() => cand.status === "complete" && cand.asset_id && void sc.approve(cand.id)}
+      onClick={() => {
+        if (cand.status === "failed") {
+          onInspect?.(cand.id);
+          return;
+        }
+        onInspect?.(null);
+        if (cand.status === "complete" && cand.asset_id) void sc.approve(cand.id);
+      }}
       onPointerDown={() => parent?.asset_id && setCompare(true)}
       onPointerUp={() => setCompare(false)}
       onPointerLeave={() => setCompare(false)}
@@ -279,10 +300,24 @@ function usePreviewAsset(sc: ReturnType<typeof useSceneCreator>) {
   return { assetId, source, session };
 }
 
-function StandardPreview({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+function StandardPreview({
+  sc,
+  inspectedId,
+}: {
+  sc: ReturnType<typeof useSceneCreator>;
+  inspectedId?: string | null;
+}) {
   const { assetId, source, session } = usePreviewAsset(sc);
   const inpaintMode = session.maskInteractive;
   const showMask = session.accordionOpen || session.hasMask;
+  const inspected = (sc.shot?.candidates || []).find((item) => item.id === inspectedId);
+  if (inspected?.status === "failed") {
+    return (
+      <div className="scene-creator-standard__preview is-failed" data-testid="scene-creator-preview">
+        <FailedCandidateBody cand={inspected} sc={sc} />
+      </div>
+    );
+  }
   return (
     <div
       className={inpaintMode ? "scene-creator-standard__preview is-inpaint" : "scene-creator-standard__preview"}

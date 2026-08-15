@@ -299,9 +299,15 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     page.on("request", (req) => {
       if (req.method() === "POST" && /cinematographer\/preview/.test(req.url())) previewPosts.push(req.url());
     });
+    await openAccordion(page, "cine-orient-accordion");
+    await page.getByRole("button", { name: "Yaw up" }).click();
+    const previewReq = page.waitForRequest(
+      (req) => req.method() === "POST" && /cinematographer\/preview/.test(req.url()),
+      { timeout: 45_000 },
+    );
     await page.getByTestId("cine-preview").click();
+    await previewReq;
     await expect(page.getByTestId("cine-preview")).toContainText(/Generating preview|Generate Low-Res Preview/i);
-    await page.waitForTimeout(1500);
     expect(previewPosts.length, "exactly one preview request").toBe(1);
     const ws = await getWorkspace(request);
     const shot = ws.selected_shot;
@@ -348,7 +354,8 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     attachObserver(page, testInfo);
     await openSceneCreator(page);
     await paintMask(page, "large");
-    await expect(page.getByTestId("scene-creator-inpaint-mode").or(page.getByTestId("scene-creator-center-mask"))).toBeVisible();
+    await expect(page.getByTestId("scene-creator-inpaint-mode")).toBeVisible();
+    await expect(page.getByTestId("scene-creator-center-mask")).toBeVisible();
     await expect(page.getByTestId("scene-creator-inpaint-mask-summary")).toBeVisible();
     await expect(page.getByTestId("scene-creator-inpaint-mask-summary")).toContainText(/Masked area|Mask too small|%/i);
     await expect(page.getByTestId("scene-creator-inpaint-source")).toBeVisible();
@@ -426,6 +433,17 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const hashes: string[] = [];
     for (const step of ops) {
       await page.getByTestId("scene-creator-inpaint-clear").click().catch(() => undefined);
+      await openAccordion(page, "scene-creator-inpaint-accordion");
+      const source = page.getByTestId("scene-creator-inpaint-source");
+      if (step.op === "modify") {
+        await source.selectOption({ label: "Take B" }).catch(async () => {
+          const takeB = source.locator("option").filter({ hasText: /Take B/i }).first();
+          const value = await takeB.getAttribute("value");
+          if (value) await source.selectOption(value);
+        });
+      } else if (step.op === "add" || step.op === "replace") {
+        await source.selectOption({ label: /Approved Preview/i }).catch(() => undefined);
+      }
       await paintMask(page, "large");
       await page.getByTestId("scene-creator-inpaint-operation").selectOption(step.op);
       await page.getByTestId("scene-creator-inpaint-prompt").fill(step.prompt);
@@ -491,12 +509,9 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     if (await generate.isEnabled()) {
       await generate.click();
     }
-    await expect(page.getByTestId("scene-creator-model-guard").or(page.getByTestId("scene-creator-final-guard"))).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(page.getByTestId("scene-creator-model-recommend").or(page.getByTestId("scene-creator-final-guard"))).toContainText(
-      /Z-Image|FLUX/i,
-    );
+    await expect(page.getByTestId("scene-creator-model-guard")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("scene-creator-final-guard")).toBeVisible();
+    await expect(page.getByTestId("scene-creator-model-recommend")).toContainText(/Z-Image|FLUX/i);
     for (const body of finals) {
       expect(body).not.toMatch(/txt2img/);
     }
@@ -673,7 +688,9 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const ws = await getWorkspace(request);
     const failed = (ws.selected_shot?.candidates || []).find((c) => c.status === "failed");
     if (failed) {
-      await page.getByTestId("scene-creator-strip-take").filter({ hasText: /Failed/i }).first().click();
+      const failedTake = page.locator('[data-testid="scene-creator-strip-take"][data-status="failed"]').first();
+      await failedTake.scrollIntoViewIfNeeded();
+      await failedTake.click();
       await expect(page.getByTestId("scene-creator-failed-card")).toBeVisible();
       await expect(page.getByTestId("scene-creator-failed-card")).not.toContainText(/Traceback|File \".+\.py\"/);
       await expect(page.getByTestId("scene-creator-retry")).toBeVisible();
