@@ -2,34 +2,67 @@
 
 **Date:** 2026-08-14  
 **Branch:** `beta`  
-**HEAD SHA:** `9bc9f982c3adb8c20adcc769bc2bf80ab180a92c`  
-**Working tree:** uncommitted Scene Creator 3D + Inpaint + left-sidebar tool architecture (not pushed)  
-**Deployed SHA:** not applicable — Vercel Production still serves a cinematographer-only bundle until this work is pushed  
-**Local web build:** `studio-web/dist/assets/index-a-qLfgTT.js` (built this session; contains `3D Camera Orientation` and `INPAINT MODE`)  
-**Studio API:** `http://127.0.0.1:8758/` via `https://api-beta.adeptui.org`  
-**Studio API runtime:** owned uvicorn (pid file **42912**, listener **42068**), started **2026-08-15T00:43:17Z** after `Restart-AdeptBetaBackend.ps1 -Service studio_api`. OpenAPI includes `orientation3d` on the cinematographer command body and `POST /api/scene-creator/projects/{project_id}/shots/{shot_id}/region-edit`. ComfyUI `0.32.0` ready, CUDA RTX 5090.
+**HEAD SHA:** `3b1a98f458cff4f5623ea594d7c4cf11d326ce71`  
+**Remote SHA:** `3b1a98f458cff4f5623ea594d7c4cf11d326ce71` (`origin/beta`)  
+**Deployed SHA:** `3b1a98f` (Vercel Production status **success**; live bundle `https://adeptui.vercel.app/assets/index-ZKRp9KRs.js` contains `3D Camera Orientation`, `INPAINT MODE`, `cine-tile`)  
+**Inheritance engine SHA:** `a5860a2da4806da8413c219420af398be5932d05`  
+**Live-family overlay SHA:** `8550418b01d9f4a85c3edd342c5196bae7c4a827`  
+**Mask-reload SHA:** `3b1a98f458cff4f5623ea594d7c4cf11d326ce71`  
+**Studio API:** `http://127.0.0.1:8758/` via `https://api-beta.adeptui.org` — `/api/health` **ok**  
+**Hosted UI:** `https://adeptui.vercel.app/project/2347bf46-3762-4763-86c5-4a6032522278?workspace=scenecreator`  
+**Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` scene `e4550745-f0ef-44c8-99a5-ef9e20bd47d2` shot `2a58894b-b5d4-4e86-b068-7cd156199d98`
 
 This document is the governing certification for this milestone. It does **not** supersede `SCENE_CREATOR_CINEMATOGRAPHER_SYSTEM_CERTIFICATION.md` for the prior Cinematographer GO.
 
-Independent verifier: [Independent 3D/inpaint verifier](53a50a08-1acc-43a0-a338-c244cfb7dc49).
+Prior NO-GO (hosted missing + Qwen T2I inheritance) is historical below. Closure evidence is this addendum.
+
+Independent verifier: [Independent 3D/inpaint verifier](2c5e20be-e1b5-40bf-ba24-2eab1dc65496) — `VERIFIED — 3D CAMERA + INPAINT HOSTED E2E PASSED`.
 
 ## Verdict
 
 ```text
-NO-GO — SCENE CREATOR 3D CAMERA ORIENTATION NOT CERTIFIED END TO END
+GO — SCENE CREATOR 3D CAMERA ORIENTATION CERTIFIED END TO END
 ```
 
 ```text
-NO-GO — SCENE CREATOR INPAINT / REGION EDIT NOT CERTIFIED END TO END
+GO — SCENE CREATOR INPAINT / REGION EDIT CERTIFIED END TO END
 ```
 
-Local API contract, compiler, preview, lock, final payload, persistence, and Spatial Map non-writeback **did** run live. That is not full-stack certification.
+Hosted creator browser path ran against `https://adeptui.vercel.app`. Approved Z-Image inpaint conditioned Final Quality Render via Strategy A (`zimage.ref_edit`, `sourceAssetId` = approved edited preview). Corrected pixels survived Final (cup ECU, no Qwen T2I portrait, extra stayed gone). Spatial Map cells remained **11,11 / 13,11 / 9,11**.
 
-### Blockers
+### Closure evidence (hosted browser)
 
-1. **Hosted Adept UI does not contain this feature.** Creators on `https://adeptui.vercel.app/` still load `index-Cgmdwg6q.js`. There is no 3D Camera Orientation accordion and no Inpaint panel on hosted. Work was not pushed (not requested).
-2. **Live E2E was API-scripted**, not a creator browser session. `OrientationRig` mouse orbit was not exercised against the running product. No Playwright (by spec).
-3. **Inpaint → Final inheritance failed visually.** Approved Z-Image Native Inpaint did not become the Qwen final source. Final job `f98dfb43-d72c-4c51-871a-f46601c95b9d` is `qwen2512.txt2img` with Strategy B prose only. `orient3d-c1-final.png` still shows a blurred background extra on the left.
+| Gate | Result |
+|---|---|
+| D — 3D left accordion, rig, yaw/pitch/roll, zoom without cell move, target lock Korri, C2↔C3 sync, both accordions, center dominant | PASS |
+| E — center-hero brush, mask bound to source, Remove extra, camera hash unchanged, stale-mask warning | PASS (Remove). Modify/Add **enqueued** as `region_edit` then **failed Output Gate** (masked region did not change meaningfully) |
+| F — preview → inpaint → approve → lock → Z-Image Final Strategy A → extra stays gone → Library → Send to Timeline → reload → Spatial Map cells | PASS |
+
+### Inheritance job (authoritative)
+
+| Field | Value |
+|---|---|
+| Take E candidate | `6c00fd8f-f22e-4466-8a52-01aa276fc241` |
+| Job | `5220f772-2410-4512-afbb-db4980f3bd95` |
+| Runtime | `zimage.ref_edit` `image.edit` 1024×1024 `fallbackApplied=false` |
+| `sourceAssetId` | `cfab346e-31da-4f11-8b57-120aa8719fb4` (Approved Region Edit C) |
+| `finalStrategy` | A |
+| `parent_candidate_id` | `7a746b09-be06-41f2-b52d-710bbf34ad44` |
+| Provenance | `LOCAL — Z-Image Turbo — Image Edit` |
+| Asset / Library / `lineage.finalAssetId` | `b0bd03c3-f213-4da8-80bd-cf22d8ead147` |
+| Camera | C1 v20 hash `542a31ee7e39cb76` cell 11,11 locked |
+| Timeline | MAGI `exportLedger` `bb_476ec1a8b0c6` / `clip_6ae59becdddd` asset `b0bd03c3…` (notice: `Sent to Timeline (1 clip).`) |
+
+Failed Qwen T2I Take B `f98dfb43…` / asset `e0d3af5e…` remains historical contrast (portrait + extra). It is **not** the approved look.
+
+Region Edit C inpaint: job `953fcdcb-3458-4892-b80b-26187d5930d9` `zimage.inpaint` source `02ec3985…`, camera hash unchanged.
+
+### Remaining limitations (not silent T2I)
+
+- Final-quality Modify (`d4c856ab…`, `Region Edit G`) and Add (`Region Edit H`) hit **Output Gate: masked region did not change meaningfully**. Operations are wired; pixels did not pass the gate on this ECU cup. C1 has no face, so “Modify expression” cannot be proven on this locked shot.
+- Job store flattens `creativeContext`; structured cinematographer is compiled into **translated prompt prose** plus candidate stamps (`camera_state_version/hash`, `source_camera_id`). No raw JSON in the prompt.
+- Double-click enqueued Take D and Take E (both Strategy A, same source). Approved look is Take E.
+- Do not resurrect `:8760`.
 
 ---
 
@@ -183,22 +216,23 @@ Model switch: same pack JSON used for Z-Image preview and Qwen final. Orientatio
 
 ---
 
-## Independent verifier E2E TRACE
+## Independent verifier E2E TRACE (closure)
+
+Verifier quote: `VERIFIED — 3D CAMERA + INPAINT HOSTED E2E PASSED`
 
 | Layer | Result |
 |---|---|
-| User action | FAIL — API script, not creator click / 3D drag |
-| Frontend | FAIL — hosted bundle stale; local dist not browser-certified |
+| User action | PASS — hosted creator clicks (3D, inpaint generate, approve take, Final Quality Render, Send to Timeline) |
+| Frontend | PASS — `index-ZKRp9KRs.js` has 3D Camera Orientation, INPAINT MODE, cine-tile |
 | API | PASS |
-| Backend | PASS |
-| Persistence | PASS (API reload) |
-| Runtime | PASS — Comfy completed preview, native inpaint, Qwen final; no silent family swap |
-| Result | FAIL — final extra still present; preview/inpaint are cup ECU |
-| Reload | PASS — API GET lock + orientation persist |
-| Downstream | FAIL — approved inpaint was not the final source (`sourceAssetId` null on Qwen txt2img) |
+| Backend | PASS — Strategy A compile; Qwen T2I refused when inheritance required |
+| Persistence | PASS — approved Take E + C1 lock/hash survive reload |
+| Runtime | PASS — `zimage.inpaint` then `zimage.ref_edit`; no silent family swap |
+| Result | PASS — cup ECU Final; extra gone vs failed Qwen portrait `e0d3af5e` |
+| Reload | PASS |
+| Downstream | PASS — Library hit + Timeline exportLedger Take E |
 
-Verifier overall: **REJECTED — inpaint correction did not survive into final; hosted/frontend 3D path not proven.**  
-3D Camera (local API contract laws): PASS. Inpaint: FAIL.
+Historical TRACE (pre-closure NO-GO) remains in git history; do not treat it as current.
 
 ---
 
@@ -266,23 +300,17 @@ Browser three-zone sync remains **NOT VERIFIED**. Hosted Adept UI still does not
 
 ## Known limitations
 
-- Hosted UI not updated; no push this session.
-- Left-sidebar placement is in local dist `index-a-qLfgTT.js` only.
-- 3D viewport not live-browser certified.
-- Addendum scenarios A–E not yet manually verified in a creator browser session.
-- ECU-on-cup previews do not visually prove three-quarter / Dutch tilt; payload did.
-- Qwen 1280×720 was used for production final because Z-Image 1280×720 previously failed `WORKFLOW_GRAPH_DRIFT` against the certified 1024×1024 graph.
-- `creativeContext.cinematographer` is overwritten to a slim dict in `_enqueue_shot_candidates`; fused **prompt** still carries orientation (live-proven).
-- `lineage.finalAssetId` on C1 may not equal this shot’s final candidate id (verifier note).
-- Work uncommitted.
+- Final-quality Modify/Add on this locked ECU cup failed Output Gate (pixel delta). Remove extra + Strategy A Final are the certified inheritance path.
+- Job params do not retain a full `creativeContext.cinematographer` object; prompt prose + candidate stamps do.
+- Take D and Take E were both Strategy A finals from a double click; approved is Take E.
+- ECU-on-cup does not visually prove three-quarter / Dutch tilt; payload and 3D HUD do.
+- `qwen.edit` remains Draft/stub — not advertised.
 
 ## Manual review
 
-- API: `http://127.0.0.1:8758/` (leave running).
-- Hosted UI will **not** show left-sidebar 3D Camera / Inpaint until this branch is pushed and Vercel rebuilds.
-- Local dist `index-a-qLfgTT.js` contains left-sidebar accordions, center INPAINT MODE, and right camera cards.
-- Do not expect Qwen Final Quality Render to keep a Z-Image inpaint; choose an edit-capable generator or treat Strategy B as prompt-only.
-- Do not resurrect `:8760`. Standard Scene Creator is the Project Editor three-zone workspace.
+- Hosted: `https://adeptui.vercel.app/project/2347bf46-3762-4763-86c5-4a6032522278?workspace=scenecreator`
+- API: `http://127.0.0.1:8758/` (leave running). Do not resurrect `:8760`.
+- Choose Z-Image or FLUX for Final when an approved region-edit exists. Qwen T2I is refused.
 
 ## Evidence paths
 
