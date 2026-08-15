@@ -9,6 +9,7 @@ import {
   regionEditCapability,
   resolveRegionEditSource,
   approvedLookBlocksFinal,
+  shotWithSelectedFamily,
   UNSUPPORTED_REGION_EDIT_MESSAGE,
 } from "./regionEdit";
 
@@ -241,6 +242,32 @@ describe("Strategy B compile", () => {
     expect(compiled.strategy).toBe("C");
     expect(compiled.visualInheritanceBlocked).toBe(true);
     expect(compiled.sourceAssetId).toBeUndefined();
+  });
+
+  it("uses the live generator dropdown, not a stale saved Qwen family", () => {
+    const qwenShot = shot({
+      approved_candidate_id: "e1",
+      generator: { local_enabled: true, api_enabled: false, local_family: "qwen2512", api_provider: "", api_model: "" },
+      candidates: [
+        {
+          id: "e1",
+          shot_id: "s1",
+          index: 0,
+          job_id: "j",
+          asset_id: "edited",
+          status: "complete",
+          source: "local",
+          family: "zimage",
+          model: "zimage",
+          provenance_label: "LOCAL",
+          take_label: "Region Edit A",
+          kind: "region_edit",
+          quality_profile: "draft",
+        },
+      ],
+    });
+    expect(compileRegionEditFinalPrompt(qwenShot).strategy).toBe("C");
+    expect(compileRegionEditFinalPrompt(shotWithSelectedFamily(qwenShot, "zimage")!).strategy).toBe("A");
   });
 });
 

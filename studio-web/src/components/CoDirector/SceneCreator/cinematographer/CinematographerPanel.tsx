@@ -12,7 +12,7 @@ import {
   previewIsStale,
   type SceneCameraRecord,
 } from "./cameraCommandEngine";
-import { approvedLookBlocksFinal, compileRegionEditFinalPrompt } from "../regionEdit/regionEdit";
+import { approvedLookBlocksFinal, compileRegionEditFinalPrompt, shotWithSelectedFamily } from "../regionEdit/regionEdit";
 
 type Props = { sc: ReturnType<typeof useSceneCreator> };
 
@@ -40,7 +40,8 @@ export function CinematographerPanel({ sc }: Props) {
   const chars = sc.workspace?.characters || [];
   const props = sc.workspace?.props || [];
   const blocksFinal = approvedLookBlocksFinal(sc.shot);
-  const inheritanceBlocked = Boolean(sc.shot && compileRegionEditFinalPrompt(sc.shot).visualInheritanceBlocked);
+  const liveShot = shotWithSelectedFamily(sc.shot, sc.localFamily);
+  const inheritanceBlocked = Boolean(liveShot && compileRegionEditFinalPrompt(liveShot).visualInheritanceBlocked);
 
   return (
     <section className="cine-panel" data-testid="scene-creator-cinematographer">

@@ -202,6 +202,16 @@ export function isMaskStale(input: {
   return false;
 }
 
+export function shotWithSelectedFamily(
+  shot: SceneShot | null | undefined,
+  family: string,
+): SceneShot | null {
+  if (!shot) return null;
+  const live = (family || shot.generator?.local_family || "").trim();
+  if (!live || live === shot.generator?.local_family) return shot;
+  return { ...shot, generator: { ...shot.generator, local_family: live } };
+}
+
 export function compileRegionEditFinalPrompt(
   shot: Pick<SceneShot, "prompt" | "intent" | "approved_candidate_id" | "candidates" | "take_memory" | "generator">,
   basePrompt = "",

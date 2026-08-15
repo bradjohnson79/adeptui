@@ -21,6 +21,7 @@ import { clampPitch, clampRoll, clampZoom, wrapYaw } from "./cinematographer/ori
 import {
   approvedLookBlocksFinal,
   compileRegionEditFinalPrompt,
+  shotWithSelectedFamily,
   VISUAL_INHERITANCE_BLOCKED_MESSAGE,
 } from "./regionEdit/regionEdit";
 
@@ -549,7 +550,7 @@ export function useSceneCreator(projectId: string) {
       setError("Use Re-Take to change an approved look.");
       return;
     }
-    const compiled = shot ? compileRegionEditFinalPrompt(shot) : null;
+    const compiled = shot ? compileRegionEditFinalPrompt(shotWithSelectedFamily(shot, localFamily) || shot) : null;
     if (compiled?.visualInheritanceBlocked) {
       setError(VISUAL_INHERITANCE_BLOCKED_MESSAGE);
       return;
