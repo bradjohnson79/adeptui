@@ -30,8 +30,8 @@ OPERATION_PROFILES: dict[str, dict[str, Any]] = {
         "expand": "normal",
         "feather": "hard",
         "prefix": (
-            "Remove the selected object seamlessly. Fill the masked region from the "
-            "surrounding context. Do not leave a ghost of the original."
+            "Remove the selected object seamlessly. Fill from surrounding context. "
+            "Do not leave a ghost of the original. No text, letters, or watermarks."
         ),
     },
     "modify": {
@@ -40,8 +40,9 @@ OPERATION_PROFILES: dict[str, dict[str, Any]] = {
         "expand": "normal",
         "feather": "soft",
         "prefix": (
-            "Change only the masked region as requested. Preserve exact identity, "
-            "facial structure, hair, wardrobe, lighting, pose, and camera framing."
+            "Change only this area as requested. Preserve exact identity, "
+            "facial structure, hair, wardrobe, lighting, pose, and camera framing. "
+            "No text, letters, or watermarks."
         ),
     },
     "add": {
@@ -50,8 +51,8 @@ OPERATION_PROFILES: dict[str, dict[str, Any]] = {
         "expand": "wide",
         "feather": "soft",
         "prefix": (
-            "Create the described object in the masked region. Do not copy the "
-            "existing masked pixels. Match lighting, perspective, and depth."
+            "Create the described object here. Do not copy existing pixels. "
+            "Match lighting, perspective, and depth. No text, letters, or watermarks."
         ),
     },
     "replace": {
@@ -60,8 +61,9 @@ OPERATION_PROFILES: dict[str, dict[str, Any]] = {
         "expand": "normal",
         "feather": "soft",
         "prefix": (
-            "Replace the masked object with the described object. The original item "
-            "must not remain. Match lighting, perspective, and depth."
+            "Replace the selected object with the described object. The original item "
+            "must not remain. Match lighting, perspective, and depth. "
+            "No text, letters, or watermarks."
         ),
     },
 }

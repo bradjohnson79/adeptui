@@ -1289,6 +1289,40 @@ def _position_summary(p: dict[str, Any]) -> str:
 _REGION_EDIT_OPS = {"remove", "replace", "add", "modify"}
 
 
+def _ers_structured_context(db: Session, project_id: str, shot: SceneShot) -> dict[str, Any]:
+    """ERS identity for Core provenance. Do not flatten into prompt-only."""
+    ctx: dict[str, Any] = {}
+    sheet_id = str(getattr(shot, "sheet_id", "") or "")
+    package_id = str(getattr(shot, "ers_package_id", "") or "")
+    if sheet_id:
+        ctx["sheetId"] = sheet_id
+    if package_id:
+        ctx["ersPackageId"] = package_id
+    if not sheet_id and not package_id:
+        return ctx
+    try:
+        package = None
+        if sheet_id:
+            package, _runtime = resolve_ers_for_sheet(db, project_id, sheet_id, persist_runtime=False)
+        else:
+            from ..spatial_map.ers_persistence import load_ers_package
+
+            package = load_ers_package(db, project_id, package_id)
+        if package is None:
+            return ctx
+        ctx["ersPackageId"] = str(getattr(package, "id", "") or package_id)
+        composite = str(getattr(package, "ers_composite_asset_id", None) or "").strip()
+        if composite:
+            ctx["ers_composite_asset_id"] = composite
+            refs = [str(x) for x in (ctx.get("reference_image_ids") or []) if str(x)]
+            if composite not in refs:
+                refs.insert(0, composite)
+            ctx["reference_image_ids"] = refs
+    except Exception:
+        pass
+    return ctx
+
+
 def compile_region_edit_for_final(shot: SceneShot, base_prompt: str = "") -> tuple[str, dict[str, Any]]:
     """Strategy A when an approved edited preview exists and the selected family
     has a Certified visual-edit path. Strategy C (prompt-only) is recorded but
@@ -1388,8 +1422,17 @@ def apply_region_edit_compile(
     """Mutate an enqueue body with approved region-edit refinements."""
     prompt, extras = compile_region_edit_for_final(shot, str(body.get("prompt") or ""))
     family = (enqueue_family or getattr(shot.generator, "local_family", "") or "").strip()
+    from ..image_core.flag import scene_image_core_enabled as _core_on
+
+    core_on = _core_on()
     if extras.get("strategy") == "A" and family and certified_visual_edit_path(family) is None:
-        extras = _honest_t2i_instead_of_strategy_a(body, extras, family)
+        if core_on and not (quality_profile or "final").lower() in {"draft", "preview"}:
+            extras = dict(extras)
+            extras["strategy"] = "C"
+            extras["visualInheritanceBlocked"] = True
+            extras["sourceAssetId"] = ""
+        else:
+            extras = _honest_t2i_instead_of_strategy_a(body, extras, family)
     if extras.get("clauses"):
         body["prompt"] = prompt
     draft = (quality_profile or "final").lower() in {"draft", "preview"}
@@ -1406,22 +1449,20 @@ def apply_region_edit_compile(
         body["operation"] = extras.get("operation") or "image.edit"
         body["edit"] = True
         body["lockModelFamily"] = True
-        if extras.get("width"):
-            body["width"] = int(extras["width"])
-        if extras.get("height"):
-            body["height"] = int(extras["height"])
-        ctx["workflowKey"] = extras.get("workflowKey") or ""
+        if not core_on:
+            if extras.get("width"):
+                body["width"] = int(extras["width"])
+            if extras.get("height"):
+                body["height"] = int(extras["height"])
+            ctx["workflowKey"] = extras.get("workflowKey") or ""
+            body["forceWorkflowKey"] = extras.get("workflowKey") or ""
+            body["allow_force_workflow_key"] = True
         ctx["finalStrategy"] = "A"
         ctx["approvedEditedPreviewAssetId"] = source_id
         ctx["sourcePreviewAssetId"] = extras.get("sourcePreviewAssetId") or ""
         ctx["regionEditIds"] = extras.get("regionEditIds") or []
         ctx["maskAssetIds"] = extras.get("maskAssetIds") or []
         ctx["finalModelId"] = extras.get("finalModelId") or ""
-        from ..image_core.flag import scene_image_core_enabled as _core_on
-
-        if not _core_on():
-            body["forceWorkflowKey"] = extras.get("workflowKey") or ""
-            body["allow_force_workflow_key"] = True
     elif extras.get("strategy"):
         ctx["finalStrategy"] = extras.get("strategy")
     correction = dict((shot.take_memory.userCorrection if shot.take_memory else {}) or {})
@@ -1727,23 +1768,6 @@ def region_edit_shot(
         return shot
 
     masks = [{"maskAssetId": mask_id, "maskId": mask_id, "role": "replace" if op == "replace" else "include"}]
-    compiled = _compile_region_edit_runtime(
-        project_id,
-        family=family,
-        caps=caps,
-        prompt=text,
-        source_asset_id=source_id,
-        masks=masks,
-        operation=op,
-        expand=expand,
-        feather=feather,
-    )
-    workflow_key = str(compiled.get("workflowKey") or (compiled.get("imageRuntime") or {}).get("workflowKey") or "")
-    if "txt2img" in workflow_key:
-        raise SceneCreatorError(REGION_EDIT_UNSUPPORTED_MESSAGE)
-
-    from ..image_product.edit_service import _enqueue_compiled
-
     rec = _camera_record_for_shot(db, project_id, shot)
     cine_ctx: dict[str, Any] = {}
     if rec is not None:
@@ -1758,29 +1782,100 @@ def region_edit_shot(
                 "cameraStateHash": getattr(rec, "cameraStateHash", ""),
             }
 
-    body = {
-        "sceneId": shot.scene_id,
-        "shotId": shot.id,
-        "tag": f"scene_region_edit_{shot.id[:8]}",
-        "masks": masks,
-        "denoise": compiled.get("denoise"),
-        "grow_mask_by": compiled.get("grow_mask_by"),
-        "creativeContext": {"cinematographer": cine_ctx} if cine_ctx else {},
-    }
-    try:
-        job_info = _enqueue_compiled(db, project_id=project_id, compiled=compiled, body=body)
-        job_id = str(job_info.get("jobId") or "")
-        status = "queued"
-        error = ""
-    except Exception as exc:
-        logger.error("Scene region edit enqueue failed: %s", exc)
-        job_id = f"failed_region_edit_{len(shot.candidates)}"
-        status = "failed"
-        error = str(exc)
+    from ..image_core.flag import scene_image_core_enabled
+    from .region_edit_profiles import compile_operation_prompt
+
+    compiled_prompt = compile_operation_prompt(op, text)
+    workflow_key = ""
+    denoise = None
+    grow = None
+    capability_label = str(caps.get("label") or "Image Edit")
+
+    if scene_image_core_enabled():
+        from ..image_core.errors import ImageCoreError
+        from ..image_core.generate import generate as image_core_generate
+        from ..image_core.request import ImageCoreRequest
+
+        purpose = "final_region_edit" if (stage or "preview").lower() == "final" else "region_edit"
+        runtime_op = "image.inpaint" if caps.get("supportsInpaint") else "image.edit"
+        creative: dict[str, Any] = {"editOperation": op}
+        if cine_ctx:
+            creative["cinematographer"] = cine_ctx
+        creative.update(_ers_structured_context(db, project_id, shot))
+        try:
+            result = image_core_generate(
+                db,
+                ImageCoreRequest(
+                    project_id=project_id,
+                    purpose=purpose,
+                    operation=runtime_op,
+                    model_id=family,
+                    prompt=compiled_prompt,
+                    source_asset_id=source_id,
+                    mask_asset_id=mask_id,
+                    edit_operation=op,
+                    expand=expand,
+                    feather=feather,
+                    scene_id=shot.scene_id,
+                    shot_id=shot.id,
+                    tag=f"scene_region_edit_{shot.id[:8]}",
+                    creative_context=creative,
+                    extra={"masks": masks},
+                ),
+            )
+        except ImageCoreError as exc:
+            raise SceneCreatorError(exc.message) from exc
+        job_id = result.job_id
+        status = result.status
+        error = result.error
+        workflow_key = result.workflow_key
+        if result.decision:
+            denoise = result.decision.denoise
+            grow = result.decision.grow_mask_by
+        capability_label = "Native Inpaint" if caps.get("supportsInpaint") else "Image Edit"
+    else:
+        compiled = _compile_region_edit_runtime(
+            project_id,
+            family=family,
+            caps=caps,
+            prompt=text,
+            source_asset_id=source_id,
+            masks=masks,
+            operation=op,
+            expand=expand,
+            feather=feather,
+        )
+        workflow_key = str(compiled.get("workflowKey") or (compiled.get("imageRuntime") or {}).get("workflowKey") or "")
+        if "txt2img" in workflow_key:
+            raise SceneCreatorError(REGION_EDIT_UNSUPPORTED_MESSAGE)
+        denoise = compiled.get("denoise")
+        grow = compiled.get("grow_mask_by")
+        capability_label = str(compiled.get("capabilityLabel") or caps.get("label") or "Image Edit")
+
+        from ..image_product.edit_service import _enqueue_compiled
+
+        body = {
+            "sceneId": shot.scene_id,
+            "shotId": shot.id,
+            "tag": f"scene_region_edit_{shot.id[:8]}",
+            "masks": masks,
+            "denoise": denoise,
+            "grow_mask_by": grow,
+            "creativeContext": {"cinematographer": cine_ctx} if cine_ctx else {},
+        }
+        try:
+            job_info = _enqueue_compiled(db, project_id=project_id, compiled=compiled, body=body)
+            job_id = str(job_info.get("jobId") or "")
+            status = "queued"
+            error = ""
+        except Exception as exc:
+            logger.error("Scene region edit enqueue failed: %s", exc)
+            job_id = f"failed_region_edit_{len(shot.candidates)}"
+            status = "failed"
+            error = str(exc)
 
     prior = list(shot.candidates)
     approved_id = shot.approved_candidate_id
-    capability_label = str(compiled.get("capabilityLabel") or caps.get("label") or "Image Edit")
     family_label = next(
         (f.get("label") for f in list_local_generator_families() if f.get("id") == family),
         family,
@@ -1843,8 +1938,8 @@ def region_edit_shot(
             "family": family,
             "capability_label": capability_label,
             "workflow_key": workflow_key,
-            "denoise": compiled.get("denoise"),
-            "grow_mask_by": compiled.get("grow_mask_by"),
+            "denoise": denoise,
+            "grow_mask_by": grow,
             "approved": False,
         }
     )

@@ -88,6 +88,9 @@ export function formatMaskSummary(input: {
 export function creatorFacingCandidateError(raw: string): { summary: string; gate: boolean; detail: string } {
   const detail = (raw || "").trim();
   const low = detail.toLowerCase();
+  if (low.includes("traceback") || low.includes("file \"") || low.includes("  file '")) {
+    return { summary: "Generation failed", gate: false, detail: "" };
+  }
   if (low.includes("did not change meaningfully") || low.includes("identical to source") || low.includes("did not change the selected region")) {
     return {
       summary: "Edit did not change the selected region enough.",
@@ -159,7 +162,7 @@ export function regionEditCapability(family: string): {
   return { family: key, supportsInpaint: false, supportsEditing: false, label: "Unsupported" };
 }
 
-/** Recommended ≠ routed. Never silent-swap the selected generator. */
+/** Fallback lockstep with `studio-api/app/image_core/recommend.py`. Live UI prefers GET /api/image-core/recommend. */
 export function recommendOperationFamily(operation: RegionEditOperation): {
   family: string;
   label: string;

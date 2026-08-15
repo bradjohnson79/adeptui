@@ -199,6 +199,45 @@ def _load_rgba(path: Path):
         return im.convert("RGBA")
 
 
+def composite_generated_into_source(
+    generated: str | Path,
+    source: str | Path,
+    mask: str | Path,
+    dest: str | Path | None = None,
+    *,
+    feather_px: int = 8,
+) -> Path:
+    """Keep source pixels outside the mask; use generated pixels inside it.
+
+    FLUX img2img restyles the whole frame. Region-edit still requires identity,
+    camera, and unmasked scene to survive. This composite is applied after
+    download and does not change certified Comfy graph fingerprints.
+    White/opaque mask pixels select the generated image.
+    """
+    from PIL import Image, ImageFilter
+
+    gen_path = Path(generated)
+    src_path = Path(source)
+    mask_path = Path(mask)
+    out_path = Path(dest) if dest else gen_path
+    with Image.open(gen_path) as gen_im:
+        gen_rgba = gen_im.convert("RGBA")
+    with Image.open(src_path) as src_im:
+        src_rgba = src_im.convert("RGBA")
+    with Image.open(mask_path) as mask_im:
+        mask_l = mask_im.convert("L")
+    if gen_rgba.size != src_rgba.size:
+        gen_rgba = gen_rgba.resize(src_rgba.size, Image.Resampling.LANCZOS)
+    if mask_l.size != src_rgba.size:
+        mask_l = mask_l.resize(src_rgba.size, Image.Resampling.LANCZOS)
+    if feather_px > 0:
+        mask_l = mask_l.filter(ImageFilter.GaussianBlur(radius=float(feather_px)))
+    composed = Image.composite(gen_rgba, src_rgba, mask_l)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    composed.convert("RGB").save(out_path)
+    return out_path
+
+
 def _mask_region_mean_delta(output: Path, source: Path, mask: Path, *, threshold: float = 2.0) -> bool:
     """True when masked pixels differ meaningfully from source (R5 inpaint check)."""
     try:

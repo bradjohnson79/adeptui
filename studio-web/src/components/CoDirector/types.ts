@@ -384,6 +384,7 @@ const MESSAGES_KEY_PREFIX = "adept_codirector_messages_";
 /** Legacy global key — read once for migration, never written. */
 const LEGACY_MESSAGES_KEY = "adept_codirector_messages";
 const MODE_KEY = "adept_codirector_display_mode";
+const OPEN_POPUP_AFTER_NAV_KEY = "adept_codirector_open_popup_after_nav";
 const CONTEXT_PANEL_KEY = "adept_codirector_context_panel";
 const EXPERTISE_MODE_KEY = "adept_codirector_expertise_mode";
 const LAST_PROJECT_KEY = "adept_codirector_last_project_suggestion";
@@ -564,6 +565,27 @@ export function persistDisplayMode(mode: CoDirectorDisplayMode) {
     localStorage.setItem(MODE_KEY, mode);
   } catch {
     /* ignore */
+  }
+}
+
+/** Survive fullscreen → Standard navigation when session `open` is not persisted. */
+export function markOpenPopupAfterNav() {
+  try {
+    sessionStorage.setItem(OPEN_POPUP_AFTER_NAV_KEY, "1");
+    persistDisplayMode("popup");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function consumeOpenPopupAfterNav(): boolean {
+  try {
+    const raw = sessionStorage.getItem(OPEN_POPUP_AFTER_NAV_KEY);
+    if (raw !== "1") return false;
+    sessionStorage.removeItem(OPEN_POPUP_AFTER_NAV_KEY);
+    return true;
+  } catch {
+    return false;
   }
 }
 

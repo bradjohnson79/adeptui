@@ -57,6 +57,11 @@ export function RegionEditPanel({
 }) {
   const session = useInpaintSession();
   const [saving, setSaving] = useState(false);
+  const [coreRecommend, setCoreRecommend] = useState<{
+    message: string;
+    recommendedFamily: string;
+    keepCurrentAllowed: boolean;
+  } | null>(null);
 
   const sources = useMemo(
     () => listRegionEditSources({ shot, cinematographer, selectedCameraId }),
@@ -81,6 +86,32 @@ export function RegionEditPanel({
       session.setSourceId(sources[0].id);
     }
   }, [sources, session.sourceId, session.setSourceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .imageCoreRecommend(session.operation, localFamily)
+      .then((row) => {
+        if (!cancelled) {
+          setCoreRecommend({
+            message: row.message || "",
+            recommendedFamily: row.recommendedFamily || "",
+            keepCurrentAllowed: row.keepCurrentAllowed !== false,
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCoreRecommend(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session.operation, localFamily]);
+
+  const fallbackRec = recommendOperationFamily(session.operation);
+  const recommendCopy = coreRecommend?.message || operationRecommendCopy(session.operation, localFamily);
+  const recFamily = coreRecommend?.recommendedFamily || fallbackRec.family;
+  const recLabel = recFamily === "flux" ? "FLUX" : recFamily === "zimage" ? "Z-Image" : fallbackRec.label;
 
   const generate = async () => {
     if (!source?.assetId || unsupported || !session.hasMask) return;
@@ -205,17 +236,17 @@ export function RegionEditPanel({
             ))}
           </select>
         </label>
-        {operationRecommendCopy(session.operation, localFamily) ? (
+        {recommendCopy ? (
           <div className="scene-creator-model-guard" data-testid="scene-creator-operation-recommend">
-            <p>{operationRecommendCopy(session.operation, localFamily)}</p>
+            <p>{recommendCopy}</p>
             <div className="scene-creator-core__row">
               <button
                 type="button"
                 className="primary"
                 data-testid="scene-creator-use-recommended-family"
-                onClick={() => onSwitchFamily?.(recommendOperationFamily(session.operation).family)}
+                onClick={() => onSwitchFamily?.(recFamily)}
               >
-                Use {recommendOperationFamily(session.operation).label}
+                Use {recLabel}
               </button>
               <button type="button" className="ghost" data-testid="scene-creator-keep-current-family">
                 Keep Current Model

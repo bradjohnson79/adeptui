@@ -281,6 +281,15 @@ def compile_image_request(
         operation = "image.edit"
     if purpose in {"storyboard", "storyboard_frame"}:
         operation = "image.storyboard_frame"
+    if purpose == "environment_reference_sheet":
+        # ERS is always one Image Core T2I. Atlas / background / map plate /
+        # character-prop refs are prompt context only — never I2I pixels.
+        operation = "image.generate"
+        body.pop("edit", None)
+        body.pop("source_asset_id", None)
+        body.pop("sourceAssetId", None)
+        body.pop("referenceImage", None)
+        body.pop("reference_image", None)
 
     creative_extras = dict(body.get("creativeContext") or {})
     continuity_session_id = body.get("continuitySessionId") or body.get("continuityId")
@@ -427,6 +436,8 @@ def compile_image_request(
         ref_ids = list(dict.fromkeys(ref_ids + list(body["referenceIds"])))
 
     source_asset = body.get("sourceAssetId") or body.get("source_asset_id")
+    if purpose == "environment_reference_sheet":
+        source_asset = None
     spatial_bundle = body.get("spatialReferenceBundle") if isinstance(body.get("spatialReferenceBundle"), dict) else None
     spatial_block = creative_extras.get("spatial") if isinstance(creative_extras.get("spatial"), dict) else {}
     intent = ImageIntent(
@@ -478,6 +489,7 @@ def compile_image_request(
             "batchIndex": body.get("batchIndex"),
             "guidance": body.get("guidance"),
             "edit_op": body.get("edit_op") or body.get("editOp"),
+            "masks": body.get("masks") or [],
         },
     )
     try:
@@ -545,7 +557,11 @@ def compile_image_request(
             force_workflow_key=force_key,
             present_inputs={
                 "prompt": intent.prompt,
-                "reference_image": bool(intent.sourceAssetId or intent.referenceIds),
+                "reference_image": (
+                    bool(intent.sourceAssetId or intent.referenceIds)
+                    and purpose != "environment_reference_sheet"
+                ),
+                "mask": bool(body.get("masks") or body.get("maskAssetId")),
             },
             provider_preference=intent.providerPreference,
         )
@@ -585,6 +601,9 @@ def compile_image_request(
         if purpose == "project_prop" or objective == "project_prop":
             # Prop Creator pins the requested family. Never silently become zimage.
             raise
+        if purpose == "environment_reference_sheet":
+            # ERS stays honest T2I on the selected family. Never zimage.ref_edit.
+            raise
         # Certified ZImage fallback (unpinned requests only)
         contract = resolve_image_workflow(
             "image.edit" if (intent.sourceAssetId or intent.operation == "image.edit") else "image.generate",
@@ -593,7 +612,11 @@ def compile_image_request(
             allow_draft=False,
             present_inputs={
                 "prompt": intent.prompt,
-                "reference_image": bool(intent.sourceAssetId or intent.referenceIds),
+                "reference_image": (
+                    bool(intent.sourceAssetId or intent.referenceIds)
+                    and purpose != "environment_reference_sheet"
+                ),
+                "mask": bool(body.get("masks") or body.get("maskAssetId")),
             },
         )
         intent.enginePreference = "zimage"

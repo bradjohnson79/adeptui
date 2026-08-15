@@ -1,5 +1,7 @@
 # SCENE CREATOR → ADEPT IMAGE GENERATION CORE MIGRATION
 
+> **HISTORICAL (Law 30).** This document is no longer the governing Scene Creator cert. Governing document: `SCENE_CREATOR_FINAL_PRODUCTION_CERTIFICATION.md`. Do not recertify from this file. The NO-GO verdict below is unchanged.
+
 **Date:** 2026-08-15  
 **Branch:** `beta`  
 **HEAD SHA:** `3bbc696ed2f68b9bdf2e46a56d80b2ffa977d1b2`  

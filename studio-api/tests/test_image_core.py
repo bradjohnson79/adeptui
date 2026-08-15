@@ -133,5 +133,140 @@ def test_scene_service_does_not_hardcode_force_workflow_on_core_path() -> None:
     text = src.read_text(encoding="utf-8")
     assert "image_core_generate" in text
     assert "scene_shot_final" in text
+    assert "final_region_edit" in text
+    assert "purpose=purpose" in text or 'purpose="region_edit"' in text or "purpose = \"region_edit\"" in text or 'purpose = "final_region_edit"' in text
     assert 'return "zimage.inpaint", "image.inpaint", "Native Inpaint"' not in text
     assert 'return "flux.img2img", "image.edit", "Image Edit"' not in text
+
+
+def test_idempotency_key_includes_purpose_source_mask() -> None:
+    from app.image_core.generate import idempotency_key
+    from app.image_core.request import ImageCoreRequest
+
+    key = idempotency_key(
+        ImageCoreRequest(
+            project_id="p",
+            purpose="region_edit",
+            operation="image.edit",
+            model_id="flux",
+            source_asset_id="src-1",
+            mask_asset_id="mask-1",
+            edit_operation="modify",
+            creative_context={"cinematographer": {"cameraStateHash": "hash-9"}},
+        )
+    )
+    assert key == "region_edit|src-1|hash-9|flux|image.edit|modify|mask-1"
+
+
+def test_unknown_purpose_is_rejected() -> None:
+    decision = preflight(
+        ImageCoreRequest(
+            project_id="p",
+            purpose="character_sheet",
+            operation="image.generate",
+            model_id="flux",
+        )
+    )
+    assert decision.ok is False
+    assert decision.code == UNSUPPORTED_OPERATION
+    assert "Unknown Image Core purpose" in decision.message
+
+
+def test_to_body_stamps_purpose_on_job_payload() -> None:
+    from types import SimpleNamespace
+
+    from app.image_core.generate import _to_body
+    from app.image_core.request import ImageCoreRequest
+
+    decision = SimpleNamespace(
+        runtime_operation="image.edit",
+        family="flux",
+        width=1024,
+        height=1024,
+        denoise=0.35,
+        grow_mask_by=None,
+        workflow_key="flux.img2img",
+    )
+    body = _to_body(
+        ImageCoreRequest(
+            project_id="p",
+            purpose="scene_shot_final",
+            operation="image.edit",
+            model_id="flux",
+            source_asset_id="d1",
+        ),
+        decision,
+    )
+    assert body["purpose"] == "scene_shot_final"
+    assert body["creativeContext"]["purpose"] == "scene_shot_final"
+    assert body["operation"] == "image.edit"
+
+
+def test_generate_reuses_live_job(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.image_core.generate import generate, idempotency_key
+    from app.image_core.request import ImageCoreRequest
+
+    request = ImageCoreRequest(
+        project_id="p",
+        purpose="region_edit",
+        operation="image.edit",
+        model_id="flux",
+        source_asset_id="src-1",
+        mask_asset_id="mask-1",
+        edit_operation="modify",
+        creative_context={"cinematographer": {"cameraStateHash": "h"}},
+    )
+    key = idempotency_key(request)
+    live = SimpleNamespace(
+        id="job-live",
+        status="queued",
+        params_json={"creativeContext": {"imageCoreIdempotencyKey": key}},
+        params=None,
+        message="",
+    )
+
+    class _Query:
+        def filter(self, *a, **k):
+            return self
+
+        def order_by(self, *a, **k):
+            return self
+
+        def limit(self, n):
+            return self
+
+        def all(self):
+            return [live]
+
+    class _Db:
+        def query(self, model):
+            return _Query()
+
+    enqueued = []
+
+    def _enqueue(*a, **k):
+        enqueued.append("hit")
+        raise AssertionError("live job must be reused")
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    result = generate(_Db(), request)
+    assert result.job_id == "job-live"
+    assert enqueued == []
+
+
+def test_image_product_preserves_masks_on_enqueue() -> None:
+    from pathlib import Path
+
+    service = Path(__file__).resolve().parents[1] / "app" / "image_product" / "service.py"
+    jobs = Path(__file__).resolve().parents[1] / "app" / "storyboard_jobs.py"
+    text = service.read_text(encoding="utf-8")
+    assert '"masks": body.get("masks")' in text or "body.get(\"masks\")" in text
+    job_src = jobs.read_text(encoding="utf-8")
+    assert 'payload["operation"] = "image.edit"' in job_src
+    assert "image.inpaint" in job_src
+    assert recommend("modify", "zimage")["recommendedFamily"] == "flux"
+    assert recommend("replace", "zimage")["recommendedFamily"] == "flux"
+    assert recommend("add", "flux")["recommendedFamily"] == "zimage"
+    assert recommend("remove", "flux")["recommendedFamily"] == "zimage"

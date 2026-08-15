@@ -81,6 +81,7 @@ describe("Scene Creator contracts", () => {
     expect(launcher).toContain("scene-creator-open-standard");
     expect(launcher).toContain("Open Scene Creator");
     expect(launcher).toContain("onGoTab?.(\"scenecreator\")");
+    expect(launcher).toContain("markOpenPopupAfterNav");
     expect(launcher).not.toContain("CinematographerPanel");
     expect(launcher).not.toContain("scene-creator-generate");
   });
@@ -123,6 +124,8 @@ describe("Scene Creator contracts", () => {
     );
     expect(inpaint).not.toContain("ImageMaskEditor");
     expect(inpaint).toContain("scene-creator-inpaint-source");
+    expect(inpaint).toContain("imageCoreRecommend");
+    expect(inpaint).toContain("scene-creator-keep-current-family");
     const css = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("./sceneCreator.css", import.meta.url), "utf8"),
     );

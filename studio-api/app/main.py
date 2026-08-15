@@ -482,6 +482,12 @@ try:
 except Exception as exc:  # pragma: no cover
     logger.warning("scene_creator region_edit router unavailable: %s", exc)
 try:
+    from .image_core.router import router as image_core_router
+
+    app.include_router(image_core_router, prefix="/api")
+except Exception as exc:  # pragma: no cover
+    logger.warning("image_core router unavailable: %s", exc)
+try:
     from .prop_creator.router import router as prop_creator_router
 
     app.include_router(prop_creator_router, prefix="/api")

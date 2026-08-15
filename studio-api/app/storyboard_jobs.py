@@ -197,9 +197,16 @@ def enqueue_imagegen_job(
         "sceneId": scene_id or body.get("sceneId") or body.get("scene_id"),
         "modelFamilyPreference": body.get("modelFamilyPreference") or body.get("model") or "zimage",
     }
-    if body.get("edit") or body.get("source_asset_id"):
-        payload["operation"] = "image.edit"
-        payload.setdefault("sourceAssetId", body.get("source_asset_id"))
+    if str(body.get("purpose") or "") == "environment_reference_sheet":
+        payload["operation"] = "image.generate"
+        payload.pop("edit", None)
+        payload.pop("source_asset_id", None)
+        payload.pop("sourceAssetId", None)
+    elif body.get("edit") or body.get("source_asset_id"):
+        current_op = str(body.get("operation") or payload.get("operation") or "").strip().lower()
+        if current_op not in {"image.inpaint", "image.edit", "image.reference", "native_inpaint"}:
+            payload["operation"] = "image.edit"
+        payload.setdefault("sourceAssetId", body.get("source_asset_id") or body.get("sourceAssetId"))
     result = generate_images(db, project_id=project_id, body=payload)
     job = db.get(Job, result.get("jobId"))
     if not job:

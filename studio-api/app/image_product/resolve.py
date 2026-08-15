@@ -27,6 +27,9 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     operation = str(src.get("operation") or "image.generate").strip()
     if src.get("edit") or src.get("source_asset_id") or src.get("sourceAssetId"):
         operation = "image.edit"
+    if purpose == "environment_reference_sheet":
+        # Plate / atlas / character-prop ids are prompt context, not I2I.
+        operation = "image.generate"
     model = str(
         src.get("hostedModelId")
         or src.get("kieImageModelId")
@@ -111,6 +114,9 @@ def _refuse_qwen2512_edit(intent: dict[str, Any], family: str) -> dict[str, Any]
 
 
 def _wants_edit(src: dict[str, Any], intent: dict[str, Any]) -> bool:
+    purpose = str(intent.get("purpose") or src.get("purpose") or "").strip()
+    if purpose == "environment_reference_sheet":
+        return False
     if intent.get("operation") == "image.edit":
         return True
     if src.get("edit") is True:

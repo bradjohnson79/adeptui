@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   api,
   ApiError,
@@ -56,6 +56,7 @@ import {
 } from "./activity";
 import {
   consumeAbandonedStreamingFlag,
+  consumeOpenPopupAfterNav,
   getTabSessionId,
   loadActivityPreference,
   loadContextPanelOpen,
@@ -514,6 +515,7 @@ function mergeOntoServer(
 
 export function CoDirectorSessionProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const bindingsRef = useRef<CoDirectorWorkspaceBindings>({});
   const activeContentTabRef = useRef<string | null>(null);
   const [open, setOpenState] = useState(false);
@@ -1150,6 +1152,11 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setDisplayModeState(mode);
     persistDisplayMode(mode);
   }, []);
+  useEffect(() => {
+    if (!consumeOpenPopupAfterNav()) return;
+    setDisplayMode("popup");
+    setOpenState(true);
+  }, [location.pathname, setDisplayMode]);
   const setContextPanelOpen = useCallback((value: boolean) => {
     setContextPanelOpenState(value);
     persistContextPanelOpen(value);
@@ -3479,9 +3486,8 @@ export function useOpenCoDirector() {
         session.expandToFullScreen();
         return;
       }
-      if (session.displayMode !== "fullscreen") {
-        session.setOpen(true);
-      }
+      session.setDisplayMode("popup");
+      session.setOpen(true);
     },
     [session],
   );

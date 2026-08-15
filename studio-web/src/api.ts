@@ -3884,6 +3884,33 @@ export const api = {
         executable?: boolean;
       }[]
     >("/api/imagegen/models"),
+  imageCoreRecommend: (operation: string, family = "") =>
+    req<{
+      operation: string;
+      family: string;
+      recommendedFamily: string;
+      recommended: boolean;
+      supported: boolean;
+      message: string;
+      keepCurrentAllowed: boolean;
+    }>(
+      `/api/image-core/recommend?operation=${encodeURIComponent(operation)}&family=${encodeURIComponent(family)}`,
+    ),
+  imageCorePreflight: (body: Record<string, unknown>) =>
+    req<{
+      ok: boolean;
+      code: string;
+      message: string;
+      family: string;
+      workflowKey: string;
+      operation: string;
+      recommendedFamily: string;
+      supported: boolean;
+    }>("/api/image-core/preflight", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   imageProduct: {
     generate: (projectId: string, body: Record<string, unknown>) =>
       req<ImageProductGenerateResult>(`/api/image-product/projects/${projectId}/generate`, {

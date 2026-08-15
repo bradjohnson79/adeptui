@@ -11,7 +11,7 @@ from .capability import (
 )
 from .errors import UNSUPPORTED_OPERATION
 from .recommend import recommend
-from .request import CapabilityDecision, ImageCoreRequest
+from .request import IMAGE_CORE_PURPOSES, CapabilityDecision, ImageCoreRequest
 from .resolution import resolve_resolution
 
 REGION_EDIT_UNSUPPORTED_MESSAGE = (
@@ -43,6 +43,15 @@ def preflight(request: ImageCoreRequest) -> CapabilityDecision:
     operation = (request.operation or "").strip().lower()
     rec = recommend(request.edit_operation or operation, family)
     caps = family_region_edit_capability(family)
+    if purpose and purpose not in IMAGE_CORE_PURPOSES:
+        return CapabilityDecision(
+            ok=False,
+            code=UNSUPPORTED_OPERATION,
+            message=f"Unknown Image Core purpose: {purpose}",
+            family=family,
+            recommended_family=str(rec.get("recommendedFamily") or ""),
+            supported=False,
+        )
 
     if request.provider == "cloud" and not (request.hosted_model_id or request.extra.get("hostedModelId")):
         return CapabilityDecision(

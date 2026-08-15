@@ -2841,7 +2841,7 @@ class JobQueue:
         # Mask for inpaint (from ImageEditIntent metadata or params)
         meta = (intent.metadata if hasattr(intent, "metadata") else None) or params.get("imageIntent", {}).get("metadata") or {}
         mask_specs = params.get("masks") or meta.get("masks") or []
-        if mask_specs and ("inpaint" in contract.workflow_key or edit_op in {"inpaint", "object_remove", "object_replace"}):
+        if mask_specs:
             job.stage = ImageJobStage.PREPARING_MASKS.value
             job.message = "Preparing masks"
             db.commit()
@@ -2862,9 +2862,14 @@ class JobQueue:
             if not mask_image and "inpaint" in contract.workflow_key:
                 raise RuntimeError("Inpaint requires a persisted mask asset")
 
+        # Keep edit_op in job metadata only. Appending "Edit operation:" to the
+        # Comfy prompt caused FLUX to burn those words into the pixels.
         build_prompt = prompt
-        if job.kind == "imagegen_edit" and edit_op:
-            build_prompt = f"{prompt}. Edit operation: {edit_op}".strip()
+        negative = (negative or "blurry, low quality, watermark").strip()
+        if job.kind == "imagegen_edit" or (edit_op and edit_op not in {"generate", "image.generate"}):
+            anti_text = "text, letters, watermark, logo, caption, overlay, typography, writing"
+            if "typography" not in negative.lower():
+                negative = f"{negative}, {anti_text}"
 
         job.stage = ImageJobStage.LOADING_MODELS.value
         job.message = "Loading models"
@@ -2975,6 +2980,47 @@ class JobQueue:
             src_a = self._get_asset(db, source_asset_id)
             if src_a and src_a.path:
                 source_path_for_gate = src_a.path
+        mask_path_for_gate = None
+        try:
+            from .image_product.masks import get_mask_path
+
+            specs = params.get("masks") or (intent.metadata or {}).get("masks") or []
+            if specs:
+                m0 = specs[0] if isinstance(specs[0], dict) else {"maskAssetId": specs[0]}
+                mid = m0.get("maskAssetId") or m0.get("assetId")
+                if mid:
+                    mask_path_for_gate = get_mask_path(project.id, str(mid))
+        except Exception:
+            pass
+        # Region-edit contract: unmasked pixels must remain the source.
+        # Certified FLUX img2img does not consume a mask; composite after
+        # download so identity/camera survive without graph drift.
+        if (
+            source_path_for_gate
+            and mask_path_for_gate
+            and Path(source_path_for_gate).is_file()
+            and Path(str(mask_path_for_gate)).is_file()
+            and "outpaint" not in contract.workflow_key
+            and "inpaint" not in contract.workflow_key
+            and contract.workflow_key != "image.upscale"
+        ):
+            from .image_runtime.output_gate import composite_generated_into_source
+
+            feather = 8
+            try:
+                feather = int(params.get("featherPx") or (intent.metadata or {}).get("featherPx") or 8)
+            except Exception:
+                feather = 8
+            composite_generated_into_source(
+                tmp_path,
+                source_path_for_gate,
+                mask_path_for_gate,
+                tmp_path,
+                feather_px=max(0, feather),
+            )
+            params["regionCompositeApplied"] = True
+            job.params_json = json.dumps(params)
+            db.commit()
         is_edit_op = bool(
             (edit_operation and edit_operation not in {"generate", "image.generate"})
             or "inpaint" in contract.workflow_key
@@ -2984,18 +3030,6 @@ class JobQueue:
         if is_edit_op:
             from .image_runtime.output_gate import validate_edit_output
 
-            mask_path_for_gate = None
-            try:
-                from .image_product.masks import get_mask_path
-
-                specs = params.get("masks") or (intent.metadata or {}).get("masks") or []
-                if specs:
-                    m0 = specs[0] if isinstance(specs[0], dict) else {"maskAssetId": specs[0]}
-                    mid = m0.get("maskAssetId") or m0.get("assetId")
-                    if mid:
-                        mask_path_for_gate = get_mask_path(project.id, str(mid))
-            except Exception:
-                pass
             gate = validate_edit_output(
                 tmp_path,
                 operation=edit_operation if edit_operation.startswith("image.") else f"image.{edit_operation}",

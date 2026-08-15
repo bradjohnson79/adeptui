@@ -162,16 +162,53 @@ def _pin_runtime(monkeypatch, workflow_key: str, family: str):
             raise AssertionError("region edit must not pin txt2img")
         return _Contract()
 
-    def _enqueue(db, *, project_id, compiled, body):
-        captured["compiled"] = compiled
+    def _fill_from_body(body: dict) -> None:
         captured["body"] = body
+        wf = str(
+            body.get("forceWorkflowKey")
+            or (body.get("creativeContext") or {}).get("imageCoreWorkflowKey")
+            or (body.get("creativeContext") or {}).get("workflowKey")
+            or workflow_key
+        )
+        captured["workflowKey"] = wf
+        captured["resolve"] = captured.get("resolve") or {"args": (), "kwargs": {"force_workflow_key": wf}}
+        captured["compiled"] = {
+            "workflowKey": wf,
+            "imageRuntime": {"workflowKey": wf},
+            "imageEditIntent": {"masks": body.get("masks") or []},
+            "imageIntent": {
+                "prompt": body.get("prompt") or "",
+                "metadata": {
+                    "denoise": body.get("denoise"),
+                    "grow_mask_by": body.get("grow_mask_by"),
+                },
+            },
+            "denoise": body.get("denoise"),
+            "grow_mask_by": body.get("grow_mask_by"),
+            "capabilityLabel": "Native Inpaint" if "inpaint" in wf else "Image Edit",
+        }
+
+    def _enqueue(db, *, project_id, compiled, body):
+        _fill_from_body(body if isinstance(body, dict) else {})
+        captured["compiled"] = compiled
         captured["workflowKey"] = compiled.get("workflowKey") or (compiled.get("imageRuntime") or {}).get(
             "workflowKey"
         )
         return {"jobId": str(uuid.uuid4()), "workflowKey": captured["workflowKey"]}
 
+    class _Job:
+        def __init__(self) -> None:
+            self.id = str(uuid.uuid4())
+            self.status = "queued"
+            self.message = ""
+
+    def _enqueue_job(db, project_id, body, scene_id=None):
+        _fill_from_body(body if isinstance(body, dict) else {})
+        return _Job()
+
     monkeypatch.setattr("app.image_runtime.contract.resolve_image_workflow", _resolve)
     monkeypatch.setattr("app.image_product.edit_service._enqueue_compiled", _enqueue)
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue_job)
     monkeypatch.setattr("app.scene_creator.service._job_is_live", lambda *a, **k: True)
     return captured
 
@@ -240,8 +277,8 @@ def test_illustrious_is_unsupported(monkeypatch) -> None:
 
 
 def test_zimage_region_edit_sets_inpaint_not_txt2img(monkeypatch) -> None:
-    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         edited = region_edit_shot(
             db,
@@ -276,8 +313,8 @@ def test_zimage_region_edit_sets_inpaint_not_txt2img(monkeypatch) -> None:
 
 
 def test_flux_region_edit_is_image_edit_not_native_inpaint(monkeypatch) -> None:
-    captured = _pin_runtime(monkeypatch, "flux.img2img", "flux")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="flux")
+    captured = _pin_runtime(monkeypatch, "flux.img2img", "flux")
     try:
         edited = region_edit_shot(
             db,
@@ -301,8 +338,8 @@ def test_flux_region_edit_is_image_edit_not_native_inpaint(monkeypatch) -> None:
 
 
 def test_candidate_appended_parent_and_approval_preserved(monkeypatch) -> None:
-    _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         edited = region_edit_shot(
             db,
@@ -649,8 +686,8 @@ def test_operation_profiles_pin_denoise_and_grow(monkeypatch) -> None:
     remove = operation_profile("remove", expand="tight")
     assert remove["grow_mask_by"] == 2
 
-    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         edited = region_edit_shot(
             db,
@@ -691,8 +728,8 @@ def test_mask_too_small_blocks_enqueue(monkeypatch, tmp_path) -> None:
     except ValueError as exc:
         assert MASK_TOO_SMALL_MESSAGE in str(exc)
 
-    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         monkeypatch.setattr(
             "app.image_product.masks.get_mask_path",
@@ -718,8 +755,8 @@ def test_mask_too_small_blocks_enqueue(monkeypatch, tmp_path) -> None:
 
 
 def test_duplicate_region_edit_reuses_in_flight(monkeypatch) -> None:
-    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    captured = _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         first = region_edit_shot(
             db,
@@ -759,9 +796,21 @@ def test_creator_facing_output_gate_message() -> None:
     assert OUTPUT_GATE_CREATOR_MESSAGE.splitlines()[0] in msg
 
 
+def test_region_edit_prompt_prefixes_are_not_ui_jargon() -> None:
+    from app.scene_creator.region_edit_profiles import OPERATION_PROFILES, compile_operation_prompt
+
+    for op in OPERATION_PROFILES:
+        text = compile_operation_prompt(op, "irritated expression")
+        low = text.lower()
+        assert "edit operation" not in low
+        assert "masked region" not in low
+        assert "inpaint" not in low
+        assert "irritated expression" in low
+
+
 def test_approve_marks_previous_superseded_not_deleted(monkeypatch) -> None:
-    _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     db, project_id, shot, parent, asset_id = _seed_shot_with_parent(monkeypatch, family="zimage")
+    _pin_runtime(monkeypatch, "zimage.inpaint", "zimage")
     try:
         parent.asset_id = asset_id
         parent.status = "complete"

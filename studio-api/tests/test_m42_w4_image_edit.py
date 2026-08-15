@@ -144,6 +144,26 @@ def test_semantic_gate_upscale(tmp_path: Path):
     assert gate.checks.get("resolutionIncreased")
 
 
+def test_composite_generated_into_source_keeps_unmasked_pixels(tmp_path: Path):
+    from PIL import Image, ImageDraw
+
+    from app.image_runtime.output_gate import composite_generated_into_source
+
+    src = tmp_path / "src.png"
+    gen = tmp_path / "gen.png"
+    mask = tmp_path / "mask.png"
+    out = tmp_path / "out.png"
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(src)
+    Image.new("RGB", (64, 64), (200, 10, 10)).save(gen)
+    mask_im = Image.new("L", (64, 64), 0)
+    ImageDraw.Draw(mask_im).rectangle((16, 16, 48, 48), fill=255)
+    mask_im.save(mask)
+    composite_generated_into_source(gen, src, mask, out, feather_px=0)
+    result = Image.open(out).convert("RGB")
+    assert result.getpixel((0, 0)) == (10, 20, 30)
+    assert result.getpixel((32, 32)) == (200, 10, 10)
+
+
 def test_w1_w2_preserved():
     assert evaluate_image_gate().get("wave1Go") is True
     assert evaluate_image_wave2_gate().get("wave2Go") is True

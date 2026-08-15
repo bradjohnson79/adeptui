@@ -90,6 +90,9 @@ def generate_images(
             # fidelity-first value when a Character Reference is attached.
             "denoise": body.get("denoise"),
             "grow_mask_by": body.get("grow_mask_by"),
+            "masks": body.get("masks") or (intent.get("metadata") or {}).get("masks") or [],
+            "purpose": body.get("purpose") or intent.get("purpose"),
+            "operation": intent.get("operation") or body.get("operation"),
             "creativeContext": body.get("creativeContext") if isinstance(body.get("creativeContext"), dict) else {},
             "productionDock": dock_meta,
             "preferenceProvenance": (dock_meta or {}).get("provenance"),

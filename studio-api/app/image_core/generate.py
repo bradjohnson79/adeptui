@@ -11,6 +11,23 @@ from .preflight import preflight
 from .request import ImageCoreRequest, NormalizedEnqueue
 
 
+def idempotency_key(request: ImageCoreRequest) -> str:
+    ctx = request.creative_context or {}
+    cine = ctx.get("cinematographer") if isinstance(ctx.get("cinematographer"), dict) else {}
+    camera_hash = str(cine.get("cameraStateHash") or ctx.get("cameraStateHash") or "")
+    return "|".join(
+        [
+            request.purpose or "",
+            request.source_asset_id or "",
+            camera_hash,
+            request.model_id or "",
+            request.operation or "",
+            request.edit_operation or "",
+            request.mask_asset_id or "",
+        ]
+    )
+
+
 def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
     body = dict(request.extra or {})
     body["purpose"] = request.purpose
@@ -69,14 +86,72 @@ def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
         body["allow_force_workflow_key"] = True
     if request.edit_operation:
         ctx["editOperation"] = request.edit_operation
+    ctx["purpose"] = request.purpose
+    ctx["imageCoreIdempotencyKey"] = idempotency_key(request)
     body["creativeContext"] = ctx
     return body
+
+
+def _reuse_live_job(db: Session, request: ImageCoreRequest):
+    key = idempotency_key(request)
+    if not key.strip("|") or not request.project_id:
+        return None
+    try:
+        from ..db import Job
+    except Exception:
+        return None
+    wanted = {"queued", "pending", "running", "generating", "processing"}
+    try:
+        rows = (
+            db.query(Job)
+            .filter(Job.project_id == request.project_id)
+            .order_by(Job.created_at.desc())
+            .limit(24)
+            .all()
+        )
+    except Exception:
+        return None
+    for job in rows:
+        status = str(getattr(job, "status", "") or "").lower()
+        if status not in wanted:
+            continue
+        raw = getattr(job, "params_json", None) or getattr(job, "params", None)
+        params: dict[str, Any] = {}
+        if isinstance(raw, dict):
+            params = raw
+        elif isinstance(raw, str) and raw:
+            try:
+                import json
+
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    params = parsed
+            except Exception:
+                params = {}
+        ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+        if str(ctx.get("imageCoreIdempotencyKey") or "") == key:
+            return job
+    return None
 
 
 def generate(db: Session, request: ImageCoreRequest) -> NormalizedEnqueue:
     decision = preflight(request)
     if not decision.ok:
         raise ImageCoreError(decision.code or UNSUPPORTED_OPERATION, decision.message or "Unsupported operation")
+    reused = _reuse_live_job(db, request)
+    if reused is not None:
+        return NormalizedEnqueue(
+            job_id=str(getattr(reused, "id", "") or ""),
+            status="queued",
+            workflow_key=decision.workflow_key,
+            family=decision.family,
+            operation=decision.runtime_operation,
+            width=decision.width,
+            height=decision.height,
+            fallback_applied=False,
+            job=reused,
+            decision=decision,
+        )
     body = _to_body(request, decision)
     try:
         from ..storyboard_jobs import enqueue_imagegen_job

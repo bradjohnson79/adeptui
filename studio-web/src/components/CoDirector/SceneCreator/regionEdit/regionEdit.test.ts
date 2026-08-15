@@ -523,6 +523,12 @@ describe("mask coverage and model guard copy", () => {
     expect(parsed.detail).not.toMatch(/Traceback|File \".+\.py\"/);
   });
 
+  it("strips traceback from failure copy", () => {
+    const parsed = creatorFacingCandidateError('Traceback (most recent call last):\n  File "comfy_exec.py", line 12');
+    expect(parsed.summary).toBe("Generation failed");
+    expect(parsed.detail).toBe("");
+  });
+
   it("never advertises qwen.edit", () => {
     expect(MODEL_GUARD_MESSAGE.toLowerCase()).not.toContain("qwen.edit");
     expect(recommendedFinalCopy(shot({ approved_candidate_id: "e1", candidates: [

@@ -1,5 +1,7 @@
 # SCENE CREATOR FINISHING & RELIABILITY — GOVERNING CERTIFICATION
 
+> **HISTORICAL (Law 30).** This document is no longer the governing Scene Creator cert. Governing document: `SCENE_CREATOR_FINAL_PRODUCTION_CERTIFICATION.md`. Do not recertify from this file. The NO-GO verdict below is unchanged.
+
 **Date:** 2026-08-15  
 **Branch:** `beta`  
 **HEAD SHA:** `513fa8c6a1e8cb78c9d85b213ff750707cc96954`  

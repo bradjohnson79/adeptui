@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+IMAGE_CORE_PURPOSES = (
+    "scene_shot_preview",
+    "scene_shot_final",
+    "region_edit",
+    "final_region_edit",
+)
+
 
 @dataclass
 class ImageCoreRequest:

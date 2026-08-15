@@ -1,4 +1,5 @@
 import { useCoDirectorSession } from "../CoDirectorSession";
+import { markOpenPopupAfterNav } from "../types";
 
 export type SceneCreatorExpressLauncherProps = {
   projectId: string;
@@ -12,10 +13,9 @@ export function SceneCreatorExpressLauncher({
   const session = useCoDirectorSession();
 
   const openStandard = () => {
-    if (session.displayMode === "fullscreen") {
-      session.setDisplayMode("popup");
-      session.setOpen(true);
-    }
+    markOpenPopupAfterNav();
+    session.setDisplayMode("popup");
+    session.setOpen(true);
     onGoTab?.("scenecreator");
   };
 
