@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-15  
 **Branch:** `beta`  
-**HEAD SHA:** pending commit on `beta`  
+**HEAD SHA:** `3bbc696ed2f68b9bdf2e46a56d80b2ffa977d1b2`  
 **Studio API:** `http://127.0.0.1:8758/` `/api/health` **ok** after restart (script reported FAILED then Recovered). ComfyUI ready on RTX 5090; free VRAM observed **3424 MB** at cert time.  
 **Hosted UI:** deploy required for Playwright A–E against the new bundle (`index-AQs8WY7O.js` local build).  
 **Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`  
