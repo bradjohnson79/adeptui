@@ -136,6 +136,36 @@ def test_zimage_inpaint_denoise_and_grow_are_not_graph_drift():
     assert graph_hash(remove) == certified
 
 
+def test_zimage_ref_edit_matches_certified_graph_after_latent_path():
+    from app.config import settings
+
+    c = resolve_image_workflow(
+        "image.edit",
+        engine="zimage",
+        force_workflow_key="zimage.ref_edit",
+        allow_draft=True,
+    )
+    g = build_leaf_graph(
+        c,
+        settings=settings,
+        prompt="test",
+        reference_image="ref.png",
+        source_image="ref.png",
+        width=1024,
+        height=1024,
+        seed=1,
+        steps=8,
+        cfg=1.0,
+    )
+    types = {node["class_type"] for node in g.values()}
+    assert "VAEEncode" in types
+    assert "ImageScale" in types
+    assert "EmptyLatentImage" not in types
+    certified = get_workflow("zimage.ref_edit").fingerprints.get("graphHash")
+    assert certified
+    assert graph_hash(g) == certified
+
+
 def test_modern_foundation_ready():
     foundation = evaluate_modern_model_foundation()
     assert foundation["ModernModelFoundationReady"] is True

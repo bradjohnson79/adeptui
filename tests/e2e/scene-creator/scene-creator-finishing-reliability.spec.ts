@@ -370,20 +370,27 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     attachObserver(page, testInfo);
     await openSceneCreator(page);
     const preview = page.getByTestId("cine-preview");
+    const generate = page.getByTestId("scene-creator-generate");
+    await expect(preview).toHaveText(/Generate Low-Res Preview/i, { timeout: JOB_WAIT_MS });
+    await expect(generate).toHaveText(/Final Quality Render|Re-Take/i, { timeout: JOB_WAIT_MS });
     await expect(preview).toBeEnabled({ timeout: JOB_WAIT_MS });
-    await openAccordion(page, "cine-orient-accordion");
-    await page.getByRole("button", { name: "Yaw up" }).click();
-    await expect(preview).toBeEnabled();
     const posts: string[] = [];
     page.on("request", (req) => {
       if (req.method() === "POST" && /cinematographer\/preview/.test(req.url())) posts.push(req.url());
     });
+    await openAccordion(page, "cine-orient-accordion");
+    await page.getByRole("button", { name: "Yaw up" }).click();
     const before = await listJobs(request);
+    const previewReq = page.waitForRequest(
+      (req) => req.method() === "POST" && /cinematographer\/preview/.test(req.url()),
+      { timeout: 45_000 },
+    );
     await preview.dblclick({ delay: 20 }).catch(async () => {
       await preview.click();
       await preview.click();
     });
-    await page.waitForTimeout(2000);
+    await previewReq;
+    await page.waitForTimeout(1500);
     expect(posts.length, "frontend must serialize duplicate preview").toBe(1);
     const after = await listJobs(request);
     const created = after.filter((j) => !before.some((b) => b.id === j.id));
@@ -605,6 +612,7 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       if (value) await local.selectOption(value);
     }
     await waitForStudioOnline(page);
+    await expect(page.getByTestId("scene-creator-generate")).toHaveText(/Final Quality Render/i, { timeout: JOB_WAIT_MS });
     const lock = page.getByTestId("cine-lock");
     if (await lock.isDisabled()) {
       await page.getByTestId("cine-preview").click();
@@ -648,6 +656,8 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       .reverse()
       .find((c) => (c.quality_profile || "").toLowerCase() === "final" && c.kind !== "region_edit");
     expect(finalCand, "final candidate").toBeTruthy();
+    expect(finalCand!.status, "Final must complete, not merely enqueue").toMatch(/complete|done|succeeded/);
+    expect(finalCand!.asset_id, "Final must persist an asset").toBeTruthy();
     if (approved?.id) expect(finalCand!.parent_candidate_id || approved.id).toBeTruthy();
     if (finalCand?.final_strategy) expect(finalCand.final_strategy).toBe("A");
   });
