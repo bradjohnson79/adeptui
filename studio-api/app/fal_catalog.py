@@ -93,6 +93,9 @@ FAL_IMAGE_ENDPOINT_BY_DOCK: dict[str, str] = {
     "krea2-medium-fal": "krea/v2/medium/text-to-image",
     "krea2-large-fal": "krea/v2/large/text-to-image",
     "flux-fal": "fal-ai/flux/dev",
+    "flux-2-pro-fal": "fal-ai/flux-2-pro",
+    "flux-schnell-fal": "fal-ai/flux/schnell",
+    "nano-banana-2-fal": "fal-ai/nano-banana-2",
 }
 
 

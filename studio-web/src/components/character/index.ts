@@ -7,6 +7,7 @@ export { useCharacterProfile, getHeroIdentity, getReferenceImage } from "./useCh
 export { CharacterProfileForm } from "./CharacterProfileForm";
 export { CharacterReferenceControl } from "./CharacterReferenceControl";
 export { GeneratorSourceSelector } from "./GeneratorSourceSelector";
+export { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 export { CharacterSheetGenerator } from "./CharacterSheetGenerator";
 export { CharacterCandidateGrid } from "./CharacterCandidateGrid";
 export { GenerationProgressBar } from "./GenerationProgressBar";

@@ -59,6 +59,45 @@ FULL_BODY_CASTING_NEGATIVE_RULES: list[str] = [
     "Do not crop head, arms, hands, legs, or feet",
 ]
 
+# Close-up tile is a structural identity portrait, not a cropped full-body frame.
+CLOSEUP_FRONT_COMPOSITION: dict[str, Any] = {
+    "shot_type": "head-and-shoulders identity portrait",
+    "framing": "head and shoulders, full hair silhouette in frame",
+    "camera_angle": "eye level, camera at face height",
+    "lens": "85mm portrait, no fisheye, no wide-angle",
+    "environment": "simple unobtrusive studio background",
+    "lighting": "soft studio portrait light",
+    "pose": "front-facing, upright, neutral posture, not leaning into camera",
+    "expression": "neutral natural presence",
+    "focus": "face, eyes, ears, identity-critical features, full hair silhouette",
+    "full_body": False,
+}
+
+CLOSEUP_FRONT_NEGATIVE_RULES: list[str] = [
+    "No full body",
+    "No full-length figure",
+    "No wide shot",
+    "No fisheye",
+    "No wide-angle lens",
+    "No giant-head perspective",
+    "No leaning into camera",
+    "No hands dominating the frame",
+    "No cropped skull",
+    "Do not crop the hair silhouette",
+    "No character sheet",
+    "No collage",
+    "No grid",
+    "No multiple panels",
+    "No multiple views in one image",
+]
+
+VIEW_ROLE_CANONICAL: dict[str, str] = {
+    "hero_identity": "front_full",
+    "full_body_side_left": "side_full",
+    "full_body_back": "back_full",
+    "closeup_front": "front_closeup",
+}
+
 # Machine-readable composition intent persisted into prompt_metadata → creative_context
 # → Job lineage so Co-Director, retakes, and MAGI can determine framing without
 # parsing prompt text. Regeneration inherits this via the same endpoint.
@@ -160,7 +199,11 @@ PROFILE_GUIDED_VIEW_INSTRUCTIONS: dict[str, str] = {
     "hero_identity": "FRONT: front-facing, full-body neutral stance",
     "full_body_side_left": "SIDE: strict side-profile, full-body neutral stance",
     "full_body_back": "BACK: back-facing, full-body neutral stance",
-    "closeup_front": "CLOSE-UP: front-facing close-up portrait",
+    "closeup_front": (
+        "CLOSE-UP: one single front-facing head-and-shoulders identity portrait, "
+        "eye-level, full hair silhouette, ears readable, no hands, no fisheye, "
+        "not a character sheet, not a collage"
+    ),
 }
 
 # 2x2 grid layout (row-major): front, side / back, front-close-up.
@@ -285,10 +328,13 @@ def _compiler_payload(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sheet_request_for_role(role: str) -> dict[str, Any]:
-    view = ROLE_TO_SHEET_VIEW.get(role)
-    if not view:
-        return {}
-    return {"enabled": True, "views": [view]}
+    """Each enqueued view is one image. Multi-panel assembly is PIL, not the model.
+
+    Enabling compiler "character sheet mode" on a single view tells models such as
+    Illustrious to emit a collage/grid instead of the requested camera. That is
+    forbidden for Character Sheet view jobs.
+    """
+    return {}
 
 
 def _compile_visual_prompt(
@@ -318,21 +364,72 @@ def _compile_visual_prompt(
     )
 
 
-def _resolve_reference_asset_id(references: list[dict[str, Any]]) -> str | None:
-    """Return the first attached character-reference asset id, if any.
+def _reference_item_asset_id(item: dict[str, Any]) -> str | None:
+    aid = str(item.get("asset_id") or item.get("assetId") or "").strip()
+    return aid or None
 
-    A Character Reference Sheet or single reference image attached to the
-    character (role ``reference_image`` or canonical ``hero_identity``) is the
-    visual identity authority for reference-locked candidate generation.
+
+def _iter_reference_candidate_ids(references: list[dict[str, Any]]) -> list[str]:
+    """Character Reference ids in product priority, newest within each tier.
+
+    Generated ``hero_identity`` rows from prior sheets must not override the
+    creator-attached Character Reference (role ``reference_image``). Stale
+    generated rows can also point at deleted files.
     """
-    for item in references or []:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("reference_role") or "").strip()
-        if role in ("reference_image", "hero_identity"):
-            aid = item.get("asset_id") or item.get("assetId")
-            if aid:
-                return str(aid)
+    refs = [item for item in (references or []) if isinstance(item, dict)]
+
+    def _newest(items: list[dict[str, Any]]) -> list[str]:
+        ranked = [item for item in items if _reference_item_asset_id(item)]
+        ranked.sort(
+            key=lambda item: str(item.get("created_at") or item.get("createdAt") or ""),
+            reverse=True,
+        )
+        seen: list[str] = []
+        for item in ranked:
+            aid = _reference_item_asset_id(item)
+            if aid and aid not in seen:
+                seen.append(aid)
+        return seen
+
+    image_refs = [
+        item for item in refs if str(item.get("reference_role") or "").strip() == "reference_image"
+    ]
+    heroes = [
+        item for item in refs if str(item.get("reference_role") or "").strip() == "hero_identity"
+    ]
+    canonical = [item for item in heroes if item.get("canonical")]
+    ordered: list[str] = []
+    for aid in _newest(image_refs) + _newest(canonical) + _newest(heroes):
+        if aid not in ordered:
+            ordered.append(aid)
+    return ordered
+
+
+def _asset_image_readable(db: Session, project_id: str, asset_id: str) -> bool:
+    asset = db.get(Asset, asset_id)
+    if not asset or asset.project_id != project_id or str(asset.kind or "") != "image":
+        return False
+    path = Path(str(asset.path or ""))
+    return path.is_file()
+
+
+def _resolve_reference_asset_id(references: list[dict[str, Any]]) -> str | None:
+    """Return the attached Character Reference asset id, if any.
+
+    Priority: creator-attached ``reference_image``, then canonical
+    ``hero_identity``, then other ``hero_identity``. Newest wins within a tier.
+    """
+    ids = _iter_reference_candidate_ids(references)
+    return ids[0] if ids else None
+
+
+def _resolve_readable_reference_asset_id(
+    db: Session, project_id: str, references: list[dict[str, Any]]
+) -> str | None:
+    """Like ``_resolve_reference_asset_id``, skipping missing/unreadable files."""
+    for asset_id in _iter_reference_candidate_ids(references):
+        if _asset_image_readable(db, project_id, asset_id):
+            return asset_id
     return None
 
 
@@ -445,42 +542,153 @@ def _stage2_workflow_key(family: str) -> str | None:
     return None
 
 
+def _canonical_view_role(role: str) -> str:
+    return VIEW_ROLE_CANONICAL.get(role) or ROLE_TO_SHEET_VIEW.get(role) or role
+
+
+def _negative_rules_for_view(role: str, explicit: list[str] | None) -> list[str]:
+    if explicit is not None:
+        return list(explicit)
+    if role == "closeup_front":
+        return list(CLOSEUP_FRONT_NEGATIVE_RULES)
+    return list(FULL_BODY_CASTING_NEGATIVE_RULES)
+
+
+def _clamp_batch_count(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(4, n))
+
+
+def _is_auto_family(family: str) -> bool:
+    return (family or "").strip().lower() in {"", "auto"}
+
+
+def _parse_local_source_entries(local: Any) -> tuple[bool, list[dict[str, Any]]]:
+    if local is None:
+        return False, []
+    if isinstance(local, list):
+        entries: list[dict[str, Any]] = []
+        for item in local:
+            if not isinstance(item, dict):
+                continue
+            family = _normalize_local_family(str(item.get("family") or item.get("selected") or ""))
+            raw_family = str(item.get("family") or item.get("selected") or "").strip().lower()
+            if raw_family in {"", "auto"}:
+                family = "auto"
+            entries.append(
+                {
+                    "family": family,
+                    "enabled": bool(item.get("enabled")),
+                    "batchCount": _clamp_batch_count(item.get("batchCount") or 1),
+                }
+            )
+        return True, entries
+    if isinstance(local, dict):
+        family = _normalize_local_family(str(local.get("family") or local.get("selected") or ""))
+        return True, [
+            {
+                "family": family or "auto",
+                "enabled": True,
+                "batchCount": 0,  # legacy uses candidate_count
+            }
+        ]
+    return False, []
+
+
+def _parse_api_source_entries(api: Any) -> tuple[bool, list[dict[str, Any]]]:
+    if api is None:
+        return False, []
+    if isinstance(api, list):
+        entries: list[dict[str, Any]] = []
+        for item in api:
+            if not isinstance(item, dict):
+                continue
+            provider_id = str(item.get("providerId") or "").strip().lower()
+            model_id = str(item.get("modelId") or "").strip()
+            model = str(item.get("model") or item.get("selected") or "").strip()
+            if not model:
+                model = model_id
+            entries.append(
+                {
+                    "model": model,
+                    "providerId": provider_id,
+                    "modelId": model_id or model,
+                    "enabled": bool(item.get("enabled")),
+                    "batchCount": _clamp_batch_count(item.get("batchCount") or 1),
+                }
+            )
+        return True, entries
+    if isinstance(api, dict):
+        model = str(api.get("model") or api.get("selected") or "").strip()
+        provider_id = str(api.get("providerId") or "").strip().lower()
+        model_id = str(api.get("modelId") or "").strip()
+        return True, [
+            {
+                "model": model,
+                "providerId": provider_id,
+                "modelId": model_id or model,
+                "enabled": True,
+                "batchCount": 0,
+            }
+        ]
+    return False, []
+
+
 def _parse_generator_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize creator source toggles. Omitted sources keep legacy local-auto routing."""
     if generator_sources is None:
         return {
             "explicit": False,
+            "list_shape": False,
             "local_enabled": True,
             "api_enabled": False,
             "chosen_local": "",
             "chosen_api": "",
             "stage2_enabled": False,
             "chosen_stage2_family": "",
+            "local_entries": [],
+            "api_entries": [],
         }
     local = generator_sources.get("local")
     api = generator_sources.get("api")
-    chosen_local = ""
-    chosen_stage2 = ""
-    stage2_enabled = False
+    list_shape = isinstance(local, list) or isinstance(api, list)
+    local_enabled, local_entries = _parse_local_source_entries(local)
+    api_enabled, api_entries = _parse_api_source_entries(api)
+    stage2_enabled = bool(generator_sources.get("stage2Enabled"))
+    chosen_stage2 = str(generator_sources.get("stage2Family") or "").strip().lower()
     if isinstance(local, dict):
-        chosen_local = _normalize_local_family(str(local.get("family") or local.get("selected") or ""))
-        chosen_stage2 = str(local.get("stage2Family") or "").strip().lower()
-        stage2_enabled = bool(local.get("stage2Enabled"))
-    if chosen_local in {"", "auto"}:
-        chosen_local = ""
+        chosen_stage2 = str(local.get("stage2Family") or chosen_stage2).strip().lower()
+        stage2_enabled = bool(local.get("stage2Enabled") or stage2_enabled)
     if chosen_stage2 in {"", "auto"}:
         chosen_stage2 = ""
+
+    chosen_local = ""
+    if not list_shape:
+        for entry in local_entries:
+            if entry.get("family") and entry.get("family") != "auto":
+                chosen_local = str(entry["family"])
+                break
     chosen_api = ""
-    if isinstance(api, dict):
-        chosen_api = str(api.get("model") or api.get("selected") or "").strip()
+    if not list_shape:
+        for entry in api_entries:
+            if entry.get("model"):
+                chosen_api = str(entry["model"])
+                break
+
     return {
         "explicit": True,
-        "local_enabled": bool(local),
-        "api_enabled": bool(api),
+        "list_shape": list_shape,
+        "local_enabled": local_enabled,
+        "api_enabled": api_enabled,
         "chosen_local": chosen_local,
         "chosen_api": chosen_api,
         "stage2_enabled": stage2_enabled,
         "chosen_stage2_family": chosen_stage2,
+        "local_entries": local_entries,
+        "api_entries": api_entries,
     }
 
 
@@ -508,7 +716,7 @@ def _hosted_family_for_model(model_id: str) -> str:
     except Exception:
         pass
     mid = str(model_id).lower()
-    if "nano-banana" in mid or mid.startswith("imagen"):
+    if "nano-banana" in mid or "gpt-image" in mid or "seedream" in mid or mid.startswith("imagen"):
         return "imagen"
     if "flux" in mid:
         return "flux"
@@ -529,6 +737,14 @@ def _normalize_local_family(family: str) -> str:
 def _txt2img_workflow_key(family: str, hosted_model_id: str | None = None) -> str:
     fam = (family or "").strip().lower()
     mid = (hosted_model_id or "").lower()
+    try:
+        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+
+        official = kie_image_model_id_for_dock(hosted_model_id or family)
+        if official:
+            return f"kie:{official}"
+    except Exception:
+        pass
     if fam == "krea2" or "krea" in mid:
         if "raw" in mid:
             return "krea2.raw_txt2img"
@@ -687,6 +903,172 @@ def _build_stage1_route(
     }
 
 
+def _legacy_slots(
+    *,
+    parsed: dict[str, Any],
+    candidate_count: int,
+    visual_style: str | None,
+) -> list[dict[str, Any]]:
+    local_families: list[str] = []
+    if (not parsed["explicit"]) or parsed["local_enabled"]:
+        if parsed["chosen_local"]:
+            local_families = [parsed["chosen_local"]]
+        else:
+            local_families = list(_no_reference_families_for_style(visual_style))
+            if not local_families:
+                local_families = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
+
+    api_model = parsed["chosen_api"] if parsed["api_enabled"] else ""
+    api_family = _hosted_family_for_model(api_model) if api_model else ""
+    count = max(1, int(candidate_count or 1))
+    slots: list[dict[str, Any]] = []
+    if parsed["explicit"] and parsed["api_enabled"] and not parsed["local_enabled"]:
+        for i in range(count):
+            slots.append(
+                {
+                    "providerKind": "api",
+                    "family": api_family or api_model,
+                    "hostedModelId": api_model,
+                    "selectedSource": api_model,
+                    "providerId": "",
+                    "modelId": api_model,
+                    "batchIndex": i + 1,
+                    "batchOf": count,
+                    "autoSelect": False,
+                }
+            )
+    elif parsed["explicit"] and parsed["local_enabled"] and parsed["api_enabled"] and api_model:
+        for i in range(count):
+            if i % 2 == 1:
+                slots.append(
+                    {
+                        "providerKind": "api",
+                        "family": api_family or api_model,
+                        "hostedModelId": api_model,
+                        "selectedSource": api_model,
+                        "providerId": "",
+                        "modelId": api_model,
+                        "batchIndex": i + 1,
+                        "batchOf": count,
+                        "autoSelect": False,
+                    }
+                )
+            else:
+                fam = local_families[(i // 2) % len(local_families)] if local_families else "zimage"
+                slots.append(
+                    {
+                        "providerKind": "local",
+                        "family": fam,
+                        "hostedModelId": None,
+                        "selectedSource": fam,
+                        "providerId": "",
+                        "modelId": fam,
+                        "batchIndex": i + 1,
+                        "batchOf": count,
+                        "autoSelect": False,
+                    }
+                )
+    else:
+        for i in range(count):
+            fam = local_families[i % len(local_families)] if local_families else "zimage"
+            slots.append(
+                {
+                    "providerKind": "local",
+                    "family": fam,
+                    "hostedModelId": None,
+                    "selectedSource": fam,
+                    "providerId": "",
+                    "modelId": fam,
+                    "batchIndex": i + 1,
+                    "batchOf": count,
+                    "autoSelect": not bool(parsed.get("chosen_local")),
+                }
+            )
+    return slots
+
+
+def _expand_list_slots(
+    *,
+    parsed: dict[str, Any],
+    visual_style: str | None,
+) -> list[dict[str, Any]]:
+    slots: list[dict[str, Any]] = []
+    if parsed["local_enabled"]:
+        explicit = [
+            e
+            for e in parsed["local_entries"]
+            if e.get("enabled") and not _is_auto_family(str(e.get("family") or ""))
+        ]
+        auto = [
+            e
+            for e in parsed["local_entries"]
+            if e.get("enabled") and _is_auto_family(str(e.get("family") or ""))
+        ]
+        if explicit:
+            for entry in explicit:
+                n = _clamp_batch_count(entry.get("batchCount") or 1)
+                family = str(entry.get("family") or "")
+                for i in range(n):
+                    slots.append(
+                        {
+                            "providerKind": "local",
+                            "family": family,
+                            "hostedModelId": None,
+                            "selectedSource": family,
+                            "providerId": "",
+                            "modelId": family,
+                            "batchIndex": i + 1,
+                            "batchOf": n,
+                            "autoSelect": False,
+                        }
+                    )
+        elif auto:
+            n = _clamp_batch_count(auto[0].get("batchCount") or 1)
+            mix = list(_no_reference_families_for_style(visual_style))
+            if not mix:
+                mix = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
+            for i in range(n):
+                fam = mix[i % len(mix)] if mix else "zimage"
+                slots.append(
+                    {
+                        "providerKind": "local",
+                        "family": fam,
+                        "hostedModelId": None,
+                        "selectedSource": fam,
+                        "providerId": "",
+                        "modelId": fam,
+                        "batchIndex": i + 1,
+                        "batchOf": n,
+                        "autoSelect": True,
+                    }
+                )
+    if parsed["api_enabled"]:
+        enabled_api = [e for e in parsed["api_entries"] if e.get("enabled") and (e.get("model") or e.get("modelId"))]
+        if parsed["api_enabled"] and not enabled_api:
+            raise ValueError("Cloud generator is enabled but no API model is selected.")
+        for entry in enabled_api:
+            n = _clamp_batch_count(entry.get("batchCount") or 1)
+            model = str(entry.get("model") or entry.get("modelId") or "")
+            provider_id = str(entry.get("providerId") or "")
+            model_id = str(entry.get("modelId") or model)
+            api_family = _hosted_family_for_model(model) if model else ""
+            for i in range(n):
+                slots.append(
+                    {
+                        "providerKind": "api",
+                        "family": api_family or model,
+                        "hostedModelId": model,
+                        "selectedSource": model,
+                        "providerId": provider_id,
+                        "modelId": model_id,
+                        "batchIndex": i + 1,
+                        "batchOf": n,
+                        "autoSelect": False,
+                    }
+                )
+    return slots
+
+
 def _build_candidate_routing_plan(
     *,
     candidate_count: int,
@@ -698,18 +1080,24 @@ def _build_candidate_routing_plan(
 
     Product laws:
     * Selected source/model is authoritative — no silent Comfy/Z-Image substitute.
-    * LOCAL ON / API OFF = zero API jobs. LOCAL OFF / API ON = zero local jobs.
-    * BOTH ON = both pools participate (prefer distinct families).
+    * Unchecked sources create zero jobs (master and per-row).
+    * List-shaped generatorSources expand enabled batchCounts; Auto Select is
+      ignored when any explicit local family is enabled.
     * Reference + reference-capable family → REFERENCE_CONDITIONED (pixels).
     * Reference + txt2img-only (Illustrious / Qwen) → PROFILE_GUIDED (no pixels).
-    * Auto Select may mix the two modes when both family kinds exist.
     """
     parsed = _parse_generator_sources(generator_sources)
     if parsed["explicit"] and not parsed["local_enabled"] and not parsed["api_enabled"]:
         raise ValueError(
             "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
         )
-    if parsed["explicit"] and parsed["api_enabled"] and not parsed["local_enabled"] and not parsed["chosen_api"]:
+    if (
+        parsed["explicit"]
+        and not parsed["list_shape"]
+        and parsed["api_enabled"]
+        and not parsed["local_enabled"]
+        and not parsed["chosen_api"]
+    ):
         raise ValueError("Cloud generator is enabled but no API model is selected.")
 
     stage2: dict[str, Any] | None = None
@@ -726,61 +1114,14 @@ def _build_candidate_routing_plan(
                 "denoise": STAGE2_DEFAULT_DENOISE,
             }
 
-    local_families: list[str] = []
-    if (not parsed["explicit"]) or parsed["local_enabled"]:
-        if parsed["chosen_local"]:
-            local_families = [parsed["chosen_local"]]
-        else:
-            local_families = list(_no_reference_families_for_style(visual_style))
-            if not local_families:
-                local_families = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
-
-    api_model = parsed["chosen_api"] if parsed["api_enabled"] else ""
-    api_family = _hosted_family_for_model(api_model) if api_model else ""
-
-    slots: list[dict[str, Any]] = []
-    if parsed["explicit"] and parsed["api_enabled"] and not parsed["local_enabled"]:
-        for _i in range(candidate_count):
-            slots.append(
-                {
-                    "providerKind": "api",
-                    "family": api_family or api_model,
-                    "hostedModelId": api_model,
-                    "selectedSource": api_model,
-                }
+    if parsed["list_shape"]:
+        slots = _expand_list_slots(parsed=parsed, visual_style=visual_style)
+        if not slots:
+            raise ValueError(
+                "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
             )
-    elif parsed["explicit"] and parsed["local_enabled"] and parsed["api_enabled"] and api_model:
-        for i in range(candidate_count):
-            if i % 2 == 1:
-                slots.append(
-                    {
-                        "providerKind": "api",
-                        "family": api_family or api_model,
-                        "hostedModelId": api_model,
-                        "selectedSource": api_model,
-                    }
-                )
-            else:
-                fam = local_families[(i // 2) % len(local_families)] if local_families else "zimage"
-                slots.append(
-                    {
-                        "providerKind": "local",
-                        "family": fam,
-                        "hostedModelId": None,
-                        "selectedSource": fam,
-                    }
-                )
     else:
-        for i in range(candidate_count):
-            fam = local_families[i % len(local_families)] if local_families else "zimage"
-            slots.append(
-                {
-                    "providerKind": "local",
-                    "family": fam,
-                    "hostedModelId": None,
-                    "selectedSource": fam,
-                }
-            )
+        slots = _legacy_slots(parsed=parsed, candidate_count=candidate_count, visual_style=visual_style)
 
     plan: list[dict[str, Any]] = []
     for slot in slots:
@@ -791,11 +1132,16 @@ def _build_candidate_routing_plan(
             hosted_model_id=slot.get("hostedModelId"),
             selected_source=str(slot.get("selectedSource") or ""),
         )
+        stage1["providerId"] = slot.get("providerId") or ""
+        stage1["modelId"] = slot.get("modelId") or stage1.get("hostedModelId") or slot.get("family")
         use_stage2 = stage2 if slot["providerKind"] == "local" else None
         entry = {
             "stage1": stage1,
             "stage2": use_stage2,
             "stage2Enabled": bool(use_stage2),
+            "batchIndex": int(slot.get("batchIndex") or 1),
+            "batchOf": int(slot.get("batchOf") or 1),
+            "autoSelect": bool(slot.get("autoSelect")),
             **stage1,
         }
         plan.append(entry)
@@ -900,7 +1246,6 @@ def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | 
     coverage = {role: (goal, comp) for role, goal, comp in _coverage_role_specs()}
     side = coverage["full_body_side_left"]
     back = coverage["full_body_back"]
-    closeup = coverage["closeup_front"]
     return [
         (
             "hero_identity",
@@ -910,7 +1255,12 @@ def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | 
         ),
         ("full_body_side_left", side[0], dict(side[1]), None),
         ("full_body_back", back[0], dict(back[1]), None),
-        ("closeup_front", closeup[0], dict(closeup[1]), None),
+        (
+            "closeup_front",
+            "a front-facing head-and-shoulders identity portrait",
+            dict(CLOSEUP_FRONT_COMPOSITION),
+            list(CLOSEUP_FRONT_NEGATIVE_RULES),
+        ),
     ]
 
 
@@ -978,11 +1328,12 @@ def _compose_character_sheet_grid(
 ) -> str:
     """Compose 4 view images into a 2x2 Character Sheet grid (PIL).
 
-    Each tile is resized to ``CHARACTER_SHEET_TILE_SIZE`` (preserving aspect,
-    padded onto a square canvas) then pasted into the grid. No rendered text is
-    added — the sheet is a clean image grid. Returns the composed file path.
+    Each tile is fitted with a non-distorting contain policy (preserve aspect,
+    never stretch), then centered on a square canvas. Portrait framing must
+    already be correct on the generated close-up; assembly does not stretch
+    it to fill the tile.
     """
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     if len(view_paths) != CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS:
         raise ValueError(
@@ -994,12 +1345,11 @@ def _compose_character_sheet_grid(
     grid = Image.new("RGB", (tile * CHARACTER_SHEET_GRID_COLS, tile * CHARACTER_SHEET_GRID_ROWS), (24, 24, 24))
     for idx, src in enumerate(view_paths):
         im = Image.open(src).convert("RGB")
-        # Resize preserving aspect ratio, then center on a square canvas.
-        im.thumbnail((tile, tile))
+        contained = ImageOps.contain(im, (tile, tile), method=getattr(Image, "Resampling", Image).LANCZOS)
         canvas = Image.new("RGB", (tile, tile), (24, 24, 24))
-        x = (tile - im.width) // 2
-        y = (tile - im.height) // 2
-        canvas.paste(im, (x, y))
+        x = (tile - contained.width) // 2
+        y = (tile - contained.height) // 2
+        canvas.paste(contained, (x, y))
         col = idx % CHARACTER_SHEET_GRID_COLS
         row = idx // CHARACTER_SHEET_GRID_COLS
         grid.paste(canvas, (col * tile, row * tile))
@@ -1233,6 +1583,27 @@ def _load_pack_raw(db: Session, character_id: str) -> dict[str, Any]:
     return _loads(row.value, {})
 
 
+def save_visual_sheet_preferences(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    generator_sources: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Persist the NEXT generation plan without mutating generated candidates."""
+    service.get_profile(db, project_id, character_id)
+    pack = _load_pack_raw(db, character_id) or {
+        "characterId": character_id,
+        "projectId": project_id,
+        "status": "NOT_STARTED",
+        "jobs": {},
+        "roleAssets": {},
+        "candidates": [],
+        "mock": False,
+    }
+    pack["generatorPreferences"] = generator_sources
+    return _save_pack(db, project_id, character_id, pack)
+
+
 def get_visual_sheet_pack(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
     service.get_profile(db, project_id, character_id)
     data = _load_pack_raw(db, character_id)
@@ -1348,19 +1719,23 @@ def start_visual_sheet_generation(
         # * Each distinct Certified generator is used once before reuse; we
         #   never fabricate distinctness.
         references = service.list_references(db, project_id, character_id)
-        reference_asset_id = _resolve_reference_asset_id(references)
+        reference_asset_id = _resolve_readable_reference_asset_id(db, project_id, references)
         routing_plan = _build_candidate_routing_plan(
             candidate_count=candidate_count,
             reference_asset_id=reference_asset_id,
             visual_style=resolved_style_key,
             generator_sources=generator_sources,
         )
+        candidate_count = len(routing_plan)
+        if candidate_count < 1:
+            raise ValueError(
+                "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
+            )
         reference_locked = bool(reference_asset_id)
         hero_candidate_jobs: list[dict[str, Any]] = []
         pack_generator_sources = generator_sources
         view_specs = _candidate_view_specs()
-        for _i in range(candidate_count):
-            route = routing_plan[_i]
+        for _i, route in enumerate(routing_plan):
             stage1_route = route["stage1"]
             stage2_route = route.get("stage2")
             seed = _candidate_seed(character_id, _i)
@@ -1384,7 +1759,7 @@ def start_visual_sheet_generation(
                     composition=composition,
                     references=references,
                     role=vrole,
-                    extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
+                    extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
                     style_profile=style_profile,
                     reference_locked=bool(stage1_route.get("referenceLocked")),
                 )
@@ -1416,7 +1791,9 @@ def start_visual_sheet_generation(
                         "candidateIndex": _i,
                         "candidateCount": candidate_count,
                         "viewIndex": vidx,
-                        "viewRole": vrole,
+                        "viewRole": _canonical_view_role(vrole),
+                        "batchIndex": int(route.get("batchIndex") or (_i + 1)),
+                        "batchOf": int(route.get("batchOf") or candidate_count),
                         "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
                         if vrole != "hero_identity"
                         else COMPOSITION_INTENT_FULL_BODY_CASTING,
@@ -1446,6 +1823,7 @@ def start_visual_sheet_generation(
                     {
                         "jobId": vjob.id,
                         "role": vrole,
+                        "viewRole": _canonical_view_role(vrole),
                         "viewIndex": vidx,
                         "status": vjob.status,
                         "assetId": None,
@@ -1470,7 +1848,7 @@ def start_visual_sheet_generation(
                             "candidateIndex": _i,
                             "candidateCount": candidate_count,
                             "viewIndex": vidx,
-                            "viewRole": vrole,
+                            "viewRole": _canonical_view_role(vrole),
                             "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET
                             if vrole != "hero_identity"
                             else COMPOSITION_INTENT_FULL_BODY_CASTING,
@@ -1517,6 +1895,8 @@ def start_visual_sheet_generation(
                 reference_locked=bool(stage1_route.get("referenceLocked")), lineage=stage1_lineage
             )
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
+            batch_index = int(route.get("batchIndex") or (_i + 1))
+            batch_of = int(route.get("batchOf") or 1)
             provenance = _candidate_provenance_label(
                 provider_kind=str(stage1_route.get("providerKind") or "local"),
                 provider=stage1_lineage.get("provider"),
@@ -1550,6 +1930,11 @@ def start_visual_sheet_generation(
                 "providerKind": stage1_route.get("providerKind") or "local",
                 "selectedSource": stage1_route.get("selectedSource"),
                 "hostedModelId": stage1_route.get("hostedModelId"),
+                "providerId": stage1_route.get("providerId") or "",
+                "modelId": stage1_route.get("modelId") or stage1_route.get("hostedModelId") or stage1_route.get("selectedSource"),
+                "batchIndex": batch_index,
+                "batchOf": batch_of,
+                "autoSelect": bool(route.get("autoSelect")),
                 "provenance": provenance,
                 "error": None,
                 "lowReferenceFidelity": low_fidelity,
@@ -1587,6 +1972,11 @@ def start_visual_sheet_generation(
                 "providerKind": stage1_route.get("providerKind") or "local",
                 "selectedSource": stage1_route.get("selectedSource"),
                 "hostedModelId": stage1_route.get("hostedModelId"),
+                "providerId": stage1_route.get("providerId") or "",
+                "modelId": stage1_route.get("modelId") or stage1_route.get("hostedModelId") or stage1_route.get("selectedSource"),
+                "batchIndex": batch_index,
+                "batchOf": batch_of,
+                "autoSelect": bool(route.get("autoSelect")),
                 "provenance": provenance,
                 "error": None,
                 "lowReferenceFidelity": low_fidelity,
@@ -1602,8 +1992,7 @@ def start_visual_sheet_generation(
                 "stage2SourceAssetIds": [],
             })
         jobs["hero"] = hero_candidate_jobs[0]
-        if candidate_count > 1:
-            jobs["hero_candidates"] = hero_candidate_jobs
+        jobs["hero_candidates"] = hero_candidate_jobs
 
     pack = {
         "schema_version": 2,
@@ -1626,6 +2015,7 @@ def start_visual_sheet_generation(
         "candidates": candidates,
         "candidateCount": candidate_count,
         "generatorSources": generator_sources,
+        "generatorPreferences": generator_sources,
         "includeDetails": include_details,
         "includePerformance": include_performance,
         "characterName": name,
@@ -1721,6 +2111,16 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "sourceAssetIds": item.get("sourceAssetIds") or [],
                 "viewJobs": item.get("viewJobs") or [],
                 "error": item.get("error"),
+                "conditioningMode": item.get("conditioningMode"),
+                "providerKind": item.get("providerKind") or "local",
+                "selectedSource": item.get("selectedSource"),
+                "hostedModelId": item.get("hostedModelId"),
+                "providerId": item.get("providerId") or "",
+                "modelId": item.get("modelId"),
+                "batchIndex": item.get("batchIndex"),
+                "batchOf": item.get("batchOf"),
+                "autoSelect": bool(item.get("autoSelect")),
+                "provenance": item.get("provenance"),
             }
             for item in hero_candidates
         ]
@@ -1905,6 +2305,11 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "providerKind": item.get("providerKind") or "local",
             "selectedSource": item.get("selectedSource"),
             "hostedModelId": item.get("hostedModelId"),
+            "providerId": item.get("providerId") or "",
+            "modelId": item.get("modelId"),
+            "batchIndex": item.get("batchIndex"),
+            "batchOf": item.get("batchOf"),
+            "autoSelect": bool(item.get("autoSelect")),
             "provenance": item.get("provenance")
             or _candidate_provenance_label(
                 provider_kind=str(item.get("providerKind") or "local"),
@@ -2327,7 +2732,11 @@ def retry_visual_sheet_candidate(
     references = service.list_references(db, project_id, character_id)
     view_specs = {spec[0]: spec for spec in _candidate_view_specs()}
     seed = int(centry.get("seed") or _candidate_seed(character_id, candidate_index))
-    family = str(centry.get("model") or (str(centry.get("workflowKey") or "zimage").split(".")[0]))
+    family = str(
+        centry.get("selectedSource")
+        or centry.get("modelFamily")
+        or (str(centry.get("workflowKey") or "zimage").split(".")[0])
+    )
     provider_kind = str(centry.get("providerKind") or "local")
     hosted = centry.get("hostedModelId")
     source_id = None
@@ -2358,7 +2767,7 @@ def retry_visual_sheet_candidate(
             composition=composition,
             references=references,
             role=vrole,
-            extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
+            extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
             style_profile=style_profile,
             reference_locked=bool(centry.get("referenceLocked")),
         )
@@ -2380,16 +2789,21 @@ def retry_visual_sheet_candidate(
             hosted_model_id=hosted,
             prompt_metadata={
                 "candidateIndex": int(candidate_index),
-                "viewRole": vrole,
+                "viewRole": _canonical_view_role(vrole),
+                "batchIndex": int(centry.get("batchIndex") or 1),
+                "batchOf": int(centry.get("batchOf") or 1),
                 "workflowKey": force_key or vj.get("workflowKey"),
                 "modelFamily": family,
                 "referenceLocked": bool(centry.get("referenceLocked")),
                 "conditioningMode": centry.get("conditioningMode"),
                 "providerKind": provider_kind,
+                "providerId": centry.get("providerId") or "",
+                "modelId": centry.get("modelId") or hosted or family,
                 "retry": True,
             },
         )
         vj["jobId"] = vjob.id
+        vj["viewRole"] = _canonical_view_role(vrole)
         vj["status"] = vjob.status
         vj["assetId"] = None
         vj["error"] = None
@@ -2486,7 +2900,9 @@ def _enqueue_txt2img(
         "width": 1024,
         "height": 1024,
         "tag": tag,
+        "model": model_family_preference,
         "modelFamilyPreference": model_family_preference,
+        "lockModelFamily": True,
         "purpose": "character_sheet",
         "presetId": "builtin-character-sheet",
         "creativeContext": creative_context,
@@ -2532,8 +2948,40 @@ def _enqueue_txt2img(
             db.commit()
             db.refresh(job)
             return job
+        kie_id = None
+        try:
+            from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+            kie_id = kie_image_model_id_for_dock(str(hosted), image_to_image=bool(source_asset_id))
+        except Exception:
+            kie_id = None
+        if kie_id:
+            from ..secrets_store import get_secret
+
+            if not get_secret("kie_api_key"):
+                job.status = "failed"
+                job.message = (
+                    "Kie.ai API key required. Open Setup → AI Providers and add a Kie.ai key."
+                )
+                job.params_json = json.dumps(params)
+                db.commit()
+                db.refresh(job)
+                return job
+            params["cloudPaid"] = True
+            params["kieImageModelId"] = kie_id
+            params["hostedModelId"] = hosted
+            params["providerPreference"] = "cloud"
+            runtime = params.get("imageRuntime") if isinstance(params.get("imageRuntime"), dict) else {}
+            runtime["workflowKey"] = f"kie:{kie_id}"
+            runtime["kieImageModelId"] = kie_id
+            runtime["hostedModelId"] = hosted
+            params["imageRuntime"] = runtime
+            job.params_json = json.dumps(params)
+            db.commit()
+            db.refresh(job)
+            return job
         cloud_paid = bool(params.get("cloudPaid"))
-        if not cloud_paid and not runtime_key.startswith("imagen."):
+        already_kie = str(runtime_key).startswith("kie:") or bool(params.get("kieImageModelId"))
+        if not cloud_paid and not runtime_key.startswith("imagen.") and not already_kie:
             job.status = "failed"
             job.message = (
                 f"API model {hosted} resolved to local workflow {runtime_key or 'unknown'}; "

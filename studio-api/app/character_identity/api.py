@@ -905,6 +905,10 @@ class VisualSheetStartBody(BaseModel):
     generationMode: Optional[str] = None
 
 
+class VisualSheetPreferencesBody(BaseModel):
+    generatorSources: Optional[Dict[str, Any]] = None
+
+
 class VisualSheetApproveBody(BaseModel):
     approvedBy: str = "owner"
     selectDirectionId: str = "wild_sun_sprite"
@@ -930,6 +934,25 @@ def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStar
             generator_sources=body.generatorSources,
             generation_mode=body.generationMode,
         )
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
+    return {"ok": True, "pack": pack}
+
+
+@router.put("/projects/{project_id}/characters/{character_id}/visual-sheet/preferences")
+def save_visual_sheet_preferences_route(
+    project_id: str,
+    character_id: str,
+    body: VisualSheetPreferencesBody,
+    db: Session = Depends(get_db),
+):
+    """Save the next Character Sheet generation plan without mutating candidates."""
+    _require_flag()
+    _project(db, project_id)
+    from .visual_sheet import save_visual_sheet_preferences
+
+    try:
+        pack = save_visual_sheet_preferences(db, project_id, character_id, body.generatorSources)
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
     return {"ok": True, "pack": pack}

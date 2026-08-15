@@ -32,155 +32,292 @@ Readiness = Literal[
 _PROVIDER_CATALOG: dict[str, list[dict[str, Any]]] = {
     "kie": [
         {
-            "providerModelId": "seedance",
-            "displayName": "Seedance 2.0",
-            "modality": "video",
-            "capabilities": ["text_to_video", "image_to_video"],
+            "providerModelId": 'bytedance/seedance-2',
+            "displayName": 'Seedance 2.0',
+            "modality": 'video',
+            "capabilities": ['text_to_video', 'image_to_video'],
             "adapterAvailable": True,
-            "dockModelId": "seedance-kie",
+            "dockModelId": 'seedance-kie',
         },
         {
-            "providerModelId": "kling",
-            "displayName": "Kling",
-            "modality": "video",
-            "capabilities": ["text_to_video", "image_to_video"],
+            "providerModelId": 'kling-3.0/video',
+            "displayName": 'Kling 3.0',
+            "modality": 'video',
+            "capabilities": ['text_to_video', 'image_to_video'],
             "adapterAvailable": True,
-            "dockModelId": "kling-kie",
+            "dockModelId": 'kling-kie',
         },
         {
-            "providerModelId": "flux",
-            "displayName": "FLUX",
-            "modality": "image",
-            "capabilities": ["text_to_image", "edit"],
-            "adapterAvailable": True,
-            "dockModelId": "flux-kie",
-        },
-        {
-            "providerModelId": "nano-banana",
-            "displayName": "Nano Banana",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
-            "adapterAvailable": True,
-            "dockModelId": "nano-banana-kie",
-        },
-        {
-            "providerModelId": "audio",
-            "displayName": "Hosted Audio",
-            "modality": "audio",
-            "capabilities": ["music", "sfx"],
+            "providerModelId": 'veo3',
+            "displayName": 'Veo 3.1',
+            "modality": 'video',
+            "capabilities": ['text_to_video', 'image_to_video'],
             "adapterAvailable": False,
-            "dockModelId": "audio-kie",
+            "dockModelId": 'veo-kie',
+        },
+        {
+            "providerModelId": 'flux',
+            "displayName": 'FLUX',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
+            "adapterAvailable": True,
+            "dockModelId": 'flux-kie',
+        },
+        {
+            "providerModelId": 'nano-banana',
+            "displayName": 'Nano Banana',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
+            "adapterAvailable": True,
+            "dockModelId": 'nano-banana-kie',
+        },
+        {
+            "providerModelId": 'gpt-image-2-text-to-image',
+            "displayName": 'GPT Image 2',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
+            "adapterAvailable": True,
+            "dockModelId": 'gpt-image-2-kie',
+        },
+        {
+            "providerModelId": 'seedream/5-pro-text-to-image',
+            "displayName": 'Seedream',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
+            "adapterAvailable": True,
+            "dockModelId": 'seedream-kie',
+        },
+        {
+            "providerModelId": 'elevenlabs/text-to-speech-multilingual-v2',
+            "displayName": 'ElevenLabs Multilingual v2',
+            "modality": 'audio',
+            "capabilities": ['tts'],
+            "adapterAvailable": False,
+            "dockModelId": 'audio-kie',
+        },
+        {
+            "providerModelId": 'elevenlabs/text-to-dialogue-v3',
+            "displayName": 'ElevenLabs Dialogue v3',
+            "modality": 'audio',
+            "capabilities": ['tts', 'dialogue'],
+            "adapterAvailable": False,
+            "dockModelId": 'elevenlabs-dialogue-kie',
+        },
+        {
+            "providerModelId": 'gemini-3-pro',
+            "displayName": 'Gemini 3 Pro',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": True,
+            "dockModelId": 'gemini-3-pro-kie',
+        },
+        {
+            "providerModelId": 'claude-sonnet-4-6',
+            "displayName": 'Claude Sonnet 4.6',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": False,
+            "dockModelId": 'claude-sonnet-4-6-kie',
+        },
+        {
+            "providerModelId": 'gpt-5-5',
+            "displayName": 'GPT 5.5',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": False,
+            "dockModelId": 'gpt-5-5-kie',
         },
     ],
     "wavespeed": [
         {
-            "providerModelId": "seedance",
-            "displayName": "Seedance",
-            "modality": "video",
-            "capabilities": ["text_to_video"],
+            "providerModelId": 'bytedance/seedance-2.0/text-to-video',
+            "displayName": 'Seedance 2.0',
+            "modality": 'video',
+            "capabilities": ['text_to_video'],
             "adapterAvailable": False,
-            "dockModelId": "seedance-wavespeed",
+            "dockModelId": 'seedance-wavespeed',
         },
         {
-            "providerModelId": "veo",
-            "displayName": "Veo",
-            "modality": "video",
-            "capabilities": ["text_to_video"],
+            "providerModelId": 'google/veo3-fast',
+            "displayName": 'Veo 3 Fast',
+            "modality": 'video',
+            "capabilities": ['text_to_video'],
             "adapterAvailable": False,
-            "dockModelId": "veo-wavespeed",
+            "dockModelId": 'veo-wavespeed',
         },
         {
-            "providerModelId": "wavespeed-ai/flux-dev",
-            "displayName": "FLUX Dev",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
+            "providerModelId": 'wavespeed-ai/flux-dev',
+            "displayName": 'FLUX Dev',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
             "adapterAvailable": False,
-            "dockModelId": "flux-wavespeed",
+            "dockModelId": 'flux-wavespeed',
         },
         {
-            "providerModelId": "seedream",
-            "displayName": "Seedream",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
+            "providerModelId": 'bytedance/seedream-v5.0-pro',
+            "displayName": 'Seedream',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
             "adapterAvailable": False,
-            "dockModelId": "seedream-wavespeed",
+            "dockModelId": 'seedream-wavespeed',
+        },
+        {
+            "providerModelId": 'wavespeed-ai/z-image/turbo',
+            "displayName": 'Z-Image Turbo',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
+            "adapterAvailable": False,
+            "dockModelId": 'z-image-turbo-wavespeed',
+        },
+        {
+            "providerModelId": 'minimax/speech-2.6-hd',
+            "displayName": 'MiniMax Speech 2.6 HD',
+            "modality": 'audio',
+            "capabilities": ['tts'],
+            "adapterAvailable": False,
+            "dockModelId": 'minimax-speech-wavespeed',
+        },
+        {
+            "providerModelId": 'deepseek/deepseek-v4-flash',
+            "displayName": 'DeepSeek V4 Flash',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": True,
+            "dockModelId": 'deepseek-v4-flash-wavespeed',
+        },
+        {
+            "providerModelId": 'anthropic/claude-opus-4.7',
+            "displayName": 'Claude Opus 4.7',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": True,
+            "dockModelId": 'claude-opus-4.7-wavespeed',
+        },
+        {
+            "providerModelId": 'openai/gpt-5.5',
+            "displayName": 'GPT 5.5',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": True,
+            "dockModelId": 'gpt-5.5-wavespeed',
         },
     ],
     "fal": [
         {
-            "providerModelId": "fal-ai/bytedance/seedance",
-            "displayName": "Seedance",
-            "modality": "video",
-            "capabilities": ["text_to_video", "image_to_video"],
+            "providerModelId": 'fal-ai/bytedance/seedance/v1/pro/text-to-video',
+            "displayName": 'Seedance 1 Pro',
+            "modality": 'video',
+            "capabilities": ['text_to_video', 'image_to_video'],
             "adapterAvailable": True,
-            "dockModelId": "seedance-fal",
+            "dockModelId": 'seedance-fal',
         },
         {
-            "providerModelId": "fal-ai/kling-video",
-            "displayName": "Kling 3.0",
-            "modality": "video",
-            "capabilities": ["text_to_video", "image_to_video"],
+            "providerModelId": 'fal-ai/kling-video/v3/pro/text-to-video',
+            "displayName": 'Kling 3 Pro',
+            "modality": 'video',
+            "capabilities": ['text_to_video', 'image_to_video'],
             "adapterAvailable": True,
-            "dockModelId": "kling-fal",
+            "dockModelId": 'kling-fal',
         },
         {
-            "providerModelId": "fal-ai/veo",
-            "displayName": "Veo",
-            "modality": "video",
-            "capabilities": ["text_to_video"],
+            "providerModelId": 'fal-ai/veo3.1',
+            "displayName": 'Veo 3.1',
+            "modality": 'video',
+            "capabilities": ['text_to_video'],
             "adapterAvailable": True,
-            "dockModelId": "veo-fal",
+            "dockModelId": 'veo-fal',
         },
         {
-            "providerModelId": "fal-ai/flux/dev",
-            "displayName": "FLUX Kontext",
-            "modality": "image",
-            "capabilities": ["text_to_image", "edit"],
+            "providerModelId": 'fal-ai/flux/dev',
+            "displayName": 'FLUX Kontext',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
             "adapterAvailable": True,
-            "dockModelId": "flux-fal",
+            "dockModelId": 'flux-fal',
         },
         {
-            "providerModelId": "fal-ai/flux/kontext",
-            "displayName": "FLUX Kontext Pro",
-            "modality": "image",
-            "capabilities": ["text_to_image", "edit"],
+            "providerModelId": 'fal-ai/flux-pro/kontext',
+            "displayName": 'FLUX Kontext Pro',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
             "adapterAvailable": False,
-            "dockModelId": "flux-kontext-fal",
+            "dockModelId": 'flux-kontext-fal',
         },
         {
-            "providerModelId": "fal-ai/krea-2/turbo",
-            "displayName": "Krea 2 Turbo",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
+            "providerModelId": 'fal-ai/krea-2/turbo',
+            "displayName": 'Krea 2 Turbo',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
             "adapterAvailable": True,
-            "dockModelId": "krea2-turbo-fal",
+            "dockModelId": 'krea2-turbo-fal',
         },
         {
-            "providerModelId": "krea/v2/medium/text-to-image",
-            "displayName": "Krea 2 Medium",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
+            "providerModelId": 'krea/v2/medium/text-to-image',
+            "displayName": 'Krea 2 Medium',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
             "adapterAvailable": True,
-            "dockModelId": "krea2-medium-fal",
+            "dockModelId": 'krea2-medium-fal',
         },
         {
-            "providerModelId": "krea/v2/large/text-to-image",
-            "displayName": "Krea 2 Large",
-            "modality": "image",
-            "capabilities": ["text_to_image"],
+            "providerModelId": 'krea/v2/large/text-to-image',
+            "displayName": 'Krea 2 Large',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
             "adapterAvailable": True,
-            "dockModelId": "krea2-large-fal",
+            "dockModelId": 'krea2-large-fal',
         },
         {
-            "providerModelId": "fal-ai/mmaudio",
-            "displayName": "Hosted Audio",
-            "modality": "audio",
-            "capabilities": ["music", "sfx"],
+            "providerModelId": 'fal-ai/mmaudio',
+            "displayName": 'Hosted Audio',
+            "modality": 'audio',
+            "capabilities": ['music', 'sfx'],
             "adapterAvailable": False,
-            "dockModelId": "audio-fal",
+            "dockModelId": 'audio-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/flux-2-pro',
+            "displayName": 'FLUX.2 Pro',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
+            "adapterAvailable": True,
+            "dockModelId": 'flux-2-pro-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/flux/schnell',
+            "displayName": 'FLUX.1 Schnell',
+            "modality": 'image',
+            "capabilities": ['text_to_image'],
+            "adapterAvailable": True,
+            "dockModelId": 'flux-schnell-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/nano-banana-2',
+            "displayName": 'Nano Banana 2',
+            "modality": 'image',
+            "capabilities": ['text_to_image', 'edit'],
+            "adapterAvailable": True,
+            "dockModelId": 'nano-banana-2-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/minimax/speech-02-hd',
+            "displayName": 'MiniMax Speech 02 HD',
+            "modality": 'audio',
+            "capabilities": ['tts'],
+            "adapterAvailable": False,
+            "dockModelId": 'minimax-speech-fal',
+        },
+        {
+            "providerModelId": 'fal-ai/any-llm',
+            "displayName": 'Any LLM',
+            "modality": 'llm',
+            "capabilities": ['chat'],
+            "adapterAvailable": True,
+            "dockModelId": 'any-llm-fal',
         },
     ],
 }
+
 
 _PROBES = {
     "kie": probe_kie,
@@ -233,6 +370,70 @@ def _classify(
     return "Ready", "ok", True
 
 
+
+def _normalize_provider_models(
+    pid: str,
+    *,
+    account_ok: bool,
+    probe: dict[str, Any] | None,
+    discovered_at: str | None = None,
+) -> list[dict[str, Any]]:
+    """Normalize one provider catalog into dock rows. Does not persist."""
+    defn = PROVIDERS[pid]
+    stamp = discovered_at or _now()
+    models: list[dict[str, Any]] = []
+    for row in list(_PROVIDER_CATALOG.get(pid) or []):
+        readiness, _reason, selectable = _classify(
+            account_accessible=account_ok,
+            adapter_available=bool(row.get("adapterAvailable")),
+            probe=probe,
+        )
+        models.append(
+            {
+                "id": row["dockModelId"],
+                "providerId": pid,
+                "providerModelId": row["providerModelId"],
+                "displayName": row["displayName"],
+                "modality": row["modality"],
+                "capabilities": list(row.get("capabilities") or []),
+                "accountAccessible": account_ok,
+                "adapterAvailable": bool(row.get("adapterAvailable")),
+                "liveProbeStatus": "ok" if account_ok else "failed",
+                "pricingMetadata": None,
+                "lastDiscoveredAt": stamp,
+                "lastVerifiedAt": stamp if account_ok else None,
+                "readiness": readiness,
+                "selectable": selectable and account_ok and bool(row.get("adapterAvailable")),
+                "capabilityLabel": (
+                    "Certified"
+                    if readiness == "Ready"
+                    else "Requires Setup"
+                    if readiness in ("Requires Setup", "Permission Denied", "Insufficient Balance")
+                    else "Unsupported"
+                    if readiness == "Requires Adapter"
+                    else "Unavailable"
+                ),
+                "locality": "hosted",
+                "label": f"{row['displayName']} — {defn.display_name}",
+                "executable": bool(selectable and account_ok and row.get("adapterAvailable")),
+            }
+        )
+    return models
+
+
+def _verified_provider_ids() -> list[str]:
+    """Providers whose stored key probe is verified. Missing/invalid/unverified are omitted."""
+    from .registry import PRIORITY_ORDER
+
+    out: list[str] = []
+    for pid in PRIORITY_ORDER:
+        defn = PROVIDERS[pid]
+        st = secret_status(defn.secret_name)
+        if st.get("state") == "verified":
+            out.append(pid)
+    return out
+
+
 async def discover_provider(provider_id: str, *, persist_as_active: bool = True) -> dict[str, Any]:
     """Validate access, discover Adept-compatible models, normalize, store."""
     pid = (provider_id or "").strip().lower()
@@ -267,45 +468,10 @@ async def discover_provider(provider_id: str, *, persist_as_active: bool = True)
     probe = await probe_fn(key)
     account_ok = probe.get("valid") is True
 
-    raw_rows = list(_PROVIDER_CATALOG.get(pid) or [])
     discovered_at = _now()
-    models: list[dict[str, Any]] = []
-    for row in raw_rows:
-        readiness, _reason, selectable = _classify(
-            account_accessible=account_ok,
-            adapter_available=bool(row.get("adapterAvailable")),
-            probe=probe,
-        )
-        models.append(
-            {
-                "id": row["dockModelId"],
-                "providerId": pid,
-                "providerModelId": row["providerModelId"],
-                "displayName": row["displayName"],
-                "modality": row["modality"],
-                "capabilities": list(row.get("capabilities") or []),
-                "accountAccessible": account_ok,
-                "adapterAvailable": bool(row.get("adapterAvailable")),
-                "liveProbeStatus": "ok" if account_ok else "failed",
-                "pricingMetadata": None,
-                "lastDiscoveredAt": discovered_at,
-                "lastVerifiedAt": discovered_at if account_ok else None,
-                "readiness": readiness,
-                "selectable": selectable and account_ok and bool(row.get("adapterAvailable")),
-                "capabilityLabel": (
-                    "Certified"
-                    if readiness == "Ready"
-                    else "Requires Setup"
-                    if readiness in ("Requires Setup", "Permission Denied", "Insufficient Balance")
-                    else "Unsupported"
-                    if readiness == "Requires Adapter"
-                    else "Unavailable"
-                ),
-                "locality": "hosted",
-                "label": f"{row['displayName']} — {defn.display_name}",
-                "executable": bool(selectable and account_ok and row.get("adapterAvailable")),
-            }
-        )
+    models = _normalize_provider_models(
+        pid, account_ok=account_ok, probe=probe, discovered_at=discovered_at
+    )
 
     summary = {
         "providerId": pid,
@@ -388,7 +554,7 @@ def discovery_status() -> dict[str, Any]:
     }
 
 
-def dock_api_models(modality: str) -> dict[str, Any]:
+def _dock_api_models_primary(modality: str) -> dict[str, Any]:
     """API section payload for Production Dock menus (primary provider only)."""
     cat = load_catalog()
     active = cat.get("activeProviderId") or _active_provider_id()
@@ -412,13 +578,12 @@ def dock_api_models(modality: str) -> dict[str, Any]:
             "No API models available.\n\nCheck your API key or add a provider\nthrough the Setup Wizard."
         )
     elif not all_models:
-        # Provider selected/connected but discovery has not populated the catalog yet.
         empty_reason = "needs_discovery"
         empty_message = (
             "No API models available.\n\nCheck your API key or add a provider\nthrough the Setup Wizard."
         )
     elif empty_message and empty_reason in ("invalid_key", "invalid_or_inactive_key", "none_supported"):
-        pass  # keep diagnostic catalog message
+        pass
     else:
         empty_reason = "none_for_modality"
         empty_message = (
@@ -427,9 +592,75 @@ def dock_api_models(modality: str) -> dict[str, Any]:
 
     return {
         "activeProviderId": active,
+        "scope": "primary",
         "models": rows,
         "emptyReason": empty_reason if not rows else None,
         "emptyMessage": empty_message if not rows else None,
         "summary": cat.get("summary") or {},
         "updatedAt": cat.get("updatedAt"),
     }
+
+
+def _dock_api_models_all_keyed(modality: str) -> dict[str, Any]:
+    """Union image/other rows for every provider whose key probe is verified."""
+    verified = _verified_provider_ids()
+    stamp = _now()
+    rows: list[dict[str, Any]] = []
+    by_provider: dict[str, int] = {}
+    for pid in verified:
+        defn = PROVIDERS[pid]
+        st = secret_status(defn.secret_name)
+        probe = {
+            "valid": True,
+            "message": st.get("message") or "",
+            "httpStatus": 200,
+        }
+        models = _normalize_provider_models(
+            pid, account_ok=True, probe=probe, discovered_at=stamp
+        )
+        kept = [m for m in models if m.get("modality") == modality]
+        rows.extend(kept)
+        by_provider[pid] = len(kept)
+
+    empty_reason = None
+    empty_message = None
+    if not verified:
+        empty_reason = "no_provider"
+        empty_message = (
+            "No API models available.\n\nCheck your API key or add a provider\nthrough the Setup Wizard."
+        )
+    elif not rows:
+        empty_reason = "none_for_modality"
+        empty_message = (
+            f"No compatible {modality} models were found\nfor the connected providers."
+        )
+
+    return {
+        "activeProviderId": _active_provider_id(),
+        "scope": "all_keyed",
+        "models": rows,
+        "emptyReason": empty_reason,
+        "emptyMessage": empty_message,
+        "summary": {
+            "scope": "all_keyed",
+            "providers": verified,
+            "found": len(rows),
+            "byProvider": by_provider,
+        },
+        "updatedAt": stamp,
+    }
+
+
+def dock_api_models(modality: str, scope: str | None = None) -> dict[str, Any]:
+    """API section payload.
+
+    Image defaults to every provider whose key probe is verified (Character Creator
+    Cloud Generators). Video/audio/llm stay primary-provider-only unless scope is
+    passed explicitly. scope='primary' restores the old single-provider filter.
+    """
+    requested = (scope or "").strip().lower()
+    if requested not in {"primary", "all_keyed"}:
+        requested = "all_keyed" if modality == "image" else "primary"
+    if requested == "all_keyed":
+        return _dock_api_models_all_keyed(modality)
+    return _dock_api_models_primary(modality)

@@ -101,12 +101,12 @@ async def post_discovery(providerId: Optional[str] = None):
 
 
 @router.get("/discovered-models")
-def get_discovered_models(modality: Optional[str] = None):
+def get_discovered_models(modality: Optional[str] = None, scope: Optional[str] = None):
     from .discovery import dock_api_models
     from .model_store import load_catalog
 
     if modality:
-        return {"ok": True, "modality": modality, **dock_api_models(modality), "mock": False}
+        return {"ok": True, "modality": modality, **dock_api_models(modality, scope=scope), "mock": False}
     cat = load_catalog()
     return {"ok": True, **cat, "mock": False}
 

@@ -28,3 +28,10 @@ export {
   summarizeCandidatePlan,
 } from "./generatorPlan";
 export type { CharacterGeneratorPlan, GeneratorPlan, GeneratorSourcesPayload } from "./generatorPlan";
+
+export {
+  DISCOVERED_HOSTED_MODALITIES,
+  discoveredHostedModelRows,
+  fetchDiscoveredHostedModelRows,
+} from "./discoveredModels";
+export type { DiscoveredHostedModality } from "./discoveredModels";

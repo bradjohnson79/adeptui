@@ -41,6 +41,8 @@ export type CharacterReference = {
 export type CharacterViewJob = {
   jobId?: string;
   role?: string;
+  /** Canonical sheet view role, e.g. front_closeup. Do not infer from tile index. */
+  viewRole?: string;
   viewIndex?: number;
   status?: string;
   assetId?: string | null;
@@ -81,6 +83,12 @@ export type CharacterCandidate = {
   hostedModelId?: string | null;
   /** Creator-facing provenance, e.g. LOCAL — Illustrious XL — Profile Guided */
   provenance?: string | null;
+  /** 1-based batch index within this generator's requested count. */
+  batchIndex?: number | null;
+  /** Total batches requested for this generator in the originating plan. */
+  batchOf?: number | null;
+  providerId?: string | null;
+  modelId?: string | null;
 };
 
 /** Truthful per-candidate generation stage derived from backend state. */
@@ -116,6 +124,13 @@ function kreaModelNameFromCandidate(c: CharacterCandidate): string {
   if (low.includes("large")) return "Krea 2 Large";
   if (low.includes("raw")) return "Krea 2 RAW";
   return String(c.model || c.modelVariant || hosted || "Krea 2");
+}
+
+export function characterSheetBatchLabel(c: CharacterCandidate): string | null {
+  const index = Number(c.batchIndex);
+  const of = Number(c.batchOf);
+  if (!Number.isFinite(index) || !Number.isFinite(of) || of < 1) return null;
+  return `Batch ${index} of ${of}`;
 }
 
 /** Creator-facing candidate provenance. Never show a raw family id as the product label. */

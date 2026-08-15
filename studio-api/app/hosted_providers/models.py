@@ -27,18 +27,18 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
         "displayName": "Seedance",
         "modality": "video",
         "mappings": {
-            "kie": {"providerModelId": "seedance", "status": "Testing"},
-            "wavespeed": {"providerModelId": "seedance", "status": "Testing"},
-            "fal": {"providerModelId": "fal-ai/bytedance/seedance", "status": "Certified", "engine": "fal_seedance"},
+            "kie": {"providerModelId": "bytedance/seedance-2", "status": "Testing"},
+            "wavespeed": {"providerModelId": "bytedance/seedance-2.0/text-to-video", "status": "Testing"},
+            "fal": {"providerModelId": "fal-ai/bytedance/seedance/v1/pro/text-to-video", "status": "Certified", "engine": "fal_seedance"},
         },
     },
     "Kling": {
         "displayName": "Kling",
         "modality": "video",
         "mappings": {
-            "kie": {"providerModelId": "kling", "status": "Testing"},
+            "kie": {"providerModelId": "kling-3.0/video", "status": "Testing"},
             "wavespeed": {"providerModelId": "kling", "status": "Available but Uncertified"},
-            "fal": {"providerModelId": "fal-ai/kling-video", "status": "Certified", "engine": "fal_kling"},
+            "fal": {"providerModelId": "fal-ai/kling-video/v3/pro/text-to-video", "status": "Certified", "engine": "fal_kling"},
         },
     },
     "Veo": {
@@ -46,7 +46,7 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
         "modality": "video",
         "mappings": {
             "kie": {"providerModelId": "veo", "status": "Available but Uncertified"},
-            "fal": {"providerModelId": "fal-ai/veo", "status": "Certified", "engine": "fal_veo"},
+            "fal": {"providerModelId": "fal-ai/veo3.1", "status": "Certified", "engine": "fal_veo"},
         },
     },
     "Runway": {
@@ -54,6 +54,15 @@ CANONICAL_MODELS: dict[str, dict[str, Any]] = {
         "modality": "video",
         "mappings": {
             "fal": {"providerModelId": "fal-ai/runway", "status": "Certified", "engine": "fal_runway"},
+        },
+    },
+    "Hosted LLM": {
+        "displayName": "Hosted LLM",
+        "modality": "llm",
+        "mappings": {
+            "kie": {"providerModelId": "gemini-3-pro", "status": "Testing"},
+            "wavespeed": {"providerModelId": "deepseek/deepseek-v4-flash", "status": "Testing"},
+            "fal": {"providerModelId": "fal-ai/any-llm", "status": "Testing"},
         },
     },
 }

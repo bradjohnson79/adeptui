@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { characterSheetProvenanceLabel } from "./types";
+import { characterSheetBatchLabel, characterSheetProvenanceLabel } from "./types";
 
 describe("characterSheetProvenanceLabel", () => {
   it("renders Illustrious Profile Guided from family id + mode", () => {
@@ -34,5 +34,11 @@ describe("characterSheetProvenanceLabel", () => {
         model: "illustrious",
       }),
     ).toBe("LOCAL — Illustrious XL — Profile Guided");
+  });
+
+  it("uses 1-based Batch N of M indexing", () => {
+    expect(characterSheetBatchLabel({ batchIndex: 2, batchOf: 3 })).toBe("Batch 2 of 3");
+    expect(characterSheetBatchLabel({ batchIndex: 0, batchOf: 2 })).toBe("Batch 0 of 2");
+    expect(characterSheetBatchLabel({})).toBeNull();
   });
 });

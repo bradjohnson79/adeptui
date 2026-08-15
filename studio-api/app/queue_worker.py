@@ -2637,6 +2637,10 @@ class JobQueue:
         if fal_image_model:
             await self._imagegen_fal(db, job, project, params, fal_image_model, edit_op=edit_op)
             return
+        kie_image_model = str(params.get("kieImageModelId") or "").strip()
+        if kie_image_model:
+            await self._imagegen_kie(db, job, project, params, kie_image_model, edit_op=edit_op)
+            return
 
         # Retry path: reuse validated but unregistered output (no silent regeneration)
         pending = params.get("validated_output_path")
@@ -3010,7 +3014,96 @@ class JobQueue:
             raise RuntimeError(f"output_valid_but_unregistered: {reg_exc}") from reg_exc
 
 
+    async def _imagegen_kie(
+        self,
+        db: Session,
+        job: Job,
+        project: Project,
+        params: dict,
+        model_id: str,
+        *,
+        edit_op: str = "generate",
+    ) -> None:
+        """Dispatch a still-image job through Kie createTask. Never Comfy/Qwen."""
+        import asyncio
+        import uuid
+
+        from .hosted_providers.adapters.kie_adapter import (
+            extract_kie_image_url,
+            kie_image_model_id_for_dock,
+            poll_kie_task,
+            submit_kie_image_task,
+        )
+        from .image_runtime.job_model import ImageJobStage
+        from .image_runtime.output_gate import validate_image_output
+
+        api_key = get_secret("kie_api_key")
+        if not api_key:
+            raise RuntimeError(
+                "Hosted AI Provider credential not configured. Open Setup → AI Providers "
+                "(Kie.ai · WaveSpeed.ai · fal.ai)."
+            )
+        official = kie_image_model_id_for_dock(model_id) or model_id
+        prompt = str(params.get("prompt") or "").strip()
+        if not prompt and isinstance(params.get("imageIntent"), dict):
+            prompt = str(params["imageIntent"].get("prompt") or "").strip()
+        if not prompt:
+            raise RuntimeError("Kie image generate requires a prompt")
+        width = int(params.get("width") or 1024)
+        height = int(params.get("height") or 1024)
+        aspect = "1:1"
+        if width > 0 and height > 0:
+            aspect = f"{width}:{height}"
+        job.stage = ImageJobStage.SAMPLING.value
+        job.message = f"Kie.ai · {official}"
+        job.comfy_prompt_id = official[:64]
+        db.commit()
+        submitted = await submit_kie_image_task(api_key, model=official, prompt=prompt, aspect_ratio=aspect)
+        if not submitted.get("ok") or not submitted.get("taskId"):
+            raise RuntimeError(submitted.get("message") or f"Kie createTask failed for {official}")
+        task_id = str(submitted["taskId"])
+        image_url = None
+        for _ in range(45):
+            polled = await poll_kie_task(api_key, task_id)
+            state = str(polled.get("state") or "").lower()
+            image_url = extract_kie_image_url(polled.get("payload"))
+            if image_url:
+                break
+            if state in {"fail", "failed", "error"}:
+                raise RuntimeError(f"Kie task {task_id} failed ({state})")
+            job.progress = min(0.9, float(job.progress or 0.05) + 0.02)
+            job.message = f"Kie.ai · {official} · {state or 'queued'}"
+            job.updated_at = datetime.utcnow()
+            db.commit()
+            await asyncio.sleep(2)
+        if not image_url:
+            raise RuntimeError(f"Kie task {task_id} produced no image URL")
+        tmp_dir = settings.data_dir / "projects" / project.id / "assets" / ".pending"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = tmp_dir / f"imagegen_kie_{uuid.uuid4().hex[:8]}.png"
+        await download_url(image_url, tmp_path)
+        job.stage = ImageJobStage.VALIDATING.value
+        job.message = "Output Gate validation"
+        db.commit()
+        gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
+        if not gate.ok:
+            raise RuntimeError(f"Kie image failed output validation: {gate.errors}")
+        await self._imagegen_commit_asset(
+            db,
+            job,
+            project,
+            params,
+            tmp_path,
+            gate,
+            edit_op=edit_op,
+            prompt=prompt,
+            seed=int(params.get("seed") if params.get("seed") is not None else 0),
+            model=str(params.get("hostedModelId") or official),
+            contract_key=f"kie:{official}",
+        )
+
     async def _imagegen_fal(
+
         self,
         db: Session,
         job: Job,

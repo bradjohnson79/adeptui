@@ -57,6 +57,7 @@ from .errors import (
     CoDirectorError,
 )
 from .providers.base import ChatRequest, ChatResult, CoDirectorProvider, ProviderHealthResult, ProviderModel
+from .providers.hosted import HostedLlmProvider, configured_hosted_llm_ids
 from .providers.mock import MockCoDirectorProvider
 from .providers.ollama import OllamaProvider
 from .structured_output import ToolCallRequest, parse_structured_reply
@@ -77,7 +78,8 @@ except ImportError:  # pragma: no cover - defensive during partial installs
 
 logger = logging.getLogger(__name__)
 
-PROVIDER_IDS: list[str] = ["ollama", "mock"]
+PROVIDER_IDS: list[str] = ["ollama", "kie", "wavespeed", "fal", "mock"]
+HOSTED_LLM_IDS: tuple[str, ...] = ("kie", "wavespeed", "fal")
 
 # Up to three consecutive read tools per turn, plus one follow-up completion. The bound exists so
 # a model that likes calling tools can't turn a single user message into an unbounded chain of
@@ -163,6 +165,14 @@ def active_provider_id() -> str:
         return "ollama"
     if override in PROVIDER_IDS:
         return override
+    try:
+        cfg_provider = str(config_store.load_config().get("selectedProvider") or "").strip().lower()
+    except Exception:
+        cfg_provider = ""
+    if cfg_provider in HOSTED_LLM_IDS:
+        return cfg_provider
+    if cfg_provider == "ollama":
+        return "ollama"
     if _mock_provider_allowed():
         return "mock"
     return "ollama"
@@ -170,9 +180,11 @@ def active_provider_id() -> str:
 
 def list_provider_ids() -> list[str]:
     """Providers selectable via the UI/API — mock is hidden unless explicitly allowed."""
+    hosted = configured_hosted_llm_ids()
+    base = ["ollama"] + [p for p in HOSTED_LLM_IDS if p in hosted]
     if _mock_provider_allowed():
-        return list(PROVIDER_IDS)
-    return [p for p in PROVIDER_IDS if p != "mock"]
+        return base + ["mock"]
+    return base
 
 
 def build_provider(provider_id: str) -> CoDirectorProvider:
@@ -195,6 +207,10 @@ def build_provider(provider_id: str) -> CoDirectorProvider:
             default_model=str(cfg.get("selectedModel") or "") or (settings.ollama_model or None),
             timeout_sec=float(cfg.get("timeoutSec") or settings.ollama_timeout_sec),
         )
+    if provider_id in HOSTED_LLM_IDS:
+        cfg = config_store.load_config()
+        selected = str(cfg.get("selectedModel") or "").strip()
+        return HostedLlmProvider(provider_id, default_model=selected or None)
     raise CoDirectorError(
         "PROVIDER_NOT_CONFIGURED",
         f"Unknown Co-Director provider '{provider_id}'.",

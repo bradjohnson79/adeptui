@@ -14,16 +14,18 @@ import {
   characterGenerateBlockReason,
   formatCharacterSheetStartError,
 } from "./characterSheetGenerate";
-import type { CharacterCandidate, CharacterProfile, GeneratorSourceState } from "./types";
+import type { CharacterGeneratorPlan } from "./characterGeneratorPlan";
+import type { CharacterCandidate, CharacterProfile, GeneratorOption } from "./types";
 
-type Sources = { local: GeneratorSourceState; api: GeneratorSourceState };
 type Phase = "idle" | "starting" | "generating";
 
 type Props = {
   projectId: string;
   characterId: string;
   profile: CharacterProfile | null;
-  sources: Sources;
+  plan: CharacterGeneratorPlan;
+  localOptions?: GeneratorOption[];
+  apiOptions?: GeneratorOption[];
   hasReference?: boolean;
   disabled?: boolean;
   onCandidates: (candidates: CharacterCandidate[]) => void;
@@ -50,7 +52,9 @@ export function CharacterSheetGenerator({
   projectId,
   characterId,
   profile,
-  sources,
+  plan,
+  localOptions = [],
+  apiOptions = [],
   hasReference = false,
   disabled,
   onCandidates,
@@ -62,12 +66,13 @@ export function CharacterSheetGenerator({
   const inFlightRef = useRef(false);
 
   const generating = phase !== "idle";
-  const anyEnabled = sources.local.enabled || sources.api.enabled;
+  const anyEnabled = plan.localEnabled || plan.apiEnabled;
   const blockReason = characterGenerateBlockReason({
     name: profile?.name,
-    sources,
+    plan,
     generating,
     disabled,
+    localOptions,
   });
   const canGenerate = !blockReason && !generating && !disabled;
 
@@ -131,9 +136,10 @@ export function CharacterSheetGenerator({
     if (inFlightRef.current) return;
     const reason = characterGenerateBlockReason({
       name: profile?.name,
-      sources,
+      plan,
       generating: false,
       disabled,
+      localOptions,
     });
     if (reason) {
       setMessage(reason);
@@ -147,8 +153,10 @@ export function CharacterSheetGenerator({
     try {
       const body = buildCharacterSheetStartBody({
         profileVisualStyle: profile?.visual_style,
-        sources,
+        plan,
         hasReference,
+        localOptions,
+        apiOptions,
       });
       setPhase("generating");
       setMessage("Generating…");
@@ -162,7 +170,7 @@ export function CharacterSheetGenerator({
       setPhase("idle");
       setMessage(formatCharacterSheetStartError(e));
     }
-  }, [disabled, projectId, characterId, profile, sources, hasReference, onCandidates, poll]);
+  }, [disabled, projectId, characterId, profile, plan, hasReference, localOptions, apiOptions, onCandidates, poll]);
 
   const retryCandidate = useCallback(
     async (candidate: CharacterCandidate) => {

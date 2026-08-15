@@ -23,6 +23,8 @@ IMAGE_FAMILY_BY_MODEL: dict[str, str] = {
     "flux-kie": "flux",
     "flux-fal": "flux",
     "nano-banana-kie": "imagen",
+    "gpt-image-2-kie": "imagen",
+    "seedream-kie": "imagen",
     "krea2-turbo-fal": "krea2",
     "krea2-medium-fal": "krea2",
     "krea2-large-fal": "krea2",
@@ -185,14 +187,31 @@ def apply_image_dock_preference(project_id: str, body: dict[str, Any]) -> dict[s
         out.get("lockModelFamily")
         or out.get("modelLocked")
         or out.get("forceWorkflowKey")
+        or out.get("hostedModelId")
     )
+    try:
+        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+
+        if kie_image_model_id_for_dock(str(out.get("hostedModelId") or "")) or kie_image_model_id_for_dock(
+            str(explicit or "")
+        ):
+            locked = True
+    except Exception:
+        pass
     if not explicit or (not locked and explicit in ("zimage", "auto", "default")):
+        dock_model = str(dock.get("activeModelId") or "")
+        hosted_dock = dock_model.endswith(("-kie", "-fal", "-wavespeed"))
         style_family = _style_preferred_family(out.get("creativeContext"))
-        chosen = (
-            style_family
-            if (style_family and _family_executable(style_family))
-            else dock.get("imageFamily")
-        )
+        if hosted_dock:
+            # Hosted docks enqueue through the provider adapter. Never silently
+            # rewrite them to a local Comfy family (qwen2512 / zimage).
+            chosen = dock.get("imageFamily")
+        else:
+            chosen = (
+                style_family
+                if (style_family and _family_executable(style_family))
+                else dock.get("imageFamily")
+            )
         if chosen:
             out["modelFamilyPreference"] = chosen
     out.setdefault("productionDock", dock)

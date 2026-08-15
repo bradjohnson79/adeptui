@@ -350,7 +350,7 @@ def enqueue_variant_generation(
             composition=composition,
             references=references,
             role=vrole,
-            extra_negative_constraints=vneg if vneg is not None else FULL_BODY_CASTING_NEGATIVE_RULES,
+            extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
             style_profile=style_profile,
             reference_locked=True,
         )

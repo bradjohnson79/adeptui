@@ -12,6 +12,30 @@ from .prompt_intel import expand_prompt
 from .recommend import recommend_image_family
 from .references import normalize_ui_refs
 
+
+def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
+    """If the request selected a Kie API dock, return dock + official Market model."""
+    src = dict(body or {})
+    i2i = bool(src.get("source_asset_id") or src.get("sourceAssetId") or src.get("edit"))
+    try:
+        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+    except Exception:
+        return None
+    for raw in (
+        src.get("hostedModelId"),
+        src.get("model"),
+        src.get("modelId"),
+        src.get("modelFamilyPreference"),
+    ):
+        dock = str(raw or "").strip()
+        if not dock:
+            continue
+        official = kie_image_model_id_for_dock(dock, image_to_image=i2i)
+        if official:
+            return {"dock": dock, "official": official}
+    return None
+
+
 _ASPECT = {
     "1:1": (1024, 1024),
     "16:9": (1920, 1080),
@@ -274,7 +298,7 @@ def compile_image_request(
         referenceIds=ref_ids,
         style=dict(body.get("style") or {}),
         quality=str(body.get("quality") or "standard"),
-        providerPreference="cloud" if family == "imagen" else "local",
+        providerPreference="cloud" if family in {"imagen", "kie"} or bool(_kie_image_route(body)) else "local",
         enginePreference=family,
         workflowPreference=None,  # resolver chooses — no product workflow key
         seed=int(body["seed"]) if body.get("seed") is not None else None,
@@ -306,6 +330,44 @@ def compile_image_request(
             "edit_op": body.get("edit_op") or body.get("editOp"),
         },
     )
+
+    kie_route = _kie_image_route(body)
+    if kie_route:
+        # Selected Kie API dock: pin Market createTask. Never resolve a local workflow.
+        intent.providerPreference = "cloud"
+        intent.enginePreference = "kie"
+        official = kie_route["official"]
+        dock = kie_route["dock"]
+        pinned = {
+            "workflowKey": f"kie:{official}",
+            "workflowVersion": "1.0.0",
+            "workflowId": f"kie:{official}",
+            "modelFamily": "kie",
+            "modelVariant": official,
+            "provider": "kie",
+            "engine": "kie",
+            "status": "Certified",
+            "kieImageModelId": official,
+            "hostedModelId": dock,
+        }
+        return {
+            "imageIntent": intent.model_dump(),
+            "imageRuntime": pinned,
+            "recommendation": {
+                "executionFamily": "kie",
+                "recommendedFamily": "kie",
+                "fallbackApplied": False,
+                "lockModelFamily": True,
+                "whyThisModel": f"Selected Kie.ai model {dock}",
+                "estimates": {"costLabel": "Paid hosted API"},
+            },
+            "promptIntel": prompt_info,
+            "creativeContextDigest": creative.get("digest"),
+            "presetApplied": preset_applied,
+            "allowDraft": False,
+            "kieImageModelId": official,
+            "hostedModelId": dock,
+        }
 
     from ..image_runtime.contract import resolve_image_workflow
 

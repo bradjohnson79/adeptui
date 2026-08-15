@@ -72,6 +72,13 @@ def generate_images(
             "refs": body.get("refs") or [],
             "cloudPaid": intent.get("providerPreference") == "cloud",
             "tag": body.get("tag") or "imagegen",
+            "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId") or (pinned or {}).get("hostedModelId"),
+            "kieImageModelId": (
+                body.get("kieImageModelId")
+                or compiled.get("kieImageModelId")
+                or (pinned or {}).get("kieImageModelId")
+            ),
+            "providerPreference": intent.get("providerPreference") or body.get("providerPreference"),
             # Reference-fidelity strength (img2img / ref_edit). Lower denoise =
             # more of the reference latent preserved. Character Creator passes a
             # fidelity-first value when a Character Reference is attached.
@@ -79,6 +86,15 @@ def generate_images(
             "productionDock": dock_meta,
             "preferenceProvenance": (dock_meta or {}).get("provenance"),
         }
+        if params.get("kieImageModelId"):
+            params["cloudPaid"] = True
+            params["providerPreference"] = "cloud"
+            from ..secrets_store import get_secret
+
+            if not get_secret("kie_api_key"):
+                raise RuntimeError(
+                    "Kie.ai API key required. Open Setup → AI Providers and add a Kie.ai key."
+                )
         kind = "imagegen_edit" if params["edit"] else "imagegen"
         job = Job(
             id=str(uuid.uuid4()),

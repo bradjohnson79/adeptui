@@ -1,0 +1,451 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import {
+  anyExplicitLocalFamilyEnabled,
+  buildGeneratorSourcesPayload,
+  clampBatchCount,
+  cloudModelStatusLabel,
+  DEFAULT_CHARACTER_GENERATOR_PLAN,
+  groupDiscoveredImageModelsByProvider,
+  hydratePlanFromPreferences,
+  isAutoSelectActive,
+  mergePlanWithInventory,
+  normalizeDiscoveredImageModel,
+  returnToAutoSelectOnly,
+  summarizeGenerationPlan,
+  type CharacterGeneratorPlan,
+  type NormalizedDiscoveredImageModel,
+} from "./characterGeneratorPlan";
+
+function plan(partial: Partial<CharacterGeneratorPlan> = {}): CharacterGeneratorPlan {
+  return {
+    ...DEFAULT_CHARACTER_GENERATOR_PLAN,
+    localFamilies: [
+      { family: "illustrious", enabled: false, batchCount: 1 },
+      { family: "qwen2512", enabled: false, batchCount: 1 },
+      { family: "zimage", enabled: false, batchCount: 1 },
+    ],
+    ...partial,
+  };
+}
+
+describe("Character generator plan", () => {
+  it("clamps batch counts to 1–4 and defaults to 1", () => {
+    expect(clampBatchCount(undefined)).toBe(1);
+    expect(clampBatchCount(0)).toBe(1);
+    expect(clampBatchCount(1)).toBe(1);
+    expect(clampBatchCount(4)).toBe(4);
+    expect(clampBatchCount(9)).toBe(4);
+  });
+
+  it("makes Auto Select inactive when any explicit local family is checked", () => {
+    const mixed = plan({
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 2 },
+        { family: "qwen2512", enabled: false, batchCount: 1 },
+      ],
+    });
+    expect(anyExplicitLocalFamilyEnabled(mixed)).toBe(true);
+    expect(isAutoSelectActive(mixed)).toBe(false);
+    const summary = summarizeGenerationPlan(mixed);
+    expect(summary.totalSheets).toBe(2);
+    expect(summary.sheets.every((s) => s.family === "illustrious")).toBe(true);
+    const payload = buildGeneratorSourcesPayload(mixed);
+    const auto = payload.local?.find((r) => r.family === "auto");
+    expect(auto?.enabled).toBe(false);
+  });
+
+  it("does not add Auto Select candidates on top of explicit families", () => {
+    const mixed = plan({
+      autoSelect: { enabled: true, batchCount: 2 },
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 2 },
+        { family: "qwen2512", enabled: true, batchCount: 1 },
+      ],
+    });
+    const summary = summarizeGenerationPlan(mixed);
+    expect(summary.totalSheets).toBe(3);
+    expect(summary.totalViews).toBe(12);
+    expect(summary.sheets.some((s) => s.family === "auto")).toBe(false);
+    expect(summary.localLines.map((l) => `${l.label}×${l.count}`)).toEqual([
+      "Illustrious XL×2",
+      "Qwen Image 2512×1",
+    ]);
+  });
+
+  it("returns to Auto Select-only when the creator chooses Auto Select again", () => {
+    const mixed = plan({
+      localFamilies: [{ family: "illustrious", enabled: true, batchCount: 2 }],
+    });
+    const autoOnly = returnToAutoSelectOnly(mixed);
+    expect(isAutoSelectActive(autoOnly)).toBe(true);
+    expect(anyExplicitLocalFamilyEnabled(autoOnly)).toBe(false);
+    expect(summarizeGenerationPlan(autoOnly).totalSheets).toBe(1);
+  });
+
+  it("treats unchecked sources as zero work at every master and row level", () => {
+    const localOff = plan({
+      localEnabled: false,
+      localFamilies: [{ family: "illustrious", enabled: true, batchCount: 4 }],
+    });
+    expect(summarizeGenerationPlan(localOff).totalSheets).toBe(0);
+
+    const cloudOff = plan({
+      apiEnabled: false,
+      apiModels: [
+        {
+          providerId: "kie",
+          modelId: "nano-banana-pro",
+          model: "nano-banana-kie",
+          displayName: "Nano Banana Pro",
+          enabled: true,
+          batchCount: 4,
+        },
+      ],
+    });
+    expect(summarizeGenerationPlan(cloudOff).apiSheetCount).toBe(0);
+
+    const oneChecked = plan({
+      localEnabled: false,
+      apiEnabled: true,
+      apiModels: [
+        {
+          providerId: "kie",
+          modelId: "nano-banana-pro",
+          model: "nano-banana-kie",
+          displayName: "Nano Banana Pro",
+          enabled: true,
+          batchCount: 2,
+        },
+        {
+          providerId: "wavespeed",
+          modelId: "seedream",
+          model: "seedream-wavespeed",
+          displayName: "Seedream",
+          enabled: false,
+          batchCount: 4,
+        },
+      ],
+    });
+    const summary = summarizeGenerationPlan(oneChecked);
+    expect(summary.totalSheets).toBe(2);
+    expect(summary.apiSheetCount).toBe(2);
+    expect(summary.apiLines).toEqual([{ label: "Nano Banana Pro — Kie.ai", count: 2 }]);
+    const payload = buildGeneratorSourcesPayload(oneChecked);
+    expect(payload.local).toBeNull();
+    expect(payload.api?.find((m) => m.modelId === "seedream")?.enabled).toBe(false);
+    expect(payload.api?.find((m) => m.modelId === "nano-banana-pro")).toMatchObject({
+      providerId: "kie",
+      modelId: "nano-banana-pro",
+      enabled: true,
+      batchCount: 2,
+    });
+  });
+
+  it("always shows the Generation Plan totals without inventing costs", () => {
+    const mixed = plan({
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 2 },
+        { family: "qwen2512", enabled: true, batchCount: 1 },
+      ],
+      apiEnabled: true,
+      apiModels: [
+        {
+          providerId: "kie",
+          modelId: "nano-banana-pro",
+          model: "nano-banana-kie",
+          displayName: "Nano Banana Pro",
+          enabled: true,
+          batchCount: 2,
+        },
+      ],
+    });
+    const summary = summarizeGenerationPlan(mixed);
+    expect(summary.totalSheets).toBe(5);
+    expect(summary.totalViews).toBe(20);
+    expect(summary.apiSheetCount).toBe(2);
+  });
+
+  it("normalizes Setup discovered models using providerId not provider", () => {
+    const normalized = normalizeDiscoveredImageModel({
+      id: "nano-banana-kie",
+      providerId: "kie",
+      providerModelId: "nano-banana-pro",
+      displayName: "Nano Banana Pro",
+      modality: "image",
+      capabilities: ["text_to_image"],
+      executable: true,
+    });
+    expect(normalized).toMatchObject({
+      providerId: "kie",
+      modelId: "nano-banana-pro",
+      model: "nano-banana-kie",
+      supportsReferences: false,
+    });
+    expect(normalized?.displayName).toContain("Kie.ai");
+  });
+
+  it("does not create a Character Creator catalog from video/upscaler rows", () => {
+    expect(
+      normalizeDiscoveredImageModel({
+        id: "seedance-kie",
+        providerId: "kie",
+        providerModelId: "seedance",
+        modality: "video",
+        capabilities: ["text_to_video"],
+      }),
+    ).toBeNull();
+  });
+
+  it("hydrates prefs without enabling unchecked API models", () => {
+    const localOptions = [
+      { id: "illustrious", label: "Illustrious XL", executable: true },
+      { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+    ];
+    const apiModels = [
+      {
+        providerId: "kie",
+        modelId: "nano-banana-pro",
+        model: "nano-banana-kie",
+        displayName: "Nano Banana Pro — Kie.ai",
+        providerLabel: "Kie.ai",
+        capabilities: ["text_to_image"],
+        supportsReferences: false,
+        availability: "Connected",
+        executable: true,
+        adapterAvailable: true,
+        accountAccessible: true,
+      },
+    ];
+    const hydrated = hydratePlanFromPreferences(
+      {
+        local: [
+          { family: "auto", enabled: false, batchCount: 1 },
+          { family: "illustrious", enabled: true, batchCount: 2 },
+        ],
+        api: null,
+      },
+      localOptions,
+      apiModels,
+    );
+    expect(hydrated.localEnabled).toBe(true);
+    expect(hydrated.apiEnabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.batchCount).toBe(2);
+    expect(hydrated.apiModels[0].enabled).toBe(false);
+  });
+
+  it("changing batchCount in the next plan does not require mutating inventory identity", () => {
+    const merged = mergePlanWithInventory(
+      plan({
+        localFamilies: [{ family: "illustrious", enabled: true, batchCount: 2 }],
+      }),
+      [{ id: "illustrious", label: "Illustrious XL", executable: true }],
+      [],
+    );
+    expect(merged.localFamilies[0]).toMatchObject({ family: "illustrious", enabled: true, batchCount: 2 });
+    const next = { ...merged, localFamilies: merged.localFamilies.map((r) => ({ ...r, batchCount: 1 })) };
+    expect(next.localFamilies[0].batchCount).toBe(1);
+    expect(merged.localFamilies[0].batchCount).toBe(2);
+  });
+});
+
+describe("Character Creator generator UI contract", () => {
+  it("CharacterGeneratorPanel has batch count controls and per-model checkboxes", () => {
+    const panel = readFileSync(new URL("./CharacterGeneratorPanel.tsx", import.meta.url), "utf8");
+    expect(panel).toContain("function BatchSelect");
+    expect(panel).toContain("<span>Batches</span>");
+    expect(panel).toContain('testId="generator-auto-batch"');
+    expect(panel).toContain("generator-local-batch-");
+    expect(panel).toContain("generator-api-batch-");
+    expect(panel).toContain("generator-local-enable-");
+    expect(panel).toContain("generator-api-enable-");
+    expect(panel).toContain('type="checkbox"');
+    expect(panel).toContain("CHARACTER_SHEET_BATCH_MIN");
+    expect(panel).toContain("CHARACTER_SHEET_BATCH_MAX");
+    const checkboxes = [...panel.matchAll(/type="checkbox"/g)];
+    expect(checkboxes.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("Character Creator loads hosted image catalog into per-model API checkboxes", () => {
+    const panel = readFileSync(new URL("./CharacterGeneratorPanel.tsx", import.meta.url), "utf8");
+    expect(panel).toContain('fetchDiscoveredHostedModelRows("image")');
+    expect(panel).toContain("normalizeDiscoveredImageModel");
+    expect(panel).toContain("mergePlanWithInventory");
+    expect(panel).toContain("groupDiscoveredImageModelsByProvider");
+    expect(panel).toContain("character-core__api-group");
+    expect(panel).toContain("character-core__api-group-label");
+    expect(panel).toContain("data-testid={`generator-api-provider-${group.providerId}`}");
+    expect(panel).toContain("cloudModelStatusLabel");
+    expect(panel).toContain("CHARACTER_SHEET_BATCH_MIN");
+    expect(panel).toContain("CHARACTER_SHEET_BATCH_MAX");
+    const plan = readFileSync(new URL("./characterGeneratorPlan.ts", import.meta.url), "utf8");
+    expect(plan).toContain("listed, adapter not ready");
+    expect(plan).toContain("adapterAvailable");
+    const core = readFileSync(new URL("./CharacterCore.tsx", import.meta.url), "utf8");
+    expect(core).toContain("CharacterGeneratorPanel");
+  });
+
+  it("plan contract: every local family and API model has enabled checkbox plus batchCount", () => {
+    const merged = mergePlanWithInventory(
+      DEFAULT_CHARACTER_GENERATOR_PLAN,
+      [
+        { id: "illustrious", label: "Illustrious XL", executable: true },
+        { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+      ],
+      [
+        {
+          providerId: "kie",
+          modelId: "nano-banana-pro",
+          model: "nano-banana-kie",
+          displayName: "Nano Banana Pro",
+          providerLabel: "Kie.ai",
+          capabilities: ["text_to_image"],
+          supportsReferences: false,
+          availability: "Connected",
+          executable: true,
+          adapterAvailable: true,
+          accountAccessible: true,
+        },
+        {
+          providerId: "kie",
+          modelId: "gpt-image-2",
+          model: "gpt-image-2-kie",
+          displayName: "GPT Image 2",
+          providerLabel: "Kie.ai",
+          capabilities: ["text_to_image"],
+          supportsReferences: false,
+          availability: "Connected",
+          executable: true,
+          adapterAvailable: true,
+          accountAccessible: true,
+        },
+        {
+          providerId: "kie",
+          modelId: "seedream",
+          model: "seedream-kie",
+          displayName: "Seedream",
+          providerLabel: "Kie.ai",
+          capabilities: ["text_to_image"],
+          supportsReferences: false,
+          availability: "Connected",
+          executable: true,
+          adapterAvailable: true,
+          accountAccessible: true,
+        },
+      ],
+    );
+    expect(merged.localFamilies.every((row) => typeof row.enabled === "boolean" && typeof row.batchCount === "number")).toBe(true);
+    expect(merged.apiModels.every((row) => typeof row.enabled === "boolean" && typeof row.batchCount === "number")).toBe(true);
+    expect(merged.apiModels.map((row) => row.modelId)).toEqual([
+      "nano-banana-pro",
+      "gpt-image-2",
+      "seedream",
+    ]);
+    const oneOn = {
+      ...merged,
+      apiEnabled: true,
+      apiModels: merged.apiModels.map((row) =>
+        row.modelId === "gpt-image-2" ? { ...row, enabled: true, batchCount: 3 } : row,
+      ),
+    };
+    const summary = summarizeGenerationPlan(oneOn);
+    expect(summary.apiSheetCount).toBe(3);
+    expect(summary.apiLines).toHaveLength(1);
+    expect(summary.apiLines[0].label).toContain("GPT Image 2");
+    expect(summary.apiLines[0].label).toContain("Kie.ai");
+    expect(summary.apiLines[0].count).toBe(3);
+    const payload = buildGeneratorSourcesPayload(oneOn);
+    expect(payload.api?.find((m) => m.modelId === "nano-banana-pro")?.enabled).toBe(false);
+    expect(payload.api?.find((m) => m.modelId === "gpt-image-2")).toMatchObject({
+      enabled: true,
+      batchCount: 3,
+    });
+    expect(payload.api?.find((m) => m.modelId === "seedream")?.enabled).toBe(false);
+  });
+
+  it("groups discovered image rows by provider and keeps models without an adapter", () => {
+    const flux = normalizeDiscoveredImageModel({
+      id: "flux-kie",
+      providerId: "kie",
+      providerModelId: "flux",
+      displayName: "FLUX",
+      label: "FLUX — Kie.ai",
+      modality: "image",
+      capabilities: ["text_to_image", "edit"],
+      adapterAvailable: true,
+      accountAccessible: true,
+      capabilityLabel: "Certified",
+      readiness: "Ready",
+      executable: true,
+    });
+    const listed = normalizeDiscoveredImageModel({
+      id: "flux-wavespeed",
+      providerId: "wavespeed",
+      providerModelId: "wavespeed-ai/flux-dev",
+      displayName: "FLUX Dev",
+      label: "FLUX Dev — WaveSpeed.ai",
+      modality: "image",
+      capabilities: ["text_to_image"],
+      adapterAvailable: false,
+      accountAccessible: true,
+      capabilityLabel: "Unsupported",
+      readiness: "Requires Adapter",
+      executable: false,
+      selectable: false,
+    });
+    const fal = normalizeDiscoveredImageModel({
+      id: "krea2-turbo-fal",
+      providerId: "fal",
+      providerModelId: "fal-ai/krea-2/turbo",
+      displayName: "Krea 2 Turbo",
+      label: "Krea 2 Turbo — fal.ai",
+      modality: "image",
+      capabilities: ["text_to_image"],
+      adapterAvailable: true,
+      accountAccessible: true,
+      capabilityLabel: "Certified",
+      readiness: "Ready",
+      executable: true,
+    });
+    expect(flux).not.toBeNull();
+    expect(listed).not.toBeNull();
+    expect(fal).not.toBeNull();
+    expect(flux?.adapterAvailable).toBe(true);
+    expect(listed?.adapterAvailable).toBe(false);
+    expect(flux?.providerLabel).toBe("Kie.ai");
+    expect(listed?.providerLabel).toBe("WaveSpeed.ai");
+    expect(fal?.providerLabel).toBe("fal.ai");
+    expect(cloudModelStatusLabel(flux as NormalizedDiscoveredImageModel)).toBe("Certified");
+    expect(cloudModelStatusLabel(listed as NormalizedDiscoveredImageModel)).toBe("listed, adapter not ready");
+    const groups = groupDiscoveredImageModelsByProvider([
+      fal as NormalizedDiscoveredImageModel,
+      listed as NormalizedDiscoveredImageModel,
+      flux as NormalizedDiscoveredImageModel,
+    ]);
+    expect(groups.map((g) => g.providerId)).toEqual(["kie", "wavespeed", "fal"]);
+    expect(groups.map((g) => g.providerLabel)).toEqual(["Kie.ai", "WaveSpeed.ai", "fal.ai"]);
+    expect(groups.every((g) => g.models.length > 0)).toBe(true);
+    expect(groups.find((g) => g.providerId === "wavespeed")?.models[0].modelId).toBe("wavespeed-ai/flux-dev");
+  });
+
+  it("omits a provider heading when the discovered-models key is not configured", () => {
+    const noKey = normalizeDiscoveredImageModel({
+      id: "flux-kie",
+      providerId: "kie",
+      providerModelId: "flux",
+      displayName: "FLUX",
+      label: "FLUX — Kie.ai",
+      modality: "image",
+      capabilities: ["text_to_image"],
+      adapterAvailable: true,
+      accountAccessible: false,
+      capabilityLabel: "Requires Setup",
+      readiness: "Requires Setup",
+      executable: false,
+    });
+    expect(noKey?.accountAccessible).toBe(false);
+    const groups = groupDiscoveredImageModelsByProvider([noKey as NormalizedDiscoveredImageModel]);
+    expect(groups).toEqual([]);
+  });
+});
+

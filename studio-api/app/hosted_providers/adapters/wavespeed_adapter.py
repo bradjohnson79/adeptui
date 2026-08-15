@@ -1,4 +1,4 @@
-"""WaveSpeed.ai live credential probe — GET prediction status path (no billed POST)."""
+"""WaveSpeed.ai live credential probe + official generation / LLM enqueue."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from typing import Any
 
 import httpx
 
-# Non-existent prediction id: auth is evaluated without creating a generation job.
 _PROBE_URL = "https://api.wavespeed.ai/api/v3/predictions/{task_id}/result"
+_GEN_BASE = "https://api.wavespeed.ai/api/v3"
+_LLM_CHAT_URL = "https://llm.wavespeed.ai/v1/chat/completions"
 
 
 async def probe_wavespeed(api_key: str, *, timeout_sec: float = 15.0) -> dict[str, Any]:
@@ -53,10 +54,99 @@ async def probe_wavespeed(api_key: str, *, timeout_sec: float = 15.0) -> dict[st
         out["message"] = f"WaveSpeed.ai returned {response.status_code}; key left unverified."
         return out
 
-    # 404 (missing prediction) or 200 with auth = key accepted; no job was created via POST.
     out.update(
         valid=True,
         status="verified",
         message="WaveSpeed.ai accepted this API key (auth probe; no generation job submitted).",
     )
     return out
+
+
+async def enqueue_wavespeed(
+    api_key: str,
+    model_id: str,
+    payload: dict[str, Any],
+    *,
+    timeout_sec: float = 30.0,
+) -> dict[str, Any]:
+    """POST official WaveSpeed generation API: /api/v3/{model_id}."""
+    key = (api_key or "").strip()
+    mid = (model_id or "").strip().lstrip("/")
+    if not key:
+        return {"ok": False, "error": "NO_KEY", "message": "No WaveSpeed.ai API key.", "mock": False}
+    if not mid:
+        return {"ok": False, "error": "NO_MODEL", "message": "providerModelId is required.", "mock": False}
+    url = f"{_GEN_BASE}/{mid}"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=payload if isinstance(payload, dict) else {},
+            )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "NETWORK", "message": str(exc), "mock": False}
+    data: Any = None
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw": response.text[:800]}
+    pred_id = None
+    if isinstance(data, dict):
+        inner = data.get("data") if isinstance(data.get("data"), dict) else data
+        pred_id = (inner or {}).get("id") or (inner or {}).get("prediction_id") or data.get("id")
+    ok = response.status_code < 400 and pred_id is not None
+    return {
+        "ok": ok,
+        "providerId": "wavespeed",
+        "modelId": mid,
+        "httpStatus": response.status_code,
+        "predictionId": pred_id,
+        "result": data,
+        "message": None if ok else (data.get("message") if isinstance(data, dict) else response.text[:400]),
+        "mock": False,
+    }
+
+
+async def chat_wavespeed(
+    api_key: str,
+    *,
+    model_id: str,
+    messages: list[dict[str, str]],
+    temperature: float = 0.55,
+    timeout_sec: float = 120.0,
+) -> dict[str, Any]:
+    """Official OpenAI-compatible WaveSpeed LLM API."""
+    key = (api_key or "").strip()
+    mid = (model_id or "").strip() or "deepseek/deepseek-v4-flash"
+    try:
+        async with httpx.AsyncClient(timeout=timeout_sec) as client:
+            response = await client.post(
+                _LLM_CHAT_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": mid, "messages": messages, "temperature": temperature, "stream": False},
+            )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": "NETWORK", "message": str(exc), "mock": False}
+    data: Any = None
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw": response.text[:800]}
+    output = ""
+    if isinstance(data, dict):
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices:
+            msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+            if isinstance(msg, dict):
+                output = str(msg.get("content") or "")
+    ok = response.status_code < 400 and bool(output)
+    return {
+        "ok": ok,
+        "providerId": "wavespeed",
+        "modelId": mid,
+        "httpStatus": response.status_code,
+        "output": output,
+        "raw": data,
+        "mock": False,
+    }

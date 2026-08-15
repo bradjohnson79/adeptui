@@ -1548,6 +1548,13 @@ export const api = {
       { method: "POST" },
     ),
   hostedProvidersDiscoveryStatus: () => req<any>("/api/hosted-providers/discovery"),
+  /**
+   * Live hosted catalog from GET /api/hosted-providers/discovered-models.
+   * Character Creator / Prop Creator pass modality "image".
+   * Co-Director video / audio / LLM pickers should reuse this same helper
+   * with modality "video" | "audio" | "llm" — do not add a second
+   * catalog client or a new App route.
+   */
   hostedProvidersDiscoveredModels: (modality?: string) =>
     req<any>(
       modality

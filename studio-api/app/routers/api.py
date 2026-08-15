@@ -187,124 +187,45 @@ async def healthz() -> dict:
     """Lightweight health — no DB, no ComfyUI, no capability check.
     Returns 200 immediately if the uvicorn worker is responsive.
     Used by the frontend health probe for fast ONLINE/OFFLINE detection.
-    The full /health endpoint remains for detailed dependency status."""
+    /health is also liveness-only; Comfy/catalog live on /api/comfy/health."""
     return {"status": "ok"}
 
 
 @router.get("/health", response_model=HealthOut)
 async def health():
-    """Structured health.
+    """Fast liveness. Same intent as /healthz.
 
-    The previous implementation probed one developer's hardcoded `%LOCALAPPDATA%` ComfyUI
-    model root for three filenames and returned a raw exception string when anything threw.
-    Model presence now comes from the same component verifiers the Setup Wizard and Source
-    Manager use, so a gap names a real component id that a blocker action can act on.
-    Top-level `missing_models` / `missing_model_component_ids` are REQUIRED-only
-    (human-readable labels + component ids). Optional gaps are on
-    `missing_optional_models` / `missing_optional_model_component_ids`.
+    The UI and the :8760 proxy poll this route. The previous handler awaited
+    comfy_health (Comfy HTTP + object_info + on-disk model verifiers),
+    capability_service.get_capabilities, and codirector_service.get_health
+    (provider/Ollama). Those probes blocked the uvicorn worker and produced
+    Gateway Timeout on GET /api/health.
+
+    Do not run Comfy, catalog, or provider discovery here. Detailed status
+    lives on /api/comfy/health and /api/capabilities. Operator flags stay
+    in-memory from feature_flags so existing flag-matrix consumers still work.
     """
-    from ..comfy_health import comfy_health
     from ..feature_flags import feature_flags
 
-    api_state = "ok"
-    partial_errors: list[str] = []
-
-    try:
-        payload = await comfy_health()
-    except Exception as exc:  # noqa: BLE001
-        payload = {"reachable": False, "models": [], "status": "error", "message": str(exc)[:240]}
-        api_state = "degraded"
-        partial_errors.append(f"comfy:{type(exc).__name__}")
-
-    reachable = bool(payload.get("reachable"))
-    models = payload.get("models") or []
-    # Top-level missing_* lists are REQUIRED-only. Optional gaps (e.g. krea2_models)
-    # live on missing_optional_* / nested comfy.missingOptionalModelComponentIds so a
-    # falsy empty required array cannot ||-fall through into optional IDs.
-    required_missing = [item for item in models if item.get("required") and not item.get("present")]
-    optional_missing = [item for item in models if (not item.get("required")) and not item.get("present")]
-    missing = [str(item.get("name") or item.get("componentId")) for item in required_missing]
-    optional_missing_labels = [str(item.get("name") or item.get("componentId")) for item in optional_missing]
-    raw_required_ids = payload.get("missingRequiredModelComponentIds")
-    required_missing_ids = (
-        [str(x) for x in raw_required_ids]
-        if isinstance(raw_required_ids, list)
-        else [str(item.get("componentId")) for item in required_missing]
-    )
-    raw_optional_ids = payload.get("missingOptionalModelComponentIds")
-    optional_missing_ids = (
-        [str(x) for x in raw_optional_ids]
-        if isinstance(raw_optional_ids, list)
-        else [str(item.get("componentId")) for item in optional_missing]
-    )
-
-    caps = None
-    provider = None
     specialist_count = 0
-    pack_blockers: list[dict] = []
-
-    try:
-        from ..capabilities import service as capability_service
-
-        caps = await capability_service.get_capabilities(force=False)
-    except Exception as exc:  # noqa: BLE001
-        api_state = "degraded"
-        partial_errors.append(f"capabilities:{type(exc).__name__}")
-
-    try:
-        from ..codirector import service as codirector_service
-
-        provider = await codirector_service.get_health()
-    except Exception as exc:  # noqa: BLE001
-        api_state = "degraded"
-        partial_errors.append(f"provider:{type(exc).__name__}")
-
     try:
         from ..codirector.intelligence.specialist_registry import SpecialistRegistry
 
         specialist_count = len(SpecialistRegistry().all())
-    except Exception as exc:  # noqa: BLE001
-        api_state = "degraded"
-        partial_errors.append(f"specialists:{type(exc).__name__}")
-
-    if caps is not None:
-        pack_blockers = [
-            {
-                "capabilityId": b.capabilityId,
-                "message": b.message,
-                "recommendedAction": b.recommendedAction,
-                "componentIds": list(b.componentIds),
-            }
-            for b in caps.blockers
-            if b.subsystem in ("source_manager", "models", "workflows", "comfyui")
-        ]
-
-    bible_storage = _probe_bible_storage()
-    if bible_storage != "ready":
-        # Bible probe failure is informational; keep API up unless already degraded.
-        partial_errors.append("bibleStorage:unavailable")
-
-    provider_payload = {
-        "id": getattr(provider, "provider_id", None),
-        "status": getattr(provider, "status", "unavailable"),
-        "reachable": bool(getattr(provider, "reachable", False)),
-        "modelAvailable": bool(getattr(provider, "model_available", False)),
-        "selectedModel": getattr(provider, "selected_model", None),
-    }
-
-    registry_payload = {
-        "callable": len(caps.callable) if caps is not None else 0,
-        "blocked": len(caps.blockers) if caps is not None else 0,
-        "total": int(getattr(caps, "readinessTotal", None) or (len(caps.capabilities) if caps is not None else 0)),
-        "deferred": len(getattr(caps, "deferred", None) or []) if caps is not None else 0,
-        "counts": dict(caps.counts) if caps is not None else {},
-    }
+    except Exception:  # noqa: BLE001 — health must not raise
+        pass
 
     operator = {
-        "api": api_state,
-        "comfy": "reachable" if reachable else "down",
-        "provider": provider_payload,
-        "bibleStorage": bible_storage,
+        "api": "ok",
+        "comfy": "unknown",
+        "provider": {
+            "id": None,
+            "status": "skipped",
+            "reachable": False,
+            "modelAvailable": False,
+            "selectedModel": None,
+        },
+        "bibleStorage": "skipped",
         "intelligenceEnabled": bool(feature_flags.codirector_intelligence_v2),
         "visionValidationEnabled": bool(feature_flags.vision_validation_v1),
         "timelineReferencesEnabled": bool(feature_flags.timeline_references_v1),
@@ -326,40 +247,43 @@ async def health():
         "codirectorProductionControlEnabled": bool(feature_flags.codirector_production_control_v1),
         "productionIntelligenceEnabled": bool(feature_flags.codirector_production_intelligence_v1),
         "adaptiveLearningEnabled": bool(feature_flags.codirector_adaptive_learning_v1),
-        # V1.1: never advertise native 3D Environment Studio / Virtual Stage as enabled
-        # in operator health (foundations remain flag-gated for Version 1.2).
         "virtualEnvironmentStudioEnabled": False,
         "unifiedExperienceEnabled": bool(feature_flags.codirector_unified_experience_v1),
         "templatesPresetsEnabled": bool(feature_flags.templates_presets_v1),
         "specialistCount": specialist_count,
-        "registry": registry_payload,
-        "packBlockers": pack_blockers[:12],
+        "registry": {
+            "callable": 0,
+            "blocked": 0,
+            "total": 0,
+            "deferred": 0,
+            "counts": {},
+        },
+        "packBlockers": [],
         "visualValidationPendingNote": (
             "M2.5 vision validation enabled — review pending assets in Validation Workspace."
             if feature_flags.vision_validation_v1
             else "M2.5 — visual validation flag is off (STUDIO_FEATURE_VISION_VALIDATION_V1)."
         ),
-        "partialErrors": partial_errors[:12],
+        "partialErrors": [],
     }
-    health_message = str(payload.get("message") or "")
-    if api_state == "degraded" and partial_errors:
-        health_message = (health_message + " " if health_message else "") + (
-            "Partial health probe failure: " + ", ".join(partial_errors[:6])
-        )
     return HealthOut(
-        ok=reachable,
-        comfy_reachable=reachable,
-        comfy=payload,
-        missing_models=missing,
-        missing_model_component_ids=required_missing_ids,
-        missing_optional_models=optional_missing_labels,
-        missing_optional_model_component_ids=optional_missing_ids,
-        comfy_status=str(payload.get("status") or "unknown"),
-        comfy_version=payload.get("version"),
-        node_catalog_available=bool(payload.get("nodeCatalogAvailable")),
-        reason_code=payload.get("reasonCode"),
-        recommended_action=payload.get("recommendedAction"),
-        message=health_message,
+        ok=True,
+        comfy_reachable=True,
+        comfy={
+            "status": "unknown",
+            "reachable": False,
+            "message": "liveness only; use /api/comfy/health for Comfy and /api/capabilities for catalog",
+        },
+        missing_models=[],
+        missing_model_component_ids=[],
+        missing_optional_models=[],
+        missing_optional_model_component_ids=[],
+        comfy_status="unknown",
+        comfy_version=None,
+        node_catalog_available=False,
+        reason_code=None,
+        recommended_action=None,
+        message="ok",
         operator=operator,
     )
 

@@ -24,6 +24,7 @@ _LOCK = threading.RLock()
 _CONFIG_KEYS = (
     "endpoint",
     "selectedModel",
+    "selectedProvider",
     "primaryModel",
     "fallbackModel",
     "allowAutomaticModelDownload",
@@ -49,6 +50,7 @@ def _defaults() -> dict[str, Any]:
         # provider is never selectable in a production run even if this key is
         # somehow flipped. See service._mock_provider_allowed().
         "allowMockProvider": False,
+        "selectedProvider": "ollama",
         "timeoutSec": settings.ollama_timeout_sec,
     }
 

@@ -10,7 +10,7 @@
  *  - failed              → spinner removed, error state + Retry. Never an infinite loader.
  */
 import { api } from "../../api";
-import { candidateStage, characterSheetProvenanceLabel, SHEET_VIEW_LABELS } from "./types";
+import { candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, SHEET_VIEW_LABELS } from "./types";
 import type { CharacterCandidate } from "./types";
 
 type Props = {
@@ -103,6 +103,11 @@ export function CharacterCandidateGrid({
               <span className="character-core__candidate-prov" data-testid={`candidate-provenance-${i}`}>
                 {characterSheetProvenanceLabel(c)}
               </span>
+              {characterSheetBatchLabel(c) ? (
+                <span className="character-core__candidate-batch" data-testid={`candidate-batch-${i}`}>
+                  {characterSheetBatchLabel(c)}
+                </span>
+              ) : null}
               {failed && onRetry ? (
                 <button
                   type="button"

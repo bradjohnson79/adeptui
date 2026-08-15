@@ -5,87 +5,108 @@ import {
   CHARACTER_SHEET_START_ERROR_PREFIX,
   formatCharacterSheetStartError,
 } from "./characterSheetGenerate";
+import { DEFAULT_CHARACTER_GENERATOR_PLAN, type CharacterGeneratorPlan } from "./characterGeneratorPlan";
 
-const named = { name: "Korri" };
+const localOptions = [
+  { id: "illustrious", label: "Illustrious XL", executable: true, supportsReferences: false },
+  { id: "qwen2512", label: "Qwen Image 2512", executable: true, supportsReferences: false },
+  { id: "zimage", label: "Z-Image Turbo", executable: true, supportsReferences: true },
+];
+
+function plan(partial: Partial<CharacterGeneratorPlan> = {}): CharacterGeneratorPlan {
+  return {
+    ...DEFAULT_CHARACTER_GENERATOR_PLAN,
+    localFamilies: [
+      { family: "illustrious", enabled: false, batchCount: 1 },
+      { family: "qwen2512", enabled: false, batchCount: 1 },
+      { family: "zimage", enabled: false, batchCount: 1 },
+    ],
+    ...partial,
+  };
+}
 
 describe("Character Sheet generate request", () => {
   it("enables Generate for Illustrious + reference and sends one profile_guided local request", () => {
-    const sources = {
-      local: { enabled: true, selectedId: "illustrious", stage2Enabled: false },
-      api: { enabled: false, selectedId: "" },
-    };
-    expect(characterGenerateBlockReason({ name: named.name, sources })).toBeNull();
+    const next = plan({
+      autoSelect: { enabled: false, batchCount: 1 },
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 1 },
+        { family: "qwen2512", enabled: false, batchCount: 1 },
+        { family: "zimage", enabled: false, batchCount: 1 },
+      ],
+    });
+    expect(characterGenerateBlockReason({ name: "Korri", plan: next, localOptions })).toBeNull();
     const body = buildCharacterSheetStartBody({
       profileVisualStyle: "realistic_anime",
-      sources,
+      plan: next,
       hasReference: true,
+      localOptions,
     });
-    expect(body.candidateCount).toBe(4);
+    expect(body.candidateCount).toBe(1);
     expect(body.generationMode).toBe("profile_guided");
-    expect(body.generatorSources.local?.family).toBe("illustrious");
+    expect(body.generatorSources.local?.find((r) => r.family === "illustrious")).toMatchObject({
+      enabled: true,
+      batchCount: 1,
+    });
+    expect(body.generatorSources.local?.find((r) => r.family === "auto")?.enabled).toBe(false);
     expect(body.generatorSources.api).toBeNull();
-    expect(body.generatorSources.local?.stage2Enabled).toBe(false);
-  });
-
-  it("sends profile_guided for Qwen with a reference attached", () => {
-    const body = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "qwen2512" },
-        api: { enabled: false, selectedId: "" },
-      },
-      hasReference: true,
-    });
-    expect(body.generationMode).toBe("profile_guided");
-    expect(body.generatorSources.local?.family).toBe("qwen2512");
   });
 
   it("sends reference_conditioned for Z-Image with a reference attached", () => {
     const body = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "zimage" },
-        api: { enabled: false, selectedId: "" },
-      },
+      plan: plan({
+        localFamilies: [
+          { family: "illustrious", enabled: false, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+          { family: "zimage", enabled: true, batchCount: 1 },
+        ],
+      }),
       hasReference: true,
+      localOptions,
     });
     expect(body.generationMode).toBe("reference_conditioned");
+    expect(body.candidateCount).toBe(1);
   });
 
-  it("still generates Illustrious with no reference", () => {
+  it("expands mixed local batches and keeps Cloud off at zero API jobs", () => {
     const body = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "illustrious" },
-        api: { enabled: false, selectedId: "" },
-      },
+      plan: plan({
+        localFamilies: [
+          { family: "illustrious", enabled: true, batchCount: 2 },
+          { family: "qwen2512", enabled: true, batchCount: 1 },
+          { family: "zimage", enabled: false, batchCount: 1 },
+        ],
+        apiEnabled: false,
+      }),
       hasReference: false,
+      localOptions,
     });
-    expect(body.generationMode).toBe("profile_guided");
-    expect(characterGenerateBlockReason({
-      name: "Korri",
-      sources: {
-        local: { enabled: true, selectedId: "illustrious" },
-        api: { enabled: false, selectedId: "" },
-      },
-    })).toBeNull();
+    expect(body.candidateCount).toBe(3);
+    expect(body.generatorSources.api).toBeNull();
+    expect(body.generatorSources.local?.find((r) => r.family === "illustrious")?.batchCount).toBe(2);
+    expect(body.generatorSources.local?.find((r) => r.family === "qwen2512")?.batchCount).toBe(1);
   });
 
   it("blocks Generate when no source is enabled with a visible error", () => {
     const reason = characterGenerateBlockReason({
       name: "Korri",
-      sources: { local: { enabled: false, selectedId: "" }, api: { enabled: false, selectedId: "" } },
+      plan: plan({ localEnabled: false, apiEnabled: false }),
     });
     expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
     expect(reason).toMatch(/Enable a Local or Cloud generator/i);
   });
 
-  it("click contract: building the body twice yields one identical request shape (not two families)", () => {
-    const sources = {
-      local: { enabled: true, selectedId: "illustrious" },
-      api: { enabled: false, selectedId: "" },
-    };
-    const a = buildCharacterSheetStartBody({ sources, hasReference: true });
-    const b = buildCharacterSheetStartBody({ sources, hasReference: true });
+  it("click contract: building the body twice yields one identical request shape", () => {
+    const next = plan({
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 1 },
+        { family: "qwen2512", enabled: false, batchCount: 1 },
+        { family: "zimage", enabled: false, batchCount: 1 },
+      ],
+    });
+    const a = buildCharacterSheetStartBody({ plan: next, hasReference: true, localOptions });
+    const b = buildCharacterSheetStartBody({ plan: next, hasReference: true, localOptions });
     expect(a).toEqual(b);
-    expect(a.generatorSources.local?.family).toBe("illustrious");
   });
 
   it("formats backend rejection with the creator-facing prefix", () => {
@@ -97,35 +118,34 @@ describe("Character Sheet generate request", () => {
   it("invokes startCharacterVisualSheet exactly once per generate", async () => {
     const start = vi.fn().mockResolvedValue({ ok: true, pack: { candidates: [] } });
     const body = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "illustrious" },
-        api: { enabled: false, selectedId: "" },
-      },
+      plan: plan({
+        localFamilies: [
+          { family: "illustrious", enabled: true, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+          { family: "zimage", enabled: false, batchCount: 1 },
+        ],
+      }),
       hasReference: true,
+      localOptions,
     });
     await start("proj", "char", body);
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0][2].generationMode).toBe("profile_guided");
-    expect(start.mock.calls[0][2].candidateCount).toBe(4);
+    expect(start.mock.calls[0][2].candidateCount).toBe(1);
+    expect(start.mock.calls[0][2].generatorSources.local.find((r: { family: string }) => r.family === "illustrious").enabled).toBe(true);
   });
 
-  it("E2E override may send candidateCount=1 without changing the product default", () => {
+  it("product default is one sheet per enabled generator, not a global four", () => {
     const body = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "illustrious" },
-        api: { enabled: false, selectedId: "" },
-      },
+      plan: plan({
+        localFamilies: [
+          { family: "illustrious", enabled: true, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+          { family: "zimage", enabled: false, batchCount: 1 },
+        ],
+      }),
       hasReference: true,
-      candidateCount: 1,
+      localOptions,
     });
     expect(body.candidateCount).toBe(1);
-    const product = buildCharacterSheetStartBody({
-      sources: {
-        local: { enabled: true, selectedId: "illustrious" },
-        api: { enabled: false, selectedId: "" },
-      },
-      hasReference: true,
-    });
-    expect(product.candidateCount).toBe(4);
   });
 });

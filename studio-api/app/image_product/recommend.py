@@ -199,7 +199,17 @@ def recommend_image_family(
     if reference_attached and not explicit_preference and style_preferred in _TEXT_ONLY_FAMILIES:
         style_preferred = ""
 
-    if preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious", "krea2", "krea"}:
+    kie_official = None
+    try:
+        from ..hosted_providers.adapters.kie_adapter import kie_image_model_id_for_dock
+
+        kie_official = kie_image_model_id_for_dock(preferred)
+    except Exception:
+        kie_official = None
+
+    if kie_official:
+        primary = "kie"
+    elif preferred in {"flux", "qwen", "qwen2512", "imagen", "zimage", "illustrious", "krea2", "krea"}:
         primary = preferred
     elif style_preferred and _executable(style_preferred):
         primary = style_preferred
@@ -213,9 +223,12 @@ def recommend_image_family(
     else:
         primary = "qwen2512"
 
-    # Execution fallback: only Certified families execute in production
+    # Execution fallback: only Certified families execute in production.
+    # Selected Kie API docks are hosted — never substitute Qwen/Z-Image.
     exec_family = primary
-    if not _executable(exec_family):
+    if kie_official:
+        exec_family = "kie"
+    elif not _executable(exec_family):
         for candidate in ("qwen2512", "zimage", "flux", "illustrious"):
             if candidate != primary and _executable(candidate):
                 exec_family = candidate

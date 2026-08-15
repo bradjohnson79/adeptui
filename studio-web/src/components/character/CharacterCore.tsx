@@ -3,15 +3,21 @@
  * shared building blocks. Used by BOTH the Co-Director Express surface and the
  * standalone Character Creator so they share schema, hydration, and behavior.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { CharacterActions } from "./CharacterActions";
 import { CharacterCandidateGrid } from "./CharacterCandidateGrid";
+import { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 import { CharacterProfileForm } from "./CharacterProfileForm";
 import { CharacterReferenceControl } from "./CharacterReferenceControl";
 import { CharacterSheetGenerator } from "./CharacterSheetGenerator";
-import { GeneratorSourceSelector } from "./GeneratorSourceSelector";
-import type { CharacterCandidate, GeneratorSourceState } from "./types";
+import {
+  DEFAULT_CHARACTER_GENERATOR_PLAN,
+  buildGeneratorSourcesPayload,
+  hydratePlanFromPreferences,
+  type CharacterGeneratorPlan,
+} from "./characterGeneratorPlan";
+import type { CharacterCandidate, GeneratorOption } from "./types";
 import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
 import "./characterCore.css";
 
@@ -29,13 +35,17 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const cp = useCharacterProfile(projectId, characterId);
   const { profile, references } = cp;
 
-  const [sources, setSources] = useState<{ local: GeneratorSourceState; api: GeneratorSourceState }>({
-    local: { enabled: true, selectedId: "" },
-    api: { enabled: false, selectedId: "" },
-  });
+  const [plan, setPlan] = useState<CharacterGeneratorPlan>(DEFAULT_CHARACTER_GENERATOR_PLAN);
+  const [localOptions, setLocalOptions] = useState<GeneratorOption[]>([]);
+  const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [notice, setNotice] = useState("");
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
+  const prefsHydratedRef = useRef(false);
+  const prefsTimerRef = useRef<number | null>(null);
+  const rawPrefsRef = useRef<unknown>(null);
+  const packLoadedRef = useRef(false);
+  const inventoryRef = useRef<{ localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] } | null>(null);
 
   const hero = useMemo(() => getHeroIdentity(references), [references]);
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
@@ -44,6 +54,79 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
 
   const saved = !!profile?.id;
   const canSave = !!profile?.name?.trim();
+
+  const applyHydration = useCallback(
+    (
+      prefs: unknown,
+      inv: { localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] },
+    ) => {
+      const apiModels = inv.apiOptions.map((opt) => ({
+        providerId: opt.providerId || "",
+        modelId: opt.modelId || "",
+        model: opt.id.includes(":") ? opt.id.split(":").slice(1).join(":") : opt.id,
+        displayName: opt.label,
+        capabilities: opt.capabilities || [],
+        supportsReferences: !!opt.supportsReferences,
+        availability: opt.availability || "Connected",
+        executable: opt.executable,
+        credits: opt.credits,
+      }));
+      setPlan(hydratePlanFromPreferences(prefs, inv.localOptions, apiModels));
+    },
+    [],
+  );
+
+  const handleInventory = useCallback(
+    (inv: { localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] }) => {
+      inventoryRef.current = inv;
+      setLocalOptions(inv.localOptions);
+      setApiOptions(inv.apiOptions);
+      if (packLoadedRef.current && rawPrefsRef.current) applyHydration(rawPrefsRef.current, inv);
+      if (packLoadedRef.current) prefsHydratedRef.current = true;
+    },
+    [applyHydration],
+  );
+
+  useEffect(() => {
+    prefsHydratedRef.current = false;
+    packLoadedRef.current = false;
+    rawPrefsRef.current = null;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await api.getCharacterVisualSheet(projectId, characterId);
+        const pack = (res as { pack?: Record<string, unknown> }).pack || (res as Record<string, unknown>);
+        const prefs = pack?.generatorPreferences || pack?.generatorSources;
+        if (cancelled) return;
+        rawPrefsRef.current = prefs || null;
+        packLoadedRef.current = true;
+        if (prefs && inventoryRef.current) applyHydration(prefs, inventoryRef.current);
+        prefsHydratedRef.current = true;
+      } catch {
+        if (!cancelled) {
+          packLoadedRef.current = true;
+          prefsHydratedRef.current = true;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, characterId, applyHydration]);
+
+  useEffect(() => {
+    if (!prefsHydratedRef.current) return;
+    if (prefsTimerRef.current) window.clearTimeout(prefsTimerRef.current);
+    prefsTimerRef.current = window.setTimeout(() => {
+      const payload = buildGeneratorSourcesPayload(plan);
+      void api.saveCharacterVisualSheetPreferences(projectId, characterId, { generatorSources: payload }).catch(() => {
+        /* prefs save is best-effort; generation still uses live UI state */
+      });
+    }, 400);
+    return () => {
+      if (prefsTimerRef.current) window.clearTimeout(prefsTimerRef.current);
+    };
+  }, [plan, projectId, characterId]);
 
   const handleApprove = useCallback(
     async (candidate: CharacterCandidate) => {
@@ -136,18 +219,21 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
 
       <div className="character-core__section">
         <h3 className="character-core__section-title">Character Sheet</h3>
-        <GeneratorSourceSelector
+        <CharacterGeneratorPanel
           projectId={projectId}
           visualStyle={profile?.visual_style}
           hasReference={hasReference}
-          value={sources}
-          onChange={setSources}
+          value={plan}
+          onChange={setPlan}
+          onInventory={handleInventory}
         />
         <CharacterSheetGenerator
           projectId={projectId}
           characterId={characterId}
           profile={profile}
-          sources={sources}
+          plan={plan}
+          localOptions={localOptions}
+          apiOptions={apiOptions}
           hasReference={hasReference}
           onCandidates={setCandidates}
           retryHandlerRef={retryHandlerRef}
