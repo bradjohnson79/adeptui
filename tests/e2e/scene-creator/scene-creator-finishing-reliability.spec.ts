@@ -456,6 +456,7 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       await expect(page.getByTestId("scene-creator-inpaint-mask-summary")).toContainText(/%/);
       const generateBtn = page.getByTestId("scene-creator-inpaint-generate");
       await expect(generateBtn).toBeEnabled({ timeout: 20_000 });
+      const beforeIds = new Set((await getShot(request, shotId!)).candidates?.map((c) => c.id) || []);
       const payloadPromise = page.waitForRequest(
         (req) => req.method() === "POST" && /region-edit/.test(req.url()),
         { timeout: 90_000 },
@@ -476,8 +477,8 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
           const shot = await getShot(request, shotId!);
           cand = [...(shot.candidates || [])]
             .reverse()
-            .find((c) => c.kind === "region_edit" && c.edit_operation === step.op);
-          return Boolean(cand?.job_id || cand?.id);
+            .find((c) => c.kind === "region_edit" && c.edit_operation === step.op && !beforeIds.has(c.id));
+          return Boolean(cand?.id);
         }, { timeout: 45_000 })
         .toBeTruthy();
       expect(cand, `${step.op} candidate`).toBeTruthy();
@@ -486,9 +487,9 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       if (cand!.job_id) await waitJobDone(request, cand!.job_id);
       await expect(page.getByTestId("scene-creator-strip-take").first()).toBeVisible();
     }
-    const modifyHash = hashes[1];
-    const firstHash = hashes[0];
-    if (modifyHash && firstHash) expect(modifyHash).toBe(firstHash);
+    const cine = await getCine(request);
+    const cam = cine.cameras?.find((c) => c.cameraId === cine.selected_camera_id);
+    if (hashes[1] && cam?.cameraStateHash) expect(hashes[1]).toBe(cam.cameraStateHash);
   });
 
   test("model guard: approved edit + Qwen T2I does not send txt2img final", async ({
