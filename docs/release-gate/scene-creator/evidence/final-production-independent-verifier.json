@@ -1,0 +1,11 @@
+{
+  "verifier": "independent",
+  "agentId": "48b46211-2260-4eaf-9072-70e46d38b646",
+  "verdict": "FAILED — Pixel Add/Remove visual FAIL (Z-Image inpaint)",
+  "head": "2d8eddb",
+  "playwrightAT": "20 passed",
+  "pixelModify": "PASS",
+  "pixelReplace": "PASS",
+  "pixelAdd": "FAIL",
+  "pixelRemove": "FAIL"
+}
