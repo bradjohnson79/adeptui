@@ -114,5 +114,10 @@ describe("Scene Creator contracts", () => {
       fs.readFileSync(new URL("./sceneCreator.css", import.meta.url), "utf8"),
     );
     expect(css).toContain("grid-template-columns: 220px minmax(0, 1fr) 280px");
+    const mask = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("../../imageEdit/ImageMaskEditor.tsx", import.meta.url), "utf8"),
+    );
+    expect(mask).toContain("}, [imageUrl]);");
+    expect(mask).not.toContain("[imageUrl, onChange, syncDisplay]");
   });
 });

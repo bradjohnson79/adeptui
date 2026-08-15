@@ -42,6 +42,9 @@ export const ImageMaskEditor = forwardRef<
   const displayCanvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const rectStartRef = useRef<{ x: number; y: number } | null>(null);
+  const onChangeRef = useRef(onChange);
+  const overlayOpacityRef = useRef(overlayOpacity);
+  const syncDisplayRef = useRef<() => void>(() => undefined);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [localBrush, setLocalBrush] = useState(brushSize);
   const [localTool, setLocalTool] = useState<MaskTool>(tool);
@@ -50,6 +53,12 @@ export const ImageMaskEditor = forwardRef<
   useEffect(() => setLocalBrush(brushSize), [brushSize]);
   useEffect(() => setLocalTool(tool), [tool]);
   useEffect(() => setLocalFeather(feather), [feather]);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+  useEffect(() => {
+    overlayOpacityRef.current = overlayOpacity;
+  }, [overlayOpacity]);
 
   const syncDisplay = useCallback(() => {
     const maskCanvas = maskCanvasRef.current;
@@ -60,10 +69,11 @@ export const ImageMaskEditor = forwardRef<
     if (!ctx) return;
     ctx.clearRect(0, 0, dims.w, dims.h);
     ctx.drawImage(img, 0, 0, dims.w, dims.h);
-    ctx.globalAlpha = overlayOpacity;
+    ctx.globalAlpha = overlayOpacityRef.current;
     ctx.drawImage(maskCanvas, 0, 0);
     ctx.globalAlpha = 1;
-  }, [dims.w, dims.h, overlayOpacity]);
+  }, [dims.w, dims.h]);
+  syncDisplayRef.current = syncDisplay;
 
   const loadImage = useCallback(() => {
     if (!imageUrl) return;
@@ -91,12 +101,12 @@ export const ImageMaskEditor = forwardRef<
           mctx.fillStyle = "#000";
           mctx.fillRect(0, 0, w, h);
         }
-        syncDisplay();
-        onChange?.(false);
+        syncDisplayRef.current();
+        onChangeRef.current?.(false);
       }
     };
     img.src = imageUrl;
-  }, [imageUrl, onChange, syncDisplay]);
+  }, [imageUrl]);
 
   useEffect(() => {
     loadImage();
@@ -126,7 +136,7 @@ export const ImageMaskEditor = forwardRef<
     ctx.arc(x, y, localBrush / 2, 0, Math.PI * 2);
     ctx.fill();
     syncDisplay();
-    onChange?.(true);
+    onChangeRef.current?.(true);
   };
 
   const drawRect = (x0: number, y0: number, x1: number, y1: number, erase: boolean) => {
@@ -141,7 +151,7 @@ export const ImageMaskEditor = forwardRef<
     const h = Math.abs(y1 - y0);
     ctx.fillRect(x, y, w, h);
     syncDisplay();
-    onChange?.(true);
+    onChangeRef.current?.(true);
   };
 
   const exportMask = useCallback(async () => {
@@ -173,7 +183,7 @@ export const ImageMaskEditor = forwardRef<
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
     syncDisplay();
-    onChange?.(false);
+    onChangeRef.current?.(false);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
