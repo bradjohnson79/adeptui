@@ -157,10 +157,13 @@ async function openSceneCreator(page: Page) {
 async function openAccordion(page: Page, testId: string) {
   const acc = page.getByTestId(testId);
   await expect(acc).toBeVisible();
-  if (!(await acc.getAttribute("open"))) {
+  const isOpen = await acc.evaluate((el) => (el as HTMLDetailsElement).open);
+  if (!isOpen) {
     await acc.locator("summary").first().click();
   }
-  await expect(acc).toHaveAttribute("open", "");
+  await expect
+    .poll(async () => acc.evaluate((el) => (el as HTMLDetailsElement).open))
+    .toBe(true);
 }
 
 async function paintMask(page: Page, size: "tiny" | "large") {
@@ -538,13 +541,21 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const ws = await getWorkspace(request);
     const shot = ws.selected_shot;
     expect(shot).toBeTruthy();
-    const approved = (shot!.candidates || []).find((c) => c.id === shot!.approved_candidate_id)
-      || [...(shot!.candidates || [])].reverse().find((c) => c.kind === "region_edit" && c.status === "complete");
+    const approvedRegionEdit = [...(shot!.candidates || [])]
+      .reverse()
+      .find((c) => c.kind === "region_edit" && c.status === "complete" && c.asset_id);
+    const approved = approvedRegionEdit
+      || (shot!.candidates || []).find((c) => c.id === shot!.approved_candidate_id);
     if (approved?.id && shot!.approved_candidate_id !== approved.id) {
       await request.post(`${API}/api/scene-creator/projects/${PROJECT_ID}/shots/${shot!.id}/approve`, {
         data: { candidate_id: approved.id },
       });
     }
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+      timeout: 60_000,
+    });
+    await page.getByTestId("cine-tile-c1").click();
     const local = page.getByTestId("generator-local-select");
     const zimage = local.locator("option").filter({ hasText: /z-?image/i }).first();
     if (await zimage.count()) {
@@ -601,7 +612,9 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const currentApprovedId = shot!.approved_candidate_id || complete[complete.length - 1].id;
     const other = complete.find((c) => c.id !== currentApprovedId) || complete[0];
     const jobsBefore = await listJobs(request);
-    await page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${other.id}"]`).click();
+    const otherBtn = page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${other.id}"]`);
+    await otherBtn.scrollIntoViewIfNeeded();
+    await otherBtn.click();
     const approve = page.getByTestId("scene-creator-approve");
     if (await approve.count()) await approve.click();
     await expect
@@ -613,7 +626,9 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     if (prev && currentApprovedId !== other.id) {
       expect(prev.superseded).toBe(true);
     }
-    await page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${currentApprovedId}"]`).click();
+    const originalBtn = page.locator(`[data-testid="scene-creator-strip-take"][data-candidate-id="${currentApprovedId}"]`);
+    await originalBtn.scrollIntoViewIfNeeded();
+    await originalBtn.click();
     if (await approve.count()) await approve.click();
     await expect
       .poll(async () => (await getShot(request, shot!.id)).approved_candidate_id, { timeout: 20_000 })
