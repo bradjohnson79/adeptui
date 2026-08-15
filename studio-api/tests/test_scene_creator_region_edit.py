@@ -172,6 +172,7 @@ def _pin_runtime(monkeypatch, workflow_key: str, family: str):
 
     monkeypatch.setattr("app.image_runtime.contract.resolve_image_workflow", _resolve)
     monkeypatch.setattr("app.image_product.edit_service._enqueue_compiled", _enqueue)
+    monkeypatch.setattr("app.scene_creator.service._job_is_live", lambda *a, **k: True)
     return captured
 
 

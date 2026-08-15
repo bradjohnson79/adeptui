@@ -1,6 +1,6 @@
 /**
- * SceneCreatorCore — shared Express + Standard views over useSceneCreator.
- * Express stays light. Advanced controls live in Standard.
+ * SceneCreatorCore — Standard three-zone Scene Creator production workspace.
+ * Co-Director Express is a launcher only (SceneCreatorExpressLauncher).
  */
 import { useMemo, useState } from "react";
 import { api } from "../../../api";
@@ -33,7 +33,7 @@ export type SceneCreatorCoreProps = {
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
 
-export function SceneCreatorCore({ projectId, variant, onGoTab }: SceneCreatorCoreProps) {
+export function SceneCreatorCore({ projectId, onGoTab }: SceneCreatorCoreProps) {
   const sc = useSceneCreator(projectId);
   const sheets = sc.workspace?.sheets || [];
 
@@ -75,16 +75,9 @@ export function SceneCreatorCore({ projectId, variant, onGoTab }: SceneCreatorCo
     );
   }
 
-  if (variant === "standard") {
-    return (
-      <InpaintSessionProvider>
-        <StandardLayout sc={sc} onGoTab={onGoTab} />
-      </InpaintSessionProvider>
-    );
-  }
   return (
     <InpaintSessionProvider>
-      <ExpressLayout sc={sc} onGoTab={onGoTab} />
+      <StandardLayout sc={sc} onGoTab={onGoTab} />
     </InpaintSessionProvider>
   );
 }
@@ -93,25 +86,6 @@ type LayoutProps = {
   sc: ReturnType<typeof useSceneCreator>;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
-
-function ExpressLayout({ sc, onGoTab }: LayoutProps) {
-  return (
-    <section className="scene-creator-core" data-testid="scene-creator-panel">
-      <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
-      <CharactersPropsBlock sc={sc} />
-      <CinematographerPanel sc={sc} />
-      <OrientationAccordion sc={sc} />
-      <RegionEditBlock sc={sc} />
-      <ExpressMaskStage sc={sc} />
-      <ShotPromptBlock sc={sc} />
-      <GeneratorBlock sc={sc} />
-      <ActionsBlock sc={sc} />
-      {sc.approved ? <RetakeBlock sc={sc} /> : null}
-      <StatusBlock sc={sc} />
-      <CandidateGrid sc={sc} />
-    </section>
-  );
-}
 
 function StandardLayout({ sc, onGoTab }: LayoutProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -348,25 +322,6 @@ function StandardPreview({
   );
 }
 
-function ExpressMaskStage({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
-  const { assetId, source, session } = usePreviewAsset(sc);
-  if (!session.accordionOpen || !assetId) return null;
-  return (
-    <div className="scene-creator-express-mask" data-testid="scene-creator-preview">
-      {session.maskInteractive ? (
-        <p className="scene-creator-inpaint-banner" data-testid="scene-creator-inpaint-mode">
-          INPAINT MODE — paint on this image
-        </p>
-      ) : null}
-      <CenterMaskCanvas
-        imageUrl={api.assetUrl(assetId)}
-        sourceAssetId={source?.assetId || assetId}
-        cameraVersion={source?.cameraStateVersion ?? null}
-      />
-    </div>
-  );
-}
-
 function EnvironmentBlock({ sc, onGoTab }: LayoutProps) {
   const sheets = sc.workspace?.sheets || [];
   return (
@@ -585,6 +540,7 @@ function RegionEditBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
       localEnabled={sc.localEnabled}
       busy={sc.busy}
       onGenerate={(body) => sc.regionEdit(body)}
+      onSwitchFamily={sc.setLocalFamily}
     />
   );
 }
@@ -661,56 +617,6 @@ function FailedCandidateBody({
           {cand.error_detail || cand.error}
         </pre>
       ) : null}
-    </div>
-  );
-}
-
-function CandidateGrid({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
-  const candidates = sc.shot?.candidates || [];
-  if (!candidates.length) return null;
-  return (
-    <div className="scene-creator-core__candidates" data-testid="scene-creator-result-grid">
-      {candidates.map((cand) => {
-        const approved = cand.id === sc.shot?.approved_candidate_id;
-        return (
-          <article
-            key={cand.id}
-            className={approved ? "scene-creator-core__card is-approved" : "scene-creator-core__card"}
-            data-testid="scene-creator-result-card"
-          >
-            <div className="scene-creator-core__thumb">
-              {cand.asset_id ? (
-                <img src={api.assetUrl(cand.asset_id)} alt={cand.take_label} data-testid="scene-creator-result-image" />
-              ) : (
-                <span className="muted">
-                  {cand.status === "failed" ? "Generation failed" : cand.status === "queued" || cand.status === "generating" ? "Generating…" : "Waiting"}
-                </span>
-              )}
-            </div>
-            <div className="scene-creator-core__card-body">
-              <strong>{cand.take_label}</strong>
-              <span className="muted">{candidateSourceLine(cand, sc.shot) || cand.provenance_label}</span>
-              {cand.status === "failed" ? (
-                <FailedCandidateBody cand={cand} sc={sc} />
-              ) : cand.status === "complete" ? (
-                <button
-                  type="button"
-                  className="primary"
-                  data-testid="scene-creator-approve"
-                  disabled={sc.busy}
-                  onClick={() => void sc.approve(cand.id)}
-                >
-                  {approved ? "Approved" : cand.superseded ? "Use This Look again" : "Use This Look"}
-                </button>
-              ) : (
-                <span className="muted">
-                  {cand.quality_profile === "final" ? "Final rendering…" : cand.kind === "region_edit" ? "Generating region edit…" : "Generating preview…"}
-                </span>
-              )}
-            </div>
-          </article>
-        );
-      })}
     </div>
   );
 }

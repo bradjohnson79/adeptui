@@ -359,6 +359,17 @@ export function CoDirectorProjectContent({
     [onTabChange],
   );
 
+  const goTab = useCallback(
+    (next: string, extra?: Record<string, string>) => {
+      if (next === "scene_creator") {
+        handleTabChange("scene_creator");
+        return;
+      }
+      onGoTab?.(next, extra);
+    },
+    [handleTabChange, onGoTab],
+  );
+
   useEffect(() => {
     if (!openGroup) return;
     const handleMouseDown = (e: MouseEvent) => {
@@ -576,7 +587,7 @@ export function CoDirectorProjectContent({
         {tab === "spatial_map" && (
           <div data-testid="codirector-content-spatial-map">
             {projectId ? (
-              <SpatialMapPanel projectId={projectId} onGoTab={onGoTab} />
+              <SpatialMapPanel projectId={projectId} onGoTab={goTab} />
             ) : (
               <CoDirectorEmptyState
                 testId="codirector-spatial-map-empty"

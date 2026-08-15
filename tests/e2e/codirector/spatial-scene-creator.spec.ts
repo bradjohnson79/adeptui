@@ -355,6 +355,15 @@ async function openSceneCreatorTab(page: Page) {
   ).toBeVisible({ timeout: 45_000 });
 }
 
+async function openStandardFromExpressLauncher(page: Page) {
+  await openSceneCreatorTab(page);
+  const openBtn = page.getByTestId("scene-creator-open-standard");
+  if (await openBtn.isVisible().catch(() => false)) {
+    await openBtn.click();
+    await expect(page.getByTestId("scene-creator-standard")).toBeVisible({ timeout: 60_000 });
+  }
+}
+
 async function seedKorri(request: APIRequestContext, projectId: string): Promise<CharacterProfile> {
   const chars = await listCharacters(request, projectId);
   const korri = chars.find((c) => /korri/i.test(c.name));
@@ -653,8 +662,10 @@ test.describe.serial("@critical spatial map + scene creator certification (§77�
         .toBe("completed");
 
       await openCoDirectorFullScreen(page, project.id);
-      await openSceneCreatorTab(page);
-      await expect(page.getByTestId("scene-creator-panel")).toBeVisible({ timeout: 30_000 });
+      await openStandardFromExpressLauncher(page);
+      await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+        timeout: 30_000,
+      });
 
       const shotTextarea = page.getByTestId("scene-creator-shot-textarea");
       await shotTextarea.fill("");
@@ -765,11 +776,13 @@ test.describe.serial("@critical spatial map + scene creator certification (§77�
       logStep(`§88 @Korri resolved to ${korri.id} for all 4 shots`);
 
       await openCoDirectorFullScreen(page, project.id);
-      await openSceneCreatorTab(page);
-      await expect(page.getByTestId("scene-creator-panel")).toBeVisible({ timeout: 30_000 });
+      await openStandardFromExpressLauncher(page);
+      await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+        timeout: 30_000,
+      });
 
       // §84: ERS auto-resolves (selector shows the sheet name).
-      const ersSelector = page.locator('[data-testid="scene-creator-panel"]').locator("select, [role='combobox']").first();
+      const ersSelector = page.getByTestId("scene-creator-ers-select");
       await expect(ersSelector).toBeVisible({ timeout: 15_000 });
       // Placed entities chip for @Korri should appear.
       await expect(page.getByTestId("scene-creator-character-chip").first()).toContainText(/Korri/i, { timeout: 15_000 });

@@ -8,82 +8,21 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from ..image_core.capability import (
+    certified_visual_edit_path,
+    family_region_edit_capability,
+)
+
 logger = logging.getLogger(__name__)
 
 CandidatePlan = dict[str, Any]
 
-# Frozen Scene Creator region-edit capability. Do not infer from txt2img
-# roster or edit_compile's silent Z-Image fallback.
 REGION_EDIT_UNSUPPORTED_MESSAGE = (
     "This generator cannot edit a region. Choose Z-Image for Native Inpaint."
 )
 VISUAL_INHERITANCE_BLOCKED_MESSAGE = (
     "This generator cannot keep the painted correction. Choose Z-Image or FLUX for Final Quality Render."
 )
-
-# Strategy A I2I paths. qwen.edit is omitted until Certified (it is Draft/stub).
-_VISUAL_EDIT_CANDIDATES: dict[str, list[tuple[str, str, int, int]]] = {
-    "zimage": [("zimage.ref_edit", "image.edit", 1024, 1024)],
-    "flux": [("flux.img2img", "image.edit", 1024, 1024)],
-    "qwen": [("qwen.edit", "image.edit", 1024, 1024)],
-    "qwen2512": [("qwen.edit", "image.edit", 1024, 1024)],
-}
-
-_REGION_EDIT_FAMILY_CAPS: dict[str, dict[str, Any]] = {
-    "zimage": {"supportsInpaint": True, "supportsEditing": True, "label": "Native Inpaint"},
-    "flux": {"supportsInpaint": False, "supportsEditing": True, "label": "Image Edit"},
-    "qwen2512": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
-    "qwen": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
-    "illustrious": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
-}
-
-
-def _normalize_region_edit_family(family: str) -> str:
-    key = (family or "").strip().lower()
-    if key in {"qwen-image-2512", "qwen_image_2512", "qwen"}:
-        return "qwen2512"
-    if key in {"illustrious-xl", "illustrious_xl", "sdxl-illustrious", "sdxl_illustrious"}:
-        return "illustrious"
-    return key
-
-
-def certified_visual_edit_path(family: str) -> dict[str, Any] | None:
-    """Certified I2I/edit workflow that can consume an approved edited preview.
-
-    Returns None when the family has no Certified visual-conditioning path.
-    Draft stubs (including qwen.edit) are not treated as ready.
-    """
-    key = _normalize_region_edit_family(family)
-    try:
-        from ..image_runtime.certified_registry import get_workflow
-    except Exception:
-        return None
-    for workflow_key, operation, width, height in _VISUAL_EDIT_CANDIDATES.get(key, ()):
-        wf = get_workflow(workflow_key)
-        if wf is None:
-            continue
-        if str(getattr(wf, "status", "") or "") != "Certified":
-            continue
-        return {
-            "family": key,
-            "workflowKey": workflow_key,
-            "operation": operation,
-            "width": width,
-            "height": height,
-        }
-    return None
-
-
-def family_region_edit_capability(family: str) -> dict[str, Any]:
-    """Honest Native Inpaint | Image Edit | Unsupported for a local family."""
-    key = _normalize_region_edit_family(family)
-    caps = dict(_REGION_EDIT_FAMILY_CAPS.get(key) or {})
-    if not caps:
-        caps = {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"}
-    path = certified_visual_edit_path(key)
-    if path and not caps.get("supportsEditing") and not caps.get("supportsInpaint"):
-        caps = {"supportsInpaint": False, "supportsEditing": True, "label": "Image Edit"}
-    return {"family": key, **caps}
 
 
 def hosted_image_generation_available() -> bool:

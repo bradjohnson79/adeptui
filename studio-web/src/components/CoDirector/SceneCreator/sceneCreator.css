@@ -4,6 +4,29 @@
   gap: 0.75rem;
 }
 
+.scene-creator-launcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 28rem;
+  padding: 0.25rem 0 0.5rem;
+}
+
+.scene-creator-launcher__title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.scene-creator-launcher__lead {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.scene-creator-launcher__note {
+  margin: 0;
+}
+
 .scene-creator-core__row {
   display: flex;
   flex-wrap: wrap;

@@ -4,6 +4,7 @@ import { api } from "../api";
 import { CoDirectorFullScreen } from "../components/CoDirector";
 import { useCoDirectorSession } from "../components/CoDirector/CoDirectorSession";
 import { StudioChrome } from "../components/dashboard/StudioChrome";
+import { resolveWorkspace } from "../core/workspaces";
 
 export default function CoDirectorPage() {
   const navigate = useNavigate();
@@ -64,8 +65,9 @@ export default function CoDirectorPage() {
       // such as characterId / returnWorkspace. Without this, onGoTab is undefined in
       // fullscreen Co-Director and "Open Full Character Creator" is a no-op.
       onGoTab: (tab: string, extra?: Record<string, string>) => {
+        const resolved = resolveWorkspace(tab) || tab;
         const params = new URLSearchParams();
-        if (tab && tab !== "home") params.set("workspace", tab);
+        if (resolved && resolved !== "home") params.set("workspace", resolved);
         if (extra) {
           for (const [k, v] of Object.entries(extra)) {
             if (v) params.set(k, v);

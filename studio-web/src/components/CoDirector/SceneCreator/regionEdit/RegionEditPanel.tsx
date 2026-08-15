@@ -12,6 +12,8 @@ import {
   isMaskStale,
   listRegionEditSources,
   MASK_TOO_SMALL_PERCENT,
+  operationRecommendCopy,
+  recommendOperationFamily,
   REGION_EDIT_OPERATIONS,
   regionEditCapability,
   type ExpandPreset,
@@ -41,6 +43,7 @@ export function RegionEditPanel({
   localEnabled,
   busy,
   onGenerate,
+  onSwitchFamily,
 }: {
   projectId: string;
   shot: SceneShot | null;
@@ -50,6 +53,7 @@ export function RegionEditPanel({
   localEnabled: boolean;
   busy?: boolean;
   onGenerate: (body: RegionEditRequest) => Promise<void>;
+  onSwitchFamily?: (family: string) => void;
 }) {
   const session = useInpaintSession();
   const [saving, setSaving] = useState(false);
@@ -201,6 +205,24 @@ export function RegionEditPanel({
             ))}
           </select>
         </label>
+        {operationRecommendCopy(session.operation, localFamily) ? (
+          <div className="scene-creator-model-guard" data-testid="scene-creator-operation-recommend">
+            <p>{operationRecommendCopy(session.operation, localFamily)}</p>
+            <div className="scene-creator-core__row">
+              <button
+                type="button"
+                className="primary"
+                data-testid="scene-creator-use-recommended-family"
+                onClick={() => onSwitchFamily?.(recommendOperationFamily(session.operation).family)}
+              >
+                Use {recommendOperationFamily(session.operation).label}
+              </button>
+              <button type="button" className="ghost" data-testid="scene-creator-keep-current-family">
+                Keep Current Model
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="scene-creator-core__row">
           <span className="scene-creator-core__label">Expand</span>
           {EXPAND_PRESETS.map((preset) => (

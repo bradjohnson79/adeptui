@@ -159,6 +159,25 @@ export function regionEditCapability(family: string): {
   return { family: key, supportsInpaint: false, supportsEditing: false, label: "Unsupported" };
 }
 
+/** Recommended ≠ routed. Never silent-swap the selected generator. */
+export function recommendOperationFamily(operation: RegionEditOperation): {
+  family: string;
+  label: string;
+} {
+  if (operation === "modify" || operation === "replace") {
+    return { family: "flux", label: "FLUX" };
+  }
+  return { family: "zimage", label: "Z-Image" };
+}
+
+export function operationRecommendCopy(operation: RegionEditOperation, currentFamily: string): string {
+  const rec = recommendOperationFamily(operation);
+  const current = (currentFamily || "").trim().toLowerCase();
+  if (!current || current === rec.family) return "";
+  const opLabel = operation.charAt(0).toUpperCase() + operation.slice(1);
+  return `${rec.label} is recommended for ${opLabel}`;
+}
+
 export type RegionEditSource = {
   sourceAssetId: string;
   parentCandidateId?: string;

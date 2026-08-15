@@ -301,7 +301,7 @@ export const WORKSPACES = {
     labelKey: "sceneCreator",
     group: "create",
     futureDestination: "sceneSheets",
-    compatibilityAliases: ["scene-creator", "sceneCreator"],
+    compatibilityAliases: ["scene-creator", "sceneCreator", "scene_creator"],
     menuGroup: "production",
     order: 30,
     description: "Create scene shots from an Environment Reference Sheet and send approved takes to the Timeline.",

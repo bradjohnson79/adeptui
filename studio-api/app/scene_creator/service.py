@@ -459,8 +459,10 @@ def _enqueue_shot_candidates(
     )
 
     from ..codirector.entity_resolver import compile_shot_prompt
+    from ..image_core.flag import scene_image_core_enabled
     from ..storyboard_jobs import enqueue_imagegen_job
 
+    use_core = scene_image_core_enabled()
     parsed = _shot_request_from_scene_shot(shot)
     body_base = compile_shot_prompt(db, project_id, parsed, ers_package=package)
     _apply_cinematic(body_base, shot, camera_record=camera_record, db=db, project_id=project_id)
@@ -468,9 +470,12 @@ def _enqueue_shot_candidates(
     if draft:
         body_base["purpose"] = "scene_shot_preview"
         body_base["quality"] = "draft"
-        body_base["width"] = 512
-        body_base["height"] = 288
         body_base["allowDraft"] = True
+        if not use_core:
+            body_base["width"] = 512
+            body_base["height"] = 288
+    else:
+        body_base["purpose"] = "scene_shot_final"
 
     lead_family = (local_family or "").strip() or (
         str(plans[0].get("family") or "") if plans else ""
@@ -501,6 +506,8 @@ def _enqueue_shot_candidates(
         body["modelFamilyPreference"] = plan["family"]
         plan_extras = extras
         if extras.get("strategy") == "A" and certified_visual_edit_path(plan["family"]) is None:
+            if use_core and not draft:
+                raise SceneCreatorError(VISUAL_INHERITANCE_BLOCKED_MESSAGE)
             plan_extras = _honest_t2i_instead_of_strategy_a(body, extras, str(plan["family"] or ""))
         body["seed"] = plan["seed"]
         body["sceneId"] = shot.scene_id
@@ -523,12 +530,12 @@ def _enqueue_shot_candidates(
                     body["referenceImage"] = composite
                     body["reference_image"] = composite
             ctx["qualityProfile"] = "draft" if draft else "final"
-            if ctx.get("finalStrategy") == "A" and ctx.get("workflowKey"):
+            if ctx.get("finalStrategy") == "A" and (ctx.get("workflowKey") or use_core):
                 if camera_record is not None:
                     ctx["cameraStateVersion"] = getattr(camera_record, "cameraStateVersion", None)
                     ctx["cameraStateHash"] = getattr(camera_record, "cameraStateHash", "") or ""
                     ctx["sourceCameraId"] = getattr(camera_record, "cameraId", "") or ""
-            else:
+            elif not use_core:
                 ctx["workflowKey"] = f"{plan['family']}.txt2img"
             if camera_record is not None:
                 try:
@@ -559,13 +566,57 @@ def _enqueue_shot_candidates(
             body["lockModelFamily"] = True
             body["model"] = plan["family"]
         try:
-            job = enqueue_imagegen_job(db, project_id, body, scene_id=shot.scene_id)
-            if plan["source"] == "api":
-                job = _pin_hosted_image_job(db, job, hosted=hosted)
-            job_id = job.id
-            job_status = str(getattr(job, "status", "") or "").lower()
-            status = "failed" if job_status in {"failed", "error"} else "queued"
-            error = str(getattr(job, "message", "") or "")
+            if use_core:
+                from ..image_core.errors import ImageCoreError as _ImageCoreError
+                from ..image_core.generate import generate as image_core_generate
+                from ..image_core.request import ImageCoreRequest
+
+                purpose = "scene_shot_preview" if draft else "scene_shot_final"
+                operation = "image.generate"
+                source_asset = str(plan_extras.get("sourceAssetId") or body.get("sourceAssetId") or "")
+                if source_asset and str(plan_extras.get("strategy") or "") == "A":
+                    operation = str(plan_extras.get("operation") or "image.edit")
+                core_req = ImageCoreRequest(
+                    project_id=project_id,
+                    purpose=purpose,
+                    operation=operation,
+                    model_id=str(plan.get("family") or body.get("model") or ""),
+                    prompt=str(body.get("prompt") or ""),
+                    provider="cloud" if plan["source"] == "api" else "local",
+                    hosted_model_id=str(body.get("hostedModelId") or "") if plan["source"] == "api" else "",
+                    source_asset_id=source_asset if operation != "image.generate" else "",
+                    seed=plan.get("seed"),
+                    scene_id=shot.scene_id,
+                    shot_id=shot.id,
+                    tag=str(body.get("tag") or ""),
+                    lock_model_family=True,
+                    creative_context=dict(body.get("creativeContext") or {}) if isinstance(body.get("creativeContext"), dict) else {},
+                    extra={k: v for k, v in body.items() if k not in {"forceWorkflowKey", "allow_force_workflow_key", "width", "height"}},
+                )
+                try:
+                    result = image_core_generate(db, core_req)
+                except _ImageCoreError as exc:
+                    if not draft:
+                        raise SceneCreatorError(exc.message) from exc
+                    raise
+                job = result.job
+                if plan["source"] == "api" and job is not None:
+                    job = _pin_hosted_image_job(db, job, hosted=hosted)
+                job_id = result.job_id
+                status = result.status
+                error = result.error
+                if result.workflow_key and isinstance(body.get("creativeContext"), dict):
+                    body["creativeContext"]["workflowKey"] = result.workflow_key
+            else:
+                job = enqueue_imagegen_job(db, project_id, body, scene_id=shot.scene_id)
+                if plan["source"] == "api":
+                    job = _pin_hosted_image_job(db, job, hosted=hosted)
+                job_id = job.id
+                job_status = str(getattr(job, "status", "") or "").lower()
+                status = "failed" if job_status in {"failed", "error"} else "queued"
+                error = str(getattr(job, "message", "") or "")
+        except SceneCreatorError:
+            raise
         except Exception as exc:
             logger.error("Scene candidate enqueue failed: %s", exc)
             job_id = f"failed_scene_cand_{index}"
@@ -1366,8 +1417,11 @@ def apply_region_edit_compile(
         ctx["regionEditIds"] = extras.get("regionEditIds") or []
         ctx["maskAssetIds"] = extras.get("maskAssetIds") or []
         ctx["finalModelId"] = extras.get("finalModelId") or ""
-        body["forceWorkflowKey"] = extras.get("workflowKey") or ""
-        body["allow_force_workflow_key"] = True
+        from ..image_core.flag import scene_image_core_enabled as _core_on
+
+        if not _core_on():
+            body["forceWorkflowKey"] = extras.get("workflowKey") or ""
+            body["allow_force_workflow_key"] = True
     elif extras.get("strategy"):
         ctx["finalStrategy"] = extras.get("strategy")
     correction = dict((shot.take_memory.userCorrection if shot.take_memory else {}) or {})
@@ -1456,12 +1510,23 @@ def resolve_region_edit_source(
 
 
 def _region_edit_workflow(family: str, caps: dict[str, Any]) -> tuple[str, str, str]:
-    """Return (workflow_key, runtime_operation, capability_label)."""
-    if caps.get("supportsInpaint"):
-        return "zimage.inpaint", "image.inpaint", "Native Inpaint"
-    if caps.get("supportsEditing"):
-        return "flux.img2img", "image.edit", "Image Edit"
-    raise SceneCreatorError(REGION_EDIT_UNSUPPORTED_MESSAGE)
+    """Return (workflow_key, runtime_operation, capability_label). Delegates to Image Core."""
+    from ..image_core.preflight import preflight
+    from ..image_core.request import ImageCoreRequest
+
+    decision = preflight(
+        ImageCoreRequest(
+            project_id="",
+            purpose="region_edit",
+            operation="image.inpaint" if caps.get("supportsInpaint") else "image.edit",
+            model_id=family,
+            edit_operation="modify",
+        )
+    )
+    if not decision.ok or not decision.workflow_key:
+        raise SceneCreatorError(REGION_EDIT_UNSUPPORTED_MESSAGE)
+    label = "Native Inpaint" if caps.get("supportsInpaint") else "Image Edit"
+    return decision.workflow_key, decision.runtime_operation, label
 
 
 def _region_edit_correction_text(operation: str, prompt: str) -> str:

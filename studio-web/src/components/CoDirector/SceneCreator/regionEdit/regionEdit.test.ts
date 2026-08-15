@@ -8,6 +8,8 @@ import {
   isMaskStale,
   listRegionEditSources,
   regionEditCapability,
+  recommendOperationFamily,
+  operationRecommendCopy,
   resolveRegionEditSource,
   approvedLookBlocksFinal,
   shotWithSelectedFamily,
@@ -77,6 +79,16 @@ describe("regionEdit capability labels", () => {
     expect(regionEditCapability("qwen2512").label).toBe("Unsupported");
     expect(regionEditCapability("illustrious").label).toBe("Unsupported");
     expect(UNSUPPORTED_REGION_EDIT_MESSAGE).toContain("Choose Z-Image");
+  });
+
+  it("recommends FLUX for Modify/Replace and Z-Image for Add/Remove without silent swap", () => {
+    expect(recommendOperationFamily("modify")).toEqual({ family: "flux", label: "FLUX" });
+    expect(recommendOperationFamily("replace")).toEqual({ family: "flux", label: "FLUX" });
+    expect(recommendOperationFamily("add")).toEqual({ family: "zimage", label: "Z-Image" });
+    expect(recommendOperationFamily("remove")).toEqual({ family: "zimage", label: "Z-Image" });
+    expect(operationRecommendCopy("modify", "zimage")).toContain("FLUX is recommended for Modify");
+    expect(operationRecommendCopy("modify", "flux")).toBe("");
+    expect(operationRecommendCopy("add", "flux")).toContain("Z-Image is recommended for Add");
   });
 });
 

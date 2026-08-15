@@ -58,18 +58,31 @@ describe("Scene Creator contracts", () => {
   it("routes legacy Scene Master Sheet links to Scene Creator", () => {
     expect(resolveWorkspace("mastersheet")).toBe("scenecreator");
     expect(resolveWorkspace("scene-creator")).toBe("scenecreator");
+    expect(resolveWorkspace("scene_creator")).toBe("scenecreator");
   });
 
-  it("puts Re-Take on Express, not only Standard", async () => {
+  it("keeps Express as a launcher into Standard, not a second editor", async () => {
     const src = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("./SceneCreatorCore.tsx", import.meta.url), "utf8"),
     );
-    const express = src.slice(src.indexOf("function ExpressLayout"), src.indexOf("function StandardLayout"));
-    expect(express).toContain("RetakeBlock");
-    expect(express).toContain("{sc.approved ? <RetakeBlock");
-    expect(express).toContain("CinematographerPanel");
+    const panel = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./SceneCreatorPanel.tsx", import.meta.url), "utf8"),
+    );
+    const launcher = await import("node:fs").then((fs) =>
+      fs.readFileSync(new URL("./SceneCreatorExpressLauncher.tsx", import.meta.url), "utf8"),
+    );
+    expect(src).not.toContain("function ExpressLayout");
+    expect(src).not.toContain("function ExpressMaskStage");
+    expect(src).toContain("function StandardLayout");
     expect(src).toContain("Final Quality Render");
     expect(src).not.toContain("function CameraBlock");
+    expect(panel).toContain("SceneCreatorExpressLauncher");
+    expect(panel).not.toContain('variant="express"');
+    expect(launcher).toContain("scene-creator-open-standard");
+    expect(launcher).toContain("Open Scene Creator");
+    expect(launcher).toContain("onGoTab?.(\"scenecreator\")");
+    expect(launcher).not.toContain("CinematographerPanel");
+    expect(launcher).not.toContain("scene-creator-generate");
   });
 
   it("wires placed project props onto the shot as toggle chips", async () => {

@@ -1,5 +1,7 @@
 # SCENE CREATOR EXPRESS + STANDARD — ARCHITECTURE AUDIT
 
+> **HISTORICAL / SUPERSEDED (2026-08-15).** Amendment 5 (“Express stays light” as a functional editor) is superseded by the Image Generation Core migration addendum: **Express is a launcher only; Standard is the single production workspace.** Governing cert: `SCENE_CREATOR_IMAGE_GENERATION_CORE_MIGRATION_CERTIFICATION.md`. Do not cite this audit as current product law for Express generation.
+
 **Date:** 2026-08-14  
 **Branch:** `beta`  
 **Starting SHA:** `8b6ddf9850fcb461ea9facc5e910ae8a62664b34`  

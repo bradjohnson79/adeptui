@@ -303,6 +303,15 @@ async function openSceneCreatorTab(page: Page) {
   ).toBeVisible({ timeout: 45_000 });
 }
 
+async function openStandardFromExpressLauncher(page: Page) {
+  await openSceneCreatorTab(page);
+  const openBtn = page.getByTestId("scene-creator-open-standard");
+  if (await openBtn.isVisible().catch(() => false)) {
+    await openBtn.click();
+    await expect(page.getByTestId("scene-creator-standard")).toBeVisible({ timeout: 60_000 });
+  }
+}
+
 function attachObserver(page: Page, info: TestInfo) {
   const observer = new AuditObserver(page, info);
   observer.attach();
@@ -475,8 +484,10 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     expect(workspace.selected_sheet_id).toBe(LIVE_SHEET_ID);
 
     await openCoDirectorFullScreen(page, PROJECT_ID);
-    await openSceneCreatorTab(page);
-    await expect(page.getByTestId("scene-creator-panel")).toBeVisible({ timeout: 45_000 });
+    await openStandardFromExpressLauncher(page);
+    await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+      timeout: 45_000,
+    });
     await expect(page.getByTestId("scene-creator-empty-no-ers")).toHaveCount(0);
 
     const select = page.getByTestId("scene-creator-ers-select");
@@ -527,8 +538,10 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     );
 
     await openCoDirectorFullScreen(page, PROJECT_ID);
-    await openSceneCreatorTab(page);
-    await expect(page.getByTestId("scene-creator-panel")).toBeVisible({ timeout: 45_000 });
+    await openStandardFromExpressLauncher(page);
+    await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+      timeout: 45_000,
+    });
     await expect(page.getByTestId("cine-preview")).toBeVisible();
     // Observe the button only. Never click Generate Low-Res Preview / Final Quality Render.
     expect(clicks.generate, "HOLD: cine-preview / Generate was not clicked").toBe(false);
