@@ -17,6 +17,7 @@ from app.scene_creator.generation import (
 )
 from app.scene_creator.service import (
     SceneCreatorError,
+    apply_region_edit_compile,
     approve_candidate,
     compile_region_edit_for_final,
     create_or_update_shot,
@@ -786,5 +787,156 @@ def test_approve_marks_previous_superseded_not_deleted(monkeypatch) -> None:
         rolled = approve_candidate(db, project_id, approved.id, parent.id)
         assert rolled.approved_candidate_id == parent.id
         assert any(c.id == child.id for c in rolled.candidates)
+    finally:
+        db.close()
+
+def test_apply_demotes_strategy_a_when_enqueue_family_cannot_i2i() -> None:
+    """Approved zimage region-edit + qwen2512 enqueue must not set I2I flags."""
+    child = SceneShotCandidate(
+        id="edit-1",
+        shot_id="shot-1",
+        index=1,
+        status="complete",
+        asset_id="asset-zimage-edit",
+        family="zimage",
+        kind="region_edit",
+        edit_operation="remove",
+    )
+    shot = SceneShot(
+        project_id="p",
+        scene_id="s",
+        sheet_id="sheet",
+        prompt="Wide static",
+        candidates=[child],
+        approved_candidate_id="edit-1",
+        take_memory=SceneShotTakeMemory(
+            userCorrection={
+                "region_edits": [
+                    {
+                        "operation": "remove",
+                        "prompt": "the boom mic",
+                        "maskAssetId": "mask-x",
+                        "candidate_id": "edit-1",
+                        "approved": True,
+                    }
+                ]
+            }
+        ),
+    )
+    shot.generator.local_family = ""
+    composite = "ers-composite-resolved"
+    body = {
+        "prompt": "Wide static",
+        "creativeContext": {
+            "ers_composite_asset_id": composite,
+            "reference_image_ids": [composite],
+        },
+    }
+    extras = apply_region_edit_compile(
+        body, shot, quality_profile="draft", enqueue_family="qwen2512"
+    )
+    assert extras["strategy"] == "C"
+    assert extras["sourceAssetId"] == ""
+    assert extras.get("workflowKey") == "qwen2512.txt2img"
+    assert body.get("edit") is not True
+    assert not body.get("source_asset_id")
+    assert not body.get("sourceAssetId")
+    assert body.get("operation") != "image.edit"
+    assert body.get("forceWorkflowKey") not in {"flux.img2img", "zimage.ref_edit", "qwen.edit"}
+    ctx = body["creativeContext"]
+    assert ctx.get("finalStrategy") == "C"
+    assert ctx.get("workflowKey") != "zimage.ref_edit"
+    assert ctx.get("ers_composite_asset_id") == composite
+    assert composite in (ctx.get("reference_image_ids") or [])
+
+
+def test_qwen2512_draft_skips_strategy_a_and_stamps_ers_composite(monkeypatch) -> None:
+    """Empty local_family + approved zimage edit must enqueue honest qwen T2I."""
+    from app.scene_creator.service import _enqueue_shot_candidates, resolve_ers_for_sheet
+
+    captured: list[dict] = []
+
+    def _enqueue(db, pid, body, scene_id=None):
+        captured.append(body)
+        return SimpleNamespace(id=str(uuid.uuid4()), status="queued", message="")
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _enqueue)
+    monkeypatch.setattr(
+        gen_mod,
+        "list_local_generator_families",
+        lambda has_reference=False: _families("qwen2512"),
+    )
+    real_resolve = resolve_ers_for_sheet
+
+    def _resolve(db, project_id, sheet_id, **kwargs):
+        package, runtime = real_resolve(db, project_id, sheet_id, **kwargs)
+        package.ers_composite_asset_id = "ers-composite-resolved"
+        package.directional_assets = {"north": None, "east": None, "south": None, "west": None}
+        return package, runtime
+
+    monkeypatch.setattr("app.scene_creator.service.resolve_ers_for_sheet", _resolve)
+
+    project_id = _create_project("Qwen Draft Honest T2I")
+    sheet = _save_sheet(project_id)
+    db = _session()
+    try:
+        shot = create_or_update_shot(
+            db, project_id, sheet_id=sheet.sheetId, intent="Preview after paint"
+        )
+        child = SceneShotCandidate(
+            shot_id=shot.id,
+            index=0,
+            status="complete",
+            asset_id="asset-zimage-edit",
+            family="zimage",
+            kind="region_edit",
+            edit_operation="remove",
+            quality_profile="draft",
+        )
+        shot.candidates = [child]
+        shot.approved_candidate_id = child.id
+        shot.generator.local_family = ""
+        shot.take_memory.userCorrection = {
+            "region_edits": [
+                {
+                    "operation": "remove",
+                    "prompt": "the extra person on the left",
+                    "maskAssetId": "mask-1",
+                    "candidate_id": child.id,
+                    "approved": True,
+                }
+            ]
+        }
+        save_scene_shot(db, project_id, shot)
+        cands = _enqueue_shot_candidates(
+            db,
+            project_id,
+            shot,
+            local_enabled=True,
+            api_enabled=False,
+            local_family="",
+            api_model="",
+            candidate_count=1,
+            quality_profile="draft",
+        )
+        assert captured
+        body = captured[0]
+        ctx = body.get("creativeContext") or {}
+        assert body.get("edit") is not True
+        assert not body.get("source_asset_id")
+        assert not body.get("sourceAssetId")
+        assert body.get("operation") != "image.edit"
+        assert ctx.get("finalStrategy") != "A"
+        assert ctx.get("workflowKey") == "qwen2512.txt2img"
+        assert body.get("forceWorkflowKey") not in {"flux.img2img", "zimage.ref_edit", "qwen.edit"}
+        composite = ctx.get("ers_composite_asset_id")
+        assert composite == "ers-composite-resolved"
+        assert composite in (ctx.get("reference_image_ids") or [])
+        assert cands[0].family == "qwen2512"
+        assert cands[0].final_strategy != "A"
+        assert cands[0].final_workflow_key == "qwen2512.txt2img"
+        assert cands[0].parent_candidate_id == child.id
+        assert cands[0].status != "failed"
+        assert not str(cands[0].job_id or "").startswith("failed_")
     finally:
         db.close()

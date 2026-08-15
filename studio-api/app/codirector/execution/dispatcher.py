@@ -73,6 +73,46 @@ def _publish_event(event: ExecutionEvent) -> None:
         logger.debug("Failed to publish execution event: %s", exc)
 
 
+def creator_readable_handler_error(exc: BaseException, *, capability: str = "") -> str:
+    """Creator-facing handler failure. Never HANDLER_ERROR + raw TypeError."""
+    raw = str(exc).strip()
+    name = type(exc).__name__
+    if raw.startswith("HANDLER_ERROR:"):
+        raw = raw.split(":", 1)[-1].strip()
+    if name in {"SpatialCaptureGeometryError", "PropAttachmentError"} and raw:
+        return raw
+    details = f"{name}: {raw}" if raw else name
+    low = raw.lower()
+    if isinstance(exc, TypeError) and (
+        "unsupported operand" in low or "nonetype" in low or "not supported between" in low
+    ):
+        return (
+            "This request could not run because a Spatial Map placement is "
+            "missing a world position (attached or unplaced). Place it on the "
+            f"grid or attach it to a character, then try again. Details: {details}"
+        )
+    if name == "TypeError":
+        return (
+            "This request could not run because a value had the wrong type. "
+            f"Details: {details}"
+        )
+    labels = {
+        "ers.generate": "Environment Reference Sheet",
+        "atlas.generate": "Atlas Shot",
+        "image.generate": "Image generation",
+        "scene.generate": "Scene generation",
+        "storyboard.generate": "Storyboard",
+    }
+    label = labels.get(capability, "This action")
+    if raw:
+        return f"{label} could not start. Details: {details}"
+    return f"{label} could not start. Details: {details}"
+
+
+def _creator_readable_handler_error(exc: BaseException, capability: str = "") -> str:
+    return creator_readable_handler_error(exc, capability=capability)
+
+
 def dispatch(
     db: Session,
     project_id: str,
@@ -202,6 +242,15 @@ def _dispatch_capability_handler(
             "output_count": ctx.get("output_count"),
             "name": ctx.get("name"),
             "description": ctx.get("description"),
+            "hosted_model_id": ctx.get("hosted_model_id") or ctx.get("hostedModelId") or "",
+            "model": ctx.get("model") or ctx.get("modelId") or "",
+            "model_family_preference": ctx.get("model_family_preference")
+            or ctx.get("modelFamilyPreference")
+            or "",
+            "source": ctx.get("source") or ctx.get("providerKind") or ctx.get("provider_kind") or "",
+            "kie_image_model_id": ctx.get("kie_image_model_id") or ctx.get("kieImageModelId") or "",
+            "fal_image_model_id": ctx.get("fal_image_model_id") or ctx.get("falImageModelId") or "",
+            "provider_kind": ctx.get("provider_kind") or ctx.get("providerKind") or "",
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
 
@@ -244,7 +293,7 @@ def _dispatch_capability_handler(
     except Exception as exc:
         logger.exception("Capability handler %s failed", cap.id)
         plan.status = ExecutionStatus.FAILED
-        plan.error = f"HANDLER_ERROR: {exc}"
+        plan.error = creator_readable_handler_error(exc, capability=cap.id)
         save_pack(db, project_id, plan)
         return plan
 

@@ -12,6 +12,7 @@ type Props = {
   onRegenerate: () => void;
   onOpenInLibrary: () => void;
   onUseInSceneCreator: () => void;
+  regenerateDisabled?: boolean;
 };
 
 export function ErsResultDisplay({
@@ -19,6 +20,7 @@ export function ErsResultDisplay({
   onRegenerate,
   onOpenInLibrary,
   onUseInSceneCreator,
+  regenerateDisabled = false,
 }: Props) {
   const url = api.assetUrl(ersCompositeAssetId);
 
@@ -48,6 +50,7 @@ export function ErsResultDisplay({
           type="button"
           className="ui-btn ui-btn--secondary"
           onClick={onRegenerate}
+          disabled={regenerateDisabled}
           aria-label="Regenerate Environment Reference Sheet"
         >
           Regenerate

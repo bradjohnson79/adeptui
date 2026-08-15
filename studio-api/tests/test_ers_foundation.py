@@ -149,51 +149,24 @@ def test_ers_export_registers_assets(client, isolated_data_dir: Path) -> None:
     finally:
         db.close()
 
-def test_ers_generate_handler_builds_jobs_from_plan_request_prompt(monkeypatch) -> None:
-    """ers.generate must read ImageGenerationPlan.request.prompt, not .prompt.
 
-    ImageGenerationPlan exposes request / shotIntent / creativeDirection.
-    Accessing plan.prompt raises AttributeError and aborts the handler
-    before any ERS sheet or child jobs are created.
-    """
+def test_ers_generate_does_not_access_imagegenerationplan_prompt() -> None:
+    """ers.generate must not read ImageGenerationPlan.prompt."""
+    import inspect
+
     from app.codirector.capabilities.handlers import ers_generate
-    from app.environment_reference_sheet.contracts import (
-        DirectionalViewRecord,
-        SpatialMapReference,
-    )
     from app.image_pipeline.orchestrator import prepare_plan
-    from app.spatial_map.schemas import SpatialMapDocument
 
-    project_id = f"proj-{uuid.uuid4()}"
-    spatial_map_id = f"map-{uuid.uuid4()}"
-    execution_id = "279a7474-d93c-4dc7-8936-4b649ef06255"
-
-    sheet = orchestrator.create_sheet(
-        project_id=project_id,
-        name="Helios Research Atrium",
-        description="Glass-roofed atrium, hanging gardens, cool daylight.",
-        scene_id="scene-1",
-    )
-    sheet.spatialMap = SpatialMapReference(
-        mapId=spatial_map_id,
-        northLockDirection="north",
-    )
-    sheet.directionalViews = [
-        DirectionalViewRecord(
-            direction=direction,
-            title=f"{direction.title()} View",
-            prompt=f"{direction.title()} view of the glass-roofed atrium.",
-            sourceDirection=direction,
-            status="planned",
-        )
-        for direction in ("north", "east", "south", "west")
-    ]
-
+    src = inspect.getsource(ers_generate)
+    handle_src = inspect.getsource(ers_generate.handle)
+    assert "plan.prompt" not in src
+    assert "image_core_prompt" in src
+    assert "plan.prompt" not in handle_src
     contract_plan = prepare_plan(
         {
-            "projectId": project_id,
+            "projectId": "proj-ers-contract",
             "prompt": "North view of the glass-roofed atrium.",
-            "purpose": "ers-north-view",
+            "purpose": "environment_reference_sheet",
         }
     )
     try:
@@ -203,20 +176,30 @@ def test_ers_generate_handler_builds_jobs_from_plan_request_prompt(monkeypatch) 
         pass
     assert contract_plan.request.prompt
 
-    captured_bodies: list[dict] = []
 
-    class _Job:
-        def __init__(self, job_id: str) -> None:
-            self.id = job_id
+def test_ers_generate_enqueues_image_product_jobs(monkeypatch) -> None:
+    """ERS enqueues one image-product job (not hardcoded zimage.txt2img)."""
+    from app.codirector.capabilities.handlers import ers_generate
+    from app.environment_reference_sheet.contracts import SpatialMapReference
+    from app.spatial_map.schemas import SpatialMapDocument
+
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    execution_id = "279a7474-d93c-4dc7-8936-4b649ef06255"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium, hanging gardens, cool daylight.",
+        scene_id="scene-1",
+    )
+    sheet.spatialMap = SpatialMapReference(mapId=spatial_map_id, northLockDirection="north")
+    captured: list[dict] = []
 
     def _fake_enqueue(db, enqueue_project_id, body, scene_id=None):
-        captured_bodies.append(dict(body))
-        return _Job(f"job-ers-{body['creativeContext']['direction']}")
+        captured.append(dict(body))
+        return {"jobId": "job-ers-one", "jobs": [{"jobId": "job-ers-one"}]}
 
-    monkeypatch.setattr(
-        "app.environment_reference_sheet.store.list_sheets",
-        lambda pid: [sheet],
-    )
+    monkeypatch.setattr("app.environment_reference_sheet.store.list_sheets", lambda pid: [sheet])
     monkeypatch.setattr(
         "app.environment_reference_sheet.orchestrator.attach_spatial_map",
         lambda db, current, spatial_map_id: current,
@@ -225,18 +208,315 @@ def test_ers_generate_handler_builds_jobs_from_plan_request_prompt(monkeypatch) 
         "app.environment_reference_sheet.orchestrator.compose_sheet_metadata",
         lambda current: current,
     )
-    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", _fake_enqueue)
+    monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
     monkeypatch.setattr(
         "app.spatial_map.service.get_document",
         lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
     )
+    monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
+    monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
+
+    result = ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id=execution_id,
+        spatial_map_id=spatial_map_id,
+        scene_id="scene-1",
+    )
+    assert len(captured) == 1
+    assert len(result["job_ids"]) == 1
+    assert len(result["child_jobs"]) == 1
+    body = captured[0]
+    assert body["purpose"] == "environment_reference_sheet"
+    assert (body.get("creativeContext") or {}).get("ersPackageId") == result["ers_package_id"]
+    assert (body.get("creativeContext") or {}).get("environmentReferenceSheetId") == sheet.sheetId
+    assert body.get("modelFamilyPreference") != "zimage"
+    assert "zimage.txt2img" not in str(body)
+    assert (body.get("creativeContext") or {}).get("workflowKey") != "zimage.txt2img"
+    assert result["child_jobs"][0]["job_id"] == "job-ers-one"
+    assert result["child_jobs"][0]["status"] == "queued"
+    assert result["purpose"] == "environment_reference_sheet"
+    assert result["sheet_id"] == sheet.sheetId
+    assert result["ers_package_id"]
+    assert result["spatial_map_id"] == spatial_map_id
+
+
+def test_ers_compile_uses_image_product_not_hardcoded_zimage() -> None:
+    from app.codirector.capabilities.handlers.ers_generate import (
+        _ERS_PURPOSE,
+        _creator_model_body,
+        _pin_resolved_capability,
+    )
+    from app.image_product.compile import compile_image_request
+    from app.image_product.resolve import resolve_image_capability
+
+    body = {
+        "prompt": "Café layout / spatial reference of the atrium.",
+        "purpose": _ERS_PURPOSE,
+        "operation": "image.generate",
+        "lockModelFamily": True,
+        "creativeContext": {"objective": _ERS_PURPOSE},
+        **_creator_model_body(hosted_model_id="nano-banana-kie", source="api"),
+    }
+    assert body["purpose"] == "environment_reference_sheet"
+    assert "zimage.txt2img" not in str(body)
+    assert body.get("modelFamilyPreference") != "zimage"
+    cap = resolve_image_capability(body)
+    assert cap["canExecute"] is True
+    assert cap["provider"] == "kie"
+    assert cap["adapter"] == "kie"
+    assert cap["workflowKey"] != "zimage.txt2img"
+    pinned = _pin_resolved_capability(dict(body))
+    assert pinned["creativeContext"]["resolvedWorkflowKey"] == "kie:nano-banana-2"
+    assert pinned["creativeContext"]["workflowKey"] != "zimage.txt2img"
+    compiled = compile_image_request("proj-ers-pin", body)
+    runtime = compiled["imageRuntime"]
+    assert runtime["provider"] == "kie"
+    assert runtime["workflowKey"] == "kie:nano-banana-2"
+    assert runtime["workflowKey"] != "zimage.txt2img"
+
+
+def test_ers_body_local_flux_is_not_kie() -> None:
+    from app.codirector.capabilities.handlers.ers_generate import (
+        _ERS_PURPOSE,
+        _creator_model_body,
+        _pin_resolved_capability,
+    )
+    from app.image_product.resolve import resolve_image_capability
+
+    body = {
+        "prompt": "Café layout / spatial reference of the atrium.",
+        "purpose": _ERS_PURPOSE,
+        "operation": "image.generate",
+        "forceWorkflowKey": "flux.txt2img",
+        "allow_force_workflow_key": True,
+        "lockModelFamily": True,
+        "creativeContext": {"objective": _ERS_PURPOSE},
+        **_creator_model_body(
+            model="flux",
+            model_family_preference="flux",
+            source="local",
+        ),
+    }
+    assert "zimage.txt2img" not in str(body)
+    cap = resolve_image_capability(body)
+    assert cap["canExecute"] is True
+    assert cap["provider"] == "local"
+    assert cap["provider"] != "kie"
+    assert not str(cap.get("workflowKey") or "").startswith("kie:")
+    pinned = _pin_resolved_capability(dict(body))
+    assert pinned["creativeContext"].get("resolvedProvider") == "local"
+    assert not str(pinned["creativeContext"].get("resolvedWorkflowKey") or "").startswith("kie:")
+
+
+def test_ers_handle_forwards_selected_model_not_zimage(monkeypatch) -> None:
+    from app.codirector.capabilities.handlers import ers_generate
+    from app.environment_reference_sheet.contracts import SpatialMapReference
+    from app.spatial_map.schemas import SpatialMapDocument
+
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    execution_id = "279a7474-d93c-4dc7-8936-4b649ef06255"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium.",
+        scene_id="scene-1",
+    )
+    sheet.spatialMap = SpatialMapReference(mapId=spatial_map_id, northLockDirection="north")
+    captured: list[dict] = []
+
+    def _fake_enqueue(db, enqueue_project_id, body, scene_id=None):
+        captured.append(dict(body))
+        return {"jobId": "job-ers-one", "jobs": [{"jobId": "job-ers-one"}]}
+
+    monkeypatch.setattr("app.environment_reference_sheet.store.list_sheets", lambda pid: [sheet])
     monkeypatch.setattr(
-        "app.spatial_map.ers_persistence.save_ers_package",
-        lambda *args, **kwargs: None,
+        "app.environment_reference_sheet.orchestrator.attach_spatial_map",
+        lambda db, current, spatial_map_id: current,
     )
     monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.compose_sheet_metadata",
+        lambda current: current,
+    )
+    monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
+    monkeypatch.setattr(
+        "app.spatial_map.service.get_document",
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+    )
+    monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
+    monkeypatch.setattr("app.environment_reference_sheet.store.save_sheet", lambda current: None)
+
+    ers_generate.handle(
+        db=None,
+        project_id=project_id,
+        execution_id=execution_id,
+        spatial_map_id=spatial_map_id,
+        scene_id="scene-1",
+        hosted_model_id="nano-banana-kie",
+        source="api",
+    )
+    assert len(captured) == 1
+    body = captured[0]
+    assert body["purpose"] == "environment_reference_sheet"
+    assert body.get("hostedModelId") == "nano-banana-kie"
+    assert body.get("modelFamilyPreference") != "zimage"
+    assert (body.get("creativeContext") or {}).get("workflowKey") != "zimage.txt2img"
+    assert "zimage.txt2img" not in str(body)
+    assert (body.get("creativeContext") or {}).get("resolvedProvider") == "kie"
+
+
+def test_ers_persist_composite_sets_has_reference(monkeypatch) -> None:
+    """Persisting the one-job Library asset sets ers_composite_asset_id."""
+    from app.codirector.capabilities.handlers.ers_generate import persist_ers_composite_asset
+    from app.scene_creator.ers_resolver import resolve_ers_for_sheet
+    from app.spatial_map.ers_contracts import EnvironmentReferencePackage
+
+    project_id = f"proj-{uuid.uuid4()}"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium.",
+        scene_id="scene-1",
+    )
+    store.save_sheet(sheet)
+    package = EnvironmentReferencePackage(
+        project_id=project_id,
+        scene_layout_id="map-ers",
+        directional_assets={"north": None, "east": None, "south": None, "west": None},
+        metadata={"sheet_id": sheet.sheetId},
+    )
+    saved = {package.id: package}
+
+    monkeypatch.setattr(
+        "app.spatial_map.ers_persistence.load_ers_package",
+        lambda db, pid, pkg_id: saved.get(pkg_id),
+    )
+    monkeypatch.setattr(
+        "app.spatial_map.ers_persistence.list_ers_packages",
+        lambda db, pid: list(saved.values()),
+    )
+
+    def _save(db, pid, pkg, provenance="ers_generate"):
+        saved[pkg.id] = pkg
+
+    monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", _save)
+
+    result = persist_ers_composite_asset(
+        db=object(),
+        project_id=project_id,
+        sheet_id=sheet.sheetId,
+        asset_id="asset-ers-composite-1",
+        package_id=package.id,
+    )
+    assert result["ers_composite_asset_id"] == "asset-ers-composite-1"
+    assert saved[package.id].ers_composite_asset_id == "asset-ers-composite-1"
+    reloaded = store.load_sheet(project_id, sheet.sheetId)
+    assert reloaded is not None
+    assert reloaded.ers_composite_asset_id == "asset-ers-composite-1"
+    assert reloaded.composition.renderedAssetIds.get("composite") == "asset-ers-composite-1"
+    resolved, _runtime = resolve_ers_for_sheet(
+        object(), project_id, sheet.sheetId, persist_runtime=False
+    )
+    assert resolved.ers_composite_asset_id == "asset-ers-composite-1"
+    has_reference = bool(
+        any((resolved.directional_assets or {}).values()) or resolved.ers_composite_asset_id
+    )
+    assert has_reference is True
+
+
+def test_ers_persist_accepts_worker_positional_args(monkeypatch) -> None:
+    """queue_worker calls persist(db, project_id, sheet_id=..., asset_id=...)."""
+    from app.codirector.capabilities.handlers.ers_generate import persist_ers_composite_asset
+    from app.spatial_map.ers_contracts import EnvironmentReferencePackage
+
+    project_id = f"proj-{uuid.uuid4()}"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium.",
+        scene_id="scene-1",
+    )
+    store.save_sheet(sheet)
+    package = EnvironmentReferencePackage(
+        project_id=project_id,
+        scene_layout_id="map-ers",
+        directional_assets={"north": None, "east": None, "south": None, "west": None},
+        metadata={"sheet_id": sheet.sheetId},
+    )
+    saved = {package.id: package}
+
+    monkeypatch.setattr(
+        "app.spatial_map.ers_persistence.load_ers_package",
+        lambda db, pid, pkg_id: saved.get(pkg_id),
+    )
+    monkeypatch.setattr(
+        "app.spatial_map.ers_persistence.list_ers_packages",
+        lambda db, pid: list(saved.values()),
+    )
+
+    def _save(db, pid, pkg, provenance="ers_generate"):
+        saved[pkg.id] = pkg
+
+    monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", _save)
+
+    result = persist_ers_composite_asset(
+        object(),
+        project_id,
+        sheet_id=sheet.sheetId,
+        asset_id="asset-ers-worker-1",
+        package_id=package.id,
+    )
+    assert result["has_reference"] is True
+    assert result["ers_composite_asset_id"] == "asset-ers-worker-1"
+    reloaded = store.load_sheet(project_id, sheet.sheetId)
+    assert reloaded is not None
+    assert reloaded.ers_composite_asset_id == "asset-ers-worker-1"
+    assert reloaded.composition.renderedAssetIds.get("composite") == "asset-ers-worker-1"
+    assert saved[package.id].ers_composite_asset_id == "asset-ers-worker-1"
+
+
+def test_ers_handle_stamps_one_job_id_for_async_persist(monkeypatch) -> None:
+    """handle enqueues one job and stamps the sheet so the worker can persist."""
+    from app.codirector.capabilities.handlers import ers_generate
+    from app.environment_reference_sheet.contracts import SpatialMapReference
+    from app.spatial_map.schemas import SpatialMapDocument
+
+    project_id = f"proj-{uuid.uuid4()}"
+    spatial_map_id = f"map-{uuid.uuid4()}"
+    execution_id = "279a7474-d93c-4dc7-8936-4b649ef06255"
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Helios Research Atrium",
+        description="Glass-roofed atrium, hanging gardens, cool daylight.",
+        scene_id="scene-1",
+    )
+    sheet.spatialMap = SpatialMapReference(mapId=spatial_map_id, northLockDirection="north")
+    captured: list[dict] = []
+    stamped: list = []
+
+    def _fake_enqueue(db, enqueue_project_id, body, scene_id=None):
+        captured.append(dict(body))
+        return {"jobId": "job-ers-one", "jobs": [{"jobId": "job-ers-one"}]}
+
+    monkeypatch.setattr("app.environment_reference_sheet.store.list_sheets", lambda pid: [sheet])
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.attach_spatial_map",
+        lambda db, current, spatial_map_id: current,
+    )
+    monkeypatch.setattr(
+        "app.environment_reference_sheet.orchestrator.compose_sheet_metadata",
+        lambda current: current,
+    )
+    monkeypatch.setattr(ers_generate, "_enqueue_ers_image_product", _fake_enqueue)
+    monkeypatch.setattr(
+        "app.spatial_map.service.get_document",
+        lambda db, pid, mid: SpatialMapDocument(projectId=pid, id=mid),
+    )
+    monkeypatch.setattr("app.spatial_map.ers_persistence.save_ers_package", lambda *a, **k: None)
+    monkeypatch.setattr(
         "app.environment_reference_sheet.store.save_sheet",
-        lambda current: None,
+        lambda current: stamped.append(current),
     )
 
     result = ers_generate.handle(
@@ -246,18 +526,10 @@ def test_ers_generate_handler_builds_jobs_from_plan_request_prompt(monkeypatch) 
         spatial_map_id=spatial_map_id,
         scene_id="scene-1",
     )
-
-    expected_prompts = [view.prompt for view in sheet.directionalViews]
-    assert [body["prompt"] for body in captured_bodies] == expected_prompts
-    assert len(result["child_jobs"]) == 5
-    assert [job["status"] for job in result["child_jobs"][:4]] == ["queued"] * 4
-    assert [job["metadata"]["direction"] for job in result["child_jobs"][:4]] == [
-        "north",
-        "east",
-        "south",
-        "west",
-    ]
-    assert result["sheet_id"] == sheet.sheetId
-    assert result["ers_package_id"]
-    assert result["spatial_map_id"] == spatial_map_id
-
+    assert len(captured) == 1
+    assert len(result["job_ids"]) == 1
+    assert result["job_ids"] == ["job-ers-one"]
+    assert stamped
+    details = stamped[-1].provenance.details
+    assert details.get("ers_image_job_id") == "job-ers-one"
+    assert details.get("ers_package_id") == result["ers_package_id"]

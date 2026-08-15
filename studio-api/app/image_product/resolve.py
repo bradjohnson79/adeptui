@@ -88,6 +88,28 @@ def _ok(
     return out
 
 
+
+def _is_qwen2512_family(name: str) -> bool:
+    """Qwen Image 2512 is T2I-only. No certified edit / I2I workflow."""
+    n = str(name or "").strip().lower().replace("_", "-")
+    return n in {"qwen2512", "qwen-image-2512", "qwen-image2512"} or n.startswith(
+        "qwen2512."
+    )
+
+
+def _refuse_qwen2512_edit(intent: dict[str, Any], family: str) -> dict[str, Any]:
+    return _refuse(
+        "Qwen Image 2512 has no certified image-to-image / edit workflow. "
+        "Refusing silent substitute of zimage.ref_edit.",
+        provider="local",
+        adapter="comfy",
+        officialModelId="qwen2512",
+        workflowKey="",
+        intent=intent,
+        family=family,
+    )
+
+
 def _wants_edit(src: dict[str, Any], intent: dict[str, Any]) -> bool:
     if intent.get("operation") == "image.edit":
         return True
@@ -151,6 +173,7 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
 
     Refuses (canExecute=false, honest reason — never a silent swap):
     - silent T2I-as-edit (hosted T2I-only model asked to edit)
+    - qwen2512 + image.edit / i2i (no certified edit UNET; never zimage.ref_edit)
     - local flux → kie
     - substituting qwen/zimage/comfy for a selected API model
     """
@@ -165,12 +188,16 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             src.get("modelFamilyPreference") or src.get("model") or model or ""
         ).strip()
         force = _local_force_key(src)
+        if _wants_edit(src, intent) and (
+            _is_qwen2512_family(family) or _is_qwen2512_family(force)
+        ):
+            return _refuse_qwen2512_edit(intent, family or force)
         return _ok(
             provider="local",
             adapter="comfy",
             official=family,
             workflow_key=force or (f"{family}.txt2img" if family else ""),
-            reason="local comfy adapter façade (not kie)",
+            reason="local comfy adapter facade (not kie)",
             hostedModelId="",
             intent=intent,
         )
@@ -225,6 +252,8 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
         )
 
     family = str(src.get("modelFamilyPreference") or src.get("model") or model or "").strip()
+    if _wants_edit(src, intent) and _is_qwen2512_family(family):
+        return _refuse_qwen2512_edit(intent, family)
     return _ok(
         provider="local",
         adapter="comfy",

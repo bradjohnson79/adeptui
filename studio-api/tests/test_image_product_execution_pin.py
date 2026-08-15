@@ -228,3 +228,55 @@ def test_resolver_local_flux_is_not_kie() -> None:
     assert cap["provider"] != "kie"
     assert cap["provider"] == "local"
     assert not str(cap.get("workflowKey") or "").startswith("kie:")
+
+def test_resolver_refuses_qwen2512_edit_never_zimage_ref_edit() -> None:
+    from app.image_product.resolve import resolve_image_capability
+
+    for body in (
+        {
+            "prompt": "edit the room",
+            "purpose": "environment_reference_sheet",
+            "source": "local",
+            "model": "qwen2512",
+            "modelFamilyPreference": "qwen2512",
+            "operation": "image.edit",
+            "edit": True,
+            "source_asset_id": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        },
+        {
+            "prompt": "edit the room",
+            "purpose": "environment_reference_sheet",
+            "source": "local",
+            "model": "qwen-image-2512",
+            "operation": "image.edit",
+            "sourceAssetId": "atlas-ref-1",
+        },
+    ):
+        cap = resolve_image_capability(body)
+        assert cap["canExecute"] is False, body
+        reason = str(cap.get("reason") or "").lower()
+        assert "qwen" in reason
+        assert "zimage.ref_edit" in reason or "zimage" in reason
+        assert cap.get("workflowKey") != "zimage.ref_edit"
+        assert "zimage.ref_edit" not in str(cap.get("workflowKey") or "")
+
+
+def test_resolver_local_qwen2512_t2i_still_executes() -> None:
+    from app.image_product.resolve import resolve_image_capability
+
+    cap = resolve_image_capability(
+        {
+            "prompt": "a coffee shop",
+            "purpose": "environment_reference_sheet",
+            "source": "local",
+            "model": "qwen2512",
+            "modelFamilyPreference": "qwen2512",
+            "operation": "image.generate",
+        }
+    )
+    assert cap["canExecute"] is True
+    assert cap["provider"] == "local"
+    assert cap["officialModelId"] in {"qwen2512", "qwen-image-2512"}
+    assert cap["workflowKey"] == "qwen2512.txt2img"
+    assert cap["workflowKey"] != "zimage.ref_edit"
+

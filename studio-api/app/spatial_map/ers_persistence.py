@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -335,3 +335,86 @@ def list_prop_entities(db: Session, project_id: str) -> list[PropEntity]:
         except Exception:
             continue
     return props
+
+
+def persist_ers_composite_asset(
+    db: Session,
+    project_id: str,
+    *,
+    sheet_id: str,
+    asset_id: str,
+    package_id: str | None = None,
+    sheet: Any = None,
+    package: Any = None,
+) -> dict[str, Any]:
+    """Bind a real Library asset as the ERS composite so has_reference can be true.
+
+    Does not generate. Does not rewrite Spatial Map positions.
+    """
+    asset_id = (asset_id or "").strip()
+    sheet_id = (sheet_id or "").strip()
+    if not asset_id:
+        raise ValueError("ERS persist needs a Library asset id.")
+    if not sheet_id:
+        raise ValueError("ERS persist needs an Environment Reference Sheet id.")
+
+    from ..db import Asset as AssetRow
+
+    asset = (
+        db.query(AssetRow)
+        .filter(AssetRow.id == asset_id, AssetRow.project_id == project_id)
+        .first()
+    )
+    if asset is None:
+        raise ValueError(
+            "Environment Reference Sheet could not persist: Library asset not found."
+        )
+
+    from ..environment_reference_sheet.store import load_sheet, save_sheet
+
+    current_sheet = sheet
+    if current_sheet is None:
+        current_sheet = load_sheet(project_id, sheet_id)
+    if current_sheet is None:
+        raise ValueError("Environment Reference Sheet not found in this project.")
+
+    rendered = dict(
+        getattr(getattr(current_sheet, "composition", None), "renderedAssetIds", None) or {}
+    )
+    rendered["composite"] = asset_id
+    rendered.setdefault("png", asset_id)
+    current_sheet.composition.renderedAssetIds = rendered
+    current_sheet.ers_composite_asset_id = asset_id
+    if current_sheet.status in {"draft", "spatial_pending", "views_pending"}:
+        current_sheet.status = "registered"
+    save_sheet(current_sheet)
+
+    current_package = package
+    if current_package is None and package_id:
+        current_package = load_ers_package(db, project_id, package_id)
+    if current_package is None:
+        packages = [
+            p
+            for p in list_ers_packages(db, project_id)
+            if str((p.metadata or {}).get("sheet_id") or "") == sheet_id
+            and not str(p.id).startswith("runtime-")
+        ]
+        if packages:
+            current_package = sorted(
+                packages, key=lambda p: p.updated_at or p.created_at or "", reverse=True
+            )[0]
+    if current_package is not None:
+        current_package.ers_composite_asset_id = asset_id
+        meta = dict(current_package.metadata or {})
+        meta["sheet_id"] = sheet_id
+        meta["ers_composite_asset_id"] = asset_id
+        current_package.metadata = meta
+        save_ers_package(db, project_id, current_package, provenance="ers_composite_persist")
+
+    return {
+        "sheet_id": sheet_id,
+        "asset_id": asset_id,
+        "ers_composite_asset_id": asset_id,
+        "package_id": getattr(current_package, "id", None),
+        "has_reference": True,
+    }

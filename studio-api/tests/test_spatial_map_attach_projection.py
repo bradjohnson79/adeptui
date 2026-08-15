@@ -254,3 +254,57 @@ def test_compile_shot_prompt_emits_structured_attachment_state(monkeypatch) -> N
     assert ctx["characters"][0]["approved_casting_asset_id"] == "cast-korri"
     assert ctx["prop_entities"][0]["approved_asset_id"] == "prop-asset-1"
     assert "approved_asset_id" not in blocking["attachments"][0]
+
+def test_compile_shot_prompt_attaches_ers_composite_when_directionals_null(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.codirector import entity_resolver as er
+    from app.spatial_map.ers_contracts import EnvironmentReferencePackage, ShotRequest
+
+    monkeypatch.setattr(er, "_character_metadata", lambda db, pid, ids: [])
+    monkeypatch.setattr(er, "_prop_metadata", lambda db, pid, ids: [])
+    monkeypatch.setattr(er, "_project_visual_style", lambda db, pid: "")
+
+    package = EnvironmentReferencePackage(
+        project_id="proj-1",
+        scene_layout_id="map-1",
+        directional_assets={"north": None, "east": None, "south": None, "west": None},
+        ers_composite_asset_id="2f2e871b-efef-4b67-a1fc-26b7bb50aa7b",
+        placements=[],
+    )
+    shot = ShotRequest(index=0, raw_text="Camera 1 medium", characters=[], prop_entities=[])
+    body = er.compile_shot_prompt(SimpleNamespace(), "proj-1", shot, ers_package=package)
+    ctx = body["creativeContext"]
+    assert ctx["ers_composite_asset_id"] == "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b"
+    assert "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b" in (ctx.get("reference_image_ids") or [])
+    assert body.get("referenceImage") == "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b"
+    assert body.get("reference_image") == "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b"
+
+
+def test_compile_shot_prompt_keeps_directional_over_composite(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.codirector import entity_resolver as er
+    from app.spatial_map.ers_contracts import EnvironmentReferencePackage, ShotRequest
+
+    monkeypatch.setattr(er, "_character_metadata", lambda db, pid, ids: [])
+    monkeypatch.setattr(er, "_prop_metadata", lambda db, pid, ids: [])
+    monkeypatch.setattr(er, "_project_visual_style", lambda db, pid: "")
+
+    package = EnvironmentReferencePackage(
+        project_id="proj-1",
+        scene_layout_id="map-1",
+        directional_assets={"north": "north-asset-1", "east": None, "south": None, "west": None},
+        ers_composite_asset_id="2f2e871b-efef-4b67-a1fc-26b7bb50aa7b",
+        placements=[],
+    )
+    shot = ShotRequest(
+        index=0, raw_text="north", characters=[], prop_entities=[], orientation="north"
+    )
+    body = er.compile_shot_prompt(SimpleNamespace(), "proj-1", shot, ers_package=package)
+    ctx = body["creativeContext"]
+    refs = ctx.get("reference_image_ids") or []
+    assert "north-asset-1" in refs
+    assert ctx["ers_directional_ref"]["asset_id"] == "north-asset-1"
+    assert "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b" not in refs
+

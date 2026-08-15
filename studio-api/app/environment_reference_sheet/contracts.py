@@ -196,6 +196,7 @@ class EnvironmentReferenceSheet(BaseModel):
     continuity: ContinuityValidationReport = Field(default_factory=ContinuityValidationReport)
     creationPlan: ERSCreationPlan
     composition: ERSCompositionRecord
+    ers_composite_asset_id: str | None = None
     registration: ERSProjectRegistration = Field(default_factory=ERSProjectRegistration)
     exports: list[ERSExportRecord] = Field(default_factory=list)
     revisionLaw: ERSRevisionLaw = Field(default_factory=ERSRevisionLaw)

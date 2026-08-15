@@ -21,6 +21,15 @@ def _require_project(db: Session, project_id: str) -> Project:
 
 
 def _summary(sheet) -> dict[str, Any]:
+    rendered = getattr(getattr(sheet, "composition", None), "renderedAssetIds", None) or {}
+    composite = getattr(sheet, "ers_composite_asset_id", None)
+    if not composite and isinstance(rendered, dict):
+        composite = rendered.get("composite") or rendered.get("png") or rendered.get("sheet")
+    approved = [
+        view.direction
+        for view in sheet.directionalViews
+        if view.status == "approved" and view.approvedAssetId
+    ]
     return {
         "sheetId": sheet.sheetId,
         "projectId": sheet.projectId,
@@ -29,9 +38,9 @@ def _summary(sheet) -> dict[str, Any]:
         "sceneId": sheet.sceneId,
         "locationStableId": sheet.registration.locationStableId,
         "continuityStatus": sheet.continuity.status,
-        "approvedDirections": [
-            view.direction for view in sheet.directionalViews if view.status == "approved" and view.approvedAssetId
-        ],
+        "approvedDirections": approved,
+        "ers_composite_asset_id": composite,
+        "has_reference": bool(composite or approved),
         "exportKinds": [item.exportKind for item in sheet.exports if item.status == "created"],
         "updatedAt": sheet.updatedAt,
     }

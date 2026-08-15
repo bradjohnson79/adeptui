@@ -3452,6 +3452,22 @@ class JobQueue:
         }
         job.params_json = json.dumps(params)
         job.history_json = json.dumps(prompt_meta)
+        try:
+            ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+            intent = params.get("imageIntent") if isinstance(params.get("imageIntent"), dict) else {}
+            purpose = str(intent.get("purpose") or ctx.get("objective") or params.get("purpose") or "")
+            if purpose == "environment_reference_sheet":
+                from .codirector.capabilities.handlers.ers_generate import persist_ers_composite_asset
+
+                persist_ers_composite_asset(
+                    db,
+                    project.id,
+                    sheet_id=str(ctx.get("environmentReferenceSheetId") or ""),
+                    asset_id=asset.id,
+                    package_id=str(ctx.get("ersPackageId") or ""),
+                )
+        except Exception:
+            logger.exception("ERS composite persist failed for job %s", job.id)
         db.commit()
         self._set_status(job.id, "done", 1.0, f"ImageGen ({edit_op}) complete", str(dest))
 

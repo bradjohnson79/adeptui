@@ -20,6 +20,7 @@ import type {
   SurfaceType,
 } from "./types";
 import { isAgentWork, isTerminal } from "./types";
+import { normalizeErsError } from "../SpatialMap/ersErrorMessage";
 import "./agentWorkSurface.css";
 
 const POLL_INTERVAL_MS = 3000;
@@ -357,7 +358,7 @@ export function AgentWorkSurface() {
 
       {pack.error && (
         <div className="agent-work-surface__error-detail" role="alert">
-          {pack.error}
+          {pack.surface_type === "ers_generation" ? normalizeErsError(pack.error) : pack.error}
         </div>
       )}
     </div>

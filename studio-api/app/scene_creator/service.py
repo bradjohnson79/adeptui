@@ -75,6 +75,40 @@ class SceneCreatorError(ValueError):
     pass
 
 
+_LIVE_JOB_STATUSES = frozenset({"queued", "running", "generating", "pending", "started", "processing"})
+_DEAD_JOB_STATUSES = frozenset({
+    "failed", "error", "interrupted", "cancelled", "canceled",
+    "done", "completed", "succeeded", "success",
+})
+
+
+def _job_is_live(db: Any, job_id: str) -> bool:
+    """True only when the provider job is still running.
+
+    A candidate can stay queued/generating after bounce while the Job is
+    failed/interrupted. That job is not in-flight and must not be reused.
+    """
+    jid = str(job_id or "").strip()
+    if not jid or jid.startswith("failed_"):
+        return False
+    if db is None:
+        return True
+    try:
+        from ..db import Job
+
+        job = db.get(Job, jid)
+    except Exception:
+        return True
+    if job is None:
+        return False
+    status = str(getattr(job, "status", "") or "").strip().lower()
+    if status in _DEAD_JOB_STATUSES:
+        return False
+    if status in _LIVE_JOB_STATUSES:
+        return True
+    return False
+
+
 def _in_flight_candidate(
     shot: SceneShot,
     *,
@@ -83,11 +117,14 @@ def _in_flight_candidate(
     kind: str = "",
     operation: str = "",
     source_asset_id: str = "",
+    db: Any = None,
 ) -> SceneShotCandidate | None:
     quality = (quality_profile or "final").lower()
     wanted_kind = (kind or "").strip().lower()
     for cand in reversed(list(shot.candidates or [])):
         if cand.status not in {"queued", "generating"}:
+            continue
+        if not _job_is_live(db, str(getattr(cand, "job_id", "") or "")):
             continue
         cand_kind = str(getattr(cand, "kind", "") or "").lower()
         cand_quality = str(getattr(cand, "quality_profile", "") or "final").lower()
@@ -284,7 +321,10 @@ def hydrate_workspace(
     has_reference = bool(
         resolved
         and isinstance(resolved, dict)
-        and any((resolved.get("directional_assets") or {}).values())
+        and (
+            any((resolved.get("directional_assets") or {}).values())
+            or bool(resolved.get("ers_composite_asset_id"))
+        )
     )
 
     cinematographer = None
@@ -401,7 +441,11 @@ def _enqueue_shot_candidates(
         api_model=api_model,
     )
 
-    has_reference = bool(any((package.directional_assets or {}).values()) or shot.character_ids)
+    has_reference = bool(
+        any((package.directional_assets or {}).values())
+        or package.ers_composite_asset_id
+        or shot.character_ids
+    )
     shot.prop_entity_ids = _ensure_placed_project_props(db, project_id, shot)
     if any(shot.prop_entity_ids):
         has_reference = True
@@ -428,7 +472,15 @@ def _enqueue_shot_candidates(
         body_base["height"] = 288
         body_base["allowDraft"] = True
 
-    extras = apply_region_edit_compile(body_base, shot, quality_profile=quality_profile)
+    lead_family = (local_family or "").strip() or (
+        str(plans[0].get("family") or "") if plans else ""
+    )
+    extras = apply_region_edit_compile(
+        body_base,
+        shot,
+        quality_profile=quality_profile,
+        enqueue_family=lead_family,
+    )
     inheritance = str(extras.get("strategy") or "")
     camera_hash = str(getattr(camera_record, "cameraStateHash", "") or "")
     source_id = str(extras.get("sourceAssetId") or "")
@@ -437,6 +489,7 @@ def _enqueue_shot_candidates(
         quality_profile="draft" if draft else "final",
         camera_hash=camera_hash,
         source_asset_id=source_id,
+        db=db,
     )
     if reuse is not None:
         return [reuse]
@@ -446,6 +499,9 @@ def _enqueue_shot_candidates(
         index = plan["index"] + index_offset
         body = dict(body_base)
         body["modelFamilyPreference"] = plan["family"]
+        plan_extras = extras
+        if extras.get("strategy") == "A" and certified_visual_edit_path(plan["family"]) is None:
+            plan_extras = _honest_t2i_instead_of_strategy_a(body, extras, str(plan["family"] or ""))
         body["seed"] = plan["seed"]
         body["sceneId"] = shot.scene_id
         body["shotId"] = shot.id
@@ -456,6 +512,16 @@ def _enqueue_shot_candidates(
             ctx["candidateIndex"] = index
             ctx["sheetId"] = shot.sheet_id
             ctx["ersPackageId"] = package.id
+            composite = str(getattr(package, "ers_composite_asset_id", None) or "").strip()
+            if composite:
+                ctx["ers_composite_asset_id"] = composite
+                refs = [str(x) for x in (ctx.get("reference_image_ids") or []) if str(x)]
+                if composite not in refs:
+                    refs.insert(0, composite)
+                    ctx["reference_image_ids"] = refs
+                if not body.get("referenceImage") and not body.get("reference_image"):
+                    body["referenceImage"] = composite
+                    body["reference_image"] = composite
             ctx["qualityProfile"] = "draft" if draft else "final"
             if ctx.get("finalStrategy") == "A" and ctx.get("workflowKey"):
                 if camera_record is not None:
@@ -508,7 +574,7 @@ def _enqueue_shot_candidates(
         provenance = plan["provenance_label"]
         if draft:
             provenance = f"PREVIEW — {provenance}"
-        elif inheritance == "A":
+        elif str(plan_extras.get("strategy") or inheritance) == "A":
             provenance = f"{provenance} — Image Edit"
         approved = _approved_candidate(shot)
         parent_id = approved.id if approved else None
@@ -539,17 +605,17 @@ def _enqueue_shot_candidates(
                 source_camera_id=getattr(camera_record, "cameraId", "") or "",
                 quality_profile="draft" if draft else "final",
                 parent_candidate_id=parent_id,
-                final_strategy=str(inheritance or ""),
+                final_strategy=str(plan_extras.get("strategy") or inheritance or ""),
                 source_preview_asset_id=source_preview or None,
                 approved_edited_preview_asset_id=edited_preview or None,
-                final_model_id=str(extras.get("finalModelId") or plan["family"] or ""),
+                final_model_id=str(plan_extras.get("finalModelId") or plan["family"] or ""),
                 final_workflow_key=str(
-                    extras.get("workflowKey")
-                    or (body_base.get("creativeContext") or {}).get("workflowKey")
+                    plan_extras.get("workflowKey")
+                    or (body.get("creativeContext") or {}).get("workflowKey")
                     or ""
                 ),
-                region_edit_ids=list(extras.get("regionEditIds") or []),
-                mask_asset_ids=list(extras.get("maskAssetIds") or []),
+                region_edit_ids=list(plan_extras.get("regionEditIds") or extras.get("regionEditIds") or []),
+                mask_asset_ids=list(plan_extras.get("maskAssetIds") or extras.get("maskAssetIds") or []),
             )
         )
     return candidates
@@ -1233,14 +1299,46 @@ def compile_region_edit_for_final(shot: SceneShot, base_prompt: str = "") -> tup
     return prompt, extras
 
 
+def _honest_t2i_instead_of_strategy_a(
+    body: dict[str, Any],
+    extras: dict[str, Any],
+    family: str,
+) -> dict[str, Any]:
+    """Drop Strategy A I2I flags. Keep ERS composite refs. No flux/zimage substitute."""
+    body.pop("edit", None)
+    body.pop("source_asset_id", None)
+    body.pop("sourceAssetId", None)
+    body.pop("forceWorkflowKey", None)
+    body.pop("allow_force_workflow_key", None)
+    if str(body.get("operation") or "") == "image.edit":
+        body["operation"] = "image.generate"
+    ctx = body.get("creativeContext")
+    if isinstance(ctx, dict):
+        if ctx.get("finalStrategy") == "A":
+            ctx["finalStrategy"] = "C"
+        ctx["workflowKey"] = f"{family}.txt2img" if family else ctx.get("workflowKey")
+    out = dict(extras)
+    out["strategy"] = "C"
+    out["sourceAssetId"] = ""
+    out["visualInheritanceBlocked"] = True
+    out["workflowKey"] = f"{family}.txt2img" if family else ""
+    out["finalModelId"] = family
+    out.pop("operation", None)
+    return out
+
+
 def apply_region_edit_compile(
     body: dict[str, Any],
     shot: SceneShot,
     *,
     quality_profile: str = "final",
+    enqueue_family: str = "",
 ) -> dict[str, Any]:
     """Mutate an enqueue body with approved region-edit refinements."""
     prompt, extras = compile_region_edit_for_final(shot, str(body.get("prompt") or ""))
+    family = (enqueue_family or getattr(shot.generator, "local_family", "") or "").strip()
+    if extras.get("strategy") == "A" and family and certified_visual_edit_path(family) is None:
+        extras = _honest_t2i_instead_of_strategy_a(body, extras, family)
     if extras.get("clauses"):
         body["prompt"] = prompt
     draft = (quality_profile or "final").lower() in {"draft", "preview"}
@@ -1558,6 +1656,7 @@ def region_edit_shot(
         kind="region_edit",
         operation=op,
         source_asset_id=source_id,
+        db=db,
     )
     if reuse is not None:
         return shot

@@ -409,6 +409,22 @@ def compile_shot_prompt(
             if asset_id not in reference_image_ids:
                 reference_image_ids.append(asset_id)
 
+    composite_id = ""
+    if ers_package:
+        composite_id = str(getattr(ers_package, "ers_composite_asset_id", None) or "").strip()
+    directional_present = bool(
+        (directional_ref.get("asset_id") if directional_ref else "")
+        or any(
+            str(v or "").strip()
+            for v in ((ers_package.directional_assets or {}).values() if ers_package else [])
+        )
+    )
+    # When N/E/S/W views are empty, the sheet composite IS the ERS asset.
+    # First Scene Creator preview must consume it — not a prior shot I2I.
+    if ers_package and composite_id and not directional_present:
+        if composite_id not in reference_image_ids:
+            reference_image_ids.insert(0, composite_id)
+
     # Compose the visible prompt: additional instructions + framing/angle/orientation
     # modifiers + named entities (already-resolved names for clarity in the model).
     char_names = [c.get("name") for c in char_meta if c.get("name")]
@@ -473,6 +489,7 @@ def compile_shot_prompt(
         "angle": shot.angle,
         "orientation": shot.orientation,
         "ers_package_id": ers_package.id if ers_package else "",
+        "ers_composite_asset_id": composite_id or None,
         "ers_directional_ref": directional_ref,
         "structured_blocking": structured_blocking,
         # Layered styles — NOT flattened.

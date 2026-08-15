@@ -31,6 +31,69 @@ def _bearing_degrees(*, from_x: float, from_z: float, to_x: float, to_z: float) 
     return (math.degrees(math.atan2(dx, dz)) + 360.0) % 360.0
 
 
+def _finite_world_xz(x: object, z: object) -> tuple[float, float] | None:
+    """World XZ only when both coordinates are real numbers.
+
+    Attached and unplaced props store x/z as None (cleared independent
+    coords). Never coerce missing coordinates to origin.
+    """
+    if isinstance(x, bool) or isinstance(z, bool):
+        return None
+    if isinstance(x, (int, float)) and isinstance(z, (int, float)):
+        return float(x), float(z)
+    return None
+
+
+class SpatialCaptureGeometryError(ValueError):
+    """Creator-readable Spatial Map geometry reject. Never a raw TypeError."""
+
+
+def _prop_is_required_unplaced(prop: SpatialPropPlacement) -> bool:
+    state = str(getattr(prop, "state", "") or "").strip().lower()
+    return state == "required" or bool(getattr(prop, "required", False))
+
+
+def _attached_holder_note(
+    document: SpatialMapDocument,
+    prop: SpatialPropPlacement,
+) -> str | None:
+    """Skip world bearing for attached props; keep a held-by clause instead."""
+    if getattr(prop, "placementMode", None) != "attached":
+        return None
+    label = prop.label or "Prop"
+    cid = getattr(prop, "attachedCharacterId", None)
+    if isinstance(cid, str):
+        cid = cid.strip() or None
+    slot = getattr(prop, "attachedCharacterSlot", None)
+    holder = None
+    for character in document.characters:
+        aliases = {
+            (character.characterId or "").strip(),
+            (character.id or "").strip(),
+            (character.label or "").strip(),
+        }
+        if cid and cid in aliases:
+            holder = character.label or character.characterId or cid
+            break
+        if slot is not None:
+            try:
+                from .attachment import attached_slot_from_slot_index
+
+                if attached_slot_from_slot_index(character.slotIndex) == int(slot):
+                    holder = character.label or character.characterId or cid
+                    break
+            except (TypeError, ValueError):
+                pass
+    if not holder:
+        holder = cid
+    if not holder and slot is not None:
+        holder = f"character {slot}"
+    if not holder:
+        return None
+    rel = getattr(prop, "relationship", None) or "held"
+    return f"{label} {rel} by {holder}"
+
+
 def _visibility_for_yaw(
     *,
     yaw_degrees: float,
@@ -67,12 +130,25 @@ def _spatial_visibility_clause(
     notes: list[str] = []
     props: Iterable[SpatialPropPlacement] = document.props
     for prop in props:
+        xz = _finite_world_xz(prop.x, prop.z)
+        if xz is None:
+            # Attached: skip world bearing, keep held-by. Unplaced: skip.
+            held = _attached_holder_note(document, prop)
+            if held:
+                notes.append(held)
+                continue
+            if _prop_is_required_unplaced(prop):
+                raise SpatialCaptureGeometryError(
+                    f"{prop.label or 'Prop'} is required on the Spatial Map but has no world position. "
+                    "Place it on the grid or attach it to a character before generating."
+                )
+            continue
         note = _visibility_for_yaw(
             yaw_degrees=yaw_degrees,
             camera_x=cam_x,
             camera_z=cam_z,
-            object_x=prop.x,
-            object_z=prop.z,
+            object_x=xz[0],
+            object_z=xz[1],
             label=prop.label or "Prop",
         )
         if note:
@@ -81,12 +157,15 @@ def _spatial_visibility_clause(
     if include_characters:
         characters: Iterable[SpatialCharacterPlacement] = document.characters
         for character in characters:
+            xz = _finite_world_xz(character.x, character.z)
+            if xz is None:
+                continue
             note = _visibility_for_yaw(
                 yaw_degrees=yaw_degrees,
                 camera_x=cam_x,
                 camera_z=cam_z,
-                object_x=character.x,
-                object_z=character.z,
+                object_x=xz[0],
+                object_z=xz[1],
                 label=character.label or "Character",
             )
             if note:
@@ -95,12 +174,15 @@ def _spatial_visibility_clause(
         notes.append("No characters in frame.")
 
     for anchor in document.anchors:
+        xz = _finite_world_xz(anchor.x, anchor.z)
+        if xz is None:
+            continue
         note = _visibility_for_yaw(
             yaw_degrees=yaw_degrees,
             camera_x=cam_x,
             camera_z=cam_z,
-            object_x=anchor.x,
-            object_z=anchor.z,
+            object_x=xz[0],
+            object_z=xz[1],
             label=anchor.label or "Anchor",
         )
         if note:

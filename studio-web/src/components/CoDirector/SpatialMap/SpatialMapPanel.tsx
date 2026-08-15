@@ -31,6 +31,7 @@ import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
 import { ErsResultDisplay } from "./ErsResultDisplay";
+import { normalizeErsError } from "./ersErrorMessage";
 import { CharacterInspector } from "./CharacterInspector";
 import { PlacementSlot } from "./PlacementSlot";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
@@ -122,6 +123,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const replaceModeRef = useRef(false);
+  const ersInFlightRef = useRef(false);
 
   // ── Load most recent map on mount / project change ───────────────────────
   const loadMap = useCallback(async () => {
@@ -274,10 +276,16 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           setErsCompositeAssetId(compositeId);
           setOpMsg("Environment Reference Sheet generated.");
           setBusyOp(null);
+          ersInFlightRef.current = false;
         }
       } else if (activeExecution.status === "failed" || activeExecution.status === "cancelled") {
-        setOpMsg(activeExecution.error || `${busyOp || "Operation"} failed.`);
+        setOpMsg(
+          busyOp === "ers"
+            ? normalizeErsError(activeExecution.error)
+            : activeExecution.error || `${busyOp || "Operation"} failed.`,
+        );
         setBusyOp(null);
+        if (busyOp === "ers") ersInFlightRef.current = false;
       }
     }
   }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, projectId, busyOp, document]);
@@ -298,6 +306,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   const startErsGeneration = useCallback(async () => {
     if (!document) return;
+    if (ersInFlightRef.current || busyOp === "ers") return;
+    ersInFlightRef.current = true;
     setOpMsg(null);
     setBusyOp("ers");
     try {
@@ -305,10 +315,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       const exec = normalizeExecution(res);
       setActiveExecution(exec);
     } catch (err) {
-      setOpMsg(err instanceof Error ? err.message : "Failed to start ERS generation.");
+      setOpMsg(normalizeErsError(err instanceof Error ? err.message : ""));
       setBusyOp(null);
+      ersInFlightRef.current = false;
     }
-  }, [projectId, document, setActiveExecution]);
+  }, [projectId, document, setActiveExecution, busyOp]);
 
   // ── Library / upload / replace / remove atlas ──────────────────────────
   const handleChooseFromLibrary = () => setLibraryPickerOpen(true);
@@ -1404,6 +1415,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               onRegenerate={() => void startErsGeneration()}
               onOpenInLibrary={() => onGoTab?.("library")}
               onUseInSceneCreator={() => onGoTab?.("scene_creator")}
+              regenerateDisabled={isGenerating}
             />
           ) : null}
         </>
