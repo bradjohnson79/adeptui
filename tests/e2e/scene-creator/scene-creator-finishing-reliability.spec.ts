@@ -140,12 +140,41 @@ async function waitJobDone(request: APIRequestContext, jobId: string, timeout = 
     .toMatch(/^(done|complete|succeeded|success|failed|error)$/);
 }
 
+async function studioBannerVisible(page: Page): Promise<boolean> {
+  const offline = page.getByText("Studio API Offline", { exact: false });
+  const reconnecting = page.getByText("Reconnecting to Studio API", { exact: false });
+  return (await offline.isVisible().catch(() => false)) || (await reconnecting.isVisible().catch(() => false));
+}
+
+async function waitForStudioOnline(page: Page) {
+  await expect
+    .poll(async () => !(await studioBannerVisible(page)), { timeout: 180_000, intervals: [1_000, 2_000, 4_000] })
+    .toBeTruthy();
+}
+
 async function openSceneCreator(page: Page) {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto(SC_URL, { waitUntil: "domcontentloaded" });
-  await expect(page.getByTestId("scene-creator-panel").or(page.getByTestId("scene-creator-standard"))).toBeVisible({
-    timeout: 60_000,
-  });
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(SC_URL, { waitUntil: "domcontentloaded" });
+      await waitForStudioOnline(page);
+      const standard = page.getByTestId("scene-creator-standard");
+      const panel = page.getByTestId("scene-creator-panel");
+      await expect
+        .poll(async () => (await standard.isVisible().catch(() => false)) || (await panel.isVisible().catch(() => false)), {
+          timeout: 60_000,
+        })
+        .toBeTruthy();
+      lastError = undefined;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (attempt === 2) throw err;
+      await page.waitForTimeout(4_000);
+    }
+  }
+  if (lastError) throw lastError;
   const tools = page.getByTestId("scene-creator-tools-toggle");
   if (await tools.isVisible().catch(() => false)) {
     const browser = page.getByTestId("scene-creator-browser");
@@ -340,14 +369,19 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     test.setTimeout(JOB_WAIT_MS + 60_000);
     attachObserver(page, testInfo);
     await openSceneCreator(page);
+    const preview = page.getByTestId("cine-preview");
+    await expect(preview).toBeEnabled({ timeout: JOB_WAIT_MS });
+    await openAccordion(page, "cine-orient-accordion");
+    await page.getByRole("button", { name: "Yaw up" }).click();
+    await expect(preview).toBeEnabled();
     const posts: string[] = [];
     page.on("request", (req) => {
       if (req.method() === "POST" && /cinematographer\/preview/.test(req.url())) posts.push(req.url());
     });
     const before = await listJobs(request);
-    await page.getByTestId("cine-preview").dblclick({ delay: 20 }).catch(async () => {
-      await page.getByTestId("cine-preview").click();
-      await page.getByTestId("cine-preview").click();
+    await preview.dblclick({ delay: 20 }).catch(async () => {
+      await preview.click();
+      await preview.click();
     });
     await page.waitForTimeout(2000);
     expect(posts.length, "frontend must serialize duplicate preview").toBe(1);
@@ -570,6 +604,7 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
       const value = await zimage.getAttribute("value");
       if (value) await local.selectOption(value);
     }
+    await waitForStudioOnline(page);
     const lock = page.getByTestId("cine-lock");
     if (await lock.isDisabled()) {
       await page.getByTestId("cine-preview").click();
@@ -583,8 +618,18 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     const jobsBefore = await listJobs(request);
     const generate = page.getByTestId("scene-creator-generate");
     await expect(generate).toBeEnabled({ timeout: 45_000 });
+    await expect(generate).toHaveText(/Final Quality Render/i);
+    const finalReq = page.waitForRequest(
+      (req) => req.method() === "POST" && /cinematographer\/final/.test(req.url()),
+      { timeout: 45_000 },
+    );
     await generate.dblclick({ delay: 30 }).catch(async () => {
       await generate.click();
+      await generate.click();
+    });
+    await finalReq.catch(async () => {
+      await waitForStudioOnline(page);
+      await expect(generate).toBeEnabled({ timeout: 45_000 });
       await generate.click();
     });
     await page.waitForTimeout(2000);
