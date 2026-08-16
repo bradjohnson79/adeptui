@@ -1,5 +1,85 @@
 # SCENE CREATOR FINAL PRODUCTION CERTIFICATION
 
+**Date:** 2026-08-15 (Z-Image Add apple capability probe)  
+**Branch:** `beta`  
+**Product SHA:** `c45ac84` (recommend still FLUX for all four ops; **not** flipped)  
+**HEAD SHA:** `7b918d7` (prior cert) — this docs commit follows  
+**Vercel Production SHA:** `7b918d7` (docs-only; no product change)  
+**Hosted UI:** `https://adeptui.vercel.app`  
+**Studio API:** `http://127.0.0.1:8758/` `/api/health` **200**  
+**Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`  
+**Scene:** `e4550745-f0ef-44c8-99a5-ef9e20bd47d2`  
+**Shot:** `2a58894b-b5d4-4e86-b068-7cd156199d98` (Shot 3, 1280×720)  
+**Source take A:** `e0d3af5e-b63d-4974-b999-7c5543f7624e`  
+**Camera hash:** `542a31ee7e39cb76`  
+**Flag:** `SCENE_IMAGE_CORE=1`
+
+This is the single governing document (Law 30). Newest run on top. Preserve historical NO-GOs below.
+
+`qwen.edit` unpublished. Do not resurrect `:8760`. Never `POST /api/projects`. Recommend ≠ routing. Certified `flux.img2img` graph not changed.
+
+## Verdict
+
+```text
+NO-GO — SCENE CREATOR PRODUCTION SYSTEM NOT CERTIFIED END TO END
+```
+
+Independent visual verifier ([Visual apple Add FAIL](7df724a6-4c47-4642-aec3-2299f189345e)):
+
+```text
+FAILED — SCENE CREATOR ADD + FINAL PIXELS NOT CERTIFIED
+```
+
+## Blocker (this pass)
+
+One decisive Z-Image native inpaint Add on Shot 3 (red apple, clean far-right counter, 1280×720, `expand=wide`, denoise 0.94). Routing succeeded. Pixels did not.
+
+| Field | Value |
+|---|---|
+| Job | `9ef820ad-3ca3-4cd4-81e1-49a94eab7352` **done** `zimage.inpaint` |
+| Candidate | `a9f0be0a-80a9-463f-95de-5f9791e9e0b0` |
+| Asset | `ef086d78-9159-4d5d-8297-d073cbc2183f` `imagegen_edit_f75c34b6.png` |
+| Mask | `mask-9a4d7866038d` box `(0.82, 0.52, 0.995, 0.92)` 1280×720 |
+| Camera | `542a31ee7e39cb76` |
+| Inside-mask mean abs diff | **53.85** (not a no-op) |
+| Outside-mask mean abs diff | **1.54** (Korri/cup stable) |
+| Reddish pixels inside mask | **2.0%** |
+| Visual | **FAIL** — no recognizable red apple; café counter / indistinct shapes |
+
+Stop immediately. No denoise/grow retune. No `flux.inpaint`. No unpublished `qwen.edit`. Recommend table **not** flipped (`add` remains `flux` until pixels pass). Inheritance chain not run. Hosted A–T not run.
+
+Remove/Modify/Replace remain independently PASS (`186f04f2`, `4ec0bfc4`, `47dbe065`).
+
+## Gates
+
+| Gate | Result |
+| --- | --- |
+| Image Core architecture | PASS |
+| Remove | PASS (reuse) |
+| Modify | PASS (reuse) |
+| Replace | PASS (reuse) |
+| Add | FAIL |
+| Camera preservation | PASS |
+| Mask/source lineage | PASS (1280×720, source A) |
+| Approve | N/A |
+| Final inheritance | N/A |
+| Final pixel preservation | N/A |
+| Reload | N/A |
+| Library | N/A |
+| Timeline | N/A |
+| Hosted Playwright | N/A |
+| Independent visual verification | FAIL |
+
+## What this pass changed (code)
+
+None. Job-done is not visual PASS.
+
+Pixels: `artifacts/scene-creator/zimage-add-probe/add_full.png`.
+
+---
+
+# Historical NO-GO (FLUX Add diagnostic Case 5) — audit trail
+
 **Date:** 2026-08-15 (FLUX Add diagnostic closure)  
 **Branch:** `beta`  
 **Product SHA:** `c45ac84` (recommend lockstep; no product code this pass)  
