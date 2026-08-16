@@ -20,4 +20,13 @@ export default defineConfig({
       "/media": apiTarget,
     },
   },
+  preview: {
+    host: "127.0.0.1",
+    port: Number(process.env.PLAYWRIGHT_PREVIEW_PORT || 4173),
+    strictPort: true,
+    proxy: {
+      "/api": apiTarget,
+      "/media": apiTarget,
+    },
+  },
 });

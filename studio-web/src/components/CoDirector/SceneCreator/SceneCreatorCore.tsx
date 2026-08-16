@@ -136,6 +136,7 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
       </aside>
       <StandardPreview sc={sc} inspectedId={inspectedId} />
       <aside className="scene-creator-standard__inspector">
+        <SpatialProfileBlock sc={sc} />
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
         <CharactersPropsBlock sc={sc} />
         <CinematographerPanel sc={sc} />
@@ -322,6 +323,57 @@ function StandardPreview({
   );
 }
 
+function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const profiles = sc.workspace?.spatial_profiles || [];
+  return (
+    <div className="scene-creator-profile" data-testid="scene-creator-spatial-profile">
+      <p className="scene-creator-core__label">Spatial Profile</p>
+      <select
+        data-testid="scene-creator-spatial-profile-select"
+        value={sc.selectedProfileId || ""}
+        onChange={(e) => void sc.selectSpatialProfile(e.target.value)}
+        disabled={sc.busy}
+      >
+        <option value="">None</option>
+        {profiles.map((profile) => (
+          <option key={profile.handoffId} value={profile.handoffId}>
+            {profile.displayName || profile.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="ghost scene-creator-profile__reset"
+        data-testid="scene-creator-reset-workspace"
+        onClick={() => sc.setResetConfirmOpen(true)}
+        disabled={sc.busy}
+      >
+        Reset Workspace
+      </button>
+      {sc.resetConfirmOpen ? (
+        <div className="scene-creator-reset-dialog" role="dialog" aria-labelledby="scene-creator-reset-title" data-testid="scene-creator-reset-dialog">
+          <h3 id="scene-creator-reset-title">Reset Scene Creator?</h3>
+          <p>
+            This will clear the current Scene Creator workspace and selected production context.
+          </p>
+          <p>
+            Images and media already generated will remain safely stored in Library. Spatial Profiles, ERS assets,
+            characters, props, and project data will not be deleted.
+          </p>
+          <div className="scene-creator-core__row">
+            <button type="button" className="ghost" data-testid="scene-creator-reset-cancel" onClick={() => sc.setResetConfirmOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="ui-btn ui-btn--secondary" data-testid="scene-creator-reset-confirm" onClick={() => void sc.confirmResetWorkspace()}>
+              Reset Workspace
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EnvironmentBlock({ sc, onGoTab }: LayoutProps) {
   const sheets = sc.workspace?.sheets || [];
   return (
@@ -419,6 +471,20 @@ function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   return (
     <div data-testid="scene-creator-generators">
       <p className="scene-creator-core__label">Generator</p>
+      <label className="scene-creator-core__row">
+        <span>Picture Shape</span>
+        <select
+          data-testid="scene-creator-aspect"
+          value={sc.productionAspect}
+          onChange={(e) => void sc.setProductionAspect(e.target.value as typeof sc.productionAspect)}
+        >
+          {["1:1", "4:3", "16:9", "21:9"].map((ratio) => (
+            <option key={ratio} value={ratio}>
+              {ratio}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="scene-creator-core__row">
         <input
           type="checkbox"

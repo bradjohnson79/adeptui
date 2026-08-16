@@ -3589,10 +3589,19 @@ export const api = {
         body: JSON.stringify(body),
       },
     ),
-  directorTimelineGenerateBatch: (projectId: string, sceneId: string, batchId: string) =>
+  directorTimelineGenerateBatch: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    body?: { draftMode?: boolean },
+  ) =>
     req<Record<string, unknown>>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/generate`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      },
     ),
   directorTimelineAddClipToBatch: (
     projectId: string,
@@ -3624,7 +3633,7 @@ export const api = {
   directorTimelineGenerateScene: (
     projectId: string,
     sceneId: string,
-    body?: { scope?: string; batchBlockIds?: string[] },
+    body?: { scope?: string; batchBlockIds?: string[]; draftMode?: boolean },
   ) =>
     req<Record<string, unknown>>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/generate`,
@@ -3687,6 +3696,11 @@ export const api = {
   directorTimelineActivateTake: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
     req<Record<string, unknown>>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/activate-take`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId }) },
+    ),
+  directorTimelineRejectTake: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/reject`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId }) },
     ),
   directorTimelineRetryBridge: (projectId: string, sceneId: string, bridgeId: string) =>
@@ -4163,6 +4177,11 @@ export const api = {
       }>(`/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}`, {
         cache: "no-store",
       }),
+    useAnyway: (projectId: string, sheetId: string) =>
+      req<{ ok: boolean }>(
+        `/api/environment-reference-sheets/projects/${encodeURIComponent(projectId)}/${encodeURIComponent(sheetId)}/semantic-gate/use-anyway`,
+        { method: "POST" }
+      ),
   },
   sceneCreator: {
     parseShots: (projectId: string, rawText: string) =>
@@ -4239,17 +4258,67 @@ export const api = {
           body: JSON.stringify(body),
         },
       ),
-    workspace: (projectId: string, query?: { sheet_id?: string; scene_id?: string; shot_id?: string }) => {
+    workspace: (projectId: string, query?: { sheet_id?: string; scene_id?: string; shot_id?: string; spatial_profile_id?: string }) => {
       const params = new URLSearchParams();
       if (query?.sheet_id) params.set("sheet_id", query.sheet_id);
       if (query?.scene_id) params.set("scene_id", query.scene_id);
       if (query?.shot_id) params.set("shot_id", query.shot_id);
+      if (query?.spatial_profile_id) params.set("spatial_profile_id", query.spatial_profile_id);
       const qs = params.toString();
       return req<import("./components/CoDirector/SceneCreator/types").SceneCreatorWorkspace>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/workspace${qs ? `?${qs}` : ""}`,
         { cache: "no-store" },
       );
     },
+    productionHandoff: (
+      projectId: string,
+      body?: { scene_id?: string; sheet_id?: string; spatial_map_id?: string },
+    ) =>
+      req<{
+        sceneId: string;
+        sheetId: string;
+        handoffId: string;
+        revision: number;
+        selectedProfileId: string | null;
+        ersPackageId: string;
+        ersLibraryAssetId: string;
+        spatialMapId: string;
+        name?: string;
+        displayName?: string;
+        noop?: boolean;
+        profile?: import("./components/CoDirector/SceneCreator/types").SpatialProfile;
+      }>(`/api/scene-creator/projects/${encodeURIComponent(projectId)}/production-handoff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      }),
+    listSpatialProfiles: (projectId: string) =>
+      req<{
+        profiles: import("./components/CoDirector/SceneCreator/types").SpatialProfile[];
+        selectedProfileId: string | null;
+        workspaceReset: boolean;
+      }>(`/api/scene-creator/projects/${encodeURIComponent(projectId)}/spatial-profiles`, {
+        cache: "no-store",
+      }),
+    selectSpatialProfile: (projectId: string, handoffId: string) =>
+      req<{
+        sceneId: string;
+        sheetId: string;
+        handoffId: string;
+        revision: number;
+        selectedProfileId: string | null;
+        ersPackageId: string;
+        ersLibraryAssetId: string;
+        spatialMapId: string;
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/spatial-profiles/${encodeURIComponent(handoffId || "none")}/select`,
+        { method: "POST" },
+      ),
+    resetWorkspace: (projectId: string) =>
+      req<{ ok: boolean; selectedProfileId: null; workspaceReset: boolean }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/workspace/reset`,
+        { method: "POST" },
+      ),
     upsertShot: (
       projectId: string,
       body: {

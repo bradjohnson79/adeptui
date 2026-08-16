@@ -3,7 +3,9 @@
  * Express and Standard are views over this hook. Do not duplicate API calls.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { api } from "../../../api";
 import { sceneCreatorApi } from "./sceneCreatorApi";
+import { normalizeProductionAspect, type ProductionAspectRatio } from "../../../workspacePrefs";
 import type {
   CinematicShotControls,
   SceneCreatorCamera,
@@ -36,8 +38,25 @@ const defaultCamera = (): SceneCreatorCamera => ({
   cinematic: { ...DEFAULT_CINEMATIC },
 });
 
+function readSceneCreatorQuery(): {
+  sheet_id?: string;
+  scene_id?: string;
+  shot_id?: string;
+  spatial_profile_id?: string;
+} {
+  if (typeof window === "undefined") return {};
+  const params = new URLSearchParams(window.location.search);
+  return {
+    sheet_id: params.get("sheet_id") || undefined,
+    scene_id: params.get("scene_id") || undefined,
+    shot_id: params.get("shot_id") || undefined,
+    spatial_profile_id: params.get("spatialProfileId") || params.get("handoffId") || undefined,
+  };
+}
+
 export function useSceneCreator(projectId: string) {
   const [workspace, setWorkspace] = useState<SceneCreatorWorkspace | null>(null);
+  const [loading, setLoading] = useState(true);
   const [shot, setShot] = useState<SceneShot | null>(null);
   const [sheetId, setSheetId] = useState("");
   const [sceneId, setSceneId] = useState("");
@@ -55,7 +74,9 @@ export function useSceneCreator(projectId: string) {
   const [cineCharacterId, setCineCharacterId] = useState("");
   const [cinePropId, setCinePropId] = useState("");
   const [cineInstruction, setCineInstruction] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>("");
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const initialQueryRef = useRef(readSceneCreatorQuery());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -101,17 +122,45 @@ export function useSceneCreator(projectId: string) {
   }, []);
 
   const refresh = useCallback(
-    async (query?: { sheet_id?: string; scene_id?: string; shot_id?: string }) => {
+    async (query?: { sheet_id?: string; scene_id?: string; shot_id?: string; spatial_profile_id?: string }) => {
+      const initial = initialQueryRef.current;
+      const shotId =
+        query && Object.prototype.hasOwnProperty.call(query, "shot_id")
+          ? query.shot_id
+          : shot?.id || initial.shot_id;
+      const profileId =
+        query && Object.prototype.hasOwnProperty.call(query, "spatial_profile_id")
+          ? query.spatial_profile_id
+          : initial.spatial_profile_id;
+      const nextSheetId =
+        query && Object.prototype.hasOwnProperty.call(query, "sheet_id")
+          ? query.sheet_id
+          : sheetId || initial.sheet_id || undefined;
+      const nextSceneId =
+        query && Object.prototype.hasOwnProperty.call(query, "scene_id")
+          ? query.scene_id
+          : sceneId || initial.scene_id || undefined;
       const data = await sceneCreatorApi.workspace(projectId, {
-        sheet_id: query?.sheet_id || sheetId || undefined,
-        scene_id: query?.scene_id || sceneId || undefined,
-        shot_id: query?.shot_id || shot?.id || undefined,
+        sheet_id: nextSheetId || undefined,
+        scene_id: nextSceneId || undefined,
+        shot_id: shotId || undefined,
+        spatial_profile_id: profileId || undefined,
       });
+      initialQueryRef.current = {};
       setWorkspace(data);
       setSheetId(data.selected_sheet_id || "");
       setSceneId(data.selected_scene_id || "");
+      setSelectedProfileId(data.selected_spatial_profile_id || "");
       const placed = (data.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id));
-      applyShot(data.selected_shot, placed);
+      if (data.workspace_reset && !data.selected_shot) {
+        applyShot(null, placed);
+        setIntent("");
+        setCamera(defaultCamera());
+        setCorrection("");
+        setCineInstruction("");
+      } else {
+        applyShot(data.selected_shot, placed);
+      }
       if (data.cinematographer) {
         setCinematographer(data.cinematographer);
         const selected = data.cinematographer.selected_camera_id || data.cinematographer.cameras?.[0]?.cameraId || "";
@@ -306,6 +355,64 @@ export function useSceneCreator(projectId: string) {
     },
     [refresh, sceneId, sheetId],
   );
+
+  const selectSpatialProfile = useCallback(
+    async (nextId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await sceneCreatorApi.selectSpatialProfile(projectId, nextId || "none");
+        setSelectedProfileId(res.selectedProfileId || "");
+        await refresh({
+          spatial_profile_id: res.selectedProfileId || undefined,
+          scene_id: res.sceneId || undefined,
+          sheet_id: res.sheetId || undefined,
+          shot_id: undefined,
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Spatial Profile could not be loaded.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [projectId, refresh],
+  );
+
+  const confirmResetWorkspace = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await sceneCreatorApi.resetWorkspace(projectId);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        for (const key of ["spatialProfileId", "handoffId", "scene_id", "sheet_id", "shot_id"]) {
+          url.searchParams.delete(key);
+        }
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+      initialQueryRef.current = {};
+      setSelectedProfileId("");
+      setSheetId("");
+      setSceneId("");
+      setIntent("");
+      setCamera(defaultCamera());
+      setCorrection("");
+      setCineInstruction("");
+      applyShot(null);
+      setResetConfirmOpen(false);
+      await refresh({
+        spatial_profile_id: undefined,
+        shot_id: undefined,
+        sheet_id: "",
+        scene_id: "",
+      });
+      setNotice("Scene Creator workspace cleared. Your Library and Spatial Profiles are unchanged.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reset the workspace. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }, [applyShot, projectId, refresh]);
 
   const newShot = useCallback(() => {
     setShot(null);
@@ -641,6 +748,16 @@ export function useSceneCreator(projectId: string) {
     approved,
     generating,
     refresh,
+    productionAspect: normalizeProductionAspect(workspace?.production_aspect_ratio),
+    setProductionAspect: async (ratio: ProductionAspectRatio) => {
+      if (!sceneId) return;
+      try {
+        await api.updateScene(projectId, sceneId, { aspect_ratio: ratio } as never);
+        await refresh({ scene_id: sceneId });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    },
     generate: finalRender,
     approve,
     retake,
@@ -649,6 +766,11 @@ export function useSceneCreator(projectId: string) {
     selectScene,
     selectShot,
     newShot,
+    selectSpatialProfile,
+    confirmResetWorkspace,
+    selectedProfileId,
+    resetConfirmOpen,
+    setResetConfirmOpen,
     setCinematic,
     pickCamera,
     toggleCharacter,

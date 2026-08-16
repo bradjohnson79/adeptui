@@ -74,6 +74,9 @@ describe("Scene Creator contracts", () => {
     expect(src).not.toContain("function ExpressLayout");
     expect(src).not.toContain("function ExpressMaskStage");
     expect(src).toContain("function StandardLayout");
+    expect(src).toContain("SpatialProfileBlock");
+    expect(src).toContain("scene-creator-spatial-profile-select");
+    expect(src).toContain("Reset Workspace");
     expect(src).toContain("Final Quality Render");
     expect(src).not.toContain("function CameraBlock");
     expect(panel).toContain("SceneCreatorExpressLauncher");
@@ -108,9 +111,12 @@ describe("Scene Creator contracts", () => {
     const inspector = standard.slice(standard.indexOf("scene-creator-standard__inspector"), standard.indexOf("scene-creator-standard__strip"));
     expect(browser).toContain("OrientationAccordion");
     expect(browser).toContain("RegionEditBlock");
+    expect(inspector).toContain("SpatialProfileBlock");
+    expect(inspector).toContain("EnvironmentBlock");
     expect(inspector).toContain("CinematographerPanel");
     expect(inspector).not.toContain("OrientationAccordion");
     expect(inspector).not.toContain("RegionEditBlock");
+    expect(browser).not.toContain("SpatialProfileBlock");
     expect(standard).toContain("StandardPreview");
     expect(src).toContain("CenterMaskCanvas");
     const cine = await import("node:fs").then((fs) =>

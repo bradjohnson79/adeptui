@@ -101,6 +101,12 @@ class CreateShotBody(BaseModel):
     generator: dict[str, Any] | None = None
 
 
+class ProductionHandoffBody(BaseModel):
+    scene_id: str = ""
+    sheet_id: str = ""
+    spatial_map_id: str = ""
+
+
 class GenerateShotBody(BaseModel):
     local_enabled: bool = True
     api_enabled: bool = False
@@ -391,9 +397,10 @@ def api_send_to_timeline(
 
 def _service_error(exc: Exception) -> HTTPException:
     from .ers_resolver import ErsResolveError
+    from .production_handoff import SceneCreatorHandoffError
     from .service import SceneCreatorError
 
-    if isinstance(exc, (SceneCreatorError, ErsResolveError, ValueError)):
+    if isinstance(exc, (SceneCreatorError, ErsResolveError, SceneCreatorHandoffError, ValueError)):
         return HTTPException(400, str(exc))
     logger.exception("Scene Creator error")
     return HTTPException(500, str(exc))
@@ -405,6 +412,7 @@ def api_workspace(
     sheet_id: str = "",
     scene_id: str = "",
     shot_id: str = "",
+    spatial_profile_id: str = "",
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     _require_project(db, project_id)
@@ -412,8 +420,70 @@ def api_workspace(
 
     try:
         return hydrate_workspace(
-            db, project_id, sheet_id=sheet_id, scene_id=scene_id, shot_id=shot_id
+            db,
+            project_id,
+            sheet_id=sheet_id,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            spatial_profile_id=spatial_profile_id,
         )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/production-handoff")
+def api_production_handoff(
+    project_id: str, body: ProductionHandoffBody | None = None, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .production_handoff import synchronize_production_handoff
+
+    payload = body or ProductionHandoffBody()
+    try:
+        return synchronize_production_handoff(
+            db,
+            project_id,
+            scene_id=payload.scene_id,
+            sheet_id=payload.sheet_id,
+            spatial_map_id=payload.spatial_map_id,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/spatial-profiles")
+def api_list_spatial_profiles(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .production_handoff import list_profiles, load_selection
+
+    selection = load_selection(db, project_id)
+    return {
+        "profiles": [p.model_dump() for p in list_profiles(db, project_id)],
+        "selectedProfileId": selection.selectedProfileId,
+        "workspaceReset": selection.workspaceReset,
+    }
+
+
+@router.post("/projects/{project_id}/spatial-profiles/{handoff_id}/select")
+def api_select_spatial_profile(
+    project_id: str, handoff_id: str, db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .production_handoff import select_profile
+
+    try:
+        return select_profile(db, project_id, handoff_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/workspace/reset")
+def api_reset_workspace(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .production_handoff import reset_workspace
+
+    try:
+        return reset_workspace(db, project_id)
     except Exception as exc:
         raise _service_error(exc) from exc
 

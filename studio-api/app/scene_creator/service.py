@@ -176,9 +176,11 @@ def hydrate_workspace(
     sheet_id: str = "",
     scene_id: str = "",
     shot_id: str = "",
+    spatial_profile_id: str = "",
 ) -> dict[str, Any]:
     from ..environment_reference_sheet.store import list_sheets, load_sheet
     from ..spatial_map.service import list_documents
+    from .production_handoff import list_profiles, load_profile, load_selection
 
     sheets = list_sheets(project_id)
     sheet_summaries = [
@@ -193,12 +195,25 @@ def hydrate_workspace(
         }
         for s in sheets
     ]
-    selected_sheet_id = (sheet_id or "").strip()
-    if not selected_sheet_id and sheets:
+    spatial_profiles = [p.model_dump() for p in list_profiles(db, project_id)]
+    selection = load_selection(db, project_id)
+    wanted_profile = (spatial_profile_id or "").strip()
+    if not wanted_profile and not selection.workspaceReset:
+        wanted_profile = (selection.selectedProfileId or "").strip()
+    selected_profile = load_profile(db, project_id, wanted_profile) if wanted_profile else None
+    if selected_profile and selected_profile.projectId != project_id:
+        selected_profile = None
+
+    selected_sheet_id = (sheet_id or "").strip() or (selected_profile.sheetId if selected_profile else "")
+    if not selected_sheet_id and sheets and not selection.workspaceReset:
         selected_sheet_id = sheets[0].sheetId
 
     sheet = load_sheet(project_id, selected_sheet_id) if selected_sheet_id else None
-    preferred_scene = (scene_id or "").strip() or (sheet.sceneId if sheet and sheet.sceneId else "")
+    preferred_scene = (
+        (scene_id or "").strip()
+        or (selected_profile.sceneId if selected_profile else "")
+        or (sheet.sceneId if sheet and sheet.sceneId else "")
+    )
 
     resolved = None
     cameras: list[dict[str, Any]] = []
@@ -208,6 +223,12 @@ def hydrate_workspace(
         try:
             package, runtime = resolve_ers_for_sheet(db, project_id, selected_sheet_id)
             cameras = list((package.metadata or {}).get("cameras") or [])
+            # Scene Intent handoff: the sheet provenance carries the snapshot
+            # (W3 stamps it at generation; W6 backfilled legacy sheets).
+            scene_intent_snapshot = None
+            if sheet is not None:
+                prov_details = getattr(getattr(sheet, "provenance", None), "details", None) or {}
+                scene_intent_snapshot = prov_details.get("sceneIntent") or None
             resolved = {
                 "sheet_id": selected_sheet_id,
                 "package_id": package.id,
@@ -216,6 +237,7 @@ def hydrate_workspace(
                 "atlas_asset_id": package.atlas_asset_id,
                 "ers_composite_asset_id": package.ers_composite_asset_id,
                 "style_context": package.style_context,
+                "scene_intent": scene_intent_snapshot,
             }
             for placement in package.placements or []:
                 if not isinstance(placement, dict):
@@ -315,7 +337,8 @@ def hydrate_workspace(
     wanted_shot = (shot_id or "").strip()
     if wanted_shot:
         selected_shot = next((s for s in shots if s.id == wanted_shot), None)
-    if selected_shot is None and shots:
+    skip_last_shot = bool(selection.workspaceReset) and not wanted_shot and selected_profile is None
+    if selected_shot is None and shots and not skip_last_shot:
         selected_shot = shots[-1]
 
     has_reference = bool(
@@ -366,6 +389,10 @@ def hydrate_workspace(
         "has_reference": has_reference,
         "cinematographer": cinematographer,
         "preview_capabilities": _workspace_preview_capabilities(bool(api_models)),
+        "production_aspect_ratio": getattr(scene, "aspect_ratio", None) or "16:9",
+        "spatial_profiles": spatial_profiles,
+        "selected_spatial_profile_id": selected_profile.handoffId if selected_profile else None,
+        "workspace_reset": bool(selection.workspaceReset) and selected_profile is None,
     }
 
 
@@ -463,17 +490,24 @@ def _enqueue_shot_candidates(
     from ..storyboard_jobs import enqueue_imagegen_job
 
     use_core = scene_image_core_enabled()
+    from ..aspect_fps import normalize_production_aspect, production_pixels
+    from ..db import Scene as SceneRow
+
     parsed = _shot_request_from_scene_shot(shot)
     body_base = compile_shot_prompt(db, project_id, parsed, ers_package=package)
     _apply_cinematic(body_base, shot, camera_record=camera_record, db=db, project_id=project_id)
+    scene_row = db.get(SceneRow, shot.scene_id) if getattr(shot, "scene_id", None) else None
+    aspect = normalize_production_aspect(getattr(scene_row, "aspect_ratio", None) if scene_row else None)
     draft = (quality_profile or "final").lower() == "draft"
+    quality = "draft" if draft else "final"
+    width, height = production_pixels(aspect, quality)
+    body_base["aspectRatio"] = aspect
+    body_base["width"] = width
+    body_base["height"] = height
     if draft:
         body_base["purpose"] = "scene_shot_preview"
         body_base["quality"] = "draft"
         body_base["allowDraft"] = True
-        if not use_core:
-            body_base["width"] = 512
-            body_base["height"] = 288
     else:
         body_base["purpose"] = "scene_shot_final"
 
@@ -592,6 +626,7 @@ def _enqueue_shot_candidates(
                     lock_model_family=True,
                     creative_context=dict(body.get("creativeContext") or {}) if isinstance(body.get("creativeContext"), dict) else {},
                     extra={k: v for k, v in body.items() if k not in {"forceWorkflowKey", "allow_force_workflow_key", "width", "height"}},
+                    aspect_ratio=str(body.get("aspectRatio") or aspect),
                 )
                 try:
                     result = image_core_generate(db, core_req)
@@ -1880,7 +1915,11 @@ def region_edit_shot(
         (f.get("label") for f in list_local_generator_families() if f.get("id") == family),
         family,
     )
-    provenance = f"LOCAL — {family_label} — {capability_label}"
+    if family == "nano-banana-fal":
+        family_label = "Nano Banana 2"
+        provenance = f"API — {family_label} — {capability_label}"
+    else:
+        provenance = f"LOCAL — {family_label} — {capability_label}"
     quality = "draft" if (stage or "preview").lower() == "preview" else "final"
     parent_version = getattr(parent, "camera_state_version", None) if parent else None
     parent_hash = getattr(parent, "camera_state_hash", "") if parent else ""

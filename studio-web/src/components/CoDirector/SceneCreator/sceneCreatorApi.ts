@@ -77,8 +77,16 @@ export const sceneCreatorApi = {
   ): Promise<SendToTimelineResponse> => api.sceneCreator.sendToTimeline(projectId, batchId, body),
   workspace: (
     projectId: string,
-    query?: { sheet_id?: string; scene_id?: string; shot_id?: string },
+    query?: { sheet_id?: string; scene_id?: string; shot_id?: string; spatial_profile_id?: string },
   ): Promise<SceneCreatorWorkspace> => api.sceneCreator.workspace(projectId, query),
+  productionHandoff: (
+    projectId: string,
+    body?: { scene_id?: string; sheet_id?: string; spatial_map_id?: string },
+  ) => api.sceneCreator.productionHandoff(projectId, body),
+  listSpatialProfiles: (projectId: string) => api.sceneCreator.listSpatialProfiles(projectId),
+  selectSpatialProfile: (projectId: string, handoffId: string) =>
+    api.sceneCreator.selectSpatialProfile(projectId, handoffId),
+  resetWorkspace: (projectId: string) => api.sceneCreator.resetWorkspace(projectId),
   upsertShot: (projectId: string, body: UpsertShotInput): Promise<{ shot: SceneShot }> =>
     api.sceneCreator.upsertShot(projectId, body),
   getShot: (projectId: string, shotId: string): Promise<{ shot: SceneShot }> =>

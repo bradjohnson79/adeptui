@@ -20,6 +20,7 @@ import type {
   SurfaceType,
 } from "./types";
 import { isAgentWork, isTerminal } from "./types";
+import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { normalizeErsError } from "../SpatialMap/ersErrorMessage";
 import "./agentWorkSurface.css";
 
@@ -37,6 +38,8 @@ export function AgentWorkSurface() {
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [pollAttempts, setPollAttempts] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [continueError, setContinueError] = useState<string | null>(null);
+  const [continuing, setContinuing] = useState(false);
   const [busyFrame, setBusyFrame] = useState<number | null>(null);
 
   const buildPack = useCallback(
@@ -185,6 +188,23 @@ export function AgentWorkSurface() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [pack, handleClose]);
 
+  const handleContinueToSceneCreator = useCallback(async () => {
+    setContinueError(null);
+    setContinuing(true);
+    try {
+      await persistThenOpenSceneCreator({
+        projectId,
+        sceneId: pack?.scene_id || undefined,
+        onGoTab: uiContext.onGoTab,
+        onClose: handleClose,
+      });
+    } catch (err) {
+      setContinueError(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+    } finally {
+      setContinuing(false);
+    }
+  }, [handleClose, pack?.scene_id, projectId, uiContext.onGoTab]);
+
   if (!pack || !isAgentWork(pack)) {
     return null;
   }
@@ -194,6 +214,7 @@ export function AgentWorkSurface() {
   const total = pack.child_jobs.length;
   const failed = pack.child_jobs.filter((c) => c.status === "failed").length;
   const nonTerminal = !isTerminal(pack);
+
   const cancelLabel = cancelling ? "Cancelling…" : pack.status === "cancelled" ? "Cancelled" : "Cancel";
 
   return (
@@ -310,12 +331,21 @@ export function AgentWorkSurface() {
             <button
               type="button"
               className="ui-btn ui-btn--primary"
-              onClick={handleClose}
+              onClick={() => {
+                if (surfaceType === "atlas_shot_generation") {
+                  handleClose();
+                  return;
+                }
+                void handleContinueToSceneCreator();
+              }}
+              disabled={continuing}
               data-testid="agent-work-continue"
             >
-              {surfaceType === "atlas_shot_generation" ? "Continue to Spatial Map" :
-               surfaceType === "ers_generation" ? "Continue to Spatial Map" :
-               "Continue to Scene Creator"}
+              {surfaceType === "atlas_shot_generation"
+                ? "Continue to Spatial Map"
+                : continuing
+                  ? "Opening Scene Creator…"
+                  : "Continue to Scene Creator"}
             </button>
           )}
           {pack.result_asset_ids.length > 0 && (
@@ -355,6 +385,11 @@ export function AgentWorkSurface() {
           </button>
         </div>
       )}
+      {continueError ? (
+        <p className="agent-work-surface__error-detail" role="alert" data-testid="agent-work-continue-error">
+          {continueError}
+        </p>
+      ) : null}
 
       {pack.error && (
         <div className="agent-work-surface__error-detail" role="alert">

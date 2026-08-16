@@ -37,6 +37,7 @@ import { PlacementSlot } from "./PlacementSlot";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import { SpatialGrid, toGridPlacements } from "./SpatialGrid";
 import { spatialMapApi } from "./spatialMapApi";
+import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { CameraInspector } from "./CameraInspector";
 import {
   assignedSpatialMapCharacters,
@@ -137,6 +138,19 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
     setBusy({ loading: false, error: null });
   }, [projectId]);
+
+  const handleUseInSceneCreator = useCallback(async () => {
+    setOpMsg(null);
+    try {
+      await persistThenOpenSceneCreator({
+        projectId,
+        spatialMapId: document?.id || undefined,
+        onGoTab,
+      });
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+    }
+  }, [document?.id, onGoTab, projectId]);
 
   useEffect(() => {
     void loadMap();
@@ -1414,7 +1428,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               ersCompositeAssetId={ersCompositeAssetId}
               onRegenerate={() => void startErsGeneration()}
               onOpenInLibrary={() => onGoTab?.("library")}
-              onUseInSceneCreator={() => onGoTab?.("scene_creator")}
+              onUseInSceneCreator={() => void handleUseInSceneCreator()}
               regenerateDisabled={isGenerating}
             />
           ) : null}

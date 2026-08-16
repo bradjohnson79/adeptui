@@ -1,0 +1,67 @@
+{
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+  "shot3Id": "2a58894b-b5d4-4e86-b068-7cd156199d98",
+  "apiHealth": "http://127.0.0.1:8758/api/health 200",
+  "continue1": {
+    "handoffId": "792376c5-013c-51dd-8d3a-dae5834ae77e",
+    "revision": 1,
+    "noop": false,
+    "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+    "sheetId": "db095959-5678-4f11-98d1-e93e0810d119",
+    "ersPackageId": "1dd886bf-2ded-4ece-9f6b-6021bc1fb1f1",
+    "ersLibraryAssetId": "21927403-e090-49dc-ab03-3169d446fd1f",
+    "spatialMapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+    "characterIds": ["c49371ed-ba6b-4c16-ba98-a8b28b72118b"],
+    "propIds": ["78c5be96-cd03-4969-9f8b-655fcefd28ea"],
+    "shotIds": [
+      "88539183-6fd2-495a-aa48-e406a3653cd5",
+      "3cb60593-ef82-434a-9043-3b31abe8c0ee",
+      "2a58894b-b5d4-4e86-b068-7cd156199d98"
+    ]
+  },
+  "continue2": {
+    "handoffId": "792376c5-013c-51dd-8d3a-dae5834ae77e",
+    "revision": 2,
+    "noop": true,
+    "sameHandoffId": true,
+    "sameShotIds": true,
+    "noNewShots": true,
+    "shotsBeforeCount": 3,
+    "shotsAfterCount": 3
+  },
+  "workspaceHydrate": {
+    "selected_spatial_profile_id": "792376c5-013c-51dd-8d3a-dae5834ae77e",
+    "selected_scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+    "selected_sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+    "ers_package_id": "1dd886bf-2ded-4ece-9f6b-6021bc1fb1f1",
+    "ers_composite": "21927403-e090-49dc-ab03-3169d446fd1f"
+  },
+  "shot3PointersAfterHandoff": {
+    "id": "2a58894b-b5d4-4e86-b068-7cd156199d98",
+    "scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+    "sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+    "ers_package_id": "1dd886bf-2ded-4ece-9f6b-6021bc1fb1f1",
+    "character_ids": ["c49371ed-ba6b-4c16-ba98-a8b28b72118b"]
+  },
+  "reset": {
+    "ok": true,
+    "selectedProfileId": null,
+    "workspaceReset": true,
+    "profileSurvived": true,
+    "noDeleteApis": true
+  },
+  "reselect": {
+    "selectedProfileId": "792376c5-013c-51dd-8d3a-dae5834ae77e",
+    "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+    "sheetId": "db095959-5678-4f11-98d1-e93e0810d119",
+    "ersPackageId": "1dd886bf-2ded-4ece-9f6b-6021bc1fb1f1"
+  },
+  "tests": {
+    "backend": "5 passed tests/test_scene_spatial_profile.py + workspace hydrate (6 passed including hydrate)",
+    "frontend": "10 passed persistThenOpenSceneCreator + sceneCreatorContracts",
+    "playwright": "2 passed tests/e2e/scene-creator/spatial-profile-reset.spec.ts chromium",
+    "playwrightUi": "http://127.0.0.1:4173 (studio-web dist preview)",
+    "playwrightApi": "http://127.0.0.1:8758"
+  }
+}

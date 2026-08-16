@@ -1,0 +1,204 @@
+"""Scene Spatial Profile / production-handoff — pointer identity and idempotency."""
+
+from __future__ import annotations
+
+import uuid
+
+from app.environment_reference_sheet import orchestrator, store
+from app.scene_creator.production_handoff import (
+    list_profiles,
+    load_selection,
+    reset_workspace,
+    select_profile,
+    synchronize_production_handoff,
+)
+from app.scene_creator.service import hydrate_workspace
+from app.spatial_map.ers_persistence import list_scene_shots, save_scene_shot
+from app.spatial_map.ers_contracts import SceneShot
+from app.spatial_map.schemas import (
+    SpatialCharacterPlacementBody,
+    SpatialMapCreateBody,
+    SpatialPropPlacementBody,
+)
+from app.spatial_map.service import create_document, place_character, place_prop
+
+
+def _session():
+    from app.db import SessionLocal, init_db
+
+    init_db()
+    return SessionLocal()
+
+
+def _create_project(name: str = "Spatial Profile Test") -> str:
+    from app.db import Project, SessionLocal, init_db
+
+    init_db()
+    db = SessionLocal()
+    try:
+        project_id = str(uuid.uuid4())
+        db.add(Project(id=project_id, name=name))
+        db.commit()
+        return project_id
+    finally:
+        db.close()
+
+
+def _save_sheet(project_id: str, *, scene_id: str | None = None, composite: str = "ers-lib-1"):
+    sheet = orchestrator.create_sheet(
+        project_id=project_id,
+        name="Café ERS",
+        description="Warm café interior.",
+        scene_id=scene_id,
+    )
+    sheet.ers_composite_asset_id = composite
+    sheet.status = "registered"
+    store.save_sheet(sheet)
+    return sheet
+
+
+def test_production_handoff_is_pointer_only_and_idempotent() -> None:
+    project_id = _create_project("Schnick Coffee")
+    db = _session()
+    try:
+        from app.scene_creator.service import ensure_scene_id
+
+        scene = ensure_scene_id(db, project_id, "")
+        sheet = _save_sheet(project_id, scene_id=scene.id, composite="ers-asset-canonical")
+        doc = create_document(db, project_id, SpatialMapCreateBody(title="Schnick Coffee", sceneId=scene.id))
+        place_character(
+            db,
+            project_id,
+            doc.id,
+            SpatialCharacterPlacementBody(characterId="korri-1", label="Korri", slotIndex=0),
+        )
+        place_prop(
+            db,
+            project_id,
+            doc.id,
+            SpatialPropPlacementBody(label="Cup", propId="prop-cup-1"),
+        )
+
+        first = synchronize_production_handoff(db, project_id, scene_id=scene.id, sheet_id=sheet.sheetId)
+        second = synchronize_production_handoff(db, project_id, scene_id=scene.id, sheet_id=sheet.sheetId)
+
+        assert first["handoffId"] == second["handoffId"]
+        assert first["sceneId"] == scene.id
+        assert first["sheetId"] == sheet.sheetId
+        assert first["ersLibraryAssetId"] == "ers-asset-canonical"
+        assert first["spatialMapId"] == doc.id
+        assert second["noop"] is True
+        assert second["revision"] == first["revision"] + 1
+        assert "profile" in first
+        profile = first["profile"]
+        assert "ersPackageId" in profile
+        assert profile.get("copiedErs") is None
+        shots_a = [s.id for s in list_scene_shots(db, project_id, scene_id=scene.id)]
+        shots_b = [s.id for s in list_scene_shots(db, project_id, scene_id=scene.id)]
+        assert shots_a == shots_b
+        assert len(list_profiles(db, project_id)) == 1
+        assert "korri-1" in first["profile"]["characterIds"]
+        assert "prop-cup-1" in first["profile"]["propIds"]
+    finally:
+        db.close()
+
+
+def test_handoff_does_not_create_shots_when_scene_already_has_them() -> None:
+    project_id = _create_project()
+    db = _session()
+    try:
+        from app.scene_creator.service import ensure_scene_id
+
+        scene = ensure_scene_id(db, project_id, "")
+        sheet = _save_sheet(project_id, scene_id=scene.id)
+        existing = SceneShot(project_id=project_id, scene_id=scene.id, sheet_id=sheet.sheetId, intent="Keep me")
+        save_scene_shot(db, project_id, existing)
+        result = synchronize_production_handoff(db, project_id, scene_id=scene.id, sheet_id=sheet.sheetId)
+        shots = list_scene_shots(db, project_id, scene_id=scene.id)
+        assert len(shots) == 1
+        assert shots[0].id == existing.id
+        assert shots[0].intent == "Keep me"
+        assert shots[0].sheet_id == sheet.sheetId
+        assert result["profile"]["shotIds"] == [existing.id]
+    finally:
+        db.close()
+
+
+def test_reset_clears_selection_without_deleting_profile() -> None:
+    project_id = _create_project()
+    db = _session()
+    try:
+        from app.scene_creator.service import ensure_scene_id
+
+        scene = ensure_scene_id(db, project_id, "")
+        sheet = _save_sheet(project_id, scene_id=scene.id)
+        result = synchronize_production_handoff(db, project_id, scene_id=scene.id, sheet_id=sheet.sheetId)
+        reset = reset_workspace(db, project_id)
+        assert reset["selectedProfileId"] is None
+        assert reset["workspaceReset"] is True
+        assert list_profiles(db, project_id)[0].handoffId == result["handoffId"]
+        selection = load_selection(db, project_id)
+        assert selection.selectedProfileId is None
+        ws = hydrate_workspace(db, project_id)
+        assert ws["selected_spatial_profile_id"] is None
+        assert ws["workspace_reset"] is True
+        assert any(p["handoffId"] == result["handoffId"] for p in ws["spatial_profiles"])
+        selected = select_profile(db, project_id, result["handoffId"])
+        assert selected["selectedProfileId"] == result["handoffId"]
+        restored = hydrate_workspace(db, project_id, spatial_profile_id=result["handoffId"])
+        assert restored["selected_spatial_profile_id"] == result["handoffId"]
+        assert restored["selected_sheet_id"] == sheet.sheetId
+    finally:
+        db.close()
+
+
+def test_handoff_ids_match_generation_context() -> None:
+    project_id = _create_project("Identity")
+    db = _session()
+    try:
+        from app.codirector.entity_resolver import compile_shot_prompt
+        from app.scene_creator.ers_resolver import resolve_ers_for_sheet
+        from app.scene_creator.service import _apply_cinematic, _shot_request_from_scene_shot, ensure_scene_id
+
+        scene = ensure_scene_id(db, project_id, "")
+        sheet = _save_sheet(project_id, scene_id=scene.id, composite="ers-lib-identity")
+        result = synchronize_production_handoff(db, project_id, scene_id=scene.id, sheet_id=sheet.sheetId)
+        shots = list_scene_shots(db, project_id, scene_id=scene.id)
+        assert shots
+        shot = shots[0]
+        package, _runtime = resolve_ers_for_sheet(db, project_id, shot.sheet_id)
+        body = compile_shot_prompt(db, project_id, _shot_request_from_scene_shot(shot), package)
+        _apply_cinematic(body, shot)
+        ctx = body["creativeContext"]
+        assert ctx["sceneId"] == result["sceneId"]
+        assert ctx["sheetId"] == result["sheetId"]
+        assert ctx["ers_package_id"] == result["ersPackageId"]
+        package_composite = str(getattr(package, "ers_composite_asset_id", "") or "")
+        if package_composite:
+            assert package_composite == result["ersLibraryAssetId"]
+        assert ctx["sheetId"] == result["sheetId"]
+        assert shot.character_ids == result["profile"]["characterIds"] or all(
+            cid in (shot.character_ids or []) for cid in result["profile"]["characterIds"]
+        )
+    finally:
+        db.close()
+
+
+def test_select_profile_is_project_scoped() -> None:
+    a = _create_project("A")
+    b = _create_project("B")
+    db = _session()
+    try:
+        from app.scene_creator.service import ensure_scene_id
+
+        scene = ensure_scene_id(db, a, "")
+        sheet = _save_sheet(a, scene_id=scene.id)
+        result = synchronize_production_handoff(db, a, scene_id=scene.id, sheet_id=sheet.sheetId)
+        try:
+            select_profile(db, b, result["handoffId"])
+            raised = False
+        except Exception:
+            raised = True
+        assert raised is True
+    finally:
+        db.close()

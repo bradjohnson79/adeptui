@@ -255,6 +255,26 @@ export type SceneCreatorWorkspace = {
     local?: { status?: string; label?: string };
     api?: { status?: string; label?: string; discovered?: boolean; noneLabel?: string };
   } | null;
+  production_aspect_ratio?: string;
+  spatial_profiles?: SpatialProfile[];
+  selected_spatial_profile_id?: string | null;
+  workspace_reset?: boolean;
+};
+
+export type SpatialProfile = {
+  handoffId: string;
+  name: string;
+  displayName?: string;
+  revision?: number;
+  sceneId?: string;
+  sheetId?: string;
+  spatialMapId?: string;
+  ersPackageId?: string;
+  ersLibraryAssetId?: string;
+  aspectRatio?: string;
+  characterIds?: string[];
+  propIds?: string[];
+  shotIds?: string[];
 };
 
 export const DEFAULT_CINEMATIC: CinematicShotControls = {

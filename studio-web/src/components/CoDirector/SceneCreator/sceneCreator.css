@@ -645,3 +645,37 @@
   padding: 0.4rem;
   border-radius: 6px;
 }
+
+.scene-creator-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.scene-creator-profile select {
+  width: 100%;
+}
+
+.scene-creator-profile__reset {
+  align-self: flex-start;
+  font-size: 0.8rem;
+}
+
+.scene-creator-reset-dialog {
+  border: 1px solid var(--border, #2c3346);
+  background: var(--panel-2, #1c2130);
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+}
+
+.scene-creator-reset-dialog h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.95rem;
+}
+
+.scene-creator-reset-dialog p {
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
