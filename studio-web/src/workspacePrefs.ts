@@ -147,6 +147,23 @@ export const ASPECT_PRESETS = [
 
 export type AspectPreset = (typeof ASPECT_PRESETS)[number];
 
+/** Scene Creator + Timeline Generator production contract. Project Settings may keep the wider list. */
+export const PRODUCTION_ASPECTS = ["1:1", "4:3", "16:9", "21:9"] as const;
+export type ProductionAspectRatio = (typeof PRODUCTION_ASPECTS)[number];
+export const DEFAULT_PRODUCTION_ASPECT: ProductionAspectRatio = "16:9";
+export const PRODUCTION_PIXELS: Record<ProductionAspectRatio, { draft: [number, number]; final: [number, number] }> = {
+  "1:1": { draft: [512, 512], final: [1024, 1024] },
+  "4:3": { draft: [512, 384], final: [1024, 768] },
+  "16:9": { draft: [512, 288], final: [1280, 720] },
+  "21:9": { draft: [672, 288], final: [1344, 576] },
+};
+
+export function normalizeProductionAspect(raw?: string | null): ProductionAspectRatio {
+  const v = (raw || "").trim();
+  if ((PRODUCTION_ASPECTS as readonly string[]).includes(v)) return v as ProductionAspectRatio;
+  return DEFAULT_PRODUCTION_ASPECT;
+}
+
 export const FPS_OPTIONS = ["auto", 12, 16, 18, 24, 25, 30, 48, 50, 60] as const;
 
 export const STYLE_PRESETS = [
