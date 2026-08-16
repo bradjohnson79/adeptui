@@ -3,6 +3,7 @@
 **Date:** 2026-08-15  
 **Branch:** `beta`  
 **Starting SHA:** `ad6423a`  
+**Product SHA:** `a059818`  
 **Hosted UI:** `https://adeptui.vercel.app` (this feature certified against production `studio-web` dist preview, not a new Vercel SHA)  
 **Studio API:** `http://127.0.0.1:8758/` `/api/health` **200**  
 **Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`  
