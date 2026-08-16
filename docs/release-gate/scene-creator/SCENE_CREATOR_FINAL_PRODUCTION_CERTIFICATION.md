@@ -1,5 +1,89 @@
 # SCENE CREATOR FINAL PRODUCTION CERTIFICATION
 
+**Date:** 2026-08-15 (FLUX Add diagnostic closure)  
+**Branch:** `beta`  
+**Product SHA:** `c45ac84` (recommend lockstep; no product code this pass)  
+**HEAD SHA:** `4c44936` (prior cert) — this docs commit follows  
+**Vercel Production SHA:** `4c44936` (docs-only follow-up expected; no product change)  
+**Hosted UI:** `https://adeptui.vercel.app`  
+**Studio API:** `http://127.0.0.1:8758/` `/api/health` **200**  
+**Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`  
+**Scene:** `e4550745-f0ef-44c8-99a5-ef9e20bd47d2`  
+**Shot:** `2a58894b-b5d4-4e86-b068-7cd156199d98` (Shot 3, ECU Korri with cup, 1280×720)  
+**Source take A:** `e0d3af5e-b63d-4974-b999-7c5543f7624e`  
+**Camera hash:** `542a31ee7e39cb76`  
+**Flag:** `SCENE_IMAGE_CORE=1`  
+**GPU:** RTX 5090. Certified `flux.img2img` graph not changed.
+
+This is the single governing document for this milestone (Build Law 30). Newest run on top. Preserve: Z-Image Add/Remove NO-GO, FLUX Add smear NO-GO, this diagnostic Case 5.
+
+`qwen.edit` stays unpublished. Do not resurrect `:8760`. Never `POST /api/projects`. Recommend ≠ routing.
+
+## Verdict
+
+```text
+NO-GO — SCENE CREATOR PRODUCTION SYSTEM NOT CERTIFIED END TO END
+```
+
+Independent visual verifier ([Visual Add diagnostic FAIL](f12fec45-d3db-4cf4-bff9-f441cdc04718)):
+
+```text
+FAILED — Add A/B/C produced oval wood-grain slat smear, not a recognizable napkin or apple
+```
+
+## Blocker (this pass) — Case 5
+
+Three controlled FLUX Add diagnostics on Shot 3. Product Add prefix, graph, sampler, and providers were **not** changed. Composite remained valid (unmasked Korri/cup stable). FLUX `flux.img2img` + region composite **cannot insert a recognizable object** into a masked region on this ECU.
+
+| Diag | Prompt | Mask | Expand / denoise / grow | Job | Asset | Visual |
+|---|---|---|---|---|---|---|
+| A | Strong napkin (white, rectangular, folded, fully visible) | Same failed geometry `(0.00, 0.62, 0.14, 0.95)` hair/hand/chair `mask-c1baaaa4b290` 1280×720 | `wide` / **0.94** / **14** | `85e400f3-5d51-4484-bd8c-3041f1d14670` | `b0f2882d-6e3a-4d54-a16e-1e7a6db1870e` | **FAIL** — tan oval, horizontal slats; no napkin |
+| B | Same strong napkin | Far-bottom-right counter `(0.86, 0.70, 0.995, 0.96)` `mask-160abfe31129` 1280×720 | `wide` / **0.94** / **14** | `ceae13b8-9a5d-4cfe-8ee1-3b3b8540276e` | `e90609c8-3044-4bc6-b746-ecb6b1925b1a` | **FAIL** — circular wood-grain blob; no napkin |
+| C | Bright red apple (not certifiable) | Same B surface mask | `wide` / **0.94** / **14** | `fd3da13c-2da3-48da-9291-682932bda5f0` | `9d50e05b-42f5-43d0-9a93-922c60c93f89` | **FAIL** — same oval wood-grain smear; no apple |
+
+Diagnosis confirmed:
+
+- Prompt-only (A) does not fix Add.
+- Cleaner surface mask (B) does not fix Add.
+- FLUX Add cannot synthesize even a simple inserted object (C).
+- Composite did not clip a hidden napkin (inside-region smear is the generated content).
+- Prior cert `expand=tight` was not the cause (A/B/C used product `wide` / denoise 0.94).
+
+No Add prefix change (A did not prove prompt was the missing piece). No graph/sampler/provider work. Stop rule.
+
+## Gates
+
+| Gate | Result |
+| --- | --- |
+| Add visual | FAIL |
+| Remove | PASS (reuse `186f04f2` / `73f59257`) |
+| Modify | PASS (reuse `4ec0bfc4` / `cf0f0279`) |
+| Replace | PASS (reuse `47dbe065` / `59f36901`) |
+| Final inheritance | N/A — stop before chain |
+| Camera preservation | PASS — hash `542a31ee7e39cb76` on A/B/C |
+| Approve | N/A |
+| Reload | N/A |
+| Library | N/A |
+| Timeline | N/A |
+| Hosted | N/A — no product change; A–T not run |
+| A–T | N/A |
+| Independent visual | FAIL |
+
+## What this pass changed (code)
+
+None. Case 5. Do not manufacture a product deploy.
+
+## Stopped
+
+- Inheritance A → Remove B → Add C → Approve C → FLUX Final D: **not run**
+- Hosted A–T: **not run**
+
+Pixels: `artifacts/scene-creator/flux-add-diag/` (`a_full.png`, `b_full.png`, `c_full.png`).
+
+---
+
+# Historical NO-GO (FLUX Add smear, first closure) — audit trail
+
 **Date:** 2026-08-15 (FLUX closure run)  
 **Branch:** `beta`  
 **Implementation SHA:** `c45ac84` (recommend lockstep)  
