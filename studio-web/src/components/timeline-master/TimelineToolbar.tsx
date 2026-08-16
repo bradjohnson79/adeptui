@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
+import { generatorOptionsFromPayload } from "../../timelineMaster/draftCapabilities";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import { HelpTip } from "../HelpTip";
 import {
@@ -131,6 +132,30 @@ export function TimelineToolbar({
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [generatorOptions, setGeneratorOptions] = useState(() => [] as ReturnType<typeof generatorOptionsFromPayload>);
+
+  useEffect(() => {
+    let alive = true;
+    void api.directorTimelineGenerators().then((payload) => {
+      if (!alive) return;
+      setGeneratorOptions(generatorOptionsFromPayload(payload));
+    }).catch(() => {
+      if (alive) setGeneratorOptions([]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const selectedBatch = useMemo(
+    () => (selection.kind === "batch" ? master?.batchBlocks.find((b) => b.id === selection.id) : null),
+    [master, selection],
+  );
+  const selectedGen = generatorOptions.find((g) => g.id === selectedBatch?.generatorId)
+    || generatorOptions.find((g) => g.id === master?.batchBlocks[0]?.generatorId);
+  const draftAvailable = (selectedGen?.draftPathway || "none") !== "none";
+  const generating = (master?.batchBlocks || []).some((b) => b.status === "Generating");
+  const canStop = generating && (selectedGen?.supportsQueuedCancel || selectedGen?.supportsRunningCancel);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -448,11 +473,12 @@ export function TimelineToolbar({
       <button
         type="button"
         className="primary"
-        title="Generate the full Scene with the Timeline orchestrator"
-        aria-label="Generate the full Scene with the Timeline orchestrator"
+        title={draftAvailable ? "Generate a low-cost preview first" : "Generate the full Scene"}
+        aria-label={draftAvailable ? "Generate Draft for the full Scene" : "Generate the full Scene"}
+        data-testid="timeline-generate-scene"
         onClick={() => void generateScene("full")}
       >
-        Generate
+        {draftAvailable ? "Generate Draft" : "Generate"}
       </button>
       {onOpenRetake ? (
         <button
@@ -474,8 +500,28 @@ export function TimelineToolbar({
           data-testid="timeline-gen-batch"
           onClick={() => void generateScene("selected")}
         >
-          Gen Batch
+          {draftAvailable ? "Draft Batch" : "Gen Batch"}
         </button>
+      ) : null}
+      {generating && canStop ? (
+        <button
+          type="button"
+          data-testid="timeline-toolbar-stop"
+          title="Stop the current local generation"
+          aria-label="Stop the current local generation"
+          onClick={() =>
+            void run(async () => {
+              await api.directorTimelineCancel(projectId, scene.id, { action: "cancel_active_local_job" });
+            })
+          }
+        >
+          Stop
+        </button>
+      ) : null}
+      {generating && !canStop ? (
+        <span className="scene-meta" data-testid="timeline-toolbar-cancel-unavailable">
+          Provider is rendering — cancellation unavailable
+        </span>
       ) : null}
       {master?.mode === "video_finishing" ? (
         <button

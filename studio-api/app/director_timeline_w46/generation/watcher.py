@@ -45,6 +45,10 @@ def start_completion_watcher(
                 try:
                     if status.status == "completed":
                         result = adapter.collect_result(submission)
+                        draft = bool(
+                            (submission.providerMetadata or {}).get("draftMode")
+                            or (result.providerMetadata or {}).get("draftMode")
+                        )
                         apply_shared_completion(
                             db,
                             project_id=project_id,
@@ -53,7 +57,18 @@ def start_completion_watcher(
                             execution_snapshot_id=execution_snapshot_id,
                             result=result,
                             job=submission,
-                            auto_approve=True,
+                            auto_approve=not draft,
+                        )
+                    elif status.status == "cancelled":
+                        _mark_job_failed(
+                            db,
+                            project_id,
+                            scene_id,
+                            batch_id,
+                            execution_snapshot_id,
+                            status.errorCode or "CANCELLED",
+                            status.errorMessage or "Cancelled",
+                            cancelled=True,
                         )
                     else:
                         _mark_job_failed(
@@ -125,6 +140,8 @@ def _mark_job_failed(
     execution_snapshot_id: str,
     error_code: str | None,
     error_message: str | None,
+    *,
+    cancelled: bool = False,
 ) -> None:
     from .. import store
     from ..contracts import SceneTimelineMaster
@@ -146,11 +163,11 @@ def _mark_job_failed(
             flush=True,
         )
         return
-    batch.status = "Failed"
+    batch.status = "Cancelled" if cancelled else "Failed"
     for job in batch.generationJobs:
         if job.executionSnapshotId == execution_snapshot_id:
-            job.status = "failed"
-            job.error = error_message or error_code or "failed"
+            job.status = "cancelled" if cancelled else "failed"
+            job.error = error_message or error_code or ("cancelled" if cancelled else "failed")
     store.save_master(db, project_id, scene_id, master)
     # SEQUENTIAL_SUBMISSION_CHAIN: Failed is a terminal state — free the
     # provider slot for the next Queued batch (no-op when none queued).

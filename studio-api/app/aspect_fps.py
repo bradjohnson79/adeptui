@@ -17,6 +17,16 @@ ASPECT_PRESETS = (
     "custom",
 )
 
+# Shared production contract for Scene Creator + Timeline Generator.
+PRODUCTION_ASPECTS = ("1:1", "4:3", "16:9", "21:9")
+DEFAULT_PRODUCTION_ASPECT = "16:9"
+PRODUCTION_PIXELS: dict[str, dict[str, tuple[int, int]]] = {
+    "1:1": {"draft": (512, 512), "final": (1024, 1024)},
+    "4:3": {"draft": (512, 384), "final": (1024, 768)},
+    "16:9": {"draft": (512, 288), "final": (1280, 720)},
+    "21:9": {"draft": (672, 288), "final": (1344, 576)},
+}
+
 FPS_CHOICES = (12, 16, 18, 24, 25, 30, 48, 50, 60)
 
 # Engine → allowed aspect labels (approximate; UI warns when mismatched)
@@ -105,3 +115,18 @@ def validate_engine_aspect(engine: str, aspect: str) -> list[str]:
             f"Selected {aspect} may be remapped or rejected."
         )
     return warnings
+
+
+def normalize_production_aspect(raw: str | None) -> str:
+    """Missing / unknown / custom without pixels → 16:9."""
+    aspect = (raw or "").strip() or DEFAULT_PRODUCTION_ASPECT
+    if aspect in PRODUCTION_ASPECTS:
+        return aspect
+    return DEFAULT_PRODUCTION_ASPECT
+
+
+def production_pixels(aspect: str | None, quality: str = "final") -> tuple[int, int]:
+    """Adept production intent pixels. Providers may remap to a legal size."""
+    key = normalize_production_aspect(aspect)
+    bucket = "draft" if (quality or "").strip().lower() in {"draft", "preview"} else "final"
+    return PRODUCTION_PIXELS[key][bucket]

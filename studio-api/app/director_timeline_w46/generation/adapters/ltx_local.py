@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from ....db import Job, SessionLocal
+from ....db import Asset, Job, SessionLocal
 from ..adapter import validate_against_capabilities
 from ..contracts import (
     NormalizedJobStatus,
@@ -44,8 +44,8 @@ def _capabilities() -> VideoGeneratorCapabilities:
         maximumReferenceVideos=0,
         maximumReferenceAudio=0,
         supportedDurations=[5.0, 8.0, 10.0, 15.0, 20.0],
-        supportedResolutions=["1280x720", "768x512", "3840x2160"],
-        supportedAspectRatios=["16:9", "9:16"],
+        supportedResolutions=["1280x720", "768x432", "672x288", "1344x576", "512x512", "1024x1024", "512x384", "1024x768"],
+        supportedAspectRatios=["1:1", "4:3", "16:9", "21:9", "9:16"],
         supportedFps=[24, 30, 48, 50],
         supportsSeed=True,
         supportsNegativePrompt=True,
@@ -61,6 +61,13 @@ def _capabilities() -> VideoGeneratorCapabilities:
         },
         executable=True,
         notes="Local Comfy LTX path via studio render_scene jobs. Supports LTX 2.3 and 2.5 variants.",
+        draftPathway="local_live",
+        supportsQueuedCancel=True,
+        supportsRunningCancel=True,
+        finalRequiresNewGeneration=True,
+        draftResolution="768x432",
+        finalResolution="1280x720",
+        supportsImageAndVideoTogether=False,
     )
 
 
@@ -103,12 +110,32 @@ class LtxLocalAdapter:
             "generationMode": request.generationMode,
             "timelineGeneration": True,
             "fallbackAllowed": bool(request.fallbackAllowed),
+            "continuityBridgeId": request.continuityBridgeId,
+            "lastFrameAssetId": request.lastFrameAssetId,
+            "tailAssetId": request.tailAssetId,
+            "aspectRatio": request.aspectRatio,
+            "resolution": request.resolution,
+            "draftMode": bool(request.providerOptions.get("draftMode")),
+            "continuityStrategy": request.continuityStrategy
+            if request.continuityStrategy not in ("native_tail", "native_extend")
+            else "last_frame_i2v",
         }
 
         if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
             params["fast_mode"] = bool(request.providerOptions.get("fast_generation", True))
             params["generate_audio"] = bool(request.providerOptions.get("audio_generation", True))
             params["variant"] = gen_id
+        elif request.providerOptions.get("fast_generation"):
+            params["fast_mode"] = True
+
+        res = str(request.resolution or "")
+        if "x" in res:
+            try:
+                w_s, h_s = res.lower().split("x", 1)
+                params["width"] = int(w_s)
+                params["height"] = int(h_s)
+            except ValueError:
+                pass
 
         db: Session = SessionLocal()
         try:
@@ -119,7 +146,11 @@ class LtxLocalAdapter:
                 kind="render_scene",
                 status="queued",
                 progress=0.0,
-                message="Timeline batch LTX job queued",
+                message=(
+                    "Timeline batch LTX draft queued"
+                    if params.get("draftMode")
+                    else "Timeline batch LTX job queued"
+                ),
                 stage="queued",
                 params_json=json.dumps(params),
             )
@@ -128,21 +159,28 @@ class LtxLocalAdapter:
         finally:
             db.close()
 
-        # Best-effort enqueue into async worker when available.
+        # Enqueue into the in-process JobQueue. The Timeline generate route is
+        # sync (threadpool), so hop onto the worker event loop — never silently
+        # skip because `worker` is not an exported alias.
         try:
-            from ....queue_worker import worker
+            import asyncio
 
-            if worker is not None and hasattr(worker, "enqueue"):
-                import asyncio
+            from ....queue_worker import job_queue
 
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(worker.enqueue(job_id))
+            if job_queue is not None and hasattr(job_queue, "enqueue"):
+                task = getattr(job_queue, "_task", None)
+                worker_loop = task.get_loop() if task is not None else None
+                if worker_loop is not None and worker_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(job_queue.enqueue(job_id), worker_loop)
+                else:
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop and loop.is_running():
+                        loop.create_task(job_queue.enqueue(job_id))
                     else:
-                        loop.run_until_complete(worker.enqueue(job_id))
-                except Exception:
-                    pass
+                        asyncio.run(job_queue.enqueue(job_id))
         except Exception:
             pass
 
@@ -160,6 +198,8 @@ class LtxLocalAdapter:
                 "generatorId": gen_id,
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
+                "continuityStrategy": params.get("continuityStrategy") or "none",
+                "lastFrameAssetId": request.lastFrameAssetId,
             },
         )
 
@@ -176,6 +216,16 @@ class LtxLocalAdapter:
                     errorMessage="LTX queue job not found.",
                 )
             mapped = _map(row.status)
+            params: dict[str, Any] = {}
+            try:
+                parsed = json.loads(row.params_json or "{}")
+                if isinstance(parsed, dict):
+                    params = parsed
+            except Exception:
+                params = {}
+            output_ids = [str(x) for x in (params.get("outputAssetIds") or []) if x]
+            if mapped == "completed" and not output_ids:
+                output_ids = _ensure_output_asset_ids(db, row, params)
             return NormalizedJobStatus(
                 internalJobId=job.internalJobId,
                 providerJobId=row.comfy_prompt_id or job.providerJobId,
@@ -189,18 +239,32 @@ class LtxLocalAdapter:
                     **job.providerMetadata,
                     "outputPath": row.output_path,
                     "stage": row.stage,
+                    "outputAssetIds": output_ids,
+                    "draftMode": bool(params.get("draftMode")),
+                    "aspectRatio": params.get("aspectRatio"),
+                    "resolution": params.get("resolution"),
                 },
             )
         finally:
             db.close()
 
     def cancel(self, job: NormalizedJobSubmission) -> None:
+        job_id = job.queueJobId or job.internalJobId
+        if not job_id:
+            return
+        try:
+            from ....codirector.execution.cancel import _cancel_job
+
+            _cancel_job(str(job_id))
+            return
+        except Exception:
+            pass
         db = SessionLocal()
         try:
-            row = db.get(Job, job.queueJobId or job.internalJobId)
-            if row and row.status in ("queued", "running"):
+            row = db.get(Job, job_id)
+            if row and row.status in ("queued", "running", "cancelling"):
                 row.status = "cancelled"
-                row.message = "Cancelled from Timeline batch"
+                row.message = "Cancelled from Timeline batch (halt fallback)"
                 db.add(row)
                 db.commit()
         finally:
@@ -237,6 +301,42 @@ class LtxLocalAdapter:
             else "LTX_OUTPUT_PENDING",
             errorMessage=None,
         )
+
+
+def _ensure_output_asset_ids(db: Session, row: Job, params: dict[str, Any]) -> list[str]:
+    """Bind a Library asset for a finished LTX render if queue_worker did not."""
+    from pathlib import Path
+
+    path = str(row.output_path or "").strip()
+    if not path or not Path(path).is_file():
+        return []
+    existing = db.query(Asset).filter(Asset.project_id == row.project_id, Asset.path == path).first()
+    if existing:
+        ids = [existing.id]
+    else:
+        try:
+            from ....minimax_h3.route_a_adapter import import_output_to_project_library
+
+            tag = "ltx-draft" if params.get("draftMode") else "ltx"
+            receipt = import_output_to_project_library(
+                project_id=str(row.project_id),
+                source_mp4=Path(path),
+                tag=tag,
+                db=db,
+            )
+            ids = [str(receipt.get("assetId") or receipt.get("id") or "")]
+            ids = [x for x in ids if x]
+        except Exception:
+            return []
+    if ids:
+        params["outputAssetIds"] = ids
+        row.params_json = json.dumps(params)
+        db.add(row)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+    return ids
 
 
 def _map(raw: str) -> Any:

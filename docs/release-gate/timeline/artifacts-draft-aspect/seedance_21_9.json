@@ -1,0 +1,26 @@
+{
+  "skipped": false,
+  "submitOk": true,
+  "normalized": {
+    "aspectRatio": "21:9",
+    "resolution": "480p",
+    "draftMode": true,
+    "videoReferenceAssetId": null
+  },
+  "error": "Job submitted via seedance-api adapter with immutable execution snapshot.",
+  "draftResult": {
+    "batchStatus": "Cancelled",
+    "quality": null,
+    "resolution": null,
+    "aspectRatio": null,
+    "candidateCount": 0
+  },
+  "promote": {
+    "ok": true,
+    "draftMode": false,
+    "resolution": "720p",
+    "aspectRatio": "21:9",
+    "error": "Job submitted via seedance-api adapter with immutable execution snapshot."
+  },
+  "ok": false
+}

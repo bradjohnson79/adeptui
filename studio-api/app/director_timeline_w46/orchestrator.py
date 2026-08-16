@@ -50,6 +50,75 @@ def _load_director_timeline(
     )
 
 
+def _bind_video_reference_anchor(batch: BatchBlock, director_timeline: DirectorTimeline | None) -> None:
+    """Ensure a video sourceAnchor exists when a Video Reference clip is on the Timeline.
+
+    One clip max. Does not drop an existing video anchor.
+    """
+    if any(a.kind == "video" and (a.assetId or "").strip() for a in (batch.sourceAnchors or [])):
+        return
+    clips = list(getattr(director_timeline, "video_reference_clips", None) or [])
+    chosen = next((c for c in clips if getattr(c, "asset_id", None)), None)
+    if chosen is None:
+        return
+    from .contracts import TimelineVisualAnchor, _nid
+
+    batch.sourceAnchors = [
+        a for a in (batch.sourceAnchors or []) if a.kind != "video"
+    ]
+    trim_in = float(getattr(chosen, "trim_start", 0.0) or 0.0)
+    length = float(getattr(chosen, "length", 0.0) or 0.0)
+    batch.sourceAnchors.append(
+        TimelineVisualAnchor(
+            id=_nid("anc_"),
+            kind="video",
+            assetId=str(chosen.asset_id),
+            label="Video Reference",
+            atTime=float(getattr(chosen, "start", 0.0) or 0.0),
+            strength=1.0,
+        )
+    )
+    refs = [r for r in (batch.references or []) if not (
+        isinstance(r, dict) and str(r.get("kind") or "") == "videoReference"
+    )]
+    refs.append(
+        {
+            "kind": "videoReference",
+            "assetId": str(chosen.asset_id),
+            "trim": {"in": trim_in, "out": trim_in + length} if length else None,
+        }
+    )
+    batch.references = refs
+
+
+def _halt_adapter_jobs(halt_jobs: list[tuple[str, GenerationJobRef]]) -> None:
+    """Propagate Timeline Stop to the adapter / Comfy halt path."""
+    from .generation.contracts import NormalizedJobSubmission
+    from .generation.registry import GeneratorNotFoundError, get_registry
+
+    registry = get_registry()
+    for generator_id, job in halt_jobs:
+        try:
+            adapter = registry.get(generator_id or job.generatorId)
+        except GeneratorNotFoundError:
+            continue
+        caps = adapter.capabilities
+        if not (caps.supportsQueuedCancel or caps.supportsRunningCancel):
+            continue
+        try:
+            adapter.cancel(
+                NormalizedJobSubmission(
+                    internalJobId=job.queueJobId or job.id,
+                    providerJobId=job.providerJobId,
+                    queueJobId=job.queueJobId,
+                    generatorId=adapter.id,
+                    status="running",
+                )
+            )
+        except Exception:
+            continue
+
+
 def create_execution_snapshot(
     batch: BatchBlock,
     *,
@@ -190,6 +259,7 @@ def submit_batch_generation(
     guidance_priority: str | None = None,
     fallback_allowed: bool = False,
     precreated_snapshot_id: str | None = None,
+    draft_mode: bool | None = None,
 ) -> dict[str, Any]:
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
@@ -260,14 +330,28 @@ def submit_batch_generation(
             guidance_priority=guidance_priority,
         )
 
+    scene_row = store.get_scene(db, project_id, scene_id)
+    aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
+    director_timeline = _load_director_timeline(db, project_id, scene_id)
+    _bind_video_reference_anchor(batch, director_timeline)
+
     try:
+        from .continuity import active_bridge_for_target
+
+        incoming = active_bridge_for_target(master, batch.id)
         request = build_timeline_generation_request(
             project_id=project_id,
             scene_id=scene_id,
             batch=batch,
             snapshot=snap,
             fallback_allowed=fallback_allowed,
+            incoming_bridge=incoming if incoming and incoming.status in ("Ready", "Applied") else None,
+            aspect_ratio=aspect_ratio,
+            draft_mode=draft_mode,
         )
+        if incoming and incoming.status == "Ready" and request.continuityStrategy:
+            incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
+            incoming.status = "Applied"
     except Exception as exc:
         return {"ok": False, "error": "REQUEST_BUILD_FAILED", "message": str(exc), "mock": False}
 
@@ -298,6 +382,19 @@ def submit_batch_generation(
             "mock": False,
         }
 
+    draft_used = bool(request.providerOptions.get("draftMode"))
+    st = dict(snap.continuityState or {})
+    st["takeState"] = {
+        "quality": "draft" if draft_used else "final",
+        "draftPathway": request.providerOptions.get("draftPathway"),
+        "finalRequiresNewGeneration": request.providerOptions.get("finalRequiresNewGeneration"),
+        "aspectRatio": request.aspectRatio,
+        "resolution": request.resolution,
+        "videoReferenceAssetId": request.videoReferenceAssetId,
+    }
+    snap.continuityState = st
+    request.providerOptions["draftMode"] = draft_used
+
     try:
         submission = adapter.submit(request)
     except Exception as exc:
@@ -312,9 +409,18 @@ def submit_batch_generation(
     # Bind projectId for MiniMax status polling
     meta = dict(submission.providerMetadata or {})
     meta["projectId"] = project_id
+    meta["draftMode"] = draft_used
+    meta["draftPathway"] = request.providerOptions.get("draftPathway")
+    meta["aspectRatio"] = request.aspectRatio
+    meta["resolution"] = request.resolution
+    meta["videoReferenceAssetId"] = request.videoReferenceAssetId
     submission.providerMetadata = meta
 
-    hosted_cancel: HostedCancelSupport = "unsupported" if locality == "hosted" else "supported"
+    hosted_cancel: HostedCancelSupport = (
+        "supported"
+        if (adapter.capabilities.supportsQueuedCancel or adapter.capabilities.supportsRunningCancel)
+        else "unsupported"
+    )
 
     job = GenerationJobRef(
         executionSnapshotId=snap.id,
@@ -383,11 +489,40 @@ def complete_batch_candidate(
     if not snap.immutable:
         return {"ok": False, "error": "SNAPSHOT_NOT_IMMUTABLE", "mock": False}
 
+    from .continuity import active_bridge_for_target, compile_retake_memory
+
+    incoming = active_bridge_for_target(master, batch_id)
+    stashed = dict(snap.continuityState or {})
+    user_correction = stashed.get("userCorrection") if isinstance(stashed.get("userCorrection"), dict) else {}
+    memory = compile_retake_memory(
+        master=master,
+        batch=batch,
+        user_correction=user_correction,
+        incoming=incoming,
+    )
+    if isinstance(stashed.get("sequenceMemory"), dict) and stashed["sequenceMemory"]:
+        memory["sequenceMemory"] = stashed["sequenceMemory"]
+    if isinstance(stashed.get("originalTakeIntent"), dict) and stashed["originalTakeIntent"]:
+        memory["originalTakeIntent"] = stashed["originalTakeIntent"]
+    if isinstance(stashed.get("takeState"), dict) and stashed["takeState"]:
+        memory["takeState"] = stashed["takeState"]
+    parent = next((c for c in batch.candidateVersions if c.approved), None)
     cand = CandidateVersion(
         executionSnapshotId=execution_snapshot_id,
         assetId=asset_id,
-        label=f"Candidate {len(batch.candidateVersions) + 1}",
+        label=f"Take {chr(64 + min(len(batch.candidateVersions) + 1, 26))}"
+        if batch.candidateVersions
+        else "Take A",
         generatedDuration=generated_duration,
+        parentTakeId=parent.takeId if parent else None,
+        incomingBridgeId=(incoming.bridgeId if incoming else stashed.get("incomingBridgeId")),
+        continuityAware=bool(stashed.get("continuityAware") or (incoming and incoming.status in ("Ready", "Applied"))),
+        reTakeReason=stashed.get("reTakeReason"),
+        sequenceMemory=memory["sequenceMemory"],
+        incomingContinuity=memory["incomingContinuity"],
+        originalTakeIntent=memory["originalTakeIntent"],
+        takeState=memory["takeState"],
+        userCorrection=memory["userCorrection"],
     )
     batch.candidateVersions.append(cand)
     batch.duration.generatedDuration = generated_duration
@@ -430,6 +565,11 @@ def approve_candidate(
     cand = next((c for c in batch.candidateVersions if c.id == candidate_id), None)
     if not cand or not cand.assetId:
         return {"ok": False, "error": "CANDIDATE_NOT_FOUND", "mock": False}
+    was_other_approved = bool(
+        batch.approvedClip
+        and batch.approvedClip.candidateId
+        and batch.approvedClip.candidateId != candidate_id
+    )
     for c in batch.candidateVersions:
         c.approved = c.id == candidate_id
     batch.approvedClip = ApprovedClip(
@@ -438,7 +578,13 @@ def approve_candidate(
         candidateId=cand.id,
     )
     batch.status = "Approved"
+    batch.activeTakeId = cand.takeId
     batch.configFingerprint = compute_config_fingerprint(batch)
+    from .continuity import prepare_outgoing_bridge, supersede_outgoing_bridges
+
+    if was_other_approved:
+        supersede_outgoing_bridges(master, batch_id, now=_now())
+    prepare_outgoing_bridge(db, project_id, scene_id, master, batch_id)
     store.save_master(db, project_id, scene_id, master)
     # APPROVE_PLACES_ON_TIMELINE: approval through any path (HTTP endpoint,
     # adapter auto-approve, watcher) must place the approved clip onto the
@@ -450,6 +596,32 @@ def approve_candidate(
     # provider slot for the next Queued batch (no-op when none queued).
     chain = submit_next_queued_batch(db, project_id, scene_id)
     return {"ok": True, "approvedClip": batch.approvedClip.model_dump(), "batchStatus": batch.status, "placement": placement, "sequentialChain": chain, "mock": False}
+
+
+def reject_candidate(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    candidate_id: str,
+) -> dict[str, Any]:
+    """Mark a draft/take as rejected without deleting the asset."""
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = _batch_map(master).get(batch_id)
+    if not batch:
+        return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+    cand = next((c for c in batch.candidateVersions if c.id == candidate_id), None)
+    if not cand:
+        return {"ok": False, "error": "CANDIDATE_NOT_FOUND", "mock": False}
+    state = dict(cand.takeState or {})
+    state["rejected"] = True
+    cand.takeState = state
+    cand.approved = False
+    store.save_master(db, project_id, scene_id, master)
+    return {"ok": True, "candidate": cand.model_dump(), "mock": False}
 
 
 def touch_batch_config(
@@ -612,6 +784,7 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
     affected: list[str] = []
     preserved: list[str] = []
     hosted: HostedCancelSupport = "unknown"
+    halt_jobs: list[tuple[str, GenerationJobRef]] = []
 
     for batch in master.batchBlocks:
         if batch.id not in targets and body.action != "stop_remaining_scene_jobs":
@@ -635,6 +808,7 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
                 if job.status in ("queued", "running") and job.locality == "local":
                     job.status = "cancelled"
                     hosted = "supported"
+                    halt_jobs.append((batch.generatorId or "", job))
             if batch.status == "Generating":
                 batch.status = "Cancelled"
                 batch.pendingSnapshotId = None
@@ -643,7 +817,7 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
             for job in batch.generationJobs:
                 if job.status in ("queued", "running") and job.locality == "hosted":
                     job.hostedCancelSupport = "unsupported"
-                    job.error = "Hosted cancellation unsupported for this provider"
+                    job.error = "Provider is rendering — cancellation unavailable"
                     hosted = "unsupported"
             affected.append(batch.id)
         elif body.action == "stop_remaining_scene_jobs":
@@ -653,6 +827,7 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
                 for job in batch.generationJobs:
                     if job.status in ("queued", "running"):
                         job.status = "cancelled"
+                        halt_jobs.append((batch.generatorId or "", job))
                 affected.append(batch.id)
             else:
                 preserved.append(batch.id)
@@ -664,6 +839,8 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
                 preserved.append(batch.id)
 
     store.save_master(db, project_id, scene_id, master)
+    if halt_jobs:
+        _halt_adapter_jobs(halt_jobs)
     msg = {
         "cancel_pending_batch": "Pending batches cancelled.",
         "cancel_active_local_job": "Local jobs cancel requested.",
@@ -893,6 +1070,49 @@ def submit_next_queued_batch(
     if not queued:
         return {"ok": True, "submitted": False, "reason": "no_queued_batches", "mock": False}
     nxt = sorted(queued, key=lambda b: b.order)[0]
+    from .continuity import analyze_bridge, bridge_blocks_submit
+
+    blocker = bridge_blocks_submit(master, nxt.id)
+    if blocker is not None:
+        if blocker.status == "Failed":
+            retries = int((blocker.continuityState or {}).get("retryCount") or 0)
+            if retries < 1:
+                state = dict(blocker.continuityState or {})
+                state["retryCount"] = retries + 1
+                blocker.continuityState = state
+                blocker.status = "Waiting"
+                analyze_bridge(db, project_id, master, blocker)
+                store.save_master(db, project_id, scene_id, master)
+                if blocker.status == "Ready":
+                    pass  # fall through to submit
+                else:
+                    return {
+                        "ok": True,
+                        "submitted": False,
+                        "reason": "continuity_failed",
+                        "bridgeId": blocker.bridgeId,
+                        "error": blocker.error,
+                        "mock": False,
+                    }
+            else:
+                return {
+                    "ok": True,
+                    "submitted": False,
+                    "reason": "continuity_failed",
+                    "bridgeId": blocker.bridgeId,
+                    "error": blocker.error,
+                    "message": "Continuity handoff failed. Retry, continue without continuity, or cancel.",
+                    "mock": False,
+                }
+        else:
+            return {
+                "ok": True,
+                "submitted": False,
+                "reason": "continuity_pending",
+                "bridgeId": blocker.bridgeId,
+                "status": blocker.status,
+                "mock": False,
+            }
     result = submit_batch_generation(
         db,
         project_id,
@@ -916,11 +1136,17 @@ def generate_scene(
     *,
     scope: Literal["current", "selected", "ready", "full"] = "full",
     batch_ids: list[str] | None = None,
+    draft_mode: bool | None = None,
 ) -> dict[str, Any]:
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    from .continuity import ensure_policy
+
+    gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
+    ensure_policy(master, gid)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
     director_timeline = _load_director_timeline(db, project_id, scene_id)
     findings = run_preflight(master, director_timeline=director_timeline)
     if master.preflightMode == "strict" and any(f["severity"] == "error" for f in findings):
@@ -970,6 +1196,7 @@ def generate_scene(
             scene_id,
             batch.id,
             precreated_snapshot_id=batch.pendingSnapshotId or None,
+            draft_mode=draft_mode,
         )
         if result.get("ok"):
             jobs.append(result)
@@ -986,3 +1213,193 @@ def generate_scene(
         "message": "Partial failure preserved successes." if errors and jobs else "Scene generation submitted.",
         "mock": False,
     }
+
+
+def set_scene_continuity_policy(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    configured_tail: float,
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    from .continuity import set_continuity_policy
+
+    gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
+    try:
+        policy = set_continuity_policy(master, generator_id=gid, configured_tail=configured_tail)
+    except ValueError as exc:
+        return {"ok": False, "error": "INVALID_CONTINUITY_WINDOW", "message": str(exc), "mock": False}
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    return {"ok": True, "continuityPolicy": policy.model_dump(), "master": master.model_dump(), "mock": False}
+
+
+def retake_batch(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    *,
+    user_correction: dict[str, Any] | None = None,
+    continuity_aware: bool | None = None,
+    mode: str = "directed",
+) -> dict[str, Any]:
+    """Create a new take. Does not overwrite the active approved clip until Activate."""
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = _batch_map(master).get(batch_id)
+    if not batch:
+        return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+    from .continuity import active_bridge_for_target, compile_retake_memory, ensure_policy, generator_locality
+
+    gid = batch.generatorId or master.sceneGeneratorId
+    policy = ensure_policy(master, gid)
+    aware = policy.continuityAwareRetake if continuity_aware is None else bool(continuity_aware)
+    if generator_locality(gid) == "api" and continuity_aware is None:
+        aware = False
+    batch.continuityAwareRetake = aware
+    incoming = active_bridge_for_target(master, batch_id)
+    memory = compile_retake_memory(
+        master=master,
+        batch=batch,
+        user_correction=user_correction,
+        incoming=incoming if aware else None,
+    )
+    store.save_master(db, project_id, scene_id, master)
+    result = submit_batch_generation(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        continuity={
+            "reTakeReason": mode or "creator_retake",
+            "continuityAware": aware,
+            "userCorrection": dict(user_correction or {}),
+            **memory,
+        },
+    )
+    result["retakeMode"] = mode
+    result["priorSnapshotsPreserved"] = True
+    result["continuityAware"] = aware
+    return result
+
+
+def activate_take(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    candidate_id: str,
+) -> dict[str, Any]:
+    return approve_candidate(db, project_id, scene_id, batch_id, candidate_id)
+
+
+def retry_continuity_bridge(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    bridge_id: str,
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    from .continuity import analyze_bridge
+
+    bridge = next((b for b in master.continuityBridges if b.bridgeId == bridge_id), None)
+    if not bridge:
+        return {"ok": False, "error": "BRIDGE_NOT_FOUND", "mock": False}
+    analyze_bridge(db, project_id, master, bridge)
+    store.save_master(db, project_id, scene_id, master)
+    chain = {"ok": True, "submitted": False}
+    if bridge.status == "Ready":
+        chain = submit_next_queued_batch(db, project_id, scene_id)
+    return {"ok": True, "bridge": bridge.model_dump(), "sequentialChain": chain, "mock": False}
+
+
+def continue_without_continuity_bridge(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    bridge_id: str,
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    from .continuity import continue_without_continuity
+
+    bridge = next((b for b in master.continuityBridges if b.bridgeId == bridge_id), None)
+    if not bridge:
+        return {"ok": False, "error": "BRIDGE_NOT_FOUND", "mock": False}
+    continue_without_continuity(master, bridge.targetBatchId)
+    store.save_master(db, project_id, scene_id, master)
+    chain = submit_next_queued_batch(db, project_id, scene_id)
+    return {"ok": True, "bridge": bridge.model_dump(), "sequentialChain": chain, "mock": False}
+
+
+def reconcile_downstream(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    *,
+    spend_api_credits: bool = False,
+) -> dict[str, Any]:
+    """Explicit creator action. Never auto-spend API credits."""
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    from .continuity import generator_locality, paid_continuity_forbidden
+
+    stale = [b for b in master.batchBlocks if b.downstreamStale]
+    if not stale:
+        return {"ok": True, "reconciled": [], "message": "No stale downstream batches.", "mock": False}
+    gid = master.sceneGeneratorId or (stale[0].generatorId if stale else None)
+    if generator_locality(gid) == "api" and not spend_api_credits:
+        return {
+            "ok": False,
+            "error": "API_CREDIT_CONFIRMATION_REQUIRED",
+            "message": "Reconciling API batches spends credits. Confirm spendApiCredits to continue.",
+            "staleBatchIds": [b.id for b in stale],
+            "mock": False,
+        }
+    if paid_continuity_forbidden(master.continuityPolicy, gid) and generator_locality(gid) == "api":
+        return {
+            "ok": False,
+            "error": "API_CONTINUITY_OFF",
+            "message": "Auto Continuity is Off for API. Turn it on, or keep existing downstream takes.",
+            "mock": False,
+        }
+    ids = [b.id for b in stale]
+    for batch in stale:
+        batch.downstreamStale = False
+        if batch.status == "Approved":
+            batch.status = "RegenerationRecommended"
+    store.save_master(db, project_id, scene_id, master)
+    result = generate_scene(db, project_id, scene_id, scope="selected", batch_ids=ids)
+    result["reconciled"] = ids
+    return result
+
+
+def keep_existing_downstream(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    ids = []
+    for batch in master.batchBlocks:
+        if batch.downstreamStale:
+            batch.downstreamStale = False
+            ids.append(batch.id)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    return {"ok": True, "kept": ids, "mock": False}
+

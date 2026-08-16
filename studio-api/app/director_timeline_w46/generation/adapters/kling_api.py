@@ -43,7 +43,14 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsNegativePrompt=True,
         supportsCameraControls=False,
         executable=True,
-        notes="Hosted asynchronous Kling adapter. Live provider credentials required for production runs.",
+        notes="Hosted asynchronous Kling adapter. Live provider credentials required for production runs. Draft Mode is unavailable.",
+        draftPathway="none",
+        supportsQueuedCancel=False,
+        supportsRunningCancel=False,
+        finalRequiresNewGeneration=True,
+        draftResolution=None,
+        finalResolution="1280x720",
+        supportsImageAndVideoTogether=False,
     )
 
 

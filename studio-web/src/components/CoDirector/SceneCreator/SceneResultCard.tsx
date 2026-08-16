@@ -14,6 +14,7 @@
  */
 import { useState } from "react";
 import { api } from "../../../api";
+import { aspectCssValue, normalizeProductionAspect } from "../../../workspacePrefs";
 import type { ShotRequest } from "./types";
 
 export type SceneResultCardProps = {
@@ -29,6 +30,7 @@ export type SceneResultCardProps = {
   onOpen: () => void;
   onSendToTimeline: () => void;
   sendingToTimeline?: boolean;
+  aspectRatio?: string;
 };
 
 function isRealAssetId(id: string): boolean {
@@ -76,6 +78,7 @@ export function SceneResultCard({
   onOpen,
   onSendToTimeline,
   sendingToTimeline,
+  aspectRatio,
 }: SceneResultCardProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(shot.raw_text);
@@ -103,7 +106,7 @@ export function SceneResultCard({
         className="scene-creator-result-card__thumb"
         style={{
           position: "relative",
-          aspectRatio: "16 / 9",
+          aspectRatio: aspectCssValue(normalizeProductionAspect(aspectRatio)),
           background: "color-mix(in srgb, currentColor 6%, transparent)",
           borderRadius: "0.4rem",
           overflow: "hidden",

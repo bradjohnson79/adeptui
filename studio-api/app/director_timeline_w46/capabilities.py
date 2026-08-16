@@ -25,6 +25,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsContinuation=False,
             inPaintStrategies=["complete_batch_retake"],
             executable=True,
+            supportsQueuedCancel=True,
+            supportsRunningCancel=True,
+            supportsInterrupt=True,
+            draftPathway="none",
             notes=(
                 "Experimental Private Profile — text-to-video with native audio. "
                 "Routes through the shared Timeline generation adapter registry."
@@ -42,6 +46,13 @@ def list_generators() -> list[GeneratorCapability]:
             supportsAudio=True,
             inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
             executable=True,
+            supportsQueuedCancel=True,
+            supportsRunningCancel=True,
+            supportsInterrupt=True,
+            draftPathway="local_live",
+            draftResolution="768x432",
+            finalResolution="1280x720",
+            finalRequiresNewGeneration=True,
             notes="Default production engine. LTX 2.5 variants available via ltx-2.5-full, ltx-2.5-distilled, ltx-2.5-comfy.",
         ),
         GeneratorCapability(
@@ -56,6 +67,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsAudio=True,
             inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
             executable=True,
+            supportsQueuedCancel=True,
+            supportsRunningCancel=True,
+            supportsInterrupt=True,
+            draftPathway="local_live",
             notes="Full-precision LTX 2.5 with native audio. Recommended for high-quality production.",
         ),
         GeneratorCapability(
@@ -70,6 +85,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsAudio=True,
             inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
             executable=True,
+            supportsQueuedCancel=True,
+            supportsRunningCancel=True,
+            supportsInterrupt=True,
+            draftPathway="local_live",
             notes="Distilled BF16 LTX 2.5 with fast generation and native audio. Default for auto mode.",
         ),
         GeneratorCapability(
@@ -84,6 +103,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsAudio=False,
             inPaintStrategies=["range_replacement", "complete_batch_retake", "keyframe_repair"],
             executable=True,
+            supportsQueuedCancel=True,
+            supportsRunningCancel=True,
+            supportsInterrupt=True,
+            draftPathway="local_live",
             notes="INT8 quantized LTX 2.5 for reduced VRAM. No native audio generation.",
         ),
         GeneratorCapability(
@@ -140,6 +163,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsStartEndFrame=True,
             inPaintStrategies=["complete_batch_retake"],
             executable=False,
+            draftPathway="cheap_preview",
+            supportsVideoReferences=True,
+            supportsImageAndVideoTogether=True,
+            maximumReferenceVideos=1,
             notes="Executable only when discovered API model is Ready.",
         ),
         GeneratorCapability(
@@ -152,6 +179,10 @@ def list_generators() -> list[GeneratorCapability]:
             supportsStartEndFrame=True,
             inPaintStrategies=["complete_batch_retake"],
             executable=False,
+            draftPathway="none",
+            supportsQueuedCancel=False,
+            supportsRunningCancel=False,
+            notes="Draft Mode is unavailable. Cancellation after submit is unavailable.",
         ),
         GeneratorCapability(
             id="comfy-workflow",

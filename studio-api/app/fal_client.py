@@ -33,24 +33,25 @@ async def upload_file_to_fal(path: Path, api_key: str) -> str:
     data = path.read_bytes()
 
     async with httpx.AsyncClient(timeout=120.0) as client:
-        # Preferred: fal CDN v3 initiate + PUT
-        init = await client.post(
-            "https://rest.alpha.fal.ai/storage/upload/initiate",
-            params={
-                "file_name": path.name,
-                "content_type": content_type,
-            },
-            headers={"Authorization": f"Key {api_key}"},
-        )
-        if init.status_code < 400:
-            payload = init.json()
-            upload_url = payload.get("upload_url") or payload.get("put_url")
-            file_url = payload.get("file_url") or payload.get("url")
+        headers = {"Authorization": f"Key {api_key}", "Content-Type": "application/json"}
+        payload = {"file_name": path.name, "content_type": content_type}
+        init = None
+        for url in (
+            "https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
+            "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
+        ):
+            init = await client.post(url, headers=headers, json=payload)
+            if init.status_code < 400:
+                break
+        if init is not None and init.status_code < 400:
+            body = init.json()
+            upload_url = body.get("upload_url") or body.get("put_url")
+            file_url = body.get("file_url") or body.get("url")
             if upload_url and file_url:
                 put = await client.put(
                     upload_url,
                     content=data,
-                    headers={"Content-Type": content_type, "Authorization": f"Key {api_key}"},
+                    headers={"Content-Type": content_type},
                 )
                 if put.status_code >= 400:
                     raise FalApiError(f"fal upload PUT failed ({put.status_code}): {put.text[:400]}")
@@ -58,7 +59,7 @@ async def upload_file_to_fal(path: Path, api_key: str) -> str:
 
         # Fallback: multipart to fal media
         multi = await client.post(
-            "https://fal.media/files/upload",
+            "https://v3.fal.media/files/upload",
             headers={"Authorization": f"Key {api_key}"},
             files={"file": (path.name, data, content_type)},
         )
@@ -70,7 +71,7 @@ async def upload_file_to_fal(path: Path, api_key: str) -> str:
 
         raise FalApiError(
             "Could not upload file to fal.ai storage. "
-            f"initiate={init.status_code} media={multi.status_code}: {(multi.text or init.text)[:400]}"
+            f"initiate={getattr(init, 'status_code', None)} media={multi.status_code}: {(multi.text or (init.text if init is not None else ''))[:400]}"
         )
 
 

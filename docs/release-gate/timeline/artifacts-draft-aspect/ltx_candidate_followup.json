@@ -1,0 +1,78 @@
+{
+  "ltx_stop_running": {
+    "submitOk": true,
+    "jobId": "96a8b7c9-a136-43a3-8d89-c221669dcb29",
+    "preCancel": {
+      "status": "running",
+      "comfy_prompt_id": "91ce4472-df68-431f-8e59-3f7bc5665475",
+      "message": "Director submit failed, falling back to simple I2V: WORKFLOW_GRAPH_DRIFT: ltx.scene@1.0.0 topologyHash mismatch (certified=sha256:c8ec1eac3ffad1c02d3ded918fc22d52b9fb48a4eec826dd903d98393f34be7b, actu"
+    },
+    "cancelOk": true,
+    "after": {
+      "status": "cancelled",
+      "comfy_prompt_id": "91ce4472-df68-431f-8e59-3f7bc5665475",
+      "message": "Cancelled \u2014 ComfyUI confirmed prompt is no longer active or queued",
+      "confirmedStopped": true,
+      "haltReason": null,
+      "halt": {
+        "interrupt": true,
+        "deleted": true,
+        "freedRequested": true,
+        "confirmedStopped": true,
+        "errorCode": null,
+        "deleteResponse": {
+          "ok": true
+        },
+        "confirmation": {
+          "confirmed": true,
+          "elapsedSec": 0.8,
+          "presence": {
+            "reachable": true,
+            "running": false,
+            "pending": false,
+            "active": false
+          }
+        },
+        "freeResponse": {
+          "ok": true
+        },
+        "vramFullyReleased": false,
+        "vramReleaseNote": "free_memory was requested; cached CUDA/models/encoders may remain. Success is measured by prompt stop + job reservation release, not full unload."
+      }
+    },
+    "ok": true
+  },
+  "ltx_draft_promote": {
+    "submitOk": true,
+    "jobId": "c9ed85c0-a010-4a14-b661-fec32e2ff6c1",
+    "jobStatus": "failed",
+    "jobMessage": "Interrupted by an API restart before it finished. The studio queue does not resume work that was already running, because the provider-side render (ComfyUI prompt or fal.ai request) cannot be re-attac",
+    "params": {
+      "draftMode": true,
+      "fast_mode": true,
+      "width": 672,
+      "height": 288,
+      "outputAssetIds": null
+    },
+    "candidates": [],
+    "survivedReload": false,
+    "promote": {
+      "ok": true,
+      "jobId": "ea6d5d2f-6b0e-484a-aca2-77919d82b8ea",
+      "draftMode": false,
+      "resolution": "1344x576",
+      "aspectRatio": "21:9",
+      "newJob": true
+    },
+    "ok": false
+  },
+  "summary": {
+    "playwright_mocked": "1 passed",
+    "video_ref_refuse": true,
+    "ltx_stop_running": true,
+    "ltx_draft_promote": false,
+    "seedance_21_9": true
+  },
+  "verdict": "NO-GO \u2014 TIMELINE DRAFT-FIRST GENERATION + ASPECT RATIO SYSTEM NOT CERTIFIED END TO END",
+  "blocker": "ltx_draft_promote"
+}

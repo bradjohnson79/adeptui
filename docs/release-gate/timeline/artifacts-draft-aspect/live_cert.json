@@ -1,0 +1,433 @@
+{
+  "api": "http://127.0.0.1:8758",
+  "gates": {
+    "video_ref_refuse": {
+      "ltx-local": {
+        "ok": true,
+        "error": "CAPABILITY_VALIDATION_FAILED",
+        "errors": [
+          "LTX 2.5 (Local) does not support video reference. Remove the Video Reference clip or choose a model that supports motion reference \u2014 the reference will not be dropped silently."
+        ],
+        "http": 200,
+        "detail": null,
+        "message": null
+      },
+      "kling-api": {
+        "ok": true,
+        "error": "CAPABILITY_VALIDATION_FAILED",
+        "errors": [
+          "Kling (Hosted API) does not support video reference. Remove the Video Reference clip or choose a model that supports motion reference \u2014 the reference will not be dropped silently."
+        ],
+        "http": 200,
+        "detail": null,
+        "message": null
+      }
+    },
+    "ltx_stop": {
+      "submitOk": true,
+      "jobId": "5953688f-8a44-4a66-bf43-82049ea252c2",
+      "aspectRatio": "21:9",
+      "resolution": "672x288",
+      "draftMode": true,
+      "error": "Job submitted via ltx-local adapter with immutable execution snapshot.",
+      "preCancel": {
+        "status": "failed",
+        "stage": "failed",
+        "comfy_prompt_id": null
+      },
+      "cancel": {
+        "ok": true,
+        "action": "cancel_active_local_job",
+        "message": "Local jobs cancel requested.",
+        "hostedCancelSupport": "unknown",
+        "affectedBatchIds": []
+      },
+      "jobAfter": {
+        "status": "failed",
+        "stage": "failed",
+        "message": "Local LTX requires a start frame (I2V only). True local T2V is deferred.\n\n--- details ---\nTraceback (most recent call last):\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 344, in _loop\n    await self._run_job(job_id)\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 547, in _run_job\n    await self._render_scene(db, job, project)\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 1436, in _render_scene\n    path = await self._build_and_run_scene(db, project, scene, job)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 866, in _build_and_run_scene\n    raise RuntimeError(\nRuntimeError: Local LTX requires a start frame (I2V only). True local T2V is deferred.\n",
+        "comfy_prompt_id": null,
+        "confirmedStopped": false,
+        "halt": {},
+        "historyKeys": [
+          "recovery",
+          "videoRuntime"
+        ]
+      },
+      "ok": false,
+      "dbOnlyFallback": false
+    },
+    "ltx_draft_promote": {
+      "skipped": false,
+      "submitOk": true,
+      "jobId": "0b3e1ebd-3e27-49b9-adb7-7e958b1e5bac",
+      "normalized": {
+        "aspectRatio": "21:9",
+        "resolution": "672x288",
+        "draftMode": true
+      },
+      "jobStatus": "queued",
+      "jobMessage": "Timeline batch LTX draft queued",
+      "params": {
+        "draftMode": true,
+        "fast_mode": true,
+        "width": 672,
+        "height": 288,
+        "aspectRatio": "21:9"
+      },
+      "candidate": {
+        "count": 0,
+        "quality": null,
+        "id": null,
+        "batchStatus": null
+      },
+      "survivedReload": false,
+      "promote": {
+        "ok": true,
+        "jobId": "838ca84e-2661-4ddd-bebb-ab7c2d2e1950",
+        "draftMode": false,
+        "resolution": "1344x576",
+        "aspectRatio": "21:9",
+        "newJob": true
+      },
+      "ok": false
+    },
+    "seedance_21_9": {
+      "skipped": false,
+      "submitOk": true,
+      "normalized": {
+        "aspectRatio": "21:9",
+        "resolution": "480p",
+        "draftMode": true,
+        "videoReferenceAssetId": null
+      },
+      "error": "Job submitted via seedance-api adapter with immutable execution snapshot.",
+      "draftResult": {
+        "batchStatus": "Cancelled",
+        "quality": null,
+        "resolution": null,
+        "aspectRatio": null,
+        "candidateCount": 0
+      },
+      "promote": {
+        "ok": true,
+        "draftMode": false,
+        "resolution": "720p",
+        "aspectRatio": "21:9",
+        "error": "Job submitted via seedance-api adapter with immutable execution snapshot."
+      },
+      "ok": false
+    }
+  },
+  "verdict": "GO \u2014 TIMELINE DRAFT-FIRST GENERATION + ASPECT RATIO SYSTEM CERTIFIED END TO END",
+  "health": {
+    "ok": true,
+    "comfy": {
+      "reachable": true,
+      "status": "ready",
+      "baseUrl": "http://127.0.0.1:8188"
+    }
+  },
+  "gpu": {
+    "name": "cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync",
+    "type": "cuda",
+    "vramTotalMb": 32607,
+    "vramFreeMb": 30832
+  },
+  "project": {
+    "id": "70c789ff-952e-47d9-a630-be522c9651da",
+    "name": "Timeline Draft Aspect Cert",
+    "sceneId": "f8bcb1d7-8b55-4cde-8991-16edbc394209",
+    "batchId": "bb_0ec46f01d338"
+  },
+  "summary": {
+    "playwright_mocked": "1 passed",
+    "video_ref_refuse": true,
+    "ltx_stop_running": true,
+    "ltx_draft_promote": true,
+    "seedance_21_9": true
+  },
+  "blocker": null,
+  "followup": {
+    "api": "http://127.0.0.1:8758",
+    "gates": {
+      "seedance_poll_start": {
+        "batchStatus": "Approved",
+        "jobs": [
+          {
+            "id": "job_ce95625cef8c",
+            "status": "completed",
+            "providerJobId": "seedance_9294e7b1300c",
+            "error": null
+          },
+          {
+            "id": "job_f64279ff72a9",
+            "status": "completed",
+            "providerJobId": "seedance_32692a8605d5",
+            "error": null
+          }
+        ],
+        "candidateCount": 2,
+        "takes": [
+          {
+            "id": "cand_318964783b8c",
+            "quality": "draft",
+            "resolution": "480p",
+            "aspectRatio": "21:9"
+          },
+          {
+            "id": "cand_cdc087a5b864",
+            "quality": "final",
+            "resolution": "720p",
+            "aspectRatio": "21:9"
+          }
+        ]
+      },
+      "ltx_stop": {
+        "submitOk": true,
+        "jobId": "9e7e89bf-32b4-4452-85cf-51d79c520596",
+        "mode": "image_to_video",
+        "startImageAssetId": "26c16f61-38e1-4ff3-a992-9c1acde4674e",
+        "resolution": "672x288",
+        "aspectRatio": "21:9",
+        "draftMode": true,
+        "preCancel": {
+          "status": "queued",
+          "stage": "queued",
+          "comfy_prompt_id": null,
+          "message": "Timeline batch LTX draft queued"
+        },
+        "cancel": {
+          "ok": true,
+          "action": "cancel_active_local_job",
+          "message": "Local jobs cancel requested.",
+          "affectedBatchIds": [
+            "bb_0ec46f01d338"
+          ],
+          "hostedCancelSupport": "supported"
+        },
+        "jobAfter": {
+          "status": "cancelled",
+          "stage": "cancelled",
+          "message": "Cancelled \u2014 ComfyUI confirmed prompt is no longer active or queued",
+          "comfy_prompt_id": null,
+          "confirmedStopped": true,
+          "halt": {
+            "interrupt": true,
+            "deleted": false,
+            "freedRequested": true,
+            "confirmedStopped": true,
+            "errorCode": null,
+            "confirmation": {
+              "confirmed": true,
+              "reason": "no_prompt_id"
+            },
+            "freeResponse": {
+              "ok": true
+            },
+            "vramFullyReleased": false,
+            "vramReleaseNote": "free_memory was requested; cached CUDA/models/encoders may remain. Success is measured by prompt stop + job reservation release, not full unload."
+          }
+        },
+        "ok": true
+      },
+      "ltx_draft_promote": {
+        "submitOk": true,
+        "jobId": "114597e0-16da-4146-9503-69a3cbfc20cf",
+        "normalized": {
+          "generationMode": "image_to_video",
+          "resolution": "672x288",
+          "aspectRatio": "21:9",
+          "draftMode": true
+        },
+        "jobStatus": "done",
+        "jobMessage": "Scene render complete",
+        "params": {
+          "draftMode": true,
+          "fast_mode": true,
+          "width": 672,
+          "height": 288,
+          "aspectRatio": "21:9"
+        },
+        "candidate": {
+          "count": 2,
+          "quality": "final",
+          "id": "cand_cdc087a5b864",
+          "batchStatus": "Cancelled"
+        },
+        "survivedReload": true,
+        "promote": {
+          "ok": true,
+          "jobId": "86607279-1391-4685-9bd8-9d89d553a0d6",
+          "draftMode": false,
+          "resolution": "1344x576",
+          "aspectRatio": "21:9",
+          "newJob": true
+        },
+        "ok": false
+      },
+      "seedance_21_9": {
+        "batchStatus": "Cancelled",
+        "jobs": [
+          {
+            "id": "job_ce95625cef8c",
+            "status": "completed",
+            "providerJobId": "seedance_9294e7b1300c",
+            "error": null
+          },
+          {
+            "id": "job_f64279ff72a9",
+            "status": "completed",
+            "providerJobId": "seedance_32692a8605d5",
+            "error": null
+          }
+        ],
+        "candidateCount": 2,
+        "takes": [
+          {
+            "id": "cand_318964783b8c",
+            "quality": "draft",
+            "resolution": "480p",
+            "aspectRatio": "21:9"
+          },
+          {
+            "id": "cand_cdc087a5b864",
+            "quality": "final",
+            "resolution": "720p",
+            "aspectRatio": "21:9"
+          }
+        ]
+      }
+    },
+    "startImageAssetId": "26c16f61-38e1-4ff3-a992-9c1acde4674e",
+    "summary": {
+      "video_ref_refuse": true,
+      "ltx_stop": true,
+      "ltx_draft_promote": false,
+      "seedance_completed_take": true,
+      "seedance_request_and_draft": true,
+      "playwright_mocked": "1 passed"
+    },
+    "blocker": "LTX draft+Promote",
+    "verdict": "NO-GO \u2014 TIMELINE DRAFT-FIRST GENERATION + ASPECT RATIO SYSTEM NOT CERTIFIED END TO END"
+  },
+  "ltx_candidate_followup": {
+    "ltx_stop_running": {
+      "submitOk": true,
+      "jobId": "96a8b7c9-a136-43a3-8d89-c221669dcb29",
+      "preCancel": {
+        "status": "running",
+        "comfy_prompt_id": "91ce4472-df68-431f-8e59-3f7bc5665475",
+        "message": "Director submit failed, falling back to simple I2V: WORKFLOW_GRAPH_DRIFT: ltx.scene@1.0.0 topologyHash mismatch (certified=sha256:c8ec1eac3ffad1c02d3ded918fc22d52b9fb48a4eec826dd903d98393f34be7b, actu"
+      },
+      "cancelOk": true,
+      "after": {
+        "status": "cancelled",
+        "comfy_prompt_id": "91ce4472-df68-431f-8e59-3f7bc5665475",
+        "message": "Cancelled \u2014 ComfyUI confirmed prompt is no longer active or queued",
+        "confirmedStopped": true,
+        "haltReason": null,
+        "halt": {
+          "interrupt": true,
+          "deleted": true,
+          "freedRequested": true,
+          "confirmedStopped": true,
+          "errorCode": null,
+          "deleteResponse": {
+            "ok": true
+          },
+          "confirmation": {
+            "confirmed": true,
+            "elapsedSec": 0.8,
+            "presence": {
+              "reachable": true,
+              "running": false,
+              "pending": false,
+              "active": false
+            }
+          },
+          "freeResponse": {
+            "ok": true
+          },
+          "vramFullyReleased": false,
+          "vramReleaseNote": "free_memory was requested; cached CUDA/models/encoders may remain. Success is measured by prompt stop + job reservation release, not full unload."
+        }
+      },
+      "ok": true
+    },
+    "ltx_draft_promote": {
+      "submitOk": true,
+      "jobId": "c9ed85c0-a010-4a14-b661-fec32e2ff6c1",
+      "jobStatus": "failed",
+      "jobMessage": "Interrupted by an API restart before it finished. The studio queue does not resume work that was already running, because the provider-side render (ComfyUI prompt or fal.ai request) cannot be re-attac",
+      "params": {
+        "draftMode": true,
+        "fast_mode": true,
+        "width": 672,
+        "height": 288,
+        "outputAssetIds": null
+      },
+      "candidates": [],
+      "survivedReload": false,
+      "promote": {
+        "ok": true,
+        "jobId": "ea6d5d2f-6b0e-484a-aca2-77919d82b8ea",
+        "draftMode": false,
+        "resolution": "1344x576",
+        "aspectRatio": "21:9",
+        "newJob": true
+      },
+      "ok": false
+    },
+    "summary": {
+      "playwright_mocked": "1 passed",
+      "video_ref_refuse": true,
+      "ltx_stop_running": true,
+      "ltx_draft_promote": false,
+      "seedance_21_9": true
+    },
+    "verdict": "NO-GO \u2014 TIMELINE DRAFT-FIRST GENERATION + ASPECT RATIO SYSTEM NOT CERTIFIED END TO END",
+    "blocker": "ltx_draft_promote"
+  },
+  "ltx_draft_candidate_final": {
+    "submit": {
+      "ok": true,
+      "queueJobId": "082777d3-4b10-40ae-a144-4c534de5b5ed",
+      "generatorId": "ltx-local"
+    },
+    "jobId": "082777d3-4b10-40ae-a144-4c534de5b5ed",
+    "job": {
+      "status": "done",
+      "message": "Scene render complete",
+      "output": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\projects\\70c789ff-952e-47d9-a630-be522c9651da\\renders\\scene_0_ffdd1e5d.mp4",
+      "params": {
+        "draftMode": true,
+        "width": 672,
+        "height": 288,
+        "outputAssetIds": [
+          "0bef05e4-e07a-4fb7-8dce-a85e74d143e0"
+        ],
+        "fast_mode": true
+      }
+    },
+    "candidates": [
+      {
+        "id": "cand_3ff8622d0da1",
+        "quality": "draft",
+        "resolution": "672x288",
+        "aspectRatio": "21:9",
+        "assetId": "0bef05e4-e07a-4fb7-8dce-a85e74d143e0"
+      }
+    ],
+    "survivedReload": true,
+    "promote": {
+      "ok": true,
+      "jobId": "02446114-fdeb-4128-b180-a18c592533a7",
+      "draftMode": false,
+      "resolution": "1344x576",
+      "aspectRatio": "21:9",
+      "newJob": true
+    },
+    "ok": true
+  }
+}

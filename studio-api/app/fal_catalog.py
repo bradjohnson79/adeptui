@@ -224,12 +224,17 @@ def build_fal_arguments(
     height: int,
     seed: int,
     generate_audio: bool = True,
+    aspect_ratio: str | None = None,
+    resolution: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (model_id, arguments) for fal queue submit."""
     model = get_fal_model(engine)
     duration = nearest_duration(duration_sec, model.durations, model.default_duration)
-    aspect = aspect_from_size(width, height)
-    res = resolution_label(height)
+    aspect = (aspect_ratio or "").strip() or aspect_from_size(width, height)
+    if resolution in ("480p", "720p", "1080p"):
+        res = resolution
+    else:
+        res = resolution_label(height)
 
     if model.mode == "image_to_video" and not image_url:
         # Fall back to text-to-video endpoints where available
@@ -309,3 +314,37 @@ def build_fal_arguments(
         raise RuntimeError(f"Unhandled fal engine {engine}")
 
     return model.model_id, args
+
+
+SEEDANCE_R2V_MODEL_ID = "bytedance/seedance-2.0/reference-to-video"
+
+
+def build_seedance_r2v_arguments(
+    *,
+    prompt: str,
+    image_urls: list[str],
+    video_urls: list[str],
+    duration_sec: float,
+    aspect_ratio: str | None,
+    resolution: str | None,
+    seed: int = -1,
+    generate_audio: bool = True,
+) -> tuple[str, dict[str, Any]]:
+    """Seedance 2.0 reference-to-video — used only when a Video Reference is attached."""
+    duration = nearest_duration(float(duration_sec or 5), (4, 5, 6, 7, 8, 9, 10, 11, 12), 5)
+    res = resolution if resolution in ("480p", "720p", "1080p", "4k") else "720p"
+    aspect = (aspect_ratio or "auto").strip() or "auto"
+    args: dict[str, Any] = {
+        "prompt": prompt,
+        "resolution": res,
+        "duration": str(duration),
+        "aspect_ratio": aspect,
+        "generate_audio": generate_audio,
+    }
+    if image_urls:
+        args["image_urls"] = list(image_urls)[:9]
+    if video_urls:
+        args["video_urls"] = list(video_urls)[:1]
+    if seed >= 0:
+        args["seed"] = seed
+    return SEEDANCE_R2V_MODEL_ID, args

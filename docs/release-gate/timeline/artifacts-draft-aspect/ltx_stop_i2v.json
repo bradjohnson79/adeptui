@@ -1,0 +1,48 @@
+{
+  "submitOk": true,
+  "jobId": "9e7e89bf-32b4-4452-85cf-51d79c520596",
+  "mode": "image_to_video",
+  "startImageAssetId": "26c16f61-38e1-4ff3-a992-9c1acde4674e",
+  "resolution": "672x288",
+  "aspectRatio": "21:9",
+  "draftMode": true,
+  "preCancel": {
+    "status": "queued",
+    "stage": "queued",
+    "comfy_prompt_id": null,
+    "message": "Timeline batch LTX draft queued"
+  },
+  "cancel": {
+    "ok": true,
+    "action": "cancel_active_local_job",
+    "message": "Local jobs cancel requested.",
+    "affectedBatchIds": [
+      "bb_0ec46f01d338"
+    ],
+    "hostedCancelSupport": "supported"
+  },
+  "jobAfter": {
+    "status": "cancelled",
+    "stage": "cancelled",
+    "message": "Cancelled \u2014 ComfyUI confirmed prompt is no longer active or queued",
+    "comfy_prompt_id": null,
+    "confirmedStopped": true,
+    "halt": {
+      "interrupt": true,
+      "deleted": false,
+      "freedRequested": true,
+      "confirmedStopped": true,
+      "errorCode": null,
+      "confirmation": {
+        "confirmed": true,
+        "reason": "no_prompt_id"
+      },
+      "freeResponse": {
+        "ok": true
+      },
+      "vramFullyReleased": false,
+      "vramReleaseNote": "free_memory was requested; cached CUDA/models/encoders may remain. Success is measured by prompt stop + job reservation release, not full unload."
+    }
+  },
+  "ok": true
+}

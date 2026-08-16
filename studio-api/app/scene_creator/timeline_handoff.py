@@ -84,6 +84,8 @@ def send_scene_batch_to_timeline(
             "message": "Batch has no completed result assets to send to Timeline.",
         }
 
+    _stamp_aspect_on_handoff(db, scene_id, clips)
+
     result = export_to_timeline(
         db,
         project_id,
@@ -146,6 +148,7 @@ def send_approved_shot_to_timeline(
             "cameraStateVersion": getattr(candidate, "camera_state_version", None),
         }
     ]
+    _stamp_aspect_on_handoff(db, scene_id, clips)
     result = export_to_timeline(
         db,
         project_id,
@@ -220,3 +223,42 @@ def _shot_role(index: int, total: int) -> str:
     if index == total - 1:
         return "end"
     return "middle"
+
+
+def _stamp_aspect_on_handoff(db: Session, scene_id: str, clips: list[dict[str, Any]]) -> None:
+    """Write production aspect onto clip provenance and asset prompt_meta. No Asset column migration."""
+    import json
+
+    from ..aspect_fps import normalize_production_aspect, production_pixels
+    from ..db import Asset, Scene
+
+    scene = db.get(Scene, scene_id) if scene_id else None
+    aspect = normalize_production_aspect(getattr(scene, "aspect_ratio", None) if scene else None)
+    width, height = production_pixels(aspect, "final")
+    if scene and not (getattr(scene, "aspect_ratio", None) or "").strip():
+        scene.aspect_ratio = aspect
+        db.add(scene)
+    for clip in clips:
+        clip["aspectRatio"] = aspect
+        clip["width"] = width
+        clip["height"] = height
+        asset_id = str(clip.get("assetId") or "").strip()
+        if not asset_id:
+            continue
+        row = db.get(Asset, asset_id)
+        if not row:
+            continue
+        meta: dict[str, Any] = {}
+        raw = getattr(row, "prompt_meta_json", None) or "{}"
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict):
+                meta = parsed
+        except Exception:
+            meta = {}
+        meta.setdefault("aspectRatio", aspect)
+        meta.setdefault("width", width)
+        meta.setdefault("height", height)
+        row.prompt_meta_json = json.dumps(meta)
+        db.add(row)
+    db.commit()

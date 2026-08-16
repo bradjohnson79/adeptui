@@ -45,8 +45,16 @@ def _capabilities() -> VideoGeneratorCapabilities:
         executable=True,
         notes=(
             "Experimental Private Profile — image-to-video with native audio. "
-            "Requires a start image; never silently falls back to text-to-video."
+            "Requires a start image; never silently falls back to text-to-video. "
+            "Draft Mode is unavailable — this profile only generates at 480x256."
         ),
+        draftPathway="none",
+        supportsQueuedCancel=True,
+        supportsRunningCancel=True,
+        finalRequiresNewGeneration=True,
+        draftResolution=None,
+        finalResolution="480x256",
+        supportsImageAndVideoTogether=False,
     )
 
 
@@ -101,6 +109,7 @@ class MiniMaxH3I2VLocalAdapter:
                     f"executionSnapshotId={request.executionSnapshotId}",
                     f"startImageAssetId={start_id}",
                     "generatorId=minimax-h3-i2v-local",
+                    f"continuityStrategy={request.continuityStrategy or 'last_frame_i2v'}",
                 ],
             ),
             creatorNotes=(
@@ -146,6 +155,13 @@ class MiniMaxH3I2VLocalAdapter:
                 "comfyImageName": binding.get("comfyImageName"),
                 "firstFrameNodeId": binding.get("firstFrameNodeId"),
                 "submittedGraphPath": binding.get("submittedGraphPath"),
+                "continuityStrategy": (
+                    "last_frame_i2v"
+                    if request.lastFrameAssetId and start_id == request.lastFrameAssetId
+                    else (request.continuityStrategy or "none")
+                ),
+                "continuityBridgeId": request.continuityBridgeId,
+                "lastFrameAssetId": request.lastFrameAssetId,
             },
         )
 

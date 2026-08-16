@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   api,
   type DirectorTimelineCameraCatalog,
@@ -26,6 +26,13 @@ import {
 } from "../ui/SearchableGroupedSelect";
 import { useDraftField } from "./useDraftField";
 import { SceneProductionReadinessPanel } from "./SceneProductionReadinessPanel";
+import {
+  draftPathwayCopy,
+  generatorOptionsFromPayload,
+  promoteCopy,
+  type TimelineGeneratorOption,
+} from "../../timelineMaster/draftCapabilities";
+import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 
 function executionLabel(engine: string) {
   return engine.startsWith("fal_") ? "Hosted" : engine === "auto" ? "Automatic" : "Local";
@@ -52,38 +59,6 @@ function cameraLabel(value: string | null | undefined) {
     .replace(/_/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase())
     .trim();
-}
-
-type TimelineGeneratorOption = {
-  id: string;
-  label: string;
-  executable: boolean;
-  capabilityLabel?: string;
-  notes?: string;
-};
-
-/** CAPABILITY_DRIVEN_GENERATOR_MENU: build the batch generator dropdown from
- * the registered Timeline adapter capabilities (never a hardcoded list).
- * The certification stub is filtered out — it is wiring-cert tooling, never
- * creator chrome. Non-executable adapters stay visible but disabled with the
- * honest capability label (Honest Capability Labels, Law 20). */
-function generatorOptionsFromPayload(payload: Record<string, unknown>): TimelineGeneratorOption[] {
-  const adapters = Array.isArray(payload?.timelineAdapters)
-    ? (payload.timelineAdapters as Array<Record<string, unknown>>)
-    : [];
-  const out: TimelineGeneratorOption[] = [];
-  for (const a of adapters) {
-    const id = String(a.id || "");
-    if (!id || id === "cert-stub-local") continue;
-    out.push({
-      id,
-      label: String(a.label || id),
-      executable: a.executable !== false,
-      capabilityLabel: a.capabilityLabel ? String(a.capabilityLabel) : undefined,
-      notes: a.notes ? String(a.notes) : undefined,
-    });
-  }
-  return out;
 }
 
 function resolveCatalogEntry(entries: DirectorTimelineCameraCatalogEntry[], value: string | null | undefined) {
@@ -132,6 +107,39 @@ function cameraGroupOptions(groups: DirectorTimelineCameraCatalog["motionGroups"
   }));
 }
 
+function InspectorAccordion({
+  title,
+  testId,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  testId: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <details
+      className="timeline-inspector__accordion"
+      data-testid={testId}
+      open={open}
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>{title}</summary>
+      <div className="timeline-inspector__accordion-body">{children}</div>
+    </details>
+  );
+}
+
+function continuityChipLabel(status: string | undefined, stale?: boolean) {
+  if (stale) return "Needs update";
+  if (status === "Failed") return "Match failed";
+  if (status === "Waiting" || status === "Analyzing") return "Matching…";
+  if (status === "Ready" || status === "Applied") return "Matched";
+  return null;
+}
+
 export function TimelineInspector({
   project,
   scene,
@@ -158,6 +166,7 @@ export function TimelineInspector({
   const [timeline, setTimeline] = useState<DirectorTimeline | null>(null);
   const [cameraCatalog, setCameraCatalog] = useState<DirectorTimelineCameraCatalog | null>(null);
   const [generatorOptions, setGeneratorOptions] = useState<TimelineGeneratorOption[]>([]);
+  const [draftMode, setDraftMode] = useState(true);
   const [showProjectStyle, setShowProjectStyle] = useState(false);
   const [scenePromptDraftBase, setScenePromptDraftBase] = useState(scene.prompt || "");
 
@@ -244,6 +253,27 @@ export function TimelineInspector({
     () => master?.batchBlocks.find((batch) => batch.id === selection.id),
     [master, selection.id],
   );
+  const selectedGenerator = useMemo(
+    () => generatorOptions.find((g) => g.id === selectedBatch?.generatorId) || null,
+    [generatorOptions, selectedBatch?.generatorId],
+  );
+  const draftPathway = selectedGenerator?.draftPathway || "none";
+  const draftAvailable = draftPathway !== "none";
+  const videoRefAttached = Boolean(
+    (timeline?.video_reference_clips || []).some((c) => c.asset_id) ||
+      selectedBatch?.sourceAnchors?.some((a) => a.kind === "video" && a.assetId),
+  );
+  const videoRefBlocked = Boolean(videoRefAttached && selectedGenerator && !selectedGenerator.supportsVideoReferences);
+  useEffect(() => {
+    setDraftMode(draftAvailable);
+  }, [draftAvailable, selectedBatch?.id, selectedBatch?.generatorId]);
+  const continuityPolicy = master?.continuityPolicy;
+  const isApiContinuity = continuityPolicy?.locality === "api";
+  const staleDownstream = useMemo(
+    () => (master?.batchBlocks || []).filter((batch) => batch.downstreamStale),
+    [master],
+  );
+  const [retakeDelta, setRetakeDelta] = useState("");
   const selectedRepair = useMemo(
     () => master?.batchBlocks.flatMap((batch) => batch.repairRanges.map((repair) => ({ batch, repair }))).find((entry) => entry.repair.id === selection.id),
     [master, selection.id],
@@ -508,6 +538,7 @@ export function TimelineInspector({
 
       {(selection.kind === null || selection.kind === "scene") && (
         <div className="timeline-inspector__stack">
+          <InspectorAccordion title="Scene" testId="timeline-inspector-scene" defaultOpen>
           <label className="field">
             <span>Name</span>
             <input
@@ -553,6 +584,9 @@ export function TimelineInspector({
               });
             }}
           />
+          </InspectorAccordion>
+
+          <InspectorAccordion title="Generation" testId="timeline-inspector-generation" defaultOpen>
           <label className="field">
             <span>Generator</span>
             <select value={scene.engine} onChange={(e) => void updateScene({ engine: e.target.value as Scene["engine"] })}>
@@ -565,6 +599,21 @@ export function TimelineInspector({
               <option value="fal_veo">Veo</option>
               <option value="fal_runway">Runway</option>
             </select>
+          </label>
+          <label className="field">
+            <span>Picture Shape</span>
+            <select
+              data-testid="timeline-scene-aspect"
+              value={normalizeProductionAspect(scene.aspect_ratio)}
+              onChange={(e) => void updateScene({ aspect_ratio: e.target.value })}
+            >
+              {PRODUCTION_ASPECTS.map((ratio) => (
+                <option key={ratio} value={ratio}>
+                  {ratio}
+                </option>
+              ))}
+            </select>
+            <HelpTip text="How wide the picture is. 16:9 is standard. 21:9 is extra wide. Changing this updates the Viewer immediately." />
           </label>
           <label className="field">
             <span>Duration</span>
@@ -607,7 +656,66 @@ export function TimelineInspector({
               ) : null}
             </div>
           </div>
-          <SceneProductionReadinessPanel project={project} scene={scene} />
+          </InspectorAccordion>
+
+          <InspectorAccordion title="Extend & Continuity" testId="timeline-inspector-continuity">
+            <p className="scene-meta">
+              Later shots can start from the last moments of the previous shot so the scene feels continuous.
+              This is not a separate track.
+            </p>
+            {isApiContinuity ? (
+              <label className="field">
+                <span>Auto Continuity</span>
+                <select
+                  data-testid="timeline-continuity-window"
+                  value={String(continuityPolicy?.configuredTailDuration ?? 0)}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    void api.directorTimelineSetContinuityPolicy(project.id, scene.id, { configuredTailDuration: n }).then(onRefresh);
+                  }}
+                >
+                  <option value="0">Off</option>
+                  <option value="3">Last 3 seconds</option>
+                  <option value="5">Last 5 seconds</option>
+                </select>
+                <HelpTip text="Off means Adept will not spend API credits to match shots in the background. 3 or 5 seconds uses the end of the previous shot when you generate the next one." />
+              </label>
+            ) : (
+              <p className="scene-meta" data-testid="timeline-continuity-local-lock">
+                Auto Continuity is on. Adept uses the last 5 seconds of the previous shot — or the whole shot if it is shorter.
+              </p>
+            )}
+          </InspectorAccordion>
+
+          <InspectorAccordion title="Re-Take" testId="timeline-inspector-retake">
+            <p className="scene-meta">
+              A new take keeps the scene, matching, and original intent. Your note is the change — not a rewrite.
+            </p>
+            {staleDownstream.length > 0 ? (
+              <div className="timeline-inspector__stale" data-testid="timeline-downstream-stale">
+                <p className="scene-meta">Later shots still use the old take.</p>
+                <button
+                  type="button"
+                  data-testid="timeline-reconcile-downstream"
+                  onClick={() => void api.directorTimelineReconcileDownstream(project.id, scene.id, { spendApiCredits: false }).then(onRefresh)}
+                >
+                  Update later shots
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid="timeline-keep-existing-downstream"
+                  onClick={() => void api.directorTimelineKeepExistingDownstream(project.id, scene.id).then(onRefresh)}
+                >
+                  Keep existing
+                </button>
+              </div>
+            ) : null}
+          </InspectorAccordion>
+
+          <InspectorAccordion title="Advanced" testId="timeline-inspector-advanced">
+            <SceneProductionReadinessPanel project={project} scene={scene} />
+          </InspectorAccordion>
         </div>
       )}
 
@@ -892,7 +1000,199 @@ export function TimelineInspector({
               ) : null}
             </select>
           </label>
+          <label className="field">
+            <span>Draft Mode</span>
+            <input
+              type="checkbox"
+              data-testid="timeline-draft-mode"
+              checked={draftAvailable && draftMode}
+              disabled={!draftAvailable}
+              onChange={(e) => setDraftMode(e.target.checked)}
+            />
+            <HelpTip text={draftPathwayCopy(draftPathway)} />
+          </label>
+          <p className="scene-meta" data-testid="timeline-draft-pathway-copy">
+            {draftPathwayCopy(draftPathway)}
+          </p>
+          {videoRefBlocked ? (
+            <p className="scene-meta" data-testid="timeline-video-ref-blocked">
+              Selected model does not support video reference. Remove the Video Reference clip or choose a model that can use motion reference.
+            </p>
+          ) : null}
+          {selectedGenerator &&
+          selectedGenerator.supportedAspectRatios.length > 0 &&
+          !selectedGenerator.supportedAspectRatios.includes(normalizeProductionAspect(scene.aspect_ratio)) &&
+          !selectedGenerator.supportedAspectRatios.some((a) => a.includes(normalizeProductionAspect(scene.aspect_ratio))) ? (
+            <p className="scene-meta" data-testid="timeline-aspect-warning">
+              This generator may not honor {normalizeProductionAspect(scene.aspect_ratio)}. Adept will not crop a different shape and call it {normalizeProductionAspect(scene.aspect_ratio)}.
+            </p>
+          ) : null}
+          <div className="timeline-inspector__row">
+            <button
+              type="button"
+              className="primary"
+              data-testid="timeline-generate-draft"
+              disabled={videoRefBlocked}
+              onClick={() =>
+                void api
+                  .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, {
+                    draftMode: draftAvailable ? draftMode : false,
+                  })
+                  .then(onRefresh)
+              }
+            >
+              {draftAvailable ? "Generate Draft" : "Generate Final"}
+            </button>
+            {draftAvailable ? (
+              <button
+                type="button"
+                data-testid="timeline-generate-final"
+                disabled={videoRefBlocked}
+                onClick={() =>
+                  void api
+                    .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
+                    .then(onRefresh)
+                }
+              >
+                Generate Final
+              </button>
+            ) : null}
+          </div>
+          {(() => {
+            const latest = [...(selectedBatch.candidateVersions || [])].reverse()[0];
+            const isDraftTake = String(latest?.takeState?.quality || "").toLowerCase() === "draft";
+            const generating = selectedBatch.status === "Generating";
+            const canStop =
+              generating &&
+              (selectedGenerator?.supportsQueuedCancel || selectedGenerator?.supportsRunningCancel);
+            return (
+              <>
+                {generating && canStop ? (
+                  <button
+                    type="button"
+                    data-testid="timeline-stop-jobs"
+                    onClick={() =>
+                      void api
+                        .directorTimelineCancel(project.id, scene.id, { action: "cancel_active_local_job" })
+                        .then(onRefresh)
+                    }
+                  >
+                    Stop
+                  </button>
+                ) : null}
+                {generating && !canStop ? (
+                  <p className="scene-meta" data-testid="timeline-cancel-unavailable">
+                    Provider is rendering — cancellation unavailable
+                  </p>
+                ) : null}
+                {isDraftTake && latest ? (
+                  <div className="timeline-inspector__row" data-testid="timeline-draft-actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      data-testid="timeline-promote-final"
+                      disabled={videoRefBlocked}
+                      title={promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false)}
+                      onClick={() =>
+                        void api
+                          .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
+                          .then(onRefresh)
+                      }
+                    >
+                      Promote to Final
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="timeline-reject-take"
+                      onClick={() =>
+                        void api
+                          .directorTimelineRejectTake(project.id, scene.id, selectedBatch.id, latest.id)
+                          .then(onRefresh)
+                      }
+                    >
+                      Reject
+                    </button>
+                    <p className="scene-meta">{promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false)}</p>
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
           <div className="scene-meta">Status: {formatBatchStatus(selectedBatch.status)}</div>
+          {selectedBatch.downstreamStale ? (
+            <p className="scene-meta" data-testid="timeline-batch-stale">This shot still uses the previous take from earlier in the scene.</p>
+          ) : null}
+          {(() => {
+            const incoming = (master?.continuityBridges || []).find(
+              (bridge) => bridge.targetBatchId === selectedBatch.id && bridge.status !== "Superseded",
+            );
+            if (!incoming) return null;
+            if (incoming.status !== "Failed") {
+              return (
+                <p className="scene-meta" data-testid="timeline-batch-continuity">
+                  Continuity: {continuityChipLabel(incoming.status) || incoming.status}
+                </p>
+              );
+            }
+            return (
+              <div data-testid="timeline-batch-continuity-failed">
+                <p className="scene-meta">Matching the previous shot failed.</p>
+                <button type="button" onClick={() => void api.directorTimelineRetryBridge(project.id, scene.id, incoming.bridgeId).then(onRefresh)}>
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => void api.directorTimelineContinueWithoutBridge(project.id, scene.id, incoming.bridgeId).then(onRefresh)}
+                >
+                  Continue without matching
+                </button>
+              </div>
+            );
+          })()}
+          <label className="field">
+            <span>What should change</span>
+            <textarea
+              data-testid="timeline-retake-delta-field"
+              rows={2}
+              value={retakeDelta}
+              onChange={(e) => setRetakeDelta(e.target.value)}
+              placeholder="Example: walk behind the cruiser, not in front"
+            />
+            <HelpTip text="Adept keeps the scene, the match from the previous shot, and the original idea. This note is only the change." />
+          </label>
+          <button
+            type="button"
+            data-testid="timeline-batch-retake"
+            onClick={() =>
+              void api
+                .directorTimelineRetakeBatch(project.id, scene.id, selectedBatch.id, {
+                  mode: "directed",
+                  userCorrection: { delta: retakeDelta },
+                })
+                .then(onRefresh)
+            }
+          >
+            New take
+          </button>
+          {selectedBatch.candidateVersions.length > 1 ? (
+            <div className="timeline-inspector__takes" data-testid="timeline-batch-takes">
+              {selectedBatch.candidateVersions.map((cand, index) => (
+                <button
+                  key={cand.id}
+                  type="button"
+                  className={cand.approved ? "active" : "ghost"}
+                  data-testid={`timeline-take-${cand.id}`}
+                  onClick={() =>
+                    void api.directorTimelineActivateTake(project.id, scene.id, selectedBatch.id, cand.id).then(onRefresh)
+                  }
+                >
+                  {cand.label || `Take ${String.fromCharCode(65 + index)}`}
+                  {cand.approved ? " (active)" : ""}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 

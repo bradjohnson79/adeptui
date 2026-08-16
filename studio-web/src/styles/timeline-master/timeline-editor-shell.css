@@ -529,6 +529,25 @@
   color: #fda4af;
 }
 
+.timeline-editor-shell .track-clip__continuity {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: rgba(94, 160, 255, 0.16);
+  color: #b9d4ff;
+}
+
+.timeline-editor-shell .track-clip__continuity.warn {
+  background: rgba(217, 160, 63, 0.22);
+  color: #f5c97b;
+}
+
 .timeline-editor-shell .director-tracks--timeline-shell .track-clip--repair {
   background: linear-gradient(180deg, rgba(105, 38, 60, 0.95), rgba(78, 24, 45, 0.95));
   color: #fff1f5;
@@ -584,6 +603,45 @@
   border: 1px solid rgba(126, 156, 187, 0.14);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.timeline-inspector__accordion {
+  border: 1px solid rgba(126, 156, 187, 0.12);
+  border-radius: 12px;
+  padding: 0.35rem 0.65rem 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.timeline-inspector__accordion > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(190, 210, 230, 0.88);
+  padding: 0.35rem 0;
+  list-style: none;
+}
+
+.timeline-inspector__accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-inspector__accordion-body {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.25rem 0 0.35rem;
+}
+
+.timeline-inspector__takes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.timeline-inspector__stale {
+  display: grid;
+  gap: 0.4rem;
 }
 
 .timeline-render-queue__toggle {

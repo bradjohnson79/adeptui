@@ -1,0 +1,35 @@
+{
+  "submitOk": true,
+  "jobId": "114597e0-16da-4146-9503-69a3cbfc20cf",
+  "normalized": {
+    "generationMode": "image_to_video",
+    "resolution": "672x288",
+    "aspectRatio": "21:9",
+    "draftMode": true
+  },
+  "jobStatus": "done",
+  "jobMessage": "Scene render complete",
+  "params": {
+    "draftMode": true,
+    "fast_mode": true,
+    "width": 672,
+    "height": 288,
+    "aspectRatio": "21:9"
+  },
+  "candidate": {
+    "count": 2,
+    "quality": "final",
+    "id": "cand_cdc087a5b864",
+    "batchStatus": "Cancelled"
+  },
+  "survivedReload": true,
+  "promote": {
+    "ok": true,
+    "jobId": "86607279-1391-4685-9bd8-9d89d553a0d6",
+    "draftMode": false,
+    "resolution": "1344x576",
+    "aspectRatio": "21:9",
+    "newJob": true
+  },
+  "ok": false
+}

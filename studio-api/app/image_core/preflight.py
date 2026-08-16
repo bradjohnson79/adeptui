@@ -174,7 +174,13 @@ def preflight(request: ImageCoreRequest) -> CapabilityDecision:
             supported=False,
         )
 
-    width, height = resolve_resolution(family, runtime_op, purpose, workflow_key=workflow_key)
+    width, height = resolve_resolution(
+        family,
+        runtime_op,
+        purpose,
+        workflow_key=workflow_key,
+        aspect_ratio=request.aspect_ratio or str((request.extra or {}).get("aspectRatio") or ""),
+    )
     return CapabilityDecision(
         ok=True,
         family=family,

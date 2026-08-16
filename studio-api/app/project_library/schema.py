@@ -109,6 +109,10 @@ class AssetLibraryMeta:
     is_canonical: bool = False
     override: bool = False
     tags: list[str] = field(default_factory=list)
+    aspect_ratio: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    quality: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -134,6 +138,14 @@ class AssetLibraryMeta:
             payload["sourceJobId"] = self.source_job_id
         if self.provider_output_id:
             payload["providerOutputId"] = self.provider_output_id
+        if self.aspect_ratio:
+            payload["aspectRatio"] = self.aspect_ratio
+        if self.width:
+            payload["width"] = self.width
+        if self.height:
+            payload["height"] = self.height
+        if self.quality:
+            payload["quality"] = self.quality
         return payload
 
     @classmethod
@@ -156,6 +168,10 @@ class AssetLibraryMeta:
             is_canonical=bool(data.get("isCanonical") or data.get("is_canonical")),
             override=bool(data.get("override")),
             tags=list(data.get("tags") or []),
+            aspect_ratio=data.get("aspectRatio") or data.get("aspect_ratio"),
+            width=int(data["width"]) if data.get("width") else None,
+            height=int(data["height"]) if data.get("height") else None,
+            quality=data.get("quality"),
         )
 
 

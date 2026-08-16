@@ -12,6 +12,105 @@ from ..contracts import ApprovedClip, SceneTimelineMaster
 from .contracts import NormalizedJobSubmission, TimelineGenerationResult
 
 
+def _label_draft_library_asset(db: Session, asset_id: str) -> None:
+    """Mark the Library asset as a draft without deleting or replacing it."""
+    if not (asset_id or "").strip():
+        return
+    try:
+        from ...db import Asset
+
+        row = db.get(Asset, str(asset_id))
+        if not row:
+            return
+        tag = (row.tag or "").strip()
+        if "draft" not in tag.lower():
+            row.tag = f"{tag}-draft" if tag else "draft"
+        import json
+
+        meta: dict[str, Any] = {}
+        raw = getattr(row, "prompt_meta_json", None) or "{}"
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(parsed, dict):
+                meta = parsed
+        except Exception:
+            meta = {}
+        meta["quality"] = "draft"
+        row.prompt_meta_json = json.dumps(meta)
+        db.add(row)
+        db.commit()
+    except Exception:
+        pass
+
+
+def _stash_generation_lineage(
+    db: Session,
+    *,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    execution_snapshot_id: str,
+    result: TimelineGenerationResult,
+    job: NormalizedJobSubmission | None,
+    asset_id: str,
+    quality: str,
+) -> None:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = next((b for b in master.batchBlocks if b.id == batch_id), None)
+    if not batch:
+        return
+    for j in batch.generationJobs:
+        if j.executionSnapshotId == execution_snapshot_id:
+            j.status = "completed"
+            if job:
+                j.queueJobId = job.queueJobId or j.queueJobId
+                if hasattr(j, "providerJobId"):
+                    j.providerJobId = job.providerJobId  # type: ignore[attr-defined]
+                if hasattr(j, "generatorId"):
+                    j.generatorId = result.generatorId  # type: ignore[attr-defined]
+                if hasattr(j, "apiUsed"):
+                    j.apiUsed = result.apiUsed  # type: ignore[attr-defined]
+    meta = result.providerMetadata if isinstance(result.providerMetadata, dict) else {}
+    lineage = {
+        "kind": "timelineGenerationLineage",
+        "projectId": project_id,
+        "sceneId": scene_id,
+        "batchBlockId": batch_id,
+        "executionSnapshotId": execution_snapshot_id,
+        "internalJobId": result.internalJobId,
+        "providerJobId": result.providerJobId,
+        "queueJobId": result.queueJobId,
+        "generatorId": result.generatorId,
+        "outputAssetId": asset_id,
+        "apiUsed": result.apiUsed,
+        "startImageAssetId": meta.get("startImageAssetId"),
+        "startImageSha256": meta.get("startImageSha256"),
+        "comfyImageName": meta.get("comfyImageName"),
+        "workflowId": meta.get("workflowId"),
+        "videoReferenceAssetId": meta.get("videoReferenceAssetId"),
+        "draftMode": meta.get("draftMode") if meta.get("draftMode") is not None else quality == "draft",
+        "draftPathway": meta.get("draftPathway"),
+        "aspectRatio": meta.get("aspectRatio"),
+        "resolution": meta.get("resolution"),
+        "quality": quality,
+    }
+    refs = [
+        r
+        for r in (batch.references or [])
+        if not (
+            isinstance(r, dict)
+            and r.get("kind") == "timelineGenerationLineage"
+            and r.get("executionSnapshotId") == execution_snapshot_id
+        )
+    ]
+    refs.append(lineage)
+    batch.references = refs
+    store.save_master(db, project_id, scene_id, master)
+
+
 def apply_shared_completion(
     db: Session,
     *,
@@ -97,12 +196,42 @@ def apply_shared_completion(
             return complete
         cand_id = complete["candidate"]["id"]
 
+    # Continuity-aware Re-Take must not overwrite Take A. The new candidate
+    # stays selectable as Take B until the creator activates it.
+    payload_now = store.load_master(db, project_id, scene_id)
+    live = SceneTimelineMaster.model_validate(payload_now["master"]) if payload_now.get("ok") else master
+    live_batch = next((b for b in live.batchBlocks if b.id == batch_id), batch)
+    new_cand = next((c for c in live_batch.candidateVersions if c.id == cand_id), None)
+    take_state = dict(new_cand.takeState or {}) if new_cand else {}
+    is_draft = str(take_state.get("quality") or "").lower() == "draft"
+    if is_draft:
+        auto_approve = False
+        _label_draft_library_asset(db, asset_id)
+    if (
+        auto_approve
+        and live_batch.approvedClip
+        and new_cand
+        and (new_cand.reTakeReason or new_cand.parentTakeId)
+    ):
+        auto_approve = False
+
+    _stash_generation_lineage(
+        db,
+        project_id=project_id,
+        scene_id=scene_id,
+        batch_id=batch_id,
+        execution_snapshot_id=execution_snapshot_id,
+        result=result,
+        job=job,
+        asset_id=asset_id,
+        quality="draft" if is_draft else "final",
+    )
+
     approved = None
     if auto_approve:
         approved = orchestrator.approve_candidate(db, project_id, scene_id, batch_id, cand_id)
         if not approved.get("ok"):
             return approved
-        # Enrich approved clip lineage
         payload2 = store.load_master(db, project_id, scene_id)
         master2 = SceneTimelineMaster.model_validate(payload2["master"])
         batch2 = next((b for b in master2.batchBlocks if b.id == batch_id), None)
@@ -114,43 +243,6 @@ def apply_shared_completion(
                 approvedAt=batch2.approvedClip.approvedAt,
                 playable=True,
             )
-            # Persist lineage alongside job refs
-            for j in batch2.generationJobs:
-                if j.executionSnapshotId == execution_snapshot_id:
-                    j.status = "completed"
-                    if job:
-                        j.queueJobId = job.queueJobId or j.queueJobId
-                        if hasattr(j, "providerJobId"):
-                            j.providerJobId = job.providerJobId  # type: ignore[attr-defined]
-                        if hasattr(j, "generatorId"):
-                            j.generatorId = result.generatorId  # type: ignore[attr-defined]
-                        if hasattr(j, "apiUsed"):
-                            j.apiUsed = result.apiUsed  # type: ignore[attr-defined]
-            # Stash lineage on batch.references metadata (non-destructive)
-            meta = result.providerMetadata if isinstance(result.providerMetadata, dict) else {}
-            lineage = {
-                "kind": "timelineGenerationLineage",
-                "projectId": project_id,
-                "sceneId": scene_id,
-                "batchBlockId": batch_id,
-                "executionSnapshotId": execution_snapshot_id,
-                "internalJobId": result.internalJobId,
-                "providerJobId": result.providerJobId,
-                "queueJobId": result.queueJobId,
-                "generatorId": result.generatorId,
-                "outputAssetId": asset_id,
-                "apiUsed": result.apiUsed,
-                "startImageAssetId": meta.get("startImageAssetId"),
-                "startImageSha256": meta.get("startImageSha256"),
-                "comfyImageName": meta.get("comfyImageName"),
-                "workflowId": meta.get("workflowId"),
-            }
-            refs = [r for r in (batch2.references or []) if not (
-                isinstance(r, dict) and r.get("kind") == "timelineGenerationLineage"
-                and r.get("executionSnapshotId") == execution_snapshot_id
-            )]
-            refs.append(lineage)
-            batch2.references = refs
             store.save_master(db, project_id, scene_id, master2)
 
     placement = place_approved_batches_on_timeline(db, project_id, scene_id)

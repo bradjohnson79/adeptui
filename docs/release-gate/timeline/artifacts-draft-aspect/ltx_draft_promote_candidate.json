@@ -1,0 +1,24 @@
+{
+  "submitOk": true,
+  "jobId": "c9ed85c0-a010-4a14-b661-fec32e2ff6c1",
+  "jobStatus": "failed",
+  "jobMessage": "Interrupted by an API restart before it finished. The studio queue does not resume work that was already running, because the provider-side render (ComfyUI prompt or fal.ai request) cannot be re-attac",
+  "params": {
+    "draftMode": true,
+    "fast_mode": true,
+    "width": 672,
+    "height": 288,
+    "outputAssetIds": null
+  },
+  "candidates": [],
+  "survivedReload": false,
+  "promote": {
+    "ok": true,
+    "jobId": "ea6d5d2f-6b0e-484a-aca2-77919d82b8ea",
+    "draftMode": false,
+    "resolution": "1344x576",
+    "aspectRatio": "21:9",
+    "newJob": true
+  },
+  "ok": false
+}

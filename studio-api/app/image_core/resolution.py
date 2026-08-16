@@ -42,10 +42,17 @@ def resolve_resolution(
     purpose: str,
     *,
     workflow_key: str = "",
+    aspect_ratio: str | None = None,
 ) -> tuple[int, int]:
     purpose_n = (purpose or "").strip().lower()
     if purpose_n in {"scene_shot_preview"}:
-        return _PREVIEW_SIZE
+        from ..aspect_fps import production_pixels
+
+        return production_pixels(aspect_ratio, "draft")
+    if purpose_n in {"scene_shot_final"}:
+        from ..aspect_fps import production_pixels
+
+        return production_pixels(aspect_ratio, "final")
     if workflow_key:
         sized = _registry_size(workflow_key)
         if sized:

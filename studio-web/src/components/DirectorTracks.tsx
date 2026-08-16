@@ -21,6 +21,14 @@ import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./ti
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
 import { formatBatchStatus } from "../timelineMaster/contracts";
 
+function continuityChipLabel(status: string | undefined, stale?: boolean) {
+  if (stale) return "Needs update";
+  if (status === "Failed") return "Match failed";
+  if (status === "Waiting" || status === "Analyzing") return "Matching…";
+  if (status === "Ready" || status === "Applied") return "Matched";
+  return null;
+}
+
 export type RegionBox = { x: number; y: number; w: number; h: number };
 export type TimelineClip = {
   id: string;
@@ -103,6 +111,8 @@ export type DirectorTimeline = {
   duration_sec: number;
   image_clips: TimelineClip[];
   video_clips: TimelineClip[];
+  /** Motion/performance reference — independent of the output Video track. One clip this milestone. */
+  video_reference_clips?: TimelineClip[];
   prompt_segments: PromptSegment[];
   camera_clips?: CameraClip[];
   audio_clips: TimelineClip[];
@@ -348,7 +358,7 @@ export function DirectorTracks({
   const [selectedClip, setSelectedClip] = useState<string>();
   const [timelineRefsEnabled, setTimelineRefsEnabled] = useState(false);
   const [selectedClipKind, setSelectedClipKind] = useState<
-    "imageClip" | "videoClip" | "camera" | "audio" | "sfx" | null
+    "imageClip" | "videoClip" | "videoReferenceClip" | "camera" | "audio" | "sfx" | null
   >(null);
   const [refsCounts, setRefsCounts] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
@@ -441,6 +451,7 @@ export function DirectorTracks({
         const next = {
           ...d,
           image_clips: freeImageClips(d as DirectorTimeline),
+          video_reference_clips: (d as DirectorTimeline).video_reference_clips || [],
           lipsync: { tracks: normalizeLipSyncTracks((d as DirectorTimeline).lipsync?.tracks) },
         } as DirectorTimeline;
         setTl(next);
@@ -463,6 +474,7 @@ export function DirectorTracks({
           duration_sec: scene.duration_sec || 5,
           image_clips: [],
           video_clips: [],
+          video_reference_clips: [],
           prompt_segments: [],
           camera_clips: [],
           audio_clips: [],
@@ -651,10 +663,11 @@ export function DirectorTracks({
   );
   const boardWidth = Math.max(480, boardDuration * 90 * zoom);
 
-  const laneClipsFor = (kind: "image" | "video" | "prompt" | "audio" | "sfx" | "camera") => {
+  const laneClipsFor = (kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera") => {
     if (!tl) return [] as Array<{ id: string; start: number; length: number }>;
     if (kind === "image") return tl.image_clips || [];
     if (kind === "video") return tl.video_clips || [];
+    if (kind === "videoReference") return tl.video_reference_clips || [];
     if (kind === "prompt") return tl.prompt_segments || [];
     if (kind === "audio") return tl.audio_clips || [];
     if (kind === "sfx") return tl.sfx_clips || [];
@@ -664,7 +677,7 @@ export function DirectorTracks({
   // CLIP_OVERLAP_GUARD: clips on the same lane may not overlap. Moves clamp
   // flush against the neighbor; trims clamp at the neighbor boundary.
   const clampToLane = (
-    kind: "image" | "video" | "prompt" | "audio" | "sfx" | "camera",
+    kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera",
     id: string,
     start: number,
     length: number,
@@ -701,7 +714,7 @@ export function DirectorTracks({
   };
 
   const commitClipGeometry = (
-    kind: "image" | "video" | "prompt" | "audio" | "sfx" | "camera",
+    kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera",
     id: string,
     next: ClipGeometry,
     mode: ClipDragMode,
@@ -725,6 +738,19 @@ export function DirectorTracks({
       void save({
         ...tl,
         video_clips: (tl.video_clips || []).map((c) => {
+          if (c.id !== id) return c;
+          const delta = start - c.start;
+          const trim_start =
+            mode === "trim-left" ? Math.max(0, (c.trim_start || 0) + delta) : c.trim_start;
+          return { ...c, start, length, trim_start };
+        }),
+      });
+      return;
+    }
+    if (kind === "videoReference") {
+      void save({
+        ...tl,
+        video_reference_clips: (tl.video_reference_clips || []).map((c) => {
           if (c.id !== id) return c;
           const delta = start - c.start;
           const trim_start =
@@ -759,7 +785,7 @@ export function DirectorTracks({
     setSelectedSeg(id);
     sel?.setSelection({ kind: "promptSeg", id });
   };
-  const selectClip = (kind: "imageClip" | "videoClip" | "camera" | "audio" | "sfx", id: string) => {
+  const selectClip = (kind: "imageClip" | "videoClip" | "videoReferenceClip" | "camera" | "audio" | "sfx", id: string) => {
     setSelectedClip(id);
     setSelectedClipKind(kind);
     sel?.setSelection({ kind, id });
@@ -865,11 +891,26 @@ export function DirectorTracks({
     selectClip("imageClip", clip.id);
   };
 
-  const onDropAsset = async (e: React.DragEvent, kind: "image" | "audio" | "sfx") => {
+  const addVideoReferenceFromLibrary = async (assetId: string) => {
+    if (!assetId) return;
+    const clip: TimelineClip = {
+      id: nid(),
+      start: 0,
+      length: Math.min(duration, 5),
+      label: "Video Reference",
+      asset_id: assetId,
+      trim_start: 0,
+    };
+    await save({ ...tl, video_reference_clips: [clip] });
+    selectClip("videoReferenceClip", clip.id);
+  };
+
+  const onDropAsset = async (e: React.DragEvent, kind: "image" | "audio" | "sfx" | "videoReference") => {
     e.preventDefault();
     const assetId = e.dataTransfer.getData("application/x-adept-asset");
     if (!assetId) return;
     if (kind === "image") await addImageFromLibrary(assetId);
+    else if (kind === "videoReference") await addVideoReferenceFromLibrary(assetId);
     else if (kind === "audio") {
       await save({
         ...tl,
@@ -1007,7 +1048,7 @@ export function DirectorTracks({
   };
 
   const removeClip = async (
-    kind: "image" | "video" | "audio" | "sfx" | "prompt" | "camera",
+    kind: "image" | "video" | "videoReference" | "audio" | "sfx" | "prompt" | "camera",
     id: string,
     persisted: boolean,
   ) => {
@@ -1022,6 +1063,7 @@ export function DirectorTracks({
     const next = { ...tl };
     if (kind === "image") next.image_clips = tl.image_clips.filter((c) => c.id !== id);
     if (kind === "video") next.video_clips = tl.video_clips.filter((c) => c.id !== id);
+    if (kind === "videoReference") next.video_reference_clips = (tl.video_reference_clips || []).filter((c) => c.id !== id);
     if (kind === "audio") next.audio_clips = tl.audio_clips.filter((c) => c.id !== id);
     if (kind === "sfx") next.sfx_clips = tl.sfx_clips.filter((c) => c.id !== id);
     if (kind === "prompt") next.prompt_segments = tl.prompt_segments.filter((c) => c.id !== id);
@@ -1577,6 +1619,21 @@ export function DirectorTracks({
                                 {formatBatchStatus(batch.status)}
                               </span>
                             ) : null}
+                            {(() => {
+                              const incoming = (master?.continuityBridges || []).find(
+                                (bridge) => bridge.targetBatchId === batch.id && bridge.status !== "Superseded",
+                              );
+                              const label = continuityChipLabel(incoming?.status, batch.downstreamStale);
+                              if (!label) return null;
+                              return (
+                                <span
+                                  className={`track-clip__continuity ${batch.downstreamStale || incoming?.status === "Failed" ? "warn" : ""}`}
+                                  data-testid={`timeline-continuity-chip-${batch.id}`}
+                                >
+                                  {label}
+                                </span>
+                              );
+                            })()}
                           </button>
                         ));
                       })()
@@ -1750,6 +1807,96 @@ export function DirectorTracks({
                   </div>
                 </div>
               )}
+
+              <div
+                className="track-row"
+                data-testid="timeline-video-reference-track"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => onDropAsset(e, "videoReference")}
+              >
+                <TrackHeader
+                  label="VIDEO REFERENCE"
+                  shellMode={shellMode}
+                  onAction={() => {
+                    const clip = {
+                      id: nid(),
+                      start: 0,
+                      length: Math.min(duration, 5),
+                      label: "Video Reference",
+                      asset_id: null,
+                      trim_start: 0,
+                    };
+                    void save({ ...tl, video_reference_clips: [clip] });
+                    selectClip("videoReferenceClip", clip.id);
+                  }}
+                  actionLabel="+ Clip"
+                />
+                <div className="track-lane">
+                  {(tl.video_reference_clips || []).length === 0 && workspaceLayout.showEmptyHelp && (
+                    <div className="track-empty">
+                      Drop one video that shows how the shot should move. The picture still says who and what.
+                    </div>
+                  )}
+                  {(tl.video_reference_clips || []).map((clip) => {
+                    const asset = clip.asset_id ? assetsById.get(clip.asset_id) : undefined;
+                    return (
+                      <TrackClipInteractive
+                        key={clip.id}
+                        clipId={clip.id}
+                        start={clip.start}
+                        length={clip.length}
+                        boardDuration={boardDuration}
+                        boardWidthPx={boardWidth}
+                        snapEnabled={snap}
+                        snapStep={snap ? 1 / sceneFps : 0.01}
+                        selected={selectedClip === clip.id}
+                        className="media video"
+                        domId={`timeline-track-item-videoReferenceClip-${clip.id}`}
+                        testId={`track-clip-video-ref-${clip.id}`}
+                        onSelect={() => selectClip("videoReferenceClip", clip.id)}
+                        onCommit={(next, mode) => commitClipGeometry("videoReference", clip.id, next, mode)}
+                      >
+                        <button
+                          type="button"
+                          className="track-clip__remove"
+                          aria-label="Remove from Timeline"
+                          title="Remove from Timeline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeClip("videoReference", clip.id, Boolean(clip.asset_id));
+                          }}
+                        >
+                          ×
+                        </button>
+                        <strong>{clip.label || "Video Reference"}</strong>
+                        <span>
+                          {asset ? `@${asset.tag || asset.filename}` : "empty"} · {clip.start.toFixed(1)}–
+                          {(clip.start + clip.length).toFixed(1)}s
+                        </span>
+                        {!shellMode ? (
+                          <select
+                            value={clip.asset_id || ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              save({
+                                ...tl,
+                                video_reference_clips: [{ ...clip, asset_id: e.target.value || null }],
+                              })
+                            }
+                          >
+                            <option value="">Asset…</option>
+                            {videos.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                @{a.tag || a.filename}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                      </TrackClipInteractive>
+                    );
+                  })}
+                </div>
+              </div>
 
               <div className="track-row">
                 <TrackHeader label="TIMED INSTRUCTIONS" shellMode={shellMode} onAction={addPromptSegment} actionLabel="+ Prompt" />

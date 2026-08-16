@@ -96,6 +96,20 @@ def validate_against_capabilities(
     if request.seed is not None and not caps.supportsSeed:
         errors.append("Seed is not supported by this generator (refusing silent drop).")
 
+    video_ref = (request.videoReferenceAssetId or "").strip()
+    if video_ref:
+        if not caps.supportsVideoReferences or caps.maximumReferenceVideos <= 0:
+            errors.append(
+                f"{caps.label} does not support video reference. Remove the Video Reference clip "
+                "or choose a model that supports motion reference — the reference will not be dropped silently."
+            )
+        elif not caps.supportsImageAndVideoTogether and (
+            request.startImageAssetId or request.referenceAssetIds
+        ):
+            errors.append(
+                f"{caps.label} cannot use image and video references together."
+            )
+
     if not caps.executable:
         errors.append(f"{caps.label} is not executable in this environment.")
 

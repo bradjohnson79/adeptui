@@ -1,0 +1,35 @@
+{
+  "skipped": false,
+  "submitOk": true,
+  "jobId": "0b3e1ebd-3e27-49b9-adb7-7e958b1e5bac",
+  "normalized": {
+    "aspectRatio": "21:9",
+    "resolution": "672x288",
+    "draftMode": true
+  },
+  "jobStatus": "queued",
+  "jobMessage": "Timeline batch LTX draft queued",
+  "params": {
+    "draftMode": true,
+    "fast_mode": true,
+    "width": 672,
+    "height": 288,
+    "aspectRatio": "21:9"
+  },
+  "candidate": {
+    "count": 0,
+    "quality": null,
+    "id": null,
+    "batchStatus": null
+  },
+  "survivedReload": false,
+  "promote": {
+    "ok": true,
+    "jobId": "838ca84e-2661-4ddd-bebb-ab7c2d2e1950",
+    "draftMode": false,
+    "resolution": "1344x576",
+    "aspectRatio": "21:9",
+    "newJob": true
+  },
+  "ok": false
+}

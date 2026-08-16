@@ -439,6 +439,30 @@ export function LivePreviewMonitor({
           </div>
         )}
 
+        {(showDraft || composed?.kind === "generation_draft" || (libraryAsset?.tag || "").toLowerCase().includes("draft")) && (
+          <div
+            className="live-preview-draft-badge"
+            data-testid="timeline-draft-badge"
+            aria-label="Draft preview"
+            style={{
+              position: "absolute",
+              top: "0.45rem",
+              left: "0.45rem",
+              zIndex: 3,
+              background: "color-mix(in srgb, #c9a227 85%, #0b0d12)",
+              color: "#0b0d12",
+              fontSize: "0.7rem",
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              padding: "0.15rem 0.45rem",
+              borderRadius: "0.25rem",
+              pointerEvents: "none",
+            }}
+          >
+            DRAFT
+          </div>
+        )}
+
         {showingLibrary && !hideOverlay && (
           <div className="live-preview-overlay" aria-live="polite">
             <div className="pill">LIBRARY · {libraryAsset?.kind}</div>

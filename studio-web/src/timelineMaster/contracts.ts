@@ -31,6 +31,24 @@ export type InPaintStrategy =
   | "frame_repair_propagation"
   | "complete_batch_retake";
 
+export type ContinuityStrategy =
+  | "native_tail"
+  | "native_extend"
+  | "multi_frame"
+  | "last_frame_i2v"
+  | "prompt_context"
+  | "none";
+
+export type ContinuityBridgeStatus =
+  | "Waiting"
+  | "Analyzing"
+  | "Ready"
+  | "Applied"
+  | "Failed"
+  | "Superseded";
+
+export const CURRENT_CONTINUITY_CONTEXT_VERSION = 1;
+
 export interface DurationState {
   plannedDuration: number;
   generatedDuration?: number | null;
@@ -105,6 +123,16 @@ export interface CandidateVersion {
   generatedDuration?: number | null;
   createdAt: string;
   approved: boolean;
+  takeId?: string;
+  parentTakeId?: string | null;
+  incomingBridgeId?: string | null;
+  continuityAware?: boolean;
+  reTakeReason?: string | null;
+  sequenceMemory?: Record<string, unknown>;
+  incomingContinuity?: Record<string, unknown>;
+  originalTakeIntent?: Record<string, unknown>;
+  takeState?: Record<string, unknown>;
+  userCorrection?: Record<string, unknown>;
 }
 
 export interface RepairRange {
@@ -175,6 +203,38 @@ export interface BatchBlock {
   legacyImageClipIds: string[];
   migrationMetadata?: Record<string, unknown>;
   pendingSnapshotId?: string | null;
+  activeTakeId?: string | null;
+  incomingBridgeId?: string | null;
+  continuityAwareRetake?: boolean;
+  downstreamStale?: boolean;
+  staleFromTakeId?: string | null;
+}
+
+export interface ContinuityPolicy {
+  autoContinuity: boolean;
+  configuredTailDuration: number;
+  locality: "local" | "api";
+  continuityAwareRetake: boolean;
+}
+
+export interface ContinuityBridge {
+  bridgeId: string;
+  sceneId: string;
+  sourceBatchId: string;
+  targetBatchId: string;
+  sourceTakeId?: string | null;
+  contextVersion: number;
+  configuredTailDuration: number;
+  effectiveTailDuration: number;
+  tailAssetId?: string | null;
+  lastFrameAssetId?: string | null;
+  continuityStrategy: ContinuityStrategy;
+  continuityModel?: string | null;
+  continuityState: Record<string, unknown>;
+  status: ContinuityBridgeStatus;
+  createdAt: string;
+  supersededAt?: string | null;
+  error?: string | null;
 }
 
 export interface SceneTimelineMaster {
@@ -187,6 +247,8 @@ export interface SceneTimelineMaster {
   batchBlocks: BatchBlock[];
   executionSnapshots: Record<string, ExecutionSnapshot>;
   dismissedFailureJobIds?: string[];
+  continuityPolicy?: ContinuityPolicy;
+  continuityBridges?: ContinuityBridge[];
   migratedFromDirectorJson: boolean;
   migrationNote?: string | null;
 }

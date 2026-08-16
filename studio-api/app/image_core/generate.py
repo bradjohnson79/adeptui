@@ -73,6 +73,9 @@ def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
     if request.purpose in {"scene_shot_preview"}:
         body["quality"] = "draft"
         body["allowDraft"] = True
+    if request.aspect_ratio:
+        body["aspect"] = request.aspect_ratio
+        body["aspectRatio"] = request.aspect_ratio
     ctx = dict(request.creative_context or {})
     if isinstance(body.get("creativeContext"), dict):
         merged = dict(body["creativeContext"])

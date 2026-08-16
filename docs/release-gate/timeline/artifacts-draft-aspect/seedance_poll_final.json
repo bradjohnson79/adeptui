@@ -1,0 +1,32 @@
+{
+  "batchStatus": "Cancelled",
+  "jobs": [
+    {
+      "id": "job_ce95625cef8c",
+      "status": "completed",
+      "providerJobId": "seedance_9294e7b1300c",
+      "error": null
+    },
+    {
+      "id": "job_f64279ff72a9",
+      "status": "completed",
+      "providerJobId": "seedance_32692a8605d5",
+      "error": null
+    }
+  ],
+  "candidateCount": 2,
+  "takes": [
+    {
+      "id": "cand_318964783b8c",
+      "quality": "draft",
+      "resolution": "480p",
+      "aspectRatio": "21:9"
+    },
+    {
+      "id": "cand_cdc087a5b864",
+      "quality": "final",
+      "resolution": "720p",
+      "aspectRatio": "21:9"
+    }
+  ]
+}

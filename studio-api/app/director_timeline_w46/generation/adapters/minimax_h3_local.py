@@ -45,8 +45,17 @@ def _capabilities() -> VideoGeneratorCapabilities:
         executable=True,
         notes=(
             "Experimental Private Profile — text-to-video with native audio. "
-            "Image-to-video is not supported; batch start images remain Timeline planning anchors."
+            "Image-to-video is not supported; batch start images remain Timeline planning anchors. "
+            "Continuity uses prompt_context only — never native video extend or last-frame I2V. "
+            "Draft Mode is unavailable — this profile only generates at 480x256."
         ),
+        draftPathway="none",
+        supportsQueuedCancel=True,
+        supportsRunningCancel=True,
+        finalRequiresNewGeneration=True,
+        draftResolution=None,
+        finalResolution="480x256",
+        supportsImageAndVideoTogether=False,
     )
 
 
@@ -66,9 +75,32 @@ class MiniMaxH3LocalAdapter:
         if request.generationMode == "image_to_video":
             raise ValueError("MiniMax H3 local profile does not support image-to-video.")
 
+        strategy = request.continuityStrategy or "none"
+        if strategy in ("native_tail", "native_extend", "last_frame_i2v", "multi_frame"):
+            strategy = "prompt_context"
+        if request.lastFrameAssetId and strategy == "none":
+            strategy = "prompt_context"
+
+        notes = [
+            f"batchBlockId={request.batchBlockId}",
+            f"executionSnapshotId={request.executionSnapshotId}",
+            f"continuityStrategy={strategy}",
+        ]
+        if request.lastFrameAssetId:
+            notes.append(f"continuityLastFrameAssetId={request.lastFrameAssetId}")
+            notes.append("Continue the same scene, characters, wardrobe, lighting, and location from the previous shot.")
+
+        prompt = request.prompt
+        if strategy == "prompt_context" and request.lastFrameAssetId:
+            prompt = (
+                "Continue this scene from the previous shot. Keep the same characters, wardrobe, "
+                "lighting, and location.\n"
+                + (prompt or "")
+            ).strip()
+
         h3_req = AdeptMiniMaxH3Request(
             projectId=request.projectId,
-            prompt=request.prompt,
+            prompt=prompt,
             territory=str(request.providerOptions.get("territory") or "PRIVATE"),
             sourceSurface="timeline",
             mode=mode,  # type: ignore[arg-type]
@@ -77,14 +109,12 @@ class MiniMaxH3LocalAdapter:
             timelineContext=H3TimelineContext(
                 sceneId=request.sceneId,
                 shotId=request.batchBlockId,
-                notes=[
-                    f"batchBlockId={request.batchBlockId}",
-                    f"executionSnapshotId={request.executionSnapshotId}",
-                ],
+                notes=notes,
             ),
             creatorNotes=(
                 f"timeline-batch generatorId={request.generatorId} "
-                f"planningAnchor={request.providerOptions.get('planningStartImageAssetId') or ''}"
+                f"planningAnchor={request.providerOptions.get('planningStartImageAssetId') or ''} "
+                f"continuityStrategy={strategy}"
             ),
         )
         plan = prepare_plan(h3_req)
@@ -111,6 +141,9 @@ class MiniMaxH3LocalAdapter:
                 "profile": prov.get("profile") or "Experimental Private Profile",
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
+                "continuityStrategy": strategy,
+                "continuityBridgeId": request.continuityBridgeId,
+                "lastFrameAssetId": request.lastFrameAssetId,
             },
         )
 

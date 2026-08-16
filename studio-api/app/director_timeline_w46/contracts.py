@@ -70,6 +70,23 @@ CapabilityLabel = Literal[
 ]
 AnchorKind = Literal["image", "video", "end_frame"]
 RetakeMode = Literal["fast", "directed", "reference", "cross_model", "range"]
+ContinuityStrategy = Literal[
+    "native_tail",
+    "native_extend",
+    "multi_frame",
+    "last_frame_i2v",
+    "prompt_context",
+    "none",
+]
+ContinuityBridgeStatus = Literal[
+    "Waiting",
+    "Analyzing",
+    "Ready",
+    "Applied",
+    "Failed",
+    "Superseded",
+]
+CURRENT_CONTINUITY_CONTEXT_VERSION = 1
 
 
 class DurationState(BaseModel):
@@ -150,6 +167,17 @@ class CandidateVersion(BaseModel):
     generatedDuration: Optional[float] = None
     createdAt: str = Field(default_factory=_now)
     approved: bool = False
+    takeId: str = Field(default_factory=lambda: _nid("take_"))
+    parentTakeId: Optional[str] = None
+    incomingBridgeId: Optional[str] = None
+    continuityAware: bool = False
+    reTakeReason: Optional[str] = None
+    # Structured Re-Take memory — never collapse into one opaque prompt.
+    sequenceMemory: dict[str, Any] = Field(default_factory=dict)
+    incomingContinuity: dict[str, Any] = Field(default_factory=dict)
+    originalTakeIntent: dict[str, Any] = Field(default_factory=dict)
+    takeState: dict[str, Any] = Field(default_factory=dict)
+    userCorrection: dict[str, Any] = Field(default_factory=dict)
 
 
 class RepairRange(BaseModel):
@@ -241,6 +269,52 @@ class BatchBlock(BaseModel):
     # batch for later submission, the pre-created immutable snapshot id lives
     # here until the provider slot frees. Cleared on submission.
     pendingSnapshotId: Optional[str] = None
+    # Continuity-aware take lineage (BatchBlock remains the stable container).
+    activeTakeId: Optional[str] = None
+    incomingBridgeId: Optional[str] = None
+    continuityAwareRetake: bool = False
+    downstreamStale: bool = False
+    staleFromTakeId: Optional[str] = None
+
+
+class ContinuityPolicy(BaseModel):
+    """Creator-facing Extend / Auto Continuity policy for a scene.
+
+    Extend is the Adept UI capability. ContinuityBridge is the internal handoff.
+    Local: autoContinuity locked on, configuredTailDuration=5.
+    API: autoContinuity default off; configuredTailDuration in {0, 3, 5}.
+    """
+
+    autoContinuity: bool = False
+    configuredTailDuration: float = 0.0
+    locality: Literal["local", "api"] = "local"
+    continuityAwareRetake: bool = False
+
+
+class ContinuityBridge(BaseModel):
+    """Internal Timeline handoff. Not an Extend track.
+
+    Generic enough for future Extend surfaces (1 Frame / 3 Frame / Timeline Generator)
+    without coupling those UIs to Timeline.
+    """
+
+    bridgeId: str = Field(default_factory=lambda: _nid("cbr_"))
+    sceneId: str = ""
+    sourceBatchId: str = ""
+    targetBatchId: str = ""
+    sourceTakeId: Optional[str] = None
+    contextVersion: int = CURRENT_CONTINUITY_CONTEXT_VERSION
+    configuredTailDuration: float = 5.0
+    effectiveTailDuration: float = 5.0
+    tailAssetId: Optional[str] = None
+    lastFrameAssetId: Optional[str] = None
+    continuityStrategy: ContinuityStrategy = "none"
+    continuityModel: Optional[str] = None
+    continuityState: dict[str, Any] = Field(default_factory=dict)
+    status: ContinuityBridgeStatus = "Waiting"
+    createdAt: str = Field(default_factory=_now)
+    supersededAt: Optional[str] = None
+    error: Optional[str] = None
 
 
 class SceneTimelineMaster(BaseModel):
@@ -256,6 +330,8 @@ class SceneTimelineMaster(BaseModel):
     # is suppressed for these job ids (job rows and batch status are untouched —
     # history stays honest; a NEW failure with a different id re-shows the overlay).
     dismissedFailureJobIds: list[str] = Field(default_factory=list)
+    continuityPolicy: ContinuityPolicy = Field(default_factory=ContinuityPolicy)
+    continuityBridges: list[ContinuityBridge] = Field(default_factory=list)
     migratedFromDirectorJson: bool = False
     migrationNote: Optional[str] = None
 
@@ -305,9 +381,19 @@ class GeneratorCapability(BaseModel):
     supportsTimelineGeneration: bool = True
     supportsImageToVideo: bool = True
     supportsBatchOrchestration: bool = True
-    supportsInterrupt: bool = True
+    supportsInterrupt: bool = False
     supportsRetake: bool = True
-    supportsGenerationPreview: bool = True
+    supportsGenerationPreview: bool = False
+    draftPathway: str = "none"
+    supportsQueuedCancel: bool = False
+    supportsRunningCancel: bool = False
+    finalRequiresNewGeneration: bool = True
+    draftResolution: Optional[str] = None
+    finalResolution: Optional[str] = None
+    supportsVideoReferences: bool = False
+    supportsImageAndVideoTogether: bool = False
+    maximumReferenceVideos: int = 0
+    supportedAspectRatios: list[str] = Field(default_factory=list)
 
 
 class PreflightFinding(BaseModel):

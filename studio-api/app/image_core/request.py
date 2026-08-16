@@ -32,6 +32,7 @@ class ImageCoreRequest:
     scene_id: str = ""
     shot_id: str = ""
     tag: str = ""
+    aspect_ratio: str = ""
     lock_model_family: bool = True
     creative_context: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)

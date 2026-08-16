@@ -23,6 +23,7 @@ JobLifecycleStatus = Literal[
     "cancelled",
     "blocked",
 ]
+DraftPathway = Literal["none", "local_live", "cheap_preview", "native_api_draft"]
 
 
 class VideoGeneratorCapabilities(BaseModel):
@@ -53,6 +54,13 @@ class VideoGeneratorCapabilities(BaseModel):
     audio: dict[str, Any] = Field(default_factory=dict)
     executable: bool = True
     notes: str = ""
+    draftPathway: DraftPathway = "none"
+    supportsQueuedCancel: bool = False
+    supportsRunningCancel: bool = False
+    finalRequiresNewGeneration: bool = True
+    draftResolution: Optional[str] = None
+    finalResolution: Optional[str] = None
+    supportsImageAndVideoTogether: bool = False
 
 
 class TimelineGenerationRequest(BaseModel):
@@ -67,6 +75,8 @@ class TimelineGenerationRequest(BaseModel):
     startImageAssetId: Optional[str] = None
     endImageAssetId: Optional[str] = None
     referenceAssetIds: list[str] = Field(default_factory=list)
+    videoReferenceAssetId: Optional[str] = None
+    videoReferenceTrim: Optional[dict[str, Any]] = None
     duration: float = 5.0
     resolution: Optional[str] = None
     aspectRatio: Optional[str] = None
@@ -74,6 +84,10 @@ class TimelineGenerationRequest(BaseModel):
     cameraMotion: Optional[str] = None
     providerOptions: dict[str, Any] = Field(default_factory=dict)
     fallbackAllowed: bool = False
+    continuityBridgeId: Optional[str] = None
+    lastFrameAssetId: Optional[str] = None
+    tailAssetId: Optional[str] = None
+    continuityStrategy: Optional[str] = None
 
 
 class ValidationResult(BaseModel):

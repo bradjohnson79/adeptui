@@ -190,6 +190,22 @@ export function resolvePreviewComposition(args: {
 }): PreviewComposition {
   const { scene, libraryAsset, activeJob, preview } = args;
 
+  if (args.selection.kind === "videoReferenceClip") {
+    const clip = (args.timeline?.video_reference_clips || []).find((item) => item.id === args.selection.id);
+    if (clip?.asset_id) {
+      return {
+        kind: "timeline_frame",
+        visualSrc: api.assetUrl(clip.asset_id),
+        mediaKind: "video",
+        promptText: "Video Reference — motion and performance guidance",
+        promptLabel: clip.label || "Video Reference",
+        batchId: null,
+        batchLocalTime: 0,
+        visualLocalTime: Math.max(0, args.playheadSec - (clip.start || 0)) + (clip.trim_start || 0),
+      };
+    }
+  }
+
   // 1. Library asset takes precedence (creator explicitly previewing a file).
   if (libraryAsset) {
     const src = api.assetUrl(libraryAsset.id);

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -171,6 +171,11 @@ def set_mode(project_id: str, scene_id: str, body: ModeBody, db: Session = Depen
 class GenerateBody(BaseModel):
     scope: Literal["current", "selected", "ready", "full"] = "full"
     batchBlockIds: list[str] = Field(default_factory=list)
+    draftMode: Optional[bool] = None
+
+
+class GenerateBatchBody(BaseModel):
+    draftMode: Optional[bool] = None
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/generate")
@@ -181,12 +186,22 @@ def generate_scene(project_id: str, scene_id: str, body: GenerateBody, db: Sessi
         scene_id,
         scope=body.scope,
         batch_ids=body.batchBlockIds or None,
+        draft_mode=body.draftMode,
     )
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/generate")
-def generate_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
-    return orchestrator.submit_batch_generation(db, project_id, scene_id, batch_id)
+def generate_batch(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    body: GenerateBatchBody | None = Body(default=None),
+    db: Session = Depends(get_db),
+):
+    draft_mode = body.draftMode if body else None
+    return orchestrator.submit_batch_generation(
+        db, project_id, scene_id, batch_id, draft_mode=draft_mode
+    )
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/workflow-export")
@@ -247,6 +262,21 @@ def approve_batch(
     db: Session = Depends(get_db),
 ):
     return orchestrator.approve_candidate(db, project_id, scene_id, batch_id, body.candidateId)
+
+
+class RejectBody(BaseModel):
+    candidateId: str
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/reject")
+def reject_batch(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    body: RejectBody,
+    db: Session = Depends(get_db),
+):
+    return orchestrator.reject_candidate(db, project_id, scene_id, batch_id, body.candidateId)
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/cancel")
@@ -337,6 +367,8 @@ def timeline_tools_dispatch(body: TimelineToolBody, db: Session = Depends(get_db
 
 class RetakeBody(BaseModel):
     mode: str = "directed"
+    userCorrection: dict[str, Any] = Field(default_factory=dict)
+    continuityAware: Optional[bool] = None
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake")
@@ -348,10 +380,91 @@ def retake_batch(
     db: Session = Depends(get_db),
 ):
     """Re-Take creates a new job + immutable snapshot; never mutates prior snapshots."""
-    result = orchestrator.submit_batch_generation(db, project_id, scene_id, batch_id)
-    result["retakeMode"] = body.mode
-    result["priorSnapshotsPreserved"] = True
+    return orchestrator.retake_batch(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        user_correction=body.userCorrection,
+        continuity_aware=body.continuityAware,
+        mode=body.mode,
+    )
+
+
+class ContinuityPolicyBody(BaseModel):
+    configuredTailDuration: float = 0.0
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/continuity-policy")
+def set_continuity_policy(
+    project_id: str,
+    scene_id: str,
+    body: ContinuityPolicyBody,
+    db: Session = Depends(get_db),
+):
+    result = orchestrator.set_scene_continuity_policy(
+        db, project_id, scene_id, body.configuredTailDuration
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message") or result.get("error") or "Policy update failed")
     return result
+
+
+class ActivateTakeBody(BaseModel):
+    candidateId: str
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/activate-take")
+def activate_take(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    body: ActivateTakeBody,
+    db: Session = Depends(get_db),
+):
+    return orchestrator.activate_take(db, project_id, scene_id, batch_id, body.candidateId)
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/bridges/{bridge_id}/retry")
+def retry_bridge(project_id: str, scene_id: str, bridge_id: str, db: Session = Depends(get_db)):
+    result = orchestrator.retry_continuity_bridge(db, project_id, scene_id, bridge_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "Bridge not found")
+    return result
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/bridges/{bridge_id}/continue-without")
+def continue_without_bridge(
+    project_id: str, scene_id: str, bridge_id: str, db: Session = Depends(get_db)
+):
+    result = orchestrator.continue_without_continuity_bridge(db, project_id, scene_id, bridge_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "Bridge not found")
+    return result
+
+
+class ReconcileBody(BaseModel):
+    spendApiCredits: bool = False
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/reconcile-downstream")
+def reconcile_downstream(
+    project_id: str, scene_id: str, body: ReconcileBody, db: Session = Depends(get_db)
+):
+    result = orchestrator.reconcile_downstream(
+        db, project_id, scene_id, spend_api_credits=body.spendApiCredits
+    )
+    if not result.get("ok") and result.get("error") in {
+        "API_CREDIT_CONFIRMATION_REQUIRED",
+        "API_CONTINUITY_OFF",
+    }:
+        raise HTTPException(400, result.get("message") or result.get("error"))
+    return result
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/keep-existing-downstream")
+def keep_existing_downstream(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    return orchestrator.keep_existing_downstream(db, project_id, scene_id)
 
 
 # ---------------------------------------------------------------------------

@@ -142,6 +142,31 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
     body: "Shows how honestly the selected camera note can be executed: native, workflow-mapped, prompt-guided, approximate, or unsupported.",
     scope: "item",
   },
+  draft_mode: {
+    id: "draft_mode",
+    title: "Draft Mode",
+    body: "Makes a cheaper preview first so you can check the motion before spending a full-quality generation. Promote starts a new Final generation from the same prompt and references.",
+    scope: "batch",
+  },
+  video_reference: {
+    id: "video_reference",
+    title: "Video Reference",
+    body: "A short clip that shows how the shot should move or perform. The image still says who and what; this clip says how it moves. Match the still’s framing to the video when you can. If the selected generator cannot use video reference, generation stays blocked until you remove the clip or switch generators.",
+    scope: "scene",
+  },
+  picture_shape: {
+    id: "picture_shape",
+    title: "Picture Shape",
+    body: "The production frame for this scene: square, classic, widescreen, or extra-wide. Draft and Final share this shape. The Viewer shows the real canvas — it does not fake a wider picture by cropping.",
+    scope: "scene",
+  },
+  promote_final: {
+    id: "promote_final",
+    title: "Promote to Final",
+    body: "Starts a new full-quality generation from the same prompt and references. It does not continue the preview job.",
+    scope: "batch",
+    approvalRequired: true,
+  },
 };
 
 export function getTimelineHelp(id: string): TimelineHelpEntry {

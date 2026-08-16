@@ -1,0 +1,34 @@
+{
+  "submitOk": true,
+  "jobId": "5953688f-8a44-4a66-bf43-82049ea252c2",
+  "aspectRatio": "21:9",
+  "resolution": "672x288",
+  "draftMode": true,
+  "error": "Job submitted via ltx-local adapter with immutable execution snapshot.",
+  "preCancel": {
+    "status": "failed",
+    "stage": "failed",
+    "comfy_prompt_id": null
+  },
+  "cancel": {
+    "ok": true,
+    "action": "cancel_active_local_job",
+    "message": "Local jobs cancel requested.",
+    "hostedCancelSupport": "unknown",
+    "affectedBatchIds": []
+  },
+  "jobAfter": {
+    "status": "failed",
+    "stage": "failed",
+    "message": "Local LTX requires a start frame (I2V only). True local T2V is deferred.\n\n--- details ---\nTraceback (most recent call last):\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 344, in _loop\n    await self._run_job(job_id)\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 547, in _run_job\n    await self._render_scene(db, job, project)\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 1436, in _render_scene\n    path = await self._build_and_run_scene(db, project, scene, job)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\AdeptFilmWorks\\AIVideoStudio\\studio-api\\app\\queue_worker.py\", line 866, in _build_and_run_scene\n    raise RuntimeError(\nRuntimeError: Local LTX requires a start frame (I2V only). True local T2V is deferred.\n",
+    "comfy_prompt_id": null,
+    "confirmedStopped": false,
+    "halt": {},
+    "historyKeys": [
+      "recovery",
+      "videoRuntime"
+    ]
+  },
+  "ok": false,
+  "dbOnlyFallback": false
+}

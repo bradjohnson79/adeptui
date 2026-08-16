@@ -77,20 +77,23 @@ def cancel_execution(db: Session, project_id: str, execution_id: str) -> Executi
 
 
 def _cancel_job(job_id: str) -> None:
-    """Cancel a job via the existing cancel_and_halt mechanism."""
+    """Cancel a job via JobQueue.cancel_and_halt (Comfy halt), not a DB-only mark."""
+    import asyncio
+
+    from ...queue_worker import job_queue
+
+    if job_queue is None or not hasattr(job_queue, "cancel_and_halt"):
+        _mark_job_cancelled_direct(job_id)
+        return
     try:
-        from ...queue_worker import cancel_and_halt
-
-        cancel_and_halt(job_id)
-    except ImportError:
-        # queue_worker may have a different cancel path.
         try:
-            from ...queue_worker import job_queue
-
-            job_queue.cancel_and_halt(job_id)
-        except Exception:
-            # Last resort — mark the job as cancelled directly.
-            _mark_job_cancelled_direct(job_id)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            loop.create_task(job_queue.cancel_and_halt(job_id))
+        else:
+            asyncio.run(job_queue.cancel_and_halt(job_id))
     except Exception as exc:
         logger.warning("cancel_and_halt failed for %s: %s", job_id, exc)
         _mark_job_cancelled_direct(job_id)

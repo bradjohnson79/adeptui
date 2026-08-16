@@ -1,0 +1,41 @@
+{
+  "submit": {
+    "ok": true,
+    "queueJobId": "082777d3-4b10-40ae-a144-4c534de5b5ed",
+    "generatorId": "ltx-local"
+  },
+  "jobId": "082777d3-4b10-40ae-a144-4c534de5b5ed",
+  "job": {
+    "status": "done",
+    "message": "Scene render complete",
+    "output": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\projects\\70c789ff-952e-47d9-a630-be522c9651da\\renders\\scene_0_ffdd1e5d.mp4",
+    "params": {
+      "draftMode": true,
+      "width": 672,
+      "height": 288,
+      "outputAssetIds": [
+        "0bef05e4-e07a-4fb7-8dce-a85e74d143e0"
+      ],
+      "fast_mode": true
+    }
+  },
+  "candidates": [
+    {
+      "id": "cand_3ff8622d0da1",
+      "quality": "draft",
+      "resolution": "672x288",
+      "aspectRatio": "21:9",
+      "assetId": "0bef05e4-e07a-4fb7-8dce-a85e74d143e0"
+    }
+  ],
+  "survivedReload": true,
+  "promote": {
+    "ok": true,
+    "jobId": "02446114-fdeb-4128-b180-a18c592533a7",
+    "draftMode": false,
+    "resolution": "1344x576",
+    "aspectRatio": "21:9",
+    "newJob": true
+  },
+  "ok": true
+}

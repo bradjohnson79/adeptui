@@ -376,6 +376,19 @@ def compile_shot_prompt(
     # We pass these as discrete keys in creativeContext so downstream consumers
     # can apply them independently (no flattening into one global string).
     project_style = _project_visual_style(db, project_id)
+    from ..aspect_fps import normalize_production_aspect, production_pixels
+    from ..db import Scene
+
+    aspect = None
+    scene_id = str(getattr(shot, "scene_id", "") or "")
+    if scene_id:
+        try:
+            scene_row = db.get(Scene, scene_id)
+            aspect = getattr(scene_row, "aspect_ratio", None) if scene_row else None
+        except Exception:
+            aspect = None
+    aspect = normalize_production_aspect(aspect)
+    width, height = production_pixels(aspect, "final")
     environment_style = ""
     if ers_package:
         environment_style = (
@@ -505,12 +518,12 @@ def compile_shot_prompt(
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": "",
-        "width": 1280,
-        "height": 720,
+        "width": width,
+        "height": height,
         "tag": f"scene_shot_{shot.index}",
         "modelFamilyPreference": scene_model_family,
         "purpose": "scene_shot",
-        "aspectRatio": "16:9",
+        "aspectRatio": aspect,
         "batchCount": 1,
         "creativeContext": creative_context,
     }

@@ -157,6 +157,13 @@ def _capabilities() -> VideoGeneratorCapabilities:
             "Certification stub — replaces the provider execution boundary. "
             "Records the real TimelineGenerationRequest and never executes GPU code."
         ),
+        draftPathway="local_live",
+        supportsQueuedCancel=True,
+        supportsRunningCancel=True,
+        finalRequiresNewGeneration=True,
+        draftResolution="768x432",
+        finalResolution="1280x720",
+        supportsImageAndVideoTogether=False,
     )
 
 

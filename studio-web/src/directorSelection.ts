@@ -3,6 +3,7 @@ export type DirectorSelectionKind =
   | "promptSeg"
   | "imageClip"
   | "videoClip"
+  | "videoReferenceClip"
   | "camera"
   | "audio"
   | "sfx"

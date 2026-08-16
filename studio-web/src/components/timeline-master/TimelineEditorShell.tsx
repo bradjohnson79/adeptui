@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 import type { DirectorSelectionKind } from "../../directorSelection";
 import {
   focusDomId,
@@ -268,6 +269,7 @@ export function TimelineEditorShell({
           (next.prompt_segments || []).some((c) => c.id === s.id) ||
           (next.image_clips || []).some((c) => c.id === s.id) ||
           (next.video_clips || []).some((c) => c.id === s.id) ||
+          (next.video_reference_clips || []).some((c) => c.id === s.id) ||
           (next.audio_clips || []).some((c) => c.id === s.id) ||
           (next.sfx_clips || []).some((c) => c.id === s.id) ||
           (next.camera_clips || []).some((c) => c.id === s.id) ||
@@ -322,9 +324,10 @@ export function TimelineEditorShell({
       return;
     }
 
-    const kindMap: Record<string, "image" | "video" | "audio" | "sfx" | "prompt" | "camera" | "lipsyncClip"> = {
+    const kindMap: Record<string, "image" | "video" | "videoReference" | "audio" | "sfx" | "prompt" | "camera" | "lipsyncClip"> = {
       imageClip: "image",
       videoClip: "video",
+      videoReferenceClip: "videoReference",
       audio: "audio",
       sfx: "sfx",
       promptSeg: "prompt",
@@ -347,6 +350,12 @@ export function TimelineEditorShell({
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm("Remove this Video from the Timeline?\n\nSource assets remain in Project Library.");
+      }
+    } else if (clipKind === "videoReference") {
+      const clip = (timeline.video_reference_clips || []).find((c) => c.id === selection.id);
+      if (!clip) return;
+      if (clip.asset_id) {
+        confirmed = window.confirm("Remove this Video Reference from the Timeline?\n\nSource assets remain in Project Library.");
       }
     } else if (clipKind === "audio") {
       const clip = (timeline.audio_clips || []).find((c) => c.id === selection.id);
@@ -382,6 +391,7 @@ export function TimelineEditorShell({
       const next = { ...current };
       if (clipKind === "image") next.image_clips = (current.image_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "video") next.video_clips = (current.video_clips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "videoReference") next.video_reference_clips = (current.video_reference_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "audio") next.audio_clips = (current.audio_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "sfx") next.sfx_clips = (current.sfx_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "prompt") next.prompt_segments = (current.prompt_segments || []).filter((c) => c.id !== selection.id);
@@ -511,6 +521,24 @@ export function TimelineEditorShell({
 
   const previewExtraControls = (
     <>
+      <label className="field" style={{ margin: 0 }}>
+        <span className="sr-only">Picture Shape</span>
+        <select
+          data-testid="timeline-viewer-aspect"
+          value={normalizeProductionAspect(selected.aspect_ratio)}
+          title="Picture shape for this scene"
+          aria-label="Picture shape"
+          onChange={(e) =>
+            void api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }).then(afterMutation)
+          }
+        >
+          {PRODUCTION_ASPECTS.map((ratio) => (
+            <option key={ratio} value={ratio}>
+              {ratio}
+            </option>
+          ))}
+        </select>
+      </label>
       <button
         type="button"
         className={!hideOverlay ? "primary" : "ghost"}
