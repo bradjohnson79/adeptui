@@ -63,6 +63,13 @@ Verifier compared generated ERS `21927403` vs original reference `4d3062e8` ("Ko
 
 `e4e88a1` — `feat(spatial-map): ERS source-lineage grounding via Scene Intent snapshot` (39 files, +5261/−195). Includes the previously untracked knowledgebase (`ERS_SPEC.md` + exemplar PNGs) — clean-clone blocker fixed.
 
+## Deployment
+
+- Pushed `beta`: `e4e88a1` (feature) → `d59bc20` (this doc) → `0d1be1a` (repair: commit missing `workspacePrefs` production-aspect helpers imported by `useSceneCreator`; unblocks Vercel).
+- Vercel production `dpl` for `0d1be1a`: **Ready** (40s). Hosted https://adeptui.vercel.app serves bundle `index-vSXiRJMf.js`; verified the bundle contains `scene-description-input`, `ers-generator-select`, `scene-context-summary`.
+- Prior deployment error was NOT this milestone: a parallel Scene Creator commit imported `normalizeProductionAspect` without committing `workspacePrefs.ts`. Repaired, redeployed, verified.
+- Local Beta refreshed and serving rebuilt dist at http://127.0.0.1:8760/ (API 8758 healthy).
+
 ## Known limitations (honest)
 
 - VLM semantic gate currently degrades to `NOT_VERIFIED` because the Kie account key lacks `gemini-*` authorization; gate behavior itself is certified (advisory, honest, overridable). Obtain an authorized key to enable live PASS/FAIL verdicts.
