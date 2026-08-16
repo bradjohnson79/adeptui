@@ -145,12 +145,13 @@ def build_ers_image_body(
         },
     }
     body.update(selected)
-    if source_asset_id and operation == "image.edit":
-        body["sourceAssetId"] = source_asset_id
-        body["source_asset_id"] = source_asset_id
-        body["edit"] = True
-        body["referenceImage"] = source_asset_id
-        body["reference_image"] = source_asset_id
+    # ERS purpose is always T2I. Never attach a plate as I2I pixels.
+    body["operation"] = "image.generate"
+    body.pop("edit", None)
+    body.pop("source_asset_id", None)
+    body.pop("sourceAssetId", None)
+    body.pop("referenceImage", None)
+    body.pop("reference_image", None)
     return body
 
 
@@ -164,20 +165,37 @@ def _spatial_map_reference_id(plan: Any, spatial_document: Any) -> str:
 
 
 def _choose_operation(body: dict[str, Any], reference_id: str) -> tuple[str, str]:
-    """text_to_image unless a Spatial Map reference exists AND the model supports i2i."""
-    if not reference_id:
-        return "image.generate", "text_to_image"
-    probe = dict(body)
-    probe["operation"] = "image.edit"
-    probe["edit"] = True
-    probe["source_asset_id"] = reference_id
-    probe["sourceAssetId"] = reference_id
-    from ....image_product.resolve import resolve_image_capability
+    """ERS is always one Image Core T2I. Never I2I/edit, even if a plate exists.
 
-    cap = resolve_image_capability(probe)
-    if cap.get("canExecute"):
-        return "image.edit", "i2i"
+    Atlas / background / map plate / character-prop refs are prompt context only.
+    Do not probe image.edit — that path compiled Qwen as I2I and then refused
+    with a silent zimage.ref_edit substitute.
+    """
     return "image.generate", "text_to_image"
+
+
+def _force_ers_honest_t2i(body: dict[str, Any], reference_id: str = "") -> dict[str, Any]:
+    """Strip I2I/edit pixels. Atlas may inform the prompt as text only."""
+    body["operation"] = "image.generate"
+    ctx = body.get("creativeContext")
+    if not isinstance(ctx, dict):
+        ctx = {}
+        body["creativeContext"] = ctx
+    ctx["operationIntent"] = "text_to_image"
+    body.pop("edit", None)
+    body.pop("source_asset_id", None)
+    body.pop("sourceAssetId", None)
+    body.pop("referenceImage", None)
+    body.pop("reference_image", None)
+    if reference_id:
+        note = (
+            " Atlas shot informs this environment as text only "
+            f"(asset {reference_id}); not pixel image-to-image."
+        )
+        prompt = str(body.get("prompt") or "")
+        if "not pixel image-to-image" not in prompt:
+            body["prompt"] = (prompt + note).strip()
+    return body
 
 
 def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
@@ -361,26 +379,160 @@ def _stamp_ers_job_on_sheet(sheet: Any, *, job_id: str, package_id: str) -> None
     )
 
 
-def _ers_sheet_prompt(sheet: Any, spatial_document: Any) -> str:
-    view_prompts = [
-        str(getattr(view, "prompt", "") or "").strip()
-        for view in (getattr(sheet, "directionalViews", None) or [])
-        if str(getattr(view, "prompt", "") or "").strip()
-    ]
-    seed = (
-        str(getattr(spatial_document, "masterEnvironmentPrompt", "") or "").strip()
-        or (getattr(sheet, "description", None) or "").strip()
-        or " ".join(view_prompts)
-        or (getattr(sheet, "name", None) or "Environment reference sheet")
+_GENERIC_SHEET_DESCRIPTION = "Programmatically composed environment reference sheet."
+
+
+def _load_asset_prompt_meta(db: Session | None, asset_id: str) -> dict[str, Any]:
+    """Best-effort prompt_meta for an asset (atlas Scene Intent recovery)."""
+    if db is None or not asset_id:
+        return {}
+    try:
+        from ....db import Asset
+
+        asset = db.get(Asset, str(asset_id))
+        raw = str(getattr(asset, "prompt_meta_json", "") or "") if asset is not None else ""
+        if raw:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _resolve_ers_grounding(
+    db: Session | None,
+    project_id: str,
+    spatial_document: Any,
+) -> dict[str, Any]:
+    """Load the ERS grounding lineage in priority order (master prompt §7/§14).
+
+    Scene Intent JSON > original environment reference image > Atlas/Spatial
+    Map > structured spatial state. Snapshot-only — never re-infer here.
+    """
+    from ....spatial_map.scene_intent import (
+        coerce_scene_intent,
+        environment_intent_summary,
+        lineage_fingerprint,
+        scene_intent_from_atlas_meta,
     )
-    if view_prompts:
-        seed = (seed + " " + " ".join(view_prompts)).strip()
-        seed = (
-            "Environment reference sheet of one locked environment. "
-            + seed
-            + " North, east, south, and west stay the same place, lighting, "
-            "materials, and time of day. Do not redesign the world."
+
+    atlas_id = str(getattr(spatial_document, "backgroundAssetId", None) or "").strip()
+    intent = coerce_scene_intent(getattr(spatial_document, "sceneIntent", None))
+    atlas_meta: dict[str, Any] = {}
+    if intent is None and atlas_id:
+        # Fallback: recover the Scene Intent snapshotted onto the atlas asset.
+        atlas_meta = _load_asset_prompt_meta(db, atlas_id)
+        intent = scene_intent_from_atlas_meta(atlas_meta)
+
+    original_ref_id = str(
+        getattr(spatial_document, "originalEnvironmentReferenceAssetId", None) or ""
+    ).strip()
+    if not original_ref_id and intent is not None and intent.sourceReferenceAssetIds:
+        original_ref_id = str(intent.sourceReferenceAssetIds[0]).strip()
+    if not original_ref_id and atlas_meta:
+        refs = atlas_meta.get("originalEnvironmentReferenceAssetIds")
+        if isinstance(refs, list) and refs:
+            original_ref_id = str(refs[0]).strip()
+    # The atlas IS the source environment when the creator uploaded it directly.
+    if not original_ref_id and intent is not None:
+        original_ref_id = atlas_id
+
+    char_names = [
+        str(getattr(c, "tag", "") or getattr(c, "label", "") or "").lstrip("@").strip()
+        for c in (getattr(spatial_document, "characters", None) or [])
+        if getattr(c, "visible", True)
+    ]
+    prop_names = [
+        str(getattr(p, "tag", "") or getattr(p, "label", "") or "").lstrip("#").strip()
+        for p in (getattr(spatial_document, "props", None) or [])
+        if getattr(p, "visible", True)
+    ]
+    camera_names = [
+        str(getattr(c, "label", "") or "").strip()
+        for c in (getattr(spatial_document, "cameras", None) or [])
+        if getattr(c, "visible", True)
+    ]
+
+    fingerprint = lineage_fingerprint(
+        intent,
+        background_asset_id=atlas_id,
+        original_reference_asset_id=original_ref_id,
+    )
+    return {
+        "intent": intent,
+        "intent_summary": environment_intent_summary(intent),
+        "atlas_asset_id": atlas_id,
+        "original_environment_reference_asset_id": original_ref_id,
+        "characters": [n for n in char_names if n],
+        "props": [n for n in prop_names if n],
+        "cameras": [n for n in camera_names if n],
+        "fingerprint": fingerprint,
+    }
+
+
+def _public_asset_url(asset_id: str) -> str:
+    """Public URL a hosted provider (Kie/fal) can fetch for pixel grounding."""
+    asset_id = str(asset_id or "").strip()
+    if not asset_id:
+        return ""
+    try:
+        from ....config import settings
+
+        base = str(getattr(settings, "public_api_base_url", "") or "").rstrip("/")
+    except Exception:
+        base = ""
+    if not base:
+        return ""
+    return f"{base}/api/assets/{asset_id}/file"
+
+
+def _ers_sheet_prompt(
+    sheet: Any,
+    spatial_document: Any,
+    grounding: dict[str, Any] | None = None,
+) -> str:
+    from ....codirector.knowledgebase.ers_compiler import (
+        compile_environment_reference_sheet_prompt,
+    )
+
+    grounding = grounding or {}
+    intent = grounding.get("intent")
+    spatial: dict[str, Any] = {}
+    if spatial_document is not None:
+        for key in (
+            "id",
+            "masterEnvironmentPrompt",
+            "backgroundAssetId",
+            "northLockDirection",
+        ):
+            val = getattr(spatial_document, key, None)
+            if val not in (None, ""):
+                spatial[key] = val
+        if getattr(sheet, "spatialMap", None) is not None:
+            lock = getattr(sheet.spatialMap, "northLockDirection", None)
+            if lock:
+                spatial.setdefault("northLockDirection", lock)
+            mid = getattr(sheet.spatialMap, "mapId", None)
+            if mid:
+                spatial.setdefault("mapId", mid)
+    sheet_description = str(getattr(sheet, "description", "") or "")
+    if sheet_description == _GENERIC_SHEET_DESCRIPTION and intent is not None:
+        sheet_description = str(intent.summary or "")
+    compiled = compile_environment_reference_sheet_prompt(
+        environment_name=str(getattr(sheet, "name", "") or ""),
+        environment_description=sheet_description,
+        creator_prompt=str(
+            getattr(spatial_document, "masterEnvironmentPrompt", "") or ""
         )
+        or (str(intent.sourcePromptSummary) if intent is not None else ""),
+        spatial_map=spatial,
+        environment_intent=intent.model_dump() if intent is not None else None,
+        characters=list(grounding.get("characters") or []),
+        props=list(grounding.get("props") or []),
+        cameras=list(grounding.get("cameras") or []),
+        atlas_note=str(spatial.get("backgroundAssetId") or grounding.get("atlas_asset_id") or ""),
+    )
+    seed = str(compiled.get("prompt") or "").strip()
     core_plan = type(
         "ImageCoreIntent",
         (),
@@ -390,6 +542,15 @@ def _ers_sheet_prompt(sheet: Any, spatial_document: Any) -> str:
         },
     )()
     return image_core_prompt(core_plan, fallback=seed)
+
+
+def _is_explicit_gpt_image_2(creator_model: dict[str, Any]) -> bool:
+    """True only when the creator explicitly selected GPT Image 2 (Kie)."""
+    blob = " ".join(
+        str(creator_model.get(k) or "")
+        for k in ("hostedModelId", "kieImageModelId", "model", "modelFamilyPreference")
+    ).lower()
+    return "gpt-image-2" in blob or "gpt_image_2" in blob
 
 
 def handle(
@@ -439,11 +600,21 @@ def handle(
         ),
         None,
     )
+
+    spatial_document = get_document(db, project_id, spatial_map_id)
+    grounding = _resolve_ers_grounding(db, project_id, spatial_document)
+    scene_intent = grounding.get("intent")
+
     if sheet is None:
-        sheet_name = (name or "").strip() or "Environment Reference Sheet"
+        sheet_name = (
+            (name or "").strip()
+            or (str(scene_intent.sceneTitle).strip() if scene_intent is not None else "")
+            or "Environment Reference Sheet"
+        )
         sheet_description = (
             (description or "").strip()
-            or "Programmatically composed environment reference sheet."
+            or (str(scene_intent.summary).strip() if scene_intent is not None else "")
+            or _GENERIC_SHEET_DESCRIPTION
         )
         sheet = create_sheet(
             project_id=project_id,
@@ -452,9 +623,20 @@ def handle(
             scene_id=scene_id or None,
         )
 
+    # Populate the EnvironmentProfile from the Scene Intent when the profile
+    # still carries generic defaults (never stomp curated fields).
+    if scene_intent is not None:
+        profile = getattr(sheet, "profile", None)
+        if profile is not None:
+            if str(getattr(profile, "environmentType", "") or "") in {"", "environment"}:
+                profile.environmentType = scene_intent.locationType or "environment"
+            if not str(getattr(profile, "storyPurpose", "") or "").strip() or str(
+                getattr(profile, "storyPurpose", "")
+            ) == "Environment reference sheet":
+                profile.storyPurpose = scene_intent.productionIntent or profile.storyPurpose
+
     sheet = attach_spatial_map(db, sheet, spatial_map_id=spatial_map_id)
     sheet = compose_sheet_metadata(sheet)
-    spatial_document = get_document(db, project_id, spatial_map_id)
     creator_model = _creator_model_body(
         hosted_model_id=hosted_model_id or hostedModelId,
         model=model,
@@ -467,7 +649,7 @@ def handle(
         lock_model_family=bool(lockModelFamily),
     )
 
-    seed_prompt = _ers_sheet_prompt(sheet, spatial_document)
+    seed_prompt = _ers_sheet_prompt(sheet, spatial_document, grounding)
     from types import SimpleNamespace
 
     prompt_text = image_core_prompt(
@@ -493,28 +675,49 @@ def handle(
     operation, operation_intent = _choose_operation(body, reference_id)
     body["operation"] = operation
     body["creativeContext"]["operationIntent"] = operation_intent
-    if operation == "image.edit" and reference_id:
-        body["source_asset_id"] = reference_id
-        body["sourceAssetId"] = reference_id
-        body["edit"] = True
-        body["referenceImage"] = reference_id
-        body["reference_image"] = reference_id
-    else:
-        # Honest T2I: model cannot I2I. Atlas may inform the prompt only.
-        # Never claim pixel I2I (no edit=true / source_asset_id).
-        body.pop("edit", None)
-        body.pop("source_asset_id", None)
-        body.pop("sourceAssetId", None)
-        body.pop("referenceImage", None)
-        body.pop("reference_image", None)
-        if reference_id:
-            note = (
-                " Atlas shot informs this environment as text only "
-                f"(asset {reference_id}); not pixel image-to-image."
-            )
-            prompt = str(body.get("prompt") or "")
-            if "not pixel image-to-image" not in prompt:
-                body["prompt"] = (prompt + note).strip()
+    # Always honest T2I. _choose_operation no longer probes I2I; keep the
+    # strip+prompt-note helper so a plate id cannot leak back as pixels.
+    body = _force_ers_honest_t2i(body, reference_id)
+
+    # Lineage into creativeContext: durable on job params for the worker commit
+    # hook (edges + prompt_meta) regardless of which generator executes.
+    ctx = body["creativeContext"]
+    if scene_intent is not None:
+        ctx["sceneIntent"] = scene_intent.model_dump()
+        ctx["sceneIntentVersion"] = scene_intent.version
+    if grounding.get("atlas_asset_id"):
+        ctx["atlasAssetId"] = grounding["atlas_asset_id"]
+    grounding_ids = [
+        gid
+        for gid in (
+            grounding.get("original_environment_reference_asset_id"),
+            grounding.get("atlas_asset_id"),
+        )
+        if gid
+    ]
+    grounding_ids = list(dict.fromkeys(grounding_ids))
+    if grounding_ids:
+        ctx["groundingAssetIds"] = grounding_ids
+    ctx["groundingFingerprint"] = grounding.get("fingerprint") or ""
+
+    # GPT Image 2 (explicit creator choice): reference-conditioned pixels via the
+    # Kie input_urls path. Qwen stays honest T2I (text grounding only). No silent
+    # fallback between the two.
+    if _is_explicit_gpt_image_2(creator_model) and grounding_ids:
+        urls = [u for u in (_public_asset_url(gid) for gid in grounding_ids) if u]
+        if urls:
+            body["input_urls"] = urls
+            ctx["referenceGrounding"] = {
+                "mode": "pixel",
+                "assetIds": grounding_ids,
+                "urlCount": len(urls),
+            }
+        else:
+            ctx["referenceGrounding"] = {
+                "mode": "text_only",
+                "assetIds": grounding_ids,
+                "note": "Public asset base URL not configured; hosted pixel routing unavailable.",
+            }
     try:
         from ....image_product.compile import compile_image_request
 
@@ -538,6 +741,9 @@ def handle(
         metadata={
             "execution_id": execution_id,
             "sheet_id": sheet.sheetId,
+            "grounding_asset_ids": grounding_ids,
+            "scene_intent_version": scene_intent.version if scene_intent is not None else None,
+            "grounding_fingerprint": grounding.get("fingerprint") or "",
         },
     )
     body.setdefault("creativeContext", {})
@@ -563,6 +769,21 @@ def handle(
         "directional_job_ids": [job_id],
     }
     _stamp_ers_job_on_sheet(sheet, job_id=job_id, package_id=package.id)
+    # Source-lineage provenance on the sheet (frozen contract: details dict).
+    provenance = getattr(sheet, "provenance", None)
+    if provenance is not None:
+        details = dict(getattr(provenance, "details", None) or {})
+        if scene_intent is not None:
+            details["sceneIntent"] = scene_intent.model_dump()
+            details["sceneIntentVersion"] = scene_intent.version
+        if grounding_ids:
+            details["groundingAssetIds"] = grounding_ids
+        if grounding.get("original_environment_reference_asset_id"):
+            details["originalEnvironmentReferenceAssetId"] = grounding[
+                "original_environment_reference_asset_id"
+            ]
+        details["groundingFingerprint"] = grounding.get("fingerprint") or ""
+        provenance.details = details
     save_ers_package(db, project_id, package)
     save_sheet(sheet)
 
@@ -588,6 +809,7 @@ def handle(
                     ),
                     "ers_package_id": package.id,
                     "sheet_id": sheet.sheetId,
+                    "spatial_map_id": spatial_map_id,
                 },
             }
         ],

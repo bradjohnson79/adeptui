@@ -260,22 +260,43 @@ def compile_image_request(
             body.setdefault("modelFamilyPreference", preset_applied.get("modelFamilyPreference"))
 
     purpose = str(body.get("purpose") or "")
-    try:
-        from ..character_identity.four_view_sheet import (
-            attach_four_view_sheet_intent,
-            is_single_image_four_view,
-            strengthen_four_view_prompt,
-            four_view_sheet_intent,
+    if purpose != "environment_reference_sheet":
+        try:
+            from ..character_identity.four_view_sheet import (
+                attach_four_view_sheet_intent,
+                is_single_image_four_view,
+                strengthen_four_view_prompt,
+                four_view_sheet_intent,
+            )
+            # Full Character Sheet (not a per-view tile): stamp law BEFORE the adapter.
+            # A single reference is identity conditioning only and does not change layout.
+            if is_single_image_four_view(body):
+                attach_four_view_sheet_intent(body)
+                if body.get("prompt"):
+                    body["prompt"] = strengthen_four_view_prompt(str(body.get("prompt") or ""))
+                purpose = "character_sheet"
+        except Exception:
+            pass
+    else:
+        from ..codirector.knowledgebase.ers_compiler import apply_ers_compile_to_body
+
+        apply_ers_compile_to_body(body, project_id=project_id)
+        purpose = "environment_reference_sheet"
+        has_model = any(
+            str(body.get(k) or "").strip()
+            for k in (
+                "hostedModelId",
+                "kieImageModelId",
+                "falImageModelId",
+                "model",
+                "modelFamilyPreference",
+                "forceWorkflowKey",
+            )
         )
-        # Full Character Sheet (not a per-view tile): stamp law BEFORE the adapter.
-        # A single reference is identity conditioning only and does not change layout.
-        if is_single_image_four_view(body):
-            attach_four_view_sheet_intent(body)
-            if body.get("prompt"):
-                body["prompt"] = strengthen_four_view_prompt(str(body.get("prompt") or ""))
-            purpose = "character_sheet"
-    except Exception:
-        pass
+        if not has_model:
+            body.setdefault("modelFamilyPreference", "qwen2512")
+            body.setdefault("model", "qwen2512")
+            body.setdefault("source", "local")
     operation = str(body.get("operation") or "image.generate")
     if body.get("edit") or body.get("source_asset_id") or body.get("sourceAssetId"):
         operation = "image.edit"
@@ -482,7 +503,12 @@ def compile_image_request(
             "characterSheetIntent": body.get("characterSheetIntent") or (
                 four_view_sheet_intent() if str(body.get("layout") or "") == "four_view" else None
             ),
-            "layout": body.get("layout"),
+            "layout": body.get("layout") or (
+                "production_ers" if purpose == "environment_reference_sheet" else None
+            ),
+            "ersCompiler": (body.get("creativeContext") or {}).get("ersCompiler")
+            if purpose == "environment_reference_sheet"
+            else None,
             "requiredViews": body.get("requiredViews"),
             "referenceMode": body.get("referenceMode"),
             "fourViewSingleOutput": body.get("fourViewSingleOutput"),
@@ -498,7 +524,9 @@ def compile_image_request(
             is_four_view_sheet_request,
         )
 
-        if is_four_view_sheet_request(body) or str(body.get("layout") or "") == "four_view":
+        if purpose != "environment_reference_sheet" and (
+            is_four_view_sheet_request(body) or str(body.get("layout") or "") == "four_view"
+        ):
             intent.metadata = {**intent.metadata, **four_view_sheet_intent()}
     except Exception:
         pass

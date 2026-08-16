@@ -114,12 +114,32 @@ export type SpatialCamera = _SpatialCamera & {
   visible?: boolean;
 };
 
+/** Atlas Scene Intent — compact semantic snapshot taken at Atlas creation. */
+export type SceneIntent = {
+  version?: number;
+  purpose?: string;
+  sceneTitle?: string;
+  locationType?: string;
+  summary?: string;
+  productionIntent?: string;
+  keySubjects?: string[];
+  keyProps?: string[];
+  environmentTraits?: string[];
+  sourcePromptSummary?: string;
+  sourceReferenceAssetIds?: string[];
+};
+
 export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras"> & {
   characters: SpatialCharacterPlacement[];
   props: SpatialPropPlacement[];
   cameras: SpatialCamera[];
   gridScale: number;
   placementGrid?: string;
+  sceneIntent?: SceneIntent | null;
+  originalEnvironmentReferenceAssetId?: string | null;
+  originatingUserPrompt?: string;
+  /** Server-computed lineage fingerprint for ERS staleness. */
+  groundingFingerprint?: string;
 };
 
 /** Body types extended with V1 Cartesian grid fields. */
@@ -131,7 +151,20 @@ export type SpatialPropPlacementBody = _SpatialPropPlacementBody & Partial<Spati
 
 export type SpatialPropPlacementUpdateBody = _SpatialPropPlacementUpdateBody & Partial<SpatialPlacementGridExtension> & Partial<SpatialPropAttachmentFields>;
 
-export type SpatialMapUpdateBody = _SpatialMapUpdateBody & { gridScale?: number };
+export type SpatialMapUpdateBody = _SpatialMapUpdateBody & {
+  gridScale?: number;
+  sceneDescription?: string | null;
+  sceneIntent?: SceneIntent | null;
+  originalEnvironmentReferenceAssetId?: string | null;
+  originatingUserPrompt?: string | null;
+};
+
+export type SpatialMapSceneIntentCreateBody = SpatialMapCreateBody & {
+  sceneDescription?: string | null;
+  sceneIntent?: SceneIntent | null;
+  originalEnvironmentReferenceAssetId?: string | null;
+  originatingUserPrompt?: string | null;
+};
 
 export type {
   SpatialMapCreateBody,

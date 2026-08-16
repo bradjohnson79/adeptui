@@ -250,6 +250,9 @@ class VisionValidationEngine:
         return result
 
 
+# Back-compat alias: earlier tests / callers import VisionEngine.
+VisionEngine = VisionValidationEngine
+
 # Singleton engine instance
 _engine = VisionValidationEngine()
 

@@ -264,8 +264,11 @@
 /* —— Slot panel —— */
 .spatial-map__slots {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
   gap: 0.5rem;
+  max-height: min(40vh, 22rem);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .spatial-map__slot-group {
@@ -314,9 +317,11 @@
 }
 
 .spatial-map__slot-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
 }
 
 .spatial-map__slot-swatch {
@@ -331,6 +336,9 @@
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .spatial-map__slot-add {
@@ -342,6 +350,11 @@
   font-size: 0.75rem;
   cursor: pointer;
   text-align: left;
+  width: auto;
+  max-width: 100%;
+}
+.spatial-map__slot-assign .spatial-map__slot-add,
+.spatial-map__entity-card > .spatial-map__slot-add {
   width: 100%;
 }
 
@@ -360,6 +373,9 @@
 .spatial-map__slot-assigned-tag {
   font-weight: 600;
   color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .spatial-map__slot-assigned-loc {
@@ -421,7 +437,7 @@
 }
 
 .spatial-map__placement-arm {
-  margin-left: auto;
+  margin-left: 0;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -434,7 +450,7 @@
   letter-spacing: 0.03em;
   line-height: 1.2;
   color: var(--muted, #8aa4b5);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .spatial-map__placement-active-label.is-on {
@@ -456,8 +472,11 @@
   position: relative;
   width: 42px;
   min-width: 42px;
+  max-width: 42px;
   height: 24px;
+  min-height: 24px;
   padding: 0;
+  box-sizing: border-box;
   border: 1px solid rgba(148, 220, 255, 0.28);
   border-radius: 999px;
   background: rgba(15, 23, 32, 0.85);
@@ -532,7 +551,6 @@
 
 .spatial-map__ers-img {
   width: 100%;
-  max-height: 24rem;
   object-fit: contain;
   border-radius: 0.4rem;
   background: #000;
@@ -836,10 +854,12 @@
   padding: 0.45rem 0.55rem;
   background: var(--panel, rgba(12, 20, 34, 0.62));
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.3rem;
   min-width: 0;
+  overflow-x: hidden;
   cursor: pointer;
 }
 
@@ -1068,4 +1088,184 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
 
 .spatial-map__slot-card.is-attached {
   border-color: color-mix(in srgb, var(--accent, #2dd4bf) 40%, var(--line, rgba(148, 220, 255, 0.18)));
+}
+
+/* --- ERS live viewport + shared entity card reflow --- */
+.spatial-map__entity-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  overflow-x: hidden;
+}
+.spatial-map__entity-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.spatial-map__entity-card-head .spatial-map__slot-swatch { grid-column: 1; }
+.spatial-map__entity-card-head .spatial-map__slot-label,
+.spatial-map__slot-head .spatial-map__slot-label { grid-column: 2; }
+.spatial-map__entity-card-head .spatial-map__placement-arm,
+.spatial-map__slot-head .spatial-map__placement-arm { grid-column: 3; margin-left: 0; }
+.spatial-map__entity-card-head .spatial-map__active-badge,
+.spatial-map__slot-head .spatial-map__active-badge { grid-column: 1 / -1; margin-left: 0; justify-self: start; }
+.spatial-map__entity-card-meta,
+.spatial-map__attach-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.4rem;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.spatial-map__ers-live {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+  background: var(--panel, rgba(12, 20, 34, 0.62));
+}
+.spatial-map__ers-live-frame { width: 100%; background: #000; border-radius: 0.4rem; overflow: hidden; }
+.spatial-map__ers-live-img { display: block; width: 100%; height: auto; object-fit: contain; }
+.spatial-map__ers-live-placeholder {
+  min-height: 10rem; display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 0.85rem; padding: 1rem; text-align: center;
+}
+.spatial-map__ers-live-status { display: flex; flex-direction: column; gap: 0.3rem; }
+.spatial-map__ers-live-stage, .spatial-map__ers-live-model, .spatial-map__ers-live-context, .spatial-map__ers-live-details {
+  margin: 0; font-size: 0.78rem; color: var(--muted);
+}
+.spatial-map__ers-live-stage { color: var(--ink); font-weight: 600; }
+.spatial-map__ers-live-bar { position: relative; width: 100%; height: 0.45rem; border-radius: 999px; background: rgba(148, 220, 255, 0.12); overflow: hidden; }
+.spatial-map__ers-live-bar-fill { display: block; height: 100%; width: 32%; border-radius: inherit; background: var(--accent, #2dd4bf); }
+.spatial-map__ers-live-bar.is-indeterminate .spatial-map__ers-live-bar-fill { width: 36%; animation: ers-live-indeterminate 1.2s ease-in-out infinite; }
+@keyframes ers-live-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+.spatial-map__ers-live-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.spatial-map__ers-live-banner {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  color: var(--ink);
+}
+.spatial-map__ers-live-banner--warn {
+  background: rgba(229, 72, 77, 0.12);
+  border-color: rgba(229, 72, 77, 0.4);
+}
+.spatial-map__ers-live-banner--warn p { margin: 0 0 0.45rem; }
+
+
+/* -- ERS generator selector -- */
+.spatial-map__ers-generator {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+}
+.spatial-map__ers-generator-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.spatial-map__ers-generator-select {
+  min-width: 12.5rem;
+  max-width: 100%;
+  padding: 0.28rem 0.5rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.22));
+  background: var(--panel, rgba(12, 20, 34, 0.72));
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.spatial-map__ers-generator-reason {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger, #f87171);
+}
+
+/* Scene / Location Description + Scene Context (W2: Scene Intent lineage) */
+.spatial-map__scene-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.6rem 0;
+  max-width: 26rem;
+}
+.spatial-map__scene-desc-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.spatial-map__scene-desc-tip {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted, rgba(180, 200, 220, 0.7));
+  cursor: help;
+}
+.spatial-map__scene-desc textarea,
+.spatial-map__scene-context-edit textarea {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.22));
+  background: var(--panel, rgba(12, 20, 34, 0.72));
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  resize: vertical;
+  font-family: inherit;
+}
+.spatial-map__scene-context {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px dashed var(--line, rgba(148, 220, 255, 0.18));
+}
+.spatial-map__scene-context-summary {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.spatial-map__scene-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.spatial-map__scene-context-details {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+.spatial-map__scene-context-details > div {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+.spatial-map__scene-context-details dt {
+  font-weight: 600;
+  color: var(--muted, rgba(180, 200, 220, 0.7));
+  min-width: 7.5rem;
+}
+.spatial-map__scene-context-details dd {
+  margin: 0;
+  color: var(--ink);
+}
+.spatial-map__scene-context-edit {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
 }

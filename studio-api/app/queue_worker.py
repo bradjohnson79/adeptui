@@ -2680,10 +2680,11 @@ class JobQueue:
             strengthen_four_view_prompt,
         )
 
+        ers_purpose = str(getattr(intent, "purpose", "") or params.get("purpose") or "")
         four_view = is_single_image_four_view(params) or is_single_image_four_view(
             intent.metadata if isinstance(intent.metadata, dict) else {}
         )
-        if four_view:
+        if ers_purpose != "environment_reference_sheet" and four_view:
             params = attach_four_view_sheet_intent(params)
             prompt = strengthen_four_view_prompt(prompt)
             intent.prompt = prompt
@@ -2696,7 +2697,9 @@ class JobQueue:
                 is_single_image_four_view,
                 strengthen_local_character_sheet_prompt,
             )
-            if is_single_image_four_view(params) or is_single_image_four_view(intent_block or {}):
+            if ers_purpose != "environment_reference_sheet" and (
+                is_single_image_four_view(params) or is_single_image_four_view(intent_block or {})
+            ):
                 prompt = strengthen_local_character_sheet_prompt(
                     prompt, family=str(intent.enginePreference or params.get("model") or "")
                 )
@@ -3149,7 +3152,7 @@ class JobQueue:
         # Bind official BEFORE strengthen_kie_character_sheet_prompt (UnboundLocalError if later).
         official = resolve_official_kie_image_model(model_id, params)
         four_view = is_single_image_four_view(params)
-        if four_view:
+        if str(params.get("purpose") or "") != "environment_reference_sheet" and four_view:
             params = attach_four_view_sheet_intent(params)
             prompt = strengthen_kie_character_sheet_prompt(prompt, model=official)
         elif str(params.get("purpose") or "") == "character_sheet" or is_sheet_tile_request(params):
@@ -3272,8 +3275,26 @@ class JobQueue:
         width = int(params.get("width") or 1024)
         height = int(params.get("height") or 1024)
         seed = int(params.get("seed") if params.get("seed") is not None else 0)
+        intent_block = params.get("imageIntent") if isinstance(params.get("imageIntent"), dict) else {}
+        source_asset_id = str(
+            params.get("source_asset_id") or intent_block.get("sourceAssetId") or ""
+        ).strip()
+        source_urls: list[str] = []
+        source_path = None
+        if source_asset_id:
+            src_asset = self._get_asset(db, source_asset_id)
+            if src_asset and getattr(src_asset, "path", None) and Path(src_asset.path).is_file():
+                source_path = Path(src_asset.path)
+                source_urls = [await upload_file_to_fal(source_path, api_key)]
+        if source_urls and model_id.rstrip("/").endswith("nano-banana-2"):
+            model_id = "fal-ai/nano-banana-2/edit"
         args = build_fal_image_arguments(
-            model_id=model_id, prompt=prompt, width=width, height=height, seed=seed
+            model_id=model_id,
+            prompt=prompt,
+            width=width,
+            height=height,
+            seed=seed,
+            image_urls=source_urls or None,
         )
         job.stage = ImageJobStage.SAMPLING.value
         job.message = f"fal.ai · {model_id}"
@@ -3307,6 +3328,40 @@ class JobQueue:
         tmp_dir.mkdir(parents=True, exist_ok=True)
         tmp_path = tmp_dir / f"imagegen_fal_{uuid.uuid4().hex[:8]}.png"
         await fal_image_adapter.download(image_url, tmp_path)
+        mask_path_for_gate = None
+        try:
+            from .image_product.masks import get_mask_path
+
+            specs = params.get("masks") or (intent_block.get("metadata") or {}).get("masks") or []
+            if specs:
+                m0 = specs[0] if isinstance(specs[0], dict) else {"maskAssetId": specs[0]}
+                mid = m0.get("maskAssetId") or m0.get("assetId") or m0.get("maskId")
+                if mid:
+                    mask_path_for_gate = get_mask_path(project.id, str(mid))
+        except Exception:
+            mask_path_for_gate = None
+        if (
+            source_path
+            and mask_path_for_gate
+            and Path(str(mask_path_for_gate)).is_file()
+        ):
+            from .image_runtime.output_gate import composite_generated_into_source
+
+            feather = 8
+            try:
+                feather = int(params.get("featherPx") or 8)
+            except Exception:
+                feather = 8
+            composite_generated_into_source(
+                tmp_path,
+                source_path,
+                mask_path_for_gate,
+                tmp_path,
+                feather_px=max(0, feather),
+            )
+            params["regionCompositeApplied"] = True
+            job.params_json = json.dumps(params)
+            db.commit()
         job.stage = ImageJobStage.VALIDATING.value
         job.message = "Output Gate validation"
         db.commit()
@@ -3407,6 +3462,8 @@ class JobQueue:
         if isinstance(params.get("imageIntent"), dict):
             intent_metadata = dict(params["imageIntent"].get("metadata") or {})
 
+        creative_ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+
         prompt_meta = {
             **hist,
             "provenance": provenance.to_dict(),
@@ -3415,6 +3472,11 @@ class JobQueue:
             "spatialMapId": params.get("spatialMapId") or intent_metadata.get("spatialMapId"),
             "spatialMapVersion": params.get("spatialMapVersion") or intent_metadata.get("spatialMapVersion"),
             "spatialCameraId": params.get("spatialCameraId") or intent_metadata.get("spatialCameraId"),
+            # Atlas Scene Intent lineage (semantic anchor + source image refs).
+            "sceneIntent": creative_ctx.get("sceneIntent"),
+            "originalEnvironmentReferenceAssetIds": creative_ctx.get(
+                "originalEnvironmentReferenceAssetIds"
+            ),
         }
         asset = Asset(
             id=str(uuid.uuid4()),
@@ -3500,6 +3562,58 @@ class JobQueue:
                     asset_id=asset.id,
                     package_id=str(ctx.get("ersPackageId") or ""),
                 )
+                # ERS source-asset lineage: ERS -> atlas -> original environment
+                # reference. Keeps the origin chain queryable after generation.
+                try:
+                    atlas_id = str(ctx.get("atlasAssetId") or "").strip()
+                    if atlas_id and db.get(Asset, atlas_id):
+                        add_edge(db, atlas_id, asset.id, "derived_from", {"op": "ers_composite"})
+                    grounding = ctx.get("groundingAssetIds")
+                    if isinstance(grounding, list):
+                        for gid in grounding:
+                            gid = str(gid or "").strip()
+                            if gid and gid != atlas_id and db.get(Asset, gid):
+                                add_edge(db, gid, asset.id, "derived_from", {"op": "ers_grounding"})
+                except Exception:
+                    logger.exception("ERS lineage edge write failed for job %s", job.id)
+                # Semantic gate (advisory): does the sheet depict the intended
+                # environment? Post-persist, never blocks, never auto-retries.
+                try:
+                    from .codirector.vision.ers_gate import (
+                        run_ers_semantic_gate,
+                        stamp_ers_gate_verdict,
+                    )
+                    from .spatial_map.scene_intent import (
+                        coerce_scene_intent,
+                        environment_intent_summary,
+                    )
+
+                    gate_intent = coerce_scene_intent(ctx.get("sceneIntent"))
+                    gate_summary = environment_intent_summary(gate_intent)
+                    source_ref = ""
+                    grounding_ids = ctx.get("groundingAssetIds")
+                    if isinstance(grounding_ids, list) and grounding_ids:
+                        first = self._get_asset(db, str(grounding_ids[0]))
+                        if first is not None:
+                            from .config import settings as _settings
+
+                            base = str(getattr(_settings, "public_api_base_url", "") or "").rstrip("/")
+                            if base:
+                                source_ref = f"{base}/api/assets/{first.id}/file"
+                    verdict = await run_ers_semantic_gate(
+                        generated_image_path=str(dest),
+                        intent_summary=gate_summary,
+                        sheet_name=str(ctx.get("environmentName") or ""),
+                        source_image_url=source_ref,
+                    )
+                    db.commit()
+                    stamp_ers_gate_verdict(
+                        project_id=project.id,
+                        sheet_id=str(ctx.get("environmentReferenceSheetId") or ""),
+                        verdict=verdict,
+                    )
+                except Exception:
+                    logger.exception("ERS semantic gate failed for job %s", job.id)
         except Exception:
             logger.exception("ERS composite persist failed for job %s", job.id)
         db.commit()

@@ -590,11 +590,15 @@ async def chat_kie(
     api_key: str,
     *,
     model_id: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float = 0.55,
     timeout_sec: float = 120.0,
 ) -> dict[str, Any]:
-    """OpenAI-compatible Kie chat (Gemini family). Other chat families use different paths."""
+    """OpenAI-compatible Kie chat (Gemini family). Other chat families use different paths.
+
+    Message ``content`` may be a plain string or an OpenAI-style multimodal
+    content array (text + image_url parts) for vision-capable models.
+    """
     key = (api_key or "").strip()
     mid = (model_id or "").strip() or "gemini-3-pro"
     url = _KIE_CHAT_ENDPOINTS.get(mid)

@@ -226,6 +226,8 @@ def _dispatch_capability_handler(
             "scene_id": ctx.get("scene_id", ""),
             "visual_style": ctx.get("visual_style", ""),
             "attachment_asset_ids": ctx.get("attachment_asset_ids", []),
+            "scene_description": ctx.get("scene_description") or ctx.get("sceneDescription") or "",
+            "scene_intent": ctx.get("scene_intent") or ctx.get("sceneIntent"),
             "aspect_ratio": ctx.get("aspect_ratio", "16:9"),
             "count": ctx.get("count", 1),
             "user_instructions": ctx.get("user_instructions", ""),
@@ -272,6 +274,13 @@ def _dispatch_capability_handler(
         plan.planned_steps = result.get("planned_steps", [])
         plan.surface_type = result.get("surface_type", plan.surface_type)
         plan.character_id = result.get("character_id", plan.character_id)
+        if result.get("spatial_map_id"):
+            plan.plan_data = {**dict(plan.plan_data or {}), "spatial_map_id": result.get("spatial_map_id")}
+        first_meta = ((result.get("child_jobs") or [{}])[0] or {}).get("metadata") or {}
+        if first_meta.get("resolvedProvider") and not plan.provider:
+            plan.provider = first_meta.get("resolvedProvider")
+        if first_meta.get("resolvedWorkflowKey") and not plan.model:
+            plan.model = first_meta.get("resolvedWorkflowKey")
         plan.status = ExecutionStatus.QUEUED
         plan.recompute_progress()
 

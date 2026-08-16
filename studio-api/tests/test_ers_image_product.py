@@ -184,7 +184,11 @@ def test_ers_generate_local_flux_is_not_kie(monkeypatch) -> None:
         assert cap["provider"] != "kie"
 
 
-def test_ers_generate_uses_i2i_only_when_model_supports_it(monkeypatch) -> None:
+def test_ers_generate_never_uses_i2i_even_when_model_supports_it(monkeypatch) -> None:
+    """Deliberate carve-out (W3/W7): explicit GPT Image 2 stays honest T2I at the
+    image-product layer, but DOES receive pixel grounding via Kie input_urls
+    (original environment reference + atlas). This is the only reference-
+    conditioned ERS path; Qwen remains text-grounded T2I."""
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
@@ -207,11 +211,17 @@ def test_ers_generate_uses_i2i_only_when_model_supports_it(monkeypatch) -> None:
 
     assert captured
     for body in captured:
-        assert body["operation"] == "image.edit"
-        assert body["creativeContext"]["operationIntent"] == "i2i"
-        assert body.get("source_asset_id") == "atlas-ref-1"
+        assert body["operation"] == "image.generate"
+        assert body["creativeContext"]["operationIntent"] == "text_to_image"
+        assert not body.get("source_asset_id")
+        assert not body.get("sourceAssetId")
+        assert not body.get("edit")
         assert body["creativeContext"]["resolvedProvider"] == "kie"
-        assert "image-to-image" in str(body["creativeContext"]["resolvedOfficialModelId"])
+        # Carve-out: explicit GPT Image 2 + grounding lineage -> Kie input_urls.
+        urls = body.get("input_urls") or []
+        assert urls, "explicit GPT Image 2 with atlas lineage must attach input_urls"
+        assert any("atlas-ref-1" in u for u in urls)
+        assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
 
 
 def test_ers_generate_keeps_t2i_when_model_has_no_i2i(monkeypatch) -> None:
@@ -362,7 +372,68 @@ def test_ers_qwen2512_with_atlas_enqueues_honest_t2i(monkeypatch) -> None:
     assert body["creativeContext"]["resolvedProvider"] == "local"
     assert body["creativeContext"]["resolvedWorkflowKey"] == "qwen2512.txt2img"
     assert "zimage.ref_edit" not in str(body)
+    assert "zimage" not in str(body["creativeContext"].get("resolvedWorkflowKey") or "")
     cap = resolve_image_capability(body)
     assert cap["canExecute"] is True
     assert cap["workflowKey"] == "qwen2512.txt2img"
+
+    from app.image_product.compile import compile_image_request
+
+    # Plate id present must not upgrade compile to edit / zimage.ref_edit.
+    compiled = compile_image_request(
+        project_id,
+        {
+            **body,
+            "source_asset_id": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+            "sourceAssetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+            "edit": True,
+            "operation": "image.edit",
+            "lockModelFamily": True,
+        },
+    )
+    intent = compiled["imageIntent"]
+    runtime = compiled["imageRuntime"]
+    assert intent["operation"] == "image.generate"
+    assert intent.get("sourceAssetId") in (None, "")
+    assert runtime.get("canExecute") is True
+    assert "zimage" not in str(runtime.get("workflowKey") or "")
+    selected = str(runtime.get("workflowKey") or compiled.get("contract", {}).get("workflow_key") or "")
+    assert selected.startswith("qwen2512")
+    assert "txt2img" in selected
+    assert selected != "zimage.ref_edit"
+    assert "zimage" not in selected
+
+def test_compile_ers_qwen2512_plate_stays_t2i() -> None:
+    from app.image_product.compile import compile_image_request
+    from app.image_product.resolve import resolve_image_capability
+
+    body = {
+        "prompt": "Environment reference sheet of one locked environment.",
+        "purpose": "environment_reference_sheet",
+        "source": "local",
+        "model": "qwen2512",
+        "modelFamilyPreference": "qwen2512",
+        "lockModelFamily": True,
+        "operation": "image.edit",
+        "edit": True,
+        "source_asset_id": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        "sourceAssetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        "referenceImage": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        "width": 1280,
+        "height": 720,
+    }
+    cap = resolve_image_capability(body)
+    assert cap["canExecute"] is True
+    assert cap["workflowKey"] == "qwen2512.txt2img"
+    compiled = compile_image_request("proj-ers-t2i", body)
+    assert compiled["imageIntent"]["operation"] == "image.generate"
+    assert compiled["imageIntent"].get("sourceAssetId") in (None, "")
+    assert compiled["imageIntent"]["purpose"] == "environment_reference_sheet"
+    runtime = compiled["imageRuntime"]
+    assert runtime.get("canExecute") is True
+    key = str(runtime.get("workflowKey") or (compiled.get("contract") or {}).get("workflow_key") or "")
+    assert "qwen2512" in key
+    assert "txt2img" in key
+    assert "zimage" not in key
+    assert key != "zimage.ref_edit"
 

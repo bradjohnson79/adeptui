@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     minimax_h3_runtime_url: str = "http://127.0.0.1:8192"
     minimax_h3_model_root: str = r"D:\01_Models"
 
+    # Public base URL that hosted providers (Kie/fal) can reach to fetch local
+    # asset pixels for reference-conditioned generation. Hosted Beta routes
+    # api-beta.adeptui.org -> Studio API via the Cloudflare tunnel. Empty =
+    # pixel routing disabled (honest degrade; ERS falls back to text grounding).
+    public_api_base_url: str = "https://api-beta.adeptui.org"
+
 
 settings = Settings()
 settings.data_dir.mkdir(parents=True, exist_ok=True)

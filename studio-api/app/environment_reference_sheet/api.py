@@ -62,3 +62,19 @@ def api_get_sheet(project_id: str, sheet_id: str, response: Response, db: Sessio
     if sheet is None:
         raise HTTPException(404, "Environment Reference Sheet not found")
     return {"sheet": sheet.model_dump(mode="json"), "summary": _summary(sheet)}
+
+
+@router.post("/projects/{project_id}/{sheet_id}/semantic-gate/use-anyway")
+def api_ers_gate_use_anyway(
+    project_id: str,
+    sheet_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Creator explicitly approves a sheet despite a non-PASS semantic verdict."""
+    _require_project(db, project_id)
+    from ..codirector.vision.ers_gate import record_ers_gate_override
+
+    result = record_ers_gate_override(project_id=project_id, sheet_id=sheet_id)
+    if not result.get("ok"):
+        raise HTTPException(404, "Environment Reference Sheet not found")
+    return result

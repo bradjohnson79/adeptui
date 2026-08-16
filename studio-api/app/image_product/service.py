@@ -70,6 +70,10 @@ def generate_images(
             "spatialCameraId": (intent.get("metadata") or {}).get("spatialCameraId"),
             "spatialReferenceBundle": body.get("spatialReferenceBundle"),
             "refs": body.get("refs") or [],
+            # Hosted pixel grounding (Kie input arrays). Only set by explicit
+            # reference-conditioned paths (e.g. ERS on GPT Image 2); the worker
+            # reads these directly for the Kie createTask input.
+            "input_urls": body.get("input_urls") or body.get("image_urls") or body.get("image_input") or [],
             "cloudPaid": intent.get("providerPreference") == "cloud",
             "tag": body.get("tag") or "imagegen",
             "hostedModelId": body.get("hostedModelId") or compiled.get("hostedModelId") or (pinned or {}).get("hostedModelId"),

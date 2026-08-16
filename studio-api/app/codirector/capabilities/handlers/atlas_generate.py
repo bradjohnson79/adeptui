@@ -43,16 +43,52 @@ def handle(
     visual_style: str = "",
     scene_context: str | None = None,
     aspect_ratio: str = "1:1",
+    attachment_asset_ids: list[str] | None = None,
+    scene_description: str = "",
+    scene_intent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Submit a real Atlas Shot image generation job.
 
     Returns a dict with ``job_ids``, ``child_jobs`` (single Atlas Shot job),
     and ``surface_type``. The dispatcher wraps this into an ExecutionPlan.
+
+    Atlas Scene Intent law: every Atlas Shot carries a compact SceneIntent
+    snapshot (semantic anchor) plus the original environment reference asset
+    IDs, so ERS generation never has to re-infer why the Atlas exists.
     """
+    from ....db import Project
+    from ....spatial_map.scene_intent import (
+        build_scene_intent,
+        coerce_scene_intent,
+    )
     from ....storyboard_jobs import enqueue_imagegen_job
 
     user_prompt = (prompt or "").strip()
     atlas_prompt = _ATLAS_PREFIX + user_prompt
+
+    source_ref_ids = [
+        str(a).strip() for a in (attachment_asset_ids or []) if str(a or "").strip()
+    ]
+
+    # Snapshot Scene Intent at creation time (never re-infer at ERS time).
+    intent = coerce_scene_intent(scene_intent)
+    intent_error = ""
+    if intent is None:
+        description = (scene_description or "").strip() or user_prompt
+        try:
+            project = db.get(Project, project_id)
+            intent = build_scene_intent(
+                description,
+                project_name=str(getattr(project, "name", "") or ""),
+                source_reference_asset_ids=source_ref_ids,
+                originating_prompt=user_prompt,
+            )
+        except ValueError as exc:
+            # No usable intent text at all — record honestly, do not invent.
+            intent = None
+            intent_error = str(exc)
+    if intent is not None and source_ref_ids and not intent.sourceReferenceAssetIds:
+        intent.sourceReferenceAssetIds = source_ref_ids
 
     # Atlas Shot aspect is square by default (1:1) for clean floor-plan coverage.
     # Respect the caller's aspect ratio if they override (e.g. 16:16 for wide sets).
@@ -80,8 +116,22 @@ def handle(
             "workflowKey": "zimage.txt2img",
         },
     }
+    if intent is not None:
+        body["creativeContext"]["sceneIntent"] = intent.model_dump()
+    if source_ref_ids:
+        body["creativeContext"]["originalEnvironmentReferenceAssetIds"] = source_ref_ids
 
     job = enqueue_imagegen_job(db, project_id, body)
+
+    child_metadata: dict[str, Any] = {
+        "purpose": "atlas_shot",
+        "aspect_ratio": aspect_ratio or "1:1",
+        "scene_context": scene_context or "",
+    }
+    if intent is not None:
+        child_metadata["scene_intent"] = intent.model_dump()
+    if source_ref_ids:
+        child_metadata["original_environment_reference_asset_ids"] = source_ref_ids
 
     child_jobs = [
         {
@@ -89,18 +139,19 @@ def handle(
             "label": "Atlas Shot",
             "status": "queued",
             "child_index": 0,
-            "metadata": {
-                "purpose": "atlas_shot",
-                "aspect_ratio": aspect_ratio or "1:1",
-                "scene_context": scene_context or "",
-            },
+            "metadata": child_metadata,
         }
     ]
 
-    return {
+    result: dict[str, Any] = {
         "job_ids": [job.id],
         "child_jobs": child_jobs,
         "surface_type": "atlas_shot_generation",
         "purpose": "atlas_shot",
         "aspect_ratio": aspect_ratio or "1:1",
     }
+    if intent is not None:
+        result["scene_intent"] = intent.model_dump()
+    if intent_error:
+        result["scene_intent_warning"] = intent_error
+    return result

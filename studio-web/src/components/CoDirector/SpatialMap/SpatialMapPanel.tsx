@@ -30,14 +30,15 @@ import { CoDirectorEmptyState } from "../cards";
 import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
-import { ErsResultDisplay } from "./ErsResultDisplay";
-import { normalizeErsError } from "./ersErrorMessage";
+import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
+import { ERS_GENERATOR_OPTIONS } from "./ersGenerator";
+import { useErsGeneration } from "./useErsGeneration";
+import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { CharacterInspector } from "./CharacterInspector";
 import { PlacementSlot } from "./PlacementSlot";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import { SpatialGrid, toGridPlacements } from "./SpatialGrid";
 import { spatialMapApi } from "./spatialMapApi";
-import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { CameraInspector } from "./CameraInspector";
 import {
   assignedSpatialMapCharacters,
@@ -96,6 +97,27 @@ type PlacementMode = {
   label: string;
 } | null;
 
+// Atlas Scene Intent law: manual Atlas creation requires a short description.
+// Mirrors the light server-side validation (studio-api spatial_map/scene_intent.py).
+const SCENE_DESCRIPTION_MIN = 12;
+const GENERIC_SCENE_WORDS = new Set([
+  "test", "room", "scene", "image", "atlas", "place", "location",
+  "environment", "stuff", "thing", "asdf", "n/a", "none",
+]);
+
+function sceneDescriptionError(text: string): string | null {
+  const cleaned = text.trim().replace(/\s+/g, " ");
+  const norm = cleaned.toLowerCase();
+  if (!norm) return "Describe this location in a few words first — it guides the Atlas Shot and the Environment Reference Sheet.";
+  if (norm.length < SCENE_DESCRIPTION_MIN) {
+    return "Describe this location in a few more words — what kind of place is it and what is the scene for?";
+  }
+  if (GENERIC_SCENE_WORDS.has(norm)) {
+    return `"${cleaned}" is too generic. Name the kind of place (e.g. "a warm neighborhood coffee shop for our commercial").`;
+  }
+  return null;
+}
+
 export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const { activeExecution, setActiveExecution } = useCoDirectorSession();
   const [document, setDocument] = useState<SpatialMapDocument | null>(null);
@@ -118,13 +140,23 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [savedProps, setSavedProps] = useState<SavedOption[]>([]);
   const [busyOp, setBusyOp] = useState<PendingCoDirectorOp>(null);
   const [opMsg, setOpMsg] = useState<string | null>(null);
-  const [ersCompositeAssetId, setErsCompositeAssetId] = useState<string | null>(null);
   const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
   const [replacePickerOpen, setReplacePickerOpen] = useState(false);
+  const [sceneDescription, setSceneDescription] = useState("");
+  const [sceneDetailsOpen, setSceneDetailsOpen] = useState(false);
+  const [sceneEditOpen, setSceneEditOpen] = useState(false);
+  const [sceneEditText, setSceneEditText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const replaceModeRef = useRef(false);
-  const ersInFlightRef = useRef(false);
+  const ers = useErsGeneration({
+    projectId,
+    spatialMapId: document?.id || null,
+    document,
+    activeExecution,
+    setActiveExecution,
+  });
+
 
   // ── Load most recent map on mount / project change ───────────────────────
   const loadMap = useCallback(async () => {
@@ -144,13 +176,14 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     try {
       await persistThenOpenSceneCreator({
         projectId,
+        sceneId: document?.sceneId || undefined,
         spatialMapId: document?.id || undefined,
         onGoTab,
       });
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
     }
-  }, [document?.id, onGoTab, projectId]);
+  }, [document?.id, document?.sceneId, onGoTab, projectId]);
 
   useEffect(() => {
     void loadMap();
@@ -265,14 +298,32 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           const atlasAssetId = resultIds[0];
           void (async () => {
             try {
+              // Scene Intent lineage: prefer the snapshot compiled by the
+              // atlas.generate handler (CD path); fall back to the creator's
+              // description typed in this panel (manual path).
+              const atlasMeta = (activeExecution.child_jobs?.[0] as { metadata?: Record<string, unknown> } | undefined)?.metadata || {};
+              const snapshottedIntent = (atlasMeta.scene_intent as SpatialMapDocument["sceneIntent"]) || undefined;
+              const origRefs = Array.isArray(atlasMeta.original_environment_reference_asset_ids)
+                ? (atlasMeta.original_environment_reference_asset_ids as unknown[]).map(String).filter(Boolean)
+                : [];
+              const description = sceneDescription.trim();
+              const lineage = {
+                sceneDescription: description || undefined,
+                sceneIntent: snapshottedIntent,
+                originalEnvironmentReferenceAssetId: origRefs[0] || undefined,
+              };
               if (replaceModeRef.current && document) {
-                const updated = await spatialMapApi.updateMap(projectId, document.id, { backgroundAssetId: atlasAssetId });
+                const updated = await spatialMapApi.updateMap(projectId, document.id, {
+                  backgroundAssetId: atlasAssetId,
+                  ...lineage,
+                });
                 setDocument(updated);
                 setOpMsg("Atlas Shot replaced.");
               } else {
                 const doc = await spatialMapApi.createMap(projectId, {
                   title: "Spatial Map",
                   backgroundAssetId: atlasAssetId,
+                  ...lineage,
                 });
                 setDocument(doc);
                 setOpMsg("Atlas Shot generated and Spatial Map created.");
@@ -285,55 +336,41 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               replaceModeRef.current = false;
             }
           })();
-        } else if (busyOp === "ers") {
-          const compositeId = resultIds[resultIds.length - 1];
-          setErsCompositeAssetId(compositeId);
-          setOpMsg("Environment Reference Sheet generated.");
-          setBusyOp(null);
-          ersInFlightRef.current = false;
         }
       } else if (activeExecution.status === "failed" || activeExecution.status === "cancelled") {
-        setOpMsg(
-          busyOp === "ers"
-            ? normalizeErsError(activeExecution.error)
-            : activeExecution.error || `${busyOp || "Operation"} failed.`,
-        );
+        if (busyOp === "ers") return;
+        setOpMsg(activeExecution.error || `${busyOp || "Operation"} failed.`);
         setBusyOp(null);
-        if (busyOp === "ers") ersInFlightRef.current = false;
       }
     }
-  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, projectId, busyOp, document]);
+  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, projectId, busyOp, document, sceneDescription]);
 
   // ── Atlas Shot / ERS generation ────────────────────────────────────────
   const startAtlasGeneration = useCallback(async () => {
     setOpMsg(null);
+    const descError = sceneDescriptionError(sceneDescription);
+    if (descError) {
+      setOpMsg(descError);
+      return;
+    }
+    const description = sceneDescription.trim();
     setBusyOp("atlas");
     try {
-      const res = await api.startExecution(projectId, { capability: "atlas.generate", context: {} });
+      const res = await api.startExecution(projectId, {
+        capability: "atlas.generate",
+        context: { scene_description: description, prompt: description },
+      });
       const exec = normalizeExecution(res);
       setActiveExecution(exec);
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
       setBusyOp(null);
     }
-  }, [projectId, setActiveExecution]);
+  }, [projectId, sceneDescription, setActiveExecution]);
 
-  const startErsGeneration = useCallback(async () => {
-    if (!document) return;
-    if (ersInFlightRef.current || busyOp === "ers") return;
-    ersInFlightRef.current = true;
-    setOpMsg(null);
-    setBusyOp("ers");
-    try {
-      const res = await api.startExecution(projectId, { capability: "ers.generate", context: { spatial_map_id: document.id } });
-      const exec = normalizeExecution(res);
-      setActiveExecution(exec);
-    } catch (err) {
-      setOpMsg(normalizeErsError(err instanceof Error ? err.message : ""));
-      setBusyOp(null);
-      ersInFlightRef.current = false;
-    }
-  }, [projectId, document, setActiveExecution, busyOp]);
+  const startErsGeneration = useCallback(() => {
+    void ers.start();
+  }, [ers.start]);
 
   // ── Library / upload / replace / remove atlas ──────────────────────────
   const handleChooseFromLibrary = () => setLibraryPickerOpen(true);
@@ -342,10 +379,20 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const handleReplaceUpload = useCallback(async (file: File) => {
     if (!document) return;
     setOpMsg(null);
+    const description = sceneDescription.trim() || document.sceneIntent?.summary || "";
+    const descError = sceneDescriptionError(description);
+    if (descError) {
+      setOpMsg(descError);
+      return;
+    }
     setBusyOp("atlas");
     try {
       const asset = await api.uploadAsset(projectId, file, "atlas_shot", "image");
-      const updated = await spatialMapApi.updateMap(projectId, document.id, { backgroundAssetId: asset.id });
+      const updated = await spatialMapApi.updateMap(projectId, document.id, {
+        backgroundAssetId: asset.id,
+        sceneDescription: description,
+        originalEnvironmentReferenceAssetId: asset.id,
+      });
       setDocument(updated);
       setOpMsg("Atlas Shot replaced.");
     } catch (err) {
@@ -353,15 +400,45 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     } finally {
       setBusyOp(null);
     }
-  }, [projectId, document]);
+  }, [projectId, document, sceneDescription]);
+
+  const handleSaveSceneDescription = useCallback(async () => {
+    if (!document) return;
+    const descError = sceneDescriptionError(sceneEditText);
+    if (descError) {
+      setOpMsg(descError);
+      return;
+    }
+    setOpMsg(null);
+    try {
+      const updated = await spatialMapApi.updateMap(projectId, document.id, {
+        sceneDescription: sceneEditText.trim(),
+      });
+      setDocument(updated);
+      setSceneEditOpen(false);
+      setOpMsg("Scene description updated. Environment Reference Sheet now needs regeneration.");
+    } catch (err) {
+      setOpMsg(err instanceof Error ? err.message : "Failed to save scene description.");
+    }
+  }, [projectId, document, sceneEditText]);
 
   const handleReplaceGenerate = useCallback(async () => {
     if (!document) return;
     setOpMsg(null);
+    const description = sceneDescription.trim() || document.sceneIntent?.summary || "";
+    const descError = sceneDescriptionError(description);
+    if (descError) {
+      setOpMsg(descError);
+      return;
+    }
+    if (!sceneDescription.trim()) setSceneDescription(description);
     setBusyOp("atlas");
     replaceModeRef.current = true;
     try {
-      const res = await api.startExecution(projectId, { capability: "atlas.generate", context: {} });
+      const res = await api.startExecution(projectId, {
+        capability: "atlas.generate",
+        context: { scene_description: description, prompt: description },
+      });
       const exec = normalizeExecution(res);
       setActiveExecution(exec);
     } catch (err) {
@@ -369,7 +446,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       setBusyOp(null);
       replaceModeRef.current = false;
     }
-  }, [projectId, document, setActiveExecution]);
+  }, [projectId, document, sceneDescription, setActiveExecution]);
 
   const handleRemoveAtlas = useCallback(async () => {
     if (!document?.backgroundAssetId) return;
@@ -387,10 +464,21 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   const handleUploadImage = useCallback(async (file: File) => {
     setOpMsg(null);
+    const descError = sceneDescriptionError(sceneDescription);
+    if (descError) {
+      setOpMsg(descError);
+      return;
+    }
+    const description = sceneDescription.trim();
     setBusyOp("atlas");
     try {
       const asset = await api.uploadAsset(projectId, file, "atlas_shot", "image");
-      const doc = await spatialMapApi.createMap(projectId, { title: "Spatial Map", backgroundAssetId: asset.id });
+      const doc = await spatialMapApi.createMap(projectId, {
+        title: "Spatial Map",
+        backgroundAssetId: asset.id,
+        sceneDescription: description,
+        originalEnvironmentReferenceAssetId: asset.id,
+      });
       setDocument(doc);
       setOpMsg("Image uploaded and Spatial Map created.");
     } catch (err) {
@@ -398,7 +486,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     } finally {
       setBusyOp(null);
     }
-  }, [projectId]);
+  }, [projectId, sceneDescription]);
 
   // ── Placements ───────────────────────────────────────────────────────
   const placements = useMemo(() => (document ? toGridPlacements(document.characters, document.props) : []), [document]);
@@ -914,8 +1002,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   const hasBackground = !!document?.backgroundAssetId;
   const bgUrl = document?.backgroundAssetId ? api.assetUrl(document.backgroundAssetId) : "";
-  const ersExists = !!ersCompositeAssetId;
-  const isGenerating = busyOp !== null;
+  const ersExists = !!ers.compositeAssetId;
+  const isGenerating = busyOp !== null || ers.busy;
   const selectedCamera = findCamera(selectedCameraId);
   const selectedCharacter = selectedPlacementId
     ? document?.characters.find((c) => c.id === selectedPlacementId) || null
@@ -964,12 +1052,26 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               e.target.value = "";
             }}
           />
+          <label className="spatial-map__scene-desc" data-testid="scene-description-block">
+            <span className="spatial-map__scene-desc-label">
+              Scene / Location Description
+              <span className="spatial-map__scene-desc-tip" title="A few words about the place (e.g. &quot;a warm neighborhood coffee shop for our commercial&quot;). This guides the Atlas Shot and the Environment Reference Sheet.">(?)</span>
+            </span>
+            <textarea
+              rows={2}
+              data-testid="scene-description-input"
+              placeholder="e.g. a warm neighborhood coffee shop for our commercial"
+              value={sceneDescription}
+              onChange={(e) => setSceneDescription(e.target.value)}
+              disabled={isGenerating}
+            />
+          </label>
           <div className="spatial-map__empty-actions">
             <button
               type="button"
               className="ui-btn ui-btn--primary"
               onClick={() => void startAtlasGeneration()}
-              disabled={isGenerating}
+              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
               aria-label="Create Atlas Shot with Co-Director (recommended)"
             >
               {busyOp === "atlas" ? "Generating Atlas Shot…" : "Create Atlas Shot with Co-Director"}
@@ -978,7 +1080,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               type="button"
               className="ui-btn ui-btn--secondary"
               onClick={handleChooseFromLibrary}
-              disabled={isGenerating}
+              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
               aria-label="Choose Atlas Shot from Library"
             >
               Choose from Library
@@ -987,7 +1089,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               type="button"
               className="ui-btn ui-btn--secondary"
               onClick={() => emptyFileInputRef.current?.click()}
-              disabled={isGenerating}
+              disabled={isGenerating || !!sceneDescriptionError(sceneDescription)}
               aria-label="Upload an image as the Atlas Shot"
             >
               Upload Image
@@ -1002,8 +1104,19 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               onClose={() => setLibraryPickerOpen(false)}
               onConfirm={async (assetId) => {
                 setLibraryPickerOpen(false);
+                const descError = sceneDescriptionError(sceneDescription);
+                if (descError) {
+                  setOpMsg(descError);
+                  return;
+                }
+                const description = sceneDescription.trim();
                 try {
-                  const doc = await spatialMapApi.createMap(projectId, { title: "Spatial Map", backgroundAssetId: assetId });
+                  const doc = await spatialMapApi.createMap(projectId, {
+                    title: "Spatial Map",
+                    backgroundAssetId: assetId,
+                    sceneDescription: description,
+                    originalEnvironmentReferenceAssetId: assetId,
+                  });
                   setDocument(doc);
                 } catch (err) {
                   setOpMsg(err instanceof Error ? err.message : "Failed to create map.");
@@ -1025,6 +1138,87 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               <p className="spatial-map__atlas-source muted">
                 {document?.backgroundAssetId ? `Asset ${document.backgroundAssetId.slice(0, 8)}…` : "No Atlas"}
               </p>
+              {document ? (
+                <div className="spatial-map__scene-context" data-testid="scene-context-summary">
+                  <p className="spatial-map__scene-context-summary">
+                    {document.sceneIntent?.sceneTitle || "This Scene"}: {document.sceneIntent?.summary || "No scene description yet."}
+                  </p>
+                  <div className="spatial-map__scene-context-actions">
+                    <button
+                      type="button"
+                      className="spatial-map__slot-action"
+                      onClick={() => setSceneDetailsOpen((v) => !v)}
+                      aria-expanded={sceneDetailsOpen}
+                      data-testid="scene-context-details-btn"
+                    >
+                      {sceneDetailsOpen ? "Hide Details" : "View Details"}
+                    </button>
+                    <button
+                      type="button"
+                      className="spatial-map__slot-action"
+                      onClick={() => {
+                        setSceneEditText(document.sceneIntent?.summary || "");
+                        setSceneEditOpen(true);
+                      }}
+                      data-testid="edit-scene-description-btn"
+                    >
+                      Edit Scene Description
+                    </button>
+                  </div>
+                  {sceneDetailsOpen ? (
+                    <dl className="spatial-map__scene-context-details" data-testid="scene-context-details">
+                      {document.sceneIntent?.locationType ? (
+                        <div><dt>Location Type</dt><dd>{document.sceneIntent.locationType.replace(/_/g, " ")}</dd></div>
+                      ) : null}
+                      {document.sceneIntent?.keySubjects?.length ? (
+                        <div><dt>Featured</dt><dd>{document.sceneIntent.keySubjects.join(", ")}</dd></div>
+                      ) : null}
+                      {document.sceneIntent?.keyProps?.length ? (
+                        <div><dt>Key Prop</dt><dd>{document.sceneIntent.keyProps.join(", ")}</dd></div>
+                      ) : null}
+                      {document.sceneIntent?.productionIntent ? (
+                        <div><dt>Production Intent</dt><dd>{document.sceneIntent.productionIntent}</dd></div>
+                      ) : null}
+                      {document.sceneIntent?.sourcePromptSummary ? (
+                        <div><dt>Creator Words</dt><dd>{document.sceneIntent.sourcePromptSummary}</dd></div>
+                      ) : null}
+                      {document.sceneIntent?.sourceReferenceAssetIds?.length ? (
+                        <div><dt>Source Reference</dt><dd>{document.sceneIntent.sourceReferenceAssetIds.length} image(s)</dd></div>
+                      ) : null}
+                    </dl>
+                  ) : null}
+                  {sceneEditOpen ? (
+                    <div className="spatial-map__scene-context-edit" data-testid="scene-description-editor">
+                      <textarea
+                        rows={2}
+                        value={sceneEditText}
+                        onChange={(e) => setSceneEditText(e.target.value)}
+                        data-testid="scene-description-edit-input"
+                        placeholder="Describe this location in a few words"
+                      />
+                      <div className="spatial-map__scene-context-actions">
+                        <button
+                          type="button"
+                          className="spatial-map__slot-action"
+                          disabled={!!sceneDescriptionError(sceneEditText)}
+                          onClick={() => void handleSaveSceneDescription()}
+                          data-testid="scene-description-save-btn"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="spatial-map__slot-action"
+                          onClick={() => setSceneEditOpen(false)}
+                          data-testid="scene-description-cancel-btn"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="spatial-map__atlas-actions">
               <button type="button" className="ui-btn ui-btn--secondary spatial-map__atlas-btn" onClick={() => onGoTab?.("library")} aria-label="View Atlas Shot in Library" data-testid="atlas-view-btn">View</button>
@@ -1276,7 +1470,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 return (
                   <div
                     key={`cam-${slot.index}`}
-                    className={`spatial-map__camera-slot${activeSlot?.kind === "camera" && activeSlot?.index === slot.index ? " is-active" : ""}${camera ? " is-placed" : ""}`}
+                    className={`spatial-map__entity-card spatial-map__camera-slot${activeSlot?.kind === "camera" && activeSlot?.index === slot.index ? " is-active" : ""}${camera ? " is-placed" : ""}`}
                     role="button"
                     tabIndex={0}
                     aria-pressed={!!(activeSlot?.kind === "camera" && activeSlot?.index === slot.index)}
@@ -1295,6 +1489,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     }}
                     data-testid={`camera-slot-${slot.index}`}
                   >
+                    <div className="spatial-map__entity-card-head spatial-map__slot-head">
                     {slotPlacementBadge(cameraPlacing) ? (
                       <span className="spatial-map__active-badge is-placement-active" data-testid={'slot-active-badge-camera-' + String(slot.index)}>
                         {slotPlacementBadge(true)}
@@ -1326,8 +1521,9 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                         <span className="spatial-map__slot-toggle-thumb" aria-hidden="true" />
                       </button>
                     </div>
+                    </div>
                     {camera ? (
-                      <span className="spatial-map__slot-status">
+                      <span className="spatial-map__entity-card-meta spatial-map__slot-status">
                         {camera.orientation || "N"} · {String(camera.fovPreset || "medium").toLowerCase()}
                       </span>
                     ) : (
@@ -1406,32 +1602,55 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             </div>
           </div>
 
+          <div className="spatial-map__ers-generator" data-testid="ers-generator">
+            <label className="spatial-map__ers-generator-label" htmlFor="ers-generator-select">
+              ERS Generator
+            </label>
+            <select
+              id="ers-generator-select"
+              className="spatial-map__ers-generator-select"
+              data-testid="ers-generator-select"
+              aria-label="ERS Generator"
+              value={ers.selectedGenerator}
+              disabled={ers.busy}
+              onChange={(e) => ers.setSelectedGenerator(e.target.value as typeof ers.selectedGenerator)}
+            >
+              {ERS_GENERATOR_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {ers.generatorBlockReason ? (
+              <p className="spatial-map__ers-generator-reason" data-testid="ers-generator-reason" role="status">
+                {ers.generatorBlockReason}
+              </p>
+            ) : null}
+          </div>
           <div className="spatial-map__actions">
             <button
               type="button"
               className="ui-btn ui-btn--primary"
               onClick={() => void startErsGeneration()}
-              disabled={isGenerating}
+              disabled={isGenerating || !!ers.generatorBlockReason}
               aria-label={ersExists ? "Regenerate Environment Reference Sheet" : "Generate Environment Reference Sheet"}
             >
-              {busyOp === "ers" ? "Generating ERS…" : ersExists ? "Regenerate Environment Reference Sheet" : "Generate Environment Reference Sheet"}
+              {ers.busy ? "Generating…" : ersExists ? "Regenerate Environment Reference Sheet" : "Generate Environment Reference Sheet"}
             </button>
             <button type="button" className="ui-btn ui-btn--secondary" onClick={() => void handleResetMap()} aria-label="Reset map placements">
               Reset Map
             </button>
           </div>
 
-          {opMsg ? <p className="spatial-map__hint">{opMsg}</p> : null}
+          <ERSGenerationMonitor
+            state={ers}
+            onRetry={() => void ers.retry()}
+            onOpenInLibrary={() => onGoTab?.("library")}
+            onUseInSceneCreator={() => void handleUseInSceneCreator()}
+            onUseAnyway={() => void ers.useAnyway()}
+          />
 
-          {ersExists && ersCompositeAssetId ? (
-            <ErsResultDisplay
-              ersCompositeAssetId={ersCompositeAssetId}
-              onRegenerate={() => void startErsGeneration()}
-              onOpenInLibrary={() => onGoTab?.("library")}
-              onUseInSceneCreator={() => void handleUseInSceneCreator()}
-              regenerateDisabled={isGenerating}
-            />
-          ) : null}
+          {opMsg && ers.phase === "idle" ? <p className="spatial-map__hint">{opMsg}</p> : null}
         </>
       )}
 
@@ -1443,8 +1662,20 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           onClose={() => setReplacePickerOpen(false)}
           onConfirm={async (assetId) => {
             setReplacePickerOpen(false);
+            if (!document) return;
+            const description = sceneDescription.trim() || document.sceneIntent?.summary || "";
+            const descError = sceneDescriptionError(description);
+            if (descError) {
+              setOpMsg(descError);
+              return;
+            }
+            if (!sceneDescription.trim()) setSceneDescription(description);
             try {
-              const updated = await spatialMapApi.updateMap(projectId, document.id, { backgroundAssetId: assetId });
+              const updated = await spatialMapApi.updateMap(projectId, document.id, {
+                backgroundAssetId: assetId,
+                sceneDescription: description,
+                originalEnvironmentReferenceAssetId: assetId,
+              });
               setDocument(updated);
               setOpMsg("Atlas Shot replaced from Library.");
             } catch (err) {

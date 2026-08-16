@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from .attachment import (
     AttachmentPoint,
@@ -12,6 +12,7 @@ from .attachment import (
     PropRelationship,
     validate_prop_attachment,
 )
+from .scene_intent import SceneIntent, lineage_fingerprint, validate_scene_description
 
 
 CoordinateSystem = Literal["adept-world-v1"]
@@ -277,6 +278,10 @@ class SpatialMapDocument(BaseModel):
     bounds: SpatialBounds = Field(default_factory=SpatialBounds)
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
+    # Atlas Scene Intent lineage: semantic anchor snapshotted at Atlas creation.
+    sceneIntent: Optional[SceneIntent] = None
+    originalEnvironmentReferenceAssetId: Optional[str] = None
+    originatingUserPrompt: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
     gridScale: int = 0  # -5 .. +5, 0 = Neutral (10x10)
     placementGrid: str = ""  # cartesian-v1 after migration; empty triggers one-shot polar conversion
@@ -293,6 +298,16 @@ class SpatialMapDocument(BaseModel):
     createdAt: str = ""
     updatedAt: str = ""
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def groundingFingerprint(self) -> str:
+        """Lineage fingerprint for ERS staleness (sceneIntent + atlas + source)."""
+        return lineage_fingerprint(
+            self.sceneIntent,
+            background_asset_id=self.backgroundAssetId,
+            original_reference_asset_id=self.originalEnvironmentReferenceAssetId,
+        )
+
 
 class SpatialMapCreateBody(BaseModel):
     title: str = "Spatial Map"
@@ -303,6 +318,19 @@ class SpatialMapCreateBody(BaseModel):
     backgroundAssetId: Optional[str] = None
     masterEnvironmentPrompt: str = ""
     providerHonesty: ProviderHonestyMode = "approximate_translation"
+    # Scene Intent lineage. sceneDescription is validated + compiled into
+    # sceneIntent server-side; sceneIntent may also be passed pre-compiled
+    # (CD path). originalEnvironmentReferenceAssetId links the source image.
+    sceneDescription: Optional[str] = None
+    sceneIntent: Optional[SceneIntent] = None
+    originalEnvironmentReferenceAssetId: Optional[str] = None
+    originatingUserPrompt: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _scene_description_valid(self) -> "SpatialMapCreateBody":
+        if self.sceneDescription is not None:
+            self.sceneDescription = validate_scene_description(self.sceneDescription)
+        return self
 
 
 class SpatialMapUpdateBody(BaseModel):
@@ -316,6 +344,16 @@ class SpatialMapUpdateBody(BaseModel):
     masterEnvironmentPrompt: Optional[str] = None
     providerHonesty: Optional[ProviderHonestyMode] = None
     gridScale: Optional[int] = None
+    sceneDescription: Optional[str] = None
+    sceneIntent: Optional[SceneIntent] = None
+    originalEnvironmentReferenceAssetId: Optional[str] = None
+    originatingUserPrompt: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _scene_description_valid(self) -> "SpatialMapUpdateBody":
+        if self.sceneDescription is not None:
+            self.sceneDescription = validate_scene_description(self.sceneDescription)
+        return self
 
 
 class SpatialCharacterPlacementBody(BaseModel):

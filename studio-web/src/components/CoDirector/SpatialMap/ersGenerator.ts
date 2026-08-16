@@ -1,0 +1,152 @@
+﻿/**
+ * Narrow ERS generator catalog for Spatial Map (Express + Standard).
+ * Official IDs are the live image-product / Kie catalog values — not invented.
+ */
+export type ErsGeneratorId = "qwen2512" | "gpt-image-2";
+
+/** image-product officialModelId / modelFamilyPreference for local Qwen Image 2512. */
+export const ERS_QWEN_OFFICIAL_ID = "qwen2512";
+/** image-studio / production-dock provider id. */
+export const ERS_QWEN_PROVIDER_ID = "qwen-image-2512-local";
+/** Certified local T2I workflow key (ERS is always T2I). */
+export const ERS_QWEN_WORKFLOW_KEY = "qwen2512.txt2img";
+
+/** Kie dock / hostedModelId from the live catalog. */
+export const ERS_GPT_HOSTED_ID = "gpt-image-2-kie";
+/** Official Kie T2I model id (ERS is always image.generate). */
+export const ERS_GPT_OFFICIAL_ID = "gpt-image-2-text-to-image";
+
+export const ERS_GENERATOR_DEFAULT: ErsGeneratorId = "qwen2512";
+
+export const ERS_GENERATOR_OPTIONS: ReadonlyArray<{ id: ErsGeneratorId; label: string }> = [
+  { id: "qwen2512", label: "Qwen Image — Local" },
+  { id: "gpt-image-2", label: "GPT Image 2 — API" },
+];
+
+export const QWEN_NOT_READY_MESSAGE =
+  "Qwen Image is not ready. Choose GPT Image 2 or repair the local installation.";
+
+export const GPT_NOT_READY_MESSAGE =
+  "GPT Image 2 is not ready. Check the Kie API key, or choose Qwen Image.";
+
+export type ErsProviderRow = {
+  id?: string;
+  family?: string;
+  modelId?: string;
+  readiness?: string;
+  source?: string;
+};
+
+function norm(value: unknown): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isReady(row: ErsProviderRow): boolean {
+  return norm(row.readiness) === "ready";
+}
+
+export function isQwenProvider(row: ErsProviderRow): boolean {
+  const id = norm(row.id);
+  const family = norm(row.family);
+  return (
+    id === ERS_QWEN_PROVIDER_ID ||
+    family === ERS_QWEN_OFFICIAL_ID ||
+    id.includes("qwen2512") ||
+    family.includes("qwen2512") ||
+    id === "qwen-image-2512-local"
+  );
+}
+
+export function isGptImage2Provider(row: ErsProviderRow): boolean {
+  const id = norm(row.id);
+  const modelId = norm(row.modelId);
+  return (
+    id === ERS_GPT_HOSTED_ID ||
+    id.includes("gpt-image-2") ||
+    modelId.includes("gpt-image-2")
+  );
+}
+
+export function isQwenReady(providers: ErsProviderRow[] | null | undefined): boolean {
+  return (providers || []).some((row) => isQwenProvider(row) && isReady(row));
+}
+
+export function isGptImage2Ready(providers: ErsProviderRow[] | null | undefined): boolean {
+  return (providers || []).some((row) => isGptImage2Provider(row) && isReady(row));
+}
+
+export function buildErsStartContext(id: ErsGeneratorId): Record<string, unknown> {
+  if (id === "gpt-image-2") {
+    return {
+      hostedModelId: ERS_GPT_HOSTED_ID,
+      hosted_model_id: ERS_GPT_HOSTED_ID,
+      kieImageModelId: ERS_GPT_OFFICIAL_ID,
+      kie_image_model_id: ERS_GPT_OFFICIAL_ID,
+      model: ERS_GPT_HOSTED_ID,
+      source: "api",
+      providerKind: "api",
+      provider_kind: "api",
+    };
+  }
+  return {
+    model: ERS_QWEN_OFFICIAL_ID,
+    modelFamilyPreference: ERS_QWEN_OFFICIAL_ID,
+    model_family_preference: ERS_QWEN_OFFICIAL_ID,
+    source: "local",
+    providerKind: "local",
+    provider_kind: "local",
+  };
+}
+
+export function resolveErsGeneratorFromModel(source: {
+  model?: string | null;
+  sourceKind?: "Local" | "API" | null;
+}): ErsGeneratorId | null {
+  const model = norm(source.model);
+  if (
+    model.includes("gpt-image-2") ||
+    model === ERS_GPT_HOSTED_ID ||
+    model === ERS_GPT_OFFICIAL_ID
+  ) {
+    return "gpt-image-2";
+  }
+  if (
+    model === ERS_QWEN_OFFICIAL_ID ||
+    model.startsWith("qwen2512") ||
+    model.includes("qwen-image") ||
+    model === ERS_QWEN_WORKFLOW_KEY
+  ) {
+    return "qwen2512";
+  }
+  return null;
+}
+
+export function formatErsProvenance(source: {
+  model?: string | null;
+  sourceKind?: "Local" | "API" | null;
+}): string {
+  const resolved = resolveErsGeneratorFromModel(source);
+  if (resolved === "gpt-image-2") return "Generating with GPT Image 2 · API";
+  if (resolved === "qwen2512") return "Generating with Qwen Image · Local";
+  return "";
+}
+
+export function provenanceModelFromSelection(id: ErsGeneratorId): {
+  model: string;
+  sourceKind: "Local" | "API";
+} {
+  if (id === "gpt-image-2") {
+    return { model: ERS_GPT_OFFICIAL_ID, sourceKind: "API" };
+  }
+  return { model: ERS_QWEN_OFFICIAL_ID, sourceKind: "Local" };
+}
+
+export function generatorBlockReason(
+  id: ErsGeneratorId,
+  qwenReady: boolean | null,
+  gptReady: boolean | null,
+): string | null {
+  if (id === "qwen2512" && qwenReady === false) return QWEN_NOT_READY_MESSAGE;
+  if (id === "gpt-image-2" && gptReady === false) return GPT_NOT_READY_MESSAGE;
+  return null;
+}

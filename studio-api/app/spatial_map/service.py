@@ -23,6 +23,7 @@ from .grid import (
 from .limits import CAMERA_LIMIT, enforce_camera_limit, enforce_character_limit, enforce_prop_limit
 from .models import SpatialMapDocumentRow, ensure_tables as ensure_model_tables
 from .reference_bundle import compile_reference_bundle, creative_position_labels
+from .scene_intent import build_scene_intent, merge_scene_description_edit
 from .attachment import (
     PropAttachmentError,
     apply_attach,
@@ -295,6 +296,15 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
     if body.sceneId:
         _scene_or_404(db, project_id, body.sceneId)
     now = _now()
+    scene_intent = body.sceneIntent
+    if scene_intent is None and body.sceneDescription:
+        project = db.get(Project, project_id)
+        scene_intent = build_scene_intent(
+            body.sceneDescription,
+            project_name=str(getattr(project, "name", "") or ""),
+            source_reference_asset_ids=[body.backgroundAssetId] if body.backgroundAssetId else [],
+            originating_prompt=body.originatingUserPrompt or "",
+        )
     document = SpatialMapDocument(
         id=str(uuid.uuid4()),
         projectId=project_id,
@@ -306,6 +316,9 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
         bounds=body.bounds,
         backgroundAssetId=body.backgroundAssetId,
         masterEnvironmentPrompt=(body.masterEnvironmentPrompt or "").strip(),
+        sceneIntent=scene_intent,
+        originalEnvironmentReferenceAssetId=body.originalEnvironmentReferenceAssetId,
+        originatingUserPrompt=(body.originatingUserPrompt or "").strip(),
         providerHonesty=body.providerHonesty,
         assignedSceneIds=[body.sceneId] if body.sceneId else [],
         placementGrid="cartesian-v1",
@@ -358,6 +371,29 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
         document.backgroundAssetId = body.backgroundAssetId
     if body.masterEnvironmentPrompt is not None:
         document.masterEnvironmentPrompt = body.masterEnvironmentPrompt.strip()
+    if body.sceneIntent is not None:
+        document.sceneIntent = body.sceneIntent
+    elif body.sceneDescription is not None:
+        # Edit Scene Description: merge into the existing snapshot so curated
+        # subjects/props/traits and lineage survive a text-only edit.
+        project = db.get(Project, project_id)
+        prior_ids = (
+            list(document.sceneIntent.sourceReferenceAssetIds)
+            if document.sceneIntent is not None
+            else []
+        )
+        document.sceneIntent = merge_scene_description_edit(
+            document.sceneIntent,
+            body.sceneDescription,
+            project_name=str(getattr(project, "name", "") or ""),
+            fallback_source_reference_asset_ids=prior_ids
+            or ([document.originalEnvironmentReferenceAssetId] if document.originalEnvironmentReferenceAssetId else []),
+            originating_prompt=document.originatingUserPrompt,
+        )
+    if "originalEnvironmentReferenceAssetId" in explicit:
+        document.originalEnvironmentReferenceAssetId = body.originalEnvironmentReferenceAssetId
+    if body.originatingUserPrompt is not None:
+        document.originatingUserPrompt = body.originatingUserPrompt.strip()
     if body.providerHonesty is not None:
         document.providerHonesty = body.providerHonesty
     if body.gridScale is not None:

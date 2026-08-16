@@ -95,7 +95,7 @@ export function PlacementSlot({
 
   return (
     <div
-      className={`spatial-map__slot-card${active ? " is-active" : ""}${placing ? " is-placing" : ""}${attached ? " is-attached" : ""}`}
+      className={`spatial-map__entity-card spatial-map__slot-card${active ? " is-active" : ""}${placing ? " is-placing" : ""}${attached ? " is-attached" : ""}`}
       data-testid={`spatial-map-slot-${slot.kind}-${slot.index}`}
       data-placement-mode={propPlacement ? (attached ? "attached" : "independent") : undefined}
       onClick={onSelect}
@@ -198,7 +198,7 @@ export function PlacementSlot({
             {displayName}
           </div>
           {attached && propPlacement ? (
-            <div className="spatial-map__attach-tags" data-testid={`prop-attach-tags-${slot.index}`}>
+            <div className="spatial-map__entity-card-meta spatial-map__attach-tags" data-testid={`prop-attach-tags-${slot.index}`}>
               {characterSlotTag(propPlacement.attachedCharacterSlot) ? (
                 <span className="spatial-map__attach-tag" data-testid={`prop-attach-tag-slot-${slot.index}`}>
                   {characterSlotTag(propPlacement.attachedCharacterSlot)}

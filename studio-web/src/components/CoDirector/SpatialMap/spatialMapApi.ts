@@ -10,6 +10,7 @@ import { api } from "../../../api";
 import {
   validatePropAttachment,
   type SpatialMapCreateBody,
+  type SpatialMapSceneIntentCreateBody,
   type SpatialMapUpdateBody,
   type SpatialMapDocument,
   type SpatialCharacterPlacementBody,
@@ -61,8 +62,8 @@ export const spatialMapApi = {
     return (res.documents || []) as unknown as SpatialMapDocument[];
   },
 
-  async createMap(projectId: string, body: SpatialMapCreateBody): Promise<SpatialMapDocument> {
-    const res = await api.spatialMap.createMap(projectId, body);
+  async createMap(projectId: string, body: SpatialMapSceneIntentCreateBody): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.createMap(projectId, body as SpatialMapCreateBody);
     return res.document as unknown as SpatialMapDocument;
   },
 

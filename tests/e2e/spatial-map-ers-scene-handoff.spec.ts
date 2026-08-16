@@ -14,7 +14,13 @@
  * Generate, or Final Quality Render. Leftover-complete sheet/asset is
  * observe-only (same law as leftover success cards).
  * Test 6 GETs T2I preview job aa8eaaf3 and asserts creativeContext
- * ers_composite_asset_id + reference_image_ids[0] consume 2f2e871b.
+ * ers_composite_asset_id + reference_image_ids[0] consume 2f2e871b (the
+ * historical pre-grounding composite; the current live composite is 21927403,
+ * produced by the Scene-Intent-grounded Qwen run on 2026-08-16).
+ *
+ * Surface beats (Express/Standard load, sync, multi-toggle, monitor, one-job,
+ * failure sanitize) live in spatial-map-ers-live-view.spec.ts. Do not invent a
+ * third spec. Leftover-complete / no-Generate-if-complete still holds here.
  *
  * Reuses helpers (Law #17): observer.ts, openCoDirectorFullScreen.
  * Does not import API from helpers/app.ts (that helper still defaults :8758).
@@ -27,11 +33,16 @@ const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8761";
 const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "2347bf46-3762-4763-86c5-4a6032522278";
 const LIVE_SHEET_ID = "db095959-5678-4f11-98d1-e93e0810d119";
-const LIVE_ERS_ASSET = "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b";
+const LIVE_ERS_ASSET = "21927403-e090-49dc-ab03-3169d446fd1f";
 const LIVE_SHEET_PREFIX = "db095959";
-const LIVE_ASSET_PREFIX = "2f2e871b";
+const LIVE_ASSET_PREFIX = "21927403";
+// Historical: preview job aa8eaaf3 was rendered against the pre-grounding
+// composite 2f2e871b. Test 6 observes that historical job, so it asserts the
+// legacy prefix; the current live composite is LIVE_ASSET_PREFIX.
+const LEGACY_ERS_ASSET_PREFIX = "2f2e871b";
 const LIVE_PREVIEW_JOB_ID = "aa8eaaf3-986b-498c-af16-f558a6f15d87";
 const LIVE_PREVIEW_JOB_PREFIX = "aa8eaaf3";
+const LIVE_ORIGINAL_REF_PREFIX = "4d3062e8"; // Korri Coffee House.png (original environment reference)
 
 expect(UI, "spec default / env must be live UI :8760").toMatch(/127\.0\.0\.1:8760|localhost:8760/);
 expect(API, "spec default / env must be live API :8761").toMatch(/127\.0\.0\.1:8761|localhost:8761/);
@@ -46,6 +57,17 @@ type ErsSheetSummary = {
   ers_composite_asset_id?: string | null;
 };
 
+type SceneIntent = {
+  version?: number;
+  purpose?: string;
+  sceneTitle?: string;
+  locationType?: string;
+  summary?: string;
+  keySubjects?: string[];
+  keyProps?: string[];
+  sourceReferenceAssetIds?: string[];
+};
+
 type SpatialMapDocument = {
   id: string;
   title?: string;
@@ -53,9 +75,18 @@ type SpatialMapDocument = {
   createdAt?: string;
   placementGrid?: string;
   gridScale?: number;
+  backgroundAssetId?: string | null;
+  sceneIntent?: SceneIntent | null;
+  originalEnvironmentReferenceAssetId?: string | null;
+  originatingUserPrompt?: string;
+  groundingFingerprint?: string;
   characters?: Array<{ id?: string; label?: string; characterId?: string; slotIndex?: number; gridRow?: number; gridColumn?: number }>;
   props?: Array<{ id?: string; label?: string; tag?: string; slotIndex?: number; placementMode?: string }>;
   cameras?: Array<{ id?: string; label?: string; cameraSlot?: number }>;
+};
+
+type SheetDetail = ErsSheetSummary & {
+  provenance?: { details?: Record<string, unknown> } | null;
 };
 
 type Workspace = {
@@ -67,6 +98,7 @@ type Workspace = {
     package_id?: string;
     ers_composite_asset_id?: string | null;
     atlas_asset_id?: string | null;
+    scene_intent?: SceneIntent | null;
   } | null;
   sheets?: ErsSheetSummary[];
   shots?: Array<{
@@ -148,6 +180,25 @@ async function getWorkspace(request: APIRequestContext): Promise<Workspace> {
   return (await res.json()) as Workspace;
 }
 
+async function getSheetDetail(request: APIRequestContext, sheetId: string): Promise<SheetDetail> {
+  const res = await request.get(`${API}/api/environment-reference-sheets/projects/${PROJECT_ID}/${sheetId}`);
+  expect(res.ok(), await res.text()).toBeTruthy();
+  const body = (await res.json()) as { sheet?: SheetDetail } & SheetDetail;
+  return (body.sheet || body) as SheetDetail;
+}
+
+async function updateMapDescription(
+  request: APIRequestContext,
+  mapId: string,
+  description: string,
+): Promise<SpatialMapDocument> {
+  const res = await request.patch(`${API}/api/spatial-map/projects/${PROJECT_ID}/maps/${mapId}`, {
+    data: { sceneDescription: description },
+  });
+  expect(res.ok(), await res.text()).toBeTruthy();
+  return ((await res.json()) as { document?: SpatialMapDocument }).document as SpatialMapDocument;
+}
+
 async function listProjectJobs(request: APIRequestContext): Promise<JobRecord[]> {
   const res = await request.get(`${API}/api/projects/${PROJECT_ID}/jobs`);
   expect(res.ok(), await res.text()).toBeTruthy();
@@ -213,12 +264,17 @@ function leftoverCompleteFromApi(sheet: ErsSheetSummary): boolean {
 }
 
 async function leftoverCompleteFromUi(page: Page): Promise<boolean> {
-  const ers = page.getByTestId("spatial-map-ers");
-  if ((await ers.count()) === 0) return false;
-  if (!(await ers.first().isVisible().catch(() => false))) return false;
-  const src = (await ers.locator("img").first().getAttribute("src").catch(() => "")) || "";
-  const html = (await ers.innerHTML().catch(() => "")) || "";
-  return includesLiveAsset(src) || includesLiveAsset(html) || true;
+  const legacy = page.getByTestId("spatial-map-ers");
+  const monitor = page.getByTestId("ers-generation-monitor");
+  const node = (await legacy.first().isVisible().catch(() => false))
+    ? legacy.first()
+    : (await monitor.first().isVisible().catch(() => false))
+      ? monitor.first()
+      : null;
+  if (!node) return false;
+  const src = (await node.locator("img").first().getAttribute("src").catch(() => "")) || "";
+  const html = (await node.innerHTML().catch(() => "")) || "";
+  return includesLiveAsset(src) || includesLiveAsset(html);
 }
 
 function attachHoldGuards(page: Page, clicks: { generate: boolean }) {
@@ -411,18 +467,18 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     expect(mustWait, "leftover-complete / in-flight => observe-only").toBe(true);
 
     if (leftoverHasSuccessFromUi) {
-      const ers = page.getByTestId("spatial-map-ers");
-      await expect(ers).toBeVisible();
-      const src = (await ers.locator("img").first().getAttribute("src").catch(() => "")) || "";
-      expect(includesLiveAsset(src) || includesLiveAsset(await ers.innerHTML()), "UI leftover sheet shows live asset").toBe(
+      const surface = page.getByTestId("ers-generation-monitor").or(page.getByTestId("spatial-map-ers"));
+      await expect(surface.first()).toBeVisible();
+      const src = (await surface.locator("img").first().getAttribute("src").catch(() => "")) || "";
+      expect(includesLiveAsset(src) || includesLiveAsset(await surface.first().innerHTML()), "UI leftover sheet shows live asset").toBe(
         true,
       );
     } else {
-      logStep("UI spatial-map-ers not hydrated on load; leftover-complete observed via API only");
+      logStep("UI leftover ERS not hydrated on load; leftover-complete observed via API only");
       info.annotations.push({
         type: "gap",
         description:
-          "SpatialMapPanel does not hydrate leftover-complete ERS (2f2e871b) into spatial-map-ers on reload; observe-only via API. Do not click Generate to surface it.",
+          "Spatial Map did not hydrate leftover-complete ERS (57227c87) into ers-generation-monitor / spatial-map-ers; observe-only via API. Do not click Generate to surface it.",
       });
     }
 
@@ -457,7 +513,7 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     expect(after.has_reference).toBe(true);
 
     if (await leftoverCompleteFromUi(page)) {
-      await expect(page.getByTestId("spatial-map-ers")).toBeVisible();
+      await expect(page.getByTestId("ers-generation-monitor").or(page.getByTestId("spatial-map-ers")).first()).toBeVisible();
     }
     expect(clicks.generate, "Generate must not be clicked").toBe(false);
     logStep(`reload persist sheet=${after.sheetId} asset=${after.ers_composite_asset_id}`);
@@ -513,7 +569,7 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
 
     const workspace = await getWorkspace(request);
     const lineageAsset = workspace.resolved_ers?.ers_composite_asset_id || "";
-    expect(includesLiveAsset(lineageAsset), "scene-state lineage includes 2f2e871b").toBe(true);
+    expect(includesLiveAsset(lineageAsset), "scene-state lineage includes the live ERS composite").toBe(true);
     expect(includesLiveSheet(workspace.selected_sheet_id)).toBe(true);
 
     const shotsOnLiveSheet = (workspace.shots || []).filter((s) => includesLiveSheet(s.sheet_id));
@@ -529,10 +585,13 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     const ersComposite = ctx.ers_composite_asset_id;
     const refIds = Array.isArray(ctx.reference_image_ids) ? ctx.reference_image_ids : [];
     const ref0 = refIds[0];
-    expect(includesLiveAsset(ersComposite), "creativeContext.ers_composite_asset_id includes/equals 2f2e871b").toBe(
-      true,
-    );
-    expect(includesLiveAsset(ref0), "reference_image_ids[0] is 2f2e871b (or contains it)").toBe(true);
+    const includesLegacyAsset = (value: unknown) =>
+      String(value || "").toLowerCase().includes(LEGACY_ERS_ASSET_PREFIX);
+    expect(
+      includesLegacyAsset(ersComposite),
+      "creativeContext.ers_composite_asset_id includes/equals legacy 2f2e871b (historical preview job)",
+    ).toBe(true);
+    expect(includesLegacyAsset(ref0), "reference_image_ids[0] is legacy 2f2e871b (or contains it)").toBe(true);
     logStep(
       `preview observe job=${previewJob.id} kind=${previewJob.kind} ers_composite_asset_id=${ersComposite} reference_image_ids[0]=${ref0} lineageAsset=${lineageAsset} shotsOnSheet=${shotsOnLiveSheet.length}`,
     );
@@ -545,6 +604,172 @@ test.describe.serial("@critical Spatial Map leftover-complete ERS Scene Creator 
     await expect(page.getByTestId("cine-preview")).toBeVisible();
     // Observe the button only. Never click Generate Low-Res Preview / Final Quality Render.
     expect(clicks.generate, "HOLD: cine-preview / Generate was not clicked").toBe(false);
+    observer.flush();
+  });
+
+  test("7 Scene Intent lineage — map snapshot, sheet provenance, Scene Context UI", async ({ page, request }, info) => {
+    test.setTimeout(120_000);
+    const clicks = { generate: false };
+    attachHoldGuards(page, clicks);
+    const observer = attachObserver(page, info);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // API: the Spatial Map carries the Scene Intent snapshot (W1/W6).
+    const map = await getLatestMap(request);
+    const intent = map.sceneIntent;
+    expect(intent, "Spatial Map must carry a Scene Intent snapshot").toBeTruthy();
+    expect(intent?.sceneTitle || "", "Scene Intent title").toMatch(/Schnick Coffee/i);
+    expect(intent?.locationType || "", "Scene Intent location type").toMatch(/coffee_shop/i);
+    expect(intent?.summary || "", "Scene Intent summary must describe the café").toMatch(/coffee|café|cafe/i);
+    expect((intent?.keySubjects || []).join(" "), "Korri is a key subject").toMatch(/Korri/i);
+    expect((intent?.keyProps || []).join(" "), "coffee cup is a key prop").toMatch(/cup/i);
+    expect(
+      String(intent?.sourceReferenceAssetIds?.[0] || ""),
+      "Scene Intent links the original environment reference image",
+    ).toContain(LIVE_ORIGINAL_REF_PREFIX);
+    expect(
+      String(map.originalEnvironmentReferenceAssetId || ""),
+      "map carries the original environment reference asset id",
+    ).toContain(LIVE_ORIGINAL_REF_PREFIX);
+    expect(map.groundingFingerprint || "", "map exposes a grounding fingerprint").toMatch(/^[0-9a-f]{16}$/);
+
+    // API: the ERS sheet provenance carries the same lineage (W3/W6).
+    const sheet = await getSheetDetail(request, LIVE_SHEET_ID);
+    const details = (sheet.provenance?.details || {}) as Record<string, unknown>;
+    const sheetIntent = (details.sceneIntent || null) as SceneIntent | null;
+    expect(sheetIntent, "sheet provenance carries the Scene Intent snapshot").toBeTruthy();
+    expect(sheetIntent?.sceneTitle || "").toMatch(/Schnick Coffee/i);
+    expect(
+      String(details.groundingFingerprint || ""),
+      "sheet fingerprint matches the map fingerprint (not stale after backfill)",
+    ).toBe(map.groundingFingerprint);
+    expect(String(details.originalEnvironmentReferenceAssetId || "")).toContain(LIVE_ORIGINAL_REF_PREFIX);
+
+    // UI: Scene Context summary block shows the same identity (shared panel =>
+    // Express and Standard cannot diverge).
+    await openCoDirectorFullScreen(page, PROJECT_ID);
+    await openSpatialMapTab(page);
+    await expect(page.getByTestId("spatial-map-panel")).toBeVisible();
+    const sceneContext = page.getByTestId("scene-context-summary");
+    await expect(sceneContext).toBeVisible({ timeout: 30_000 });
+    await expect(sceneContext).toContainText(/Schnick Coffee/i);
+    await expect(sceneContext).toContainText(/coffee|café|cafe/i);
+    await page.getByTestId("scene-context-details-btn").click();
+    const detailsBlock = page.getByTestId("scene-context-details");
+    await expect(detailsBlock).toBeVisible();
+    await expect(detailsBlock).toContainText(/coffee shop/i);
+    await expect(detailsBlock).toContainText(/Korri/i);
+
+    expect(clicks.generate, "Generate must not be clicked").toBe(false);
+    logStep(
+      `scene intent lineage map=${map.id} fingerprint=${map.groundingFingerprint} intent=${intent?.sceneTitle}/${intent?.locationType}`,
+    );
+    observer.flush();
+  });
+
+  test("8 ERS generator select defaults to Qwen Image (Express + Standard share one panel)", async ({
+    page,
+    request,
+  }, info) => {
+    test.setTimeout(120_000);
+    const clicks = { generate: false };
+    attachHoldGuards(page, clicks);
+    const observer = attachObserver(page, info);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const map = await getLatestMap(request);
+    expect(map.id, "live map exists").toBeTruthy();
+
+    await openCoDirectorFullScreen(page, PROJECT_ID);
+    await openSpatialMapTab(page);
+    await expect(page.getByTestId("spatial-map-panel")).toBeVisible();
+
+    const select = page.getByTestId("ers-generator-select");
+    await expect(select).toBeVisible({ timeout: 30_000 });
+    await expect(select, "ERS generator defaults to Qwen Image (Local)").toHaveValue("qwen2512");
+    const labels = (await select.locator("option").allInnerTexts()).join("|");
+    expect(labels).toMatch(/Qwen Image/i);
+    expect(labels).toMatch(/GPT Image 2/i);
+
+    // Reload persistence: the selector still defaults to Qwen after a refresh.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await openSpatialMapTab(page);
+    await expect(page.getByTestId("ers-generator-select")).toHaveValue("qwen2512");
+
+    expect(clicks.generate, "Generate must not be clicked").toBe(false);
+    logStep("ers-generator-select defaults to qwen2512 (Qwen Image — Local), GPT Image 2 optional");
+    observer.flush();
+  });
+
+  test("9 staleness — Edit Scene Description marks ERS Needs Regeneration, restore clears", async ({
+    page,
+    request,
+  }, info) => {
+    test.setTimeout(180_000);
+    const clicks = { generate: false };
+    attachHoldGuards(page, clicks);
+    const observer = attachObserver(page, info);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const map = await getLatestMap(request);
+    const originalDescription = map.sceneIntent?.summary || "";
+    expect(originalDescription, "map has a scene description to edit").toBeTruthy();
+    const originalFingerprint = map.groundingFingerprint || "";
+
+    // Edit the description (API-equivalent of the panel's Edit Scene Description).
+    const edited = `${originalDescription} Now with a small patio.`;
+    const afterEdit = await updateMapDescription(request, map.id, edited);
+    expect(afterEdit.sceneIntent?.summary || "").toContain("patio");
+    expect(
+      afterEdit.groundingFingerprint,
+      "description edit changes the grounding fingerprint",
+    ).not.toBe(originalFingerprint);
+
+    // UI: the panel must flag the ERS as needing regeneration (no auto-spend).
+    await openCoDirectorFullScreen(page, PROJECT_ID);
+    await openSpatialMapTab(page);
+    await expect(page.getByTestId("spatial-map-panel")).toBeVisible();
+    await expect(page.getByTestId("ers-stale-banner")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("ers-stale-banner")).toContainText(/needs regeneration|stale|regenerate/i);
+
+    // Restore the original description (leave the live project as found).
+    const restored = await updateMapDescription(request, map.id, originalDescription);
+    expect(restored.groundingFingerprint, "restore returns the original fingerprint").toBe(originalFingerprint);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await openSpatialMapTab(page);
+    await expect(page.getByTestId("spatial-map-panel")).toBeVisible();
+    await expect(page.getByTestId("ers-stale-banner")).toHaveCount(0);
+
+    expect(clicks.generate, "Generate must not be clicked (staleness never auto-spends)").toBe(false);
+    logStep(`staleness verified: ${originalFingerprint} -> ${afterEdit.groundingFingerprint} -> ${restored.groundingFingerprint}`);
+    observer.flush();
+  });
+
+  test("10 Scene Creator handoff carries Scene Intent + ERS provenance", async ({ page, request }, info) => {
+    test.setTimeout(120_000);
+    const clicks = { generate: false };
+    attachHoldGuards(page, clicks);
+    const observer = attachObserver(page, info);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const workspace = await getWorkspace(request);
+    expect(includesLiveSheet(workspace.selected_sheet_id)).toBe(true);
+    expect(includesLiveAsset(workspace.resolved_ers?.ers_composite_asset_id)).toBe(true);
+    const sceneIntent = workspace.resolved_ers?.scene_intent;
+    expect(sceneIntent, "Scene Creator handoff carries the Scene Intent snapshot").toBeTruthy();
+    expect(sceneIntent?.sceneTitle || "").toMatch(/Schnick Coffee/i);
+    expect(sceneIntent?.locationType || "").toMatch(/coffee_shop/i);
+    expect(String(sceneIntent?.sourceReferenceAssetIds?.[0] || "")).toContain(LIVE_ORIGINAL_REF_PREFIX);
+
+    await openCoDirectorFullScreen(page, PROJECT_ID);
+    await openStandardFromExpressLauncher(page);
+    await expect(page.getByTestId("scene-creator-standard").or(page.getByTestId("scene-creator-panel"))).toBeVisible({
+      timeout: 45_000,
+    });
+    await expect(page.getByTestId("scene-creator-empty-no-ers")).toHaveCount(0);
+
+    expect(clicks.generate, "Generate must not be clicked").toBe(false);
+    logStep(`scene creator handoff scene_intent=${sceneIntent?.sceneTitle}/${sceneIntent?.locationType}`);
     observer.flush();
   });
 });
