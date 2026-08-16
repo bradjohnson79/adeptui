@@ -94,6 +94,15 @@ test.describe("Scene Spatial Profile + Reset", () => {
     }
     await expect(page.getByTestId("scene-creator-spatial-profile-select")).toBeVisible({ timeout: 45_000 });
     await expect(page.getByTestId("scene-creator-spatial-profile-select")).toHaveValue(a.handoffId);
+    const caption = page.getByTestId("scene-creator-cd-caption");
+    await expect.poll(async () => {
+      const text = ((await caption.textContent().catch(() => "")) || "").trim();
+      if (text.includes("Loading Co-Director production data")) return "loading";
+      if (text.includes("Co-Director production data loaded") && text.startsWith("✓")) return "loaded";
+      if (text.includes("could not be loaded")) return "failed";
+      return "missing";
+    }, { timeout: 60_000 }).toBe("loaded");
+    await expect(caption).toHaveText("✓ Co-Director production data loaded");
 
     await page.getByTestId("scene-creator-reset-workspace").click();
     await expect(page.getByTestId("scene-creator-reset-dialog")).toBeVisible();
@@ -104,6 +113,7 @@ test.describe("Scene Spatial Profile + Reset", () => {
     await page.getByTestId("scene-creator-reset-workspace").click();
     await page.getByTestId("scene-creator-reset-confirm").click();
     await expect.poll(async () => page.getByTestId("scene-creator-spatial-profile-select").inputValue(), { timeout: 30_000 }).toBe("");
+    await expect(page.getByTestId("scene-creator-cd-caption")).toHaveCount(0);
 
     const afterReset = await request.get(`${API}/api/scene-creator/projects/${PROJECT_ID}/spatial-profiles`);
     const afterBody = await afterReset.json();
@@ -113,9 +123,35 @@ test.describe("Scene Spatial Profile + Reset", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("scene-creator-spatial-profile-select")).toBeVisible({ timeout: 45_000 });
     await expect(page.getByTestId("scene-creator-spatial-profile-select")).toHaveValue("");
+    await expect(page.getByTestId("scene-creator-cd-caption")).toHaveCount(0);
 
     await page.getByTestId("scene-creator-spatial-profile-select").selectOption(a.handoffId);
     await expect.poll(async () => page.getByTestId("scene-creator-spatial-profile-select").inputValue(), { timeout: 30_000 }).toBe(a.handoffId);
+    await expect.poll(async () => {
+      const text = ((await page.getByTestId("scene-creator-cd-caption").textContent().catch(() => "")) || "").trim();
+      if (text.includes("Loading Co-Director production data")) return "loading";
+      if (text.includes("Co-Director production data loaded") && text.startsWith("✓")) return "loaded";
+      if (text.includes("could not be loaded")) return "failed";
+      return "missing";
+    }, { timeout: 60_000 }).toBe("loaded");
+
+    await page.getByTestId("scene-creator-spatial-profile-select").evaluate((el) => {
+      const select = el as HTMLSelectElement;
+      const option = document.createElement("option");
+      option.value = "00000000-0000-0000-0000-000000000000";
+      option.text = "Invalid profile";
+      select.appendChild(option);
+      select.value = option.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await expect.poll(async () => {
+      const text = ((await page.getByTestId("scene-creator-cd-caption").textContent().catch(() => "")) || "").trim();
+      if (text.includes("could not be loaded")) return "failed";
+      if (text.includes("Co-Director production data loaded") && text.startsWith("✓")) return "loaded";
+      if (text.includes("Loading")) return "loading";
+      return "missing";
+    }, { timeout: 30_000 }).toBe("failed");
+    await expect(page.getByTestId("scene-creator-cd-caption")).not.toHaveText("✓ Co-Director production data loaded");
     expect([...banned], "Reset must not delete Library or Spatial Profile assets").toEqual([]);
   });
 

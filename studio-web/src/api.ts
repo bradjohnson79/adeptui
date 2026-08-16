@@ -4392,6 +4392,11 @@ export const api = {
           body: JSON.stringify({ candidate_id: candidateId }),
         },
       ),
+    deleteShotCandidate: (projectId: string, shotId: string, candidateId: string) =>
+      req<{ shot: import("./components/CoDirector/SceneCreator/types").SceneShot }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/candidates/${encodeURIComponent(candidateId)}`,
+        { method: "DELETE" },
+      ),
     sendShotToTimeline: (projectId: string, shotId: string, body?: { batch_block_id?: string }) =>
       req<{ timeline: Record<string, unknown>; clips_sent: number }>(
         `/api/scene-creator/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/send-to-timeline`,

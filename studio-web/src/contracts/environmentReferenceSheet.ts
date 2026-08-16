@@ -141,6 +141,8 @@ export type EnvironmentReferenceSheetSummary = {
   locationStableId?: string | null;
   continuityStatus: ERSReadiness;
   approvedDirections: ERSViewDirection[];
+  ers_composite_asset_id?: string | null;
+  has_reference?: boolean;
   exportKinds: ERSExportKind[];
   updatedAt: string;
 };

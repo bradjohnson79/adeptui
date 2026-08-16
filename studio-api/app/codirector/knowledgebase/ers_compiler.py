@@ -192,6 +192,7 @@ def compile_environment_reference_sheet_prompt(
     characters: list[Any] | None = None,
     props: list[Any] | None = None,
     cameras: list[Any] | None = None,
+    contextual_subjects: list[Any] | None = None,
     visual_style: str = "",
     atlas_note: str = "",
     body: dict[str, Any] | None = None,
@@ -242,16 +243,17 @@ def compile_environment_reference_sheet_prompt(
         [
             "",
             "Required sections (all in one image):",
-        f"1. Hero Environment — canonical look of {name}.",
+        f"1. Hero Environment — canonical look of {name}. Environment-only. No characters. No hero props.",
         "2. Spatial / Top-Down — floor plan of this place. Include scale, compass, IDs, or dimensions ONLY if Spatial Map / project data below provides them. Do not invent any of those.",
         "3. Structural / 3D — greybox / untextured mesh if the model can. Skip rather than fake a second hero render.",
-        "4. Directional / Orthographic views — N / E / S / W of the same environment (North, East, South, West elevations). Architectural, not cinematic POVs.",
-        "5. Materials — surface swatches for floors, walls, counters, furniture, and equipment that belong to this place.",
-        "6. Lighting — primary / secondary / accent sources that belong to this place.",
+        "4. Directional / Orthographic views — N / E / S / W of the same environment (North, East, South, West elevations). Architectural, environment-only, not cinematic POVs. No characters. No hero props.",
+        "5. Materials — surface swatches for floors, walls, counters, furniture, and equipment that belong to this place. Environment-only.",
+        "6. Lighting — primary / secondary / accent sources that belong to this place. Environment-only.",
         "7. Environment DNA — era, visual language, condition, emotional register taken from the scene. Do not invent lore, dates, or environment IDs.",
         "8. Continuity Rules — Always / Never for this environment. Concrete and checkable.",
         "",
         "Continuity: same architecture, materials, lighting, and time of day in every panel. Do not redesign the world.",
+        "Hero / N / E / S / W / materials / lighting must stay environment-only. Do not paint characters or placed props into those panels.",
         ]
     )
     if description:
@@ -263,10 +265,30 @@ def compile_environment_reference_sheet_prompt(
         lines.extend(f"- {fact}" for fact in spatial_facts)
     else:
         lines.append("No Spatial Map dimensions, dates, environment IDs, or compass were provided. Do not invent them.")
-    if char_names:
-        lines.append("Characters (scale / occupancy only, not portraits): " + ", ".join(char_names))
-    if prop_names:
-        lines.append("Props (scale / set dressing only, not a prop sheet): " + ", ".join(prop_names))
+    contextual_lines = [
+        _text(item) for item in (contextual_subjects or []) if _text(item)
+    ]
+    if not contextual_lines:
+        leftover: list[str] = []
+        if char_names:
+            leftover.append(
+                "Placed characters (occupied scale in the contextual panel only, not portraits): "
+                + ", ".join(char_names)
+            )
+        if prop_names:
+            leftover.append(
+                "Placed props (occupied scale in the contextual panel only, not a prop sheet): "
+                + ", ".join(prop_names)
+            )
+        contextual_lines = leftover
+    if contextual_lines:
+        lines.extend(
+            [
+                "",
+                "9. Contextual production — occupied scale. ONLY this one panel may show placed subjects at environment scale, occupying the Spatial Map blocking. Not a character sheet. Not a prop catalog. Not repeated in Hero or directional panels.",
+            ]
+        )
+        lines.extend(f"- {line}" for line in contextual_lines)
     if camera_names:
         lines.append("Cameras (scale / blocking on the map only if listed): " + ", ".join(camera_names))
     if atlas:
@@ -278,7 +300,7 @@ def compile_environment_reference_sheet_prompt(
         [
             "",
             "Spec (structural guidance only — do not copy exemplar architecture or text):",
-            "Unified production-design document for ONE environment. Required: Hero, Spatial/Top-Down, Structural/3D if supported, Directional N/E/S/W, Materials, Lighting, Environment DNA, Continuity.",
+            "Unified production-design document for ONE environment. Required: Hero, Spatial/Top-Down, Structural/3D if supported, Directional N/E/S/W, Materials, Lighting, Environment DNA, Continuity. Add Contextual production (occupied scale) only when placed subjects are listed.",
             "Exemplars are layout and density references only. Do not reproduce exemplar architecture, names, or text.",
         ]
     )
@@ -349,6 +371,10 @@ def compile_ers_prompt_from_body(
         },
         spatial_map=spatial,
         environment_intent=ctx.get("sceneIntent") or src.get("sceneIntent"),
+        characters=src.get("characters") or ctx.get("characters"),
+        props=src.get("props") or ctx.get("props"),
+        cameras=src.get("cameras") or ctx.get("cameras"),
+        contextual_subjects=ctx.get("contextualSubjects") or src.get("contextualSubjects"),
         visual_style=_text(ctx.get("visualStyle") or src.get("visualStyle")),
         atlas_note=_text(ctx.get("atlasAssetId") or spatial.get("backgroundAssetId")),
         body=src,

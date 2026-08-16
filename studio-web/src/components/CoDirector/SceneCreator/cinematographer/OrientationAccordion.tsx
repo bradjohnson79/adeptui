@@ -21,6 +21,12 @@ import {
   wrapYaw,
   type AxisLocks,
 } from "./orientationMath";
+import {
+  approvedLookBlocksFinal,
+  compileRegionEditFinalPrompt,
+  MODEL_GUARD_MESSAGE,
+  shotWithSelectedFamily,
+} from "../regionEdit/regionEdit";
 
 type Draft = {
   yawDegrees: number;
@@ -60,6 +66,9 @@ function targetValue(record: SceneCameraRecord): string {
 export function OrientationAccordion({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   const cameras = (sc.cinematographer?.cameras || []).filter((cam) => cam.enabled);
   const selected = cameras.find((c) => c.cameraId === sc.selectedCameraId) || cameras[0] || null;
+  const blocksFinal = approvedLookBlocksFinal(sc.shot);
+  const liveShot = shotWithSelectedFamily(sc.shot, sc.localFamily);
+  const inheritanceBlocked = Boolean(liveShot && compileRegionEditFinalPrompt(liveShot).visualInheritanceBlocked);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => (selected ? readDraft(selected) : {
     yawDegrees: 0,
@@ -347,6 +356,31 @@ export function OrientationAccordion({ sc }: { sc: ReturnType<typeof useSceneCre
               rollDegrees: draft.rollDegrees,
               orientation3d: { enabled: true, targetLock: draft.targetLock, zoom: draft.zoom },
             })}</p>
+        ) : null}
+        <div className="scene-creator-core__row cine-orient-generate" data-testid="cine-orient-generate">
+          <button
+            type="button"
+            className="ghost"
+            data-testid="cine-orient-preview"
+            disabled={!selected || sc.busy || !sc.intent.trim() || (!sc.localEnabled && (!sc.apiEnabled || !sc.apiModel))}
+            onClick={() => void sc.previewCamera()}
+          >
+            {sc.busy || selected?.lineage?.previewStatus === "generating" ? "Generating preview…" : "Generate Low-Res Camera Preview"}
+          </button>
+          <button
+            type="button"
+            className="primary"
+            data-testid="cine-orient-final"
+            disabled={!selected || sc.busy || !lockIsValid(selected) || blocksFinal || inheritanceBlocked}
+            onClick={() => void sc.finalRender()}
+          >
+            {sc.generating || sc.busy ? "Final rendering…" : "Final Quality Render"}
+          </button>
+        </div>
+        {inheritanceBlocked ? (
+          <p className="muted">
+            {MODEL_GUARD_MESSAGE} Choose Z-Image or FLUX.
+          </p>
         ) : null}
       </div>
     </details>

@@ -596,6 +596,23 @@ def api_approve_candidate(
     return {"shot": shot.model_dump()}
 
 
+@router.delete("/projects/{project_id}/shots/{shot_id}/candidates/{candidate_id}")
+def api_delete_shot_candidate(
+    project_id: str,
+    shot_id: str,
+    candidate_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _require_project(db, project_id)
+    from .service import delete_shot_candidate
+
+    try:
+        shot = delete_shot_candidate(db, project_id, shot_id, candidate_id)
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    return {"shot": shot.model_dump()}
+
+
 @router.post("/projects/{project_id}/shots/{shot_id}/send-to-timeline")
 def api_send_shot_to_timeline(
     project_id: str,

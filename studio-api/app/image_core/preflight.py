@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from .capability import (
+    ADD_INSERT_SIZE,
+    ADD_INSERT_WORKFLOW,
     certified_visual_edit_path,
     family_region_edit_capability,
     generate_workflow_key,
     inpaint_workflow,
+    is_add_insert_family,
     normalize_family,
 )
 from .errors import UNSUPPORTED_OPERATION
@@ -24,6 +27,17 @@ VISUAL_INHERITANCE_BLOCKED_MESSAGE = (
 _EDIT_OPS = {"image.edit", "image.reference", "reference_edit", "image.inpaint", "native_inpaint"}
 _INPAINT_OPS = {"image.inpaint", "native_inpaint", "image.object_remove", "image.object_replace"}
 _GENERATE_OPS = {"image.generate", "text_to_image", "txt2img"}
+
+
+def _request_has_identity_refs(request: ImageCoreRequest) -> bool:
+    extra = request.extra or {}
+    if str(extra.get("referenceImage") or extra.get("reference_image") or "").strip():
+        return True
+    if extra.get("referenceIds") or extra.get("referenceAssetIds"):
+        return True
+    ctx = request.creative_context or {}
+    ids = ctx.get("reference_image_ids") if isinstance(ctx, dict) else None
+    return bool(ids)
 
 
 def _certified_workflow(workflow_key: str) -> bool:
@@ -69,6 +83,41 @@ def preflight(request: ImageCoreRequest) -> CapabilityDecision:
     grow = None
 
     if purpose in {"region_edit", "final_region_edit"} or request.edit_operation:
+        if is_add_insert_family(family):
+            if (request.edit_operation or "").strip().lower() != "add":
+                return CapabilityDecision(
+                    ok=False,
+                    code=UNSUPPORTED_OPERATION,
+                    message="Nano Banana 2 is recommended for Add only. Choose FLUX for Remove, Modify, or Replace.",
+                    family=family,
+                    recommended_family=str(rec.get("recommendedFamily") or "flux"),
+                    supported=False,
+                )
+            workflow_key = ADD_INSERT_WORKFLOW
+            runtime_op = "image.edit"
+            try:
+                from ..scene_creator.region_edit_profiles import operation_profile
+
+                profile = operation_profile("add", expand=request.expand, feather=request.feather)
+                denoise = float(profile["denoise"])
+                grow = int(profile["grow_mask_by"])
+            except Exception:
+                denoise = None
+                grow = None
+            width, height = ADD_INSERT_SIZE
+            return CapabilityDecision(
+                ok=True,
+                family=family,
+                workflow_key=workflow_key,
+                runtime_operation=runtime_op,
+                width=width,
+                height=height,
+                denoise=denoise,
+                grow_mask_by=grow,
+                recommended_family=str(rec.get("recommendedFamily") or ""),
+                supported=True,
+                details={"recommend": rec},
+            )
         if not caps.get("supportsInpaint") and not caps.get("supportsEditing"):
             return CapabilityDecision(
                 ok=False,
@@ -146,8 +195,17 @@ def preflight(request: ImageCoreRequest) -> CapabilityDecision:
             runtime_op = str(path["operation"])
 
     elif operation in _GENERATE_OPS or purpose in {"scene_shot_preview", "scene_shot_final"}:
-        workflow_key = generate_workflow_key(family) or ""
-        runtime_op = "image.generate"
+        if _request_has_identity_refs(request):
+            path = certified_visual_edit_path(family)
+            if path:
+                workflow_key = str(path["workflowKey"])
+                runtime_op = str(path["operation"])
+            else:
+                workflow_key = generate_workflow_key(family) or ""
+                runtime_op = "image.generate"
+        else:
+            workflow_key = generate_workflow_key(family) or ""
+            runtime_op = "image.generate"
         if workflow_key and not _certified_workflow(workflow_key) and purpose != "scene_shot_preview":
             # Draft preview may allowDraft; Final must be Certified.
             if purpose == "scene_shot_final":

@@ -296,3 +296,103 @@ def test_lock_model_family_keeps_requested_engine_for_scene_preview() -> None:
     )
     assert compiled["recommendation"]["executionFamily"] == "zimage"
     assert compiled["allowDraft"] is True
+
+
+def test_scene_shot_final_is_not_draft_pixels() -> None:
+    from app.aspect_fps import production_pixels
+    from app.image_product.compile import compile_image_request
+
+    assert production_pixels("16:9", "draft") == (512, 288)
+    assert production_pixels("16:9", "final") == (1280, 720)
+    compiled = compile_image_request(
+        "cine-final-quality",
+        {
+            "prompt": "CAMERA 1 medium on CHARACTER 1.",
+            "purpose": "scene_shot_final",
+            "modelFamilyPreference": "zimage",
+            "lockModelFamily": True,
+            "allowDraft": False,
+            "width": 1280,
+            "height": 720,
+        },
+    )
+    assert compiled["allowDraft"] is False
+    assert compiled["recommendation"]["executionFamily"] == "zimage"
+
+
+def test_preview_sampler_steps_do_not_change_final_defaults() -> None:
+    from app.scene_creator.service import preview_sampler_steps
+
+    assert preview_sampler_steps("qwen2512") == 20
+    assert preview_sampler_steps("flux") == 12
+    assert preview_sampler_steps("zimage") is None
+
+
+def test_compile_keeps_scene_reference_image_on_intent() -> None:
+    from app.image_product.compile import compile_image_request
+
+    compiled = compile_image_request(
+        "cine-identity-ref",
+        {
+            "prompt": "CAMERA 1 medium on CHARACTER 1.",
+            "purpose": "scene_shot_preview",
+            "modelFamilyPreference": "zimage",
+            "lockModelFamily": True,
+            "allowDraft": True,
+            "width": 512,
+            "height": 288,
+            "referenceImage": "cast-korri",
+            "creativeContext": {"reference_image_ids": ["cast-korri", "ers-composite-1"]},
+        },
+    )
+    intent = compiled["imageIntent"]
+    assert intent["referenceIds"][0] == "cast-korri"
+    assert "ers-composite-1" in intent["referenceIds"]
+
+
+def test_image_core_preflight_uses_ref_edit_when_identity_present() -> None:
+    from app.image_core.preflight import preflight
+    from app.image_core.request import ImageCoreRequest
+
+    decision = preflight(
+        ImageCoreRequest(
+            project_id="p1",
+            purpose="scene_shot_preview",
+            operation="image.generate",
+            model_id="zimage",
+            extra={"referenceImage": "cast-korri"},
+            creative_context={"reference_image_ids": ["cast-korri"]},
+        )
+    )
+    assert decision.ok is True
+    assert decision.workflow_key == "zimage.ref_edit"
+    assert decision.runtime_operation == "image.edit"
+    assert decision.width == 512
+    assert decision.height == 288
+
+
+def test_image_core_body_copies_identity_ref_to_source() -> None:
+    from app.image_core.generate import _to_body
+    from app.image_core.request import CapabilityDecision, ImageCoreRequest
+
+    body = _to_body(
+        ImageCoreRequest(
+            project_id="p1",
+            purpose="scene_shot_preview",
+            operation="image.generate",
+            model_id="zimage",
+            extra={"referenceImage": "cast-korri"},
+            creative_context={"reference_image_ids": ["cast-korri", "ers-composite-1"]},
+        ),
+        CapabilityDecision(
+            ok=True,
+            family="zimage",
+            workflow_key="zimage.ref_edit",
+            runtime_operation="image.edit",
+            width=512,
+            height=288,
+        ),
+    )
+    assert body["sourceAssetId"] == "cast-korri"
+    assert body["source_asset_id"] == "cast-korri"
+    assert body["referenceImage"] == "cast-korri"

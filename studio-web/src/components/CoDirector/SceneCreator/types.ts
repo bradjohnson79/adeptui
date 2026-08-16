@@ -259,6 +259,17 @@ export type SceneCreatorWorkspace = {
   spatial_profiles?: SpatialProfile[];
   selected_spatial_profile_id?: string | null;
   workspace_reset?: boolean;
+  production_context?: {
+    loaded?: boolean;
+    handoffId?: string;
+    revision?: number;
+    fingerprint?: string;
+    sceneId?: string;
+    spatialMapId?: string;
+    ersPackageId?: string;
+    ersLibraryAssetId?: string;
+    aspectRatio?: string;
+  } | null;
 };
 
 export type SpatialProfile = {

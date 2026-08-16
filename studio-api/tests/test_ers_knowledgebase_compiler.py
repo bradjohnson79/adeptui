@@ -144,3 +144,31 @@ def test_ers_layout_gate_accepts_schnick_compile() -> None:
     )
     assert result["layoutNoncompliant"] is False
     assert result["code"] is None
+
+
+def test_contextual_subjects_stay_in_one_panel_not_directional() -> None:
+    compiled = compile_environment_reference_sheet_prompt(
+        environment_name="Harbor Warehouse",
+        environment_description="A cold industrial warehouse interior with high windows.",
+        characters=["char-a"],
+        props=["crate-1"],
+        contextual_subjects=[
+            "Character Mira, slot 1 — species: human; wardrobe: waxed canvas coat",
+            "Prop lantern — description: dented brass lantern with cracked glass",
+        ],
+    )
+    prompt = compiled["prompt"]
+    lowered = prompt.lower()
+    assert "contextual production — occupied scale" in lowered
+    assert "waxed canvas coat" in lowered
+    assert "dented brass lantern" in lowered
+    assert "characters (scale / occupancy" not in lowered
+    hero_idx = lowered.index("1. hero environment")
+    contextual_idx = lowered.index("9. contextual production")
+    directional_idx = lowered.index("4. directional")
+    assert hero_idx < directional_idx < contextual_idx
+    hero_chunk = lowered[hero_idx:directional_idx]
+    assert "environment-only" in hero_chunk
+    assert "waxed canvas coat" not in hero_chunk
+    assert "dented brass lantern" not in hero_chunk
+

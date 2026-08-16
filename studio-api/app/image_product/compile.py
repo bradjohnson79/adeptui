@@ -455,10 +455,20 @@ def compile_image_request(
     ref_ids = normalize_ui_refs(project_id, body.get("refs") or body.get("references"))
     if body.get("referenceIds"):
         ref_ids = list(dict.fromkeys(ref_ids + list(body["referenceIds"])))
+    if purpose != "environment_reference_sheet":
+        single = str(body.get("referenceImage") or body.get("reference_image") or "").strip()
+        if single:
+            ref_ids = [single] + [r for r in ref_ids if r != single]
+        ctx_refs = body.get("creativeContext") if isinstance(body.get("creativeContext"), dict) else {}
+        for rid in ctx_refs.get("reference_image_ids") or []:
+            rid_s = str(rid or "").strip()
+            if rid_s and rid_s not in ref_ids:
+                ref_ids.append(rid_s)
 
     source_asset = body.get("sourceAssetId") or body.get("source_asset_id")
     if purpose == "environment_reference_sheet":
         source_asset = None
+        ref_ids = []
     spatial_bundle = body.get("spatialReferenceBundle") if isinstance(body.get("spatialReferenceBundle"), dict) else None
     spatial_block = creative_extras.get("spatial") if isinstance(creative_extras.get("spatial"), dict) else {}
     intent = ImageIntent(

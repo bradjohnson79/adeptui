@@ -308,3 +308,53 @@ def test_compile_shot_prompt_keeps_directional_over_composite(monkeypatch) -> No
     assert ctx["ers_directional_ref"]["asset_id"] == "north-asset-1"
     assert "2f2e871b-efef-4b67-a1fc-26b7bb50aa7b" not in refs
 
+
+def test_compile_shot_prompt_keeps_character_casting_ahead_of_ers_composite(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.codirector import entity_resolver as er
+    from app.spatial_map.ers_contracts import EnvironmentReferencePackage, ShotRequest
+
+    monkeypatch.setattr(
+        er,
+        "_character_metadata",
+        lambda db, pid, ids: [
+            {
+                "character_id": "korri",
+                "name": "Korri",
+                "description": "",
+                "visual_description": "",
+                "visual_style": "",
+                "approved_casting_asset_id": "cast-korri",
+                "reference_asset_ids": [],
+            }
+        ],
+    )
+    monkeypatch.setattr(er, "_prop_metadata", lambda db, pid, ids: [])
+    monkeypatch.setattr(er, "_project_visual_style", lambda db, pid: "")
+
+    package = EnvironmentReferencePackage(
+        project_id="proj-1",
+        scene_layout_id="map-1",
+        directional_assets={"north": None, "east": None, "south": None, "west": None},
+        ers_composite_asset_id="ers-composite-1",
+        placements=[{"characterId": "korri", "label": "Korri", "slotIndex": 0}],
+    )
+    shot = ShotRequest(index=0, raw_text="@Korri", characters=["korri"], prop_entities=[])
+    body = er.compile_shot_prompt(SimpleNamespace(), "proj-1", shot, ers_package=package)
+    refs = body["creativeContext"].get("reference_image_ids") or []
+    assert body["referenceImage"] == "cast-korri"
+    assert body["reference_image"] == "cast-korri"
+    assert refs[0] == "cast-korri"
+    assert "ers-composite-1" in refs
+    assert refs.index("cast-korri") < refs.index("ers-composite-1")
+
+
+def test_place_ers_composite_never_leads_when_identity_exists() -> None:
+    from app.codirector.entity_resolver import place_ers_composite_in_refs, primary_reference_image
+
+    refs = place_ers_composite_in_refs(["ers-composite-1", "cast-korri"], "ers-composite-1", ["cast-korri"])
+    assert refs[0] == "cast-korri"
+    assert refs[-1] == "ers-composite-1"
+    assert primary_reference_image(refs, ["cast-korri"], "ers-composite-1") == "cast-korri"
+

@@ -107,6 +107,10 @@ def test_ers_generate_pins_environment_reference_sheet_purpose(monkeypatch) -> N
     for body in captured:
         assert body["purpose"] == "environment_reference_sheet"
         assert body["operation"] == "image.generate"
+        assert body["width"] == 2560
+        assert body["height"] == 1440
+        assert "referenceImage" not in body
+        assert "sourceAssetId" not in body
         assert body["creativeContext"]["operationIntent"] == "text_to_image"
         assert body["creativeContext"].get("workflowKey") != "zimage.txt2img"
         assert "zimage.txt2img" not in str(body)

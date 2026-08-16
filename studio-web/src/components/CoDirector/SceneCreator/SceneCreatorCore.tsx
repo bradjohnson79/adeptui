@@ -2,7 +2,7 @@
  * SceneCreatorCore — Standard three-zone Scene Creator production workspace.
  * Co-Director Express is a launcher only (SceneCreatorExpressLauncher).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
@@ -25,6 +25,14 @@ import {
   shotWithSelectedFamily,
 } from "./regionEdit/regionEdit";
 import { RegionEditPanel } from "./regionEdit/RegionEditPanel";
+import {
+  DEFAULT_PANE_WIDTHS,
+  clampPaneWidths,
+  readPaneWidths,
+  resetPaneWidths,
+  writePaneWidths,
+  type PaneWidths,
+} from "./sceneCreatorPanes";
 import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
@@ -90,10 +98,44 @@ type LayoutProps = {
 function StandardLayout({ sc, onGoTab }: LayoutProps) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
+  const [panes, setPanes] = useState<PaneWidths>(() => ({ ...DEFAULT_PANE_WIDTHS }));
+  const panesRef = useRef(panes);
+  panesRef.current = panes;
+
+  useEffect(() => {
+    setPanes(readPaneWidths());
+  }, []);
+
+  const startResize = (side: "left" | "right") => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const originX = event.clientX;
+    const origin = { ...panesRef.current };
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - originX;
+      const next =
+        side === "left"
+          ? clampPaneWidths({ left: origin.left + dx, right: origin.right })
+          : clampPaneWidths({ left: origin.left, right: origin.right - dx });
+      panesRef.current = next;
+      setPanes(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      writePaneWidths(panesRef.current);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   return (
     <div
       className={toolsOpen ? "scene-creator-standard is-tools-open" : "scene-creator-standard"}
       data-testid="scene-creator-standard"
+      style={{
+        ["--sc-left" as string]: `${panes.left}px`,
+        ["--sc-right" as string]: `${panes.right}px`,
+      }}
     >
       <button
         type="button"
@@ -134,8 +176,32 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
         <hr className="scene-creator-standard__tool-rule" />
         <RegionEditBlock sc={sc} />
       </aside>
+      <div
+        className="scene-creator-standard__splitter scene-creator-standard__splitter--left"
+        data-testid="scene-creator-splitter-left"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize scenes pane"
+        onPointerDown={startResize("left")}
+      />
       <StandardPreview sc={sc} inspectedId={inspectedId} />
+      <div
+        className="scene-creator-standard__splitter scene-creator-standard__splitter--right"
+        data-testid="scene-creator-splitter-right"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize inspector pane"
+        onPointerDown={startResize("right")}
+      />
       <aside className="scene-creator-standard__inspector">
+        <button
+          type="button"
+          className="ghost scene-creator-standard__layout-reset"
+          data-testid="scene-creator-reset-layout"
+          onClick={() => setPanes(resetPaneWidths())}
+        >
+          Reset layout
+        </button>
         <SpatialProfileBlock sc={sc} />
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
         <CharactersPropsBlock sc={sc} />
@@ -185,6 +251,7 @@ function TakeStripButton({
     .filter(Boolean)
     .join(" ");
   return (
+    <div className="scene-creator-strip-take-wrap">
     <button
       key={cand.id}
       type="button"
@@ -218,6 +285,21 @@ function TakeStripButton({
         {approved ? " · Approved" : cand.superseded ? " · Previously approved" : ""}
       </span>
     </button>
+      <button
+        type="button"
+        className="scene-creator-strip-take__delete"
+        data-testid="scene-creator-take-delete"
+        aria-label="Delete this generation"
+        disabled={sc.busy}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void sc.deleteTake(cand.id);
+        }}
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
@@ -341,6 +423,21 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
           </option>
         ))}
       </select>
+      {sc.productionContextStatus === "loading" ? (
+        <p className="scene-creator-profile__caption" data-testid="scene-creator-cd-caption">
+          Loading Co-Director production data…
+        </p>
+      ) : null}
+      {sc.productionContextStatus === "loaded" ? (
+        <p className="scene-creator-profile__caption scene-creator-profile__caption--ok" data-testid="scene-creator-cd-caption">
+          ✓ Co-Director production data loaded
+        </p>
+      ) : null}
+      {sc.productionContextStatus === "failed" ? (
+        <p className="scene-creator-profile__caption scene-creator-profile__caption--warn" data-testid="scene-creator-cd-caption">
+          ⚠ Co-Director production data could not be loaded
+        </p>
+      ) : null}
       <button
         type="button"
         className="ghost scene-creator-profile__reset"

@@ -44,6 +44,22 @@ logger = logging.getLogger(__name__)
 
 _DIRECTIONS: tuple[str, ...] = ("north", "east", "south", "west")
 _ERS_PURPOSE = "environment_reference_sheet"
+# Live Qwen qwen2512.txt2img probe 2026-08-16: native 2560x1440 decoded cleanly
+# (Comfy success, ~86s warm, peak ~30GB / 32GB, no OOM). Product uses native 2K.
+_ERS_2K_16_9 = (2560, 1440)
+
+
+def ers_2k_pixels(aspect: str = "16:9") -> tuple[int, int]:
+    """2K-class ERS pixels. 16:9 is the probed native size; other aspects use compile 2K."""
+    key = (aspect or "16:9").strip() or "16:9"
+    if key == "16:9":
+        return _ERS_2K_16_9
+    from ....image_product.compile import _ASPECT, _RES_SCALE
+
+    w, h = _ASPECT.get(key, (1920, 1080))
+    scale = float(_RES_SCALE.get("2K", 1.25))
+    return max(64, int(w * scale / 8) * 8), max(64, int(h * scale / 8) * 8)
+
 
 
 def image_core_prompt(plan: Any, fallback: str = "") -> str:
@@ -124,8 +140,8 @@ def build_ers_image_body(
     body: dict[str, Any] = {
         "prompt": prompt,
         "negative_prompt": "",
-        "width": 1280,
-        "height": 720,
+        "width": ers_2k_pixels("16:9")[0],
+        "height": ers_2k_pixels("16:9")[1],
         "tag": f"codirector_ers_{execution_id[:8]}_{direction}",
         "purpose": _ERS_PURPOSE,
         "operation": operation,
@@ -399,6 +415,121 @@ def _load_asset_prompt_meta(db: Session | None, asset_id: str) -> dict[str, Any]
     return {}
 
 
+
+def _placement_dict(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return dict(item)
+    dump = getattr(item, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump()
+        except Exception:
+            pass
+    out: dict[str, Any] = {}
+    for key in (
+        "characterId",
+        "propId",
+        "label",
+        "tag",
+        "visible",
+        "slotIndex",
+        "placementMode",
+        "attachedCharacterId",
+        "attachedCharacterSlot",
+        "relationship",
+        "attachmentPoint",
+        "gridColumn",
+        "gridRow",
+        "miniPrompt",
+        "pose",
+        "id",
+    ):
+        if hasattr(item, key):
+            out[key] = getattr(item, key)
+    return out
+
+
+def _character_identity_text(db: Session | None, project_id: str, character_id: str) -> dict[str, Any]:
+    """Approved identity as text + asset id stamp. Never pixel refs on ERS T2I."""
+    result: dict[str, Any] = {
+        "characterId": character_id,
+        "name": "",
+        "facts": [],
+        "approvedAssetId": None,
+    }
+    if db is None or not character_id:
+        return result
+    try:
+        from ....character_identity.models import CharacterProfileRow, CharacterWardrobeRow
+        from ....character_identity.service import resolve_approved_reference
+
+        row = db.get(CharacterProfileRow, character_id)
+        if row is None or str(row.project_id) != str(project_id):
+            return result
+        result["name"] = str(row.name or "").strip()
+        facts: list[str] = []
+        for label, value in (
+            ("species", row.species_or_type),
+            ("appearance", row.visual_description),
+            ("height", row.height_description),
+            ("build", row.body_type),
+            ("age", row.apparent_age),
+        ):
+            text_value = str(value or "").strip()
+            if text_value and text_value.lower() not in {"human", ""}:
+                facts.append(f"{label}: {text_value}")
+            elif text_value and label == "species":
+                facts.append(f"{label}: {text_value}")
+        wardrobe_id = str(getattr(row, "active_wardrobe_id", "") or "").strip()
+        if wardrobe_id:
+            wardrobe = db.get(CharacterWardrobeRow, wardrobe_id)
+            if wardrobe is not None:
+                wardrobe_bits = [
+                    str(getattr(wardrobe, key, "") or "").strip()
+                    for key in ("name", "description", "materials", "colors")
+                ]
+                wardrobe_text = ", ".join(bit for bit in wardrobe_bits if bit)
+                if wardrobe_text:
+                    facts.append(f"wardrobe: {wardrobe_text}")
+        result["facts"] = facts
+        result["approvedAssetId"] = resolve_approved_reference(db, character_id, "hero_identity")
+    except Exception:
+        logger.debug("ERS character identity text unavailable for %s", character_id, exc_info=True)
+    return result
+
+
+def _prop_identity_text(db: Session | None, project_id: str, prop_id: str) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "propId": prop_id,
+        "name": "",
+        "facts": [],
+        "approvedAssetId": None,
+    }
+    if db is None or not prop_id:
+        return result
+    try:
+        from ....spatial_map.ers_persistence import load_prop_entity_by_id
+
+        entity = load_prop_entity_by_id(db, project_id, prop_id)
+        if entity is None:
+            return result
+        result["name"] = str(entity.display_label or entity.tag or "").strip()
+        facts: list[str] = []
+        for label, value in (
+            ("description", entity.description),
+            ("style", entity.visual_style),
+            ("notes", entity.notes),
+        ):
+            text_value = str(value or "").strip()
+            if text_value:
+                facts.append(f"{label}: {text_value}")
+        result["facts"] = facts
+        result["approvedAssetId"] = str(entity.approved_asset_id or "").strip() or None
+    except Exception:
+        logger.debug("ERS prop identity text unavailable for %s", prop_id, exc_info=True)
+    return result
+
+
 def _resolve_ers_grounding(
     db: Session | None,
     project_id: str,
@@ -437,21 +568,96 @@ def _resolve_ers_grounding(
     if not original_ref_id and intent is not None:
         original_ref_id = atlas_id
 
-    char_names = [
-        str(getattr(c, "tag", "") or getattr(c, "label", "") or "").lstrip("@").strip()
+    visible_characters = [
+        _placement_dict(c)
         for c in (getattr(spatial_document, "characters", None) or [])
-        if getattr(c, "visible", True)
+        if _placement_dict(c).get("visible", True)
     ]
-    prop_names = [
-        str(getattr(p, "tag", "") or getattr(p, "label", "") or "").lstrip("#").strip()
+    visible_props = [
+        _placement_dict(p)
         for p in (getattr(spatial_document, "props", None) or [])
-        if getattr(p, "visible", True)
+        if _placement_dict(p).get("visible", True)
     ]
     camera_names = [
         str(getattr(c, "label", "") or "").strip()
         for c in (getattr(spatial_document, "cameras", None) or [])
         if getattr(c, "visible", True)
     ]
+
+    from ....spatial_map.ers_projection import compile_structured_blocking
+
+    blocking = compile_structured_blocking([*visible_characters, *visible_props])
+    contextual_subjects: list[str] = []
+    character_ids: list[str] = []
+    prop_ids: list[str] = []
+    approved_character_asset_ids: list[str] = []
+    approved_prop_asset_ids: list[str] = []
+    char_names: list[str] = []
+    prop_names: list[str] = []
+
+    for placement in visible_characters:
+        cid = str(placement.get("characterId") or "").strip()
+        label = (
+            str(placement.get("label") or "").strip()
+            or str(placement.get("tag") or "").lstrip("@").strip()
+        )
+        identity = _character_identity_text(db, project_id, cid) if cid else {
+            "characterId": cid,
+            "name": label,
+            "facts": [],
+            "approvedAssetId": None,
+        }
+        name = identity.get("name") or label or cid
+        if cid:
+            character_ids.append(cid)
+        if name:
+            char_names.append(name)
+        approved = str(identity.get("approvedAssetId") or "").strip()
+        if approved:
+            approved_character_asset_ids.append(approved)
+        slot = placement.get("slotIndex")
+        slot_note = f", slot {int(slot) + 1}" if isinstance(slot, int) and slot >= 0 else ""
+        fact_text = "; ".join(str(f) for f in (identity.get("facts") or []) if f)
+        line = f"Character {name}{slot_note}"
+        if fact_text:
+            line += f" — {fact_text}"
+        mini = str(placement.get("miniPrompt") or "").strip()
+        if mini:
+            line += f". Blocking: {mini}"
+        contextual_subjects.append(line)
+
+    for placement in visible_props:
+        pid = str(placement.get("propId") or placement.get("prop_id") or "").strip()
+        label = (
+            str(placement.get("label") or "").strip()
+            or str(placement.get("tag") or "").lstrip("#").strip()
+        )
+        identity = _prop_identity_text(db, project_id, pid) if pid else {
+            "propId": pid,
+            "name": label,
+            "facts": [],
+            "approvedAssetId": None,
+        }
+        name = identity.get("name") or label or pid
+        if pid:
+            prop_ids.append(pid)
+        if name:
+            prop_names.append(name)
+        approved = str(identity.get("approvedAssetId") or "").strip()
+        if approved:
+            approved_prop_asset_ids.append(approved)
+        fact_text = "; ".join(str(f) for f in (identity.get("facts") or []) if f)
+        line = f"Prop {name}"
+        if fact_text:
+            line += f" — {fact_text}"
+        contextual_subjects.append(line)
+
+    if blocking.get("conceptual_prose"):
+        contextual_subjects.append(str(blocking["conceptual_prose"]))
+    for block_line in blocking.get("lines") or []:
+        text_line = str(block_line or "").strip()
+        if text_line and text_line not in contextual_subjects:
+            contextual_subjects.append(text_line)
 
     fingerprint = lineage_fingerprint(
         intent,
@@ -466,6 +672,11 @@ def _resolve_ers_grounding(
         "characters": [n for n in char_names if n],
         "props": [n for n in prop_names if n],
         "cameras": [n for n in camera_names if n],
+        "contextual_subjects": contextual_subjects,
+        "character_ids": list(dict.fromkeys(character_ids)),
+        "prop_ids": list(dict.fromkeys(prop_ids)),
+        "approved_character_asset_ids": list(dict.fromkeys(approved_character_asset_ids)),
+        "approved_prop_asset_ids": list(dict.fromkeys(approved_prop_asset_ids)),
         "fingerprint": fingerprint,
     }
 
@@ -530,6 +741,7 @@ def _ers_sheet_prompt(
         characters=list(grounding.get("characters") or []),
         props=list(grounding.get("props") or []),
         cameras=list(grounding.get("cameras") or []),
+        contextual_subjects=list(grounding.get("contextual_subjects") or []),
         atlas_note=str(spatial.get("backgroundAssetId") or grounding.get("atlas_asset_id") or ""),
     )
     seed = str(compiled.get("prompt") or "").strip()
@@ -699,6 +911,11 @@ def handle(
     if grounding_ids:
         ctx["groundingAssetIds"] = grounding_ids
     ctx["groundingFingerprint"] = grounding.get("fingerprint") or ""
+    ctx["characterIds"] = list(grounding.get("character_ids") or [])
+    ctx["propIds"] = list(grounding.get("prop_ids") or [])
+    ctx["approvedCharacterAssetIds"] = list(grounding.get("approved_character_asset_ids") or [])
+    ctx["approvedPropAssetIds"] = list(grounding.get("approved_prop_asset_ids") or [])
+    ctx["contextualSubjects"] = list(grounding.get("contextual_subjects") or [])
 
     # GPT Image 2 (explicit creator choice): reference-conditioned pixels via the
     # Kie input_urls path. Qwen stays honest T2I (text grounding only). No silent
@@ -744,6 +961,10 @@ def handle(
             "grounding_asset_ids": grounding_ids,
             "scene_intent_version": scene_intent.version if scene_intent is not None else None,
             "grounding_fingerprint": grounding.get("fingerprint") or "",
+            "character_ids": list(grounding.get("character_ids") or []),
+            "prop_ids": list(grounding.get("prop_ids") or []),
+            "approved_character_asset_ids": list(grounding.get("approved_character_asset_ids") or []),
+            "approved_prop_asset_ids": list(grounding.get("approved_prop_asset_ids") or []),
         },
     )
     body.setdefault("creativeContext", {})

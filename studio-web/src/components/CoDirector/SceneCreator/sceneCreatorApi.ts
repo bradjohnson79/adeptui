@@ -100,6 +100,8 @@ export const sceneCreatorApi = {
   ): Promise<{ shot: SceneShot }> => api.sceneCreator.retakeShot(projectId, shotId, body),
   approveCandidate: (projectId: string, shotId: string, candidateId: string): Promise<{ shot: SceneShot }> =>
     api.sceneCreator.approveCandidate(projectId, shotId, candidateId),
+  deleteShotCandidate: (projectId: string, shotId: string, candidateId: string): Promise<{ shot: SceneShot }> =>
+    api.sceneCreator.deleteShotCandidate(projectId, shotId, candidateId),
   sendShotToTimeline: (
     projectId: string,
     shotId: string,

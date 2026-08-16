@@ -16,8 +16,7 @@ export function CoDirectorHost() {
   }, [displayMode, onFullScreenRoute, setDisplayMode]);
 
   if (onFullScreenRoute) return null;
-
-  if (!open) return null;
+  if (!open || displayMode !== "popup") return null;
 
   return (
     <div id="codirector-popup">

@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from .capability import ADD_INSERT_DOCK, ADD_INSERT_FAL_MODEL, is_add_insert_family
 from .errors import ImageCoreError, UNSUPPORTED_OPERATION, WORKFLOW_FAILED
 from .preflight import preflight
 from .request import ImageCoreRequest, NormalizedEnqueue
@@ -39,6 +40,14 @@ def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
     body["modelFamilyPreference"] = decision.family
     body["lockModelFamily"] = request.lock_model_family
     body["providerPreference"] = "cloud" if request.provider == "cloud" else "local"
+    if is_add_insert_family(decision.family) and (request.edit_operation or "").strip().lower() == "add":
+        body["providerPreference"] = "cloud"
+        body["source"] = "api"
+        body["falImageModelId"] = ADD_INSERT_FAL_MODEL
+        body["hostedModelId"] = ADD_INSERT_DOCK
+        body["model"] = ADD_INSERT_FAL_MODEL
+        body["aspect"] = request.aspect_ratio or "16:9"
+        body["aspectRatio"] = request.aspect_ratio or "16:9"
     if request.hosted_model_id:
         body["hostedModelId"] = request.hosted_model_id
         body["model"] = request.hosted_model_id
@@ -58,6 +67,23 @@ def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
         body["sourceAssetId"] = request.source_asset_id
         body["source_asset_id"] = request.source_asset_id
         body["edit"] = True
+    elif decision.runtime_operation in {"image.edit", "image.reference"}:
+        extra = request.extra or {}
+        primary = str(extra.get("referenceImage") or extra.get("reference_image") or "").strip()
+        if not primary:
+            ids = extra.get("referenceIds") or extra.get("referenceAssetIds") or []
+            if not ids:
+                ctx = request.creative_context or {}
+                ids = ctx.get("reference_image_ids") if isinstance(ctx, dict) else []
+            if ids:
+                primary = str(ids[0] or "").strip()
+        if primary:
+            body["sourceAssetId"] = primary
+            body["source_asset_id"] = primary
+            body["referenceImage"] = primary
+            body["reference_image"] = primary
+            if not body.get("referenceIds"):
+                body["referenceIds"] = [primary]
     if request.mask_asset_id:
         body["masks"] = [
             {

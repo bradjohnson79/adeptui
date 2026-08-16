@@ -68,6 +68,7 @@ class ChildJobView(BaseModel):
     # Progress 0.0–1.0 for this child (stage-based, never invented — spec §20).
     progress: float = 0.0
     stage: str = ""
+    message: str = ""
     # Index within the pack (e.g. Frame 1, Frame 2).
     child_index: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)

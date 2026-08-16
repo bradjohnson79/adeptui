@@ -334,6 +334,64 @@ def _prop_metadata(db: Session, project_id: str, prop_ids: list[str]) -> list[di
     return out
 
 
+def identity_reference_ids(
+    char_meta: list[dict[str, Any]],
+    prop_meta: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    """Approved character casting + prop library ids, in that order."""
+    ids: list[str] = []
+    for char in char_meta or []:
+        aid = str(char.get("approved_casting_asset_id") or "").strip()
+        if aid and aid not in ids:
+            ids.append(aid)
+    for prop in prop_meta or []:
+        aid = str(prop.get("approved_asset_id") or "").strip()
+        if aid and aid not in ids:
+            ids.append(aid)
+    return ids
+
+
+def place_ers_composite_in_refs(
+    reference_image_ids: list[str],
+    composite_id: str,
+    identity_ids: list[str],
+) -> list[str]:
+    """Keep identity refs first. ERS composite is environment context, never the lead when casting exists."""
+    refs = [str(x).strip() for x in reference_image_ids if str(x).strip()]
+    composite = (composite_id or "").strip()
+    identity = [str(i).strip() for i in identity_ids if str(i).strip()]
+    if composite:
+        refs = [r for r in refs if r != composite]
+    ordered: list[str] = []
+    for iid in identity:
+        if iid in refs and iid not in ordered:
+            ordered.append(iid)
+    for ref in refs:
+        if ref not in ordered:
+            ordered.append(ref)
+    if composite:
+        if identity:
+            ordered.append(composite)
+        else:
+            ordered.insert(0, composite)
+    return ordered
+
+
+def primary_reference_image(
+    refs: list[str],
+    identity_ids: list[str],
+    composite_id: str = "",
+) -> str:
+    """Provider ``referenceImage`` is the first identity asset when one exists."""
+    identity = [str(i).strip() for i in identity_ids if str(i).strip()]
+    for iid in identity:
+        if iid in refs:
+            return iid
+    if refs:
+        return refs[0]
+    return (composite_id or "").strip()
+
+
 def compile_shot_prompt(
     db: Session,
     project_id: str,
@@ -432,11 +490,13 @@ def compile_shot_prompt(
             for v in ((ers_package.directional_assets or {}).values() if ers_package else [])
         )
     )
-    # When N/E/S/W views are empty, the sheet composite IS the ERS asset.
-    # First Scene Creator preview must consume it — not a prior shot I2I.
+    identity_ids = identity_reference_ids(char_meta, prop_meta)
+    # When N/E/S/W views are empty, the sheet composite IS the ERS environment.
+    # Keep it on the request, but never ahead of approved character/prop identity.
     if ers_package and composite_id and not directional_present:
-        if composite_id not in reference_image_ids:
-            reference_image_ids.insert(0, composite_id)
+        reference_image_ids = place_ers_composite_in_refs(
+            reference_image_ids, composite_id, identity_ids
+        )
 
     # Compose the visible prompt: additional instructions + framing/angle/orientation
     # modifiers + named entities (already-resolved names for clarity in the model).
@@ -531,8 +591,9 @@ def compile_shot_prompt(
     if reference_image_ids:
         # ``enqueue_imagegen_job`` accepts either ``referenceImage`` or
         # ``reference_image``; provide both for parity with image_generate.py.
-        body["referenceImage"] = reference_image_ids[0]
-        body["reference_image"] = reference_image_ids[0]
+        primary = primary_reference_image(reference_image_ids, identity_ids, composite_id)
+        body["referenceImage"] = primary
+        body["reference_image"] = primary
         body["creativeContext"]["reference_image_ids"] = reference_image_ids
 
     return body

@@ -111,13 +111,40 @@
 
 .scene-creator-standard {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 280px;
+  grid-template-columns: var(--sc-left, 220px) 8px minmax(0, 1fr) 8px var(--sc-right, 280px);
   grid-template-rows: minmax(0, 1fr) 160px;
-  gap: 0.75rem;
+  gap: 0.75rem 0;
   height: calc(100vh - 7rem);
   min-height: 520px;
   padding: 0.75rem;
   position: relative;
+}
+
+.scene-creator-standard__splitter {
+  width: 8px;
+  cursor: col-resize;
+  align-self: stretch;
+  border-radius: 4px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.scene-creator-standard__splitter:hover,
+.scene-creator-standard__splitter:active {
+  background: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+.scene-creator-standard__splitter--left {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.scene-creator-standard__splitter--right {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+}
+
+.scene-creator-standard__layout-reset {
+  margin-bottom: 0.5rem;
 }
 
 .scene-creator-standard__browser,
@@ -132,7 +159,7 @@
 }
 
 .scene-creator-standard__preview {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1;
   display: flex;
   flex-direction: column;
@@ -167,12 +194,12 @@
 }
 
 .scene-creator-standard__inspector {
-  grid-column: 3;
+  grid-column: 5;
   grid-row: 1 / span 2;
 }
 
 .scene-creator-standard__strip {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   display: flex;
   gap: 0.5rem;
@@ -340,6 +367,14 @@
 @media (max-width: 960px) {
   .scene-creator-standard {
     grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  .scene-creator-standard__splitter {
+    display: none;
+  }
+
+  .scene-creator-standard__layout-reset {
+    display: none;
   }
 
   .scene-creator-standard__tools-toggle {
@@ -571,14 +606,35 @@
   }
 }
 
+.scene-creator-strip-take-wrap {
+  position: relative;
+  min-width: 7.5rem;
+  max-width: 8.5rem;
+}
+
 .scene-creator-strip-take {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  min-width: 7.5rem;
-  max-width: 8.5rem;
+  width: 100%;
   padding: 0.25rem;
   border-radius: 8px;
+}
+
+.scene-creator-strip-take__delete {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.15rem;
+  z-index: 2;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border, #2c3346);
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: inherit;
+  line-height: 1;
+  font-size: 0.95rem;
 }
 
 .scene-creator-strip-take img {
@@ -655,6 +711,21 @@
 
 .scene-creator-profile select {
   width: 100%;
+}
+
+.scene-creator-profile__caption {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--muted, #9aa3b5);
+}
+
+.scene-creator-profile__caption--ok {
+  color: var(--ok, #8fd19e);
+}
+
+.scene-creator-profile__caption--warn {
+  color: var(--warn, #e0b25a);
 }
 
 .scene-creator-profile__reset {

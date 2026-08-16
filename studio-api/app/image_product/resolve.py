@@ -30,6 +30,7 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     if purpose == "environment_reference_sheet":
         # Plate / atlas / character-prop ids are prompt context, not I2I.
         operation = "image.generate"
+        layout = "production_ers"
     model = str(
         src.get("hostedModelId")
         or src.get("kieImageModelId")
@@ -228,16 +229,18 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
                     intent=intent,
                 )
             if provider == "fal":
-                return _refuse(
-                    "Refusing silent T2I-as-edit: "
-                    + (model or dock)
-                    + " has no image-to-image variant.",
-                    provider=provider,
-                    adapter=provider,
-                    officialModelId=official,
-                    hostedModelId=dock,
-                    intent=intent,
-                )
+                official_l = official.strip().lower()
+                if "/edit" not in official_l:
+                    return _refuse(
+                        "Refusing silent T2I-as-edit: "
+                        + (model or dock)
+                        + " has no image-to-image variant.",
+                        provider=provider,
+                        adapter=provider,
+                        officialModelId=official,
+                        hostedModelId=dock,
+                        intent=intent,
+                    )
         return _ok(
             provider=provider,
             adapter=provider,

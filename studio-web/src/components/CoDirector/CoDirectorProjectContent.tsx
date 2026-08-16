@@ -489,7 +489,8 @@ export function CoDirectorProjectContent({
       >
         <div
           className={
-            isAgentWork(activeExecution)
+            isAgentWork(activeExecution) &&
+            !(activeExecution?.surface_type === "ers_generation" && tab === "spatial_map")
               ? "project-pane-content project-pane--dimmed"
               : "project-pane-content"
           }
@@ -694,7 +695,8 @@ export function CoDirectorProjectContent({
         {tab === "vision" && <CoDirectorVisionPanel />}
         {tab === "pitch" && <CoDirectorPitchLaunchPanel />}
         </div>
-        {isAgentWork(activeExecution) && (
+        {isAgentWork(activeExecution) &&
+        !(activeExecution?.surface_type === "ers_generation" && tab === "spatial_map") && (
           <div
             className="agent-operation-overlay"
             role="dialog"

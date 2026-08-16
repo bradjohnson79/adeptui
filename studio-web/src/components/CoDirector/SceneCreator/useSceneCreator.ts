@@ -14,6 +14,10 @@ import type {
 } from "./types";
 import { DEFAULT_CINEMATIC } from "./types";
 import {
+  deriveProductionContextStatus,
+  type ProductionContextStatus,
+} from "./productionContextStatus";
+import {
   deriveOrientationOperation,
   validateCameraCommand,
   type OrientationPatch,
@@ -76,6 +80,8 @@ export function useSceneCreator(projectId: string) {
   const [cineInstruction, setCineInstruction] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [productionContextStatus, setProductionContextStatus] = useState<ProductionContextStatus>("idle");
+  const requestedProfileRef = useRef<string>("");
   const initialQueryRef = useRef(readSceneCreatorQuery());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +137,15 @@ export function useSceneCreator(projectId: string) {
       const profileId =
         query && Object.prototype.hasOwnProperty.call(query, "spatial_profile_id")
           ? query.spatial_profile_id
-          : initial.spatial_profile_id;
+          : initial.spatial_profile_id || requestedProfileRef.current || selectedProfileId;
+      const requestedProfile = String(profileId || "").trim();
+      if (requestedProfile) {
+        requestedProfileRef.current = requestedProfile;
+        setProductionContextStatus("loading");
+      } else {
+        requestedProfileRef.current = "";
+        setProductionContextStatus("idle");
+      }
       const nextSheetId =
         query && Object.prototype.hasOwnProperty.call(query, "sheet_id")
           ? query.sheet_id
@@ -151,6 +165,16 @@ export function useSceneCreator(projectId: string) {
       setSheetId(data.selected_sheet_id || "");
       setSceneId(data.selected_scene_id || "");
       setSelectedProfileId(data.selected_spatial_profile_id || "");
+      const nextSelected = String(data.selected_spatial_profile_id || "").trim();
+      setProductionContextStatus(
+        deriveProductionContextStatus({
+          selectedProfileId: nextSelected,
+          requestedProfileId: requestedProfileRef.current,
+          fetchInFlight: false,
+          productionContext: data.production_context,
+        }),
+      );
+      if (!nextSelected) requestedProfileRef.current = "";
       const placed = (data.props || []).map((p) => p.prop_id).filter((id): id is string => Boolean(id));
       if (data.workspace_reset && !data.selected_shot) {
         applyShot(null, placed);
@@ -290,6 +314,32 @@ export function useSceneCreator(projectId: string) {
     [applyShot, projectId, refresh, shot],
   );
 
+  const deleteTake = useCallback(
+    async (candidateId: string) => {
+      if (!shot) return;
+      const cand = (shot.candidates || []).find((item) => item.id === candidateId);
+      if (!cand) return;
+      const approved = candidateId === shot.approved_candidate_id;
+      const message = approved
+        ? "This take is approved. Deleting it will remove the approved look and the media from Library. Continue?"
+        : "Delete this generation? This will also remove the media from Library.";
+      if (typeof window !== "undefined" && !window.confirm(message)) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const res = await sceneCreatorApi.deleteShotCandidate(projectId, shot.id, candidateId);
+        applyShot(res.shot);
+        setNotice("Generation removed from Scene Creator and Library.");
+        await refresh({ shot_id: res.shot.id });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyShot, projectId, refresh, shot],
+  );
+
   const retake = useCallback(async () => {
     if (!shot) return;
     if (!beginSubmit()) return;
@@ -358,11 +408,18 @@ export function useSceneCreator(projectId: string) {
 
   const selectSpatialProfile = useCallback(
     async (nextId: string) => {
+      const wanted = (nextId || "").trim();
+      requestedProfileRef.current = wanted;
+      setSelectedProfileId(wanted);
+      if (!wanted) {
+        setProductionContextStatus("idle");
+      } else {
+        setProductionContextStatus("loading");
+      }
       setBusy(true);
       setError(null);
       try {
-        const res = await sceneCreatorApi.selectSpatialProfile(projectId, nextId || "none");
-        setSelectedProfileId(res.selectedProfileId || "");
+        const res = await sceneCreatorApi.selectSpatialProfile(projectId, wanted || "none");
         await refresh({
           spatial_profile_id: res.selectedProfileId || undefined,
           scene_id: res.sceneId || undefined,
@@ -371,6 +428,7 @@ export function useSceneCreator(projectId: string) {
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Spatial Profile could not be loaded.");
+        setProductionContextStatus(wanted ? "failed" : "idle");
       } finally {
         setBusy(false);
       }
@@ -392,6 +450,8 @@ export function useSceneCreator(projectId: string) {
       }
       initialQueryRef.current = {};
       setSelectedProfileId("");
+      requestedProfileRef.current = "";
+      setProductionContextStatus("idle");
       setSheetId("");
       setSceneId("");
       setIntent("");
@@ -760,6 +820,7 @@ export function useSceneCreator(projectId: string) {
     },
     generate: finalRender,
     approve,
+    deleteTake,
     retake,
     sendToTimeline,
     selectSheet,
@@ -769,6 +830,7 @@ export function useSceneCreator(projectId: string) {
     selectSpatialProfile,
     confirmResetWorkspace,
     selectedProfileId,
+    productionContextStatus,
     resetConfirmOpen,
     setResetConfirmOpen,
     setCinematic,

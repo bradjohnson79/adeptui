@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -73,6 +75,16 @@ CINEMATIC_FRAMING_LABELS = {
 
 class SceneCreatorError(ValueError):
     pass
+
+
+def preview_sampler_steps(family: str) -> int | None:
+    """Reduced sampler steps for Low-Res Preview only. Final keeps family defaults."""
+    fam = (family or "").strip().lower().replace("_", "").replace("-", "")
+    if fam.startswith("qwen"):
+        return 20
+    if fam.startswith("flux"):
+        return 12
+    return None
 
 
 _LIVE_JOB_STATUSES = frozenset({"queued", "running", "generating", "pending", "started", "processing"})
@@ -167,6 +179,59 @@ def ensure_scene_id(db: Session, project_id: str, scene_id: str = "") -> Scene:
     if existing:
         return existing[0]
     return SceneService.create(db, project_id, {"name": "Scene 1"})
+
+
+
+def build_production_context(
+    *,
+    selected_profile: Any,
+    resolved: dict[str, Any] | None,
+    scene_id: str,
+    sheet: Any = None,
+) -> dict[str, Any] | None:
+    """Truthful CD hydrate status for the Spatial Profile caption.
+
+    loaded is true only after the selected profile trait is present and required
+    pointers resolve. Missing optional lists (characters / props / cameras) are
+    not failure. None means no profile is selected — frontend hides the caption.
+    """
+    if selected_profile is None:
+        return None
+    handoff_id = str(getattr(selected_profile, "handoffId", "") or "").strip()
+    profile_scene = str(getattr(selected_profile, "sceneId", "") or "").strip()
+    claimed_map = str(getattr(selected_profile, "spatialMapId", "") or "").strip()
+    claimed_pkg = str(getattr(selected_profile, "ersPackageId", "") or "").strip()
+    claimed_ers = str(getattr(selected_profile, "ersLibraryAssetId", "") or "").strip()
+    sheet_ers = str(getattr(sheet, "ers_composite_asset_id", "") or "").strip() if sheet is not None else ""
+    resolved_ok = isinstance(resolved, dict) and not resolved.get("error")
+    actual_pkg = str((resolved or {}).get("package_id") or "").strip() if resolved_ok else ""
+    actual_ers = str((resolved or {}).get("ers_composite_asset_id") or "").strip() if resolved_ok else ""
+    if not actual_ers:
+        actual_ers = sheet_ers
+
+    loaded = True
+    if not handoff_id:
+        loaded = False
+    if not profile_scene or profile_scene != str(scene_id or "").strip():
+        loaded = False
+    if claimed_ers and actual_ers != claimed_ers:
+        loaded = False
+    if claimed_pkg and actual_pkg and actual_pkg != claimed_pkg:
+        loaded = False
+    if claimed_map and not (resolved_ok or sheet_ers or actual_ers):
+        loaded = False
+
+    return {
+        "loaded": loaded,
+        "handoffId": handoff_id,
+        "revision": getattr(selected_profile, "revision", None),
+        "fingerprint": getattr(selected_profile, "fingerprint", "") or "",
+        "sceneId": profile_scene,
+        "spatialMapId": claimed_map,
+        "ersPackageId": claimed_pkg,
+        "ersLibraryAssetId": claimed_ers,
+        "aspectRatio": getattr(selected_profile, "aspectRatio", None) or "16:9",
+    }
 
 
 def hydrate_workspace(
@@ -393,6 +458,12 @@ def hydrate_workspace(
         "spatial_profiles": spatial_profiles,
         "selected_spatial_profile_id": selected_profile.handoffId if selected_profile else None,
         "workspace_reset": bool(selection.workspaceReset) and selected_profile is None,
+        "production_context": build_production_context(
+            selected_profile=selected_profile,
+            resolved=resolved if isinstance(resolved, dict) else None,
+            scene_id=scene.id,
+            sheet=sheet,
+        ),
     }
 
 
@@ -548,6 +619,10 @@ def _enqueue_shot_candidates(
         body["shotId"] = shot.id
         tag_prefix = "scene_preview" if draft else "scene_shot"
         body["tag"] = f"{tag_prefix}_{shot.id[:8]}_c{index + 1}"
+        if draft:
+            preview_steps = preview_sampler_steps(str(plan.get("family") or body.get("model") or ""))
+            if preview_steps:
+                body["steps"] = preview_steps
         ctx = body.setdefault("creativeContext", {})
         if isinstance(ctx, dict):
             ctx["candidateIndex"] = index
@@ -556,13 +631,26 @@ def _enqueue_shot_candidates(
             composite = str(getattr(package, "ers_composite_asset_id", None) or "").strip()
             if composite:
                 ctx["ers_composite_asset_id"] = composite
-                refs = [str(x) for x in (ctx.get("reference_image_ids") or []) if str(x)]
-                if composite not in refs:
-                    refs.insert(0, composite)
-                    ctx["reference_image_ids"] = refs
-                if not body.get("referenceImage") and not body.get("reference_image"):
-                    body["referenceImage"] = composite
-                    body["reference_image"] = composite
+                from ..codirector.entity_resolver import (
+                    identity_reference_ids,
+                    place_ers_composite_in_refs,
+                    primary_reference_image,
+                )
+
+                identity_ids = identity_reference_ids(
+                    ctx.get("characters") or [],
+                    ctx.get("prop_entities") or [],
+                )
+                refs = place_ers_composite_in_refs(
+                    [str(x) for x in (ctx.get("reference_image_ids") or []) if str(x)],
+                    composite,
+                    identity_ids,
+                )
+                ctx["reference_image_ids"] = refs
+                primary = primary_reference_image(refs, identity_ids, composite)
+                if primary:
+                    body["referenceImage"] = primary
+                    body["reference_image"] = primary
             ctx["qualityProfile"] = "draft" if draft else "final"
             if ctx.get("finalStrategy") == "A" and (ctx.get("workflowKey") or use_core):
                 if camera_record is not None:
@@ -869,6 +957,75 @@ def approve_candidate(
         "cameraStateHash": candidate.camera_state_hash,
     }
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
+    save_scene_shot(db, project_id, shot)
+    return shot
+
+
+def _delete_library_asset(db: Session, project_id: str, asset_id: str) -> None:
+    """Remove a generated take from Library. Reuses the same file+row rules as DELETE /assets."""
+    from ..db import Project
+    from ..scene_references import service as scene_ref_service
+
+    asset = db.get(Asset, asset_id)
+    if not asset or asset.project_id != project_id:
+        return
+    usage = scene_ref_service.asset_usage(db, project_id, asset_id)
+    if usage.get("deleteBlocked"):
+        raise SceneCreatorError(
+            "This media is still used as a character or prop reference. Remove that binding before deleting."
+        )
+    asset_path = Path(asset.path)
+    if asset_path.exists():
+        try:
+            asset_path.unlink()
+        except Exception:
+            pass
+    thumbs_dir = asset_path.parent / "thumbs"
+    stem = asset_path.stem
+    if thumbs_dir.is_dir():
+        for p in list(thumbs_dir.glob(f"{stem}_*.webp")):
+            try:
+                p.unlink(missing_ok=True)
+            except Exception:
+                pass
+    db.delete(asset)
+    project = db.get(Project, project_id)
+    if project:
+        project.updated_at = datetime.utcnow()
+    db.commit()
+
+
+def delete_shot_candidate(
+    db: Session,
+    project_id: str,
+    shot_id: str,
+    candidate_id: str,
+) -> SceneShot:
+    """Remove one take from the shot and delete its canonical Library asset. Not Reset."""
+    shot = _require_shot(db, project_id, shot_id)
+    _sync_candidate_jobs(db, project_id, shot)
+    candidate = next((c for c in shot.candidates if c.id == candidate_id), None)
+    if candidate is None:
+        raise SceneCreatorError("That generation was not found.")
+    asset_id = str(candidate.asset_id or "").strip()
+    if asset_id:
+        _delete_library_asset(db, project_id, asset_id)
+    if shot.approved_candidate_id == candidate_id:
+        shot.approved_candidate_id = None
+        memory = shot.take_memory or SceneShotTakeMemory()
+        state = dict(memory.takeState or {})
+        if state.get("approved_candidate_id") == candidate_id:
+            for key in (
+                "approved_candidate_id",
+                "approved_asset_id",
+                "take_label",
+                "family",
+                "source",
+            ):
+                state.pop(key, None)
+            memory.takeState = state
+            shot.take_memory = memory
+    shot.candidates = [c for c in shot.candidates if c.id != candidate_id]
     save_scene_shot(db, project_id, shot)
     return shot
 

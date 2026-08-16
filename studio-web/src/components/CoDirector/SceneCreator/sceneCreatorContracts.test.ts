@@ -76,6 +76,9 @@ describe("Scene Creator contracts", () => {
     expect(src).toContain("function StandardLayout");
     expect(src).toContain("SpatialProfileBlock");
     expect(src).toContain("scene-creator-spatial-profile-select");
+    expect(src).toContain("scene-creator-cd-caption");
+    expect(src).toContain("Loading Co-Director production data");
+    expect(src).toContain("Co-Director production data loaded");
     expect(src).toContain("Reset Workspace");
     expect(src).toContain("Final Quality Render");
     expect(src).not.toContain("function CameraBlock");
@@ -135,7 +138,8 @@ describe("Scene Creator contracts", () => {
     const css = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("./sceneCreator.css", import.meta.url), "utf8"),
     );
-    expect(css).toContain("grid-template-columns: 220px minmax(0, 1fr) 280px");
+    expect(css).toContain("grid-template-columns: var(--sc-left, 220px) 8px minmax(0, 1fr) 8px var(--sc-right, 280px)");
+    expect(css).toContain("scene-creator-standard__splitter");
     const mask = await import("node:fs").then((fs) =>
       fs.readFileSync(new URL("../../imageEdit/ImageMaskEditor.tsx", import.meta.url), "utf8"),
     );

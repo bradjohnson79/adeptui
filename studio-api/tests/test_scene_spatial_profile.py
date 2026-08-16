@@ -148,6 +148,18 @@ def test_reset_clears_selection_without_deleting_profile() -> None:
         restored = hydrate_workspace(db, project_id, spatial_profile_id=result["handoffId"])
         assert restored["selected_spatial_profile_id"] == result["handoffId"]
         assert restored["selected_sheet_id"] == sheet.sheetId
+        ctx = restored["production_context"]
+        assert ctx is not None
+        assert ctx["loaded"] is True
+        assert ctx["handoffId"] == result["handoffId"]
+        assert ctx["sceneId"] == scene.id
+        assert ctx["ersLibraryAssetId"] == sheet.ers_composite_asset_id
+        reset_workspace(db, project_id)
+        reset_ws = hydrate_workspace(db, project_id)
+        assert reset_ws["production_context"] is None
+        bogus = hydrate_workspace(db, project_id, spatial_profile_id="not-a-real-profile")
+        assert bogus["selected_spatial_profile_id"] is None
+        assert bogus["production_context"] is None
     finally:
         db.close()
 
@@ -200,5 +212,63 @@ def test_select_profile_is_project_scoped() -> None:
         except Exception:
             raised = True
         assert raised is True
+    finally:
+        db.close()
+
+
+def test_delete_shot_candidate_removes_library_asset_not_reset() -> None:
+    from pathlib import Path
+
+    from app.db import Asset
+    from app.scene_creator.production_handoff import reset_workspace
+    from app.scene_creator.service import delete_shot_candidate, ensure_scene_id
+    from app.spatial_map.ers_contracts import SceneShotCandidate
+
+    project_id = _create_project("Delete Take")
+    db = _session()
+    try:
+        scene = ensure_scene_id(db, project_id, "")
+        sheet = _save_sheet(project_id, scene_id=scene.id, composite="ers-keep")
+        asset_id = str(uuid.uuid4())
+        asset_path = Path("data") / "tmp-take-delete" / f"{asset_id}.png"
+        asset_path.parent.mkdir(parents=True, exist_ok=True)
+        asset_path.write_bytes(b"png")
+        db.add(
+            Asset(
+                id=asset_id,
+                project_id=project_id,
+                kind="image",
+                tag="scene_take",
+                filename=asset_path.name,
+                path=str(asset_path),
+            )
+        )
+        db.commit()
+        shot = SceneShot(
+            project_id=project_id,
+            scene_id=scene.id,
+            sheet_id=sheet.sheetId,
+            intent="Korri at the counter",
+            candidates=[
+                SceneShotCandidate(
+                    id="cand-take-1",
+                    shot_id="pending",
+                    asset_id=asset_id,
+                    status="complete",
+                    take_label="Take A",
+                    quality_profile="final",
+                )
+            ],
+            approved_candidate_id="cand-take-1",
+        )
+        shot.candidates[0].shot_id = shot.id
+        save_scene_shot(db, project_id, shot)
+        updated = delete_shot_candidate(db, project_id, shot.id, "cand-take-1")
+        assert updated.candidates == []
+        assert updated.approved_candidate_id is None
+        assert db.get(Asset, asset_id) is None
+        assert asset_path.exists() is False
+        reset_workspace(db, project_id)
+        assert db.get(Asset, asset_id) is None
     finally:
         db.close()

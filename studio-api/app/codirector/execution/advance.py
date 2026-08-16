@@ -56,6 +56,8 @@ def _get_job_status(db: Session, job_id: str) -> dict[str, Any] | None:
             "status": job.status,
             "stage": getattr(job, "stage", "") or "",
             "progress": float(getattr(job, "progress", 0.0) or 0.0),
+            "message": getattr(job, "message", "") or "",
+            "preview_json": getattr(job, "preview_json", "") or "",
             "error": getattr(job, "error_message", None) or getattr(job, "error", None),
             "asset_id": _extract_asset_id(job),
         }
@@ -204,6 +206,9 @@ def advance_execution_pack(db: Session, project_id: str, execution_id: str) -> E
             child.status = ChildJobStatus.RUNNING
             child.stage = job_state.get("stage", "running")
             child.progress = job_state.get("progress", 0.0)
+            child.message = job_state.get("message", "") or ""
+            if job_state.get("preview_json"):
+                child.metadata = {**dict(child.metadata or {}), "preview_json": job_state.get("preview_json")}
             any_changed = True
             _publish_event(ExecutionEvent(
                 event_type=ExecutionEventType.JOB_RUNNING,
