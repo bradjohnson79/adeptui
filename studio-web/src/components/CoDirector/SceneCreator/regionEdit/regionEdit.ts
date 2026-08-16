@@ -167,7 +167,12 @@ export function recommendOperationFamily(operation: RegionEditOperation): {
   family: string;
   label: string;
 } {
-  if (operation === "modify" || operation === "replace") {
+  if (
+    operation === "modify" ||
+    operation === "replace" ||
+    operation === "add" ||
+    operation === "remove"
+  ) {
     return { family: "flux", label: "FLUX" };
   }
   return { family: "zimage", label: "Z-Image" };

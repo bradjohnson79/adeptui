@@ -8,8 +8,8 @@ from .capability import family_region_edit_capability, normalize_family
 
 # Product recommendation registry — UI only.
 _RECOMMENDED_FAMILY: dict[str, str] = {
-    "remove": "zimage",
-    "add": "zimage",
+    "remove": "flux",
+    "add": "flux",
     "modify": "flux",
     "replace": "flux",
 }

@@ -198,12 +198,21 @@ test.describe("Scene Creator Final Production A–T", () => {
     expect(body.message || "").toMatch(/FLUX/i);
   });
 
-  test("G — Image Core recommend Remove → Z-Image", async ({ request }) => {
-    const res = await request.get(`${API}/api/image-core/recommend?operation=remove&family=flux`);
+  test("G — Image Core recommend Remove → FLUX, Keep Current allowed", async ({ request }) => {
+    const res = await request.get(`${API}/api/image-core/recommend?operation=remove&family=zimage`);
     expect(res.ok(), await res.text()).toBeTruthy();
-    const body = (await res.json()) as { recommendedFamily?: string; keepCurrentAllowed?: boolean };
-    expect(body.recommendedFamily).toBe("zimage");
+    const body = (await res.json()) as {
+      recommendedFamily?: string;
+      keepCurrentAllowed?: boolean;
+      recommended?: boolean;
+      family?: string;
+      message?: string;
+    };
+    expect(body.recommendedFamily).toBe("flux");
     expect(body.keepCurrentAllowed).toBe(true);
+    expect(body.recommended).toBe(false);
+    expect(body.family).toBe("zimage");
+    expect(body.message || "").toMatch(/FLUX/i);
   });
 
   test("H — Qwen region-edit is refused before enqueue", async ({ request }) => {

@@ -268,5 +268,9 @@ def test_image_product_preserves_masks_on_enqueue() -> None:
     assert "image.inpaint" in job_src
     assert recommend("modify", "zimage")["recommendedFamily"] == "flux"
     assert recommend("replace", "zimage")["recommendedFamily"] == "flux"
-    assert recommend("add", "flux")["recommendedFamily"] == "zimage"
-    assert recommend("remove", "flux")["recommendedFamily"] == "zimage"
+    assert recommend("add", "zimage")["recommendedFamily"] == "flux"
+    assert recommend("remove", "zimage")["recommendedFamily"] == "flux"
+    keep = recommend("remove", "zimage")
+    assert keep["keepCurrentAllowed"] is True
+    assert keep["recommended"] is False
+    assert keep["family"] == "zimage"
