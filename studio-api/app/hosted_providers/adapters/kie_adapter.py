@@ -101,6 +101,7 @@ _KIE_DOCK_ALIASES: dict[str, str] = {
     "gpt-image-2": "gpt-image-2-kie",
     "gpt-image-2-kie": "gpt-image-2-kie",
     "gpt-image-2-text-to-image": "gpt-image-2-kie",
+    "gpt-image-2-image-to-image": "gpt-image-2-kie",
     "seedream": "seedream-kie",
     "seedream-kie": "seedream-kie",
     "seedream/5-pro-text-to-image": "seedream-kie",

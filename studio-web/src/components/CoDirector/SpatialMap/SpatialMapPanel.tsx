@@ -118,6 +118,16 @@ function sceneDescriptionError(text: string): string | null {
   return null;
 }
 
+/**
+ * CDX-021: an Atlas Shot is applied to the existing map document whenever one
+ * exists — including the post-Remove empty state — so placements are never
+ * orphaned into a brand-new document. A new document is created only when no
+ * map exists yet.
+ */
+export function atlasReuseDecision(document: SpatialMapDocument | null): "reuse" | "create" {
+  return document ? "reuse" : "create";
+}
+
 export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const { activeExecution, setActiveExecution } = useCoDirectorSession();
   const [document, setDocument] = useState<SpatialMapDocument | null>(null);
@@ -148,7 +158,6 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [sceneEditText, setSceneEditText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
-  const replaceModeRef = useRef(false);
   const ers = useErsGeneration({
     projectId,
     spatialMapId: document?.id || null,
@@ -287,6 +296,38 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     return () => window.document.removeEventListener("keydown", onKey);
   }, [clearPlacementMode]);
 
+  // Reuse-or-create for the Atlas Shot (CDX-021): when a map document already
+  // exists — including the post-Remove empty state — update it in place so
+  // placements are never orphaned into a brand-new document. A new document is
+  // created only when no map exists yet.
+  const applyAtlasToMap = useCallback(
+    async (
+      backgroundAssetId: string,
+      lineage: {
+        sceneDescription?: string;
+        sceneIntent?: SpatialMapDocument["sceneIntent"];
+        originalEnvironmentReferenceAssetId?: string;
+      },
+    ) => {
+      if (document && atlasReuseDecision(document) === "reuse") {
+        const updated = await spatialMapApi.updateMap(projectId, document.id, {
+          backgroundAssetId,
+          ...lineage,
+        });
+        setDocument(updated);
+        return updated;
+      }
+      const doc = await spatialMapApi.createMap(projectId, {
+        title: "Spatial Map",
+        backgroundAssetId,
+        ...lineage,
+      });
+      setDocument(doc);
+      return doc;
+    },
+    [document, projectId],
+  );
+
   // ── Track active Co-Director execution for atlas / ERS results ──────────
   useEffect(() => {
     if (!activeExecution) return;
@@ -312,28 +353,19 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 sceneIntent: snapshottedIntent,
                 originalEnvironmentReferenceAssetId: origRefs[0] || undefined,
               };
-              if (replaceModeRef.current && document) {
-                const updated = await spatialMapApi.updateMap(projectId, document.id, {
-                  backgroundAssetId: atlasAssetId,
-                  ...lineage,
-                });
-                setDocument(updated);
-                setOpMsg("Atlas Shot replaced.");
-              } else {
-                const doc = await spatialMapApi.createMap(projectId, {
-                  title: "Spatial Map",
-                  backgroundAssetId: atlasAssetId,
-                  ...lineage,
-                });
-                setDocument(doc);
-                setOpMsg("Atlas Shot generated and Spatial Map created.");
-              }
+              const updated = await applyAtlasToMap(atlasAssetId, lineage);
+              setDocument(updated);
+              setOpMsg(
+                document
+                  ? document.backgroundAssetId
+                    ? "Atlas Shot replaced."
+                    : "Atlas Shot generated."
+                  : "Atlas Shot generated and Spatial Map created.",
+              );
               setBusyOp(null);
-              replaceModeRef.current = false;
             } catch (err) {
               setOpMsg(err instanceof Error ? err.message : "Failed to create map from Atlas Shot.");
               setBusyOp(null);
-              replaceModeRef.current = false;
             }
           })();
         }
@@ -343,7 +375,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         setBusyOp(null);
       }
     }
-  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, projectId, busyOp, document, sceneDescription]);
+  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, applyAtlasToMap, projectId, busyOp, document, sceneDescription]);
 
   // ── Atlas Shot / ERS generation ────────────────────────────────────────
   const startAtlasGeneration = useCallback(async () => {
@@ -356,9 +388,17 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     const description = sceneDescription.trim();
     setBusyOp("atlas");
     try {
+      const sourceId =
+        document?.originalEnvironmentReferenceAssetId ||
+        document?.backgroundAssetId ||
+        "";
       const res = await api.startExecution(projectId, {
         capability: "atlas.generate",
-        context: { scene_description: description, prompt: description },
+        context: {
+          scene_description: description,
+          prompt: description,
+          ...(sourceId ? { attachment_asset_ids: [sourceId] } : {}),
+        },
       });
       const exec = normalizeExecution(res);
       setActiveExecution(exec);
@@ -366,7 +406,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
       setBusyOp(null);
     }
-  }, [projectId, sceneDescription, setActiveExecution]);
+  }, [projectId, document, sceneDescription, setActiveExecution]);
 
   const startErsGeneration = useCallback(() => {
     void ers.start();
@@ -433,18 +473,24 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     }
     if (!sceneDescription.trim()) setSceneDescription(description);
     setBusyOp("atlas");
-    replaceModeRef.current = true;
     try {
+      const sourceId =
+        document.originalEnvironmentReferenceAssetId ||
+        document.backgroundAssetId ||
+        "";
       const res = await api.startExecution(projectId, {
         capability: "atlas.generate",
-        context: { scene_description: description, prompt: description },
+        context: {
+          scene_description: description,
+          prompt: description,
+          ...(sourceId ? { attachment_asset_ids: [sourceId] } : {}),
+        },
       });
       const exec = normalizeExecution(res);
       setActiveExecution(exec);
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Failed to start Atlas Shot generation.");
       setBusyOp(null);
-      replaceModeRef.current = false;
     }
   }, [projectId, document, sceneDescription, setActiveExecution]);
 
@@ -473,20 +519,17 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     setBusyOp("atlas");
     try {
       const asset = await api.uploadAsset(projectId, file, "atlas_shot", "image");
-      const doc = await spatialMapApi.createMap(projectId, {
-        title: "Spatial Map",
-        backgroundAssetId: asset.id,
+      await applyAtlasToMap(asset.id, {
         sceneDescription: description,
         originalEnvironmentReferenceAssetId: asset.id,
       });
-      setDocument(doc);
-      setOpMsg("Image uploaded and Spatial Map created.");
+      setOpMsg(document ? "Image uploaded and applied to the Spatial Map." : "Image uploaded and Spatial Map created.");
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setBusyOp(null);
     }
-  }, [projectId, sceneDescription]);
+  }, [applyAtlasToMap, document, projectId, sceneDescription]);
 
   // ── Placements ───────────────────────────────────────────────────────
   const placements = useMemo(() => (document ? toGridPlacements(document.characters, document.props) : []), [document]);
@@ -1111,13 +1154,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 }
                 const description = sceneDescription.trim();
                 try {
-                  const doc = await spatialMapApi.createMap(projectId, {
-                    title: "Spatial Map",
-                    backgroundAssetId: assetId,
+                  await applyAtlasToMap(assetId, {
                     sceneDescription: description,
                     originalEnvironmentReferenceAssetId: assetId,
                   });
-                  setDocument(doc);
                 } catch (err) {
                   setOpMsg(err instanceof Error ? err.message : "Failed to create map.");
                 }

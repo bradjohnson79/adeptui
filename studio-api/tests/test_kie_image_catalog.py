@@ -277,9 +277,11 @@ def test_seedream_create_task_requires_quality():
         prompt="edit",
         input_urls=["https://example.com/ref.png"],
     )
+    assert gpt_i2i["model"] == "gpt-image-2-image-to-image"
     assert gpt_i2i["input"]["input_urls"] == ["https://example.com/ref.png"]
     assert "image_urls" not in gpt_i2i["input"]
     assert "quality" not in gpt_i2i["input"]
+    assert "text-to-image" not in gpt_i2i["model"]
 
     nano = build_kie_create_task_body(
         model="nano-banana-2",

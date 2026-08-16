@@ -261,8 +261,8 @@ def test_resolver_refuses_qwen2512_edit_never_zimage_ref_edit() -> None:
         assert "zimage.ref_edit" not in str(cap.get("workflowKey") or "")
 
 
-def test_resolver_ers_purpose_with_plate_stays_t2i() -> None:
-    """purpose=environment_reference_sheet must not upgrade a plate id to I2I."""
+def test_resolver_ers_purpose_with_plate_uses_qwen_ref() -> None:
+    """purpose=environment_reference_sheet + plate must resolve I2I, never T2I."""
     from app.image_product.resolve import resolve_image_capability
 
     cap = resolve_image_capability(
@@ -281,12 +281,13 @@ def test_resolver_ers_purpose_with_plate_stays_t2i() -> None:
     )
     assert cap["canExecute"] is True
     assert cap["provider"] == "local"
-    assert cap["workflowKey"] == "qwen2512.txt2img"
+    assert cap["workflowKey"] == "qwen2512.ref"
+    assert "txt2img" not in str(cap.get("workflowKey") or "")
     assert "zimage" not in str(cap.get("workflowKey") or "")
     assert cap["intent"]["operation"] == "image.generate"
 
 
-def test_resolver_local_qwen2512_t2i_still_executes() -> None:
+def test_resolver_ers_without_source_cannot_execute_t2i() -> None:
     from app.image_product.resolve import resolve_image_capability
 
     cap = resolve_image_capability(
@@ -299,9 +300,7 @@ def test_resolver_local_qwen2512_t2i_still_executes() -> None:
             "operation": "image.generate",
         }
     )
-    assert cap["canExecute"] is True
-    assert cap["provider"] == "local"
-    assert cap["officialModelId"] in {"qwen2512", "qwen-image-2512"}
-    assert cap["workflowKey"] == "qwen2512.txt2img"
-    assert cap["workflowKey"] != "zimage.ref_edit"
+    assert cap["canExecute"] is False
+    assert "text-to-image" in str(cap.get("reason") or "").lower()
+    assert cap.get("workflowKey") != "qwen2512.txt2img"
 

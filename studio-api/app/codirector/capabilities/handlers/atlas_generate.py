@@ -46,6 +46,14 @@ def handle(
     attachment_asset_ids: list[str] | None = None,
     scene_description: str = "",
     scene_intent: dict[str, Any] | None = None,
+    hosted_model_id: str = "",
+    hostedModelId: str = "",
+    kie_image_model_id: str = "",
+    kieImageModelId: str = "",
+    model: str = "",
+    model_family_preference: str = "",
+    source: str = "",
+    forceWorkflowKey: str = "",
 ) -> dict[str, Any]:
     """Submit a real Atlas Shot image generation job.
 
@@ -91,7 +99,6 @@ def handle(
         intent.sourceReferenceAssetIds = source_ref_ids
 
     # Atlas Shot aspect is square by default (1:1) for clean floor-plan coverage.
-    # Respect the caller's aspect ratio if they override (e.g. 16:16 for wide sets).
     body: dict[str, Any] = {
         "prompt": atlas_prompt,
         "negative_prompt": (
@@ -101,7 +108,6 @@ def handle(
         "width": 1280,
         "height": 1280,
         "tag": f"codirector_atlas_{execution_id[:8]}",
-        "modelFamilyPreference": "zimage",
         "purpose": "atlas_shot",
         "aspectRatio": aspect_ratio or "1:1",
         "batchCount": 1,
@@ -113,9 +119,67 @@ def handle(
             "orientationNote": (
                 "North = top edge of the approved Atlas Shot (scene-relative)."
             ),
-            "workflowKey": "zimage.txt2img",
         },
     }
+    source_asset = source_ref_ids[0] if source_ref_ids else ""
+    gpt_blob = " ".join(
+        str(v)
+        for v in (
+            hosted_model_id,
+            hostedModelId,
+            kie_image_model_id,
+            kieImageModelId,
+            model,
+        )
+        if v
+    ).lower()
+    wants_gpt = "gpt-image-2" in gpt_blob or "gpt_image_2" in gpt_blob
+    if source_asset:
+        # Continuity mode: source pixels + instruction. Never zimage.txt2img.
+        body["sourceAssetId"] = source_asset
+        body["source_asset_id"] = source_asset
+        body["referenceImage"] = source_asset
+        body["creativeContext"]["authoritativeSourceAssetId"] = source_asset
+        body["operation"] = "image.generate"
+        if wants_gpt:
+            from .ers_generate import _gpt_i2i_official_id, _public_asset_url
+
+            url = _public_asset_url(source_asset)
+            if not url:
+                raise RuntimeError(
+                    "Atlas continuity requires a public URL for the source environment "
+                    "image when using GPT Image 2. Text-to-image is not allowed."
+                )
+            body["hostedModelId"] = "gpt-image-2-kie"
+            body["kieImageModelId"] = _gpt_i2i_official_id()
+            body["input_urls"] = [url]
+            body["source"] = "api"
+            body["lockModelFamily"] = True
+            body["creativeContext"]["workflowKey"] = _gpt_i2i_official_id()
+            body["creativeContext"]["operationIntent"] = "image.generate"
+        else:
+            from .ers_generate import _ers_i2i_workflow_key
+
+            wf = _ers_i2i_workflow_key()
+            if not wf:
+                raise RuntimeError(
+                    "Atlas continuity requires Qwen image-to-image (qwen2512.ref) or "
+                    "GPT Image 2 image-to-image. Text-to-image is not allowed once a "
+                    "source environment image exists."
+                )
+            body["modelFamilyPreference"] = "qwen2512"
+            body["model"] = "qwen2512"
+            body["forceWorkflowKey"] = wf
+            body["allow_force_workflow_key"] = True
+            body["lockModelFamily"] = True
+            body["source"] = "local"
+            body["creativeContext"]["workflowKey"] = wf
+            body["creativeContext"]["operationIntent"] = "image_to_image_reference"
+    else:
+        # Brand-new environment with no source image: T2I creation mode.
+        body["modelFamilyPreference"] = "zimage"
+        body["creativeContext"]["workflowKey"] = "zimage.txt2img"
+        body["creativeContext"]["operationIntent"] = "text_to_image"
     if intent is not None:
         body["creativeContext"]["sceneIntent"] = intent.model_dump()
     if source_ref_ids:
@@ -132,6 +196,7 @@ def handle(
         child_metadata["scene_intent"] = intent.model_dump()
     if source_ref_ids:
         child_metadata["original_environment_reference_asset_ids"] = source_ref_ids
+        child_metadata["authoritative_source_asset_id"] = source_ref_ids[0]
 
     child_jobs = [
         {

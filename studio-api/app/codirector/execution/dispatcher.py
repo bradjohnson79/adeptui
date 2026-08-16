@@ -253,6 +253,10 @@ def _dispatch_capability_handler(
             "kie_image_model_id": ctx.get("kie_image_model_id") or ctx.get("kieImageModelId") or "",
             "fal_image_model_id": ctx.get("fal_image_model_id") or ctx.get("falImageModelId") or "",
             "provider_kind": ctx.get("provider_kind") or ctx.get("providerKind") or "",
+            "hostedModelId": ctx.get("hostedModelId") or ctx.get("hosted_model_id") or "",
+            "forceWorkflowKey": ctx.get("forceWorkflowKey") or ctx.get("force_workflow_key") or "",
+            "lockModelFamily": bool(ctx.get("lockModelFamily") or ctx.get("lock_model_family")),
+            "kieImageModelId": ctx.get("kieImageModelId") or ctx.get("kie_image_model_id") or "",
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
 

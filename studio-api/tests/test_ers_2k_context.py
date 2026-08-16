@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 from app.codirector.capabilities.handlers.ers_generate import (
     _ers_sheet_prompt,
-    _force_ers_honest_t2i,
     _resolve_ers_grounding,
     build_ers_image_body,
     ers_2k_pixels,
@@ -27,23 +26,30 @@ def test_ers_2k_pixels_locks_native_16_9_probe() -> None:
     assert w < h
 
 
-def test_build_ers_image_body_is_native_2k_t2i() -> None:
+def test_build_ers_image_body_is_native_2k_i2i() -> None:
+    import inspect
+
+    from app.codirector.capabilities.handlers import ers_generate
+
     body = build_ers_image_body(
         prompt="Environment reference sheet",
         direction="sheet",
         execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
         sheet_id="sheet-1",
         spatial_map_id="map-1",
-        selected={"referenceImage": "must-not-survive", "sourceAssetId": "nope"},
+        source_asset_id="atlas-1",
+        selected={"hostedModelId": "must-keep"},
     )
     assert body["width"] == 2560
     assert body["height"] == 1440
     assert body["operation"] == "image.generate"
-    assert "referenceImage" not in body
-    assert "sourceAssetId" not in body
-    stripped = _force_ers_honest_t2i(dict(body), reference_id="atlas-1")
-    assert stripped["operation"] == "image.generate"
-    assert "referenceImage" not in stripped
+    assert body["sourceAssetId"] == "atlas-1"
+    assert body["source_asset_id"] == "atlas-1"
+    assert body["referenceImage"] == "atlas-1"
+    assert "not pixel image-to-image" not in str(body.get("prompt") or "")
+    src = inspect.getsource(ers_generate)
+    assert "_force_ers_honest_t2i" not in src
+    assert 'return "image.generate", "text_to_image"' not in src
 
 
 def test_grounding_uses_visible_placements_only() -> None:

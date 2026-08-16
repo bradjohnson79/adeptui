@@ -47,7 +47,19 @@ def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
         return None
     if _local_force_key(src):
         return None
-    i2i = bool(src.get("source_asset_id") or src.get("sourceAssetId") or src.get("edit"))
+    purpose = str(src.get("purpose") or "").strip()
+    has_pixels = bool(
+        src.get("source_asset_id")
+        or src.get("sourceAssetId")
+        or src.get("edit")
+        or src.get("input_urls")
+        or src.get("image_urls")
+        or src.get("image_input")
+        or src.get("referenceImage")
+        or src.get("reference_image")
+    )
+    continuity = purpose in {"environment_reference_sheet", "atlas_shot"}
+    i2i = has_pixels or (continuity and has_pixels)
     try:
         from ..hosted_providers.adapters.kie_adapter import (
             KIE_IMAGE_T2I_BY_DOCK,
@@ -57,13 +69,21 @@ def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
         return None
     official_ids = set(KIE_IMAGE_T2I_BY_DOCK.values())
     pinned = str(src.get("kieImageModelId") or src.get("kie_image_model_id") or "").strip()
+
+    def _continuity_official(dock: str, official: str) -> str:
+        if continuity and has_pixels and "text-to-image" in official:
+            remapped = kie_image_model_id_for_dock(dock, image_to_image=True)
+            if remapped:
+                return remapped
+        return official
+
     if pinned:
         official = kie_image_model_id_for_dock(pinned, image_to_image=i2i)
         if not official and pinned in official_ids:
             official = pinned
         if official:
             dock = str(src.get("hostedModelId") or "").strip() or pinned
-            return {"dock": dock, "official": official}
+            return {"dock": dock, "official": _continuity_official(dock, official)}
     for raw in (
         src.get("hostedModelId"),
         src.get("model"),
@@ -74,7 +94,7 @@ def _kie_image_route(body: dict[str, Any] | None) -> dict[str, str] | None:
             continue
         official = kie_image_model_id_for_dock(dock, image_to_image=i2i)
         if official:
-            return {"dock": dock, "official": official}
+            return {"dock": dock, "official": _continuity_official(dock, official)}
     return None
 
 
@@ -303,14 +323,35 @@ def compile_image_request(
     if purpose in {"storyboard", "storyboard_frame"}:
         operation = "image.storyboard_frame"
     if purpose == "environment_reference_sheet":
-        # ERS is always one Image Core T2I. Atlas / background / map plate /
-        # character-prop refs are prompt context only — never I2I pixels.
+        # ERS uses an image-to-image-capable generator (binding law): the
+        # authoritative environment pixels ride sourceAssetId/referenceImage
+        # and are consumed by the ref workflow. Operation stays image.generate
+        # (reference conditioning is not an edit); only a stray "edit" flag is
+        # dropped so it can never flip this into an edit request.
         operation = "image.generate"
         body.pop("edit", None)
-        body.pop("source_asset_id", None)
-        body.pop("sourceAssetId", None)
-        body.pop("referenceImage", None)
-        body.pop("reference_image", None)
+        blob = " ".join(
+            str(body.get(k) or "")
+            for k in (
+                "hostedModelId",
+                "kieImageModelId",
+                "model",
+                "modelFamilyPreference",
+                "forceWorkflowKey",
+            )
+        ).lower()
+        is_qwen = "qwen2512" in blob or "qwen-image-2512" in blob
+        has_source = bool(
+            str(body.get("sourceAssetId") or body.get("source_asset_id") or body.get("referenceImage") or "").strip()
+        )
+        if (
+            is_qwen
+            and has_source
+            and "gpt-image-2" not in blob
+            and not str(body.get("forceWorkflowKey") or "").strip()
+        ):
+            body["forceWorkflowKey"] = "qwen2512.ref"
+            body["allow_force_workflow_key"] = True
 
     creative_extras = dict(body.get("creativeContext") or {})
     continuity_session_id = body.get("continuitySessionId") or body.get("continuityId")
@@ -467,7 +508,10 @@ def compile_image_request(
 
     source_asset = body.get("sourceAssetId") or body.get("source_asset_id")
     if purpose == "environment_reference_sheet":
-        source_asset = None
+        # ERS image-to-image (binding law): the authoritative source
+        # environment image is preserved as intent.sourceAssetId so the ref
+        # workflow receives real pixels. ref_ids stay empty — ERS grounds on
+        # one authoritative source, not a reference stack.
         ref_ids = []
     spatial_bundle = body.get("spatialReferenceBundle") if isinstance(body.get("spatialReferenceBundle"), dict) else None
     spatial_block = creative_extras.get("spatial") if isinstance(creative_extras.get("spatial"), dict) else {}
@@ -595,10 +639,7 @@ def compile_image_request(
             force_workflow_key=force_key,
             present_inputs={
                 "prompt": intent.prompt,
-                "reference_image": (
-                    bool(intent.sourceAssetId or intent.referenceIds)
-                    and purpose != "environment_reference_sheet"
-                ),
+                "reference_image": bool(intent.sourceAssetId or intent.referenceIds),
                 "mask": bool(body.get("masks") or body.get("maskAssetId")),
             },
             provider_preference=intent.providerPreference,
@@ -640,7 +681,8 @@ def compile_image_request(
             # Prop Creator pins the requested family. Never silently become zimage.
             raise
         if purpose == "environment_reference_sheet":
-            # ERS stays honest T2I on the selected family. Never zimage.ref_edit.
+            # ERS requires an image-to-image-capable generator. Never silently
+            # fall back to a T2I-only family (or zimage.ref_edit) for ERS.
             raise
         # Certified ZImage fallback (unpinned requests only)
         contract = resolve_image_workflow(
@@ -650,10 +692,7 @@ def compile_image_request(
             allow_draft=False,
             present_inputs={
                 "prompt": intent.prompt,
-                "reference_image": (
-                    bool(intent.sourceAssetId or intent.referenceIds)
-                    and purpose != "environment_reference_sheet"
-                ),
+                "reference_image": bool(intent.sourceAssetId or intent.referenceIds),
                 "mask": bool(body.get("masks") or body.get("maskAssetId")),
             },
         )

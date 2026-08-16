@@ -1,17 +1,20 @@
-﻿/**
+/**
  * Shared ERS generation hook for Spatial Map Express + Standard.
  * One path: Spatial Map -> ers.generate -> Image Core -> persist composite.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../api";
 import { isTerminal, type WorkSurfaceState } from "../AgentWorkSurface/types";
-import { normalizeErsError } from "./ersErrorMessage";
+import { normalizeErsError, stripHandlerError } from "./ersErrorMessage";
 import {
   ERS_GENERATOR_DEFAULT,
   buildErsStartContext,
   formatErsProvenance,
   generatorBlockReason,
+  hasAuthoritativeEnvironmentSource,
+  isGptImage2I2IReady,
   isGptImage2Ready,
+  isQwenI2IReady,
   isQwenReady,
   provenanceModelFromSelection,
   resolveErsGeneratorFromModel,
@@ -86,6 +89,14 @@ function parseJson(raw: unknown): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+/** Creator-facing mapping for a failed "Use Anyway" override (FE-010). */
+export function useAnywayFailure(error: unknown): { error: string; errorDetail: string } {
+  const raw = error instanceof Error ? error.message : String(error);
+  // Same ERS error channel/peeling as normalizeErsError, but an honest label:
+  // the generation succeeded — the OVERRIDE did not persist.
+  return { error: `Use Anyway failed — ${stripHandlerError(raw)}`, errorDetail: raw };
 }
 
 export function normalizeExecution(res: any, fallbackCapability = "ers.generate"): WorkSurfaceState {
@@ -181,6 +192,56 @@ const IDLE_PROGRESS: NormalizedJobProgress = {
   genuineSampler: false,
 };
 
+/**
+ * ERS state keys scoped to the active Spatial Map document (CDX-022). When the
+ * map identity changes, all of these must reset so the previous map's
+ * composite, sheet, and phase can never leak into the new map. The generator
+ * choice (selectedGenerator) is intentionally NOT map-scoped — the creator's
+ * last choice survives remounts.
+ */
+export const ERS_MAP_SCOPED_STATE_KEYS = [
+  "phase",
+  "busy",
+  "executionId",
+  "jobId",
+  "progress",
+  "model",
+  "elapsedSec",
+  "error",
+  "errorDetail",
+  "compositeAssetId",
+  "zombie",
+  "sheetId",
+  "semanticGate",
+  "gateOverride",
+] as const;
+
+/**
+ * Default values for the map-scoped slice of ERS state. Used to reset the hook
+ * when the active Spatial Map document changes.
+ */
+export function emptyErsMapScopedState(): Pick<
+  ErsGenerationState,
+  (typeof ERS_MAP_SCOPED_STATE_KEYS)[number]
+> {
+  return {
+    phase: "idle",
+    busy: false,
+    executionId: null,
+    jobId: null,
+    progress: IDLE_PROGRESS,
+    model: { model: "", sourceKind: null },
+    elapsedSec: 0,
+    error: null,
+    errorDetail: null,
+    compositeAssetId: null,
+    zombie: false,
+    sheetId: null,
+    semanticGate: null,
+    gateOverride: false,
+  };
+}
+
 export function useErsGeneration({
   projectId,
   spatialMapId,
@@ -204,16 +265,30 @@ export function useErsGeneration({
   const [zombie, setZombie] = useState(false);
   const [selectedGenerator, setSelectedGeneratorState] = useState<ErsGeneratorId>(lastErsGeneratorId);
   const [qwenReady, setQwenReady] = useState<boolean | null>(null);
+  const [qwenI2IReady, setQwenI2IReady] = useState<boolean | null>(null);
   const [gptReady, setGptReady] = useState<boolean | null>(null);
+  const [gptI2IReady, setGptI2IReady] = useState<boolean | null>(null);
   const [sheetId, setSheetId] = useState<string | null>(null);
   const [semanticGate, setSemanticGate] = useState<ErsSemanticGate | null>(null);
   const [gateOverride, setGateOverride] = useState(false);
   const [sheetFingerprint, setSheetFingerprint] = useState<string | null>(null);
 
   const counts = useMemo(() => countsFromDocument(document), [document]);
+  const hasSource = useMemo(
+    () => hasAuthoritativeEnvironmentSource(document),
+    [document],
+  );
   const blockReason = useMemo(
-    () => generatorBlockReason(selectedGenerator, qwenReady, gptReady),
-    [gptReady, qwenReady, selectedGenerator],
+    () =>
+      generatorBlockReason(
+        selectedGenerator,
+        qwenReady,
+        gptReady,
+        qwenI2IReady,
+        gptI2IReady,
+        document ? hasSource : null,
+      ),
+    [document, gptI2IReady, gptReady, hasSource, qwenI2IReady, qwenReady, selectedGenerator],
   );
   const provenance = useMemo(() => formatErsProvenance(model), [model]);
 
@@ -281,11 +356,19 @@ export function useErsGeneration({
 
   const useAnyway = useCallback(async () => {
     if (!projectId || !sheetId) return;
+    // A new attempt clears any prior override failure so the creator can retry.
+    setError(null);
+    setErrorDetail(null);
     try {
       await api.environmentReferenceSheet.useAnyway(projectId, sheetId);
       setGateOverride(true);
-    } catch {
-      // surfaced on next refresh; the banner remains visible
+    } catch (err) {
+      // Persistence failed: the override is NOT applied (gateOverride stays
+      // false, banner remains). Surface the failure through the existing ERS
+      // error channel instead of swallowing it until an imaginary refresh.
+      const failure = useAnywayFailure(err);
+      setError(failure.error);
+      setErrorDetail(failure.errorDetail);
     }
   }, [projectId, sheetId]);
 
@@ -440,7 +523,14 @@ export function useErsGeneration({
     if (attachOnly) return;
     if (!projectId || !spatialMapId) return;
     if (inFlightRef.current || busy) return;
-    const blocked = generatorBlockReason(selectedGenerator, qwenReady, gptReady);
+    const blocked = generatorBlockReason(
+      selectedGenerator,
+      qwenReady,
+      gptReady,
+      qwenI2IReady,
+      gptI2IReady,
+      document ? hasSource : null,
+    );
     if (blocked) {
       setError(blocked);
       setErrorDetail(null);
@@ -483,7 +573,7 @@ export function useErsGeneration({
       markLive("failed");
       setBusy(false);
     }
-  }, [attachOnly, attachExecution, busy, gptReady, markLive, projectId, qwenReady, selectedGenerator, spatialMapId]);
+  }, [attachOnly, attachExecution, busy, document, gptI2IReady, gptReady, hasSource, markLive, projectId, qwenI2IReady, qwenReady, selectedGenerator, spatialMapId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -493,12 +583,16 @@ export function useErsGeneration({
         const providers = Array.isArray(listed?.providers) ? listed.providers : [];
         if (!cancelled) {
           setQwenReady(isQwenReady(providers));
+          setQwenI2IReady(isQwenI2IReady(providers));
           setGptReady(isGptImage2Ready(providers));
+          setGptI2IReady(isGptImage2I2IReady(providers));
         }
       } catch {
         if (!cancelled) {
           setQwenReady(false);
+          setQwenI2IReady(false);
           setGptReady(false);
+          setGptI2IReady(false);
         }
       }
     })();
@@ -506,6 +600,36 @@ export function useErsGeneration({
       cancelled = true;
     };
   }, []);
+
+  // CDX-022: ERS state is scoped to the active Spatial Map document. When the
+  // map identity changes, clear every map-scoped piece of state (composite,
+  // sheet, phase, execution) so the previous map's ERS is never shown as
+  // current. compositeAssetId must also be nulled so the sheet-refresh effect
+  // below re-runs for the new map instead of early-returning on a stale asset.
+  const previousSpatialMapIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousSpatialMapIdRef.current;
+    previousSpatialMapIdRef.current = spatialMapId;
+    if (previous === spatialMapId) return;
+    const reset = emptyErsMapScopedState();
+    setPhase(reset.phase);
+    setBusy(reset.busy);
+    setExecutionId(reset.executionId);
+    setJobId(reset.jobId);
+    setProgress(reset.progress);
+    setModel(reset.model);
+    setElapsedSec(reset.elapsedSec);
+    setError(reset.error);
+    setErrorDetail(reset.errorDetail);
+    setCompositeAssetId(reset.compositeAssetId);
+    setZombie(reset.zombie);
+    setSheetId(reset.sheetId);
+    setSemanticGate(reset.semanticGate);
+    setGateOverride(reset.gateOverride);
+    setSheetFingerprint(null);
+    inFlightRef.current = false;
+    startedAtRef.current = null;
+  }, [spatialMapId]);
 
   useEffect(() => {
     if (!projectId || !spatialMapId) return;

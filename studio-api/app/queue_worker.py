@@ -2155,6 +2155,10 @@ class JobQueue:
             return settings.imagegen_sd35_checkpoint
         if mid == "illustrious":
             return settings.imagegen_illustrious_checkpoint
+        if mid in ("qwen2512", "qwen-image-2512", "qwen_image_2512", "qwen"):
+            # Qwen Image 2512 runs use the Qwen UNET, not the FLUX checkpoint —
+            # job status must name the real checkpoint (CDX-082).
+            return settings.qwen_image_2512_unet
         if mid == "custom":
             return settings.imagegen_custom_checkpoint or settings.imagegen_flux_checkpoint
         if mid in ("zimage", "auto"):
@@ -2732,21 +2736,27 @@ class JobQueue:
             model = "zimage"
 
         zimage_ready = self._zimage_stack_ready()
+        # CDX-076: never silently substitute an explicit/pinned model. When the
+        # selected engine is unavailable at execution time the job FAILS with an
+        # actionable creator-facing error instead of swapping engines.
         if model == "auto":
+            # Legacy unpinned "auto" path — selecting a ready compatible engine is
+            # the designed behavior (no model was pinned), but the swap must be
+            # visible in the job status, not only history_json.
             model, reasons = self._resolve_ready_still_model("auto")
         use_zimage = model in ("zimage", "z-image", "z_image") or pinned_key.startswith("zimage.")
         if use_zimage and not zimage_ready:
-            alt, alt_reasons = self._resolve_ready_still_model("auto")
-            if alt not in ("zimage", "z-image", "z_image"):
-                model = alt
-                use_zimage = False
-                reasons.extend(alt_reasons)
-                intent.enginePreference = "checkpoint" if not str(alt).startswith("flux") else "flux"
-            else:
-                raise RuntimeError(
-                    "Z-Image Turbo weights are not verified on disk (component zimage_models). "
-                    "Open Source Manager, link the shared models root, then retry."
-                )
+            raise RuntimeError(
+                "Z-Image Turbo is selected for this job but the model is not installed — "
+                "component zimage_models verification failed (weights missing or not "
+                "linked). No alternate model was substituted. Open Source Manager, link "
+                "the shared models root, then retry."
+            )
+        # First-class disclosure for the designed legacy auto fallback: the actual
+        # executed model and the reason appear in job.message, not only history_json.
+        alternate_note = ""
+        if not use_zimage and reasons:
+            alternate_note = "; ".join(reasons)
         if use_zimage:
             steps = int(params.get("steps") or settings.zimage_steps)
             cfg = float(params.get("cfg") if params.get("cfg") is not None else settings.zimage_cfg)
@@ -2807,7 +2817,10 @@ class JobQueue:
         from .image_runtime.job_model import ImageJobStage
 
         job.stage = ImageJobStage.PREPARING.value
-        job.message = f"ImageGen · {contract.workflow_key} · {ckpt}"
+        message = f"ImageGen · {contract.workflow_key} · {ckpt}"
+        if alternate_note:
+            message += f" · {alternate_note}"
+        job.message = message
         params = {
             **params,
             "imageRuntime": pinned,
@@ -3079,6 +3092,7 @@ class JobQueue:
                 ref_hash=ref_hash,
                 source_asset_id=source_asset_id,
                 intent_id=intent.intentId,
+                note=alternate_note,
             )
             job.stage = ImageJobStage.COMPLETED.value
             db.commit()
@@ -3117,6 +3131,7 @@ class JobQueue:
             KIE_FAIL_STATES,
             KIE_POLL_ATTEMPTS,
             KIE_POLL_INTERVAL_SEC,
+            build_kie_create_task_body,
             download,
             extract_kie_image_url,
             kie_fail_message,
@@ -3170,6 +3185,27 @@ class JobQueue:
         official = resolve_official_kie_image_model(
             model_id, params, image_to_image=bool(ref_urls)
         )
+        purpose = str(params.get("purpose") or "")
+        continuity = purpose in {"environment_reference_sheet", "atlas_shot"}
+        if continuity and ref_urls and "text-to-image" in str(official or ""):
+            raise RuntimeError(
+                "Refusing text-to-image Kie createTask for Spatial Map / ERS. "
+                "Required operation is image-to-image."
+            )
+        create_body = build_kie_create_task_body(
+            model=official,
+            prompt=prompt,
+            input_urls=ref_urls or None,
+            aspect_ratio=aspect,
+            quality=str(params.get("quality") or params.get("kieQuality") or "") or None,
+        )
+        inp = create_body.get("input") if isinstance(create_body.get("input"), dict) else {}
+        params["kieCreateTask"] = {
+            "model": create_body.get("model"),
+            "input_urls": inp.get("input_urls") or inp.get("image_urls") or inp.get("image_input") or [],
+            "url": "https://api.kie.ai/api/v1/jobs/createTask",
+        }
+        job.params_json = json.dumps(params)
         job.stage = ImageJobStage.SAMPLING.value
         job.message = f"Kie.ai · {official}"
         job.comfy_prompt_id = official[:64]
@@ -3185,6 +3221,12 @@ class JobQueue:
         if not submitted.get("ok") or not submitted.get("taskId"):
             raise RuntimeError(submitted.get("message") or f"Kie createTask failed for {official}")
         task_id = str(submitted["taskId"])
+        params["kieCreateTask"] = {
+            **dict(params.get("kieCreateTask") or {}),
+            "taskId": task_id,
+        }
+        job.params_json = json.dumps(params)
+        db.commit()
         image_url = None
         last_state = ""
         for _ in range(KIE_POLL_ATTEMPTS):
@@ -3420,6 +3462,7 @@ class JobQueue:
         ref_hash: str | None = None,
         source_asset_id: str | None = None,
         intent_id: str | None = None,
+        note: str = "",
     ) -> None:
         from .image_runtime.provenance import ImageProvenance, executed_image_stamp
 
@@ -3617,7 +3660,12 @@ class JobQueue:
         except Exception:
             logger.exception("ERS composite persist failed for job %s", job.id)
         db.commit()
-        self._set_status(job.id, "done", 1.0, f"ImageGen ({edit_op}) complete", str(dest))
+        done_message = f"ImageGen ({edit_op}) complete"
+        if note:
+            # Visible disclosure of a designed legacy auto-fallback (CDX-076):
+            # the final status names the actual executed model + reason.
+            done_message += f" · {note}"
+        self._set_status(job.id, "done", 1.0, done_message, str(dest))
 
     async def _export(self, db: Session, job: Job, project: Project) -> None:
         scenes = db.query(Scene).filter(Scene.project_id == project.id).order_by(Scene.index).all()

@@ -88,12 +88,12 @@ def test_ers_generate_pins_environment_reference_sheet_purpose(monkeypatch) -> N
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
     captured: list[dict] = []
-    _patch_handler(
-        monkeypatch,
-        sheet,
-        SpatialMapDocument(projectId=project_id, id=spatial_map_id),
-        captured,
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
     )
+    _patch_handler(monkeypatch, sheet, document, captured)
 
     result = ers_generate.handle(
         db=None,
@@ -109,90 +109,82 @@ def test_ers_generate_pins_environment_reference_sheet_purpose(monkeypatch) -> N
         assert body["operation"] == "image.generate"
         assert body["width"] == 2560
         assert body["height"] == 1440
-        assert "referenceImage" not in body
-        assert "sourceAssetId" not in body
-        assert body["creativeContext"]["operationIntent"] == "text_to_image"
-        assert body["creativeContext"].get("workflowKey") != "zimage.txt2img"
+        # ERS is image-to-image: the authoritative source rides with the job.
+        assert body.get("sourceAssetId") == "atlas-ref-1"
+        assert body.get("source_asset_id") == "atlas-ref-1"
+        assert body.get("referenceImage") == "atlas-ref-1"
+        assert body["creativeContext"]["operationIntent"] == "image_to_image_reference"
+        assert body.get("forceWorkflowKey") == "qwen2512.ref"
+        assert body.get("allow_force_workflow_key") is True
+        assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
         assert "zimage.txt2img" not in str(body)
     assert result["purpose"] == "environment_reference_sheet"
     assert len(result["child_jobs"]) == 1
     assert result["child_jobs"][0]["status"] == "queued"
 
 
-def test_ers_generate_pins_creator_selected_kie_model(monkeypatch) -> None:
+def test_ers_generate_blocks_non_i2i_hosted_model(monkeypatch) -> None:
+    """Binding law: ERS requires an image-to-image-capable generator. A hosted
+    model without an ERS-authorized I2I path is blocked, never silently run as
+    T2I and never substituted."""
+    import pytest
+
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
     captured: list[dict] = []
-    _patch_handler(
-        monkeypatch,
-        sheet,
-        SpatialMapDocument(projectId=project_id, id=spatial_map_id),
-        captured,
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
     )
+    _patch_handler(monkeypatch, sheet, document, captured)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
-        spatial_map_id=spatial_map_id,
-        hosted_model_id="nano-banana-kie",
-        source="api",
-    )
-
-    assert captured
-    for body in captured:
-        assert body["purpose"] == "environment_reference_sheet"
-        assert body.get("hostedModelId") == "nano-banana-kie"
-        assert body.get("kieImageModelId") == "nano-banana-2"
-        assert body["creativeContext"]["resolvedProvider"] == "kie"
-        assert body["creativeContext"]["resolvedWorkflowKey"] == "kie:nano-banana-2"
-        assert body["creativeContext"]["workflowKey"] == "kie:nano-banana-2"
-        cap = resolve_image_capability(body)
-        assert cap["canExecute"] is True
-        assert cap["provider"] == "kie"
-        assert cap["officialModelId"] == "nano-banana-2"
+    with pytest.raises(RuntimeError, match="image-to-image"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+            spatial_map_id=spatial_map_id,
+            hosted_model_id="nano-banana-kie",
+            source="api",
+        )
+    assert not captured
 
 
-def test_ers_generate_local_flux_is_not_kie(monkeypatch) -> None:
+def test_ers_generate_blocks_t2i_only_local_family(monkeypatch) -> None:
+    """Binding law: a text-to-image-only local family (flux) is blocked for ERS
+    — never run as T2I and never silently routed to another provider."""
+    import pytest
+
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
     captured: list[dict] = []
-    _patch_handler(
-        monkeypatch,
-        sheet,
-        SpatialMapDocument(projectId=project_id, id=spatial_map_id),
-        captured,
+    document = SpatialMapDocument(
+        projectId=project_id,
+        id=spatial_map_id,
+        backgroundAssetId="atlas-ref-1",
     )
+    _patch_handler(monkeypatch, sheet, document, captured)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
-        spatial_map_id=spatial_map_id,
-        source="local",
-        model="flux",
-        model_family_preference="flux",
-    )
-
-    assert captured
-    for body in captured:
-        assert body.get("source") == "local"
-        assert body.get("modelFamilyPreference") == "flux"
-        assert not str(body.get("kieImageModelId") or "")
-        assert not str(body["creativeContext"].get("resolvedWorkflowKey") or "").startswith("kie:")
-        cap = resolve_image_capability(body)
-        assert cap["canExecute"] is True
-        assert cap["provider"] == "local"
-        assert cap["provider"] != "kie"
+    with pytest.raises(RuntimeError, match="image-to-image"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+            spatial_map_id=spatial_map_id,
+            source="local",
+            model="flux",
+            model_family_preference="flux",
+        )
+    assert not captured
 
 
-def test_ers_generate_never_uses_i2i_even_when_model_supports_it(monkeypatch) -> None:
-    """Deliberate carve-out (W3/W7): explicit GPT Image 2 stays honest T2I at the
-    image-product layer, but DOES receive pixel grounding via Kie input_urls
-    (original environment reference + atlas). This is the only reference-
-    conditioned ERS path; Qwen remains text-grounded T2I."""
+def test_ers_generate_gpt_image2_pixel_grounding(monkeypatch) -> None:
+    """Explicit GPT Image 2 satisfies the ERS image-to-image contract via the
+    Kie input_urls pixel path. Source pixels stay on the body; T2I is refused.
+    """
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
@@ -210,25 +202,34 @@ def test_ers_generate_never_uses_i2i_even_when_model_supports_it(monkeypatch) ->
         execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
         spatial_map_id=spatial_map_id,
         hosted_model_id="gpt-image-2-kie",
+        kie_image_model_id="gpt-image-2-image-to-image",
         source="api",
     )
 
     assert captured
     for body in captured:
         assert body["operation"] == "image.generate"
-        assert body["creativeContext"]["operationIntent"] == "text_to_image"
-        assert not body.get("source_asset_id")
-        assert not body.get("sourceAssetId")
-        assert not body.get("edit")
+        assert body.get("sourceAssetId") == "atlas-ref-1"
+        assert body.get("source_asset_id") == "atlas-ref-1"
+        assert body.get("kieImageModelId") == "gpt-image-2-image-to-image"
+        assert "text-to-image" not in str(body.get("kieImageModelId") or "")
+        assert "not pixel image-to-image" not in str(body.get("prompt") or "")
+        assert body["creativeContext"]["authoritativeSourceAssetId"] == "atlas-ref-1"
         assert body["creativeContext"]["resolvedProvider"] == "kie"
-        # Carve-out: explicit GPT Image 2 + grounding lineage -> Kie input_urls.
         urls = body.get("input_urls") or []
         assert urls, "explicit GPT Image 2 with atlas lineage must attach input_urls"
         assert any("atlas-ref-1" in u for u in urls)
         assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
+        official = str(body["creativeContext"].get("resolvedOfficialModelId") or "")
+        assert "text-to-image" not in official
+        assert "image-to-image" in official or official == ""
 
 
-def test_ers_generate_keeps_t2i_when_model_has_no_i2i(monkeypatch) -> None:
+def test_ers_generate_blocks_model_without_i2i(monkeypatch) -> None:
+    """Binding law: no silent T2I for ERS. A model with no ERS-authorized I2I
+    path raises an honest creator-readable block."""
+    import pytest
+
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
@@ -240,22 +241,16 @@ def test_ers_generate_keeps_t2i_when_model_has_no_i2i(monkeypatch) -> None:
     )
     _patch_handler(monkeypatch, sheet, document, captured)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
-        spatial_map_id=spatial_map_id,
-        hosted_model_id="nano-banana-kie",
-        source="api",
-    )
-
-    assert captured
-    for body in captured:
-        assert body["operation"] == "image.generate"
-        assert body["creativeContext"]["operationIntent"] == "text_to_image"
-        assert body.get("hostedModelId") == "nano-banana-kie"
-        assert body.get("kieImageModelId") == "nano-banana-2"
-        assert not body.get("edit")
+    with pytest.raises(RuntimeError, match="image-to-image"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id="279a7474-d93c-4dc7-8936-4b649ef06255",
+            spatial_map_id=spatial_map_id,
+            hosted_model_id="nano-banana-kie",
+            source="api",
+        )
+    assert not captured
 
 
 def test_handler_error_normalization_is_creator_readable() -> None:
@@ -343,15 +338,16 @@ def test_persist_ers_composite_sets_has_reference(monkeypatch) -> None:
     assert summary["ers_composite_asset_id"] == "asset-ers-1"
     assert saved["package"].ers_composite_asset_id == "asset-ers-1"
 
-def test_ers_qwen2512_with_atlas_enqueues_honest_t2i(monkeypatch) -> None:
+def test_ers_qwen2512_with_atlas_enqueues_i2i_ref(monkeypatch) -> None:
     project_id = f"proj-{uuid.uuid4()}"
     spatial_map_id = f"map-{uuid.uuid4()}"
     sheet = _sheet(project_id, spatial_map_id)
     captured: list[dict] = []
+    atlas_id = "caa72759-d965-41f9-b1d5-77cdcf9b9614"
     document = SpatialMapDocument(
         projectId=project_id,
         id=spatial_map_id,
-        backgroundAssetId="caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        backgroundAssetId=atlas_id,
     )
     _patch_handler(monkeypatch, sheet, document, captured)
 
@@ -369,27 +365,33 @@ def test_ers_qwen2512_with_atlas_enqueues_honest_t2i(monkeypatch) -> None:
     body = captured[0]
     assert body["purpose"] == "environment_reference_sheet"
     assert body["operation"] == "image.generate"
-    assert body["creativeContext"]["operationIntent"] == "text_to_image"
+    assert body["creativeContext"]["operationIntent"] == "image_to_image_reference"
     assert body.get("edit") in (None, False)
-    assert not body.get("source_asset_id")
-    assert not body.get("sourceAssetId")
+    # The authoritative source image rides the job as real pixel conditioning.
+    assert body.get("source_asset_id") == atlas_id
+    assert body.get("sourceAssetId") == atlas_id
+    assert body.get("referenceImage") == atlas_id
+    assert body.get("forceWorkflowKey") == "qwen2512.ref"
+    assert body.get("allow_force_workflow_key") is True
     assert body["creativeContext"]["resolvedProvider"] == "local"
-    assert body["creativeContext"]["resolvedWorkflowKey"] == "qwen2512.txt2img"
+    assert body["creativeContext"]["resolvedWorkflowKey"] == "qwen2512.ref"
+    assert body["creativeContext"]["referenceGrounding"]["mode"] == "pixel"
     assert "zimage.ref_edit" not in str(body)
     assert "zimage" not in str(body["creativeContext"].get("resolvedWorkflowKey") or "")
     cap = resolve_image_capability(body)
     assert cap["canExecute"] is True
-    assert cap["workflowKey"] == "qwen2512.txt2img"
+    assert cap["workflowKey"] == "qwen2512.ref"
 
     from app.image_product.compile import compile_image_request
 
-    # Plate id present must not upgrade compile to edit / zimage.ref_edit.
+    # Source pixels + a stray edit flag must not flip ERS into an edit request
+    # or zimage.ref_edit; the ref workflow stays pinned.
     compiled = compile_image_request(
         project_id,
         {
             **body,
-            "source_asset_id": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
-            "sourceAssetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+            "source_asset_id": atlas_id,
+            "sourceAssetId": atlas_id,
             "edit": True,
             "operation": "image.edit",
             "lockModelFamily": True,
@@ -398,19 +400,20 @@ def test_ers_qwen2512_with_atlas_enqueues_honest_t2i(monkeypatch) -> None:
     intent = compiled["imageIntent"]
     runtime = compiled["imageRuntime"]
     assert intent["operation"] == "image.generate"
-    assert intent.get("sourceAssetId") in (None, "")
+    assert intent.get("sourceAssetId") == atlas_id
     assert runtime.get("canExecute") is True
     assert "zimage" not in str(runtime.get("workflowKey") or "")
     selected = str(runtime.get("workflowKey") or compiled.get("contract", {}).get("workflow_key") or "")
-    assert selected.startswith("qwen2512")
-    assert "txt2img" in selected
+    assert selected == "qwen2512.ref"
     assert selected != "zimage.ref_edit"
     assert "zimage" not in selected
 
-def test_compile_ers_qwen2512_plate_stays_t2i() -> None:
+def test_compile_ers_qwen2512_source_stays_i2i_not_edit() -> None:
+    """Phase 2: ERS + Qwen + source pixels is qwen2512.ref, not T2I and not edit."""
     from app.image_product.compile import compile_image_request
     from app.image_product.resolve import resolve_image_capability
 
+    atlas_id = "caa72759-d965-41f9-b1d5-77cdcf9b9614"
     body = {
         "prompt": "Environment reference sheet of one locked environment.",
         "purpose": "environment_reference_sheet",
@@ -420,24 +423,59 @@ def test_compile_ers_qwen2512_plate_stays_t2i() -> None:
         "lockModelFamily": True,
         "operation": "image.edit",
         "edit": True,
-        "source_asset_id": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
-        "sourceAssetId": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
-        "referenceImage": "caa72759-d965-41f9-b1d5-77cdcf9b9614",
+        "source_asset_id": atlas_id,
+        "sourceAssetId": atlas_id,
+        "referenceImage": atlas_id,
         "width": 1280,
         "height": 720,
     }
     cap = resolve_image_capability(body)
     assert cap["canExecute"] is True
-    assert cap["workflowKey"] == "qwen2512.txt2img"
-    compiled = compile_image_request("proj-ers-t2i", body)
+    assert cap["workflowKey"] == "qwen2512.ref"
+    compiled = compile_image_request("proj-ers-i2i", body)
     assert compiled["imageIntent"]["operation"] == "image.generate"
-    assert compiled["imageIntent"].get("sourceAssetId") in (None, "")
+    assert compiled["imageIntent"].get("sourceAssetId") == atlas_id
     assert compiled["imageIntent"]["purpose"] == "environment_reference_sheet"
     runtime = compiled["imageRuntime"]
     assert runtime.get("canExecute") is True
     key = str(runtime.get("workflowKey") or (compiled.get("contract") or {}).get("workflow_key") or "")
-    assert "qwen2512" in key
-    assert "txt2img" in key
+    assert key == "qwen2512.ref"
+    assert "txt2img" not in key
     assert "zimage" not in key
     assert key != "zimage.ref_edit"
+
+
+def test_compile_ers_gpt_image2_uses_i2i_not_t2i() -> None:
+    from app.image_product.compile import compile_image_request
+    from app.image_product.resolve import resolve_image_capability
+
+    atlas_id = "atlas-ref-1"
+    body = {
+        "prompt": "Environment reference sheet of one locked environment.",
+        "purpose": "environment_reference_sheet",
+        "source": "api",
+        "hostedModelId": "gpt-image-2-kie",
+        "kieImageModelId": "gpt-image-2-text-to-image",
+        "sourceAssetId": atlas_id,
+        "source_asset_id": atlas_id,
+        "input_urls": [f"https://api-beta.adeptui.org/api/assets/{atlas_id}/file"],
+        "width": 2560,
+        "height": 1440,
+        "lockModelFamily": True,
+    }
+    cap = resolve_image_capability(body)
+    assert cap["canExecute"] is True
+    assert cap["officialModelId"] == "gpt-image-2-image-to-image"
+    assert "text-to-image" not in cap["officialModelId"]
+    assert cap["workflowKey"] == "kie:gpt-image-2-image-to-image"
+    compiled = compile_image_request("proj-ers-gpt-i2i", body)
+    assert compiled["imageIntent"]["sourceAssetId"] == atlas_id
+    assert compiled["imageIntent"]["operation"] == "image.generate"
+    runtime = compiled.get("imageRuntime") or {}
+    official = str(
+        compiled.get("kieImageModelId")
+        or runtime.get("officialModelId")
+        or cap["officialModelId"]
+    )
+    assert official == "gpt-image-2-image-to-image"
 

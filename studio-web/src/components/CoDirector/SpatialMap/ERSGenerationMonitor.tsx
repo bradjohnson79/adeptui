@@ -139,6 +139,11 @@ export function ERSGenerationMonitor({
               Use Anyway
             </button>
           </div>
+          {state.error ? (
+            <p className="spatial-map__ers-live-details" role="alert" data-testid="ers-gate-use-anyway-error">
+              {state.error}
+            </p>
+          ) : null}
         </div>
       ) : null}
 

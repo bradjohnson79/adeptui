@@ -28,7 +28,8 @@ def _intent_from_body(body: dict[str, Any] | None) -> dict[str, Any]:
     if src.get("edit") or src.get("source_asset_id") or src.get("sourceAssetId"):
         operation = "image.edit"
     if purpose == "environment_reference_sheet":
-        # Plate / atlas / character-prop ids are prompt context, not I2I.
+        # Generate-with-reference: pixels ride sourceAssetId / input_urls.
+        # Stay image.generate so Qwen does not fall into the refused edit path.
         operation = "image.generate"
         layout = "production_ers"
     model = str(
@@ -94,7 +95,7 @@ def _ok(
 
 
 def _is_qwen2512_family(name: str) -> bool:
-    """Qwen Image 2512 is T2I-only. No certified edit / I2I workflow."""
+    """Qwen Image 2512 family. Scene Creator edit remains unsupported; ERS uses qwen2512.ref."""
     n = str(name or "").strip().lower().replace("_", "-")
     return n in {"qwen2512", "qwen-image-2512", "qwen-image2512"} or n.startswith(
         "qwen2512."
@@ -195,15 +196,43 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
             src.get("modelFamilyPreference") or src.get("model") or model or ""
         ).strip()
         force = _local_force_key(src)
+        purpose_local = str(intent.get("purpose") or src.get("purpose") or "").strip()
+        has_pixels_local = bool(
+            intent.get("references")
+            or src.get("sourceAssetId")
+            or src.get("source_asset_id")
+            or src.get("referenceImage")
+            or src.get("input_urls")
+        )
+        if purpose_local == "environment_reference_sheet" and not has_pixels_local:
+            return _refuse(
+                "Environment Reference Sheets require an authoritative source image. "
+                "Text-to-image is not allowed.",
+                provider="local",
+                adapter="comfy",
+                officialModelId=family,
+                workflowKey="",
+                intent=intent,
+            )
         if _wants_edit(src, intent) and (
             _is_qwen2512_family(family) or _is_qwen2512_family(force)
         ):
             return _refuse_qwen2512_edit(intent, family or force)
+        ers_qwen = (
+            str(intent.get("purpose") or "") == "environment_reference_sheet"
+            and _is_qwen2512_family(family or force)
+            and bool(
+                intent.get("references")
+                or src.get("sourceAssetId")
+                or src.get("source_asset_id")
+                or src.get("referenceImage")
+            )
+        )
         return _ok(
             provider="local",
             adapter="comfy",
             official=family,
-            workflow_key=force or (f"{family}.txt2img" if family else ""),
+            workflow_key=force or ("qwen2512.ref" if ers_qwen else (f"{family}.txt2img" if family else "")),
             reason="local comfy adapter facade (not kie)",
             hostedModelId="",
             intent=intent,
@@ -213,9 +242,53 @@ def resolve_image_capability(body: dict[str, Any] | None) -> dict[str, Any]:
     wants_edit = _wants_edit(src, intent)
     api_selected = _api_model_selected(src, intent)
 
+    purpose = str(intent.get("purpose") or src.get("purpose") or "").strip()
+    continuity = purpose in {"environment_reference_sheet", "atlas_shot"}
+    has_pixels = bool(
+        intent.get("references")
+        or src.get("sourceAssetId")
+        or src.get("source_asset_id")
+        or src.get("input_urls")
+        or src.get("image_urls")
+        or src.get("referenceImage")
+    )
+    if purpose == "environment_reference_sheet" and not has_pixels:
+        return _refuse(
+            "Environment Reference Sheets require an authoritative source image. "
+            "Text-to-image is not allowed.",
+            provider=provider or "local",
+            adapter=provider or "comfy",
+            officialModelId="",
+            intent=intent,
+        )
+    if (
+        continuity
+        and "gpt-image-2" in model.lower()
+        and not has_pixels
+    ):
+        return _refuse(
+            "Environment continuity requires an image-conditioned GPT Image 2 path. "
+            "Attach an authoritative environment image; text-to-image is not allowed.",
+            provider="kie",
+            adapter="kie",
+            officialModelId="",
+            intent=intent,
+        )
+
     if route and provider in {"kie", "fal"}:
         official = str(route.get("official") or "")
         dock = str(route.get("dock") or model or official)
+        if continuity and has_pixels and "text-to-image" in official:
+            return _refuse(
+                "Refusing text-to-image for Spatial Map / ERS: "
+                + (model or dock)
+                + " must use its image-to-image operation.",
+                provider=provider,
+                adapter=provider,
+                officialModelId=official,
+                hostedModelId=dock,
+                intent=intent,
+            )
         if wants_edit:
             if provider == "kie" and not _kie_supports_i2i(dock, official):
                 return _refuse(

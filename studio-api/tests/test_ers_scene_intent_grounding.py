@@ -297,7 +297,7 @@ def _patched_ers_handle(monkeypatch, captured, *, document):
     return ers_generate
 
 
-def test_ers_qwen_keeps_honest_t2i_text_grounding(monkeypatch) -> None:
+def test_ers_qwen_uses_i2i_pixel_grounding(monkeypatch) -> None:
     intent = _schnick_intent()
     project_id = f"proj-{uuid.uuid4()}"
     map_id = f"map-{uuid.uuid4()}"
@@ -323,12 +323,14 @@ def test_ers_qwen_keeps_honest_t2i_text_grounding(monkeypatch) -> None:
 
     assert len(captured) == 1
     body = captured[0]
-    # Qwen = text grounding only: no pixel routing, no I2I.
-    assert not body.get("input_urls")
-    assert not body.get("source_asset_id")
-    assert body["creativeContext"]["operationIntent"] == "text_to_image"
-    # Lineage rides the body for provenance + prompt grounding.
+    # Qwen ERS is image-to-image: source pixels must reach the ref workflow.
+    assert body.get("sourceAssetId") == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
+    assert body.get("source_asset_id") == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
+    assert body.get("forceWorkflowKey") == "qwen2512.ref"
     ctx = body["creativeContext"]
+    assert ctx["operationIntent"] == "image_to_image_reference"
+    assert ctx["referenceGrounding"]["mode"] == "pixel"
+    assert ctx["authoritativeSourceAssetId"] == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
     assert ctx["sceneIntent"]["sceneTitle"] == "Schnick Coffee"
     assert ctx["sceneIntentVersion"] == 1
     assert ctx["groundingAssetIds"] == [
@@ -336,7 +338,7 @@ def test_ers_qwen_keeps_honest_t2i_text_grounding(monkeypatch) -> None:
         "caa72759-d965-41f9-b1d5-77cdcf9b9614",
     ]
     assert ctx["groundingFingerprint"]
-    assert "referenceGrounding" not in ctx
+    assert "text_to_image" not in str(ctx.get("operationIntent") or "")
 
 
 def test_ers_gpt_image_2_explicit_carve_out_attaches_pixel_urls(monkeypatch) -> None:
@@ -368,16 +370,19 @@ def test_ers_gpt_image_2_explicit_carve_out_attaches_pixel_urls(monkeypatch) -> 
     urls = body.get("input_urls") or []
     assert urls, "explicit GPT Image 2 must receive reference pixel URLs"
     assert any("4d3062e8" in u for u in urls)
-    assert any("caa72759" in u for u in urls)
     ctx = body["creativeContext"]
     assert ctx["referenceGrounding"]["mode"] == "pixel"
-    assert ctx["referenceGrounding"]["urlCount"] == len(urls)
-    # Still honest T2I semantics at the image-product layer (no I2I upgrade).
-    assert ctx["operationIntent"] == "text_to_image"
-    assert not body.get("source_asset_id")
+    assert ctx["authoritativeSourceAssetId"] == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
+    assert body.get("sourceAssetId") == "4d3062e8-8c30-4230-8376-bc25d1d4f735"
+    assert ctx["operationIntent"] == "image.generate"
+    assert body.get("kieImageModelId") == "gpt-image-2-image-to-image"
+    assert "text-to-image" not in str(body.get("kieImageModelId") or "")
+    assert "not pixel image-to-image" not in str(body.get("prompt") or "")
 
 
-def test_ers_gpt_image_2_without_public_base_degrades_honestly(monkeypatch) -> None:
+def test_ers_gpt_image_2_without_public_base_blocks(monkeypatch) -> None:
+    import pytest
+
     intent = _schnick_intent()
     project_id = f"proj-{uuid.uuid4()}"
     map_id = f"map-{uuid.uuid4()}"
@@ -392,23 +397,21 @@ def test_ers_gpt_image_2_without_public_base_degrades_honestly(monkeypatch) -> N
     ers_generate = _patched_ers_handle(monkeypatch, captured, document=document)
     monkeypatch.setattr("app.config.settings.public_api_base_url", "")
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id=str(uuid.uuid4()),
-        spatial_map_id=map_id,
-        hosted_model_id="gpt-image-2-kie",
-        source="api",
-    )
-
-    body = captured[0]
-    assert not body.get("input_urls")
-    grounding = body["creativeContext"]["referenceGrounding"]
-    assert grounding["mode"] == "text_only"
-    assert "not configured" in grounding["note"]
+    with pytest.raises(RuntimeError, match="public URL"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id=str(uuid.uuid4()),
+            spatial_map_id=map_id,
+            hosted_model_id="gpt-image-2-kie",
+            source="api",
+        )
+    assert not captured
 
 
-def test_ers_other_hosted_models_do_not_get_pixel_carve_out(monkeypatch) -> None:
+def test_ers_other_hosted_models_are_blocked(monkeypatch) -> None:
+    import pytest
+
     intent = _schnick_intent()
     project_id = f"proj-{uuid.uuid4()}"
     map_id = f"map-{uuid.uuid4()}"
@@ -422,20 +425,16 @@ def test_ers_other_hosted_models_do_not_get_pixel_carve_out(monkeypatch) -> None
     captured: list[dict] = []
     ers_generate = _patched_ers_handle(monkeypatch, captured, document=document)
 
-    ers_generate.handle(
-        db=None,
-        project_id=project_id,
-        execution_id=str(uuid.uuid4()),
-        spatial_map_id=map_id,
-        hosted_model_id="nano-banana-kie",
-        source="api",
-    )
-
-    body = captured[0]
-    assert not body.get("input_urls")
-    assert "referenceGrounding" not in body["creativeContext"]
-    # Lineage still rides creativeContext for provenance.
-    assert body["creativeContext"]["groundingAssetIds"] == ["orig-x", "atlas-x"]
+    with pytest.raises(RuntimeError, match="image-to-image-capable generator"):
+        ers_generate.handle(
+            db=None,
+            project_id=project_id,
+            execution_id=str(uuid.uuid4()),
+            spatial_map_id=map_id,
+            hosted_model_id="nano-banana-kie",
+            source="api",
+        )
+    assert not captured
 
 
 # ── Semantic gate verdict parsing (W4, mocked VLM) ────────────────────────

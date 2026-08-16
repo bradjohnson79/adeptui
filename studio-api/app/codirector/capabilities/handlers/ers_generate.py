@@ -161,13 +161,16 @@ def build_ers_image_body(
         },
     }
     body.update(selected)
-    # ERS purpose is always T2I. Never attach a plate as I2I pixels.
+    # ERS is image-to-image (binding law): a source environment image may ride
+    # source_asset_id / referenceImage and be consumed by the ref workflow.
+    # Operation stays image.generate (reference conditioning, not an edit).
     body["operation"] = "image.generate"
+    if source_asset_id:
+        body["sourceAssetId"] = source_asset_id
+        body["source_asset_id"] = source_asset_id
+        body["referenceImage"] = source_asset_id
+        body["reference_image"] = source_asset_id
     body.pop("edit", None)
-    body.pop("source_asset_id", None)
-    body.pop("sourceAssetId", None)
-    body.pop("referenceImage", None)
-    body.pop("reference_image", None)
     return body
 
 
@@ -180,38 +183,9 @@ def _spatial_map_reference_id(plan: Any, spatial_document: Any) -> str:
     return str(raw).strip() if raw else ""
 
 
-def _choose_operation(body: dict[str, Any], reference_id: str) -> tuple[str, str]:
-    """ERS is always one Image Core T2I. Never I2I/edit, even if a plate exists.
-
-    Atlas / background / map plate / character-prop refs are prompt context only.
-    Do not probe image.edit — that path compiled Qwen as I2I and then refused
-    with a silent zimage.ref_edit substitute.
-    """
-    return "image.generate", "text_to_image"
-
-
-def _force_ers_honest_t2i(body: dict[str, Any], reference_id: str = "") -> dict[str, Any]:
-    """Strip I2I/edit pixels. Atlas may inform the prompt as text only."""
-    body["operation"] = "image.generate"
-    ctx = body.get("creativeContext")
-    if not isinstance(ctx, dict):
-        ctx = {}
-        body["creativeContext"] = ctx
-    ctx["operationIntent"] = "text_to_image"
-    body.pop("edit", None)
-    body.pop("source_asset_id", None)
-    body.pop("sourceAssetId", None)
-    body.pop("referenceImage", None)
-    body.pop("reference_image", None)
-    if reference_id:
-        note = (
-            " Atlas shot informs this environment as text only "
-            f"(asset {reference_id}); not pixel image-to-image."
-        )
-        prompt = str(body.get("prompt") or "")
-        if "not pixel image-to-image" not in prompt:
-            body["prompt"] = (prompt + note).strip()
-    return body
+def _gpt_i2i_official_id() -> str:
+    """Canonical Kie Market id for GPT Image 2 image-to-image. Never T2I."""
+    return "gpt-image-2-image-to-image"
 
 
 def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
@@ -701,6 +675,8 @@ def _ers_sheet_prompt(
     sheet: Any,
     spatial_document: Any,
     grounding: dict[str, Any] | None = None,
+    visual_canon: Any = None,
+    continuity_invariants: list[str] | None = None,
 ) -> str:
     from ....codirector.knowledgebase.ers_compiler import (
         compile_environment_reference_sheet_prompt,
@@ -743,6 +719,8 @@ def _ers_sheet_prompt(
         cameras=list(grounding.get("cameras") or []),
         contextual_subjects=list(grounding.get("contextual_subjects") or []),
         atlas_note=str(spatial.get("backgroundAssetId") or grounding.get("atlas_asset_id") or ""),
+        visual_canon=(visual_canon.model_dump() if visual_canon is not None else None),
+        continuity_invariants=continuity_invariants,
     )
     seed = str(compiled.get("prompt") or "").strip()
     core_plan = type(
@@ -754,6 +732,33 @@ def _ers_sheet_prompt(
         },
     )()
     return image_core_prompt(core_plan, fallback=seed)
+
+
+def _is_qwen2512_selection(creator_model: dict[str, Any]) -> bool:
+    """True when the creator selected (or defaults to) the Qwen-Image-2512 family."""
+    blob = " ".join(
+        str(creator_model.get(k) or "")
+        for k in ("model", "modelFamilyPreference", "forceWorkflowKey")
+    ).lower()
+    return "qwen2512" in blob or "qwen_image_2512" in blob
+
+
+def _ers_i2i_workflow_key() -> str:
+    """The certified Qwen image-to-image workflow for ERS, or '' when unavailable.
+
+    ERS requires a generator with genuine image input + text instruction
+    (binding law). A Draft/absent qwen2512.ref yields '' so the handler blocks
+    honestly instead of falling back to text-to-image.
+    """
+    try:
+        from ....image_runtime.certified_registry import get_workflow
+
+        wf = get_workflow("qwen2512.ref")
+    except Exception:
+        return ""
+    if wf is None or str(getattr(wf, "status", "") or "") != "Certified":
+        return ""
+    return "qwen2512.ref"
 
 
 def _is_explicit_gpt_image_2(creator_model: dict[str, Any]) -> bool:
@@ -790,8 +795,13 @@ def handle(
     provider: str = "",
     forceWorkflowKey: str = "",
     lockModelFamily: bool = False,
+    visual_canon_corrections: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Enqueue ONE Image Core job (purpose=environment_reference_sheet) and persist the asset."""
+    """Enqueue ONE Image Core job (purpose=environment_reference_sheet) and persist the asset.
+
+    ``visual_canon_corrections`` are creator-authored overrides of the
+    Co-Director Vision canon - they outrank inferred vision output.
+    """
     from ....environment_reference_sheet.orchestrator import (
         attach_spatial_map,
         compose_sheet_metadata,
@@ -861,9 +871,75 @@ def handle(
         lock_model_family=bool(lockModelFamily),
     )
 
-    seed_prompt = _ers_sheet_prompt(sheet, spatial_document, grounding)
+    reference_id = _spatial_map_reference_id(None, spatial_document)
+    grounding_ids = [
+        gid
+        for gid in (
+            grounding.get("original_environment_reference_asset_id"),
+            grounding.get("atlas_asset_id"),
+        )
+        if gid
+    ]
+    grounding_ids = list(dict.fromkeys(grounding_ids))
+    source_pixels = grounding_ids[0] if grounding_ids else ""
+    # ERS requires an image-to-image-capable generator (binding law).
+    qwen_selected = _is_qwen2512_selection(creator_model) or not any(creator_model.values())
+    gpt_selected = _is_explicit_gpt_image_2(creator_model)
+    qwen_i2i = qwen_selected and (not gpt_selected) and bool(_ers_i2i_workflow_key())
+    gpt_i2i = gpt_selected
+    if not source_pixels:
+        raise RuntimeError(
+            "ERS requires an authoritative environment image. Attach an Atlas Shot "
+            "to this Spatial Map first."
+        )
+    if qwen_selected and not gpt_selected and not _ers_i2i_workflow_key():
+        raise RuntimeError(
+            "Qwen Image image-to-image is not available for ERS. "
+            "Environment Reference Sheets require a generator that consumes the "
+            "source environment image. Choose GPT Image 2 or repair the local I2I workflow."
+        )
+    if gpt_selected:
+        try:
+            from ....hosted_providers.adapters.kie_adapter import kie_image_supports_i2i
+
+            gpt_i2i_ok = kie_image_supports_i2i("gpt-image-2-kie")
+        except Exception:
+            gpt_i2i_ok = False
+        if not gpt_i2i_ok:
+            raise RuntimeError(
+                "GPT Image 2 image-to-image is not available for ERS. "
+                "Text-to-image cannot be used for Environment Reference Sheets."
+            )
+    if not qwen_i2i and not gpt_i2i:
+        raise RuntimeError(
+            "Environment Reference Sheets require an image-to-image-capable generator. "
+            "Select Qwen Image (image-to-image) or GPT Image 2 for ERS."
+        )
+    # Environment Visual Canon (Co-Director Vision) + creator corrections.
+    from ...vision.visual_canon import (
+        canon_is_stale,
+        load_visual_canon,
+        merge_visual_canon,
+    )
+
+    canon = None
+    if db is not None:
+        canon = load_visual_canon(db, project_id, spatial_map_id)
+        if canon is not None and canon_is_stale(canon, grounding.get("fingerprint") or ""):
+            canon = None  # stale canon is not authoritative; regenerate via CD Vision
+    creator_corrections = visual_canon_corrections if isinstance(visual_canon_corrections, dict) else None
+    canon = merge_visual_canon(canon, creator_corrections)
     from types import SimpleNamespace
 
+    seed_prompt = _ers_sheet_prompt(
+        sheet,
+        spatial_document,
+        grounding,
+        visual_canon=canon,
+        continuity_invariants=creator_corrections.get("hardInvariants")
+        if creator_corrections and isinstance(creator_corrections.get("hardInvariants"), list)
+        else None,
+    )
     prompt_text = image_core_prompt(
         SimpleNamespace(
             shotIntent=SimpleNamespace(prompt=seed_prompt),
@@ -871,7 +947,6 @@ def handle(
         ),
         fallback=seed_prompt,
     )
-    reference_id = _spatial_map_reference_id(None, spatial_document)
     body = build_ers_image_body(
         prompt=prompt_text,
         direction="sheet",
@@ -883,13 +958,27 @@ def handle(
             sheet.spatialMap.northLockDirection if sheet.spatialMap else "north"
         ),
         selected=creator_model,
+        source_asset_id=source_pixels,
     )
-    operation, operation_intent = _choose_operation(body, reference_id)
-    body["operation"] = operation
-    body["creativeContext"]["operationIntent"] = operation_intent
-    # Always honest T2I. _choose_operation no longer probes I2I; keep the
-    # strip+prompt-note helper so a plate id cannot leak back as pixels.
-    body = _force_ers_honest_t2i(body, reference_id)
+    body["creativeContext"]["operationIntent"] = (
+        "image_to_image_reference" if qwen_i2i else "image.generate"
+    )
+    body["creativeContext"]["authoritativeSourceAssetId"] = source_pixels
+    if qwen_i2i:
+        body["forceWorkflowKey"] = _ers_i2i_workflow_key()
+        body["allow_force_workflow_key"] = True
+        body["lockModelFamily"] = True
+        body["creativeContext"]["referenceGrounding"] = {
+            "mode": "pixel",
+            "assetIds": grounding_ids,
+            "workflow": _ers_i2i_workflow_key(),
+            "authoritativeSourceAssetId": source_pixels,
+        }
+    elif gpt_i2i:
+        body["hostedModelId"] = "gpt-image-2-kie"
+        body["kieImageModelId"] = _gpt_i2i_official_id()
+        body["lockModelFamily"] = True
+        body.pop("forceWorkflowKey", None)
 
     # Lineage into creativeContext: durable on job params for the worker commit
     # hook (edges + prompt_meta) regardless of which generator executes.
@@ -910,31 +999,50 @@ def handle(
     grounding_ids = list(dict.fromkeys(grounding_ids))
     if grounding_ids:
         ctx["groundingAssetIds"] = grounding_ids
+    ctx["authoritativeSourceAssetId"] = source_pixels
     ctx["groundingFingerprint"] = grounding.get("fingerprint") or ""
     ctx["characterIds"] = list(grounding.get("character_ids") or [])
     ctx["propIds"] = list(grounding.get("prop_ids") or [])
     ctx["approvedCharacterAssetIds"] = list(grounding.get("approved_character_asset_ids") or [])
     ctx["approvedPropAssetIds"] = list(grounding.get("approved_prop_asset_ids") or [])
     ctx["contextualSubjects"] = list(grounding.get("contextual_subjects") or [])
+    if canon is not None:
+        ctx["visualCanon"] = {
+            "version": canon.version,
+            "availability": canon.availability,
+            "fingerprint": canon.fingerprint,
+            "sourceAssetId": canon.sourceAssetId,
+            "provenance": canon.provenance,
+            "unavailableReason": canon.unavailableReason,
+        }
 
-    # GPT Image 2 (explicit creator choice): reference-conditioned pixels via the
-    # Kie input_urls path. Qwen stays honest T2I (text grounding only). No silent
-    # fallback between the two.
-    if _is_explicit_gpt_image_2(creator_model) and grounding_ids:
-        urls = [u for u in (_public_asset_url(gid) for gid in grounding_ids) if u]
-        if urls:
-            body["input_urls"] = urls
-            ctx["referenceGrounding"] = {
-                "mode": "pixel",
-                "assetIds": grounding_ids,
-                "urlCount": len(urls),
-            }
-        else:
-            ctx["referenceGrounding"] = {
-                "mode": "text_only",
-                "assetIds": grounding_ids,
-                "note": "Public asset base URL not configured; hosted pixel routing unavailable.",
-            }
+    # GPT Image 2: pixels must reach Kie as input_urls. Never T2I. Never
+    # append "not pixel image-to-image" while attaching URLs (CDX-035).
+    if gpt_i2i:
+        urls = [u for u in (_public_asset_url(source_pixels),) if u]
+        if not urls:
+            urls = [u for u in (_public_asset_url(gid) for gid in grounding_ids) if u]
+        if not urls:
+            raise RuntimeError(
+                "GPT Image 2 cannot run this Environment Reference Sheet without a "
+                "public URL for the source environment image. Text-to-image is not allowed."
+            )
+        body["input_urls"] = urls
+        ctx["operationIntent"] = "image.generate"
+        ctx["referenceGrounding"] = {
+            "mode": "pixel",
+            "assetIds": [source_pixels],
+            "authoritativeSourceAssetId": source_pixels,
+            "urlCount": len(urls),
+            "workflow": _gpt_i2i_official_id(),
+        }
+        body["kieImageModelId"] = _gpt_i2i_official_id()
+        if "not pixel image-to-image" in str(body.get("prompt") or ""):
+            body["prompt"] = str(body.get("prompt") or "").replace(
+                " Atlas shot informs this environment as text only "
+                f"(asset {reference_id}); not pixel image-to-image.",
+                "",
+            ).strip()
     try:
         from ....image_product.compile import compile_image_request
 
@@ -946,6 +1054,18 @@ def handle(
     except Exception as exc:
         logger.info("ERS Image Core compile used seed prompt: %s", exc)
     body = _pin_resolved_capability(body)
+    if gpt_i2i:
+        official = str(
+            body.get("kieImageModelId")
+            or (body.get("creativeContext") or {}).get("resolvedOfficialModelId")
+            or ""
+        )
+        if "text-to-image" in official:
+            raise RuntimeError(
+                "GPT Image 2 resolved to text-to-image for ERS. "
+                "Environment Reference Sheets require gpt-image-2-image-to-image."
+            )
+        body["kieImageModelId"] = _gpt_i2i_official_id()
 
     package = EnvironmentReferencePackage(
         project_id=project_id,
@@ -959,12 +1079,24 @@ def handle(
             "execution_id": execution_id,
             "sheet_id": sheet.sheetId,
             "grounding_asset_ids": grounding_ids,
+            "authoritative_source_asset_id": source_pixels,
             "scene_intent_version": scene_intent.version if scene_intent is not None else None,
             "grounding_fingerprint": grounding.get("fingerprint") or "",
             "character_ids": list(grounding.get("character_ids") or []),
             "prop_ids": list(grounding.get("prop_ids") or []),
             "approved_character_asset_ids": list(grounding.get("approved_character_asset_ids") or []),
             "approved_prop_asset_ids": list(grounding.get("approved_prop_asset_ids") or []),
+            "visual_canon": (
+                {
+                    "version": canon.version,
+                    "availability": canon.availability,
+                    "fingerprint": canon.fingerprint,
+                    "sourceAssetId": canon.sourceAssetId,
+                    "provenance": canon.provenance,
+                }
+                if canon is not None
+                else None
+            ),
         },
     )
     body.setdefault("creativeContext", {})
@@ -1004,6 +1136,14 @@ def handle(
                 "original_environment_reference_asset_id"
             ]
         details["groundingFingerprint"] = grounding.get("fingerprint") or ""
+        if canon is not None:
+            details["visualCanon"] = {
+                "version": canon.version,
+                "availability": canon.availability,
+                "fingerprint": canon.fingerprint,
+                "sourceAssetId": canon.sourceAssetId,
+                "provenance": canon.provenance,
+            }
         provenance.details = details
     save_ers_package(db, project_id, package)
     save_sheet(sheet)
