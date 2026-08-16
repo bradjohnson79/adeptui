@@ -41,15 +41,19 @@ test.describe("Scene Creator workspace refine", () => {
     expect(a.profile?.characterIds || []).toContain(KORRI_ID);
 
     const ws = await request.get(
-      `${API}/api/scene-creator/projects/${PROJECT_ID}/workspace?scene_id=${a.sceneId}&sheet_id=${a.sheetId}&spatial_profile_id=${a.handoffId}`,
+      `${API}/api/scene-creator/projects/${PROJECT_ID}/workspace?scene_id=${a.sceneId}&sheet_id=${a.sheetId}&spatial_profile_id=${a.handoffId}&shot_id=88539183-6fd2-495a-aa48-e406a3653cd5`,
     );
     expect(ws.ok()).toBeTruthy();
     const workspace = await ws.json();
     expect(workspace.production_context?.loaded).toBe(true);
     expect(workspace.production_context?.handoffId).toBe(a.handoffId);
+    expect(["pass", "advisory", "llm_unavailable"]).toContain(workspace.production_readiness?.status);
+    expect(workspace.production_readiness?.ticks?.character).toBe("ok");
+    expect(workspace.production_readiness?.ticks?.prop).toBe("warn");
+    expect(workspace.production_readiness?.ticks?.environment).toBe("warn");
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${SC_URL}&scene_id=${a.sceneId}&sheet_id=${a.sheetId}&spatialProfileId=${a.handoffId}`, {
+    await page.goto(`${SC_URL}&scene_id=${a.sceneId}&sheet_id=${a.sheetId}&shot_id=88539183-6fd2-495a-aa48-e406a3653cd5&spatialProfileId=${a.handoffId}`, {
       waitUntil: "domcontentloaded",
     });
     const standard = page.getByTestId("scene-creator-standard");
@@ -67,6 +71,8 @@ test.describe("Scene Creator workspace refine", () => {
     await expect(page.getByTestId("scene-creator-cd-caption")).toHaveText("✓ Co-Director production data loaded", {
       timeout: 60_000,
     });
+    await expect(page.getByTestId("scene-creator-integrity-caption")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("scene-creator-ref-ticks")).toBeVisible();
     await expect(page.getByTestId("scene-creator-splitter-left")).toBeVisible();
     await expect(page.getByTestId("scene-creator-splitter-right")).toBeVisible();
     await expect(page.getByTestId("scene-creator-reset-layout")).toBeVisible();

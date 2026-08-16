@@ -268,6 +268,14 @@ def hydrate_workspace(
     selected_profile = load_profile(db, project_id, wanted_profile) if wanted_profile else None
     if selected_profile and selected_profile.projectId != project_id:
         selected_profile = None
+    if (spatial_profile_id or "").strip() and selected_profile is not None:
+        from .production_handoff import select_profile as persist_spatial_profile
+
+        try:
+            persist_spatial_profile(db, project_id, selected_profile.handoffId)
+            selection = load_selection(db, project_id)
+        except Exception:
+            logger.exception("Scene Creator hydrate could not persist Spatial Profile selection")
 
     selected_sheet_id = (sheet_id or "").strip() or (selected_profile.sheetId if selected_profile else "")
     if not selected_sheet_id and sheets and not selection.workspaceReset:
@@ -436,6 +444,37 @@ def hydrate_workspace(
     except Exception:
         logger.exception("Cinematographer hydrate failed")
 
+    production_context = build_production_context(
+        selected_profile=selected_profile,
+        resolved=resolved if isinstance(resolved, dict) else None,
+        scene_id=scene.id,
+        sheet=sheet,
+    )
+    production_readiness = None
+    try:
+        from .readiness import readiness_from_workspace
+
+        cam_hash = ""
+        cine = cinematographer if isinstance(cinematographer, dict) else {}
+        cine_cams = cine.get("cameras") if isinstance(cine.get("cameras"), list) else []
+        if cine_cams:
+            cam_hash = str((cine_cams[0] or {}).get("cameraStateHash") or "")
+        fam = ""
+        if selected_shot is not None:
+            fam = str(getattr(getattr(selected_shot, "generator", None), "local_family", "") or "")
+        production_readiness = readiness_from_workspace(
+            db,
+            project_id,
+            production_context=production_context,
+            selected_profile=selected_profile,
+            shot=selected_shot,
+            family=fam,
+            camera_hash=cam_hash,
+            scene_id=scene.id,
+        )
+    except Exception:
+        logger.exception("Scene Creator readiness hydrate failed")
+
     return {
         "sheets": sheet_summaries,
         "selected_sheet_id": selected_sheet_id,
@@ -458,12 +497,8 @@ def hydrate_workspace(
         "spatial_profiles": spatial_profiles,
         "selected_spatial_profile_id": selected_profile.handoffId if selected_profile else None,
         "workspace_reset": bool(selection.workspaceReset) and selected_profile is None,
-        "production_context": build_production_context(
-            selected_profile=selected_profile,
-            resolved=resolved if isinstance(resolved, dict) else None,
-            scene_id=scene.id,
-            sheet=sheet,
-        ),
+        "production_context": production_context,
+        "production_readiness": production_readiness,
     }
 
 
@@ -528,6 +563,7 @@ def _enqueue_shot_candidates(
     index_offset: int = 0,
     quality_profile: str = "final",
     camera_record: Any = None,
+    diagnostic_mode: str = "",
 ) -> list[SceneShotCandidate]:
     package, runtime = resolve_ers_for_sheet(db, project_id, shot.sheet_id)
     shot.ers_package_id = package.id
@@ -594,6 +630,48 @@ def _enqueue_shot_candidates(
     inheritance = str(extras.get("strategy") or "")
     camera_hash = str(getattr(camera_record, "cameraStateHash", "") or "")
     source_id = str(extras.get("sourceAssetId") or "")
+    composite = str(getattr(package, "ers_composite_asset_id", None) or "").strip()
+    from .production_handoff import load_profile, load_selection
+    from .reference_packet import GroundingBlocked, apply_reference_packet
+
+    selection = load_selection(db, project_id)
+    profile_id = str(getattr(selection, "selectedProfileId", "") or "").strip()
+    workspace_reset = bool(getattr(selection, "workspaceReset", False))
+    profile_grounded = bool(profile_id) and not workspace_reset
+    production_loaded = False
+    pc = None
+    selected_profile = load_profile(db, project_id, profile_id) if profile_id else None
+    if profile_grounded:
+        from .ers_resolver import resolve_ers_for_sheet as _resolve_sheet
+
+        try:
+            _pkg, _rt = resolve_ers_for_sheet(db, project_id, shot.sheet_id, persist_runtime=False)
+            resolved = {
+                "package_id": str(getattr(_pkg, "id", "") or ""),
+                "ers_composite_asset_id": str(getattr(_pkg, "ers_composite_asset_id", "") or ""),
+            }
+        except Exception:
+            resolved = None
+        pc = build_production_context(
+            selected_profile=selected_profile,
+            resolved=resolved,
+            scene_id=shot.scene_id,
+        )
+        production_loaded = bool(pc and pc.get("loaded") is True)
+    gate_body = dict(body_base)
+    gate_ctx = gate_body.setdefault("creativeContext", {})
+    if isinstance(gate_ctx, dict) and composite:
+        gate_ctx["ers_composite_asset_id"] = composite
+    try:
+        apply_reference_packet(
+            gate_body,
+            family=lead_family,
+            profile_grounded=profile_grounded,
+            production_loaded=production_loaded,
+            diagnostic_mode=diagnostic_mode,
+        )
+    except GroundingBlocked as exc:
+        raise SceneCreatorError(str(exc)) from exc
     reuse = _in_flight_candidate(
         shot,
         quality_profile="draft" if draft else "final",
@@ -651,6 +729,36 @@ def _enqueue_shot_candidates(
                 if primary:
                     body["referenceImage"] = primary
                     body["reference_image"] = primary
+            try:
+                apply_reference_packet(
+                    body,
+                    family=str(plan.get("family") or body.get("model") or lead_family),
+                    profile_grounded=profile_grounded,
+                    production_loaded=production_loaded,
+                    diagnostic_mode=diagnostic_mode
+                    or str((body.get("creativeContext") or {}).get("diagnosticMode") or ""),
+                )
+            except GroundingBlocked as exc:
+                raise SceneCreatorError(str(exc)) from exc
+            pkt = (body.get("creativeContext") or {}).get("referencePacket") if isinstance(body.get("creativeContext"), dict) else None
+            from .integrity import merge_readiness_with_packet
+
+            import os
+
+            integrity = merge_readiness_with_packet(
+                pc if profile_grounded else None,
+                selected_profile,
+                pkt if isinstance(pkt, dict) else {},
+                family=str(plan.get("family") or ""),
+                camera_hash=str(getattr(camera_record, "cameraStateHash", "") or ""),
+                scene_id=shot.scene_id,
+                invoke_llm=not os.environ.get("PYTEST_CURRENT_TEST"),
+            )
+            if isinstance(body.get("creativeContext"), dict):
+                body["creativeContext"]["productionIntegrity"] = {
+                    "status": integrity.get("status"),
+                    "fingerprint": integrity.get("fingerprint"),
+                }
             ctx["qualityProfile"] = "draft" if draft else "final"
             if ctx.get("finalStrategy") == "A" and (ctx.get("workflowKey") or use_core):
                 if camera_record is not None:
@@ -946,16 +1054,24 @@ def approve_candidate(
                 edit["approved"] = True
         correction["region_edits"] = edits
         shot.take_memory.userCorrection = correction
-    shot.take_memory.takeState = {
-        "approved_candidate_id": candidate.id,
-        "approved_asset_id": candidate.asset_id,
-        "take_label": candidate.take_label,
-        "family": candidate.family,
-        "source": candidate.source,
-        "sourceCameraId": candidate.source_camera_id or shot.camera.camera_id,
-        "cameraStateVersion": candidate.camera_state_version,
-        "cameraStateHash": candidate.camera_state_hash,
-    }
+    # Merge onto any existing takeState (e.g. lastTimelineAssetId /
+    # lastTimelineResult recorded by send_approved_to_timeline). Replacing the
+    # dict would wipe the timeline-export state and silently un-protect an
+    # exported take from deletion and break re-export idempotency.
+    _take_state = dict(shot.take_memory.takeState or {})
+    _take_state.update(
+        {
+            "approved_candidate_id": candidate.id,
+            "approved_asset_id": candidate.asset_id,
+            "take_label": candidate.take_label,
+            "family": candidate.family,
+            "source": candidate.source,
+            "sourceCameraId": candidate.source_camera_id or shot.camera.camera_id,
+            "cameraStateVersion": candidate.camera_state_version,
+            "cameraStateHash": candidate.camera_state_hash,
+        }
+    )
+    shot.take_memory.takeState = _take_state
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
     save_scene_shot(db, project_id, shot)
     return shot
@@ -1008,6 +1124,13 @@ def delete_shot_candidate(
     if candidate is None:
         raise SceneCreatorError("That generation was not found.")
     asset_id = str(candidate.asset_id or "").strip()
+    memory = shot.take_memory or SceneShotTakeMemory()
+    take_state = dict(memory.takeState or {})
+    last_export = str(take_state.get("lastTimelineAssetId") or "").strip()
+    if asset_id and last_export and last_export == asset_id:
+        raise SceneCreatorError(
+            "This generation is already on the Timeline. Remove it from Timeline before deleting it here."
+        )
     if asset_id:
         _delete_library_asset(db, project_id, asset_id)
     if shot.approved_candidate_id == candidate_id:

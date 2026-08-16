@@ -728,6 +728,40 @@
   color: var(--warn, #e0b25a);
 }
 
+.scene-creator-profile__caption--fail {
+  color: var(--danger, #e08a8a);
+}
+
+.scene-creator-profile__integrity {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.scene-creator-profile__ticks {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted, #9aa3b5);
+}
+
+.scene-creator-integrity-detail {
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.scene-creator-integrity-detail p {
+  margin: 0 0 0.25rem;
+}
+
 .scene-creator-profile__reset {
   align-self: flex-start;
   font-size: 0.8rem;

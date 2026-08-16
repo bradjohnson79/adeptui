@@ -8,6 +8,7 @@ import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import type { SceneShotCandidate } from "./types";
 import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
+import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
 import { CenterMaskCanvas } from "./regionEdit/CenterMaskCanvas";
@@ -407,6 +408,13 @@ function StandardPreview({
 
 function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   const profiles = sc.workspace?.spatial_profiles || [];
+  const [integrityOpen, setIntegrityOpen] = useState(false);
+  const readiness = sc.workspace?.production_readiness || null;
+  const integrity = deriveIntegrityCaption({
+    cdStatus: sc.productionContextStatus,
+    readiness,
+  });
+  const ticks = readiness?.ticks || {};
   return (
     <div className="scene-creator-profile" data-testid="scene-creator-spatial-profile">
       <p className="scene-creator-core__label">Spatial Profile</p>
@@ -437,6 +445,41 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
         <p className="scene-creator-profile__caption scene-creator-profile__caption--warn" data-testid="scene-creator-cd-caption">
           ⚠ Co-Director production data could not be loaded
         </p>
+      ) : null}
+      {integrity.kind === "verified" ? (
+        <button type="button" className="scene-creator-profile__caption scene-creator-profile__caption--ok scene-creator-profile__integrity" data-testid="scene-creator-integrity-caption" onClick={() => setIntegrityOpen((v) => !v)}>
+          ✓ Production integrity verified
+        </button>
+      ) : null}
+      {integrity.kind === "advisory" ? (
+        <button type="button" className="scene-creator-profile__caption scene-creator-profile__caption--warn scene-creator-profile__integrity" data-testid="scene-creator-integrity-caption" onClick={() => setIntegrityOpen((v) => !v)}>
+          ⚠ Production integrity: {integrity.count} advisory
+        </button>
+      ) : null}
+      {integrity.kind === "blocked" ? (
+        <button type="button" className="scene-creator-profile__caption scene-creator-profile__caption--fail scene-creator-profile__integrity" data-testid="scene-creator-integrity-caption" onClick={() => setIntegrityOpen((v) => !v)}>
+          ✕ Production integrity check failed
+        </button>
+      ) : null}
+      {integrity.kind === "connections" ? (
+        <button type="button" className="scene-creator-profile__caption scene-creator-profile__caption--warn scene-creator-profile__integrity" data-testid="scene-creator-integrity-caption" onClick={() => setIntegrityOpen((v) => !v)}>
+          ✓ Production connections verified
+          {integrity.llmUnavailable ? " — Co-Director creative cross-check unavailable" : ""}
+        </button>
+      ) : null}
+      {sc.productionContextStatus === "loaded" ? (
+        <p className="scene-creator-profile__ticks" data-testid="scene-creator-ref-ticks">
+          Character {tickMark(ticks.character)} · Prop {tickMark(ticks.prop)} · Environment {tickMark(ticks.environment)} · Spatial {tickMark(ticks.spatial)}
+        </p>
+      ) : null}
+      {integrityOpen && readiness ? (
+        <div className="scene-creator-integrity-detail" data-testid="scene-creator-integrity-detail">
+          <p>Production Integrity</p>
+          {(readiness.issues || []).length === 0 ? <p>Ready to generate</p> : null}
+          {(readiness.issues || []).map((issue, idx) => (
+            <p key={`${issue.code || "i"}-${idx}`}>{issue.message}</p>
+          ))}
+        </div>
       ) : null}
       <button
         type="button"

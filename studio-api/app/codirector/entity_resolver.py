@@ -455,15 +455,12 @@ def compile_shot_prompt(
     character_styles = [c.get("visual_style") for c in char_meta if c.get("visual_style")]
     user_style = ""  # caller may set ``visual_style`` on the resulting body
 
-    # Reference images: approved casting for each character + prop library assets
-    # + ERS directional refs (orientation-aware).
+    # Canonical approved identity only — do not dump every character-sheet frame
+    # into the provider array (those extras are never loaded by a one-slot graph).
     reference_image_ids: list[str] = []
     for char in char_meta:
         if char.get("approved_casting_asset_id"):
             reference_image_ids.append(char["approved_casting_asset_id"])
-        for ref_id in char.get("reference_asset_ids") or []:
-            if ref_id and ref_id not in reference_image_ids:
-                reference_image_ids.append(ref_id)
     for prop in prop_meta:
         visual = (prop.get("approved_asset_id") or prop.get("library_asset_id") or "").strip()
         if visual and visual not in reference_image_ids:
@@ -534,22 +531,20 @@ def compile_shot_prompt(
     # anime/animation scenes prefer Illustrious XL while photoreal scenes keep
     # the realism engine.
     routing_style = project_style or environment_style or (character_styles[0] if character_styles else "")
-    has_reference = bool(reference_image_ids)
-    if has_reference:
-        scene_model_family = "zimage"
-    else:
-        try:
-            from ..image_product.recommend import recommend_image_family
+    # Do not silently switch the selected family to zimage because references exist.
+    # Enqueue locks the filmmaker's generator; Image Core picks a Certified path.
+    try:
+        from ..image_product.recommend import recommend_image_family
 
-            rec = recommend_image_family(
-                prompt=prompt,
-                purpose="scene_shot",
-                operation="image.generate",
-                style=routing_style or None,
-            )
-            scene_model_family = rec.get("executionFamily") or "zimage"
-        except Exception:
-            scene_model_family = "zimage"
+        rec = recommend_image_family(
+            prompt=prompt,
+            purpose="scene_shot",
+            operation="image.generate",
+            style=routing_style or None,
+        )
+        scene_model_family = rec.get("executionFamily") or "zimage"
+    except Exception:
+        scene_model_family = "zimage"
     scene_workflow_key = f"{scene_model_family}.txt2img"
 
     creative_context: dict[str, Any] = {

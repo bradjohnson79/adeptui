@@ -700,6 +700,22 @@ export function useSceneCreator(projectId: string) {
 
   const previewCamera = useCallback(async () => {
     if (!sceneId || !selectedCameraId) return;
+    if (productionContextStatus === "failed") {
+      setError("Co-Director production data is not loaded. Select a Spatial Profile and wait until it finishes loading before generating.");
+      return;
+    }
+    const readiness = workspace?.production_readiness;
+    if (/qwen/i.test(localFamily) && productionContextStatus === "loaded") {
+      const ticks = readiness?.ticks;
+      if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
+        setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+        return;
+      }
+    }
+    if (readiness?.status === "blocked") {
+      setError(readiness.issues?.[0]?.message || "Production integrity check failed.");
+      return;
+    }
     if (!beginSubmit()) return;
     setError(null);
     setNotice(null);
@@ -722,7 +738,7 @@ export function useSceneCreator(projectId: string) {
     } finally {
       endSubmit();
     }
-  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, startPoll]);
+  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, productionContextStatus, projectId, sceneId, selectedCameraId, startPoll, workspace?.production_readiness]);
 
   const finalRender = useCallback(async () => {
     if (!sceneId || !selectedCameraId) return;
@@ -733,6 +749,22 @@ export function useSceneCreator(projectId: string) {
     const compiled = shot ? compileRegionEditFinalPrompt(shotWithSelectedFamily(shot, localFamily) || shot) : null;
     if (compiled?.visualInheritanceBlocked) {
       setError(VISUAL_INHERITANCE_BLOCKED_MESSAGE);
+      return;
+    }
+    if (productionContextStatus === "failed") {
+      setError("Co-Director production data is not loaded. Select a Spatial Profile and wait until it finishes loading before generating.");
+      return;
+    }
+    const readiness = workspace?.production_readiness;
+    if (/qwen/i.test(localFamily) && productionContextStatus === "loaded") {
+      const ticks = readiness?.ticks;
+      if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
+        setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+        return;
+      }
+    }
+    if (readiness?.status === "blocked") {
+      setError(readiness.issues?.[0]?.message || "Production integrity check failed.");
       return;
     }
     if (!beginSubmit()) return;
@@ -762,7 +794,7 @@ export function useSceneCreator(projectId: string) {
     } finally {
       endSubmit();
     }
-  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, projectId, sceneId, selectedCameraId, shot, startPoll]);
+  }, [apiEnabled, apiModel, applyPack, applyShot, localEnabled, localFamily, persistShot, productionContextStatus, projectId, sceneId, selectedCameraId, shot, startPoll, workspace?.production_readiness]);
 
   const apiAvailable = workspace?.api_generation_available === true || apiEnabled;
   const approved = shot?.candidates.find((c) => c.id === shot.approved_candidate_id) || null;

@@ -220,6 +220,24 @@ export type SceneCreatorCameraOption = {
   gridRow?: number;
 };
 
+export type ProductionReadiness = {
+  ready?: boolean;
+  status?: "idle" | "pass" | "advisory" | "blocked" | "llm_unavailable";
+  sceneId?: string;
+  profileId?: string;
+  fingerprint?: string;
+  checks?: Record<string, string>;
+  issues?: { type?: string; code?: string; message?: string }[];
+  ticks?: {
+    character?: string;
+    prop?: string;
+    environment?: string;
+    spatial?: string;
+    camera?: string;
+  };
+  llm?: { status?: string; available?: boolean; summary?: string; issues?: { type?: string; message?: string }[] } | null;
+};
+
 export type SceneCreatorWorkspace = {
   sheets: EnvironmentReferenceSheetSummary[];
   selected_sheet_id: string;
@@ -270,6 +288,7 @@ export type SceneCreatorWorkspace = {
     ersLibraryAssetId?: string;
     aspectRatio?: string;
   } | null;
+  production_readiness?: ProductionReadiness | null;
 };
 
 export type SpatialProfile = {
