@@ -42,6 +42,7 @@ test.describe("Scene Creator hosted grounding smoke", () => {
     expect(workspace.production_readiness?.ticks?.character).toBe("ok");
     expect(workspace.production_readiness?.ticks?.prop).toBe("warn");
     expect(workspace.production_readiness?.ticks?.environment).toBe("warn");
+    expect(workspace.production_readiness?.ticks?.spatial).toBe("ok");
 
     const qwen = await request.post(
       `${API}/api/scene-creator/projects/${PROJECT_ID}/scenes/${SCENE_ID}/cinematographer/preview`,
@@ -98,6 +99,17 @@ test.describe("Scene Creator hosted grounding smoke", () => {
     await expect(page.getByTestId("scene-creator-reset-layout")).toBeVisible();
     await expect(page.getByTestId("cine-preview")).toBeVisible();
     await expect(page.getByTestId("scene-creator-generate")).toBeVisible();
+    await expect(page.getByTestId("scene-creator-take-strip")).toBeVisible();
+    const accordion = page.getByTestId("cine-orient-accordion");
+    await expect(accordion).toBeVisible({ timeout: 15_000 });
+    await accordion.locator("summary").first().click();
+    await expect(page.getByTestId("cine-orient-preview")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("cine-orient-final")).toBeVisible();
+    const takes = page.getByTestId("scene-creator-strip-take");
+    if ((await takes.count()) > 0) {
+      await expect(page.getByTestId("scene-creator-take-delete").first()).toBeVisible();
+    }
+    expect(a.ersLibraryAssetId).toBe("79a55177-10be-438b-9ae7-477c1781abe7");
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("scene-creator-cd-caption")).toHaveText("✓ Co-Director production data loaded", {

@@ -5,7 +5,7 @@
 
 ```text
 Implementation certification:    GO — PRODUCTION GROUNDING + INTEGRITY (already certified; not reopened)
-Hosted deployment certification: PENDING — this closure (not yet proven on Vercel)
+Hosted deployment certification: GO — Vercel production SHA = origin/beta = local HEAD
 Program-wide Scene Creator:      NOT ALL-GREEN — Localized Add remains NO-GO
 ```
 
@@ -16,13 +16,13 @@ Program-wide Scene Creator:      NOT ALL-GREEN — Localized Add remains NO-GO
 | ERS 2K Production Context | GO |
 | Workspace Refinement | GO |
 | Production Grounding + Integrity | GO |
-| Hosted Grounding Deployment | PENDING |
+| Hosted Grounding Deployment | GO |
 | Localized Add | NO-GO |
 
-**HEAD (committed):** `c34cdfe55633430f3e982749013684ee07ff9917` (Pass 1/2 ship). Grounding work is in the working tree on this branch until the deployment-closure commit.  
-**Hosted UI:** `https://adeptui.vercel.app` (implementation certified against production `studio-web` dist preview `:4173`; hosted SHA is this closure)  
-**Studio API:** `http://127.0.0.1:8758/` `/api/health` **200**  
-**Preview:** `http://127.0.0.1:4173/` with `STUDIO_API_PORT=8758`  
+**HEAD / origin/beta / Vercel production `githubCommitSha`:** `f5e5b996d31156eb731a2914566b605bcf8aaee8`  
+**Vercel production deploy:** `dpl_DjdAd73rxA75XASGFzgkusxXiQPb` (`adeptui-2ewtsud7g-anoint.vercel.app`, aliases include `https://adeptui.vercel.app`)  
+**Hosted UI:** `https://adeptui.vercel.app` → **Hosted API:** `https://api-beta.adeptui.org` → Studio API `:8758`  
+**Local restart health only:** `http://127.0.0.1:8758/` `/api/health` **200**  
 **Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` (reused; never `POST /api/projects`)
 
 This is the single governing document for Scene Creator production grounding + integrity (Law 30). It does **not** rewrite:
@@ -148,7 +148,6 @@ Studio API: `http://127.0.0.1:8758/`
 
 ## Limitations
 
-- Hosted Vercel frontend is **not** a new SHA; integrity caption/ticks live in `:4173` dist + `:8758`.
 - Cup and ERS **pixels** are not loaded on Certified Z-Image/FLUX (one slot). The UI tells that truth (⚠). That is not a milestone fail.
 - ECU Preview `6b86b9f2-…` does not show Korri’s face; identity is proven by the loaded file, not by a recognizable portrait in this framing.
 - An earlier Qwen Preview (`158e55a6-…`) ran while Spatial Profile selection was still **Reset** (prompt-only desk). After persist-on-hydrate, the same Qwen request is 400.
@@ -169,3 +168,59 @@ Studio API: `http://127.0.0.1:8758/`
 - `studio-web/src/components/CoDirector/SceneCreator/useSceneCreator.ts`
 - `studio-web/src/components/CoDirector/SceneCreator/types.ts`
 - `tests/e2e/scene-creator/scene-creator-workspace-refine.spec.ts`
+- `tests/e2e/scene-creator/scene-creator-grounding-hosted-smoke.spec.ts`
+- `docs/planning/scene-creator/SCENE_CREATOR_MULTI_REFERENCE_FUTURE.md`
+
+## Deployment closure (hosted)
+
+Git push of `f5e5b996d31156eb731a2914566b605bcf8aaee8` (`scene-creator: certify grounded reference packet and integrity checks`) triggered Git-backed production on project `adeptui` (root directory `studio-web`, production branch `beta`). CLI `npx vercel ls` age/inspect summary omitted `githubCommitSha`; `npx vercel api /v9/projects/prj_1NHSYLrFYQM3rIXyHwKUpezprbsx` is authoritative:
+
+| Identity | SHA |
+| --- | --- |
+| Local `HEAD` | `f5e5b996d31156eb731a2914566b605bcf8aaee8` |
+| `origin/beta` | `f5e5b996d31156eb731a2914566b605bcf8aaee8` |
+| Vercel production `meta.githubCommitSha` | `f5e5b996d31156eb731a2914566b605bcf8aaee8` |
+
+Hosted bundle `https://adeptui.vercel.app/assets/index-B1SoAXef.js` contains `scene-creator-integrity-caption` and “Production integrity”. Ready-alone was not used as certification.
+
+### Hosted API path
+
+Smoke used `https://api-beta.adeptui.org` (not `STUDIO_API_BASE=http://127.0.0.1:8758`). Playwright + browser `User-Agent` receive **200**. An earlier harness urllib without User-Agent received **403**; the independent verifier observed **200** without User-Agent. Neither case used localhost as a silent hosted stand-in.
+
+Same backend as local `:8758` proven by matching Schnick hydrate fingerprints on `GET https://api-beta.adeptui.org/.../workspace` and `GET http://127.0.0.1:8758/.../workspace` (Character ok / Prop warn / Environment warn / Spatial ok). Observed values: smoke `26468618cae9edf2`; independent verifier `7985d9c81cc81543` (fingerprint is Layer A of current overlay; equality at a given moment is the same-process proof).
+
+Studio API restart health: `.\Restart-AdeptBetaBackend.ps1 -Service studio_api` then `GET http://127.0.0.1:8758/api/health` **200**.
+
+### Hosted Schnick smoke
+
+`tests/e2e/scene-creator/scene-creator-grounding-hosted-smoke.spec.ts` against `PLAYWRIGHT_BASE_URL=https://adeptui.vercel.app` and `STUDIO_API_BASE=https://api-beta.adeptui.org`: **2 passed** (9.2s).
+
+| Check | Result |
+| --- | --- |
+| CD caption loaded after hydrate | PASS — `✓ Co-Director production data loaded` |
+| Integrity advisory, not fake green verified | PASS — caption visible; not “Production integrity verified” |
+| Ticks | PASS — API Character ok / Prop warn / Environment warn / Spatial ok; UI Character tick + integrity line |
+| Qwen Preview on hosted API | PASS — **400**, creator copy recommends Z-Image; no T2I job; no family switch |
+| Z-Image packet | PASS — reused job `6b86b9f2-5ec1-4d2a-be6a-e677711021f4`; `purpose=scene_shot_preview`; `zimage.ref_edit`; 512×288; Korri `b6ab91dd-…` only consumed; cup/ERS `semantic_only` |
+| Hard reload | PASS — CD + advisory recompute; no cached fake green |
+| Pass 2 verify-only | PASS — panes, Reset Layout, 3D Preview/Final (`cine-orient-preview` / `cine-orient-final`), take strip / × when takes exist, ERS `79a55177-…` still on handoff. Did **not** click Reset Workspace (would clear profile). |
+| Delete lineage | N/A hosted UI — unit test remains sufficient |
+
+### Matrix
+
+| Gate | Status |
+| --- | --- |
+| SHA triple-match | PASS |
+| Hosted bundle contains integrity UI | PASS |
+| Qwen stays refused on `api-beta.adeptui.org` | PASS |
+| Z-Image still consumes Korri casting | PASS |
+| Localized Add | **NO-GO** (not reopened) |
+| Independent verifier | **VERIFIED — SCENE CREATOR GROUNDING DEPLOYMENT CLOSURE PASSED** |
+
+```text
+GO — SCENE CREATOR GROUNDING DEPLOYMENT CERTIFIED END TO END
+```
+
+This hosted-deployment GO does **not** change Add NO-GO and does **not** imply program-wide Scene Creator completion.
+
+Product SHA on Vercel remains `f5e5b996d31156eb731a2914566b605bcf8aaee8` (`dpl_DjdAd73rxA75XASGFzgkusxXiQPb`, bundle `index-B1SoAXef.js`). A later docs/tests-only commit on `beta` records this closure; it does not reopen grounding architecture or Add.

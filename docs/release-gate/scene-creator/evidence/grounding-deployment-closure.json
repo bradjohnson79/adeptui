@@ -1,0 +1,58 @@
+{
+  "date": "2026-08-16",
+  "productSha": "f5e5b996d31156eb731a2914566b605bcf8aaee8",
+  "originBeta": "f5e5b996d31156eb731a2914566b605bcf8aaee8",
+  "vercelProduction": {
+    "id": "dpl_DjdAd73rxA75XASGFzgkusxXiQPb",
+    "url": "adeptui-2ewtsud7g-anoint.vercel.app",
+    "aliases": ["adeptui.vercel.app", "adeptui-anoint.vercel.app", "adeptui-git-beta-anoint.vercel.app"],
+    "githubCommitSha": "f5e5b996d31156eb731a2914566b605bcf8aaee8",
+    "githubCommitRef": "beta",
+    "readyState": "READY",
+    "readySubstate": "PROMOTED",
+    "target": "production"
+  },
+  "hostedBundle": {
+    "indexHtmlJs": "/assets/index-B1SoAXef.js",
+    "containsIntegrityCaption": true,
+    "containsProductionIntegrityCopy": true
+  },
+  "apiPath": {
+    "browser": "https://adeptui.vercel.app",
+    "hostedApi": "https://api-beta.adeptui.org",
+    "localHealthOnly": "http://127.0.0.1:8758",
+    "bareUrllibNoUserAgent": "403-then-200-at-verify",
+    "browserUserAgent": "200",
+    "sameBackendFingerprintSmoke": "26468618cae9edf2",
+    "sameBackendFingerprintIndependent": "7985d9c81cc81543"
+  },
+  "schnick": {
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+    "shotId": "88539183-6fd2-495a-aa48-e406a3653cd5",
+    "profileId": "792376c5-013c-51dd-8d3a-dae5834ae77e",
+    "ersLibraryAssetId": "79a55177-10be-438b-9ae7-477c1781abe7",
+    "readiness": "advisory",
+    "ticks": {
+      "character": "ok",
+      "prop": "warn",
+      "environment": "warn",
+      "spatial": "ok",
+      "camera": "ok"
+    }
+  },
+  "qwenHostedPreview": {
+    "status": 400,
+    "noT2I": true,
+    "noFamilySwitch": true
+  },
+  "zimagePacketJob": {
+    "id": "6b86b9f2-5ec1-4d2a-be6a-e677711021f4",
+    "consumedAssetIds": ["b6ab91dd-9d0a-4e4b-98b4-b26d268950dc"]
+  },
+  "playwrightHostedSmoke": {
+    "file": "tests/e2e/scene-creator/scene-creator-grounding-hosted-smoke.spec.ts",
+    "result": "2 passed"
+  },
+  "independentVerifier": "VERIFIED — SCENE CREATOR GROUNDING DEPLOYMENT CLOSURE PASSED"
+}
