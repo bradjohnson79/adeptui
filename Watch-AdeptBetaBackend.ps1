@@ -53,58 +53,64 @@ function Invoke-ServiceRestart {
     Write-BetaLog $Svc "Backing off ${backoff}s before restart (consecutive failures: $failures)."
     Start-Sleep -Seconds $backoff
 
-    # Attempt restart
-    Add-RestartEvent $Svc | Out-Null
-    $info = Read-ServicePid $Svc
-    if ($info) { Stop-OwnedService $Svc | Out-Null; Start-Sleep -Seconds 2 }
-
-    $ok = switch ($Svc) {
-        "studio_api" {
-            $py = $paths.StudioApiPython; $apiDir = $paths.StudioApiDir
-            if (-not (Test-Path $py)) { return $false }
-            $logFile = Join-Path $LogsDir "studio_api_stdout.log"
-            $proc = Start-Process -FilePath $py -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8758" -WorkingDirectory $apiDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "studio_api_err.log")
-            Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
-            $deadline = (Get-Date).AddSeconds(30)
-            while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2; if (Test-StudioApiHealth) { return $true } }
-            return $false
-        }
-        "comfyui" {
-            $py = $paths.ComfyPython; $installRoot = $paths.ComfyInstallRoot
-            if (-not (Test-Path $py)) { return $false }
-            $logFile = Join-Path $LogsDir "comfyui_stdout.log"
-            $cArgs = @("-s","ComfyUI\main.py","--enable-manager")
-            if ($paths.ComfySharedPaths) { $cArgs += @("--extra-model-paths-config","`"$($paths.ComfySharedPaths)`"") }
-            if ($paths.ComfyInputDir)  { $cArgs += @("--input-directory",$paths.ComfyInputDir) }
-            if ($paths.ComfyOutputDir) { $cArgs += @("--output-directory",$paths.ComfyOutputDir) }
-            $proc = Start-Process -FilePath $py -ArgumentList $cArgs -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "comfyui_err.log")
-            Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
-            $deadline = (Get-Date).AddSeconds(45)
-            while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 3; if (Test-ComfyUiHealth) { return $true } }
-            return $false
-        }
-        "cloudflared" {
-            $cf = $paths.Cloudflared; $cfg = $paths.TunnelConfig
-            if (-not (Test-Path $cf) -or -not (Test-Path $cfg)) { return $false }
-            $logFile = Join-Path $LogsDir "cloudflared_stdout.log"
-            $proc = Start-Process -FilePath $cf -ArgumentList "tunnel","--config","`"$cfg`"","run",$paths.TunnelName -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "cloudflared_err.log")
-            Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
-            $deadline = (Get-Date).AddSeconds(20)
-            while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2; if (Test-CloudflareHealth) { return $true } }
-            return $false
-        }
-        "ollama" {
-            $ol = $paths.Ollama
-            if (-not (Test-Path $ol)) { return $false }
-            $logFile = Join-Path $LogsDir "ollama_stdout.log"
-            $proc = Start-Process -FilePath $ol -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "ollama_err.log")
-            Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
-            $deadline = (Get-Date).AddSeconds(15)
-            while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2; if (Test-OllamaHealth) { return $true } }
-            return $false
-        }
+    # Phase 7: the watchdog must hold the same exclusive lifecycle lock as a
+    # manual Start/Restart so it can never fight an operator operation.
+    if (-not (Set-BetaRestartLock $Svc)) {
+        Write-BetaLog $Svc "Watchdog restart refused - exclusive lifecycle lock held by another operation." "WARN"
+        return $false
     }
-    return $ok
+    try {
+        # Attempt restart
+        Add-RestartEvent $Svc | Out-Null
+        $info = Read-ServicePid $Svc
+        if ($info) { Stop-OwnedService $Svc | Out-Null; Start-Sleep -Seconds 2 }
+
+        $ok = switch ($Svc) {
+            "studio_api" {
+                # Watchdog never fights a manual lifecycle lock; the caller checks
+                # Test-BetaRestartLock before invoking. Use the authoritative
+                # idempotent start (fails closed on phantom/unrelated owners).
+                return Start-StudioApiAuthoritative
+            }
+            "comfyui" {
+                $py = $paths.ComfyPython; $installRoot = $paths.ComfyInstallRoot
+                if (-not (Test-Path $py)) { return $false }
+                $logFile = Join-Path $LogsDir "comfyui_stdout.log"
+                $cArgs = @("-s","ComfyUI\main.py","--enable-manager")
+                if ($paths.ComfySharedPaths) { $cArgs += @("--extra-model-paths-config","`"$($paths.ComfySharedPaths)`"") }
+                if ($paths.ComfyInputDir)  { $cArgs += @("--input-directory",$paths.ComfyInputDir) }
+                if ($paths.ComfyOutputDir) { $cArgs += @("--output-directory",$paths.ComfyOutputDir) }
+                $proc = Start-Process -FilePath $py -ArgumentList $cArgs -WorkingDirectory $installRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "comfyui_err.log")
+                Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
+                $deadline = (Get-Date).AddSeconds(45)
+                while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 3; if (Test-ComfyUiHealth) { return $true } }
+                return $false
+            }
+            "cloudflared" {
+                $cf = $paths.Cloudflared; $cfg = $paths.TunnelConfig
+                if (-not (Test-Path $cf) -or -not (Test-Path $cfg)) { return $false }
+                $logFile = Join-Path $LogsDir "cloudflared_stdout.log"
+                $proc = Start-Process -FilePath $cf -ArgumentList "tunnel","--config","`"$cfg`"","run",$paths.TunnelName -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "cloudflared_err.log")
+                Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
+                $deadline = (Get-Date).AddSeconds(20)
+                while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2; if (Test-CloudflareHealth) { return $true } }
+                return $false
+            }
+            "ollama" {
+                $ol = $paths.Ollama
+                if (-not (Test-Path $ol)) { return $false }
+                $logFile = Join-Path $LogsDir "ollama_stdout.log"
+                $proc = Start-Process -FilePath $ol -ArgumentList "serve" -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "ollama_err.log")
+                Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
+                $deadline = (Get-Date).AddSeconds(15)
+                while ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2; if (Test-OllamaHealth) { return $true } }
+                return $false
+            }
+        }
+        return $ok
+    } finally {
+        Clear-BetaRestartLock
+    }
 }
 
 function Invoke-WatchCycle {
@@ -124,6 +130,11 @@ function Invoke-WatchCycle {
             $info = Read-ServicePid $svc
             $isOwned = $info -and $info.owned
 
+            if (Test-BetaRestartLock) {
+                Write-BetaLog $svc "Manual restart in progress - watchdog holding."
+                continue
+            }
+
             if (-not $isOwned) {
                 # Not our owned service - just report, don't restart
                 Write-BetaLog $svc "Unhealthy but not owned - monitoring only." "WARN"
@@ -133,6 +144,18 @@ function Invoke-WatchCycle {
             # Check backoff
             if ($backoffState[$svc].nextRetryAt -and (Get-Date) -lt $backoffState[$svc].nextRetryAt) {
                 continue
+            }
+
+            # A single uvicorn worker cannot answer healthz while ERS/generate
+            # is in flight. Do not kill a live process on one missed poll.
+            if (Test-ServicePidAlive $svc) {
+                $busy = [int]$backoffState[$svc].consecutiveFailures + 1
+                $backoffState[$svc].consecutiveFailures = $busy
+                if ($busy -lt 20) {
+                    Write-BetaLog $svc "HTTP unhealthy but process alive ($busy/20) - treating as busy, not killing."
+                    continue
+                }
+                Write-BetaLog $svc "HTTP unhealthy and process alive for $busy cycles - restarting wedged process." "WARN"
             }
 
             $backoffState[$svc].consecutiveFailures++

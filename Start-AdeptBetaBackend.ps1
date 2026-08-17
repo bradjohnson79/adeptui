@@ -30,29 +30,8 @@ Write-BetaLog "manager" "=== Start-AdeptBetaBackend ==="
 # ---------------------------------------------------------------------------
 
 function Start-StudioApi {
-    if (Test-StudioApiHealth) {
-        Write-BetaLog "studio_api" "Already healthy - reusing."
-        $portPid = _Get-PortOwnerPid 8758
-        if ($portPid) { Write-ServicePid "studio_api" $portPid "adopted" $true }
-        return $true
-    }
-    $py = $paths.StudioApiPython
-    $apiDir = $paths.StudioApiDir
-    if (-not (Test-Path $py)) { Write-BetaLog "studio_api" "venv Python not found at $py" "ERROR"; return $false }
-    $logFile = Join-Path $LogsDir "studio_api_stdout.log"
-    Write-BetaLog "studio_api" "Starting uvicorn on :8758..."
-    $proc = Start-Process -FilePath $py `
-        -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8758" `
-        -WorkingDirectory $apiDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "studio_api_err.log")
-    Write-ServicePid "studio_api" $proc.Id $proc.StartInfo.FileName
-    $deadline = (Get-Date).AddSeconds(60)
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 2
-        if (Test-StudioApiHealth) { Write-BetaLog "studio_api" "Healthy."; return $true }
-    }
-    Write-BetaLog "studio_api" "Did not become healthy within 60s." "ERROR"
-    return $false
+    # Authoritative idempotent start lives in BetaBackendCommon (single owner).
+    return Start-StudioApiAuthoritative
 }
 
 # ---------------------------------------------------------------------------
@@ -62,7 +41,7 @@ function Start-StudioApi {
 function Start-ComfyUi {
     if (Test-ComfyUiHealth) {
         Write-BetaLog "comfyui" "Already healthy - reusing."
-        $portPid = _Get-PortOwnerPid 8188
+        $portPid = Get-PortOwnerPid 8188
         if ($portPid) { Write-ServicePid "comfyui" $portPid "adopted" $true }
         return $true
     }
@@ -149,9 +128,13 @@ function Start-Ollama {
 }
 
 # ---------------------------------------------------------------------------
-# Execute
+# Execute (under the lifecycle lock - concurrent Start commands must not race)
 # ---------------------------------------------------------------------------
 
+if (-not (Set-BetaRestartLock "all")) {
+    Write-BetaLog "manager" "Another lifecycle operation is in progress - Start refused (exclusive lock held)."
+    exit 1
+}
 $results = @{}
 $results.studio_api  = Start-StudioApi
 $results.comfyui    = Start-ComfyUi
@@ -163,6 +146,8 @@ $tunnelOk = $results.cloudflared
 $ollamaOk = $results.ollama
 
 $gpu = Get-GpuInfo
+
+Clear-BetaRestartLock
 
 Write-BackendState @{
     studio_api  = $results.studio_api
@@ -192,3 +177,4 @@ Write-Host "  Overall           $overall" -ForegroundColor $overallColor
 Write-Host ""
 
 if ($allOk) { exit 0 } else { exit 1 }
+

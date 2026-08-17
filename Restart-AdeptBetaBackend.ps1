@@ -20,6 +20,10 @@ $envApplied = Import-BetaEnv
 Write-BetaLog "manager" "Loaded $($envApplied.Count) env vars from beta-local.env + beta-local.local.env"
 
 Write-BetaLog "manager" "=== Restart-AdeptBetaBackend (service=$Service) ==="
+if (-not (Set-BetaRestartLock $Service)) {
+    Write-BetaLog "manager" "Another lifecycle operation is in progress - Restart refused (exclusive lock held)."
+    exit 1
+}
 
 $targets = if ($Service -eq "all") { $Services } else { @($Service) }
 
@@ -39,12 +43,23 @@ function Restart-OneService {
     # Start
     switch ($Svc) {
         "studio_api" {
-            $py = $paths.StudioApiPython
-            $apiDir = $paths.StudioApiDir
-            if (-not (Test-Path $py)) { Write-BetaLog $Svc "venv Python not found." "ERROR"; return $false }
-            $logFile = Join-Path $LogsDir "studio_api_stdout.log"
-            $proc = Start-Process -FilePath $py -ArgumentList "-m","uvicorn","app.main:app","--host","127.0.0.1","--port","8758" -WorkingDirectory $apiDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $logFile -RedirectStandardError (Join-Path $LogsDir "studio_api_err.log")
-            Write-ServicePid $Svc $proc.Id $proc.StartInfo.FileName
+            if (-not (Test-PortIsFree 8758)) {
+                $st = Get-StudioApiPortState
+                if ($st.state -eq "healthy" -or $st.state -eq "starting") {
+                    # Verified Studio API owner (pid file may be absent) - stop it
+                    # first (identity-safe inside Stop-OwnedService), never stack.
+                    Write-BetaLog $Svc "Stopping verified owner (state $($st.state), PID $($st.pid))."
+                    Stop-OwnedService "studio_api" | Out-Null
+                    if (-not (Wait-PortReleased 8758 -TimeoutSec 15)) {
+                        Write-BetaLog $Svc "Refusing to restart: :8758 still held after stop (PID $(Get-PortOwnerPid 8758))." "ERROR"
+                        return $false
+                    }
+                } else {
+                    Write-BetaLog $Svc "Refusing to restart: :8758 in state $($st.state) (PID $($st.pid))." "ERROR"
+                    return $false
+                }
+            }
+            return Start-StudioApiAuthoritative
         }
         "comfyui" {
             $py = $paths.ComfyPython
@@ -76,7 +91,7 @@ function Restart-OneService {
     }
 
     # Wait for health
-    $timeout = switch ($Svc) { "comfyui" { 45 } "studio_api" { 60 } default { 20 } }
+    $timeout = switch ($Svc) { "comfyui" { 45 } "studio_api" { 120 } default { 20 } }
     $deadline = (Get-Date).AddSeconds($timeout)
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 2
@@ -103,4 +118,5 @@ Write-Host ""
 
 $allOk = $true
 foreach ($v in $results.Values) { if (-not $v) { $allOk = $false } }
+Clear-BetaRestartLock
 if ($allOk) { exit 0 } else { exit 1 }
