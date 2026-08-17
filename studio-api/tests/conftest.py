@@ -38,6 +38,14 @@ def restore_process_data_dir(monkeypatch: pytest.MonkeyPatch):
 
     settings.data_dir = _TEST_DATA_DIR
     monkeypatch.setenv("STUDIO_DATA_DIR", str(_TEST_DATA_DIR))
+    # Clear the image-modality verify cache so a prior test's monkeypatched
+    # verify_component result cannot leak into this test.
+    try:
+        from app.production_control.model_registry import _IMAGE_VERIFY_CACHE
+
+        _IMAGE_VERIFY_CACHE.clear()
+    except Exception:
+        pass
     yield
     settings.data_dir = _TEST_DATA_DIR
 

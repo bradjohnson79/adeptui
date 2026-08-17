@@ -19,7 +19,10 @@ def test_qwen_2512_registry_entries_present():
     assert profile is not None
     assert legacy is not None
 
-    assert txt2img.status == "Draft"
+    # qwen2512.txt2img was promoted from Draft to Certified (Qwen-Image-2512 is
+    # now the canonical default open-weight image family). See recommend.py:
+    # "Photoreal intents still recommend Qwen-2512 by default."
+    assert txt2img.status == "Certified"
     assert txt2img.builder_path == (
         "app.workflows.qwen_image_2512:build_qwen_2512_txt2img_workflow"
     )
@@ -31,7 +34,9 @@ def test_qwen_2512_registry_entries_present():
         "app.workflows.qwen_image_2512:build_qwen_2512_character_concept_workflow"
     )
     assert profile.builder_path == concept.builder_path
-    assert legacy.status == "Deferred"
+    # Legacy qwen.txt2img moved from Deferred to Draft (kept installable, not
+    # certified; Qwen-Image-2512 is the recommended path).
+    assert legacy.status == "Draft"
     assert "CheckpointLoaderSimple" in legacy.required_nodes
 
 
@@ -40,7 +45,8 @@ def test_qwen_2512_resolve_txt2img_family():
 
     assert contract.workflow_key == "qwen2512.txt2img"
     assert contract.model_family == "qwen-image-2512"
-    assert contract.status == "Draft"
+    # qwen2512.txt2img is now Certified (promoted from Draft).
+    assert contract.status == "Certified"
 
 
 def test_qwen_2512_build_leaf_graph_uses_split_loaders():

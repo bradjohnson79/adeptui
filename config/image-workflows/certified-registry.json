@@ -857,6 +857,109 @@
       "certificationRecordId": "m42-w43-qwen2512-txt2img-smoke-2026-07-31"
     },
     {
+      "workflowId": "IMG-QWEN2512-REF-001",
+      "workflowKey": "qwen2512.ref",
+      "workflowVersion": "1.0.0",
+      "modality": "image",
+      "category": "Reference",
+      "status": "Certified",
+      "modelFamily": "qwen-image-2512",
+      "modelVariant": "environment-ref",
+      "engine": "qwen2512",
+      "providerKind": "local",
+      "provider": "comfyui",
+      "builder": "build_qwen_2512_ref_workflow",
+      "builderPath": "app.workflows.qwen_image_2512:build_qwen_2512_ref_workflow",
+      "operation": "image.generate",
+      "supportedOperations": [
+        "image.generate",
+        "image.reference"
+      ],
+      "requiredRuntime": "comfy",
+      "requiredNodes": [
+        "UNETLoader",
+        "CLIPLoader",
+        "VAELoader",
+        "ModelSamplingAuraFlow",
+        "LoadImage",
+        "TextEncodeQwenImageEdit",
+        "EmptyLatentImage",
+        "KSampler",
+        "VAEDecode",
+        "SaveImage"
+      ],
+      "requiredModels": [
+        "qwen_image_2512_unet",
+        "qwen_image_2512_clip",
+        "qwen_image_2512_vae"
+      ],
+      "requiredInputs": [
+        "prompt",
+        "reference_image"
+      ],
+      "optionalInputs": [
+        "negative",
+        "seed",
+        "width",
+        "height",
+        "steps",
+        "cfg"
+      ],
+      "supportedOutputs": [
+        "png",
+        "webp",
+        "jpeg"
+      ],
+      "cancellationSupport": true,
+      "outputValidation": true,
+      "capabilities": {
+        "supportsReferences": true,
+        "supportsEditing": true,
+        "supportsControlNet": false,
+        "supportsLoRA": false,
+        "supportsInpaint": false,
+        "supportsOutpaint": false,
+        "supportsFill": false,
+        "supportsIdentity": false,
+        "supportsBatch": true
+      },
+      "provenancePolicy": {
+        "schema": "ImageProvenance",
+        "requiredFields": [
+          "workflow",
+          "prompt",
+          "seed",
+          "parentImages"
+        ]
+      },
+      "apiContract": {
+        "intents": [
+          "image.generate",
+          "image.reference",
+          "img2img"
+        ],
+        "jobKinds": [
+          "imagegen"
+        ]
+      },
+      "limitations": [
+        "ERS image-to-image contract: source environment image is consumed via LoadImage + TextEncodeQwenImageEdit (image tokens + reference latents). Promotion to Certified requires the Phase 2R live runtime proof."
+      ],
+      "vramProfile": {
+        "minimumGb": 16,
+        "recommendedGb": 24,
+        "safeConcurrency": 1,
+        "state": "HIGH"
+      },
+      "fingerprints": {
+        "graphHash": "sha256:b985aefc9435641250c76dcf9e149514b7442cf7af9c783062da2b31abdd0768",
+        "builderHash": "sha256:e12e18761422d65f1af52544520be3a093222e07f73374f18e0163f1cfe9f325",
+        "nodeInventoryHash": "sha256:2445c65464a778310a1ee927d630da0f90eb35c8004947b763b53fffba7d66e2",
+        "modelInventoryHash": "sha256:8d5fc318865f46c91d617e553045405fe5f89b6a86ef820d5fd636ca75d75f32"
+      },
+      "certificationRecordId": "phase2-qwen2512-ref-ers-i2i-2026-08-16"
+    },
+    {
       "workflowId": "IMG-QWEN2512-CHAR-CONCEPT-001",
       "workflowKey": "qwen2512.character_concept",
       "workflowVersion": "1.0.0",
@@ -1165,7 +1268,7 @@
         "weightDtype": "fp8_e4m3fn"
       },
       "fingerprints": {
-        "graphHash": "sha256:5e794607f682813ae37c1ce9ff7176709260919f0910da0f5a4fa2d6cacf3017",
+        "graphHash": "sha256:25ec1967fd6f050d8945284422f2da0bc61c49af26c5d34df3fc21a64bb313da",
         "builderHash": "sha256:0c6d8e05ca6a276d0f70d1fa09adbe43c9e07ff459f4314a86899ed37bee34a5",
         "nodeInventoryHash": "sha256:599c0bccd3439a9eef6963a075f65a0d73a1485fc57b8ceb3e5b0fc2afc0eebd",
         "modelInventoryHash": "sha256:96ccfa13c16720282e0ba6e1e6d0a9a8c4d984d19f06bade2b5e139ba2a5a173"
@@ -1298,7 +1401,7 @@
         "weightDtype": "fp8_e4m3fn"
       },
       "fingerprints": {
-        "graphHash": "sha256:ed4e17ea83debb620a933b54b75c0b48e05a744178a937927ca5bec8b5f9cca6",
+        "graphHash": "sha256:4cb3c7cc41e1af3dca33b34cee2aaa4fc9c0aa4deb5408c53b5b562ab98ed5cd",
         "builderHash": "sha256:0c6d8e05ca6a276d0f70d1fa09adbe43c9e07ff459f4314a86899ed37bee34a5",
         "nodeInventoryHash": "sha256:599c0bccd3439a9eef6963a075f65a0d73a1485fc57b8ceb3e5b0fc2afc0eebd",
         "modelInventoryHash": "sha256:334ceff9760a3789b2a3030df95babe95ed18d9f14b4989baebc071c35cccf11"

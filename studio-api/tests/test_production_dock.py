@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -245,15 +246,23 @@ def test_model_registry_filter_for_action():
 def test_video_models_inherit_setup_readiness(monkeypatch):
     from app.production_control.model_registry import filter_for_action
 
-    def fake_status(*, persist=False):
+    # _apply_setup_status derives non-image executable/capability from persisted
+    # setup state (load_state) plus the lifecycle certified flag, rather than
+    # build_status — list_models() runs _apply_setup_status on every modality,
+    # and build_status probes slow audio/avatar subprocesses that would hang it.
+    def fake_load_state():
         return {
-            "components": [
-                {"id": "hunyuan_video_15", "status": "ready", "certified": False, "vramRecommendationGb": 24},
-                {"id": "hunyuan_video_13b", "status": "ready", "certified": True, "vramRecommendationGb": 32},
-            ]
+            "status": {
+                "hunyuan_video_15": {"status": "ready"},
+                "hunyuan_video_13b": {"status": "ready"},
+            }
         }
 
-    monkeypatch.setattr("app.setup.status.build_status", fake_status)
+    def fake_cert(component_id: str):
+        return SimpleNamespace(certified=(component_id == "hunyuan_video_13b"))
+
+    monkeypatch.setattr("app.setup.state.load_state", fake_load_state)
+    monkeypatch.setattr("app.setup.lifecycle.service.get_certification", fake_cert)
     models = filter_for_action("video", "text_to_video")
 
     by_id = {m["id"]: m for m in models}

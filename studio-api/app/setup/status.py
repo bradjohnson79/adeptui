@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -10,13 +11,78 @@ from .catalog import COMPONENTS, ComponentDefinition
 from .diagnostics import Verification, utc_now, verify_component
 from .state import load_state, update_state
 
+# Per-component verification timeout for build_status. A single slow runtime
+# probe (e.g. an audio sandbox spawning a 60s torch-import subprocess) must
+# never block the whole status build — that would cross-block every modality
+# resolve (image route included) via _apply_setup_status. On timeout the
+# component is marked "checking" so callers proceed with last-known state.
+_BUILD_VERIFY_TIMEOUT_SEC = 6.0
+
+
+def _verify_component_bounded(
+    component_id: str,
+    state: dict[str, Any],
+    previous_status: dict[str, Any] | None,
+    timeout_sec: float = _BUILD_VERIFY_TIMEOUT_SEC,
+) -> Verification:
+    """Run verify_component in a worker thread with a bounded timeout.
+
+    Slow runtime probes (audio/avatar subprocess health checks) must not
+    block build_status. On timeout we return a "checking" Verification so the
+    component is reported as Loading rather than Error, and the previous
+    known status is preserved downstream via previous_status.
+    """
+    result_holder: dict[str, Verification | Exception | None] = {"value": None}
+
+    def _run() -> None:
+        try:
+            result_holder["value"] = verify_component(component_id, state)
+        except Exception as exc:  # pragma: no cover - defensive
+            result_holder["value"] = exc
+
+    worker = threading.Thread(target=_run, name=f"verify-{component_id}", daemon=True)
+    worker.start()
+    worker.join(timeout_sec)
+    if worker.is_alive():
+        return Verification(
+            healthy=False,
+            absent=False,
+            issue_code="verify_timeout",
+            summary=(
+                f"Verification for {component_id} did not complete within "
+                f"{timeout_sec:.0f}s; preserving last known status."
+            ),
+            recommendation="repair",
+            requires_user_interaction=False,
+        )
+    value = result_holder.get("value")
+    if isinstance(value, Exception):
+        return Verification(
+            healthy=False,
+            absent=False,
+            issue_code="verify_error",
+            summary=f"Verification for {component_id} raised: {value}",
+            recommendation="repair",
+            requires_user_interaction=False,
+        )
+    if value is None:
+        return Verification(
+            healthy=False,
+            absent=False,
+            issue_code="verify_unknown",
+            summary=f"Verification for {component_id} returned no result.",
+            recommendation="repair",
+            requires_user_interaction=False,
+        )
+    return value
+
 CANONICAL_STATUSES = {
     "unknown", "checking", "ready", "not_installed",
     "update_available", "installing", "error",
     "download_unavailable",
     "source_pending",
 }
-_STATUS_CACHE_TTL_SEC = 2.0
+_STATUS_CACHE_TTL_SEC = 30.0
 _STATUS_CACHE: tuple[float, dict[str, Any]] | None = None
 
 _RECOMMENDATION_LABELS = {
@@ -357,7 +423,7 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
     for definition in COMPONENTS:
         active = registry.active_for_component(definition.id)
         old = previous_status.get(definition.id, {})
-        verification = verify_component(definition.id, state)
+        verification = _verify_component_bounded(definition.id, state, old)
         raw_diagnostic = old.get("diagnostic") if isinstance(old, dict) else None
         diagnostic = _reconcile_diagnostic(
             definition.id,
@@ -459,6 +525,11 @@ def build_status(*, persist: bool = True) -> dict[str, Any]:
                 "pack_release_manifest_invalid",
             ):
                 canonical = "error"
+            elif verification.issue_code == "verify_timeout":
+                # Slow runtime probe (e.g. audio sandbox subprocess) did not
+                # complete within the bounded window. Keep the component in
+                # Loading so it does not cross-block other modalities' resolves.
+                canonical = "checking"
             elif verification.absent:
                 canonical = "not_installed"
             else:

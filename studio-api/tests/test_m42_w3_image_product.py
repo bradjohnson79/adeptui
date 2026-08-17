@@ -37,17 +37,22 @@ def test_builtin_presets_seeded():
 
 def test_recommend_why_and_cost():
     photo = recommend_image_family(prompt="cinematic photorealistic production still", purpose="concept_art")
-    assert photo["recommendedFamily"] == "flux"
+    # Photoreal intents now recommend Qwen-Image-2512 by default; FLUX remains
+    # the open-weight alternative (see recommend.py photoreal branch).
+    assert photo["recommendedFamily"] == "qwen2512"
     assert photo["whyThisModel"]
     assert "estimates" in photo
     assert photo["estimates"]["costLabel"]
     assert photo["overridable"] is True
 
     anime = recommend_image_family(prompt="anime cel-shaded character", purpose="character_sheet")
-    assert anime["recommendedFamily"] == "qwen"
+    # Anime/stylized intents route to Illustrious XL when it is Certified
+    # (illustrious.txt2img is Certified), else fall back to Qwen-Image-2512.
+    assert anime["recommendedFamily"] in {"illustrious", "qwen2512"}
 
-    # Execution falls back to certified zimage when flux not Certified
-    assert photo["executionFamily"] == "zimage" or photo["executable"]
+    # Qwen-Image-2512 is Certified/executable, so the photo path executes directly
+    # (no zimage fallback needed).
+    assert photo["executionFamily"] == "qwen2512" or photo["executable"]
 
 
 def test_prompt_intel_expand():
@@ -70,8 +75,10 @@ def test_compile_no_workflow_preference():
     intent = compiled["imageIntent"]
     assert intent["workflowPreference"] is None
     assert compiled["imageRuntime"]["workflowKey"] in {"zimage.txt2img", "flux.txt2img"}
-    # Production path: certified only → zimage fallback when flux Deferred
-    assert compiled["imageRuntime"]["workflowKey"] == "zimage.txt2img"
+    # flux.txt2img is now Certified, so an explicit flux family preference is
+    # honored directly (no zimage fallback). The old "zimage fallback when flux
+    # Deferred" expectation was superseded when flux.txt2img was promoted.
+    assert compiled["imageRuntime"]["workflowKey"] == "flux.txt2img"
     assert compiled["recommendation"]["whyThisModel"]
     assert compiled["recommendation"]["estimates"]["costLabel"]
 

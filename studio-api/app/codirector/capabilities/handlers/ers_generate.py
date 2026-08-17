@@ -652,6 +652,9 @@ def _resolve_ers_grounding(
         "approved_character_asset_ids": list(dict.fromkeys(approved_character_asset_ids)),
         "approved_prop_asset_ids": list(dict.fromkeys(approved_prop_asset_ids)),
         "fingerprint": fingerprint,
+        "character_placements": visible_characters,
+        "prop_placements": visible_props,
+        "blocking": blocking,
     }
 
 
@@ -677,6 +680,7 @@ def _ers_sheet_prompt(
     grounding: dict[str, Any] | None = None,
     visual_canon: Any = None,
     continuity_invariants: list[str] | None = None,
+    continuity_packet: Any = None,
 ) -> str:
     from ....codirector.knowledgebase.ers_compiler import (
         compile_environment_reference_sheet_prompt,
@@ -721,6 +725,7 @@ def _ers_sheet_prompt(
         atlas_note=str(spatial.get("backgroundAssetId") or grounding.get("atlas_asset_id") or ""),
         visual_canon=(visual_canon.model_dump() if visual_canon is not None else None),
         continuity_invariants=continuity_invariants,
+        continuity_packet=continuity_packet,
     )
     seed = str(compiled.get("prompt") or "").strip()
     core_plan = type(
@@ -796,6 +801,8 @@ def handle(
     forceWorkflowKey: str = "",
     lockModelFamily: bool = False,
     visual_canon_corrections: dict[str, Any] | None = None,
+    panel_task: str = "",
+    panelTask: str = "",
 ) -> dict[str, Any]:
     """Enqueue ONE Image Core job (purpose=environment_reference_sheet) and persist the asset.
 
@@ -930,6 +937,37 @@ def handle(
     creator_corrections = visual_canon_corrections if isinstance(visual_canon_corrections, dict) else None
     canon = merge_visual_canon(canon, creator_corrections)
     from types import SimpleNamespace
+    from ...knowledgebase.multimodal_continuity import ContinuityCompileError, compile_packet
+    from ...knowledgebase.multimodal_continuity.provenance import stamp_continuity_packet
+
+    requested_panel = str(panel_task or panelTask or "whole_sheet").strip() or "whole_sheet"
+    provider_name = "qwen" if qwen_i2i else ("gpt-image-2" if gpt_i2i else "")
+    scene_title = ""
+    location_type = ""
+    if scene_intent is not None:
+        scene_title = str(scene_intent.sceneTitle or "")
+        location_type = str(scene_intent.locationType or "")
+    try:
+        continuity_packet = compile_packet(
+            scene_title=scene_title or str(getattr(sheet, "name", "") or ""),
+            location_type=location_type,
+            original_asset_id=str(grounding.get("original_environment_reference_asset_id") or ""),
+            atlas_asset_id=str(grounding.get("atlas_asset_id") or ""),
+            lineage_fingerprint=str(grounding.get("fingerprint") or ""),
+            canon=canon,
+            characters=list(grounding.get("character_placements") or []),
+            props=list(grounding.get("prop_placements") or []),
+            blocking=grounding.get("blocking"),
+            panel_task=requested_panel,
+            extra_invariants=(
+                creator_corrections.get("hardInvariants")
+                if creator_corrections and isinstance(creator_corrections.get("hardInvariants"), list)
+                else None
+            ),
+            provider=provider_name,
+        )
+    except ContinuityCompileError as exc:
+        raise RuntimeError(str(exc)) from exc
 
     seed_prompt = _ers_sheet_prompt(
         sheet,
@@ -939,6 +977,7 @@ def handle(
         continuity_invariants=creator_corrections.get("hardInvariants")
         if creator_corrections and isinstance(creator_corrections.get("hardInvariants"), list)
         else None,
+        continuity_packet=continuity_packet,
     )
     prompt_text = image_core_prompt(
         SimpleNamespace(
@@ -1015,6 +1054,7 @@ def handle(
             "provenance": canon.provenance,
             "unavailableReason": canon.unavailableReason,
         }
+    stamp_continuity_packet(body, continuity_packet)
 
     # GPT Image 2: pixels must reach Kie as input_urls. Never T2I. Never
     # append "not pixel image-to-image" while attaching URLs (CDX-035).

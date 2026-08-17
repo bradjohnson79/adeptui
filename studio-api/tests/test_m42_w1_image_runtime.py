@@ -72,10 +72,15 @@ def test_reference_and_provenance_schemas():
     assert prov.to_dict()["workflow"] == "zimage.txt2img"
 
 
-def test_identity_registry_draft_not_enforced():
+def test_identity_registry_enforced_w5():
+    # The identity registry is now enforced (M42-W5): the canonical authority
+    # moved to studio-api/app/continuity (VisualIdentity). `enforced` is True
+    # because continuity/service.py exists. The old "draft_not_enforced"
+    # expectation was superseded when the continuity package landed.
     snap = identity_registry_snapshot()
-    assert snap["enforced"] is False
+    assert snap["enforced"] is True
     assert snap["enforcementWave"] == "M42-W5"
+    assert snap["authority"] == "studio-api/app/continuity"
 
 
 def test_output_gate_missing_file():

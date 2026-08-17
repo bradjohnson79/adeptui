@@ -276,7 +276,7 @@ _CATALOG: list[ModelDescriptor] = [
         label="Krea 2 Turbo (Local)",
         locality="local",
         provider_id="comfy",
-        capability="Certified",
+        capability="Available",
         lifecycle="Installed",
         supports=["text_to_image", "reference_conditioning", "lora"],
         does_not_support=["edit", "inpaint"],
@@ -697,6 +697,18 @@ _CATALOG: list[ModelDescriptor] = [
     ),
 ]
 
+# Static catalog claims are metadata, never install truth (CDX-075). Local rows
+# start with no lifecycle and no executability: runtime truth is derived at list
+# time from Setup/Source Manager component verification (_apply_setup_status)
+# and live probes (Ollama tags, Docker runtimes, registered model folders). A
+# Certified label proves the workflow exists, not that the weights are on disk.
+_CATALOG = [
+    m.model_copy(update={"lifecycle": None, "executable": False})
+    if m.locality == "local"
+    else m
+    for m in _CATALOG
+]
+
 _BY_ID: dict[str, ModelDescriptor] = {m.id: m for m in _CATALOG}
 
 _SETUP_COMPONENT_BY_MODEL_ID = {
@@ -712,6 +724,8 @@ _SETUP_COMPONENT_BY_MODEL_ID = {
     "flux-schnell-local": "flux1_schnell_local",
     "flux-kontext-dev-local": "flux1_kontext_dev_local",
     "zimage-local": "zimage_models",
+    "krea2-turbo-local": "krea2_models",
+    "krea2-raw-local": "krea2_models",
     "sana-15-local": "sana_15_local",
     "sdxl-local": "sdxl_local",
     "sd35-large-local": "sd35_large_local",
@@ -746,31 +760,102 @@ def _lifecycle_from_setup_status(status: str) -> LocalLifecycle | None:
     return None
 
 
+_IMAGE_VERIFY_CACHE: dict[str, tuple[float, str, bool]] = {}
+_IMAGE_VERIFY_CACHE_TTL_SEC = 5.0
+
+
 def _apply_setup_status(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
+    # Derive capability/executable from runtime status WITHOUT calling
+    # build_status(), which probes ALL components — including slow audio/avatar
+    # subprocess probes (60s torch import) that block the image route AND hang
+    # list_models() (which calls this on every modality). Image-modality
+    # components verify with fast file checks, so they are live-verified here
+    # (fresh, fixes stale persisted entries like krea2). Non-image modalities
+    # read persisted setup state (instant file read); they are overridden by
+    # modality-specific refresh paths (e.g. _refresh_audio_executable) where
+    # relevant. On any exception we keep the static catalog (no override) so
+    # an unreachable runtime never silently downgrades a Certified model.
     try:
-        from ..setup.status import build_status
+        from ..setup.state import load_state
     except Exception:
-        return models
-    try:
-        payload = build_status(persist=False)
-    except Exception:
-        return models
-    by_component = {item["id"]: item for item in payload.get("components") or []}
+        load_state = None  # type: ignore[assignment]
+
+    import time as _time
+
+    def _image_status(component_id: str) -> tuple[str, bool] | None:
+        # Live-verify an image component (fast file check) with a short TTL
+        # cache so repeated resolves don't re-stat the same files. Returns
+        # (status, certified) or None to fall back to the static catalog.
+        cached = _IMAGE_VERIFY_CACHE.get(component_id)
+        now = _time.monotonic()
+        if cached and (now - cached[0]) < _IMAGE_VERIFY_CACHE_TTL_SEC:
+            return cached[1], cached[2]
+        try:
+            from ..setup.diagnostics import verify_component
+            from ..setup.lifecycle.service import get_certification
+            verification = verify_component(component_id)
+            healthy = bool(getattr(verification, "healthy", False))
+            absent = bool(getattr(verification, "absent", False))
+            if healthy:
+                status = "ready"
+            elif absent:
+                status = "not_installed"
+            else:
+                status = "error"
+            record = get_certification(component_id)
+            certified = bool(record and record.certified)
+        except Exception:
+            return None
+        _IMAGE_VERIFY_CACHE[component_id] = (now, status, certified)
+        return status, certified
+
+    def _persisted_status(component_id: str) -> tuple[str, bool] | None:
+        # Non-image modalities derive from persisted setup state (instant file
+        # read), NOT build_status — list_models() calls _apply_setup_status on
+        # ALL modalities, and build_status probes slow audio/avatar
+        # subprocesses that would hang every list_models() call. Non-image
+        # executable truth is overridden by modality-specific refresh paths
+        # (e.g. _refresh_audio_executable) where relevant. Contract tests
+        # monkeypatch load_state to control this.
+        if load_state is None:
+            return None
+        try:
+            entry = load_state().get("status", {}).get(component_id)
+        except Exception:
+            return None
+        if not isinstance(entry, dict):
+            return None
+        status = str(entry.get("status") or "not_installed")
+        try:
+            from ..setup.lifecycle.service import get_certification
+            record = get_certification(component_id)
+            certified = bool(record and record.certified)
+        except Exception:
+            certified = False
+        return status, certified
+
     updated: list[ModelDescriptor] = []
     for model in models:
         component_id = _SETUP_COMPONENT_BY_MODEL_ID.get(model.id)
-        component = by_component.get(component_id) if component_id else None
-        if not component:
+        if not component_id:
             updated.append(model)
             continue
-        status = str(component.get("status") or "not_installed")
-        certified = bool(component.get("certified"))
+        if getattr(model, "modality", None) == "image":
+            result = _image_status(component_id)
+        else:
+            result = _persisted_status(component_id)
+        if result is None:
+            # Keep static catalog (don't override) when verification/persisted
+            # state is unavailable — never silently downgrade a Certified model.
+            updated.append(model)
+            continue
+        status, certified = result
         updated.append(
             model.model_copy(
                 update={
                     "capabilityLabel": _capability_from_setup_status(status, certified=certified),
                     "lifecycle": _lifecycle_from_setup_status(status),
-                    "estimatedVramGb": component.get("vramRecommendationGb") or model.estimatedVramGb,
+                    "estimatedVramGb": model.estimatedVramGb,
                     "executable": status == "ready",
                 }
             )
