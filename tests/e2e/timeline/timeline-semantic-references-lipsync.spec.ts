@@ -386,7 +386,11 @@ test.describe("Timeline semantic references, lip sync, hot keys", () => {
     test.setTimeout(180_000);
     const scene = await firstScene(request);
     await page.addInitScript(() => {
-      window.localStorage.removeItem("adept_timeline_hotkeys_v1");
+      // Clear once per browser context so reload can prove persistence.
+      if (!sessionStorage.getItem("adept_timeline_hotkeys_cleared")) {
+        window.localStorage.removeItem("adept_timeline_hotkeys_v1");
+        sessionStorage.setItem("adept_timeline_hotkeys_cleared", "1");
+      }
     });
     await openTimeline(page, scene.id);
 
@@ -419,6 +423,7 @@ test.describe("Timeline semantic references, lip sync, hot keys", () => {
     await expect(page.getByTestId("hotkey-conflict")).toContainText("Generate Scene");
     await page.getByTestId("hotkey-conflict-replace").click();
     await page.getByTestId("hotkey-save").click();
+    await expect(page.getByText("Saved")).toBeVisible();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
@@ -459,6 +464,7 @@ test.describe("Timeline semantic references, lip sync, hot keys", () => {
     await expect(page.getByTestId("timeline-generate-scene")).toBeVisible();
     await expect(page.getByTestId("timeline-toolbar-preflight")).toBeVisible();
     await page.getByTestId("timeline-toolbar-preflight").click();
+    await page.getByTestId("timeline-tab-inspector").click();
     await expect(page.getByTestId("timeline-inspector")).toBeVisible();
   });
 });
