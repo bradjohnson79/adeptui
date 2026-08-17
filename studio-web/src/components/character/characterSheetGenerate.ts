@@ -6,13 +6,26 @@ import type { GeneratorOption } from "../generators/types";
 import {
   buildGeneratorSourcesPayload,
   firstPlannedGenerationMode,
-  planHasExecutableWork,
+  hasExecutableSource,
+  localInventoryHasExecutableSource,
   summarizeGenerationPlan,
   type CharacterGeneratorPlan,
   type CharacterSheetGeneratorSourcesPayload,
 } from "./characterGeneratorPlan";
 
 export const CHARACTER_SHEET_START_ERROR_PREFIX = "Character Sheet generation could not start:";
+
+/** Creator-facing reason when the plan has no executable source (CDX-009). */
+export function noExecutableSourceReason(
+  plan: CharacterGeneratorPlan,
+  localOptions?: GeneratorOption[],
+): string {
+  const cloudOff = !(plan.apiEnabled && plan.apiModels.some((row) => row.enabled));
+  if (cloudOff && plan.localEnabled && !localInventoryHasExecutableSource(localOptions)) {
+    return `${CHARACTER_SHEET_START_ERROR_PREFIX} No local generator is currently available and Cloud is off. Enable a Cloud generator or start the local runtime to create character sheets.`;
+  }
+  return `${CHARACTER_SHEET_START_ERROR_PREFIX} Enable a Local or Cloud generator to create character sheets.`;
+}
 
 /** @deprecated Use per-generator batchCount default 1. Kept for E2E override docs. */
 export const CHARACTER_SHEET_PRODUCT_CANDIDATE_COUNT = 1;
@@ -34,8 +47,8 @@ export function characterGenerateBlockReason(input: {
     return `${CHARACTER_SHEET_START_ERROR_PREFIX} Enable a Local or Cloud generator to create character sheets.`;
   }
   const summary = summarizeGenerationPlan(input.plan, input.localOptions);
-  if (!planHasExecutableWork(input.plan) || summary.totalSheets < 1) {
-    return `${CHARACTER_SHEET_START_ERROR_PREFIX} Enable a Local or Cloud generator to create character sheets.`;
+  if (summary.totalSheets < 1 || !hasExecutableSource(input.plan, input.localOptions)) {
+    return noExecutableSourceReason(input.plan, input.localOptions);
   }
   return null;
 }

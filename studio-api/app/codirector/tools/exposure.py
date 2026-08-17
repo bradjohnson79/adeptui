@@ -131,6 +131,26 @@ def derive_domain(tool_id: str, *, capability: str = "project", kind: str = "rea
 # active surface, so context lookups never break.
 # --------------------------------------------------------------------------
 
+# Legacy ers.* 4-direction chat mutation pipeline (CDX-033). These tool ids
+# are still declared in definitions.py + registry.py (closure validation and
+# non-destructive read tools ers.list_sheets / ers.get_sheet remain), but the
+# mutation tools are NEVER exposed to the model: chat 'generate the ERS' is
+# routed to the ers.generate capability instead (routing/deterministic.py).
+_LEGACY_ERS_MUTATION_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "ers.create_sheet",
+        "ers.attach_spatial_map",
+        "ers.generate_directional_views",
+        "ers.approve_direction",
+        "ers.validate_continuity",
+        "ers.compose_sheet",
+        "ers.register_project",
+        "ers.set_optional_three_d",
+        "ers.export_sheet",
+    }
+)
+
+
 _BASELINE_READ_TOOL_IDS: frozenset[str] = frozenset(
     {
         "get_project_profile",
@@ -329,6 +349,10 @@ def expose(
 
     exposed: set[str] = set(_BASELINE_READ_TOOL_IDS)
     for definition in defs:
+        if definition.tool_id in _LEGACY_ERS_MUTATION_TOOL_IDS:
+            # CDX-033: legacy ers.* mutation tools are inert in chat;
+            # 'generate the ERS' routes to the ers.generate capability.
+            continue
         domain = derive_domain(
             definition.tool_id, capability=definition.capability, kind=definition.kind
         )

@@ -22,7 +22,10 @@ import {
 } from "./placementArm";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import {
+  PROP_MAP_ONLY_WARNING,
   SLOT_COLORS,
+  propOptionPropagatesToSceneCreator,
+  propSourceGroupLabel,
   type SavedOption,
   type SlotDef,
   type SpatialCharacterPlacement,
@@ -73,6 +76,7 @@ export function PlacementSlot({
   const [expanded, setExpanded] = useState(false);
   const [miniDraft, setMiniDraft] = useState(placement?.miniPrompt || "");
   const [pickedId, setPickedId] = useState("");
+  const [pickedSource, setPickedSource] = useState<SavedOption["source"] | undefined>(undefined);
 
   const color = SLOT_COLORS[slot.colorKey];
   const isCharacter = slot.kind === "character";
@@ -155,6 +159,7 @@ export function PlacementSlot({
               const id = e.target.value;
               setPickedId(id);
               const option = savedOptions.find((o) => o.id === id);
+              setPickedSource(option?.source);
               if (option) onAdd(option);
             }}
             aria-label={`Select saved ${isCharacter ? "character" : "prop"} for ${slot.label}`}
@@ -170,10 +175,8 @@ export function PlacementSlot({
               : (["project", "character", "library"] as const).map((source) => {
                   const group = savedOptions.filter((o) => (o.source || "library") === source);
                   if (!group.length) return null;
-                  const label =
-                    source === "project" ? "Project Props" : source === "character" ? "Character Props" : "Library";
                   return (
-                    <optgroup key={source} label={label}>
+                    <optgroup key={source} label={propSourceGroupLabel(source)}>
                       {group.map((option) => (
                         <option key={`${option.source || "library"}:${option.id}`} value={option.id}>
                           {option.name}
@@ -183,6 +186,15 @@ export function PlacementSlot({
                   );
                 })}
           </select>
+          {!isCharacter && !propOptionPropagatesToSceneCreator({ source: pickedSource }) ? (
+            <p
+              className="spatial-map__maponly-note"
+              role="status"
+              data-testid={`${slot.kind}-maponly-note-${slot.index}`}
+            >
+              {PROP_MAP_ONLY_WARNING}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="spatial-map__slot-assigned">
@@ -196,6 +208,15 @@ export function PlacementSlot({
               />
             ) : null}
             {displayName}
+            {!isCharacter && propPlacement && !propPlacement.propId ? (
+              <span
+                className="spatial-map__maponly-badge"
+                title={PROP_MAP_ONLY_WARNING}
+                data-testid={`prop-maponly-badge-${slot.index}`}
+              >
+                Map only
+              </span>
+            ) : null}
           </div>
           {attached && propPlacement ? (
             <div className="spatial-map__entity-card-meta spatial-map__attach-tags" data-testid={`prop-attach-tags-${slot.index}`}>

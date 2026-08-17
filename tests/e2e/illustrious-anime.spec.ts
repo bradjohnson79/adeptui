@@ -2,7 +2,7 @@
  * Illustrious XL Anime Image Engine — Playwright E2E certification.
  *
  * Verifies the full UI → API → runtime integration for the Illustrious XL anime
- * engine against the LOCAL Beta (web :8760, API :8758) where the Illustrious
+ * engine against the local Studio API (:8758) + local Vite dev server (5173) where the Illustrious
  * checkpoint is installed. The live ComfyUI smoke (4 real generations) is the
  * primary real-generation evidence; this spec certifies the UI/API routing,
  * availability, generation flow, Library ingestion, and metadata lineage.
@@ -18,7 +18,7 @@
 import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const SCREENSHOT_DIR = path.join("tests", "e2e", "screenshots");
 

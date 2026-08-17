@@ -731,6 +731,12 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     page.on("request", (req) => {
       if (req.method() === "POST" && /send-to-timeline/.test(req.url())) posts.push(req.url());
     });
+    const sendRespPromise = page
+      .waitForResponse(
+        (res) => /send-to-timeline/.test(res.url()) && res.request().method() === "POST",
+        { timeout: 60_000 },
+      )
+      .catch(() => null);
     const send = page.getByTestId("scene-creator-send-to-timeline");
     await expect(send).toBeVisible();
     await send.dblclick({ delay: 30 }).catch(async () => {
@@ -739,6 +745,44 @@ test.describe("Scene Creator finishing reliability (hosted)", () => {
     });
     await page.waitForTimeout(2000);
     expect(posts.length, "duplicate Timeline send").toBeLessThanOrEqual(1);
+
+    // CDX-097: assert ACTUAL Timeline clip presence — the approved take must be
+    // persisted as a batch-owned clip on the W46 Timeline master for this
+    // scene. A POST-count alone proves the click fired, not that the handoff
+    // placed a real clip.
+    const sendRes = await sendRespPromise;
+    expect(sendRes, "send-to-timeline must return a response").toBeTruthy();
+    const sendBody = (await sendRes!.json().catch(() => null)) as
+      | { clips_sent?: number; timeline?: { batchBlockId?: string } }
+      | null;
+    expect(
+      sendRes!.ok(),
+      `send-to-timeline must succeed: ${JSON.stringify(sendBody || {}).slice(0, 400)}`,
+    ).toBeTruthy();
+    expect(Number(sendBody?.clips_sent || 0), "send-to-timeline reports clips_sent").toBeGreaterThanOrEqual(1);
+    const sentBatchBlockId = sendBody?.timeline?.batchBlockId || "";
+
+    await expect
+      .poll(
+        async () => {
+          const masterRes = await request.get(
+            `${API}/api/director-timeline/projects/${PROJECT_ID}/scenes/${SCENE_ID}/master`,
+          );
+          if (!masterRes.ok()) return false;
+          const masterBody = (await masterRes.json()) as {
+            master?: {
+              batchBlocks?: Array<{ id?: string; visualClips?: Array<{ assetId?: string | null }> }>;
+            };
+          };
+          const blocks = masterBody.master?.batchBlocks || [];
+          const candidates = sentBatchBlockId ? blocks.filter((b) => b.id === sentBatchBlockId) : blocks;
+          return candidates.some((b) =>
+            (b.visualClips || []).some((c) => c.assetId === approved!.asset_id),
+          );
+        },
+        { timeout: 30_000, intervals: [1_000, 2_000, 4_000] },
+      )
+      .toBe(true);
   });
 
   test("reload persists scene, camera, candidates, labels", async ({ page, request }, testInfo) => {

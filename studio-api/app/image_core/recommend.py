@@ -9,7 +9,7 @@ from .capability import family_region_edit_capability, normalize_family
 # Product recommendation registry — UI only.
 _RECOMMENDED_FAMILY: dict[str, str] = {
     "remove": "flux",
-    "add": "flux",
+    "add": "nano-banana-fal",
     "modify": "flux",
     "replace": "flux",
 }
@@ -17,6 +17,7 @@ _RECOMMENDED_FAMILY: dict[str, str] = {
 _RECOMMENDED_LABEL: dict[str, str] = {
     "zimage": "Z-Image",
     "flux": "FLUX",
+    "nano-banana-fal": "Nano Banana 2",
 }
 
 

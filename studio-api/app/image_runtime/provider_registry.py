@@ -36,8 +36,47 @@ def get_provider(provider_id: str) -> dict[str, Any] | None:
     return None
 
 
+#: providerId -> secrets-store name whose "verified" state proves the key was
+#: accepted by the provider (a real live probe at configure time). Mirrors the
+#: credential verifiers used by Setup diagnostics.
+_CREDENTIAL_SECRET_BY_PROVIDER: dict[str, str] = {
+    "fal": "fal_api_key",
+    "kie": "kie_api_key",
+    "wavespeed": "wavespeed_api_key",
+}
+
+
+def _credential_verified(provider_id: str) -> bool | None:
+    """True/False when the secrets store has verified/rejected the provider key.
+
+    Returns None when there is no verified (or rejected) record - the credential
+    may be configured, but availability is unverified and must not be asserted
+    (CDX-083).
+    """
+    secret_name = _CREDENTIAL_SECRET_BY_PROVIDER.get(provider_id)
+    if not secret_name:
+        return None
+    try:
+        from ..secrets_store import secret_status
+
+        status = secret_status(secret_name)
+        state = str(status.get("state") or "")
+        if state == "verified":
+            return True
+        if state == "invalid":
+            return False
+        return None
+    except Exception:
+        return None
+
+
 def probe_provider_availability(provider: dict[str, Any]) -> dict[str, Any]:
-    """Runtime probe — credentials / reachability, not hard-coded assumptions."""
+    """Runtime probe - credentials / reachability, not hard-coded assumptions.
+
+    Cloud providers are available ONLY when a probe has verified the credential
+    with the service. A present env key alone (CDX-083) yields a distinct
+    configured-but-unverified state with available=False.
+    """
     pid = str(provider.get("providerId") or "")
     kind = str(provider.get("kind") or "local")
     result = {
@@ -46,6 +85,7 @@ def probe_provider_availability(provider: dict[str, Any]) -> dict[str, Any]:
         "available": False,
         "reason": "",
         "credentialConfigured": False,
+        "verificationState": "unknown",
     }
     if kind == "local" or pid in {"comfyui", "local"}:
         try:
@@ -64,12 +104,37 @@ def probe_provider_availability(provider: dict[str, Any]) -> dict[str, Any]:
     env_keys = provider.get("credentialEnvKeys") or provider.get("credential_env_keys") or []
     configured = any(bool(os.environ.get(str(k))) for k in env_keys) if env_keys else False
     result["credentialConfigured"] = configured
-    if not configured:
+    if not env_keys:
         result["available"] = False
         result["reason"] = "Provider unavailable or credentials not configured."
-    else:
+        return result
+    if not configured:
+        result["verificationState"] = "not_configured"
+        result["available"] = False
+        result["reason"] = "Provider unavailable or credentials not configured."
+        return result
+    # A key present in the environment is CONFIGURATION, not availability
+    # (CDX-083). Availability requires a probe that the provider actually
+    # accepts the credential. Where the app's secrets store has already
+    # verified the key with the provider, that verification is the probe;
+    # otherwise the provider is configured-but-unverified and NOT available.
+    verified = _credential_verified(pid)
+    if verified is True:
+        result["verificationState"] = "verified"
         result["available"] = True
-        result["reason"] = "Credentials configured (live API probe deferred to execution)."
+        result["reason"] = "Credentials verified with the provider."
+        return result
+    if verified is False:
+        result["verificationState"] = "invalid"
+        result["available"] = False
+        result["reason"] = "Credentials are configured but the provider rejected them."
+        return result
+    result["verificationState"] = "configured_unverified"
+    result["available"] = False
+    result["reason"] = (
+        "Credentials are configured but provider availability is not verified "
+        "(no successful live probe yet)."
+    )
     return result
 
 

@@ -32,6 +32,7 @@ export type SceneGenerationBatch = {
   shot_requests: ShotRequest[];
   output_count: number;
   result_asset_ids: string[];
+  approved_asset_ids: string[];
   collection_id?: string | null;
   created_at: string;
   updated_at: string;

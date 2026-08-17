@@ -4,9 +4,9 @@
   --timeline-left-width: 280px;
   --timeline-right-width: 320px;
   --timeline-track-label-width: 132px;
-  --timeline-v2-track-label-color: rgba(225, 232, 242, 0.72);
-  --timeline-v2-track-label-muted: rgba(225, 232, 242, 0.52);
-  --timeline-v2-track-label-bg: rgba(8, 12, 19, 0.96);
+  --timeline-v2-track-label-color: #e1e8f2;
+  --timeline-v2-track-label-muted: #c5d0dc;
+  --timeline-v2-track-label-bg: #080c13;
   --timeline-shell-chrome-offset: 72px;
   --track-row-height: 56px;
   display: flex;
@@ -180,6 +180,44 @@
   flex-wrap: wrap;
   gap: 0.3rem;
   flex: 0 0 auto;
+
+  /* Right-rail timeline tabs: deep navy background with light text.
+     Scoped overrides so these tabs never inherit the generic dark-on-dark
+     button.primary (#06201c) / button.ghost colors, in either theme. */
+  --timeline-v2-tab-bg: #14294a;               /* deep navy */
+  --timeline-v2-tab-bg-hover: #1a3358;         /* navy, hover */
+  --timeline-v2-tab-bg-active: #1d3f72;        /* brighter navy, selected */
+  --timeline-v2-tab-ink: rgba(225, 232, 242, 0.92);   /* light gray text */
+  --timeline-v2-tab-ink-active: #ffffff;       /* white text, selected */
+  --timeline-v2-tab-border: rgba(148, 180, 220, 0.28);
+  --timeline-v2-tab-border-active: rgba(130, 190, 255, 0.55);
+}
+
+.timeline-v2__tabs button,
+.timeline-v2__tabs button.ghost {
+  color: var(--timeline-v2-tab-ink);
+  background: var(--timeline-v2-tab-bg);
+  border: 1px solid var(--timeline-v2-tab-border);
+  box-shadow: none;
+}
+
+.timeline-v2__tabs button:hover:not(:disabled),
+.timeline-v2__tabs button.ghost:hover:not(:disabled) {
+  color: var(--timeline-v2-tab-ink-active);
+  background: var(--timeline-v2-tab-bg-hover);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+.timeline-v2__tabs button.primary {
+  color: var(--timeline-v2-tab-ink-active);
+  background: var(--timeline-v2-tab-bg-active);
+  border-color: var(--timeline-v2-tab-border-active);
+  box-shadow: 0 8px 18px rgba(20, 41, 74, 0.45);
+}
+
+.timeline-v2__tabs button.primary:hover:not(:disabled) {
+  color: var(--timeline-v2-tab-ink-active);
+  background: var(--timeline-v2-tab-bg-hover);
 }
 
 .timeline-v2__right-content {
@@ -203,4 +241,7 @@
   flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
+  /* Canvas stays cinematic dark in every theme, including aurora-day. */
+  background: #0c121b;
+  color: #e1e8f2;
 }

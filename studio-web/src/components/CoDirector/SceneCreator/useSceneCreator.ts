@@ -31,7 +31,6 @@ import {
   VISUAL_INHERITANCE_BLOCKED_MESSAGE,
 } from "./regionEdit/regionEdit";
 
-export type SceneCreatorVariant = "express" | "standard";
 
 const defaultCamera = (): SceneCreatorCamera => ({
   camera_id: "",
@@ -57,6 +56,7 @@ function readSceneCreatorQuery(): {
     spatial_profile_id: params.get("spatialProfileId") || params.get("handoffId") || undefined,
   };
 }
+
 
 export function useSceneCreator(projectId: string) {
   const [workspace, setWorkspace] = useState<SceneCreatorWorkspace | null>(null);
@@ -705,11 +705,21 @@ export function useSceneCreator(projectId: string) {
       return;
     }
     const readiness = workspace?.production_readiness;
-    if (/qwen/i.test(localFamily) && productionContextStatus === "loaded") {
-      const ticks = readiness?.ticks;
-      if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
-        setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+    if (/qwen/i.test(localFamily)) {
+      // CDX-040: qwen2512 has zero pixel slots - disclose when the ERS
+      // composite environment picture exists but cannot be loaded, even
+      // without a loaded spatial profile.
+      const composite = (workspace?.resolved_ers as { ers_composite_asset_id?: string } | null | undefined)?.ers_composite_asset_id;
+      if (composite && productionContextStatus !== "loaded") {
+        setError("The environment picture cannot be loaded by this generator. Choose Z-Image to keep the environment picture.");
         return;
+      }
+      if (productionContextStatus === "loaded") {
+        const ticks = readiness?.ticks;
+        if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
+          setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+          return;
+        }
       }
     }
     if (readiness?.status === "blocked") {
@@ -756,11 +766,21 @@ export function useSceneCreator(projectId: string) {
       return;
     }
     const readiness = workspace?.production_readiness;
-    if (/qwen/i.test(localFamily) && productionContextStatus === "loaded") {
-      const ticks = readiness?.ticks;
-      if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
-        setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+    if (/qwen/i.test(localFamily)) {
+      // CDX-040: qwen2512 has zero pixel slots - disclose when the ERS
+      // composite environment picture exists but cannot be loaded, even
+      // without a loaded spatial profile.
+      const composite = (workspace?.resolved_ers as { ers_composite_asset_id?: string } | null | undefined)?.ers_composite_asset_id;
+      if (composite && productionContextStatus !== "loaded") {
+        setError("The environment picture cannot be loaded by this generator. Choose Z-Image to keep the environment picture.");
         return;
+      }
+      if (productionContextStatus === "loaded") {
+        const ticks = readiness?.ticks;
+        if (ticks && (ticks.character !== "idle" || ticks.prop !== "idle" || ticks.environment !== "idle")) {
+          setError("This generator cannot use the character and prop pictures already chosen. Choose Z-Image to keep those pictures.");
+          return;
+        }
       }
     }
     if (readiness?.status === "blocked") {

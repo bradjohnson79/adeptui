@@ -21,7 +21,6 @@ from .roles import REQUIRED_COVERAGE_ROLES
 from .schemas import ReferenceAttach, TraitUpsert
 from .visual_gates import (
     list_gates,
-    owner_select_concept,
     propose_visual_directions,
     set_gate_status,
 )
@@ -38,6 +37,17 @@ from .four_view_sheet import (
 )
 
 PACK_TRAIT_KEY = "visual_sheet_pack"
+
+
+class VisualSheetSourceUnavailableError(ValueError):
+    """The pack's selected generator source cannot serve the requested phase.
+
+    Raised instead of silently falling back to the default local model (e.g. a
+    Cloud-only selection with no API model, or a persisted source selection that
+    is no longer executable). Subclasses ValueError so the API layer maps it to
+    a creator-facing 400 like the other visual-sheet errors.
+    """
+
 
 DEFAULT_NEGATIVE_PROMPT = (
     "blonde hair, aqua eyes, blue eyes, metallic clothing, sci-fi armor, "
@@ -705,6 +715,95 @@ def _parse_generator_sources(generator_sources: dict[str, Any] | None) -> dict[s
         "chosen_stage2_family": chosen_stage2,
         "local_entries": local_entries,
         "api_entries": api_entries,
+    }
+
+
+def _resolve_pack_phase_source(pack: dict[str, Any]) -> dict[str, Any]:
+    """Resolve provider/model routing for the non-hero sheet phases.
+
+    Coverage x6 (and details x6 / performance x2 when enabled) must honor the
+    SAME Local/Cloud generator selection the hero stage honors — the pack's
+    persisted generatorSources (legacy generatorPreferences). This is the
+    CDX-001 repair: Cloud-only selections must never enqueue a local qwen2512
+    job for any phase.
+
+    Returns _enqueue_txt2img kwargs:
+
+    * provider_kind — "local" or "api".
+    * model_family_preference — local family ("qwen2512" default) or the
+      hosted API model id.
+    * hosted_model_id — the selected API model, or None for local.
+    * force_workflow_key — the Certified txt2img workflow key for the
+      resolved source (informational/route pinning; API enqueues ignore it).
+    * selected_source — human/creator-facing source label.
+
+    Raises VisualSheetSourceUnavailableError (a ValueError) instead of
+    silently falling back to the default local model when the selected source
+    cannot serve the phase — Cloud-only with no API model, or no source
+    enabled at all.
+    """
+    sources = pack.get("generatorSources")
+    if sources is None:
+        sources = pack.get("generatorPreferences")
+    parsed = _parse_generator_sources(sources)
+    if not parsed["explicit"]:
+        # Legacy packs / no generatorSources: preserve the historical
+        # local qwen2512 auto routing for every non-hero phase.
+        return {
+            "provider_kind": "local",
+            "model_family_preference": "qwen2512",
+            "hosted_model_id": None,
+            "force_workflow_key": "qwen2512.txt2img",
+            "selected_source": "",
+        }
+    if not parsed["local_enabled"] and not parsed["api_enabled"]:
+        raise VisualSheetSourceUnavailableError(
+            "No image generator enabled. Enable a Local or Cloud generator to create character sheets."
+        )
+    if parsed["api_enabled"] and not parsed["local_enabled"]:
+        # Cloud-only: every phase runs on the selected hosted model. Never a
+        # local fallback.
+        model = parsed["chosen_api"]
+        if parsed["list_shape"]:
+            enabled_api = [
+                e
+                for e in parsed["api_entries"]
+                if e.get("enabled") and (e.get("model") or e.get("modelId"))
+            ]
+            if enabled_api:
+                model = str(enabled_api[0].get("model") or enabled_api[0].get("modelId") or "")
+        if not model:
+            raise VisualSheetSourceUnavailableError(
+                "Cloud generator is enabled but no API model is selected; "
+                "cannot generate character sheet phases."
+            )
+        api_family = _hosted_family_for_model(model) or model
+        return {
+            "provider_kind": "api",
+            "model_family_preference": model,
+            "hosted_model_id": model,
+            "force_workflow_key": _txt2img_workflow_key(api_family, model),
+            "selected_source": model,
+        }
+    # Local enabled (optionally alongside Cloud): phases run on the selected
+    # local family, preserving the default qwen2512 routing for Auto Select.
+    # List-shaped sources carry per-row families (chosen_local is empty then) —
+    # mirror _expand_list_slots: first enabled explicit family wins, else auto.
+    chosen_local = parsed["chosen_local"]
+    if parsed["list_shape"] and not chosen_local:
+        explicit_local = [
+            e
+            for e in parsed["local_entries"]
+            if e.get("enabled") and not _is_auto_family(str(e.get("family") or ""))
+        ]
+        if explicit_local:
+            chosen_local = str(explicit_local[0].get("family") or "")
+    return {
+        "provider_kind": "local",
+        "model_family_preference": chosen_local or "qwen2512",
+        "hosted_model_id": None,
+        "force_workflow_key": _txt2img_workflow_key(chosen_local or "qwen2512"),
+        "selected_source": chosen_local or "",
     }
 
 
@@ -2326,7 +2425,9 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             pack["status"] = "GENERATING"
         return _save_pack(db, project_id, character_id, pack)
 
-    # Coverage pack: sequential Qwen-Image-2512 txt2img per role with compiled identity prompts.
+    # Coverage pack: sequential per-role txt2img with compiled identity prompts,
+    # routed on the SAME Local/Cloud source the creator selected for the hero.
+    phase_source = _resolve_pack_phase_source(pack)
     coverage_specs = _coverage_role_specs()
     if "coverage" not in jobs:
         cov_jobs = []
@@ -2350,18 +2451,26 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 negative_prompt=package.negative_prompt,
                 tag=f"{char_slug}_{role}",
                 role=role,
+                model_family_preference=phase_source["model_family_preference"],
+                force_workflow_key=phase_source["force_workflow_key"],
+                provider_kind=phase_source["provider_kind"],
+                hosted_model_id=phase_source["hosted_model_id"],
                 prompt_metadata={
                     "promptFamily": package.prompt_family,
                     "promptModel": package.model_key,
                     "promptValidationOk": package.validation.get("ok"),
                     "sheetMode": package.metadata.get("sheetMode"),
+                    "workflowKey": phase_source["force_workflow_key"],
+                    "providerKind": phase_source["provider_kind"],
+                    "hostedModelId": phase_source["hosted_model_id"],
+                    "selectedSource": phase_source["selected_source"],
                 },
             )
             cov_jobs.append({"jobId": j.id, "role": role, "status": j.status})
         jobs["coverage"] = cov_jobs
         pack["phase"] = "turnaround_facial"
         pack["workflows"] = list(
-            dict.fromkeys([*(pack.get("workflows") or []), "qwen2512.txt2img", "coverage_pack"])
+            dict.fromkeys([*(pack.get("workflows") or []), phase_source["force_workflow_key"], "coverage_pack"])
         )
 
     if isinstance(jobs.get("coverage"), list):
@@ -2401,11 +2510,19 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                             negative_prompt=package.negative_prompt,
                             tag=f"{char_slug}_{role}_retry",
                             role=role,
+                            model_family_preference=phase_source["model_family_preference"],
+                            force_workflow_key=phase_source["force_workflow_key"],
+                            provider_kind=phase_source["provider_kind"],
+                            hosted_model_id=phase_source["hosted_model_id"],
                             prompt_metadata={
                                 "promptFamily": package.prompt_family,
                                 "promptModel": package.model_key,
                                 "promptValidationOk": package.validation.get("ok"),
                                 "sheetMode": package.metadata.get("sheetMode"),
+                                "workflowKey": phase_source["force_workflow_key"],
+                                "providerKind": phase_source["provider_kind"],
+                                "hostedModelId": phase_source["hosted_model_id"],
+                                "selectedSource": phase_source["selected_source"],
                             },
                         )
                         item["jobId"] = j.id
@@ -2447,18 +2564,26 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 negative_prompt=package.negative_prompt,
                 tag=f"{char_slug}_{role}",
                 role=role,
+                model_family_preference=phase_source["model_family_preference"],
+                force_workflow_key=phase_source["force_workflow_key"],
+                provider_kind=phase_source["provider_kind"],
+                hosted_model_id=phase_source["hosted_model_id"],
                 prompt_metadata={
                     "promptFamily": package.prompt_family,
                     "promptModel": package.model_key,
                     "promptValidationOk": package.validation.get("ok"),
                     "sheetMode": package.metadata.get("sheetMode"),
+                    "workflowKey": phase_source["force_workflow_key"],
+                    "providerKind": phase_source["provider_kind"],
+                    "hostedModelId": phase_source["hosted_model_id"],
+                    "selectedSource": phase_source["selected_source"],
                 },
             )
             detail_jobs.append({"jobId": j.id, "role": role, "status": j.status})
         jobs["details"] = detail_jobs
         pack["phase"] = "details"
         pack["workflows"] = list(
-            dict.fromkeys([*(pack.get("workflows") or []), "qwen2512.txt2img", "detail_pack"])
+            dict.fromkeys([*(pack.get("workflows") or []), phase_source["force_workflow_key"], "detail_pack"])
         )
 
     if isinstance(jobs.get("details"), list):
@@ -2512,18 +2637,26 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 negative_prompt=package.negative_prompt,
                 tag=f"{char_slug}_{role}",
                 role=role,
+                model_family_preference=phase_source["model_family_preference"],
+                force_workflow_key=phase_source["force_workflow_key"],
+                provider_kind=phase_source["provider_kind"],
+                hosted_model_id=phase_source["hosted_model_id"],
                 prompt_metadata={
                     "promptFamily": package.prompt_family,
                     "promptModel": package.model_key,
                     "promptValidationOk": package.validation.get("ok"),
                     "sheetMode": package.metadata.get("sheetMode"),
+                    "workflowKey": phase_source["force_workflow_key"],
+                    "providerKind": phase_source["provider_kind"],
+                    "hostedModelId": phase_source["hosted_model_id"],
+                    "selectedSource": phase_source["selected_source"],
                 },
             )
             perf_jobs.append({"jobId": j.id, "role": role, "status": j.status})
         jobs["performance"] = perf_jobs
         pack["phase"] = "performance"
         pack["workflows"] = list(
-            dict.fromkeys([*(pack.get("workflows") or []), "qwen2512.txt2img", "performance_pack"])
+            dict.fromkeys([*(pack.get("workflows") or []), phase_source["force_workflow_key"], "performance_pack"])
         )
 
     if isinstance(jobs.get("performance"), list):
@@ -2572,7 +2705,18 @@ def owner_approve_visual_sheet_gates(
     approved_by: str = "owner",
     select_direction_id: str = "wild_sun_sprite",
 ) -> dict[str, Any]:
-    """Owner-only: approve concept + image gates that have real assetIds from the pack."""
+    """Owner-only: approve image gates that have real assetIds from the pack.
+
+    CDX-002: the concept gate is NEVER auto-approved here. The owner must
+    select a proposed direction explicitly first (owner_select_concept / the
+    select-visual-concept API); otherwise this raises and the pack cannot
+    reach an owner-approved state with a defaulted concept.
+    CDX-003: the hero gate reads the canonical approved reference row
+    (service-level) instead of stale pack roleAssets that may still point at
+    the first-completed candidate.
+    CDX-008: the pack is only OWNER_APPROVED when every gate group has an
+    asset; otherwise OWNER_APPROVED_WITH_PENDING lists the asset-less gates.
+    """
     if not approved_by:
         raise ValueError("approved_by required — Character Creator cannot self-approve")
     pack = get_visual_sheet_pack(db, project_id, character_id)
@@ -2583,24 +2727,17 @@ def owner_approve_visual_sheet_gates(
     gates = list_gates(db, project_id, character_id)
     concept = (gates.get("gates") or {}).get("concept") or {}
     if concept.get("status") != "OWNER_APPROVED":
-        dirs = concept.get("directions") or []
-        if not dirs:
-            propose_visual_directions(db, project_id, character_id)
-            gates = list_gates(db, project_id, character_id)
-            concept = (gates.get("gates") or {}).get("concept") or {}
-            dirs = concept.get("directions") or []
-        did = select_direction_id
-        ids = {d.get("id") for d in dirs}
-        if did not in ids and dirs:
-            did = dirs[0]["id"]
-        owner_select_concept(
-            db,
-            project_id,
-            character_id,
-            direction_id=did,
-            approved_by=approved_by,
-            notes="Owner approved concept for Generated Character Image Profile",
+        # CDX-002: never auto-approve the concept gate with a default direction.
+        raise ValueError(
+            "Concept gate requires explicit owner direction selection "  # noqa: E501
+            "(selectVisualConcept / owner_select_concept) before owner-approving the visual sheet."
         )
+
+    # CDX-003: the canonical approved reference is authoritative for the hero
+    # gate; pack roleAssets may still point at the first-completed candidate.
+    canonical_hero = service.resolve_approved_reference(db, character_id, "hero_identity")
+    if canonical_hero:
+        role_assets["hero_identity"] = canonical_hero
 
     approved = {}
     for gate, roles in GATE_ROLE_GROUPS.items():
@@ -2618,7 +2755,16 @@ def owner_approve_visual_sheet_gates(
             notes=f"Owner approved generated visual pack assets for {gate}",
         )
 
-    pack["status"] = "OWNER_APPROVED"
+    pending_gates = [
+        gate for gate, roles in GATE_ROLE_GROUPS.items() if not any(r in role_assets for r in roles)
+    ]
+    if pending_gates:
+        # CDX-008: never report OWNER_APPROVED while any gate group has no asset.
+        pack["status"] = "OWNER_APPROVED_WITH_PENDING"
+        pack["pendingGates"] = pending_gates
+    else:
+        pack["status"] = "OWNER_APPROVED"
+        pack.pop("pendingGates", None)
     pack["ownerApprovedBy"] = approved_by
     pack["ownerApprovedAt"] = _now()
     _save_pack(db, project_id, character_id, pack)
@@ -2627,6 +2773,8 @@ def owner_approve_visual_sheet_gates(
         "characterId": character_id,
         "approvedGates": list(approved.keys()),
         "roleAssets": role_assets,
+        "status": pack["status"],
+        "pendingGates": pack.get("pendingGates") or [],
         "gates": list_gates(db, project_id, character_id),
     }
 

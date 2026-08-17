@@ -103,6 +103,7 @@ def migrate_director_to_master(
                     negativePrompt=seg.negative_prompt,
                     executionStrategy="compiled",
                     legacyPromptSegmentId=seg.id,
+                    referenceBindingIds=list(seg.reference_binding_ids or []),
                 )
             )
         if not segments:

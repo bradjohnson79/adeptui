@@ -289,6 +289,7 @@ def _empty(project_id: str, name: str = "Avatar Session") -> dict[str, Any]:
         "presentation_style": "direct_presenter",
         "framing_choice": "medium_presenter",
         "background_choice": "studio_gradient",
+        "background_asset_id": None,
         "duration_class": "story_section",
         "provider_mode": "best_match",
         "provider_choice": None,
@@ -319,30 +320,46 @@ def _empty(project_id: str, name: str = "Avatar Session") -> dict[str, Any]:
 
 def _validate(data: dict[str, Any]) -> list[dict[str, str]]:
     issues: list[dict[str, str]] = []
-    voice = data.get("voice") or {}
+    input_mode = str(data.get("input_mode") or "script")
+    resolved_audio = _resolved_audio_asset_id(data)
     if (
         not data.get("character_profile_id")
         and not data.get("character_name")
         and not data.get("source_still_asset_id")
     ):
-        issues.append({"level": "warn", "text": "Identity reference missing"})
-    if not voice.get("audio_asset_id") and data.get("lip_sync_method") == "external":
-        issues.append({"level": "bad", "text": "Audio required for external lip-sync method"})
+        issues.append({"level": "warn", "text": "Identity reference missing — attach Character Profile or still"})
+    if input_mode == "approved_voice" and not _voice_has_approved_take(data):
+        issues.append(
+            {
+                "level": "bad",
+                "text": "Approved Voice mode requires an approved Voice Studio take",
+            }
+        )
+    if not resolved_audio and data.get("lip_sync_method") == "external":
+        if input_mode == "script":
+            issues.append(
+                {
+                    "level": "warn",
+                    "text": "Audio not attached — script mode can still plan without lip-sync audio",
+                }
+            )
+        else:
+            issues.append({"level": "bad", "text": "Audio required for external lip-sync method"})
     if data.get("mode") == "existing_video_lipsync" and not data.get("source_video_asset_id"):
-        issues.append({"level": "bad", "text": "Source video required"})
+        issues.append({"level": "bad", "text": "Source video required for Existing Video Lip Sync mode"})
     mouth = data.get("mouth_mask") or {}
     if data.get("lip_sync_method") == "external" and not mouth.get("placed"):
         issues.append({"level": "warn", "text": "Mouth mask requires user confirmation"})
-    if not (data.get("dialogue_original") or data.get("dialogue_spoken") or voice.get("audio_asset_id")):
-        issues.append({"level": "warn", "text": "Dialogue empty"})
-    if data.get("input_mode") == "approved_voice":
-        if not _voice_has_approved_take(data):
+    if not (data.get("dialogue_original") or data.get("dialogue_spoken") or resolved_audio):
+        if input_mode == "script":
             issues.append(
                 {
                     "level": "bad",
-                    "text": "Approved Voice mode requires an approved Voice Studio take",
+                    "text": "Add the script for this presenter section before you generate.",
                 }
             )
+        else:
+            issues.append({"level": "warn", "text": "Dialogue empty"})
     return issues
 
 
@@ -1146,6 +1163,9 @@ def _new_job(
         "projectId": project_id,
         "sessionId": session_id,
         "avatarId": avatar_id,
+        "identityProfileRef": avatar_id,
+        "referenceStillAssetId": session_data.get("source_still_asset_id"),
+        "backgroundAssetId": session_data.get("background_asset_id"),
         "providerId": provider_id,
         "scriptSourceId": script_source_id,
         "audioAssetId": _resolved_audio_asset_id(session_data),

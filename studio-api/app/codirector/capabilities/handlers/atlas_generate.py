@@ -18,6 +18,7 @@ Law #7 (No mock completion): this handler submits a REAL job.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -32,6 +33,67 @@ _ATLAS_PREFIX = (
     "No characters and no moveable props unless explicitly requested. "
     "Consistent lighting and material palette throughout. "
 )
+
+
+# CDX-030: the Co-Director chat atlas path forwards the ENTIRE user message as
+# the execution prompt, so the routing phrase ("create an atlas shot of ...")
+# must never become the canonical SceneIntent summary. These patterns strip the
+# leading capability phrase (matching the router vocabulary in
+# ``codirector.routing``) so only the location description remains.
+_ATLAS_ROUTING_PREFIX_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # "create an atlas shot of X" / "make an atlas of X" / "generate atlas of X"
+    re.compile(
+        r"^(?:create|generate|make|render|build)\s+(?:an?\s+)?atlas(?:\s+shot)?"
+        r"(?:\s+(?:of|for|featuring|showing|with)\s+)?",
+        re.IGNORECASE,
+    ),
+    # "create a roofless shot of X" / "roofless shot of X" / "roofless view of X"
+    re.compile(
+        r"^(?:(?:create|generate|make|render|build)\s+)?(?:an?\s+)?roofless\s+(?:shot|map|view)"
+        r"(?:\s+(?:of|for|featuring|showing|with)\s+)?",
+        re.IGNORECASE,
+    ),
+)
+
+
+def strip_atlas_routing_prefix(text: str) -> str:
+    """CDX-030: strip the Atlas capability routing phrase from a description.
+
+    Only a leading, verb-led capability phrase is removed. A genuine location
+    description ("A neighborhood coffee shop.") or a non-routed phrase
+    ("Atlas of the city streets") is returned unchanged. An empty remainder
+    (e.g. a bare "create an atlas shot") keeps the original text so the
+    SceneIntent validation layer reports the honest problem instead of
+    silently inventing a description.
+    """
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    if not cleaned:
+        return cleaned
+    for pattern in _ATLAS_ROUTING_PREFIX_PATTERNS:
+        match = pattern.match(cleaned)
+        if match:
+            remainder = cleaned[match.end():].strip()
+            if remainder:
+                return remainder
+            return cleaned
+    return cleaned
+
+
+def _atlas_pixels(aspect_ratio: str) -> tuple[int, int]:
+    """Derive Atlas Shot pixel dimensions from the requested aspect ratio (CDX-031).
+
+    Uses the same aspect table as image_product.compile (1:1 base 1024x1024,
+    scaled by the 2K factor 1.25) so the default square Atlas stays 1280x1280
+    (unchanged behavior) while wide/tall requests (16:9, 9:16, 21:9, ...) produce
+    genuinely non-square bodies instead of a fixed 1280x1280. Results are rounded
+    down to multiples of 8 for model compatibility.
+    """
+    from ....image_product.compile import _ASPECT, _RES_SCALE
+
+    key = (aspect_ratio or "1:1").strip() or "1:1"
+    w, h = _ASPECT.get(key, (1024, 1024))
+    scale = float(_RES_SCALE.get("2K", 1.25))
+    return max(64, int(w * scale / 8) * 8), max(64, int(h * scale / 8) * 8)
 
 
 def handle(
@@ -82,7 +144,12 @@ def handle(
     intent = coerce_scene_intent(scene_intent)
     intent_error = ""
     if intent is None:
-        description = (scene_description or "").strip() or user_prompt
+        # CDX-030: the chat path forwards the entire user message (routing
+        # phrase included) as the fallback description. Strip the capability
+        # prefix so SceneIntent.summary carries the location description only.
+        description = strip_atlas_routing_prefix(
+            (scene_description or "").strip() or user_prompt
+        )
         try:
             project = db.get(Project, project_id)
             intent = build_scene_intent(
@@ -98,15 +165,18 @@ def handle(
     if intent is not None and source_ref_ids and not intent.sourceReferenceAssetIds:
         intent.sourceReferenceAssetIds = source_ref_ids
 
-    # Atlas Shot aspect is square by default (1:1) for clean floor-plan coverage.
+    # Atlas Shot dimensions derive from the requested aspect ratio (CDX-031):
+    # same table as image_product.compile, scaled so the default 1:1 stays
+    # 1280x1280 while wide/tall requests produce genuinely non-square bodies.
+    width, height = _atlas_pixels(aspect_ratio)
     body: dict[str, Any] = {
         "prompt": atlas_prompt,
         "negative_prompt": (
             "characters, people, moveable props, perspective distortion, "
             "horizon line, sky, dramatic angle, dutch tilt, fish-eye"
         ),
-        "width": 1280,
-        "height": 1280,
+        "width": width,
+        "height": height,
         "tag": f"codirector_atlas_{execution_id[:8]}",
         "purpose": "atlas_shot",
         "aspectRatio": aspect_ratio or "1:1",
@@ -121,6 +191,12 @@ def handle(
             ),
         },
     }
+    # CDX-032 lineage contract (payload-only; queue_worker.py is a concurrent
+    # workstream, so no worker edits): the PRIMARY reference rides
+    # source_asset_id/sourceAssetId/referenceImage so _imagegen_commit_asset
+    # records parent_asset_id + derived_from/reference_of edges; ALL reference
+    # ids ride creativeContext.originalEnvironmentReferenceAssetIds (persisted
+    # into prompt_meta) for the full lineage chain.
     source_asset = source_ref_ids[0] if source_ref_ids else ""
     gpt_blob = " ".join(
         str(v)

@@ -74,12 +74,16 @@ def test_classify_low_confidence_needs_clarification() -> None:
 
 
 def test_usd_extension_unsupported() -> None:
+    # CDX-073: committed classify.py semantics classify native 3D as DEFERRED to
+    # Version 1.2 (design intent: 3D import/animation lands in v1.2, not a
+    # technical failure). The tests previously asserted NOT_APPLICABLE + "USD"
+    # in the reason, which never matched the committed code.
     for ext in (".usd", ".usda", ".usdc", ".usdz"):
         assert ext in UNSUPPORTED_3D_EXTENSIONS
         result = classify_asset(ClassifyInput(kind="model", filename=f"asset{ext}"))
         assert result.needs_clarification
-        assert result.subtype == "NOT_APPLICABLE"
-        assert "USD" in result.reason
+        assert result.subtype == "DEFERRED_VERSION_1_2"
+        assert "Version 1.2" in result.reason
         assert result.target_folder == "miscellaneous"
 
 

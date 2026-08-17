@@ -16,6 +16,13 @@ def _mk_project(client):
     return res.json()
 
 
+def _mk_script_doc(client, pid):
+    """Explicitly create the canonical script document (CDX-054: GET no longer creates)."""
+    created = client.post(f"/api/projects/{pid}/scriptwriter/documents")
+    assert created.status_code == 200, created.text
+    return created.json()["document"]["id"]
+
+
 def test_registry_binds_m47_script_tools():
     from app.codirector.tools import registry
 
@@ -34,12 +41,15 @@ def test_studio_bootstrap_insert_undo_autosave(client):
     p = _mk_project(client)
     pid = p["id"]
 
-    studio = client.get(f"/api/projects/{pid}/scriptwriter")
-    assert studio.status_code == 200, studio.text
-    body = studio.json()
-    assert body["ok"] is True
+    # CDX-054: GET is side-effect free; create explicitly on first write.
+    empty = client.get(f"/api/projects/{pid}/scriptwriter")
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["document"] is None
+
+    doc_id = _mk_script_doc(client, pid)
+    body = client.get(f"/api/projects/{pid}/scriptwriter").json()
     doc = body["document"]
-    doc_id = doc["id"]
+    assert body["ok"] is True
     assert doc["revision"] >= 0
     assert body["paginationMode"] == "estimated"
 
@@ -79,11 +89,10 @@ def test_studio_bootstrap_insert_undo_autosave(client):
     assert autosave.json()["saveState"] == "saved"
 
 
-def test_fountain_roundtrip_and_pdf(client, tmp_path):
+def test_fountain_roundtrip_and_pdf(client):
     p = _mk_project(client)
     pid = p["id"]
-    studio = client.get(f"/api/projects/{pid}/scriptwriter").json()
-    doc_id = studio["document"]["id"]
+    doc_id = _mk_script_doc(client, pid)
 
     fountain = (
         "Title: Hitchhiker\n\n"
@@ -118,8 +127,8 @@ def test_proposal_revision_timeline_bible(client):
     else:
         scene_id = p["scenes"][0]["id"]
 
-    studio = client.get(f"/api/projects/{pid}/scriptwriter").json()
-    doc_id = studio["document"]["id"]
+    doc_id = _mk_script_doc(client, pid)
+    studio_doc = client.get(f"/api/projects/{pid}/scriptwriter").json()["document"]
     client.post(
         f"/api/projects/{pid}/scriptwriter/documents/{doc_id}/autosave",
         json={
@@ -135,7 +144,7 @@ def test_proposal_revision_timeline_bible(client):
                 {"id": "c1", "type": "character", "text": "ARIA", "order": 2},
                 {"id": "d1", "type": "dialogue", "text": "Stay with me", "order": 3},
             ],
-            "expectedRevision": studio["document"]["revision"],
+            "expectedRevision": studio_doc["revision"],
         },
     )
 
@@ -202,15 +211,15 @@ def test_transitions_and_stats_unit():
 def test_search_replace_transaction(client):
     p = _mk_project(client)
     pid = p["id"]
-    studio = client.get(f"/api/projects/{pid}/scriptwriter").json()
-    doc_id = studio["document"]["id"]
+    doc_id = _mk_script_doc(client, pid)
+    studio_doc = client.get(f"/api/projects/{pid}/scriptwriter").json()["document"]
     client.post(
         f"/api/projects/{pid}/scriptwriter/documents/{doc_id}/autosave",
         json={
             "elements": [
                 {"id": "1", "type": "action", "text": "The red door opens.", "order": 0},
             ],
-            "expectedRevision": studio["document"]["revision"],
+            "expectedRevision": studio_doc["revision"],
         },
     )
     res = client.post(

@@ -1,19 +1,23 @@
-﻿/**
+/**
  * Spatial Map ERS generator selector — observe-only.
  * Default is Qwen. Changing to GPT Image 2 must not POST.
  * HOLD: do not click Generate / Retry / Regenerate.
+ *
+ * Generation is HOLDed BY DESIGN (documented observe-only certification):
+ * the selector change is certified without dispatching a live ERS generate,
+ * so this spec never POSTs ers.generate (no double-charge / no provider
+ * spend). The no-POST guard below enforces that contract.
+ *
+ * Topology (current Beta, AGENTS.md §15): Studio API :8758 + local Vite dev
+ * server (5173). Override PLAYWRIGHT_BASE_URL / STUDIO_API_BASE for hosted
+ * or live-Beta runs.
  */
 import { expect, test, type Page } from "@playwright/test";
 import { openCoDirectorFullScreen } from "./codirector/helpers/audit";
 
-const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
-const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8761";
+const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
+const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "2347bf46-3762-4763-86c5-4a6032522278";
-
-expect(UI, "spec default / env must be live UI :8760").toMatch(/127\.0\.0\.1:8760|localhost:8760/);
-expect(API, "spec default / env must be live API :8761").toMatch(/127\.0\.0\.1:8761|localhost:8761/);
-expect(UI, "do not bounce retired :8758").not.toMatch(/:8758\b/);
-expect(API, "do not bounce retired :8758").not.toMatch(/:8758\b/);
 
 function attachHoldGuards(page: Page, clicks: { generate: boolean }) {
   page.on("request", (req) => {

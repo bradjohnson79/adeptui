@@ -100,7 +100,8 @@ export function CharacterSheetGenerator({
           allDone ||
           packStatus === "FAILED" ||
           packStatus === "READY_FOR_OWNER" ||
-          packStatus === "OWNER_APPROVED"
+          packStatus === "OWNER_APPROVED" ||
+          packStatus === "OWNER_APPROVED_WITH_PENDING"
         ) {
           inFlightRef.current = false;
           setPhase("idle");

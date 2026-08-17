@@ -102,3 +102,21 @@ def test_catalog_and_preferences():
 def test_codirector_tools_registered():
     assert "get_cloud_render_status" in TOOL_IDS
     assert "hosted_providers.recommend" in TOOL_IDS
+
+
+def test_dock_api_models_all_keyed_excludes_adapter_unavailable(monkeypatch) -> None:
+    """CDX-080: api_models must not include rows the catalog marks
+    adapterAvailable=False / executable=False (e.g. flux-kontext-fal)."""
+    from app.hosted_providers import discovery as hp_discovery
+
+    monkeypatch.setattr(hp_discovery, "_verified_provider_ids", lambda: ["fal"])
+    payload = hp_discovery.dock_api_models("image", scope="all_keyed")
+    rows = payload.get("models") or []
+    ids = {str(m.get("id") or "") for m in rows}
+    assert "flux-fal" in ids  # adapterAvailable=True row stays
+    assert "flux-kontext-fal" not in ids  # adapterAvailable=False row excluded
+    assert "nano-banana-2-fal" in ids
+    for m in rows:
+        assert m.get("adapterAvailable") is True
+        assert m.get("executable") is True
+        assert m.get("selectable") is True

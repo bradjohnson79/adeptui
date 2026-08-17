@@ -175,14 +175,40 @@ def build_leaf_graph(
         )
 
     if key in {
+        "qwen2512.ref",
         "qwen2512.txt2img",
         "qwen2512.character_concept",
         "qwen2512.character_profile",
     }:
         from ..workflows.qwen_image_2512 import (
             build_qwen_2512_character_concept_workflow,
+            build_qwen_2512_ref_workflow,
             build_qwen_2512_txt2img_workflow,
         )
+
+        if key == "qwen2512.ref":
+            img = reference_image or source_image
+            if not img:
+                raise RuntimeError("qwen2512.ref requires a source/reference image")
+            generic_steps = {8, int(getattr(settings, "imagegen_default_steps", 20) or 20)}
+            generic_cfg = {1.0, float(getattr(settings, "imagegen_default_cfg", 1.0) or 1.0)}
+            return build_qwen_2512_ref_workflow(
+                unet_name=settings.qwen_image_2512_unet,
+                clip_name=settings.qwen_image_2512_clip,
+                vae_name=settings.qwen_image_2512_vae,
+                positive=prompt,
+                negative=negative,
+                image_name=img,
+                width=width or settings.qwen_image_2512_size,
+                height=height or settings.qwen_image_2512_size,
+                seed=seed,
+                steps=settings.qwen_image_2512_steps if steps in generic_steps else steps,
+                cfg=settings.qwen_image_2512_cfg if cfg in generic_cfg else cfg,
+                sampler_name=settings.qwen_image_2512_sampler,
+                scheduler=settings.qwen_image_2512_scheduler,
+                model_shift=settings.qwen_image_2512_shift,
+                filename_prefix=filename_prefix or "studio/qwen2512_ref",
+            )
 
         if key == "qwen2512.txt2img":
             return build_qwen_2512_txt2img_workflow(

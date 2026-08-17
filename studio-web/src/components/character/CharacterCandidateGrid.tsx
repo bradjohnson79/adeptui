@@ -10,12 +10,15 @@
  *  - failed              → spinner removed, error state + Retry. Never an infinite loader.
  */
 import { api } from "../../api";
-import { candidateErrorMessage, candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, isLayoutNoncompliant, SHEET_VIEW_LABELS } from "./types";
+import { candidateErrorMessage, candidateSelectionLabel, candidateStage, characterSheetBatchLabel, characterSheetProvenanceLabel, isLayoutNoncompliant, SHEET_VIEW_LABELS } from "./types";
 import type { CharacterCandidate } from "./types";
 
 type Props = {
   candidates: CharacterCandidate[];
   selectedAssetId?: string | null;
+  /** Asset id of the hero_identity reference that is attached but NOT yet
+   * canonical+approved (draft) — its card reads "Pending review" (CDX-004). */
+  pendingHeroAssetId?: string | null;
   disabled?: boolean;
   onApprove: (candidate: CharacterCandidate) => void;
   onRetry?: (candidate: CharacterCandidate) => void;
@@ -39,6 +42,7 @@ function stageLabel(c: CharacterCandidate): string {
 export function CharacterCandidateGrid({
   candidates,
   selectedAssetId,
+  pendingHeroAssetId,
   disabled,
   onApprove,
   onRetry,
@@ -52,6 +56,8 @@ export function CharacterCandidateGrid({
         const src = assetId ? api.assetUrl(assetId) : "";
         const layoutNoncompliant = isLayoutNoncompliant(c);
         const isSelected = !layoutNoncompliant && !!selectedAssetId && assetId === selectedAssetId;
+        const isPendingReview =
+          !isSelected && !layoutNoncompliant && !!pendingHeroAssetId && assetId === pendingHeroAssetId;
         const stage = candidateStage(c);
         const ready = stage === "complete";
         const failed = stage === "failed";
@@ -139,7 +145,7 @@ export function CharacterCandidateGrid({
                   disabled={disabled || !canApprove}
                   onClick={() => onApprove(c)}
                 >
-                  {isSelected ? "Selected" : "Use This Look"}
+                  {candidateSelectionLabel({ isSelected, isPendingReview })}
                 </button>
               ) : null}
             </div>

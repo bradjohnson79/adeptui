@@ -96,6 +96,57 @@ describe("Character Sheet generate request", () => {
     expect(reason).toMatch(/Enable a Local or Cloud generator/i);
   });
 
+  it("blocks Generate with empty local inventory + Auto Select + cloud off (CDX-009)", () => {
+    const reason = characterGenerateBlockReason({
+      name: "Korri",
+      plan: plan(),
+      localOptions: [],
+    });
+    expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
+    expect(reason).toMatch(/local generator/i);
+    expect(reason).toMatch(/Cloud/i);
+  });
+
+  it("blocks Generate when the inventory has no executable family and cloud is off", () => {
+    const reason = characterGenerateBlockReason({
+      name: "Korri",
+      plan: plan(),
+      localOptions: [{ id: "qwen2512", label: "Qwen Image 2512", executable: false }],
+    });
+    expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
+    expect(reason).toMatch(/local generator/i);
+  });
+
+  it("does not block Auto Select when an executable local family exists", () => {
+    const reason = characterGenerateBlockReason({
+      name: "Korri",
+      plan: plan(),
+      localOptions,
+    });
+    expect(reason).toBeNull();
+  });
+
+  it("blocks Generate when the only checked local family is not executable and cloud is off", () => {
+    const reason = characterGenerateBlockReason({
+      name: "Korri",
+      plan: plan({
+        autoSelect: { enabled: false, batchCount: 1 },
+        localFamilies: [
+          { family: "illustrious", enabled: true, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+          { family: "zimage", enabled: false, batchCount: 1 },
+        ],
+      }),
+      localOptions: [
+        { id: "illustrious", label: "Illustrious XL", executable: false },
+        { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+        { id: "zimage", label: "Z-Image Turbo", executable: true },
+      ],
+    });
+    expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
+    expect(reason).toMatch(/Enable a Local or Cloud generator/i);
+  });
+
   it("click contract: building the body twice yields one identical request shape", () => {
     const next = plan({
       localFamilies: [

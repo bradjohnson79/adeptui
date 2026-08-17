@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import Project, Scene, SessionLocal, init_db
+from app.db import Asset, Project, Scene, SessionLocal, init_db
 from app.feature_flags import FeatureFlags
 
 HITCHHIKER_PROJECT = "d1683511-1cc7-4d3d-8cb7-00f48cc36aa9"
@@ -88,6 +88,21 @@ def test_feature_disabled_returns_404(client: TestClient, monkeypatch: pytest.Mo
 def test_name_only_save_is_valid_no_incomplete(client: TestClient, project_id: str):
     """Completeness law: a saved character with a valid name is valid (never INCOMPLETE),
     even after attaching a reference (which recomputes coverage)."""
+    # CDX-007: references must point at a real project image asset.
+    session = SessionLocal()
+    session.add(
+        Asset(
+            id="asset-ref-1",
+            project_id=project_id,
+            tag="reference_image",
+            kind="image",
+            filename="ref.png",
+            path="ref.png",
+        )
+    )
+    session.commit()
+    session.close()
+
     created = client.post(
         f"/api/projects/{project_id}/characters",
         json={"name": "Name Only"},

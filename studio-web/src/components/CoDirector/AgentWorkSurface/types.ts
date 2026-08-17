@@ -55,7 +55,13 @@ export interface WorkSurfaceState {
   surface_type: SurfaceType;
   status: string;
   progress: number;
-  focused_artifact_ids: string[];
+  /** DEPRECATED — vestigial contract field (CDX-092). The backend ExecutionPlan
+   * has NO "focused artifact" concept; this field historically aliased
+   * result_asset_ids, which was dishonest. New code must NOT populate it —
+   * result_asset_ids is the single artifact-truth list. It is kept only as an
+   * optional back-compat slot for legacy components (e.g.
+   * AgentWorkSurface.buildPack) pending their concurrent cleanup. */
+  focused_artifact_ids?: string[];
   child_jobs: ChildJobView[];
   result_asset_ids: string[];
   collection_id?: string | null;
@@ -73,7 +79,6 @@ export const NORMAL_WORK_SURFACE: WorkSurfaceState = {
   surface_type: "",
   status: "",
   progress: 0,
-  focused_artifact_ids: [],
   child_jobs: [],
   result_asset_ids: [],
 };

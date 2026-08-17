@@ -35,6 +35,68 @@ export type GeneratorSourceState = {
   stage2SelectedId?: string;
 };
 
+/** Raw row from GET /api/imagegen-models (Local Generator roster). */
+export type LocalGeneratorRow = {
+  id: string;
+  label: string;
+  group?: string;
+  status?: string;
+  supportsReferences?: boolean;
+  supportsEditing?: boolean;
+  executable?: boolean;
+};
+
+/** Raw row from GET /api/hosted-providers/discovered-models. */
+export type ApiGeneratorRow = {
+  id?: string;
+  label?: string;
+  displayName?: string;
+  provider?: string;
+  providerId?: string;
+  executable?: boolean;
+};
+
+/**
+ * Map a Local Generator roster row to a selector option, FAILING CLOSED
+ * (CDX-081): a missing `executable` or `status` field is treated as
+ * unverified/disabled - never as available, and never defaulted to "Certified".
+ * Only the backend asserting `executable: true` makes the option executable.
+ */
+export function toLocalGeneratorOption(row: LocalGeneratorRow): GeneratorOption {
+  return {
+    id: row.id,
+    label: row.label,
+    family: row.id,
+    providerKind: "local",
+    executable: row.executable === true,
+    status: row.status || "Unknown",
+    supportsReferences: !!row.supportsReferences,
+    supportsEditing: !!row.supportsEditing,
+  };
+}
+
+/**
+ * Map a hosted discovered-model row to a selector option. Availability is only
+ * asserted when the backend row says `executable: true` (CDX-081); otherwise the
+ * option is disabled. `availability` (credit-label fallback) is "Connected" only
+ * when the backend asserts executability - never invented from absence.
+ */
+export function toApiGeneratorOption(row: ApiGeneratorRow, falBalance: number | null): GeneratorOption {
+  const providerId = (row.providerId || row.provider || "").toLowerCase();
+  const credits = providerId === "fal" ? falBalance : null;
+  const executable = row.executable === true;
+  return {
+    id: row.id || providerId + ":" + (row.label || row.displayName || "model"),
+    label: row.label || row.displayName || row.id || "API model",
+    providerKind: "cloud",
+    providerId: providerId || undefined,
+    modelId: row.id,
+    executable,
+    credits,
+    availability: credits == null ? (executable ? "Connected" : "Balance unavailable") : undefined,
+  };
+}
+
 export type GeneratorSources = {
   local: GeneratorSourceState;
   api: GeneratorSourceState;

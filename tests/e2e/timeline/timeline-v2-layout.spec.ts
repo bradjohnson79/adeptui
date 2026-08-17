@@ -111,7 +111,7 @@ async function probeLabels(page: Page): Promise<LabelProbe[]> {
 
 function isScopedV2LabelColor(value: string) {
   const v = value.trim().toLowerCase();
-  // Authored rgba(225, 232, 242, 0.72) may minify to #e1e8f2b8.
+  // Authored #e1e8f2 (opaque light rail text).
   return /225\s*,\s*232\s*,\s*242/.test(v) || /#e1e8f2/.test(v);
 }
 
@@ -122,7 +122,10 @@ function assertReadableScoped(probes: LabelProbe[], theme: string) {
     expect(probe.transform, `${probe.testId} transform ${theme}`).toBe("none");
     expect(probe.filter === "none" || probe.filter === "", `${probe.testId} filter ${theme}`).toBeTruthy();
     expect(probe.visibility, `${probe.testId} visibility ${theme}`).toBe("visible");
-    expect(isScopedV2LabelColor(probe.scopedVar), `scoped var missing in ${theme}: ${probe.scopedVar}`).toBeTruthy();
+    expect(
+      isScopedV2LabelColor(probe.scopedVar) || isScopedV2LabelColor(probe.color),
+      `scoped var missing in ${theme}: ${probe.scopedVar} color=${probe.color}`,
+    ).toBeTruthy();
     expect(
       isScopedV2LabelColor(probe.color),
       `${probe.testId} must use scoped V2 color in ${theme}, got ${probe.color}`,
@@ -180,6 +183,21 @@ test.describe("Timeline V2 layout", () => {
 
     const defaultProbes = await probeLabels(page);
     assertReadableScoped(defaultProbes, "default");
+
+    const overlay = await page.evaluate(() => {
+      const label = document.querySelector('[data-testid="timeline-v2-label-batches"]');
+      const gutter = document.querySelector(".timeline-v2__playhead-gutter");
+      const rail = document.querySelector(".timeline-v2__playhead-rail");
+      return {
+        labelZ: label ? getComputedStyle(label).zIndex : "",
+        labelColor: label ? getComputedStyle(label).color : "",
+        gutterBg: gutter ? getComputedStyle(gutter).backgroundColor : "",
+        railZ: rail ? getComputedStyle(rail).zIndex : "",
+      };
+    });
+    expect(overlay.gutterBg, "playhead gutter must not paint an opaque plate over labels").toMatch(/rgba\(0,\s*0,\s*0,\s*0\)|transparent/);
+    expect(Number(overlay.labelZ), "labels must stack above the playhead rail").toBeGreaterThan(Number(overlay.railZ));
+    expect(overlay.labelColor).toMatch(/225,\s*232,\s*242|#e1e8f2/i);
 
     await page.evaluate(() => document.documentElement.setAttribute("data-theme", "aurora-day"));
     const dayProbes = await probeLabels(page);

@@ -63,6 +63,32 @@ def _create_project(name: str = "Spatial Map Cartesian Test") -> str:
         db.close()
 
 
+def _seed_entities(db, project_id: str) -> None:
+    """CDX-013: placements must reference project-owned canonical entities."""
+    from app.character_identity.models import CharacterProfileRow
+    from app.spatial_map.ers_contracts import PropEntity
+    from app.spatial_map.ers_persistence import save_prop_entity
+
+    existing = db.get(CharacterProfileRow, "korri-123")
+    if existing is not None:
+        db.delete(existing)
+        db.commit()
+    db.add(CharacterProfileRow(id="korri-123", project_id=project_id, name="Korri"))
+    db.commit()
+    for prop_id in ("prop-lightsaber", "prop-9"):
+        save_prop_entity(
+            db,
+            project_id,
+            PropEntity(
+                id=prop_id,
+                project_id=project_id,
+                tag=prop_id,
+                display_label=prop_id,
+                approved_asset_id=f"approved-{prop_id}",
+            ),
+        )
+
+
 def test_camera_limit_is_four():
     assert CAMERA_LIMIT == 4
 
@@ -103,6 +129,7 @@ def test_grid_scale_persistence_and_clamping():
 def test_character_assignment_requires_character_id_and_does_not_auto_place():
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         with pytest.raises(ValidationError):
             SpatialCharacterPlacementBody(characterId="", label="Korri")
@@ -146,6 +173,7 @@ def test_normalized_only_create_persists_coords():
     """Create-body default gridRow/Column=-1 must not wipe provided normalized coords."""
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Norm Persist"))
         doc = place_character(
@@ -209,6 +237,7 @@ def test_normalized_only_create_persists_coords():
 def test_prop_assignment_binds_prop_id():
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Prop"))
         updated = place_prop(
@@ -233,6 +262,7 @@ def test_prop_assignment_binds_prop_id():
 def test_normalized_position_survives_precision_change():
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Stable"))
         doc = place_character(
@@ -374,6 +404,7 @@ def test_library_tagged_prop_uses_asset_id_without_fabricating_prop_id():
 def test_reset_returns_neutral_and_clears_coords_keeps_assignments():
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Reset Neutral"))
         doc = place_character(
@@ -601,6 +632,7 @@ def test_visible_default_true_and_false_persists_assignment_and_coords():
     """Missing visible defaults true. visible=false persists and keeps assignment/coords."""
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Visible"))
         doc = place_character(
@@ -682,6 +714,7 @@ def test_add_unplaced_then_place_move_same_placement_id():
     """ADD creates unplaced (grid -1, normalized null). PLACE/MOVE write cell center on the same id."""
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Unplaced Place Move"))
         doc = place_character(
@@ -791,6 +824,7 @@ def test_hide_is_not_delete_hidden_entity_remains_in_document():
     """visible=false hides the marker only. The entity stays in the document; remove_* deletes it."""
     project_id = _create_project()
     db = _session()
+    _seed_entities(db, project_id)
     try:
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Hide Ne Delete"))
         doc = place_character(

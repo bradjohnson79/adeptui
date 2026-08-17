@@ -81,15 +81,15 @@ describe("regionEdit capability labels", () => {
     expect(UNSUPPORTED_REGION_EDIT_MESSAGE).toContain("Choose Z-Image");
   });
 
-  it("recommends FLUX for all region-edit ops without silent swap", () => {
+  it("recommends Nano Banana 2 for Add and FLUX for the other ops", () => {
     expect(recommendOperationFamily("modify")).toEqual({ family: "flux", label: "FLUX" });
     expect(recommendOperationFamily("replace")).toEqual({ family: "flux", label: "FLUX" });
-    expect(recommendOperationFamily("add")).toEqual({ family: "flux", label: "FLUX" });
+    expect(recommendOperationFamily("add")).toEqual({ family: "nano-banana-fal", label: "Nano Banana 2" });
     expect(recommendOperationFamily("remove")).toEqual({ family: "flux", label: "FLUX" });
     expect(operationRecommendCopy("modify", "zimage")).toContain("FLUX is recommended for Modify");
     expect(operationRecommendCopy("modify", "flux")).toBe("");
-    expect(operationRecommendCopy("add", "zimage")).toContain("FLUX is recommended for Add");
-    expect(operationRecommendCopy("add", "flux")).toBe("");
+    expect(operationRecommendCopy("add", "flux")).toContain("Nano Banana 2 is recommended for Add");
+    expect(operationRecommendCopy("add", "nano-banana-fal")).toBe("");
     expect(operationRecommendCopy("remove", "zimage")).toContain("FLUX is recommended for Remove");
   });
 });

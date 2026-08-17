@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Literal
 
 from app.codirector.foundation.contracts import (
     ContinuityFlag,
@@ -12,7 +12,20 @@ from app.codirector.foundation.contracts import (
     SpecialistResult,
 )
 
+from ...intelligence.specialist_runner import LIMITED_ANALYSIS_ASSUMPTION
 from .roster import is_known_specialist
+
+
+class HeuristicSpecialistResult(SpecialistResult):
+    '''A SpecialistResult produced by deterministic foundation heuristics.
+
+    CDX-090: foundation findings are keyword/deterministic heuristics, NOT
+    LLM specialist analysis. ``source`` is a first-class field so callers and
+    events can distinguish "heuristic creative review" from live provider
+    specialist output and never present it as validated consultant work.
+    '''
+
+    source: Literal["heuristic", "llm"] = "heuristic"
 
 try:
     from app.codirector.foundation.knowledge import query_knowledge, get_knowledge_pack
@@ -361,7 +374,9 @@ def _build_result(request: SpecialistRequest, specialist_id: str) -> SpecialistR
     if knowledge_refs:
         summary = f"{summary} Knowledge: {', '.join(knowledge_refs[:3])}."
 
-    return SpecialistResult(
+    # Heuristic output: first-class source label + limited-analysis assumption so
+    # synthesis caps confidence and callers never mistake this for LLM analysis.
+    return HeuristicSpecialistResult(
         specialistId=specialist_id,
         summary=summary,
         recommendation=recommendation_text,
@@ -377,6 +392,7 @@ def _build_result(request: SpecialistRequest, specialist_id: str) -> SpecialistR
         blockingIssues=_build_blockers(request, specialist_id, signals),
         optionalImprovements=opportunities[:2],
         assumptions=[
+            LIMITED_ANALYSIS_ASSUMPTION,
             "The creator wants foundation-level guidance, not direct execution.",
             "Any approved canon or locked project choices should remain the source of truth.",
             "Craft doctrine comes from the shared Creative Knowledge Framework.",
@@ -404,4 +420,4 @@ def run_specialist(request: SpecialistRequest) -> SpecialistResult:
     return _build_result(request, specialist_id)
 
 
-__all__ = ["run_specialist"]
+__all__ = ["HeuristicSpecialistResult", "run_specialist"]

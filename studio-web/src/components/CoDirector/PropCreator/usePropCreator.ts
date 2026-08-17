@@ -150,16 +150,14 @@ export function usePropCreator(projectId: string) {
           ...(identity
             ? {
                 use_as_identity: true,
-                approved_asset_id: refId,
-                library_asset_id: refId,
+                identity_asset_id: refId,
               }
             : {}),
         });
-        let next = res.prop;
-        if (identity) {
-          const pointed = await propCreatorApi.useAsIdentity(projectId, res.prop.id, refId);
-          if (pointed) next = pointed;
-        }
+        // CDX-016: upsert(use_as_identity + identity_asset_id) performs the
+        // identity point atomically server-side; the separate useAsIdentity
+        // call was redundant.
+        const next = res.prop;
         applyProp(next);
         await refresh(next.id);
         return next;

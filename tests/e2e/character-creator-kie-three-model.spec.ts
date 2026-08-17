@@ -20,8 +20,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
-const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8761";
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
+const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const SCREENSHOT_DIR = path.join("tests", "e2e", "screenshots");
 const SCREENSHOT_PATH = path.join(SCREENSHOT_DIR, "kie-three-model-sheet.png");
 const RESULT_PATH = path.join(".adept-tmp", "kie-three-model-result.json");

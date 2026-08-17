@@ -14,9 +14,13 @@ Mounted at ``/api/scene-creator``. Endpoints:
     Get one batch.
 - ``POST /scene-creator/projects/{pid}/batches/{bid}/regenerate-shot``
     Regenerate one shot of a batch (targeted regen, keep siblings).
+- ``POST /scene-creator/projects/{pid}/batches/{bid}/approve``
+    Mark specific completed result assets as approved (CDX-043 approval
+    gate: generated != approved).
 - ``POST /scene-creator/projects/{pid}/batches/{bid}/send-to-timeline``
-    Hand the batch's result assets off to the W46 Timeline via
-    ``magi.timeline_handoff.export_to_timeline``.
+    Hand the batch's approved result assets off to the W46 Timeline via
+    ``magi.timeline_handoff.export_to_timeline``. Rejects with 409
+    ``APPROVAL_REQUIRED`` when any completed result asset lacks approval.
 
 Amendment #3 (SPATIAL AUTHORITY): Scene Creator generation never writes
 back to spatial map placement state.
@@ -26,10 +30,27 @@ human-readable tag is not the database identity.
 Law #14 (project isolation): every query filters by ``project_id``.
 Law #7 (no mock completion): every batch creation calls the real
 ``scene.generate`` handler, which calls ``enqueue_imagegen_job``.
+
+CDX-085 (Phase 7) — ENGINE OWNERSHIP (canonical decision, no merge):
+The Scene Creator SHOT flow is the CANONICAL scene-generation engine:
+``POST /scene-creator/projects/{pid}/shots/{shot_id}/generate``
+(scene_creator/service.py) plus the Co-Director execution-pack path
+(scene.generate capability -> codirector/capabilities/handlers/scene_generate.py
+via codirector/execution/dispatcher.py).
+The BATCH REST surface (``POST /projects/{pid}/batches``) is RETAINED BUT
+GATED: Phase 4 approval (CDX-043 — generated != approved) + ERS grounding
+(CDX-034) + send-to-timeline 409 APPROVAL_REQUIRED.
+Both surfaces compile shots through the SAME handler
+(``scene_generate.handle`` -> ``entity_resolver.compile_shot_prompt`` ->
+``enqueue_imagegen_job``), so the capability/provider provenance contract
+(purpose, surface_type, modelFamilyPreference, workflowKey) is shared;
+parity is locked by tests/test_engine_ownership.py.
+NO MERGE: consolidating the two surfaces is architectural and out of scope.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from typing import Any
@@ -42,7 +63,7 @@ from ..codirector.entity_resolver import (
     parse_shot_requests,
     resolve_shot_request_entities,
 )
-from ..db import Project, get_db
+from ..db import Asset, Job, Project, get_db
 from ..spatial_map.ers_contracts import (
     EnvironmentReferencePackage,
     SceneGenerationBatch,
@@ -90,6 +111,10 @@ class SendToTimelineBody(BaseModel):
     batch_block_id: str | None = None
 
 
+
+
+class ApproveBatchBody(BaseModel):
+    asset_ids: list[str] = Field(default_factory=list)
 class CreateShotBody(BaseModel):
     sheet_id: str
     scene_id: str = ""
@@ -179,6 +204,125 @@ def _batch_or_404(db: Session, project_id: str, batch_id: str) -> SceneGeneratio
     return batch
 
 
+
+def _resolve_ers_package(
+    db: Session, project_id: str, ers_package_id: str
+) -> EnvironmentReferencePackage:
+    """Resolve an ERS reference to a real package (CDX-034).
+
+    Accepts either a persisted package UUID (existing callers) or the
+    creator-facing sheetId. When the id is not a package, resolves through
+    ``ers_resolver.resolve_ers_for_sheet``. Raises ``ErsResolveError`` when
+    neither identity resolves — never silently proceed with zero ERS
+    grounding.
+    """
+    from .ers_resolver import ErsResolveError, resolve_ers_for_sheet
+
+    ref = (ers_package_id or "").strip()
+    if not ref:
+        raise ErsResolveError("Select an Environment Reference Sheet first.")
+
+    package = load_ers_package(db, project_id, ref)
+    if package is not None:
+        return package
+
+    package, _runtime = resolve_ers_for_sheet(db, project_id, ref)
+    return package
+
+
+_COMPLETED_JOB_STATUSES = {"done", "completed", "complete", "success"}
+
+
+def _job_output_asset_id(job: Job) -> str | None:
+    """Best-effort extraction of a completed imagegen job's output asset id."""
+    try:
+        params = json.loads(job.params_json or "{}")
+    except Exception:
+        params = {}
+    if isinstance(params, dict):
+        asset_id = params.get("output_asset_id") or params.get("outputAssetId")
+        if asset_id:
+            return str(asset_id)
+    try:
+        preview = json.loads(job.preview_json or "{}")
+    except Exception:
+        preview = {}
+    if isinstance(preview, dict):
+        for key in ("assetId", "asset_id", "output_asset_id"):
+            if preview.get(key):
+                return str(preview[key])
+    return None
+
+
+def _approvable_ids_for_slot(
+    db: Session, project_id: str, slot_id: str
+) -> set[str]:
+    """Identities under which a batch result slot may be approved.
+
+    A slot is approvable when it is a completed imagegen job id (the slot
+    itself plus its output asset id) or a real project asset id. Failed/
+    empty slots are never approvable.
+    """
+    if not slot_id or str(slot_id).startswith("failed_"):
+        return set()
+    ids: set[str] = set()
+    job = db.get(Job, slot_id)
+    if job is not None and job.project_id == project_id:
+        status = (job.status or "").lower()
+        if status in _COMPLETED_JOB_STATUSES:
+            ids.add(slot_id)
+            out = _job_output_asset_id(job)
+            if out:
+                ids.add(str(out))
+    elif slot_id:
+        asset = db.get(Asset, slot_id)
+        if asset is not None and asset.project_id == project_id:
+            ids.add(slot_id)
+    return ids
+
+
+def _completed_result_slots(db: Session, project_id: str, batch: SceneGenerationBatch) -> list[str]:
+    """Completed (non-failed, non-empty) result asset slots of a batch."""
+    return [
+        str(slot)
+        for slot in (batch.result_asset_ids or [])
+        if slot and not str(slot).startswith("failed_")
+    ]
+
+
+def _unapproved_result_slots(db: Session, project_id: str, batch: SceneGenerationBatch) -> list[str]:
+    """Result slots that are completed but not yet creator-approved (CDX-043)."""
+    approved = set(batch.approved_asset_ids or [])
+    unapproved: list[str] = []
+    for slot in _completed_result_slots(db, project_id, batch):
+        if not (_approvable_ids_for_slot(db, project_id, slot) & approved):
+            unapproved.append(slot)
+    return unapproved
+
+
+def _stamp_batch_asset_approval(db: Session, project_id: str, asset_id: str) -> None:
+    """Mirror batch approval onto the canonical Asset approval channel (CDX-064).
+
+    Asset.production_approval is the product-wide approval truth; stamping
+    keeps approved batch takes visible in Library/retrieval like approved
+    shot-flow takes. No-op when the id is not a project asset.
+    """
+    asset = db.get(Asset, asset_id)
+    if asset is None or asset.project_id != project_id:
+        return
+    asset.production_approval = "approved"
+    try:
+        labels = json.loads(asset.labels_json or "[]")
+    except Exception:
+        labels = []
+    if not isinstance(labels, list):
+        labels = []
+    labels = [str(x) for x in labels if x]
+    for tag in ("scene_shot", "scene_creator", "approved_take"):
+        if tag not in labels:
+            labels.append(tag)
+    asset.labels_json = json.dumps(labels)
+    db.add(asset)
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -206,10 +350,20 @@ def api_create_batch(
     parsed = parse_shot_requests(body.shot_requests_raw or "")
     resolved = [resolve_shot_request_entities(db, project_id, s) for s in parsed]
 
+    # CDX-034: resolve the ERS reference to a real package before creating
+    # the batch. Accepts a persisted package UUID (existing callers) or the
+    # creator-facing sheetId; unresolvable references fail loudly — never
+    # silently compile batch shots with zero ERS grounding.
+    try:
+        ers_package = _resolve_ers_package(db, project_id, body.ers_package_id or "")
+    except Exception as exc:
+        raise _service_error(exc) from exc
+    ers_package_id = ers_package.id
+
     batch = SceneGenerationBatch(
         id=str(uuid.uuid4()),
         project_id=project_id,
-        ers_package_id=body.ers_package_id or "",
+        ers_package_id=ers_package_id,
         shot_requests=resolved,
         output_count=max(1, min(body.output_count or 1, len(resolved) or 1)),
         result_asset_ids=[],
@@ -221,16 +375,19 @@ def api_create_batch(
     from ..codirector.capabilities.handlers.scene_generate import handle as scene_generate_handle
 
     execution_id = f"scene_creator_{batch.id}"
-    result = scene_generate_handle(
-        db,
-        project_id,
-        execution_id,
-        ers_package_id=body.ers_package_id or "",
-        shot_requests_raw=body.shot_requests_raw or "",
-        output_count=body.output_count or 4,
-        visual_style=body.visual_style or "",
-        character_names=body.character_names,
-    )
+    try:
+        result = scene_generate_handle(
+            db,
+            project_id,
+            execution_id,
+            ers_package_id=ers_package_id,
+            shot_requests_raw=body.shot_requests_raw or "",
+            output_count=body.output_count or 4,
+            visual_style=body.visual_style or "",
+            character_names=body.character_names,
+        )
+    except Exception as exc:
+        raise _service_error(exc) from exc
 
     # Persist the batch with the submitted job_ids for later polling/regen.
     batch.result_asset_ids = list(result.get("job_ids") or [])
@@ -242,7 +399,6 @@ def api_create_batch(
         "job_ids": result.get("job_ids") or [],
         "surface_type": result.get("surface_type") or "scene_generation",
     }
-
 
 @router.get("/projects/{project_id}/batches")
 def api_list_batches(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
@@ -278,11 +434,13 @@ def api_regenerate_shot(
     from ..storyboard_jobs import enqueue_imagegen_job
 
     # Compile a fresh shot body from the existing shot (preserves character/prop refs).
-    ers_package = (
-        load_ers_package(db, project_id, batch.ers_package_id)
-        if batch.ers_package_id
-        else None
-    )
+    # CDX-034: the batch may store a package UUID (existing callers) or the
+    # creator-facing sheetId (legacy batch records) — resolve through
+    # resolve_ers_for_sheet and fail loudly when neither resolves.
+    try:
+        ers_package = _resolve_ers_package(db, project_id, batch.ers_package_id or "")
+    except Exception as exc:
+        raise _service_error(exc) from exc
     # Update the additional_instructions with the new prompt, keep the rest.
     updated_shot = shot.model_copy(update={"additional_instructions": new_prompt})
     from ..codirector.entity_resolver import compile_shot_prompt
@@ -292,7 +450,7 @@ def api_regenerate_shot(
         shot_body["creativeContext"].setdefault("style_layers", {})["user"] = body.visual_style
     shot_body["tag"] = f"codirector_scene_regen_{batch_id[:8]}_shot{body.shot_index + 1}"
     shot_body["creativeContext"]["executionId"] = f"regen_{batch_id}"
-    shot_body["creativeContext"]["ersPackageId"] = batch.ers_package_id or ""
+    shot_body["creativeContext"]["ersPackageId"] = ers_package.id
 
     try:
         job = enqueue_imagegen_job(db, project_id, shot_body)
@@ -322,6 +480,64 @@ def api_regenerate_shot(
     }
 
 
+@router.post("/projects/{project_id}/batches/{batch_id}/approve")
+def api_approve_batch(
+    project_id: str,
+    batch_id: str,
+    body: ApproveBatchBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Mark specific completed result assets of a batch as approved (CDX-043).
+
+    Generated != approved: only creator-approved takes may enter the Timeline.
+    Validates that every requested asset id belongs to a completed job result
+    of this batch (a completed job id, its output asset id, or a project asset
+    id recorded in the batch result slots).
+    """
+    _require_project(db, project_id)
+    batch = _batch_or_404(db, project_id, batch_id)
+
+    requested = [str(a).strip() for a in (body.asset_ids or []) if str(a).strip()]
+    if not requested:
+        raise HTTPException(
+            400,
+            {"code": "NO_ASSETS", "message": "Pass at least one result asset id to approve."},
+        )
+
+    # Each requested id must be approvable: it is a completed result slot id
+    # itself, the output asset id of a completed result job, or a project
+    # asset id recorded in the batch result slots.
+    slot_ids = set(_completed_result_slots(db, project_id, batch))
+    approvable: set[str] = set()
+    for slot in slot_ids:
+        approvable |= _approvable_ids_for_slot(db, project_id, slot)
+    invalid = [a for a in requested if a not in approvable]
+    if invalid:
+        raise HTTPException(
+            400,
+            {
+                "code": "INVALID_ASSET",
+                "message": "Only completed result assets of this batch can be approved.",
+                "invalid_asset_ids": invalid,
+            },
+        )
+
+    approved = list(batch.approved_asset_ids or [])
+    for asset_id in requested:
+        if asset_id not in approved:
+            approved.append(asset_id)
+    batch.approved_asset_ids = approved
+    save_scene_batch(db, project_id, batch)
+
+    # Mirror approval truth onto the canonical Asset channel so the take is
+    # visible as approved in Library/retrieval (CDX-064).
+    for asset_id in requested:
+        _stamp_batch_asset_approval(db, project_id, asset_id)
+    db.commit()
+
+    return {"batch": batch.model_dump(), "approved_asset_ids": approved}
+
+
 @router.post("/projects/{project_id}/batches/{batch_id}/send-to-timeline")
 def api_send_to_timeline(
     project_id: str,
@@ -333,6 +549,22 @@ def api_send_to_timeline(
     _require_project(db, project_id)
     batch = _batch_or_404(db, project_id, batch_id)
 
+    # CDX-043 approval gate: generated != approved. Every completed result
+    # asset must be creator-approved before ANY take may enter the Timeline.
+    # Name the unapproved assets so the creator knows exactly what to approve.
+    unapproved = _unapproved_result_slots(db, project_id, batch)
+    if unapproved:
+        raise HTTPException(
+            409,
+            {
+                "code": "APPROVAL_REQUIRED",
+                "message": (
+                    "Approve this batch's result assets before sending to Timeline: "
+                    + ", ".join(unapproved)
+                ),
+                "unapproved_asset_ids": unapproved,
+            },
+        )
     if not (body.scene_id or "").strip():
         raise HTTPException(400, "Send to Timeline needs a Scene. Create or select one first.")
 

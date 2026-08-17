@@ -1,4 +1,4 @@
-﻿"""Spatial Map attach/detach/relationship operations (Workstream B)."""
+"""Spatial Map attach/detach/relationship operations (Workstream B)."""
 
 from __future__ import annotations
 
@@ -45,7 +45,38 @@ def _insert_asset(project_id: str, kind: str, filename: str, isolated_data_dir: 
     return asset_id
 
 
+def _seed_canonical(project_id: str) -> None:
+    """CDX-013: placements must reference project-owned canonical entities."""
+    from app.character_identity.models import CharacterProfileRow
+    from app.spatial_map.ers_contracts import PropEntity
+    from app.spatial_map.ers_persistence import save_prop_entity
+
+    db = _session()
+    try:
+        existing = db.get(CharacterProfileRow, "korri")
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        db.add(CharacterProfileRow(id="korri", project_id=project_id, name="Korri"))
+        db.commit()
+        for prop_id in ("coffee-1", "coffee-2"):
+            save_prop_entity(
+                db,
+                project_id,
+                PropEntity(
+                    id=prop_id,
+                    project_id=project_id,
+                    tag=prop_id,
+                    display_label=prop_id,
+                    approved_asset_id=f"approved-{prop_id}",
+                ),
+            )
+    finally:
+        db.close()
+
+
 def _create_map(client, project_id: str) -> str:
+    _seed_canonical(project_id)
     create = client.post(
         f"/api/spatial-map/projects/{project_id}/maps",
         json={"title": "Cafe Blocking", "masterEnvironmentPrompt": "Warm cafe."},

@@ -113,7 +113,7 @@ def _creator_readable_handler_error(exc: BaseException, capability: str = "") ->
     return creator_readable_handler_error(exc, capability=capability)
 
 
-def dispatch(
+async def dispatch(
     db: Session,
     project_id: str,
     unified_intent: UnifiedIntent,
@@ -164,9 +164,19 @@ def dispatch(
 
     # Check approval policy (spec §50).
     if cap.approval_policy != ApprovalPolicy.DIRECT and not pre_approved:
-        # For NEEDS_APPROVAL, call the handler in plan_only mode to get the
-        # generation plan before returning PREVIEW status.
-        if cap.approval_policy == ApprovalPolicy.NEEDS_APPROVAL:
+        if cap.handler_kind == HandlerKind.TOOL:
+            # CDX-084: TOOL-kind capabilities never complete through the
+            # CAPABILITY_HANDLER plan_only path. Bridge them to the
+            # ProposalService: create the durable proposal now so the approve
+            # endpoint / chat confirmation can execute it through
+            # execute_approved_proposal instead of erroring.
+            try:
+                await _prepare_tool_proposal(db, project_id, plan, cap, unified_intent, ctx)
+            except Exception as exc:
+                logger.warning("Tool proposal preparation failed for %s: %s", cap.id, exc)
+        elif cap.approval_policy == ApprovalPolicy.NEEDS_APPROVAL:
+            # For NEEDS_APPROVAL, call the handler in plan_only mode to get the
+            # generation plan before returning PREVIEW status.
             try:
                 plan_result = _dispatch_capability_handler_plan_only(
                     db, project_id, plan, cap, unified_intent, ctx
@@ -185,7 +195,9 @@ def dispatch(
     if cap.handler_kind == HandlerKind.CAPABILITY_HANDLER:
         return _dispatch_capability_handler(db, project_id, plan, cap, unified_intent, ctx)
     elif cap.handler_kind == HandlerKind.TOOL:
-        return _dispatch_tool(db, project_id, plan, cap, unified_intent, ctx)
+        return await _dispatch_tool(
+            db, project_id, plan, cap, unified_intent, ctx, pre_approved=pre_approved
+        )
     else:
         plan.status = ExecutionStatus.FAILED
         plan.error = f"UNSUPPORTED_HANDLER_KIND: {cap.handler_kind}"
@@ -257,6 +269,10 @@ def _dispatch_capability_handler(
             "forceWorkflowKey": ctx.get("forceWorkflowKey") or ctx.get("force_workflow_key") or "",
             "lockModelFamily": bool(ctx.get("lockModelFamily") or ctx.get("lock_model_family")),
             "kieImageModelId": ctx.get("kieImageModelId") or ctx.get("kie_image_model_id") or "",
+            "panel_task": ctx.get("panel_task") or ctx.get("panelTask") or "",
+            "panelTask": ctx.get("panelTask") or ctx.get("panel_task") or "",
+            "visual_canon_corrections": ctx.get("visual_canon_corrections")
+            or ctx.get("visualCanonCorrections"),
         }
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
 
@@ -359,7 +375,7 @@ def _dispatch_capability_handler_plan_only(
         return None
 
 
-def approve_and_execute(
+async def approve_and_execute(
     db: Session,
     project_id: str,
     execution_id: str,
@@ -391,6 +407,10 @@ def approve_and_execute(
         save_pack(db, project_id, plan)
         return plan
 
+    if cap.handler_kind == HandlerKind.TOOL:
+        # CDX-084: TOOL-kind capabilities execute through the ProposalService
+        # approved path — the proposal was created at dispatch time.
+        return await _approve_tool_execution(db, project_id, plan, cap)
     if cap.handler_kind != HandlerKind.CAPABILITY_HANDLER:
         plan.status = ExecutionStatus.FAILED
         plan.error = "APPROVE_FAILED: non-capability handler"
@@ -471,48 +491,235 @@ def approve_and_execute(
         return plan
 
 
-def _dispatch_tool(
+def _tool_params(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Tool arguments for a TOOL-kind capability from the execution context.
+
+    The deterministic context does not populate tool_params itself; the
+    caller (REST body context / chat enrichment) supplies structured tool
+    arguments under tool_params. The tool registry's sanitizer drops
+    unknown keys, so this stays safe even when the context only carries
+    free-form keys.
+    """
+    params = ctx.get("tool_params") or {}
+    return params if isinstance(params, dict) else {}
+
+
+def _extract_asset_id(tool_result: Any) -> str | None:
+    """Best-effort single asset id from an approved tool result (if any)."""
+    if not isinstance(tool_result, dict):
+        return None
+    for key in ("assetId", "asset_id", "id"):
+        value = tool_result.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _receipt_error_text(receipt: Any) -> str:
+    err = getattr(receipt, "error", None)
+    if isinstance(err, dict):
+        return str(err.get("message") or err)
+    return str(err) if err else "APPROVE_EXECUTE_FAILED"
+
+
+async def _prepare_tool_proposal(
     db: Session,
     project_id: str,
     plan: ExecutionPlan,
     cap: CapabilityDefinition,
     unified_intent: UnifiedIntent,
     ctx: dict[str, Any],
+) -> None:
+    """Create the durable Proposal for a TOOL-kind capability (CDX-084).
+
+    Uses the canonical ToolExecutionService.propose so the proposal gets
+    the same server-side preview, sanitization, resource pinning, and input
+    hash as any chat-path tool proposal. Nothing is applied here — the human
+    decision happens at approve time.
+    """
+    from ..tools.execution import ToolExecutionService
+
+    tool_id = cap.tool_ids[0] if cap.tool_ids else ""
+    if not tool_id:
+        return
+    proposal = await ToolExecutionService.propose(
+        db,
+        project_id=project_id,
+        tool_id=tool_id,
+        arguments=_tool_params(ctx),
+        scene_id=ctx.get("scene_id"),
+        request_id=ctx.get("user_turn_id") or ctx.get("request_id"),
+        created_by=str(ctx.get("user_id") or "assistant"),
+    )
+    plan.proposal_id = proposal.id
+    plan.plan_data = {"proposal_id": proposal.id, "tool_id": tool_id}
+
+
+async def _approve_tool_execution(
+    db: Session,
+    project_id: str,
+    plan: ExecutionPlan,
+    cap: CapabilityDefinition,
 ) -> ExecutionPlan:
-    """Dispatch to an existing tool in the registry."""
-    # For TOOL-kind capabilities, the existing ToolExecutionService handles execution.
-    # This is a lighter path — the tool is invoked directly and the result is
-    # captured as a single-child execution.
+    """Execute an approved TOOL-kind capability through the ProposalService.
+
+    The proposal was created at dispatch time (PREVIEW status). Approving it
+    records the human decision and replays the proposal's stored arguments
+    through ToolExecutionService.execute_approved_proposal — the same
+    approved path a chat proposal approval uses (CDX-084).
+    """
+    from ..bible.proposals import ProposalService
+
+    proposal_id = plan.proposal_id or ((plan.plan_data or {}).get("proposal_id"))
+    if not proposal_id:
+        plan.status = ExecutionStatus.FAILED
+        plan.error = "APPROVE_FAILED: no proposal recorded for tool capability"
+        save_pack(db, project_id, plan)
+        return plan
+
     try:
-        from ..tools.execution import ToolExecutionService
+        receipt = ProposalService.approve(db, project_id, proposal_id, note=None, decided_by="user")
+    except Exception as exc:  # noqa: BLE001 - surface the specific failure to the user
+        logger.exception("Tool proposal approval failed for %s", cap.id)
+        plan.status = ExecutionStatus.FAILED
+        plan.error = f"APPROVE_FAILED: {exc}"
+        save_pack(db, project_id, plan)
+        return plan
 
-        tool_id = cap.tool_ids[0] if cap.tool_ids else ""
-        if not tool_id:
-            plan.status = ExecutionStatus.FAILED
-            plan.error = "NO_TOOL_ID"
-            save_pack(db, project_id, plan)
-            return plan
-
-        # Execute the tool (read or audited mutating based on approval policy).
-        result = ToolExecutionService.execute_audited(
-            db,
-            project_id=project_id,
-            tool_id=tool_id,
-            params=ctx.get("tool_params", {}),
-            user_id=ctx.get("user_id", "system"),
+    ok = receipt.status == "success"
+    asset_id = _extract_asset_id(getattr(receipt, "toolResult", None)) if ok else None
+    plan.child_jobs = [
+        ChildJobView(
+            job_id=str(uuid4()),
+            label=cap.title,
+            status=ChildJobStatus.COMPLETED if ok else ChildJobStatus.FAILED,
+            child_index=0,
+            asset_id=asset_id,
+            error=None if ok else _receipt_error_text(receipt),
         )
+    ]
+    if asset_id and asset_id not in plan.result_asset_ids:
+        plan.result_asset_ids.append(asset_id)
+    plan.recompute_progress()
+    save_pack(db, project_id, plan)
+
+    _publish_event(ExecutionEvent(
+        event_type=ExecutionEventType.EXECUTION_STARTED,
+        project_id=project_id,
+        execution_id=plan.execution_id,
+        status="completed" if ok else "failed",
+        surface_type=plan.surface_type,
+        timestamp=_now(),
+    ))
+    return plan
+
+
+async def _dispatch_tool(
+    db: Session,
+    project_id: str,
+    plan: ExecutionPlan,
+    cap: CapabilityDefinition,
+    unified_intent: UnifiedIntent,
+    ctx: dict[str, Any],
+    *,
+    pre_approved: bool = False,
+) -> ExecutionPlan:
+    """Dispatch to an existing tool in the registry (CDX-084).
+
+    Routes by the tool's own contract instead of assuming every tool executes
+    through the audited path:
+    - read tools → ToolExecutionService.execute_read
+    - audited mutating tools (requires_approval=False) → execute_audited
+    - approval-gated mutating tools → ProposalService bridge: the proposal is
+      created (preview + pinned args), and only a pre-approved dispatch (or the
+      approve endpoint) executes it through execute_approved_proposal.
+    """
+    from ..errors import CoDirectorError
+    from ..tools import registry as tool_registry
+    from ..tools.execution import ToolExecutionService
+
+    tool_id = cap.tool_ids[0] if cap.tool_ids else ""
+    if not tool_id:
+        plan.status = ExecutionStatus.FAILED
+        plan.error = "NO_TOOL_ID"
+        save_pack(db, project_id, plan)
+        return plan
+
+    definition = tool_registry.find(tool_id)
+    if definition is None:
+        plan.status = ExecutionStatus.FAILED
+        plan.error = f"TOOL_NOT_REGISTERED: {tool_id}"
+        save_pack(db, project_id, plan)
+        return plan
+
+    request_id = ctx.get("user_turn_id") or ctx.get("request_id")
+    try:
+        if definition.kind == "read":
+            invocation = await ToolExecutionService.execute_read(
+                db,
+                project_id=project_id,
+                tool_id=tool_id,
+                arguments=_tool_params(ctx),
+                scene_id=ctx.get("scene_id"),
+                request_id=request_id,
+                created_by=str(ctx.get("user_id") or "assistant"),
+            )
+            ok = invocation.status == "succeeded"
+            asset_id = _extract_asset_id(getattr(invocation, "result", None))
+            error = None if ok else (invocation.errorMessage or "TOOL_EXECUTION_FAILED")
+        elif definition.kind == "mutating" and not definition.requires_approval:
+            invocation = await ToolExecutionService.execute_audited(
+                db,
+                project_id=project_id,
+                tool_id=tool_id,
+                arguments=_tool_params(ctx),
+                scene_id=ctx.get("scene_id"),
+                request_id=request_id,
+                created_by=str(ctx.get("user_id") or "assistant"),
+            )
+            ok = invocation.status == "succeeded"
+            asset_id = _extract_asset_id(getattr(invocation, "result", None))
+            error = None if ok else (invocation.errorMessage or "TOOL_EXECUTION_FAILED")
+        else:
+            # Approval-gated mutating tool → ProposalService bridge. The
+            # proposal is created even for a pre-approved dispatch so the
+            # approval decision stays in the audit ledger.
+            proposal = await ToolExecutionService.propose(
+                db,
+                project_id=project_id,
+                tool_id=tool_id,
+                arguments=_tool_params(ctx),
+                scene_id=ctx.get("scene_id"),
+                request_id=request_id,
+                created_by=str(ctx.get("user_id") or "assistant"),
+            )
+            plan.proposal_id = proposal.id
+            plan.plan_data = {"proposal_id": proposal.id, "tool_id": tool_id}
+            if not pre_approved:
+                plan.status = ExecutionStatus.PREVIEW
+                plan.error = "APPROVAL_REQUIRED"
+                save_pack(db, project_id, plan)
+                return plan
+            from ..bible.proposals import ProposalService
+
+            receipt = ProposalService.approve(db, project_id, proposal.id, note=None, decided_by="user")
+            ok = receipt.status == "success"
+            asset_id = _extract_asset_id(getattr(receipt, "toolResult", None)) if ok else None
+            error = None if ok else _receipt_error_text(receipt)
 
         job_id = str(uuid4())
         plan.child_jobs = [
             ChildJobView(
                 job_id=job_id,
                 label=cap.title,
-                status=ChildJobStatus.COMPLETED if result.get("ok") else ChildJobStatus.FAILED,
+                status=ChildJobStatus.COMPLETED if ok else ChildJobStatus.FAILED,
                 child_index=0,
-                asset_id=result.get("asset_id"),
-                error=result.get("error"),
+                asset_id=asset_id,
+                error=error,
             )
         ]
+        if asset_id and asset_id not in plan.result_asset_ids:
+            plan.result_asset_ids.append(asset_id)
         plan.recompute_progress()
         save_pack(db, project_id, plan)
 
@@ -520,13 +727,19 @@ def _dispatch_tool(
             event_type=ExecutionEventType.EXECUTION_STARTED,
             project_id=project_id,
             execution_id=plan.execution_id,
-            status="completed" if result.get("ok") else "failed",
+            status="completed" if ok else "failed",
             surface_type=plan.surface_type,
             timestamp=_now(),
         ))
 
         return plan
 
+    except CoDirectorError as err:
+        logger.warning("Tool dispatch for %s rejected: %s", cap.id, err.code)
+        plan.status = ExecutionStatus.FAILED
+        plan.error = f"TOOL_ERROR: {err.code}: {err.message}"
+        save_pack(db, project_id, plan)
+        return plan
     except Exception as exc:
         logger.exception("Tool dispatch for %s failed", cap.id)
         plan.status = ExecutionStatus.FAILED

@@ -103,8 +103,6 @@ def build_candidate_plans(
     local_families = [
         m for m in list_local_generator_families(has_reference=has_reference) if m.get("executable")
     ]
-    if has_reference:
-        local_families = [m for m in local_families if m.get("supportsReferences") or m.get("id") != "illustrious"]
 
     selected_local = (local_family or "").strip()
     if selected_local and local_enabled:

@@ -94,6 +94,20 @@
   margin: 4px 0 0;
 }
 
+/* CDX-006: Express approval → explicit "Promote to Production" affordance. */
+.character-core__promote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-border, #3a5a8c);
+  border-radius: 8px;
+  background: var(--accent-soft, rgba(74, 111, 165, 0.08));
+  font-size: 13px;
+}
+
 .character-core__reference {
   display: flex;
   flex-direction: column;

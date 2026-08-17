@@ -26,6 +26,7 @@ class LipSyncClip(BaseModel):
     length: float = 2.0
     label: str = "Lip Sync Clip"
     status: str = "draft"
+    speaker_binding_id: Optional[str] = None
     character_id: Optional[str] = None
     character_name: Optional[str] = None
     audio_asset_id: Optional[str] = None

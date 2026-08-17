@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  AUTO_SELECT_FAMILY,
   anyExplicitLocalFamilyEnabled,
   buildGeneratorSourcesPayload,
   clampBatchCount,
   cloudModelStatusLabel,
   DEFAULT_CHARACTER_GENERATOR_PLAN,
   groupDiscoveredImageModelsByProvider,
+  hasExecutableSource,
   hydratePlanFromPreferences,
   isAutoSelectActive,
   mergePlanWithInventory,
@@ -246,6 +248,61 @@ describe("Character generator plan", () => {
     const next = { ...merged, localFamilies: merged.localFamilies.map((r) => ({ ...r, batchCount: 1 })) };
     expect(next.localFamilies[0].batchCount).toBe(1);
     expect(merged.localFamilies[0].batchCount).toBe(2);
+  });
+
+  it("counts zero Auto Select sheets when the local inventory is empty (CDX-009)", () => {
+    const summary = summarizeGenerationPlan(plan(), []);
+    expect(summary.totalSheets).toBe(0);
+    expect(summary.sheets).toHaveLength(0);
+    expect(summary.localLines).toEqual([]);
+  });
+
+  it("counts zero Auto Select sheets when the inventory has no executable family", () => {
+    const summary = summarizeGenerationPlan(plan(), [
+      { id: "qwen2512", label: "Qwen Image 2512", executable: false },
+      { id: "zimage", label: "Z-Image Turbo", executable: false },
+    ]);
+    expect(summary.totalSheets).toBe(0);
+    expect(summary.localLines).toEqual([]);
+  });
+
+  it("counts Auto Select sheets when an executable local family exists", () => {
+    const summary = summarizeGenerationPlan(plan(), [
+      { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+    ]);
+    expect(summary.totalSheets).toBe(1);
+    expect(summary.localLines).toEqual([{ label: "Auto Select", count: 1 }]);
+    expect(summary.sheets[0].family).toBe(AUTO_SELECT_FAMILY);
+  });
+
+  it("counts only executable explicit families when inventory is known (CDX-009)", () => {
+    const mixed = plan({
+      autoSelect: { enabled: false, batchCount: 1 },
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 2 },
+        { family: "qwen2512", enabled: true, batchCount: 1 },
+        { family: "zimage", enabled: true, batchCount: 1 },
+      ],
+    });
+    const summary = summarizeGenerationPlan(mixed, [
+      { id: "illustrious", label: "Illustrious XL", executable: true },
+      { id: "qwen2512", label: "Qwen Image 2512", executable: false },
+    ]);
+    expect(summary.totalSheets).toBe(2);
+    expect(summary.localLines).toEqual([{ label: "Illustrious XL", count: 2 }]);
+  });
+
+  it("hasExecutableSource reflects inventory truth for Auto Select and Cloud", () => {
+    expect(hasExecutableSource(plan(), [])).toBe(false);
+    expect(hasExecutableSource(plan(), undefined)).toBe(true);
+    expect(hasExecutableSource(plan(), [{ id: "qwen2512", label: "Qwen", executable: true }])).toBe(true);
+    const cloudOn = plan({
+      apiEnabled: true,
+      apiModels: [
+        { providerId: "kie", modelId: "nano-banana-pro", model: "nano-banana-kie", enabled: true, batchCount: 1 },
+      ],
+    });
+    expect(hasExecutableSource(cloudOn, [])).toBe(true);
   });
 });
 

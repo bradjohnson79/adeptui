@@ -119,6 +119,7 @@ class TimelinePromptSegment(BaseModel):
     executionStrategy: PromptStrategy = "compiled"
     versionId: str = Field(default_factory=lambda: _nid("psv_"))
     legacyPromptSegmentId: Optional[str] = None
+    referenceBindingIds: list[str] = Field(default_factory=list)
 
 
 class ExecutionSnapshot(BaseModel):
@@ -258,6 +259,7 @@ class BatchBlock(BaseModel):
     approvedClip: Optional[ApprovedClip] = None
     repairRanges: list[RepairRange] = Field(default_factory=list)
     references: list[dict[str, Any]] = Field(default_factory=list)
+    speechWindows: list[dict[str, Any]] = Field(default_factory=list)
     configFingerprint: Optional[str] = None
     createdAt: str = Field(default_factory=_now)
     updatedAt: str = Field(default_factory=_now)

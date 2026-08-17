@@ -60,8 +60,7 @@ def _install_exception_hooks() -> None:
     if _PREV_THREAD_EXCEPT_HOOK is not None:
         def _thread_excepthook(args):  # noqa: ANN001
             logger.error(
-                "Uncaught thread exception thread=%s op_hint=%s\n%s",
-                getattr(args, "thread", None) and getattr(args.thread, "name", None),
+                "Uncaught thread exception thread=%s\n%s",
                 getattr(args, "thread", None) and getattr(args.thread, "name", None),
                 "".join(
                     traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)

@@ -1,4 +1,20 @@
-"""High-level Production Executive service used by API routes."""
+"""High-level Production Executive service used by API routes.
+
+CDX-089 (Phase 7) — PRODUCTION-JOB OWNERSHIP (canonical decision):
+The Production Executive (this service + executive.store.JobStore) OWNS the
+long-running production-job pipeline: storyboard -> image -> validate ->
+create_proposal -> await_approval -> apply_canon. Jobs are persisted as
+``ProductionJob`` rows with per-step idempotency_key dedupe
+(``JobStore.find_by_idempotency`` / ``create_job``), so re-submitting the
+same key never double-creates.
+
+This engine does NOT write execution packs: ExecutionPlan packs
+(ProjectTraitRow, category "codirector_execution") belong exclusively to the
+execution-pack engine (codirector/execution/pack_store.py, written by
+codirector/execution/dispatcher.py). The two stores are disjoint tables by
+design; tests/test_engine_ownership.py asserts no double-creation across
+both stores for the same idempotency key and no cross-store writes.
+"""
 
 from __future__ import annotations
 

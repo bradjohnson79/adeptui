@@ -155,6 +155,25 @@ function adapterAvailableFromDiscoveredRow(raw: Record<string, unknown>): boolea
   return raw.executable !== false && raw.selectable !== false;
 }
 
+/**
+ * True when the local runtime inventory reports at least one executable
+ * family. Mirrors the backend Certified-executability gating: Auto Select and
+ * explicit local families only count when an executable local source exists.
+ * An undefined inventory is treated as unknown (legacy behavior preserved —
+ * the plan never lies when no inventory data was provided).
+ */
+export function localInventoryHasExecutableSource(localOptions?: GeneratorOption[]): boolean {
+  if (localOptions === undefined) return true;
+  return localOptions.some((o) => o.executable !== false);
+}
+
+/** True when a specific family is executable per the inventory (unknown = yes). */
+export function localFamilyIsExecutable(family: string, localOptions?: GeneratorOption[]): boolean {
+  if (localOptions === undefined) return true;
+  const opt = localOptions.find((o) => o.id === family);
+  return opt ? opt.executable !== false : false;
+}
+
 export function summarizeGenerationPlan(
   plan: CharacterGeneratorPlan,
   localOptions?: GeneratorOption[],
@@ -165,20 +184,27 @@ export function summarizeGenerationPlan(
 
   if (plan.localEnabled) {
     if (isAutoSelectActive(plan)) {
-      const count = clampBatchCount(plan.autoSelect.batchCount);
-      localLines.push({ label: "Auto Select", count });
-      for (let i = 0; i < count; i += 1) {
-        sheets.push({
-          sourceType: "local",
-          family: AUTO_SELECT_FAMILY,
-          label: "Auto Select",
-          batchIndex: i + 1,
-          batchOf: count,
-        });
+      // CDX-009: Auto Select resolves to a local family at runtime — it is
+      // only executable when the local inventory actually has one. With empty
+      // or non-executable inventory (runtime down) it contributes zero sheets
+      // instead of claiming sheets that fail at runtime.
+      if (localInventoryHasExecutableSource(localOptions)) {
+        const count = clampBatchCount(plan.autoSelect.batchCount);
+        localLines.push({ label: "Auto Select", count });
+        for (let i = 0; i < count; i += 1) {
+          sheets.push({
+            sourceType: "local",
+            family: AUTO_SELECT_FAMILY,
+            label: "Auto Select",
+            batchIndex: i + 1,
+            batchOf: count,
+          });
+        }
       }
     } else {
       for (const row of plan.localFamilies) {
         if (!row.enabled) continue;
+        if (!localFamilyIsExecutable(row.family, localOptions)) continue;
         const count = clampBatchCount(row.batchCount);
         const opt = localOptions?.find((o) => o.id === row.family);
         const label = opt?.label || localFamilyLabel(row.family);
@@ -486,6 +512,34 @@ export function hydratePlanFromPreferences(
 
 export function planHasExecutableWork(plan: CharacterGeneratorPlan): boolean {
   return summarizeGenerationPlan(plan).totalSheets > 0;
+}
+
+/**
+ * Executability truth for the Generate gate (CDX-009). Mirrors the backend
+ * Certified-executability filtering:
+ *
+ * * An enabled Cloud model is executable (API rows come from discovery).
+ * * An explicit local family is executable only when the inventory reports it
+ *   (unknown inventory = legacy behavior).
+ * * Auto Select is executable only when the local inventory has at least one
+ *   executable family — empty/non-executable inventory (runtime down) yields
+ *   zero executable sources.
+ */
+export function hasExecutableSource(
+  plan: CharacterGeneratorPlan,
+  localOptions?: GeneratorOption[],
+): boolean {
+  if (plan.apiEnabled && plan.apiModels.some((row) => row.enabled)) return true;
+  if (!plan.localEnabled) return false;
+  if (anyExplicitLocalFamilyEnabled(plan)) {
+    return plan.localFamilies.some(
+      (row) => row.enabled && localFamilyIsExecutable(row.family, localOptions),
+    );
+  }
+  if (isAutoSelectActive(plan)) {
+    return localInventoryHasExecutableSource(localOptions);
+  }
+  return false;
 }
 
 export function firstPlannedGenerationMode(

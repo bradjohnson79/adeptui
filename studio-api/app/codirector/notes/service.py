@@ -45,8 +45,12 @@ def _guess_category(text: str) -> str:
 
 def _ensure_notes_list(snapshot: Any) -> list[WorkingNote]:
     raw = getattr(snapshot, "workingNotes", None)
-    if raw is None:
-        # Bridge knowledgeEntries into Notes on first access
+    has_entries = bool(getattr(snapshot, "knowledgeEntries", None))
+    # Bridge knowledgeEntries into Notes on first access (None) or when the
+    # notes desk has never been written (empty + entries exist). The bridge is
+    # in-memory here; write paths persist it (run-on-first-write). Read paths
+    # (list_notes) never persist — CDX-056.
+    if raw is None or (not raw and has_entries):
         notes: list[WorkingNote] = []
         for entry in getattr(snapshot, "knowledgeEntries", None) or []:
             text = str(getattr(entry, "text", "") or "").strip()
@@ -86,10 +90,15 @@ def _ensure_notes_list(snapshot: Any) -> list[WorkingNote]:
 
 
 def list_notes(db: Session, project_id: str) -> dict[str, Any]:
+    """Read-only notes listing (CDX-056).
+
+    GET /notes must never mutate the conversation snapshot or bump its
+    revision. The knowledgeEntries -> workingNotes bridge runs only in memory
+    here; it is persisted on the first explicit write path (upsert / dismiss /
+    promote / demote), which all call save_snapshot.
+    """
     snapshot = load_snapshot(db, project_id)
     notes = _ensure_notes_list(snapshot)
-    # Persist bridge once
-    save_snapshot(db, snapshot)
     visible = [n for n in notes if n.promotionStatus not in {"DISMISSED", "SUPERSEDED"}]
     return {
         "ok": True,

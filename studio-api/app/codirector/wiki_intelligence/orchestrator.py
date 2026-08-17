@@ -49,7 +49,7 @@ class WikiIntelligenceOrchestrator:
             project_id=self.project_id,
             domains=domains,
             source_id=f"turn-{uuid4().hex[:8]}",
-            max_specialists=6,
+            max_specialists=3,  # Phase 7 (CDX-086): hard max three specialists
         )
 
         findings: list[WikiSpecialistFinding] = []

@@ -8,11 +8,15 @@ import {
   PROP_RELATIONSHIPS,
   PROP_SLOTS,
   SLOT_COLORS,
+  PROP_MAP_ONLY_SOURCES,
+  PROP_MAP_ONLY_WARNING,
   attachedSlotFromSlotIndex,
   characterTag,
   normalizePropAttachment,
   normalizePropTag,
+  propOptionPropagatesToSceneCreator,
   propPlacementIdentity,
+  propSourceGroupLabel,
   slotIndexFromAttachedSlot,
   validatePropAttachment,
   type ActivePlacement,
@@ -206,5 +210,32 @@ describe("Spatial Map project vs character prop identity", () => {
     const placed = propPlacementIdentity({ id: "asset-77", source: "library" });
     expect(placed.propId).toBeNull();
     expect(placed.category).toBe("prop");
+  });
+});
+
+describe("CDX-012 prop source classification (map-only honesty)", () => {
+  it("only approved project PropEntities propagate to Scene Creator", () => {
+    expect(propOptionPropagatesToSceneCreator({ source: "project" })).toBe(true);
+    expect(propOptionPropagatesToSceneCreator({ source: "character" })).toBe(false);
+    expect(propOptionPropagatesToSceneCreator({ source: "library" })).toBe(false);
+    expect(propOptionPropagatesToSceneCreator(null)).toBe(false);
+    expect(propOptionPropagatesToSceneCreator(undefined)).toBe(false);
+  });
+
+  it("labels Character-Props and Library groups as map-only in the dropdown", () => {
+    expect(propSourceGroupLabel("project")).toBe("Project Props");
+    expect(propSourceGroupLabel("character")).toBe("Character Props (map only)");
+    expect(propSourceGroupLabel("library")).toBe("Library (map only)");
+    expect(propSourceGroupLabel(undefined)).toBe("Library (map only)");
+  });
+
+  it("PROP_MAP_ONLY_SOURCES matches exactly the propId-null sources", () => {
+    expect(PROP_MAP_ONLY_SOURCES.has("character")).toBe(true);
+    expect(PROP_MAP_ONLY_SOURCES.has("library")).toBe(true);
+    expect(PROP_MAP_ONLY_SOURCES.has("project")).toBe(false);
+    for (const source of PROP_MAP_ONLY_SOURCES) {
+      expect(propPlacementIdentity({ id: "x", source }).propId).toBeNull();
+    }
+    expect(PROP_MAP_ONLY_WARNING).toContain("will not appear in Scene Creator");
   });
 });

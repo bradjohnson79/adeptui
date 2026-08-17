@@ -209,6 +209,37 @@ export function propPlacementIdentity(option: Pick<SavedOption, "id" | "source">
   return { propId: null, category: "prop" };
 }
 
+/**
+ * CDX-012: only approved project PropEntities (source "project") bind a
+ * canonical propId that Scene Creator / ERS downstream consumers accept.
+ * Character-Props and Library placements carry propId:null and are silently
+ * dropped from shots — so they are MAP-ONLY and must be labeled + warned.
+ */
+export const PROP_MAP_ONLY_SOURCES: ReadonlySet<SavedOption["source"]> = new Set([
+  "character",
+  "library",
+]);
+
+export function propOptionPropagatesToSceneCreator(
+  option: Pick<SavedOption, "source"> | null | undefined,
+): boolean {
+  return option?.source === "project";
+}
+
+/** Dropdown group label for a saved-prop source (CDX-012 honesty). */
+export function propSourceGroupLabel(
+  source: SavedOption["source"] | undefined,
+): string {
+  if (source === "project") return "Project Props";
+  if (source === "character") return "Character Props (map only)";
+  return "Library (map only)";
+}
+
+/** Creator-facing warning for a map-only prop placement (CDX-012). */
+export const PROP_MAP_ONLY_WARNING =
+  "Map-only placement — this prop will not appear in Scene Creator shots. " +
+  "Bind an approved Project Prop to propagate into shots.";
+
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
 
 export type SlotDef = {

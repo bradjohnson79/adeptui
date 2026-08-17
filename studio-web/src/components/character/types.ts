@@ -104,6 +104,21 @@ export function isLayoutNoncompliant(c: CharacterCandidate | Record<string, unkn
   return rec.layoutNoncompliant === true || rec.layout_noncompliant === true;
 }
 
+/**
+ * Candidate card action label (CDX-004). "Selected" means the asset is the
+ * canonical + approved hero identity. A candidate whose asset is attached as a
+ * draft (pending owner review) reads "Pending review"; any other ready
+ * candidate offers "Use This Look".
+ */
+export function candidateSelectionLabel(opts: {
+  isSelected: boolean;
+  isPendingReview: boolean;
+}): string {
+  if (opts.isSelected) return "Selected";
+  if (opts.isPendingReview) return "Pending review";
+  return "Use This Look";
+}
+
 /** Hydrate a pack candidate; map snake_case layout_noncompliant onto the typed field. */
 export function normalizeCharacterCandidate(raw: unknown): CharacterCandidate {
   const rec = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;

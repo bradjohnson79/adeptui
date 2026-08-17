@@ -73,8 +73,42 @@ export type ErsGenerationState = {
 const POLL_MS = 2500;
 const ZOMBIE_STATUSES = new Set(["failed", "error", "cancelled", "canceled", "interrupted", "dead", "missing"]);
 
-/** Last choice survives Express/Standard remounts without a second store. */
-let lastErsGeneratorId: ErsGeneratorId = ERS_GENERATOR_DEFAULT;
+/**
+ * CDX-072: the generator choice is persisted PER PROJECT (localStorage), not
+ * in a module global — a new project must never inherit another project's
+ * generator, while the creator's choice still survives Express/Standard
+ * remounts within the same project without a second store.
+ */
+const ERS_GENERATOR_STORAGE_PREFIX = "adept.spatial-map.ers-generator";
+
+const ERS_GENERATOR_IDS = new Set<ErsGeneratorId>(["qwen2512", "gpt-image-2"]);
+
+export function ersGeneratorStorageKey(projectId: string): string {
+  return `${ERS_GENERATOR_STORAGE_PREFIX}.${projectId}`;
+}
+
+export function readStoredGenerator(
+  projectId: string,
+  fallback: ErsGeneratorId = ERS_GENERATOR_DEFAULT,
+): ErsGeneratorId {
+  if (!projectId || typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(ersGeneratorStorageKey(projectId));
+    if (raw != null && ERS_GENERATOR_IDS.has(raw as ErsGeneratorId)) return raw as ErsGeneratorId;
+  } catch {
+    // storage unavailable — fall back to the default
+  }
+  return fallback;
+}
+
+export function writeStoredGenerator(projectId: string, id: ErsGeneratorId): void {
+  if (!projectId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ersGeneratorStorageKey(projectId), id);
+  } catch {
+    // storage unavailable — in-memory only
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -197,7 +231,8 @@ const IDLE_PROGRESS: NormalizedJobProgress = {
  * map identity changes, all of these must reset so the previous map's
  * composite, sheet, and phase can never leak into the new map. The generator
  * choice (selectedGenerator) is intentionally NOT map-scoped — the creator's
- * last choice survives remounts.
+ * choice is persisted per project (CDX-072) and survives remounts within the
+ * same project.
  */
 export const ERS_MAP_SCOPED_STATE_KEYS = [
   "phase",
@@ -263,7 +298,11 @@ export function useErsGeneration({
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
   const [compositeAssetId, setCompositeAssetId] = useState<string | null>(null);
   const [zombie, setZombie] = useState(false);
-  const [selectedGenerator, setSelectedGeneratorState] = useState<ErsGeneratorId>(lastErsGeneratorId);
+  // CDX-072: seed from THIS project's stored generator (never another
+  // project's choice). The map-scoped reset below never touches it.
+  const [selectedGenerator, setSelectedGeneratorState] = useState<ErsGeneratorId>(() =>
+    readStoredGenerator(projectId, ERS_GENERATOR_DEFAULT),
+  );
   const [qwenReady, setQwenReady] = useState<boolean | null>(null);
   const [qwenI2IReady, setQwenI2IReady] = useState<boolean | null>(null);
   const [gptReady, setGptReady] = useState<boolean | null>(null);
@@ -373,9 +412,9 @@ export function useErsGeneration({
   }, [projectId, sheetId]);
 
   const setSelectedGenerator = useCallback((id: ErsGeneratorId) => {
-    lastErsGeneratorId = id;
+    writeStoredGenerator(projectId, id);
     setSelectedGeneratorState(id);
-  }, []);
+  }, [projectId]);
 
   const applyProgress = useCallback((jobLike: unknown, exec?: WorkSurfaceState | null) => {
     const normalized = normalizeJobProgress(jobLike);
@@ -391,12 +430,12 @@ export function useErsGeneration({
     setModel(nextModel);
     const reconnect = resolveErsGeneratorFromModel(nextModel);
     if (reconnect) {
-      lastErsGeneratorId = reconnect;
+      writeStoredGenerator(projectId, reconnect);
       setSelectedGeneratorState(reconnect);
     }
     if (normalized.finalAssetId) setCompositeAssetId(normalized.finalAssetId);
     return normalized;
-  }, []);
+  }, [projectId]);
 
   const markLive = useCallback((nextPhase: ErsPhase) => {
     setPhase(nextPhase);
@@ -600,6 +639,18 @@ export function useErsGeneration({
       cancelled = true;
     };
   }, []);
+
+  // CDX-072: if the project changes without a remount, re-seed the generator
+  // from the NEW project's stored choice so project B never inherits
+  // project A's generator.
+  const previousProjectIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousProjectIdRef.current;
+    previousProjectIdRef.current = projectId;
+    if (previous !== projectId) {
+      setSelectedGeneratorState(readStoredGenerator(projectId, ERS_GENERATOR_DEFAULT));
+    }
+  }, [projectId]);
 
   // CDX-022: ERS state is scoped to the active Spatial Map document. When the
   // map identity changes, clear every map-scoped piece of state (composite,

@@ -5,8 +5,10 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from ..character_identity.models import CharacterProfileRow
 from ..db import Project, Scene
 from .capture_intelligence import build_scene_capture_plan
 from .collage import create_collage as create_spatial_collage
@@ -93,13 +95,131 @@ def _row_or_404(db: Session, project_id: str, document_id: str) -> SpatialMapDoc
     return row
 
 
-def _parse_document(row: SpatialMapDocumentRow) -> SpatialMapDocument:
+def _character_row_or_error(db: Session, project_id: str, character_id: str) -> CharacterProfileRow:
+    """CDX-013: placements must reference a project-owned CharacterProfileRow.
+
+    A placement that references a deleted/foreign/never-created character would
+    otherwise leave a dangling identity that degrades ERS / Scene Creator to a
+    bare label with no warning.
+    """
+    cid = (character_id or "").strip()
+    row = db.get(CharacterProfileRow, cid) if cid else None
+    if row is None:
+        raise raise_http_error(
+            SpatialMapErrorCode.CHARACTER_NOT_FOUND,
+            f"Character '{cid}' is not in this project's Character identity store.",
+            characterId=cid,
+        )
+    if str(row.project_id or "") != project_id:
+        raise raise_http_error(
+            SpatialMapErrorCode.PROJECT_SCOPE,
+            f"Character '{cid}' belongs to a different project.",
+            characterId=cid,
+        )
+    return row
+
+
+def _prop_entity_or_error(db: Session, project_id: str, prop_id: str | None) -> None:
+    """CDX-013: a non-empty propId must resolve to a project-owned PropEntity.
+
+    Legacy tolerance is preserved where a row predates the requirement:
+    an empty propId (character-prop / library placeholder) stays acceptable
+    and is only ever treated as map-only downstream. Validation applies when
+    propId is provided and non-empty.
+    """
+    pid = (prop_id or "").strip()
+    if not pid:
+        return
+    from .ers_persistence import load_prop_entity_by_id
+
+    entity = load_prop_entity_by_id(db, project_id, pid)
+    if entity is None:
+        raise raise_http_error(
+            SpatialMapErrorCode.PROP_ENTITY_NOT_FOUND,
+            f"PropEntity '{pid}' is not in this project's Prop registry.",
+            propId=pid,
+        )
+    if str(getattr(entity, "project_id", "") or "") != project_id:
+        raise raise_http_error(
+            SpatialMapErrorCode.PROJECT_SCOPE,
+            f"PropEntity '{pid}' belongs to a different project.",
+            propId=pid,
+        )
+
+
+def _placed_character_keys(document: SpatialMapDocument) -> tuple[set[str], set[int]]:
+    """Placed-character identity keys: ids (characterId + placement id) and occupied slots (1-4)."""
+    ids: set[str] = set()
+    slots: set[int] = set()
+    for character in document.characters:
+        cid = str(getattr(character, "characterId", "") or "").strip()
+        if cid:
+            ids.add(cid)
+        pid = str(getattr(character, "id", "") or "").strip()
+        if pid:
+            ids.add(pid)
+        raw_slot = getattr(character, "slotIndex", -1)
+        if raw_slot is None:
+            raw_slot = -1
+        try:
+            slot_index = int(raw_slot)
+        except (TypeError, ValueError):
+            slot_index = -1
+        if 0 <= slot_index <= 3:
+            slots.add(slot_index + 1)
+    return ids, slots
+
+
+def _validate_attachment_targets(document: SpatialMapDocument, prop: Any) -> None:
+    """CDX-019: an attached prop must reference a character actually placed on the document.
+
+    Validates the frozen attachedCharacterId / attachedCharacterSlot (1-4)
+    references against the current document.characters. Shape validation lives
+    in attachment.validate_prop_attachment; this adds referential integrity.
+    """
+    if getattr(prop, "placementMode", None) != "attached":
+        return
+    ids, slots = _placed_character_keys(document)
+    char_id = str(getattr(prop, "attachedCharacterId", None) or "").strip()
+    slot = getattr(prop, "attachedCharacterSlot", None)
     try:
-        data = json.loads(row.document_json or "{}")
-    except Exception:
-        data = {}
+        slot_int = int(slot) if slot is not None else None
+    except (TypeError, ValueError):
+        slot_int = None
+    if char_id and char_id not in ids:
+        raise raise_http_error(
+            SpatialMapErrorCode.ATTACHMENT_INVALID,
+            f"attachedCharacterId '{char_id}' does not reference a character placed on this map.",
+            attachedCharacterId=char_id,
+        )
+    if slot_int is not None and slot_int not in slots:
+        raise raise_http_error(
+            SpatialMapErrorCode.ATTACHMENT_INVALID,
+            f"attachedCharacterSlot {slot_int} is not occupied by a placed character on this map.",
+            attachedCharacterSlot=slot_int,
+        )
+
+
+def _corrupt_document(row: SpatialMapDocumentRow, reason: str) -> HTTPException:
+    """Typed quarantine error (CDX-024): corrupt stored JSON is never silently
+    replaced with a blank document. The raw row is left untouched so the
+    original data can be recovered."""
+    return raise_http_error(
+        SpatialMapErrorCode.DOCUMENT_CORRUPT,
+        f"Spatial Map document '{row.id}' has unreadable stored data and was NOT modified.",
+        documentId=row.id,
+        reason=reason,
+    )
+
+
+def _parse_document(row: SpatialMapDocumentRow) -> SpatialMapDocument:
+    raw = row.document_json or "{}"
+    try:
+        data = json.loads(raw)
+    except Exception as exc:
+        raise _corrupt_document(row, f"stored document_json is not valid JSON: {exc}")
     if not isinstance(data, dict):
-        data = {}
+        raise _corrupt_document(row, "stored document_json is not a JSON object")
     data.setdefault("id", row.id)
     data["projectId"] = row.project_id
     data["sceneId"] = row.scene_id
@@ -107,14 +227,8 @@ def _parse_document(row: SpatialMapDocumentRow) -> SpatialMapDocument:
     data["title"] = data.get("title") or row.title
     try:
         doc = SpatialMapDocument.model_validate(data)
-    except Exception:
-        doc = SpatialMapDocument(
-            id=row.id,
-            projectId=row.project_id,
-            sceneId=row.scene_id,
-            locationId=row.location_id,
-            title=row.title,
-        )
+    except Exception as exc:
+        raise _corrupt_document(row, f"stored document_json failed validation: {exc}")
     doc.warnings = consistency_warnings(doc)
     migrate_document(doc)
     return doc
@@ -411,6 +525,7 @@ def place_character(
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
     enforce_character_limit(len(document.characters))
+    _character_row_or_error(db, project_id, body.characterId)
     document.characters.append(
         SpatialCharacterPlacement(
             characterId=body.characterId,
@@ -448,6 +563,7 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
     enforce_prop_limit(len(document.props))
+    _prop_entity_or_error(db, project_id, body.propId)
     placement = SpatialPropPlacement(
         label=body.label,
         propId=body.propId,
@@ -483,6 +599,7 @@ def place_prop(db: Session, project_id: str, document_id: str, body: SpatialProp
         if _body_has_independent_grid(body):
             _raise_attachment_invalid("attached prop cannot have an independent grid position")
         clear_independent_grid_position(placement)
+        _validate_attachment_targets(document, placement)
     else:
         _apply_placement_from_body(placement, body, document)
     document.props.append(placement)
@@ -519,6 +636,7 @@ def update_prop(
     document = _parse_document(row)
     placement = _find_item(document.props, placement_id, kind="prop")
     updates = body.model_dump(exclude_unset=True)
+    _prop_entity_or_error(db, project_id, updates.get("propId"))
     for key, value in updates.items():
         setattr(placement, key, value)
     try:
@@ -529,6 +647,7 @@ def update_prop(
         if _updates_write_independent_grid(updates):
             _raise_attachment_invalid("attached prop cannot have an independent grid position")
         clear_independent_grid_position(placement)
+        _validate_attachment_targets(document, placement)
     else:
         _sync_coords_after_update(placement, updates, document)
     return _save_document(db, row, document)
@@ -665,6 +784,7 @@ def attach_prop(
         )
     except PropAttachmentError as exc:
         _raise_attachment_invalid(exc)
+    _validate_attachment_targets(document, placement)
     return _save_document(db, row, document)
 
 

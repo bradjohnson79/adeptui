@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .htmltext import document_text
+from .htmltext import document_text, html_scene_elements
 from .models import ScriptDocument, ScriptStats
 
 
@@ -44,17 +44,25 @@ def _stats_from_elements(doc: ScriptDocument) -> ScriptStats:
 
 
 def _stats_from_html(doc: ScriptDocument) -> ScriptStats:
+    """Stats derived from the typed HTML (CDX-051): the HTML document is the
+    canonical content, so scene counts and dialogue/action ratios come from
+    the HTML-derived element projection, never from stale stored elements."""
     text = document_text(doc)
     words = len(text.split())
-    scenes = sum(1 for e in doc.elements if e.type == "scene_heading")
+    els = html_scene_elements(doc.contentHtml or "")
+    scenes = sum(1 for e in els if e.type == "scene_heading")
+    dialogue_words = sum(len((e.text or "").split()) for e in els if e.type in ("dialogue", "parenthetical", "character"))
+    action_words = sum(len((e.text or "").split()) for e in els if e.type in ("action", "scene_heading", "shot"))
+    total = max(1, dialogue_words + action_words)
+    chars = {(e.text or "").strip().upper() for e in els if e.type == "character" and e.text.strip()}
     pages = max(1.0, round(words / 180.0, 1)) if words else 1.0
     return ScriptStats(
         pagesEstimated=pages,
         scenes=scenes,
         words=words,
-        characters=0,
-        dialoguePercent=0.0,
-        actionPercent=0.0,
+        characters=len(chars),
+        dialoguePercent=round(100.0 * dialogue_words / total, 1),
+        actionPercent=round(100.0 * action_words / total, 1),
         runtimeMinutesEstimated=pages,
         paginationMode="estimated",
     )

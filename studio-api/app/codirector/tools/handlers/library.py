@@ -12,7 +12,7 @@ from ....project_library.codirector import (
     search_library_assets,
     storage_preflight,
 )
-from ....project_library.service import assign_asset, enrich_library_item
+from ....project_library.service import assign_asset, enrich_library_item, read_asset_library_meta
 from ....db import Asset
 from ...errors import TOOL_TARGET_NOT_FOUND, CoDirectorError
 from ..definitions import ToolContext, ToolPreview
@@ -109,6 +109,8 @@ async def link_bible_entity_folder_tool(ctx: ToolContext, args: dict[str, Any]) 
 
 def preview_propose_asset_library_assignment(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     asset = _require_asset(ctx, str(args.get("assetId") or args.get("asset_id") or ""))
+    current = read_asset_library_meta(asset)
+    requested_override = bool(args.get("override", False))
     loc = resolve_library_location(
         ctx.db,
         ctx.project_id,
@@ -122,15 +124,21 @@ def preview_propose_asset_library_assignment(ctx: ToolContext, args: dict[str, A
             lines=[f"candidates: {loc.get('candidates') or []}"],
         )
     match = loc.get("match") or {}
-    return ToolPreview(
-        summary=f"Move '{asset.tag or asset.filename}' → {match.get('libraryPath') or match.get('displayPath') or 'target folder'}",
-        lines=[
-            f"assetId: {asset.id}",
-            f"targetPath: {match.get('libraryPath') or match.get('displayPath')}",
-            f"systemKey: {args.get('systemKey') or match.get('systemKey')}",
-            f"override: {bool(args.get('override', True))}",
-        ],
-    )
+    lines = [
+        f"assetId: {asset.id}",
+        f"targetPath: {match.get('libraryPath') or match.get('displayPath')}",
+        f"systemKey: {args.get('systemKey') or match.get('systemKey')}",
+        f"override: {requested_override}",
+        # CDX-070: disclose any existing manual override so the preview is truthful.
+        f"currentOverride: {current.override}",
+    ]
+    warnings: list[str] = []
+    if current.override and not requested_override:
+        warnings.append("Existing manual assignment override will be respected; pass override=true to replace it.")
+    summary = f"Move '{asset.tag or asset.filename}' → {match.get('libraryPath') or match.get('displayPath') or 'target folder'}"
+    if current.override and not requested_override:
+        summary += " (manual override preserved)"
+    return ToolPreview(summary=summary, lines=lines, warnings=warnings)
 
 
 def apply_propose_asset_library_assignment(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
@@ -144,6 +152,8 @@ def apply_propose_asset_library_assignment(ctx: ToolContext, args: dict[str, Any
         entity_name=args.get("entityName") or args.get("entity_name") or None,
         entity_id=args.get("entityId") or args.get("entity_id") or None,
         classified_by="codirector",
-        override=bool(args.get("override", True)),
+        # CDX-070: default False - a manual override wins unless the caller explicitly
+        # passes override=true to replace it.
+        override=bool(args.get("override", False)),
     )
     return {"ok": True, "asset": enrich_library_item(asset), "meta": meta.to_dict()}

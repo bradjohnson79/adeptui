@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text, or_
 from sqlalchemy.orm import Mapped, mapped_column, Session
 
 from .db import Base, Asset, engine
@@ -106,27 +106,76 @@ def neighbors(db: Session, node_id: str) -> list[dict[str, Any]]:
     return out
 
 
-def search_assets(db: Session, project_id: str | None, q: str, *, global_only: bool = False) -> list[Asset]:
+def _asset_query(
+    db: Session,
+    project_id: str | None,
+    q: str,
+    *,
+    global_only: bool = False,
+):
+    """Shared SQL filter for asset search - project-scoped plus promoted global rows."""
     query = db.query(Asset)
     if global_only:
         query = query.filter(Asset.scope == "global")
     elif project_id:
         query = query.filter((Asset.project_id == project_id) | (Asset.scope == "global"))
     term = (q or "").strip().lower()
-    if not term:
-        return query.order_by(Asset.created_at.desc()).limit(100).all()
-    rows = query.order_by(Asset.created_at.desc()).limit(500).all()
-    hits = []
-    for a in rows:
-        blob = " ".join(
-            [
-                a.tag or "",
-                a.filename or "",
-                a.kind or "",
-                getattr(a, "labels_json", "") or "",
-                getattr(a, "prompt_meta_json", "") or "",
-            ]
-        ).lower()
-        if term in blob:
-            hits.append(a)
-    return hits[:100]
+    if term:
+        like = _like_pattern(term)
+        query = query.filter(
+            or_(
+                Asset.tag.ilike(like, escape="\\"),
+                Asset.filename.ilike(like, escape="\\"),
+                Asset.kind.ilike(like, escape="\\"),
+                Asset.labels_json.ilike(like, escape="\\"),
+                Asset.prompt_meta_json.ilike(like, escape="\\"),
+            )
+        )
+    return query
+
+
+def _like_pattern(term: str) -> str:
+    """Escape LIKE wildcards so user queries match literally, not as patterns."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def search_assets(
+    db: Session,
+    project_id: str | None,
+    q: str,
+    *,
+    global_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[Asset]:
+    """Search assets with SQL-level filters and bounded paging (no scan-window cap).
+
+    CDX-067: the previous implementation loaded only the 500 most-recent rows and
+    returned at most 100, so older assets were unsearchable. Any asset is now
+    reachable by tag/filename/kind/labels via LIMIT/OFFSET paging, newest-first.
+    `global_only` restricts to assets promoted via promote_asset_global.
+    """
+    page_size = max(1, min(limit, 500))
+    page_offset = max(0, offset)
+    query = _asset_query(db, project_id, q, global_only=global_only)
+    return query.order_by(Asset.created_at.desc()).offset(page_offset).limit(page_size).all()
+
+
+def count_assets(
+    db: Session,
+    project_id: str | None,
+    q: str,
+    *,
+    global_only: bool = False,
+    project_only: bool = False,
+) -> int:
+    """Count assets matching the same filters as search_assets (pagination metadata).
+
+    `project_only` counts rows strictly local to the project (excludes promoted
+    global rows) so project-scope pagination metadata stays truthful.
+    """
+    query = _asset_query(db, project_id, q, global_only=global_only)
+    if project_only:
+        query = query.filter(Asset.project_id == project_id)
+    return int(query.count())

@@ -24,6 +24,13 @@ class SpatialMapErrorCode(str, Enum):
     REFERENCE_BUNDLE_TARGET_INVALID = "REFERENCE_BUNDLE_TARGET_INVALID"
     ATTACHMENT_INVALID = "ATTACHMENT_INVALID"
     CHARACTER_HAS_ATTACHED_PROPS = "CHARACTER_HAS_ATTACHED_PROPS"
+    DOCUMENT_CORRUPT = "DOCUMENT_CORRUPT"
+    # CDX-013/019 placement integrity: placements must reference canonical
+    # project-owned entities (CharacterProfileRow / PropEntity) or be rejected
+    # with a typed error instead of dangling.
+    CHARACTER_NOT_FOUND = "CHARACTER_NOT_FOUND"
+    PROP_ENTITY_NOT_FOUND = "PROP_ENTITY_NOT_FOUND"
+    PROJECT_SCOPE = "PROJECT_SCOPE"
 
 
 ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
@@ -59,7 +66,7 @@ ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
     },
     SpatialMapErrorCode.CAMERA_LIMIT_REACHED: {
         "status": 409,
-        "explanation": "A Spatial Map can only hold eight cameras.",
+        "explanation": "A Spatial Map can only hold four cameras.",
         "recovery": "Remove a camera or reuse an existing camera angle.",
     },
     SpatialMapErrorCode.COORDINATE_SYSTEM_UNSUPPORTED: {
@@ -101,6 +108,26 @@ ERROR_DETAILS: dict[SpatialMapErrorCode, dict[str, Any]] = {
         "status": 409,
         "explanation": "This character still has attached props.",
         "recovery": "Detach Props to Unplaced, then remove the character.",
+    },
+    SpatialMapErrorCode.DOCUMENT_CORRUPT: {
+        "status": 500,
+        "explanation": "The stored Spatial Map data is unreadable and was NOT modified.",
+        "recovery": "The raw document is preserved in storage. Restore it from a backup or recreate the map.",
+    },
+    SpatialMapErrorCode.CHARACTER_NOT_FOUND: {
+        "status": 404,
+        "explanation": "The character is not in this project's Character identity store.",
+        "recovery": "Create the character in Character Creator, then place it on the map.",
+    },
+    SpatialMapErrorCode.PROP_ENTITY_NOT_FOUND: {
+        "status": 404,
+        "explanation": "The propId does not resolve to a PropEntity in this project's Prop registry.",
+        "recovery": "Create the prop in Prop Creator, then place it on the map.",
+    },
+    SpatialMapErrorCode.PROJECT_SCOPE: {
+        "status": 403,
+        "explanation": "The referenced entity belongs to a different project.",
+        "recovery": "Use an entity that belongs to this project.",
     },
 }
 

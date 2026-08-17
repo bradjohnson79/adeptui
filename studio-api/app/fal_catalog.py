@@ -129,6 +129,8 @@ def build_fal_image_arguments(
     width: int = 1024,
     height: int = 1024,
     seed: int = -1,
+    image_urls: list[str] | None = None,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     """Minimal still-image payload for fal queue submit. Does not start a job."""
     args: dict[str, Any] = {"prompt": prompt, "num_images": 1}
@@ -136,10 +138,22 @@ def build_fal_image_arguments(
         args["seed"] = int(seed)
     mid = (model_id or "").strip()
     w, h = int(width or 1024), int(height or 1024)
-    if mid.startswith("krea/v2"):
+    urls = [u.strip() for u in (image_urls or []) if isinstance(u, str) and u.strip()]
+    if image_url and str(image_url).strip():
+        urls.append(str(image_url).strip())
+    edit = "/edit" in mid or bool(urls)
+    if mid.startswith("krea/v2") or edit:
         args["aspect_ratio"] = "1:1" if w == h else ("16:9" if w > h else "9:16")
     else:
         args["image_size"] = {"width": w, "height": h}
+    if "/edit" in mid:
+        args["output_format"] = "png"
+        args["resolution"] = "1K"
+        args["image_urls"] = urls
+    elif "kontext" in mid and urls:
+        args["image_url"] = urls[0]
+    elif urls:
+        args["image_urls"] = urls
     return args
 
 

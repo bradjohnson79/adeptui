@@ -55,11 +55,14 @@ def _bind_video_reference_anchor(
     director_timeline: DirectorTimeline | None,
     db: Session | None = None,
     project_id: str | None = None,
-) -> None:
-    """Bind Image / Video Reference clips by canonical ID. Never consume alias text."""
+) -> list[dict[str, Any]]:
+    """Bind Prompt-clip references by canonical ID. Never consume alias text."""
     from .generation.reference_compile import apply_compiled_references
+    from .generation.speech_compile import apply_compiled_speech
 
-    apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
+    warnings = apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
+    speech_errors = apply_compiled_speech(batch, director_timeline, db=db, project_id=project_id)
+    return list(warnings or []) + list(speech_errors or [])
 
 
 def _halt_adapter_jobs(halt_jobs: list[tuple[str, GenerationJobRef]]) -> None:
@@ -304,7 +307,15 @@ def submit_batch_generation(
     scene_row = store.get_scene(db, project_id, scene_id)
     aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
     director_timeline = _load_director_timeline(db, project_id, scene_id)
-    _bind_video_reference_anchor(batch, director_timeline, db=db, project_id=project_id)
+    bind_notes = _bind_video_reference_anchor(batch, director_timeline, db=db, project_id=project_id)
+    if any(n.get("code") == "LIPSYNC_SPEAKER_REQUIRED" for n in bind_notes):
+        return {
+            "ok": False,
+            "error": "LIPSYNC_SPEAKER_REQUIRED",
+            "message": "Assign a character to this Lip Sync clip.",
+            "findings": bind_notes,
+            "mock": False,
+        }
 
     try:
         from .continuity import active_bridge_for_target
@@ -863,9 +874,13 @@ def run_preflight(
     master: SceneTimelineMaster,
     *,
     director_timeline: DirectorTimeline | None = None,
+    db: Session | None = None,
+    project_id: str | None = None,
 ) -> list[dict[str, Any]]:
     from .contracts import PreflightFinding
     from .store import OPTIONAL_REFS_POLICY_NOTE
+    from .generation.speech_compile import lipsync_speaker_errors
+    from .generation.reference_compile import apply_compiled_references
 
     findings: list[PreflightFinding] = []
     for batch in master.batchBlocks:
@@ -957,6 +972,35 @@ def run_preflight(
                     fixProposal=item.get("fixProposal"),
                 )
             )
+    if director_timeline:
+        for item in lipsync_speaker_errors(director_timeline):
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="LIPSYNC_SPEAKER_REQUIRED",
+                    message=item.get("message") or "Assign a character to this Lip Sync clip.",
+                    fixProposal="Type @ in the Lip Sync clip and pick the character who speaks this audio.",
+                )
+            )
+        for batch in master.batchBlocks:
+            ref_notes = apply_compiled_references(
+                batch, director_timeline, db=db, project_id=project_id
+            )
+            for note in ref_notes:
+                code = str(note.get("code") or "")
+                severity = "error" if code.endswith("OVER_LIMIT") else "warning"
+                findings.append(
+                    PreflightFinding(
+                        severity=severity,  # type: ignore[arg-type]
+                        code=code or "REFERENCE_WARNING",
+                        message=str(note.get("message") or code),
+                        batchBlockId=batch.id,
+                        fixProposal=(
+                            "Keep the stored references. Switch back to a generator that supports them, "
+                            "or remove extra Prompt reference chips."
+                        ),
+                    )
+                )
     return [f.model_dump() for f in findings]
 
 
@@ -1119,7 +1163,9 @@ def generate_scene(
     ensure_policy(master, gid)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     director_timeline = _load_director_timeline(db, project_id, scene_id)
-    findings = run_preflight(master, director_timeline=director_timeline)
+    findings = run_preflight(
+        master, director_timeline=director_timeline, db=db, project_id=project_id
+    )
     if master.preflightMode == "strict" and any(f["severity"] == "error" for f in findings):
         return {"ok": False, "error": "PREFLIGHT_STRICT", "findings": findings, "mock": False}
 

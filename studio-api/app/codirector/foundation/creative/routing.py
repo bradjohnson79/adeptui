@@ -7,6 +7,10 @@ from typing import Any
 
 from .roster import SPECIALIST_IDS
 
+# Hard ceiling on the foundation specialist bundle (CDX-086). The router may
+# *match* more signals than this, but never returns more than MAX_SPECIALISTS.
+MAX_SPECIALISTS = 3
+
 _DEFAULT_SPECIALISTS: tuple[str, ...] = (
     "story_architect",
     "cinematography_director",
@@ -117,7 +121,7 @@ def select_specialists(user_message: str, intent: Any, domain_profile_ids: list[
             *[item for item in selected if item != "cinematography_director"],
         ]
 
-    return selected[:4]
+    return selected[:MAX_SPECIALISTS]
 
 
-__all__ = ["select_specialists"]
+__all__ = ["MAX_SPECIALISTS", "select_specialists"]

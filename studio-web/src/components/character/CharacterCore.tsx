@@ -42,6 +42,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [notice, setNotice] = useState("");
+  // CDX-006: explicit "Promote to Production" affordance after a look approval.
+  const [promoting, setPromoting] = useState(false);
+  const [promoted, setPromoted] = useState(false);
+  const prevHeroAssetRef = useRef<string | null>(null);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
@@ -184,6 +188,26 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     [projectId, characterId, cp],
   );
 
+  useEffect(() => {
+    const id = hero?.asset_id ?? null;
+    if (prevHeroAssetRef.current && prevHeroAssetRef.current !== id) setPromoted(false);
+    prevHeroAssetRef.current = id;
+  }, [hero?.asset_id]);
+
+  const handlePromote = useCallback(async () => {
+    setPromoting(true);
+    setNotice("");
+    try {
+      await api.promoteCharacterIdentity(projectId, characterId);
+      setPromoted(true);
+      setNotice("Character promoted to Production — continuity, VisualIdentity, and the Production Bible updated.");
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Promote failed");
+    } finally {
+      setPromoting(false);
+    }
+  }, [projectId, characterId]);
+
   const handleSave = useCallback(async () => {
     const ok = await cp.save({
       name: profile?.name,
@@ -267,6 +291,23 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <p className="character-core__hint" style={{ color: "#f08787" }} data-testid="character-core-error">
           {cp.error}
         </p>
+      ) : null}
+
+      {hero && !promoted ? (
+        <div className="character-core__promote" data-testid="character-core-promote">
+          <span>
+            Look approved{profile?.name ? ` for ${profile.name}` : ""}. Promote to Production to sync continuity, VisualIdentity, and the Production Bible.
+          </span>
+          <button
+            type="button"
+            className="character-core__button"
+            onClick={() => void handlePromote()}
+            disabled={promoting}
+            data-testid="character-core-promote-button"
+          >
+            {promoting ? "Promoting…" : "Promote to Production"}
+          </button>
+        </div>
       ) : null}
 
       <CharacterActions

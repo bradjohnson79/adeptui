@@ -18,6 +18,15 @@ except Exception:  # noqa: BLE001
     query_knowledge = None  # type: ignore[assignment]
 
 
+# CDX-090: foundation specialists are deterministic keyword heuristics. The
+# intelligence_progress event emitted while running the foundation pass must
+# say so (service layer consumes this label) instead of "Consulting creative
+# foundation", so creators are not misled into believing LLM specialist
+# analysis occurred. Findings themselves carry source="heuristic" (see
+# foundation/creative/runners.py).
+FOUNDATION_PROGRESS_LABEL = "Heuristic creative review"
+
+
 _CREATIVE_INTENTS = frozenset(
     {
         "develop_concept",

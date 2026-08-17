@@ -152,7 +152,8 @@ export const sceneCreatorApi = {
       local_family?: string;
       api_model?: string;
     },
-  ) => api.sceneCreator.cinematographerPreview(projectId, sceneId, body),
+  ): Promise<{ cinematographer: SceneCinematographerPack; shot: SceneShot }> =>
+    api.sceneCreator.cinematographerPreview(projectId, sceneId, body),
   cinematographerFinal: (
     projectId: string,
     sceneId: string,
@@ -166,7 +167,8 @@ export const sceneCreatorApi = {
       sourceAssetId?: string;
       finalStrategy?: string;
     },
-  ) => api.sceneCreator.cinematographerFinal(projectId, sceneId, body),
+  ): Promise<{ cinematographer: SceneCinematographerPack; shot: SceneShot }> =>
+    api.sceneCreator.cinematographerFinal(projectId, sceneId, body),
   regionEdit: (
     projectId: string,
     shotId: string,

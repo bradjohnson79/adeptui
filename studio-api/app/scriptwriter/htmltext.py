@@ -8,8 +8,10 @@ for back-compat read paths. No destructive conversion is performed.
 
 from __future__ import annotations
 
+import hashlib
 import html as _html
 import re
+from html.parser import HTMLParser
 from typing import Any
 
 from .models import ScriptDocument, ScriptElement
@@ -116,5 +118,204 @@ def stats_text(doc: ScriptDocument) -> dict[str, Any]:
     """Return lightweight stats derived from the readable text of a document."""
     text = document_text(doc)
     words = len(text.split())
-    scenes = sum(1 for e in doc.elements if e.type == "scene_heading")
+    els = html_scene_elements(doc.contentHtml or "") if html_has_visible_text(doc.contentHtml) else doc.elements
+    scenes = sum(1 for e in els if e.type == "scene_heading")
     return {"words": words, "scenes": scenes, "characters": len(text)}
+
+
+# ── Canonical HTML → element projection (CDX-051) ──────────────────────────
+
+
+def html_has_visible_text(html: str | None) -> bool:
+    """True when the HTML carries any visible text (i.e. is not a blank doc)."""
+    if not html:
+        return False
+    return bool(_TAG.sub("", html).strip())
+
+
+class _BlockCollector(HTMLParser):
+    """Collect block-level (tag, style, indent_px, text) tuples from HTML."""
+
+    _BLOCK_TAGS = {"p", "div", "li", "blockquote", "tr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks = []
+        self._cur_tag = "p"
+        self._cur_style = ""
+        self._cur_indent = 0
+        self._cur_text = []
+
+    def _is_block(self, tag: str) -> bool:
+        return tag in self._BLOCK_TAGS or (len(tag) == 2 and tag[0] == "h" and tag[1] in "123456")
+
+    def _flush(self) -> None:
+        self.blocks.append(
+            (self._cur_tag, self._cur_style, self._cur_indent, "".join(self._cur_text).strip())
+        )
+        self._cur_text = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag == "br":
+            self._cur_text.append("\n")
+            return
+        if tag == "hr":
+            self._cur_text.append(" ")
+            return
+        if self._is_block(tag):
+            self._flush()
+            self._cur_tag = tag
+            self._cur_style = ""
+            self._cur_indent = 0
+            for k, v in attrs or []:
+                kl = (k or "").lower()
+                if kl == "style":
+                    self._cur_style = v or ""
+                elif kl == "data-indent":
+                    try:
+                        self._cur_indent = int(str(v or "0"))
+                    except (TypeError, ValueError):
+                        self._cur_indent = 0
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self._is_block(tag):
+            self._flush()
+            self._cur_tag = "p"
+            self._cur_style = ""
+            self._cur_indent = 0
+
+    def handle_data(self, data: str) -> None:
+        self._cur_text.append(data)
+
+
+def html_blocks(html: str | None) -> list[tuple[str, str, int, str]]:
+    """Parse sanitized rich-text HTML into (tag, style, indent_px, text) blocks."""
+    if not html:
+        return []
+    parser = _BlockCollector()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return []
+    return parser.blocks
+
+
+def _style_map(style: str) -> dict[str, str]:
+    out = {}
+    for part in (style or "").split(";"):
+        if ":" in part:
+            k, _, v = part.partition(":")
+            out[k.strip().lower()] = v.strip().lower()
+    return out
+
+
+def _margin_left_px(style: str) -> int:
+    low = (style or "").lower()
+    idx = low.find("margin-left")
+    if idx < 0:
+        return 0
+    rest = low[idx + len("margin-left") :]
+    digits = ""
+    for ch in rest:
+        if ch.isdigit() or ch == ".":
+            digits += ch
+        elif digits:
+            break
+    try:
+        return int(float(digits))
+    except ValueError:
+        return 0
+
+
+def _is_character_cue(text: str) -> bool:
+    """Heuristic: a short ALL-CAPS line is a character cue (screenplay HTML)."""
+    t = (text or "").strip()
+    if not t or t.startswith("("):
+        return False
+    if len(t) > 80 or t.endswith((".", "!", "?")):
+        return False
+    return any(ch.isalpha() for ch in t) and t == t.upper()
+
+
+def _html_scene_id(heading: str, occurrence: int) -> str:
+    digest = hashlib.sha1((heading or "").upper().encode("utf-8")).hexdigest()[:12]
+    return f"html-scene-{digest}" if occurrence <= 1 else f"html-scene-{digest}-{occurrence}"
+
+
+def html_scene_elements(html: str | None) -> list[ScriptElement]:
+    """Derive normalized script elements from sanitized rich-text HTML.
+
+    CDX-051: typed HTML is the canonical script content, so element-based
+    features (navigator, stats, scene analysis, Timeline-prep, continuity,
+    Bible detection) must read the HTML instead of stale/default elements.
+    Rich-text HTML carries no element type semantics, so this projection
+    uses the editors structural conventions:
+
+    - h1..h6 headings           -> scene heading
+    - indented paragraphs       -> parenthetical (starts with "(" or italic),
+                                   character cue (short ALL-CAPS), else dialogue
+    - right-aligned uppercase   -> transition
+    - everything else           -> action
+
+    Scene heading ids are deterministic hashes of the heading text so
+    navigator selections survive saves. This function is pure; it never
+    writes to any store.
+    """
+    elements = []
+    order = 0
+    scene_no = 0
+    heading_counts = {}
+    for tag, style, indent, raw_text in html_blocks(html):
+        text = " ".join((raw_text or "").split()).strip()
+        st = _style_map(style)
+        if tag.startswith("h"):
+            heading = text or "INT. LOCATION - DAY"
+            scene_no += 1
+            heading_counts[heading] = heading_counts.get(heading, 0) + 1
+            elements.append(
+                ScriptElement(
+                    id=_html_scene_id(heading, heading_counts[heading]),
+                    type="scene_heading",
+                    text=heading,
+                    order=order,
+                    sceneNumber=str(scene_no),
+                )
+            )
+            order += 1
+            continue
+        if st.get("text-align") == "right" and st.get("text-transform") == "uppercase":
+            etype = "transition"
+        elif max(_margin_left_px(style), indent) >= 200:
+            if text.startswith("(") or st.get("font-style") == "italic":
+                etype = "parenthetical"
+            elif st.get("text-transform") == "uppercase" or _is_character_cue(text):
+                etype = "character"
+            else:
+                etype = "dialogue"
+        elif text:
+            etype = "action"
+        else:
+            continue
+        if not text:
+            continue
+        elements.append(
+            ScriptElement(
+                id=f"html-{etype}-{order}",
+                type=etype,  # type: ignore[arg-type]
+                text=text,
+                order=order,
+            )
+        )
+        order += 1
+    current_speaker = None
+    for el in elements:
+        if el.type == "scene_heading":
+            current_speaker = None
+        elif el.type == "character":
+            current_speaker = el.text
+        elif el.type == "dialogue" and current_speaker:
+            el.metadata["speaker"] = current_speaker
+    return elements

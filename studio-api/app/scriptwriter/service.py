@@ -25,6 +25,7 @@ from .models import (
     ScriptRevisionSnapshot,
     SceneSyncStatus,
 )
+from .htmltext import html_has_visible_text, html_scene_elements
 from .stats import compute_stats
 from .store import (
     clear_recovery,
@@ -46,7 +47,13 @@ def ensure_ready() -> None:
     ensure_scriptwriter_tables()
 
 
-def get_or_create_document(db: Session, project_id: str, *, title: str = "Untitled Script") -> ScriptDocument:
+def create_document(db: Session, project_id: str, *, title: str = "Untitled Script") -> ScriptDocument:
+    """Explicitly create the canonical script document (creator-triggered write).
+
+    Read paths (GET /scriptwriter) must never call this — CDX-054 requires reads
+    to be side-effect free. Creation happens only on the first explicit
+    autosave/insert (POST /scriptwriter/documents).
+    """
     ensure_ready()
     docs = list_documents(db, project_id)
     if docs:
@@ -83,7 +90,11 @@ def autosave_elements(
 ) -> dict[str, Any]:
     doc = get_document(db, document_id)
     if expected_revision is not None and expected_revision != doc.revision:
-        set_recovery(db, document_id, {"elements": elements, "expectedRevision": expected_revision})
+        set_recovery(
+            db,
+            document_id,
+            {"elements": elements, "expectedRevision": expected_revision, "conflictServerRevision": doc.revision},
+        )
         raise ScriptwriterError(
             "SCRIPT_CONFLICT",
             "Document revision conflict.",
@@ -109,7 +120,11 @@ def autosave_html(
 ) -> dict[str, Any]:
     doc = get_document(db, document_id)
     if expected_revision is not None and expected_revision != doc.revision:
-        set_recovery(db, document_id, {"html": html, "expectedRevision": expected_revision})
+        set_recovery(
+            db,
+            document_id,
+            {"html": html, "expectedRevision": expected_revision, "conflictServerRevision": doc.revision},
+        )
         raise ScriptwriterError(
             "SCRIPT_CONFLICT",
             "Document revision conflict.",
@@ -266,7 +281,7 @@ def import_text(db: Session, document_id: str, text: str, *, fmt: str = "fountai
 
 def export_fountain(db: Session, document_id: str) -> dict[str, Any]:
     doc = get_document(db, document_id)
-    return {"ok": True, "fountain": to_fountain(doc.elements, title=doc.title), "title": doc.title}
+    return {"ok": True, "fountain": to_fountain(canonical_elements(doc), title=doc.title), "title": doc.title}
 
 
 def export_pdf_file(db: Session, document_id: str, out_dir: Path) -> dict[str, Any]:
@@ -275,7 +290,7 @@ def export_pdf_file(db: Session, document_id: str, out_dir: Path) -> dict[str, A
     doc = get_document(db, document_id)
     path = out_dir / f"{doc.id}.pdf"
     try:
-        export_pdf(doc, path)
+        export_pdf(canonical_document(doc), path)
         return {"ok": True, "path": str(path)}
     except ScriptwriterError as exc:
         return {"ok": False, "error": exc.to_dict()}
@@ -374,7 +389,7 @@ def link_scene(db: Session, document_id: str, scene_heading_id: str, project_sce
 def prepare_timeline(db: Session, document_id: str, scene_heading_id: str) -> dict[str, Any]:
     """Build a Timeline preparation proposal (does not apply clips)."""
     doc = get_document(db, document_id)
-    block = _block_for_heading(doc.elements, scene_heading_id)
+    block = _block_for_heading(canonical_elements(doc), scene_heading_id)
     if not block:
         raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene not found.")
     heading = block[0]
@@ -450,7 +465,7 @@ def apply_timeline_prep_metadata(db: Session, document_id: str, scene_heading_id
 
 def analyze_scene(db: Session, document_id: str, scene_heading_id: str) -> dict[str, Any]:
     doc = get_document(db, document_id)
-    block = _block_for_heading(doc.elements, scene_heading_id)
+    block = _block_for_heading(canonical_elements(doc), scene_heading_id)
     action = " ".join(e.text for e in block if e.type == "action")
     dialogue = [e.text for e in block if e.type == "dialogue"]
     chars = [e.text for e in block if e.type == "character"]
@@ -479,9 +494,146 @@ def lock_production_numbers(db: Session, document_id: str, locked: bool = True) 
     return {"ok": True, "document": doc.model_dump(mode="json")}
 
 
+def canonical_elements(doc: ScriptDocument) -> list[ScriptElement]:
+    """Canonical element projection of a script document (CDX-051).
+
+    Typed HTML is the canonical Script Writer content. When a document
+    carries visible HTML, element-based features (navigator, stats, scene
+    analysis, Timeline-prep, continuity, Bible detection) read the
+    HTML-derived projection so they reflect what the creator typed instead
+    of stale/default elements. Legacy elements documents use their stored
+    elements.
+    """
+    if html_has_visible_text(doc.contentHtml):
+        return html_scene_elements(doc.contentHtml)
+    return doc.elements
+
+
+def canonical_document(doc: ScriptDocument) -> ScriptDocument:
+    """A read view of a document whose ``elements`` are the canonical projection.
+
+    Used to hand element-based consumers (stats, continuity, Bible detection,
+    exports) a document that reflects typed HTML content without mutating
+    the persisted store.
+    """
+    els = canonical_elements(doc)
+    if els is doc.elements:
+        return doc
+    return doc.model_copy(update={"elements": els})
+
+
+def project_segments(doc: ScriptDocument) -> list[dict[str, Any]]:
+    """Canonical scene/segment projection of a v2 script document.
+
+    CDX-052 architecture: ``script_documents_v2`` is the canonical Script
+    Writer store; ``script_segments`` remains a synchronized projection for
+    legacy shotlist/storyboard consumers. This pure helper derives the
+    canonical segments (scene headings, action, dialogue blocks) from the
+    v2 content — the typed HTML when present, otherwise the stored elements —
+    in the legacy segment shape. It performs no writes; consumers wire
+    persistence to ``script_segments`` as an explicitly-triggered sync.
+    """
+    els = canonical_elements(doc)
+    segments: list[dict[str, Any]] = []
+    scene_id: str | None = None
+    scene_number = ""
+    speaker = ""
+    index = 0
+    for el in els:
+        etype = el.type
+        if etype == "scene_heading":
+            scene_id = el.id
+            scene_number = el.sceneNumber or ""
+            speaker = ""
+            segments.append(_projection_segment(doc, scene_id, scene_number, speaker, el, index, "scene_heading"))
+        elif etype == "character":
+            speaker = el.text or ""
+            continue
+        elif etype == "parenthetical":
+            segments.append(_projection_segment(doc, scene_id, scene_number, speaker, el, index, "parenthetical"))
+        elif etype == "dialogue":
+            segments.append(_projection_segment(doc, scene_id, scene_number, speaker, el, index, "dialogue"))
+        elif etype == "transition":
+            segments.append(_projection_segment(doc, scene_id, scene_number, speaker, el, index, "transition"))
+        else:
+            segments.append(_projection_segment(doc, scene_id, scene_number, speaker, el, index, "action"))
+        index += 1
+    return segments
+
+
+def _projection_segment(
+    doc: ScriptDocument,
+    scene_id: str | None,
+    scene_number: str,
+    speaker: str,
+    el: ScriptElement,
+    index: int,
+    seg_type: str,
+) -> dict[str, Any]:
+    text = el.text or ""
+    return {
+        "id": f"seg-{el.id}",
+        "projectId": doc.projectId,
+        "docId": doc.id,
+        "sceneId": scene_id,
+        "sceneNumber": scene_number,
+        "index": index,
+        "segmentNumber": index + 1,
+        "segmentType": seg_type,
+        "speaker": speaker,
+        "text": text,
+        "action": text if seg_type == "action" else "",
+        "dialogue": text if seg_type == "dialogue" else "",
+        "location": _location_from_heading(text) if seg_type == "scene_heading" else "",
+        "timeOfDay": _tod_from_heading(text) if seg_type == "scene_heading" else "",
+        "characters": [speaker] if seg_type == "dialogue" and speaker else [],
+        "source": "scriptwriter:v2",
+    }
+
+
+def scene_segment_readout(doc: ScriptDocument, scene_element_id: str) -> dict[str, Any] | None:
+    """Canonical readout of one scene from the v2 projection (CDX-052).
+
+    Storyboard/Timeline-prep consumers that link a panel or shot to a Script
+    Writer scene element (``meta.scriptwriterSceneId`` == the scene heading
+    element id) use this instead of the stale legacy ``script_segments``
+    snapshot, so downstream prompts reflect the script the creator edits in
+    Script Writer. Pure — never writes.
+
+    Returns the scene's heading, joined dialogue, joined action and first
+    speaker, or None when the element id is not a scene in the projection.
+    """
+    heading = ""
+    dialogue_lines: list[str] = []
+    action_lines: list[str] = []
+    speaker = ""
+    found = False
+    for seg in project_segments(doc):
+        if str(seg.get("sceneId") or "") != scene_element_id:
+            continue
+        found = True
+        seg_type = seg.get("segmentType")
+        if seg_type == "scene_heading":
+            heading = seg.get("text") or ""
+        elif seg_type == "dialogue":
+            dialogue_lines.append(seg.get("text") or "")
+            speaker = speaker or (seg.get("speaker") or "")
+        elif seg_type == "action":
+            action_lines.append(seg.get("action") or seg.get("text") or "")
+    if not found:
+        return None
+    return {
+        "sceneId": scene_element_id,
+        "heading": heading,
+        "dialogue": " ".join(d for d in dialogue_lines if d),
+        "action": " ".join(a for a in action_lines if a),
+        "speaker": speaker,
+    }
+
+
 def navigator_scenes(doc: ScriptDocument) -> list[dict[str, Any]]:
     out = []
-    for block in _scene_blocks(doc.elements):
+    for block in _scene_blocks(canonical_elements(doc)):
         h = block[0]
         words = sum(len((e.text or "").split()) for e in block)
         out.append(
@@ -503,13 +655,14 @@ def navigator_scenes(doc: ScriptDocument) -> list[dict[str, Any]]:
 
 def document_bundle(db: Session, document_id: str) -> dict[str, Any]:
     doc = get_document(db, document_id)
+    canon = canonical_document(doc)
     return {
         "ok": True,
-        "document": doc.model_dump(mode="json"),
-        "stats": compute_stats(doc).model_dump(mode="json"),
+        "document": canon.model_dump(mode="json"),
+        "stats": compute_stats(canon).model_dump(mode="json"),
         "navigator": navigator_scenes(doc),
-        "continuity": analyze_continuity(doc),
-        "bibleCandidates": detect_entities(doc),
+        "continuity": analyze_continuity(canon),
+        "bibleCandidates": detect_entities(canon),
         "revisions": [r.model_dump(mode="json") for r in list_revisions(db, document_id)],
         "transactions": [t.model_dump(mode="json") for t in history(db, document_id, limit=20)],
         "transitions": {
@@ -518,6 +671,97 @@ def document_bundle(db: Session, document_id: str) -> dict[str, Any]:
         },
         "recovery": get_recovery(db, document_id),
         "paginationMode": "estimated",
+    }
+
+
+def _empty_bundle(project_id: str) -> dict[str, Any]:
+    """Neutral studio bundle for a project with no script document yet.
+
+    CDX-054: GET /projects/{id}/scriptwriter must be side-effect free — it
+    returns this empty state instead of creating/migrating canonical rows.
+    Creation happens only on the first explicit write (POST /scriptwriter/documents).
+    """
+    return {
+        "ok": True,
+        "document": None,
+        "projectId": project_id,
+        "stats": {},
+        "navigator": [],
+        "continuity": [],
+        "bibleCandidates": [],
+        "revisions": [],
+        "transactions": [],
+        "transitions": {
+            "nextOnEnter": {k: next_on_enter(k) for k in ("scene_heading", "action", "character", "dialogue", "parenthetical", "transition")},  # type: ignore[arg-type]
+            "cycle": [cycle_type("action"), cycle_type("action", reverse=True)],
+        },
+        "recovery": None,
+        "paginationMode": "estimated",
+    }
+
+
+def project_bundle(db: Session, project_id: str) -> dict[str, Any]:
+    """Return the studio bundle for a project without creating any rows.
+
+    Existing documents are returned as-is; projects with no script document
+    receive the empty bundle (no v2 rows, no migration writes).
+    """
+    ensure_ready()
+    docs = list_documents(db, project_id)
+    if docs:
+        return document_bundle(db, docs[0].id)
+    return _empty_bundle(project_id)
+
+
+def restore_recovery(db: Session, document_id: str) -> dict[str, Any]:
+    """Apply a stored SCRIPT_CONFLICT recovery payload as an explicit creator action.
+
+    CDX-055: the backend stores the client's unsaved edit on conflict but nothing
+    could restore it. This is the restore path.
+
+    Revision validation: the conflict was detected against a known server
+    revision (conflictServerRevision). The restore only applies when the document
+    is still at that revision — i.e. nothing else saved since the conflict. If the
+    document moved again, the restore is rejected with SCRIPT_CONFLICT and the
+    original payload is preserved so the creator can review before retrying. This
+    prevents a restore from silently clobbering a newer concurrent save.
+    """
+    payload = get_recovery(db, document_id)
+    if not payload:
+        raise ScriptwriterError(
+            "SCRIPT_RECOVERY_UNAVAILABLE", "No unsaved changes to restore.", recovery_action="reload"
+        )
+    has_html = isinstance(payload.get("html"), str) and bool(payload.get("html"))
+    has_elements = isinstance(payload.get("elements"), list) and bool(payload.get("elements"))
+    if not (has_html or has_elements):
+        raise ScriptwriterError(
+            "SCRIPT_RECOVERY_UNAVAILABLE", "Stored recovery payload is malformed.", recovery_action="reload"
+        )
+    doc = get_document(db, document_id)
+    conflict_server_revision = payload.get("conflictServerRevision")
+    if conflict_server_revision is not None and conflict_server_revision != doc.revision:
+        raise ScriptwriterError(
+            "SCRIPT_CONFLICT",
+            "Document changed again — your unsaved changes are still preserved. Restore again after reviewing.",
+            details={"serverRevision": doc.revision, "conflictServerRevision": conflict_server_revision},
+            recovery_action="reload_or_recover",
+        )
+
+    def mutate(d: ScriptDocument) -> list[str]:
+        if has_html:
+            d.contentHtml = payload["html"]
+            d.contentType = "html"
+            return []
+        d.elements = [ScriptElement.model_validate(e) for e in payload["elements"]]
+        return [e.id for e in d.elements]
+
+    doc, tx = commit_transaction(db, doc, kind="recovery_restore", source="creator", mutate=mutate, reversible=True)
+    clear_recovery(db, document_id)
+    return {
+        "ok": True,
+        "document": doc.model_dump(mode="json"),
+        "transaction": tx.model_dump(mode="json"),
+        "saveState": "saved",
     }
 
 
@@ -533,7 +777,7 @@ def propose_bible_entities(db: Session, project_id: str, document_id: str) -> di
 
     doc = get_document(db, document_id)
     created = []
-    for c in detect_entities(doc)[:20]:
+    for c in detect_entities(canonical_document(doc))[:20]:
         kind = "character" if c.get("kind") == "character" else "location"
         name = str(c.get("name") or "Unknown")
         mutation = EntityMutation(

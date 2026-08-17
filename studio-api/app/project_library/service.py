@@ -190,6 +190,28 @@ def get_tree(db: Session, project_id: str) -> dict[str, Any]:
     }
 
 
+def _rename_entity_folder_in_state(state: LibraryState, folder: FolderNode, new_name: str) -> None:
+    """Rename an entity folder in place - display name + nested display paths (no fork).
+
+    CDX-066: entity folders are keyed by entityId; the name is display-only. When the
+    entity renames we refresh the folder display name and its subfolder paths instead
+    of creating a second folder. repair_library later reconciles any stale paths.
+    """
+    if folder.display_name == new_name:
+        return
+    etype = folder.entity_type or ""
+    root_key = ENTITY_ROOTS.get(etype)
+    folder.display_name = new_name
+    base = display_path_for_system_key(root_key) if root_key else ""
+    folder.display_path = f"{base}/{new_name}" if base else new_name
+    state.folders[folder.folder_id] = folder.to_dict()
+    for row in state.folders.values():
+        if row.get("parentFolderId") == folder.folder_id:
+            sub = FolderNode.from_dict(row)
+            sub.display_path = f"{folder.display_path}/{sub.display_name}"
+            state.folders[sub.folder_id] = sub.to_dict()
+
+
 def ensure_entity_folder(
     db: Session,
     project_id: str,
@@ -217,7 +239,11 @@ def ensure_entity_folder(
     eid = entity_id or str(uuid.uuid4())
 
     entity_folder = _find_entity_folder(state, entity_type, eid, entity_name)
-    if not entity_folder:
+    if entity_folder:
+        if entity_folder.display_name != entity_name:
+            # CDX-066: same entity renamed - follow it without forking a new folder.
+            _rename_entity_folder_in_state(state, entity_folder, entity_name)
+    else:
         container_id = system_folder_id(root_key)
         entity_folder_id = str(uuid.uuid4())
         entity_path = f"{display_path_for_system_key(root_key)}/{entity_name}"
@@ -261,6 +287,38 @@ def ensure_entity_folder(
     return subfolder
 
 
+def rename_entity_folder(
+    db: Session,
+    project_id: str,
+    *,
+    entity_type: str,
+    entity_id: str,
+    new_name: str,
+) -> FolderNode:
+    """Rename an entity library folder in place (display name + nested paths), no fork.
+
+    CDX-066: the folder is keyed by entityId; renaming updates the display name and
+    the subfolder paths so the folder follows the entity instead of forking.
+    """
+    project = db.get(Project, project_id)
+    if not project:
+        raise ValueError("PROJECT_NOT_FOUND")
+    if entity_type not in ENTITY_ROOTS:
+        raise ValueError(f"UNSUPPORTED_ENTITY_TYPE:{entity_type}")
+    if not entity_id or not new_name:
+        raise ValueError("MISSING_ENTITY_ID_OR_NAME")
+    settings = _load_settings(project)
+    state = _library_state(settings)
+    folder = _find_entity_folder(state, entity_type, entity_id)
+    if not folder:
+        raise ValueError("ENTITY_FOLDER_NOT_FOUND")
+    _rename_entity_folder_in_state(state, folder, new_name)
+    _set_library_state(settings, state)
+    _save_settings(db, project, settings)
+    db.commit()
+    return folder
+
+
 def _default_subfolder(entity_type: str) -> str:
     defaults = {
         "character": "characters.identity_references",
@@ -270,13 +328,35 @@ def _default_subfolder(entity_type: str) -> str:
     return defaults[entity_type]
 
 
-def _find_entity_folder(state: LibraryState, entity_type: str, entity_id: str, entity_name: str) -> Optional[FolderNode]:
+def _find_entity_folder(
+    state: LibraryState,
+    entity_type: str,
+    entity_id: str,
+    entity_name: str = "",
+) -> Optional[FolderNode]:
+    """Match an entity folder by entityId only (name is display-only).
+
+    CDX-066: matching by entityId OR entityName made two same-name entities share
+    one folder, and renaming an entity forked a second folder. The entity id is
+    the stable key; the name only renders. When no id is supplied (legacy callers
+    that never learned the id) a name fallback applies only when exactly one
+    candidate exists, so id-less flows do not fork while same-name entities with
+    distinct ids still get separate folders.
+    """
     for row in state.folders.values():
-        if row.get("entityType") == entity_type and (
-            row.get("entityId") == entity_id or row.get("entityName") == entity_name
-        ):
-            if not row.get("systemKey"):
+        if row.get("entityType") == entity_type and not row.get("systemKey"):
+            if entity_id and row.get("entityId") == entity_id:
                 return FolderNode.from_dict(row)
+    if not entity_id and entity_name:
+        matches = [
+            FolderNode.from_dict(row)
+            for row in state.folders.values()
+            if row.get("entityType") == entity_type
+            and not row.get("systemKey")
+            and row.get("entityName") == entity_name
+        ]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
@@ -316,12 +396,34 @@ def resolve_path(
     return ""
 
 
+def _apply_production_approval(meta: AssetLibraryMeta, asset: Asset) -> AssetLibraryMeta:
+    """Single truth: approval lives on Asset.production_approval, never in the meta blob.
+
+    CDX-064: AssetLibraryMeta.approval_state/is_canonical were never written by any
+    producer (prop_creator, scene_creator and codirector/vision all write the
+    Asset.production_approval column). Every read now derives approval from the
+    column so payloads and Co-Director ranking are truthful.
+    """
+    pa = str(getattr(asset, "production_approval", "") or "none").strip().lower()
+    if pa == "approved":
+        meta.approval_state = "approved"
+        meta.is_canonical = True
+    elif pa == "rejected":
+        meta.approval_state = "rejected"
+        meta.is_canonical = False
+    else:
+        meta.approval_state = "draft"
+        meta.is_canonical = False
+    return meta
+
+
 def read_asset_library_meta(asset: Asset) -> AssetLibraryMeta:
     try:
         prompt_meta = json.loads(asset.prompt_meta_json or "{}")
     except Exception:
         prompt_meta = {}
-    return AssetLibraryMeta.from_dict(prompt_meta.get("library"))
+    meta = AssetLibraryMeta.from_dict(prompt_meta.get("library"))
+    return _apply_production_approval(meta, asset)
 
 
 def write_asset_library_meta(asset: Asset, meta: AssetLibraryMeta) -> None:
@@ -349,6 +451,21 @@ def find_duplicates_by_hash(db: Session, project_id: str, content_hash: str) -> 
         if meta.content_hash == content_hash:
             matches.append(asset)
     return matches
+
+
+def mark_duplicate(db: Session, asset: Asset, source_asset_id: str) -> AssetLibraryMeta:
+    """Flag an asset as a content-hash duplicate of another asset (never deletes).
+
+    CDX-068: upload_asset wires hash-based dedupe through this flag. The duplicate
+    binary stays stored and discoverable; the flag warns the creator instead of
+    silently deleting either copy.
+    """
+    meta = read_asset_library_meta(asset)
+    meta.duplicate_of = source_asset_id
+    write_asset_library_meta(asset, meta)
+    db.add(asset)
+    db.commit()
+    return meta
 
 
 def assign_asset(
@@ -421,6 +538,8 @@ def assign_asset(
         override=override,
         **entity_links,
     )
+    # CDX-064: approval never persists in the blob; it is always derived from the column.
+    meta = _apply_production_approval(meta, asset)
     write_asset_library_meta(asset, meta)
     db.add(asset)
     db.commit()
@@ -535,6 +654,13 @@ def enrich_library_item(asset: Asset) -> dict[str, Any]:
         "propId": meta.prop_id,
         "sceneId": meta.scene_id,
         "contentHash": meta.content_hash,
+        "duplicateOf": meta.duplicate_of,
+        # CDX-064: approval truth always comes from Asset.production_approval (see
+        # read_asset_library_meta), never from a stale blob value.
+        "approvalState": meta.approval_state,
+        "isCanonical": meta.is_canonical,
+        "version": meta.version,
+        "override": meta.override,
     }
 
 

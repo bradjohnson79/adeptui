@@ -98,12 +98,15 @@ def test_cannot_self_approve_without_approved_by(db: Session, project_and_charac
 
 def test_promote_requires_all_gates_owner_approved(db: Session, project_and_character):
     project_id, character_id, version_id = project_and_character
-    propose_visual_directions(db, project_id, character_id)
+    proposed = propose_visual_directions(db, project_id, character_id)
+    # CDX-002: non-Korri profiles get profile-derived directions — the Korri
+    # lock id (wild_sun_sprite) is no longer selectable; pick the first
+    # proposed direction instead.
     owner_select_concept(
         db,
         project_id,
         character_id,
-        direction_id="wild_sun_sprite",
+        direction_id=proposed["directions"][0]["id"],
         approved_by="owner",
     )
     for gate in GATE_ORDER:

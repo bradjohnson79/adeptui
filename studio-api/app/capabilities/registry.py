@@ -648,7 +648,15 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         baseline_status=S.LOCALLY_VERIFIED,
         summary="A verified local still-image stack (Z-Image Turbo UNET + text encoder + VAE).",
         component_ids=("zimage_models",),
-        baseline_reason="Derived from Setup zimage_models verification; blocked when absent. Not LTX.",
+        baseline_reason=(
+            "Derived from Setup zimage_models verification; blocked when absent. Not LTX. "
+            "Readiness reconciliation (CDX-075): the generator-roster and Image Studio "
+            "provider surfaces derive the SAME Setup/Source Manager disk truth (verify_component) "
+            "via imagegen_workflows._family_verified_on_disk / image_studio "
+            "_COMPONENT_GATE_BY_MODEL; Certified workflow status alone is never install truth. "
+            "Residual gap: /api/capabilities is the Setup-gated canonical answer, but no "
+            "Co-Director selector consumes this snapshot directly yet."
+        ),
     ),
     _d(
         id="models.image.krea2.ready",

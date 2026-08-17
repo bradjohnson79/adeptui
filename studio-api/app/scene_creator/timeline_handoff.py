@@ -76,7 +76,7 @@ def send_scene_batch_to_timeline(
             "message": f"Scene batch '{batch_id}' not found in project '{project_id}'.",
         }
 
-    clips = build_scene_shot_clips(batch)
+    clips = build_scene_shot_clips(batch, scene_id=scene_id)
     if not clips:
         return {
             "ok": False,
@@ -165,7 +165,7 @@ def send_approved_shot_to_timeline(
     return result
 
 
-def build_scene_shot_clips(batch: SceneGenerationBatch) -> list[dict[str, Any]]:
+def build_scene_shot_clips(batch: SceneGenerationBatch, scene_id: str = "") -> list[dict[str, Any]]:
     """Build the ordered clip dicts for a Scene Creator batch.
 
     Each clip carries the scene-shot provenance that fits the frozen W46
@@ -207,7 +207,7 @@ def build_scene_shot_clips(batch: SceneGenerationBatch) -> list[dict[str, Any]]:
                 "character_ids": list(shot.characters) if shot else [],
                 "prop_ids": list(shot.prop_entities) if shot else [],
                 "ers_package_id": batch.ers_package_id,
-                "source_scene": batch.project_id,
+                "source_scene": scene_id or "",
                 "role": role,
             }
         )

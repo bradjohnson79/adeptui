@@ -65,7 +65,7 @@ def test_find_duplicates_by_content_hash(client, isolated_data_dir: Path) -> Non
         db.close()
 
 
-def test_usd_assign_is_not_applicable_not_failure(client, isolated_data_dir: Path) -> None:
+def test_usd_assign_is_deferred_version_1_2_not_failure(client, isolated_data_dir: Path) -> None:
     project_id = _create_project(client)
     db = _session()
     try:
@@ -88,13 +88,15 @@ def test_usd_assign_is_not_applicable_not_failure(client, isolated_data_dir: Pat
         db.commit()
 
         meta = assign_asset(db, asset)
-        assert meta.classification.subtype == "NOT_APPLICABLE"
+        # CDX-073: committed classify.py assigns DEFERRED_VERSION_1_2 to native
+        # 3D (deferred to v1.2, not a technical failure / NOT_APPLICABLE).
+        assert meta.classification.subtype == "DEFERRED_VERSION_1_2"
         assert meta.folder_system_key == "miscellaneous"
         assert meta.canonical_folder_id == system_folder_id("miscellaneous")
-        assert "USD" in meta.classification.reason
+        assert "Version 1.2" in meta.classification.reason
 
         reloaded = read_asset_library_meta(db.get(Asset, asset_id))
-        assert reloaded.classification.subtype == "NOT_APPLICABLE"
+        assert reloaded.classification.subtype == "DEFERRED_VERSION_1_2"
     finally:
         db.close()
 

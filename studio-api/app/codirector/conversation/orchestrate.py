@@ -101,6 +101,46 @@ from .schemas import (
 from .snapshot import build_tier1_snapshot, save_snapshot
 from .success_score import evaluate_success
 
+# ---------------------------------------------------------------------------
+# Phase 7 (CDX-087): conversation specialist candidates.
+#
+# These are SOFT per-intent bundles declared in the canonical SpecialistRegistry
+# vocabulary (hyphenated prompt-library ids). They are resolved read-through
+# against the live registry before selection, so the conversation path never
+# carries a separate specialist id vocabulary. Complexity/budget policy in
+# intelligence.specialist_policies.select_specialists_for_turn still gates
+# whether any of them actually run. Hard max three per bundle (CDX-086).
+# ---------------------------------------------------------------------------
+_CONVERSATION_SPECIALIST_CANDIDATES: dict[IntentType, tuple[str, ...]] = {
+    IntentType.REQUEST_ACTION: ("producer", "pipeline-manager"),
+    IntentType.REQUEST_PLAN: ("story-editor", "screenwriter"),
+    IntentType.REQUEST_FEEDBACK: ("story-analyst", "continuity-analyst"),
+}
+
+
+def conversation_specialist_candidates() -> tuple[str, ...]:
+    """All soft conversation specialist candidates (canonical registry ids)."""
+    seen: list[str] = []
+    for ids in _CONVERSATION_SPECIALIST_CANDIDATES.values():
+        for sid in ids:
+            if sid not in seen:
+                seen.append(sid)
+    return tuple(seen)
+
+
+def resolve_conversation_specialist_candidates(intent: IntentType) -> list[str]:
+    """Resolve a soft candidate bundle through the canonical SpecialistRegistry.
+
+    Read-through: an id is returned only when it exists in the live canonical
+    registry (prompt library), so a dropped prompt automatically drops the
+    candidate instead of silently routing to an unknown specialist.
+    """
+    from ..intelligence.specialist_registry import SpecialistRegistry
+
+    registry = SpecialistRegistry()
+    wanted = _CONVERSATION_SPECIALIST_CANDIDATES.get(intent, ())
+    return [sid for sid in wanted if registry.get(sid) is not None]
+
 
 def _timed_step(timings: dict[str, float], key: str, started_at: float) -> None:
     timings[key] = round(time.perf_counter() - started_at, 6)
@@ -578,13 +618,10 @@ def run_conversation_core_turn(
     ):
         if dialogue.workflow_advance_policy != "HOLD" or support.support_needed == CompanionNeed.EXECUTE:
             dialogue.specialist_policy = "OPTIONAL_SUBORDINATE"
-            # Soft candidates — selection policy still gates by complexity/budget.
-            if intent.primary_intent == IntentType.REQUEST_ACTION:
-                candidate_ids = ["producer", "pipeline-manager"]
-            elif intent.primary_intent == IntentType.REQUEST_PLAN:
-                candidate_ids = ["story-editor", "screenwriter"]
-            else:
-                candidate_ids = ["story-analyst", "continuity-analyst"]
+            # Soft candidates resolved through the canonical SpecialistRegistry
+            # (CDX-087) — no separate conversation id vocabulary. Selection
+            # policy still gates by complexity/budget.
+            candidate_ids = resolve_conversation_specialist_candidates(intent.primary_intent)
     elif not budget.allow_specialists:
         dialogue.specialist_policy = "NONE"
 

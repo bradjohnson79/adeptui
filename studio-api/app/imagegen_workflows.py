@@ -18,6 +18,37 @@ _FAMILY_LABELS: dict[str, str] = {
 # Preferred dropdown ordering for known families (Auto Select is always first).
 _FAMILY_ORDER: tuple[str, ...] = ("qwen2512", "zimage", "illustrious", "flux", "krea2")
 
+#: Family -> Setup/Source Manager components whose on-disk verification gates
+#: executability (CDX-075). Certified registry status is workflow metadata, NOT
+#: install truth: a Certified key only proves the builder exists, never that the
+#: weights are installed. The Setup component registry owns disk verification;
+#: when verification cannot run (unknown component / probe failure) the family
+#: fails closed (not executable) rather than pretending to be installed.
+_FAMILY_INSTALL_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "zimage": ("zimage_models",),
+    "qwen2512": ("qwen_image_2512_models",),
+    "flux": ("flux1_kontext_dev_local", "flux1_dev_local"),
+    "illustrious": ("illustrious_local",),
+    "krea2": ("krea2_models",),
+}
+
+
+def _family_verified_on_disk(family: str) -> bool:
+    """True only when the family's Setup/Source Manager components verify on disk.
+
+    Honest degradation: an unknown family, a missing component definition, or a
+    probe exception all fail closed (False) — never assume installed.
+    """
+    components = _FAMILY_INSTALL_COMPONENTS.get(family)
+    if not components:
+        return False
+    try:
+        from .setup.diagnostics import verify_component
+
+        return any(verify_component(cid).healthy for cid in components)
+    except Exception:
+        return False
+
 
 def _family_label(family: str, variant: str) -> str:
     if family in _FAMILY_LABELS:
@@ -67,10 +98,15 @@ def build_local_generator_models() -> list[dict[str, Any]]:
             entry["status"] = "Certified"
         elif entry["status"] == "Unknown":
             entry["status"] = wf.status
-        # Executable as a generator requires a Certified txt2img/generation key.
+        # Executable as a generator requires a Certified txt2img/generation key
+        # AND the family's weights verified on disk (CDX-075). Certification is
+        # workflow metadata; install truth comes from Setup/Source Manager
+        # component verification. A family whose weights cannot be verified
+        # fails closed (executable stays False).
         if wf.status == "Certified" and _is_txt2img(wf):
-            entry["executable"] = True
             entry["_gen"] = True
+            if _family_verified_on_disk(canonical):
+                entry["executable"] = True
         # Reference capability is a family-level property: any Certified
         # reference-capable workflow in the family (e.g. zimage.ref_edit) makes
         # the family reference-capable even though its txt2img key is not.

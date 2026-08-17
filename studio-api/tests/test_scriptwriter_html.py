@@ -275,7 +275,9 @@ def test_compute_stats_counts_words_for_html_docs():
     stats = compute_stats(doc)
     # Words: "INT." "CAFE" "-" "DAY" "Rain" "on" "glass." "Quiet" "night." = 9
     assert stats.words == 9
-    assert stats.scenes == 0
+    # CDX-051: scene count derives from the typed HTML (h1 heading), not from
+    # the (empty) stored elements array.
+    assert stats.scenes == 1
     assert stats.pagesEstimated >= 1.0
 
 

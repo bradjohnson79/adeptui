@@ -1269,3 +1269,93 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
   flex-direction: column;
   gap: 0.4rem;
 }
+
+/* —— Map selector (CDX-020, multi-document projects) —— */
+.spatial-map__selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+.spatial-map__selector-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+.spatial-map__selector-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 18rem;
+}
+
+/* —— Map-only prop honesty (CDX-012) —— */
+.spatial-map__maponly-note {
+  margin: 0.3rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  color: #f0b35c;
+}
+.spatial-map__maponly-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.08rem 0.35rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  color: #f0b35c;
+  border: 1px solid color-mix(in srgb, #f0b35c 45%, transparent);
+  background: color-mix(in srgb, #f0b35c 12%, transparent);
+  border-radius: 0.25rem;
+}
+
+/* —— Scene chooser overlay (CDX-020 explicit scene binding) —— */
+.spatial-map__scene-chooser {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(4, 10, 18, 0.72);
+}
+.spatial-map__scene-chooser-title {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.spatial-map__scene-chooser-text {
+  margin: 0 0 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+  max-width: 26rem;
+}
+.spatial-map__scene-chooser-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: min(24rem, 100%);
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 0.45rem;
+  background: var(--panel, rgba(12, 20, 34, 0.92));
+}
+.spatial-map__scene-chooser-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.spatial-map__scene-chooser-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}

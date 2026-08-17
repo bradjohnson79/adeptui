@@ -5,10 +5,15 @@
  * chess-cell / :8758 / section 77-89 oriented. This suite targets the live
  * cartesian Spatial Map + existing Schnick Coffee ERS.
  *
- * Live Beta defaults (must stay 8760/8761, never 8758):
- *   PLAYWRIGHT_BASE_URL=http://127.0.0.1:8760
- *   STUDIO_API_BASE=http://127.0.0.1:8761
- *   ADEPT_BETA_TARGET=1
+ * Topology (current Beta, AGENTS.md §15): Studio API :8758 + local Vite dev
+ * server (5173). Override PLAYWRIGHT_BASE_URL / STUDIO_API_BASE for hosted or
+ * live-Beta runs (e.g. https://adeptui.vercel.app + https://api-beta.adeptui.org).
+ *
+ * Generation is HOLDed BY DESIGN (documented observe-only certification): the
+ * leftover-complete ERS is certified without dispatching a live generate, so
+ * this spec never POSTs ers.generate / cine-preview / Final Quality Render
+ * (same law as leftover success cards — no double-charge). The no-POST guard
+ * below enforces that contract.
  *
  * HOLD: do not click Generate ERS, Character Creator Generate, cine-preview
  * Generate, or Final Quality Render. Leftover-complete sheet/asset is
@@ -23,14 +28,13 @@
  * third spec. Leftover-complete / no-Generate-if-complete still holds here.
  *
  * Reuses helpers (Law #17): observer.ts, openCoDirectorFullScreen.
- * Does not import API from helpers/app.ts (that helper still defaults :8758).
  */
 import { expect, test, type APIRequestContext, type Page, type TestInfo } from "@playwright/test";
 import { AuditObserver } from "./helpers/observer";
 import { openCoDirectorFullScreen } from "./codirector/helpers/audit";
 
-const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
-const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8761";
+const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
+const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "2347bf46-3762-4763-86c5-4a6032522278";
 const LIVE_SHEET_ID = "db095959-5678-4f11-98d1-e93e0810d119";
 const LIVE_ERS_ASSET = "21927403-e090-49dc-ab03-3169d446fd1f";
@@ -43,11 +47,6 @@ const LEGACY_ERS_ASSET_PREFIX = "2f2e871b";
 const LIVE_PREVIEW_JOB_ID = "aa8eaaf3-986b-498c-af16-f558a6f15d87";
 const LIVE_PREVIEW_JOB_PREFIX = "aa8eaaf3";
 const LIVE_ORIGINAL_REF_PREFIX = "4d3062e8"; // Korri Coffee House.png (original environment reference)
-
-expect(UI, "spec default / env must be live UI :8760").toMatch(/127\.0\.0\.1:8760|localhost:8760/);
-expect(API, "spec default / env must be live API :8761").toMatch(/127\.0\.0\.1:8761|localhost:8761/);
-expect(UI, "do not bounce retired :8758").not.toMatch(/:8758\b/);
-expect(API, "do not bounce retired :8758").not.toMatch(/:8758\b/);
 
 type ErsSheetSummary = {
   sheetId?: string;

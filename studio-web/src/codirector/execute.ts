@@ -9,6 +9,17 @@ import {
   type PlannedStep,
 } from "./types";
 
+/**
+ * CDX-088 (Phase 7): legacy browser-side plan executor.
+ * This module exists to run the legacy `ActionPlan` steps from the dead plan
+ * engine (see codirector/types.ts). The live chat flow never reaches it —
+ * CoDirectorSession.plan is permanently null and `runSteps` was removed.
+ * The stubbed direct-action cases that bypassed the canonical execution-pack
+ * path were REMOVED in Phase 7 (see legacyPlanGate.test.ts for the frozen
+ * gate). `executeAction` remains for the createProject redirect test
+ * (execute.project-entry.test.ts); do not add new direct-generation bypasses
+ * here.
+ */
 export type ExecuteContext = {
   projectId?: string;
   sceneId?: string;
@@ -153,28 +164,10 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
         entityId: inputs.entityId,
         filenameHint: inputs.filenameHint || inputs.expectedName,
       });
-    case "queueImageGeneration": {
-      const reuseAssets = await assetFirst(projectId, String(inputs.prompt || "").slice(0, 24));
-      const result = await api.imageProduct.generate(projectId, {
-        prompt: String(inputs.prompt || ""),
-        operation: "image.generate",
-        purpose: String(inputs.purpose || ""),
-      });
-      const job = result.jobId ? await api.getJob(result.jobId) : result;
-      return { job, reuseAssets };
-    }
-    case "queueVideoGeneration": {
-      const reuseAssets = await assetFirst(projectId, "video");
-      const job = await api.txt2vid(projectId, { prompt: String(inputs.prompt || "") });
-      return { job, reuseAssets };
-    }
     case "createMasterSheetFromScene":
     case "setSceneAuthority":
     case "validateMasterSheet":
     case "updateIngredient":
-    case "renderIngredientsSheet":
-    case "createSpatialFromMasterSheet":
-    case "translateToSpatial":
     case "syncSpatialToMasterSheet": {
       if (def.id === "createMasterSheetFromScene") {
         const sheet = await api.getMasterSheet(projectId, sceneId).catch(() => null);
@@ -193,20 +186,6 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
           ...cur,
           patch_ingredient: { id: inputs.ingredientId, ...(inputs.patch as object) },
         });
-      }
-      if (def.id === "renderIngredientsSheet") {
-        ctx.goTab?.("mastersheet");
-        return { preview: true, note: "Ingredients board opened — export image stubbed" };
-      }
-      if (def.id === "createSpatialFromMasterSheet" || def.id === "translateToSpatial") {
-        // Stub: open spatial; full translation lands with master-sheet API helper
-        try {
-          await api.putMasterSheet(projectId, sceneId, { translate_to_spatial: true });
-        } catch {
-          /* optional */
-        }
-        ctx.goTab?.("spatial");
-        return { note: "Spatial translation stub — uncertain positions flagged for review" };
       }
       if (def.id === "syncSpatialToMasterSheet") {
         await api.putMasterSheet(projectId, sceneId, { sync_from_spatial: true });
@@ -250,16 +229,6 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
         checkpoint: true,
         message: "Place the black rectangle over the character’s mouth, then select Continue.",
       };
-    }
-    case "queueAvatarGeneration": {
-      const reuseAssets = await assetFirst(projectId, "character");
-      const result = await api.imageProduct.generate(projectId, {
-        prompt: String(inputs.prompt || "cinematic talking portrait, stable identity"),
-        operation: "image.generate",
-        purpose: "avatar",
-      });
-      const job = result.jobId ? await api.getJob(result.jobId) : result;
-      return { job, reuseAssets };
     }
     case "approveAvatarTake": {
       const sid = String(inputs.sessionId || "");
@@ -371,9 +340,6 @@ async function run(def: ActionDef, inputs: Record<string, unknown>, ctx: Execute
       ctx.goTab?.("timeline");
       return ctxPayload;
     }
-    case "saveMemorySuggestion":
-      // TODO: wire when learning promotion API is ready
-      return { stub: true, text: inputs.text, todo: "Promote via learning API when available" };
     case "manualCheckpoint":
       return { checkpoint: true, message: inputs.message };
     default:

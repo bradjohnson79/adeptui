@@ -6,11 +6,13 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from ..db import Asset
 from .coverage import compute_coverage
 from .models import (
     CharacterProfileRow,
@@ -64,6 +66,40 @@ def _dumps(value: Any) -> str:
 
 def _err(code: str, message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+# CDX-007: canonical identity references must point at real project image
+# assets. Extension check is a lenient secondary signal for legacy rows where
+# kind was not stamped; kind=="image" is the primary signal.
+IMAGE_FILE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".gif",
+    ".bmp",
+    ".avif",
+    ".tif",
+    ".tiff",
+    ".heic",
+}
+
+
+def _validate_project_image_asset(db: Session, project_id: str, asset_id: str) -> Asset:
+    """Validate that asset_id exists, belongs to project_id, and is an image.
+
+    Raises typed 4xx HTTPException (CDX-007) so a crafted request cannot make a
+    foreign/nonexistent/non-image asset the canonical identity reference.
+    """
+    asset = db.get(Asset, str(asset_id))
+    if not asset:
+        raise _err("ASSET_NOT_FOUND", f"Asset {asset_id} does not exist.", 404)
+    if asset.project_id != project_id:
+        raise _err("ASSET_NOT_IN_PROJECT", f"Asset {asset_id} does not belong to this project.", 400)
+    ext = Path(asset.filename or asset.path or "").suffix.lower()
+    if asset.kind != "image" and ext not in IMAGE_FILE_EXTENSIONS:
+        raise _err("ASSET_NOT_IMAGE", f"Asset {asset_id} is not an image.", 400)
+    return asset
 
 
 def _require_mutable(profile: CharacterProfileRow) -> None:
@@ -507,6 +543,8 @@ def attach_reference(
         raise _err("LOCKED_VERSION", "Cannot attach references to a locked profile.", 409)
     if body.reference_role not in ALL_REFERENCE_ROLES:
         raise _err("INVALID_REFERENCE_ROLE", f"Unknown reference role: {body.reference_role}")
+    # CDX-007: the canonical reference must point at a real project image asset.
+    _validate_project_image_asset(db, project_id, body.asset_id)
     rid = str(uuid.uuid4())
     row = CharacterReferenceAssetRow(
         id=rid,
@@ -601,6 +639,8 @@ def approve_character_candidate(
         raise _err("LOCKED_VERSION", "Cannot approve references for a locked profile.", 409)
     if reference_role not in ALL_REFERENCE_ROLES:
         raise _err("INVALID_REFERENCE_ROLE", f"Unknown reference role: {reference_role}")
+    # CDX-007: the canonical approved identity must point at a real project image asset.
+    _validate_project_image_asset(db, project_id, asset_id)
 
     # Phase 5: record generationUsed provenance. upload/library candidates did
     # NOT use generation; generation candidates did. The original asset id is
@@ -643,6 +683,7 @@ def approve_character_candidate(
                 row.generation_lineage_json = lineage
         profile.updated_at = _now()
         db.commit()
+        _sync_pack_role_asset(db, project_id, character_id, asset_id)
         return {
             "characterId": character_id,
             "assetId": asset_id,
@@ -671,6 +712,7 @@ def approve_character_candidate(
     db.add(row)
     profile.updated_at = _now()
     db.commit()
+    _sync_pack_role_asset(db, project_id, character_id, asset_id)
     return {
         "characterId": character_id,
         "referenceId": rid,
@@ -682,6 +724,27 @@ def approve_character_candidate(
         "generationUsed": generation_used,
         "sourceType": source_type,
     }
+
+
+def _sync_pack_role_asset(db: Session, project_id: str, character_id: str, asset_id: str) -> None:
+    """CDX-003: keep the visual-sheet pack roleAssets aligned with the canonical
+    approved reference so owner-approve and gate readers resolve the exact asset
+    the owner approved (not the first-completed candidate).
+
+    Best-effort: if no pack exists the canonical reference rows remain the
+    source of truth.
+    """
+    try:
+        from .visual_sheet import _load_pack_raw, _save_pack
+
+        pack = _load_pack_raw(db, character_id)
+        if not pack:
+            return
+        pack.setdefault("roleAssets", {})["hero_identity"] = asset_id
+        _save_pack(db, project_id, character_id, pack)
+    except Exception:
+        # Pack sync is best-effort; canonical reference rows remain the truth.
+        pass
 
 
 def list_references(db: Session, project_id: str, character_id: str) -> list[dict[str, Any]]:

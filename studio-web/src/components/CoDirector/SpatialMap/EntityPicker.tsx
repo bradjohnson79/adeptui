@@ -16,7 +16,7 @@ import {
   isImageAsset,
   type LibraryAsset,
 } from "../library/assetModel";
-import { characterTag, normalizePropTag, type SlotDef } from "./types";
+import { characterTag, type SlotDef } from "./types";
 
 type CharacterProfileLite = {
   id: string;
@@ -30,13 +30,6 @@ type Props =
       slot: SlotDef;
       onClose: () => void;
       onConfirm: (tag: string, characterId: string, characterName: string) => void;
-    }
-  | {
-      kind: "prop";
-      projectId: string;
-      slot: SlotDef;
-      onClose: () => void;
-      onConfirm: (tag: string, assetId: string, displayLabel: string) => void;
     }
   | {
       kind: "environment";
@@ -103,9 +96,7 @@ export function EntityPicker(props: Props) {
       <div className="spatial-map__picker-panel" ref={panelRef} tabIndex={-1}>
         <button type="button" className="spatial-map__picker-close" aria-label="Close" onClick={onClose}>×</button>
         <h3 className="spatial-map__picker-title" id={titleId}>
-          {kind === "character" ? "Choose a Character" :
-           kind === "environment" ? (title || "Select Spatial Map Image") :
-           "Add a Prop"}
+          {kind === "character" ? "Choose a Character" : title || "Select Spatial Map Image"}
         </h3>
         {kind === "character" ? (
           <CharacterPickerBody
@@ -118,12 +109,7 @@ export function EntityPicker(props: Props) {
             onClose={onClose}
             onConfirm={(assetId) => (props.onConfirm as (assetId: string) => void)(assetId)}
           />
-        ) : (
-          <PropPickerBody
-            projectId={projectId}
-            onConfirm={(tag, assetId, label) => props.onConfirm(tag, assetId, label)}
-          />
-        )}
+        ) : null}
       </div>
     </div>,
     document.body,
@@ -238,112 +224,6 @@ function CharacterPickerBody({
           className="ui-btn ui-btn--primary"
           disabled={!canConfirm}
           title={!canConfirm ? "Select or type a saved character first" : undefined}
-          onClick={handleConfirm}
-        >
-          Confirm
-        </button>
-      </div>
-    </>
-  );
-}
-
-function PropPickerBody({
-  projectId,
-  onConfirm,
-}: {
-  projectId: string;
-  onConfirm: (tag: string, assetId: string, displayLabel: string) => void;
-}) {
-  const [assets, setAssets] = useState<LibraryAsset[]>([]);
-  const [busy, setBusy] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedAsset, setSelectedAsset] = useState<LibraryAsset | null>(null);
-  const [labelInput, setLabelInput] = useState("");
-
-  const refresh = useCallback(async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const payload = await api.library(projectId, {});
-      const items = Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : [];
-      // Show only images — props are anchored by a Library image asset.
-      setAssets(items.filter(isImageAsset));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const normalizedTag = useMemo(() => {
-    const t = normalizePropTag(labelInput);
-    return t ? `#${t}` : "";
-  }, [labelInput]);
-
-  const canConfirm = !!selectedAsset && !!labelInput.trim() && !!normalizedTag;
-
-  const handleConfirm = useCallback(() => {
-    if (!canConfirm || !selectedAsset) return;
-    onConfirm(normalizedTag, selectedAsset.id, labelInput.trim());
-  }, [canConfirm, selectedAsset, normalizedTag, labelInput, onConfirm]);
-
-  if (busy) return <p className="spatial-map__busy">Loading Library images…</p>;
-  if (error) {
-    return (
-      <>
-        <p className="spatial-map__hint error">{error}</p>
-        <button type="button" className="ui-btn ui-btn--secondary" onClick={() => void refresh()}>Retry</button>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <p className="spatial-map__hint">Step 1 — choose a Library image (anchors the prop's visual identity):</p>
-      {assets.length === 0 ? (
-        <p className="spatial-map__hint">No images in the Library yet. Generate or upload an image first.</p>
-      ) : (
-        <div className="spatial-map__picker-grid" role="list">
-          {assets.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className={`spatial-map__picker-card${selectedAsset?.id === a.id ? " is-selected" : ""}`}
-              onClick={() => setSelectedAsset(a)}
-              aria-pressed={selectedAsset?.id === a.id}
-            >
-              {getCardPreviewUrl(a) ? (
-                <img className="spatial-map__picker-thumb" src={getCardPreviewUrl(a)!} alt={a.tag || a.filename || "asset"} loading="lazy" />
-              ) : (
-                <div className="spatial-map__picker-thumb" />
-              )}
-              <span className="spatial-map__picker-name">{a.tag || a.filename || "Untitled"}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      <p className="spatial-map__hint">Step 2 — name this prop (normalizes to a #tag):</p>
-      <div className="spatial-map__picker-row">
-        <input
-          type="text"
-          className="spatial-map__picker-input"
-          placeholder="e.g. Coffee Cup"
-          value={labelInput}
-          onChange={(e) => setLabelInput(e.target.value)}
-          aria-label="Prop label"
-        />
-        <span className="spatial-map__hint">{normalizedTag ? `Tag: ${normalizedTag}` : "Tag will appear here"}</span>
-      </div>
-      <div className="spatial-map__picker-row" style={{ justifyContent: "flex-end" }}>
-        <button
-          type="button"
-          className="ui-btn ui-btn--primary"
-          disabled={!canConfirm}
-          title={!canConfirm ? "Choose a Library image and name the prop first" : undefined}
           onClick={handleConfirm}
         >
           Confirm

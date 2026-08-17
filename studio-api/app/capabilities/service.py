@@ -361,6 +361,13 @@ def _model_component_eval(
 
 def _eval_models_image(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     # Still-image readiness is Z-Image (or other still packs), never LTX video alone.
+    # CDX-075 reconciliation: generator-roster and Image Studio provider surfaces
+    # derive the SAME Setup/Source Manager disk truth (verify_component) through
+    # imagegen_workflows._family_verified_on_disk and image_studio
+    # _COMPONENT_GATE_BY_MODEL, so Certified workflow status alone is never
+    # install truth anywhere. Residual gap: no Co-Director selector consumes this
+    # snapshot directly; per-capability install truth is also exposed by
+    # imagegenModels / image-studio providers.
     return _model_component_eval(definition, snapshot, required=("zimage_models",))
 
 

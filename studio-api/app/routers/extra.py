@@ -970,29 +970,56 @@ def project_library(
     scope: str = "project",
     folder: str = "",
     system_key: str = "",
+    limit: int = 100,
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
-    from ..asset_graph import search_assets
+    from ..asset_graph import count_assets, search_assets
     from ..project_library.service import enrich_library_item, get_library_response
 
     project = db.get(Project, project_id)
     if not project and scope != "global":
         raise HTTPException(404, "Project not found")
 
+    page_size = max(1, min(limit, 500))
+    page_offset = max(0, offset)
+
+    # CDX-065: scope=global returns cross-project rows for assets promoted via
+    # promote_asset_global; the default scope=project stays project-local.
     if scope == "global":
-        rows = search_assets(db, None, q, global_only=True)
+        rows = search_assets(db, None, q, global_only=True, limit=page_size, offset=page_offset)
+        total = count_assets(db, None, q, global_only=True)
     else:
-        rows = search_assets(db, project_id, q, global_only=False)
+        rows = search_assets(db, project_id, q, global_only=False, limit=page_size, offset=page_offset)
+        total = count_assets(db, project_id, q, global_only=False, project_only=(scope == "project"))
         if scope == "project":
             rows = [a for a in rows if a.project_id == project_id]
     items = [enrich_library_item(a) for a in rows]
-    return get_library_response(
+
+    if scope == "global" and not project:
+        # Cross-project browse without a host project: no project tree to attach.
+        return {
+            "items": items,
+            "tree": None,
+            "librarySchemaVersion": None,
+            "folderMap": {},
+            "totalMatches": total,
+            "limit": page_size,
+            "offset": page_offset,
+        }
+
+    response = get_library_response(
         db,
         project_id,
         items,
         folder_id=folder or None,
         system_key=system_key or None,
     )
+    # CDX-067: bounded pages with pagination metadata so any asset is reachable.
+    response["totalMatches"] = total
+    response["limit"] = page_size
+    response["offset"] = page_offset
+    return response
 
 
 @router.post("/projects/{project_id}/library/migrate")
@@ -1084,6 +1111,48 @@ def project_library_preflight(project_id: str, body: dict, db: Session = Depends
         entity_id=body.get("entityId") or body.get("entity_id") or None,
         filename_hint=body.get("filenameHint") or body.get("expectedName") or None,
     )
+
+
+@router.patch("/projects/{project_id}/library/entity-folder")
+def rename_library_entity_folder(project_id: str, body: dict, db: Session = Depends(get_db)):
+    """Rename an entity library folder in place - the folder follows the entity (CDX-066).
+
+    Entity folders are keyed by entityId (name is display-only), so renaming must
+    update the folder display name/paths rather than forking a new folder.
+    """
+    from ..project_library.service import rename_entity_folder
+
+    if not db.get(Project, project_id):
+        raise HTTPException(404, "Project not found")
+    entity_type = body.get("entityType") or body.get("entity_type")
+    entity_id = body.get("entityId") or body.get("entity_id")
+    entity_name = body.get("entityName") or body.get("entity_name")
+    if not entity_type or not entity_id or not entity_name:
+        raise HTTPException(400, "entityType, entityId and entityName are required")
+    try:
+        folder = rename_entity_folder(
+            db,
+            project_id,
+            entity_type=str(entity_type),
+            entity_id=str(entity_id),
+            new_name=str(entity_name),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if message == "PROJECT_NOT_FOUND":
+            raise HTTPException(404, "Project not found") from exc
+        if message == "ENTITY_FOLDER_NOT_FOUND":
+            raise HTTPException(404, "Entity folder not found") from exc
+        raise HTTPException(400, message) from exc
+    return {
+        "ok": True,
+        "folderId": folder.folder_id,
+        "displayName": folder.display_name,
+        "displayPath": folder.display_path,
+        "entityType": folder.entity_type,
+        "entityId": folder.entity_id,
+        "entityName": folder.entity_name,
+    }
 
 
 @router.patch("/assets/{asset_id}/library")
@@ -1289,11 +1358,17 @@ def promote_asset(project_id: str, body: dict, db: Session = Depends(get_db)):
         asset.tag = body["tag"]
         applied.append("tag")
     elif target == "profile":
+        profile_kind = body.get("profile_kind") or "character"
+        if profile_kind == "prop":
+            # CDX-011: ProfileItem(kind="prop") rows are ghosts - the prop
+            # system owns PropEntity via Prop Creator. ImageGenPanel no longer
+            # offers this promote; reject it honestly for any client.
+            raise HTTPException(400, "Use Prop Creator to save a project prop.")
         from ..profiles import ProfileItem
 
         row = ProfileItem(
             id=str(uuid.uuid4()),
-            kind=body.get("profile_kind") or "character",
+            kind=profile_kind,
             name=body.get("name") or asset.tag or asset.filename,
             tag=body.get("tag") or asset.tag or "",
             category=body.get("category") or "",

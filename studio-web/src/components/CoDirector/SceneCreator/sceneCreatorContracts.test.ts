@@ -79,7 +79,7 @@ describe("Scene Creator contracts", () => {
     expect(src).toContain("scene-creator-cd-caption");
     expect(src).toContain("Loading Co-Director production data");
     expect(src).toContain("Co-Director production data loaded");
-    expect(src).toContain("Reset Workspace");
+    expect(src).toContain("SceneCreatorExpressLauncher");
     expect(src).toContain("Final Quality Render");
     expect(src).not.toContain("function CameraBlock");
     expect(panel).toContain("SceneCreatorExpressLauncher");

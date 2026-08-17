@@ -58,6 +58,21 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _kv_flat(value: dict[str, Any]) -> str:
+    """Flatten a nested canon section into one readable 'key: value' string."""
+    parts: list[str] = []
+    for key, val in value.items():
+        if isinstance(val, dict):
+            inner = _kv_flat(val)
+            parts.append(f"{key}: {{{inner}}}" if inner else key)
+        elif isinstance(val, list):
+            text = "; ".join(str(x) for x in val if str(x).strip())
+            parts.append(f"{key}: {text}" if text else key)
+        elif val is not None and str(val).strip():
+            parts.append(f"{key}: {val}")
+    return "; ".join(parts)
+
+
 def _names(items: Any, *, limit: int = 6) -> list[str]:
     out: list[str] = []
     if not items:
@@ -109,7 +124,11 @@ def _spatial_facts(spatial_map: dict[str, Any] | None) -> list[str]:
 
 
 def _model_supports_layout_refs(body: dict[str, Any] | None) -> bool:
-    """GPT Image 2 (explicit) can consume layout exemplars. Qwen is T2I-only."""
+    """GPT Image 2 (explicit) can consume layout exemplars.
+
+    Qwen ERS uses qwen2512.ref for the source environment plate; layout
+    exemplars stay GPT-only so they are not mixed with the I2I source.
+    """
     src = _as_dict(body)
     blob = " ".join(
         _text(src.get(k))
@@ -130,7 +149,8 @@ def _model_supports_layout_refs(body: dict[str, Any] | None) -> bool:
 def should_attach_ers_exemplars(body: dict[str, Any] | None = None) -> bool:
     """Attach exemplar pixels only when the model path supports refs AND it is useful.
 
-    First implementation is one prompt + one image. Qwen (default) is T2I-only.
+    First implementation is one prompt + one image. Qwen ERS consumes the
+    source environment via image-to-image (qwen2512.ref), not layout exemplars.
     Explicit GPT Image 2 may attach exemplars as layout conditioning, never I2I
     source pixels, and never as content to copy.
     """
@@ -195,6 +215,9 @@ def compile_environment_reference_sheet_prompt(
     contextual_subjects: list[Any] | None = None,
     visual_style: str = "",
     atlas_note: str = "",
+    visual_canon: dict[str, Any] | None = None,
+    continuity_invariants: list[str] | None = None,
+    continuity_packet: Any | None = None,
     body: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compile one canonical ERS prompt. Never a character-sheet layout."""
@@ -224,9 +247,14 @@ def compile_environment_reference_sheet_prompt(
     camera_names = _names(cameras if cameras is not None else project.get("cameras") or spatial.get("cameras"))
     spatial_facts = _spatial_facts(spatial)
 
+    src_body = _as_dict(body)
+    has_source_pixels = bool(
+        str(src_body.get("sourceAssetId") or src_body.get("source_asset_id") or src_body.get("referenceImage") or "").strip()
+        or str(src_body.get("forceWorkflowKey") or "") == "qwen2512.ref"
+    )
     preamble = _source_grounding_preamble(
         scene,
-        has_source_image=bool(_model_supports_layout_refs(body)),
+        has_source_image=has_source_pixels,
     )
 
     lines = [
@@ -293,9 +321,57 @@ def compile_environment_reference_sheet_prompt(
         lines.append("Cameras (scale / blocking on the map only if listed): " + ", ".join(camera_names))
     if atlas:
         lines.append(
-            "Atlas / environment plate is architecture and identity conditioning only "
-            f"(ref {atlas}). Not a character reference. Not pixel image-to-image."
+            "The Atlas / source environment image is the pixel authority for this sheet "
+            f"(asset {atlas}). It is image-to-image conditioning: preserve its physical "
+            "environment exactly. Not a character reference."
         )
+    packet: dict[str, Any] = {}
+    if continuity_packet is not None:
+        dump = getattr(continuity_packet, "model_dump", None)
+        if callable(dump):
+            packet = dump()
+        else:
+            packet = _as_dict(continuity_packet)
+    if not packet and src_body:
+        packet = _as_dict((src_body.get("creativeContext") or {}).get("continuityPacket"))
+    if packet.get("providerPrompt") or packet.get("englishPrompt"):
+        lines.extend(["", "MULTIMODAL CONTINUITY PACKET:"])
+        provider_prompt = _text(packet.get("providerPrompt"))
+        if provider_prompt:
+            lines.append(provider_prompt)
+        else:
+            if packet.get("englishPrompt"):
+                lines.extend(["English:", _text(packet.get("englishPrompt"))])
+            if packet.get("chinesePrompt"):
+                lines.extend(["Chinese:", _text(packet.get("chinesePrompt"))])
+        hard = [_text(i) for i in (packet.get("hardInvariants") or []) if _text(i)]
+        if hard:
+            lines.extend(["", "LOCKED INVARIANTS (do not drop):"] + [f"- {i}" for i in hard])
+    elif visual_canon and _as_dict(visual_canon).get("availability") == "available":
+        canon = _as_dict(visual_canon)
+        lines.extend(["", "AUTHORITATIVE ENVIRONMENT (Co-Director Vision):"])
+        for label, key in (
+            ("Identity", "identity"),
+            ("Geometry", "geometry"),
+            ("Fixed architecture", "fixedArchitecture"),
+            ("Persistent furniture / dressing", "furniture"),
+        ):
+            section = _as_dict(canon.get(key))
+            if section:
+                lines.append(f"- {label}: " + _kv_flat(section))
+        rels = [_text(r) for r in canon.get("spatialRelationships") or []]
+        if rels:
+            lines.extend(["- Spatial relationships:"] + [f"  - {r}" for r in rels])
+        inv = [_text(i) for i in canon.get("hardInvariants") or []]
+        if inv:
+            lines.extend(["", "CONTINUITY INVARIANTS (do not violate):"] + [f"- {i}" for i in inv])
+        unc = [_text(u) for u in canon.get("uncertainty") or []]
+        if unc:
+            lines.extend(["", "VISION UNCERTAINTY (do not treat as fact):"] + [f"- {u}" for u in unc])
+    elif continuity_invariants:
+        inv = [_text(i) for i in continuity_invariants if _text(i)]
+        if inv:
+            lines.extend(["", "CONTINUITY INVARIANTS (do not violate):"] + [f"- {i}" for i in inv])
     lines.extend(
         [
             "",

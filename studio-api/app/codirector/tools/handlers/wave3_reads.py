@@ -313,23 +313,27 @@ async def script_get(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     script_id = str(args.get("scriptId") or "")
     # Prefer M4.7 ScriptDocument when id matches
     try:
+        from app.scriptwriter.service import canonical_elements
         from app.scriptwriter.store import load_document
 
         sw_doc = load_document(ctx.db, script_id)
         if sw_doc and sw_doc.projectId == ctx.project_id:
+            # CDX-051/052: typed HTML is the canonical content — never read
+            # the stale/default elements snapshot.
+            canon = canonical_elements(sw_doc)
             excerpts = [
                 {"index": e.order, "type": e.type, "text": (e.text or "")[:400]}
-                for e in sorted(sw_doc.elements, key=lambda x: x.order)[:40]
+                for e in sorted(canon, key=lambda x: x.order)[:40]
             ]
             return {
                 "scriptId": sw_doc.id,
                 "title": sw_doc.title,
-                "segmentCount": len(sw_doc.elements),
+                "segmentCount": len(canon),
                 "revision": sw_doc.revision,
                 "model": "scriptwriter",
                 "excerpts": excerpts,
-                "bodyTruncated": len(sw_doc.elements) > 40,
-                "_summary": f"Script '{sw_doc.title}' with {len(sw_doc.elements)} element(s).",
+                "bodyTruncated": len(canon) > 40,
+                "_summary": f"Script '{sw_doc.title}' with {len(canon)} element(s).",
                 "_evidence": [
                     {
                         "sourceType": "script",
@@ -377,36 +381,81 @@ async def script_search(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
     limit = clamp_limit(args.get("limit"), default=25)
     if not query:
         return {"matches": [], "searchMethod": "case-insensitive text search", "_summary": "Empty query."}
-    q = ctx.db.query(ScriptSegmentRow).filter(ScriptSegmentRow.project_id == ctx.project_id)
-    if args.get("scriptId"):
-        q = q.filter(ScriptSegmentRow.doc_id == str(args["scriptId"]))
-    rows = q.order_by(ScriptSegmentRow.index.asc()).limit(500).all()
     needle = query.lower()
     matches = []
-    for s in rows:
-        text = s.text or ""
-        if needle in text.lower():
-            idx = text.lower().index(needle)
-            start = max(0, idx - 40)
-            end = min(len(text), idx + len(query) + 40)
-            matches.append(
-                {
-                    "segmentId": s.id,
-                    "scriptId": s.doc_id,
-                    "matchType": "case-insensitive text search",
-                    "matchedField": "text",
-                    "excerpt": text[start:end],
-                    "sourceId": s.id,
-                }
-            )
-        if len(matches) >= limit:
-            break
+
+    # CDX-052: script_documents_v2 is the canonical Script Writer store. When
+    # a v2 document with content exists for the project, search its canonical
+    # projection (typed HTML when present); the legacy script_segments
+    # snapshot is searched only when no v2 content exists.
+    repo = "script_storyboard"
+    v2_docs: list[tuple[Any, list[dict[str, Any]]]] = []
+    try:
+        from app.scriptwriter.service import project_segments
+        from app.scriptwriter.store import list_documents
+
+        docs = list_documents(ctx.db, ctx.project_id) or []
+        if args.get("scriptId"):
+            docs = [d for d in docs if d.id == str(args["scriptId"])]
+        for d in docs:
+            segs = project_segments(d)
+            if segs:
+                v2_docs.append((d, segs))
+    except Exception:
+        v2_docs = []
+
+    if v2_docs:
+        repo = "scriptwriter"
+        for d, segs in v2_docs:
+            for s in segs:
+                text = s.get("text") or ""
+                if needle in text.lower():
+                    idx = text.lower().index(needle)
+                    start = max(0, idx - 40)
+                    end = min(len(text), idx + len(query) + 40)
+                    matches.append(
+                        {
+                            "segmentId": s.get("id"),
+                            "scriptId": d.id,
+                            "matchType": "case-insensitive text search",
+                            "matchedField": "text",
+                            "excerpt": text[start:end],
+                            "sourceId": s.get("id"),
+                        }
+                    )
+                if len(matches) >= limit:
+                    break
+            if len(matches) >= limit:
+                break
+    else:
+        q = ctx.db.query(ScriptSegmentRow).filter(ScriptSegmentRow.project_id == ctx.project_id)
+        if args.get("scriptId"):
+            q = q.filter(ScriptSegmentRow.doc_id == str(args["scriptId"]))
+        rows = q.order_by(ScriptSegmentRow.index.asc()).limit(500).all()
+        for s in rows:
+            text = s.text or ""
+            if needle in text.lower():
+                idx = text.lower().index(needle)
+                start = max(0, idx - 40)
+                end = min(len(text), idx + len(query) + 40)
+                matches.append(
+                    {
+                        "segmentId": s.id,
+                        "scriptId": s.doc_id,
+                        "matchType": "case-insensitive text search",
+                        "matchedField": "text",
+                        "excerpt": text[start:end],
+                        "sourceId": s.id,
+                    }
+                )
+            if len(matches) >= limit:
+                break
     return {
         "matches": matches,
         "searchMethod": "case-insensitive text search",
         "_summary": f"{len(matches)} script match(es) for '{query}'.",
         "_evidence": [
-            {"sourceType": "script", "sourceId": m["scriptId"], "repository": "script_storyboard"} for m in matches[:10]
+            {"sourceType": "script", "sourceId": m["scriptId"], "repository": repo} for m in matches[:10]
         ],
         "_pagination": {
             "limit": limit,

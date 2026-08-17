@@ -23,6 +23,23 @@ If 4 requests and ``output_count=8``, generate 4 (do NOT silently invent
 Law #18: scene shots go through the canonical image gen pipeline
 (``enqueue_imagegen_job``) — no silent provider/model substitution.
 Law #7: this handler submits REAL jobs (no mock completion).
+
+CDX-085 (Phase 7) — ENGINE OWNERSHIP (canonical decision, no merge):
+This handler is the SINGLE shared scene-generation engine for BOTH entry
+points: (1) the canonical Scene Creator shot flow
+(``POST /scene-creator/projects/{pid}/shots/{shot_id}/generate`` via
+scene_creator/service.py) and the Co-Director execution pack path
+(scene.generate capability -> codirector/execution/dispatcher.py
+``dispatch``/``approve_and_execute``), and (2) the retained-but-gated batch
+REST surface (``POST /scene-creator/projects/{pid}/batches``, which calls
+this same ``handle`` directly). Every shot compiles through
+``entity_resolver.compile_shot_prompt`` and submits one real imagegen job
+via ``enqueue_imagegen_job`` (purpose ``scene_shot`` / surface
+``scene_generation``). The provenance contract (purpose, surface_type,
+modelFamilyPreference, workflowKey) is therefore identical regardless of
+which surface initiated the run; parity is locked by
+tests/test_engine_ownership.py. NO MERGE of the two surfaces — that is
+architectural and out of scope.
 """
 
 from __future__ import annotations
@@ -33,6 +50,30 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_ers(db: Session, project_id: str, ers_package_id: str) -> Any:
+    """Resolve the ERS reference to a real package (CDX-034).
+
+    Accepts a persisted package UUID (existing callers) or the creator-facing
+    sheetId. When the id is not found as a package, falls back to
+    ``ers_resolver.resolve_ers_for_sheet``; fails loudly (raises
+    ``ErsResolveError``) when neither identity resolves — never silently
+    compile shots with zero ERS grounding.
+    """
+    from ....scene_creator.ers_resolver import ErsResolveError, resolve_ers_for_sheet
+    from ....spatial_map.ers_persistence import load_ers_package
+
+    ref = (ers_package_id or "").strip()
+    if not ref:
+        raise ErsResolveError("Select an Environment Reference Sheet first.")
+
+    package = load_ers_package(db, project_id, ref)
+    if package is not None:
+        return package
+
+    package, _runtime = resolve_ers_for_sheet(db, project_id, ref)
+    return package
 
 
 def handle(
@@ -59,7 +100,6 @@ def handle(
     from ....storyboard_jobs import enqueue_imagegen_job
     from ...entity_resolver import (
         compile_shot_prompt,
-        get_ers_package,
         parse_shot_requests,
         resolve_shot_request_entities,
     )
@@ -98,8 +138,9 @@ def handle(
     shots = parsed_shots[:effective_count]
 
     # 2. Resolve entity IDs per shot + compile the imagegen body.
-    ers_package = get_ers_package(db, project_id, ers_package_id) if ers_package_id else None
-
+    # CDX-034: resolve the ERS reference to a real package (package UUID or
+    # creator-facing sheetId); unresolvable references fail loudly.
+    ers_package = _resolve_ers(db, project_id, ers_package_id)
     child_jobs: list[dict[str, Any]] = []
     job_ids: list[str] = []
 
@@ -137,7 +178,7 @@ def handle(
                     pass
         body["tag"] = f"codirector_scene_{execution_id[:8]}_shot{resolved.index + 1}"
         body["creativeContext"]["executionId"] = execution_id
-        body["creativeContext"]["ersPackageId"] = ers_package_id or ""
+        body["creativeContext"]["ersPackageId"] = ers_package.id if ers_package else ""
 
         try:
             job = enqueue_imagegen_job(db, project_id, body)
@@ -170,7 +211,7 @@ def handle(
         "job_ids": job_ids,
         "child_jobs": child_jobs,
         "surface_type": "scene_generation",
-        "ers_package_id": ers_package_id or "",
+        "ers_package_id": ers_package.id if ers_package else (ers_package_id or ""),
         "shot_count": len(shots),
         "purpose": "scene_generation",
     }

@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Asset, Base, Project
-from app.director_timeline import DirectorTimeline, TimelineClip
+from app.director_timeline import DirectorTimeline, PromptSegment, TimelineClip, hydrate_prompt_refs, parse_director_timeline
 from app.director_timeline_w46.contracts import BatchBlock, DurationState
 from app.director_timeline_w46.generation.reference_compile import apply_compiled_references
 from app.director_timeline_w46.generation.request_builder import build_timeline_generation_request
@@ -194,6 +194,14 @@ def test_compile_uses_canonical_id_not_alias(db):
     service.update(db, "proj-ref", binding["id"], {"alias": "KorriDanceMotion"})
     timeline = DirectorTimeline(
         duration_sec=5,
+        prompt_segments=[
+            PromptSegment(
+                start=0,
+                length=5,
+                text="Korri follows the motion.",
+                reference_binding_ids=[binding["id"]],
+            )
+        ],
         video_reference_clips=[
             TimelineClip(
                 id="clip1",
@@ -244,6 +252,9 @@ def test_unsupported_video_ref_is_not_consumed(db):
     )
     timeline = DirectorTimeline(
         duration_sec=5,
+        prompt_segments=[
+            PromptSegment(start=0, length=5, text="", reference_binding_ids=[binding["id"]])
+        ],
         video_reference_clips=[
             TimelineClip(id="clip1", asset_id="vid-1", reference_binding_id=binding["id"], length=5)
         ],
@@ -282,6 +293,9 @@ def test_image_reference_compile_canonical_id(db):
     )
     timeline = DirectorTimeline(
         duration_sec=5,
+        prompt_segments=[
+            PromptSegment(start=0, length=5, text="", reference_binding_ids=[binding["id"]])
+        ],
         image_reference_clips=[
             TimelineClip(id="imgref", asset_id="img-1", reference_binding_id=binding["id"], length=5)
         ],

@@ -30,12 +30,14 @@ from .synthesis import SynthesisEngine
 
 try:
     from ..foundation.pipeline import (
+        FOUNDATION_PROGRESS_LABEL,
         merge_findings_for_synthesis,
         resolve_domain_profile_ids,
         run_foundation_creative_pass,
         should_run_foundation_creative,
     )
 except Exception:  # noqa: BLE001
+    FOUNDATION_PROGRESS_LABEL = "Heuristic creative review"  # CDX-090 fallback
     merge_findings_for_synthesis = None  # type: ignore[assignment]
     resolve_domain_profile_ids = None  # type: ignore[assignment]
     run_foundation_creative_pass = None  # type: ignore[assignment]
@@ -177,7 +179,7 @@ class IntelligenceService:
                 "type": "intelligence_progress",
                 "requestId": request_id,
                 "stage": "foundation_specialists",
-                "message": "Consulting creative foundation",
+                "message": FOUNDATION_PROGRESS_LABEL,  # CDX-090: heuristic, not LLM analysis
                 "intent": intent.model_dump(mode="json"),
             }
             domain_ids: list[str] = []

@@ -44,6 +44,31 @@ def _create_project(name: str = "Spatial Profile Test") -> str:
         db.close()
 
 
+def _seed_canonical(db, project_id: str) -> None:
+    """CDX-013/015: placements and handoff must reference canonical entities."""
+    from app.character_identity.models import CharacterProfileRow
+    from app.spatial_map.ers_contracts import PropEntity
+    from app.spatial_map.ers_persistence import save_prop_entity
+
+    existing = db.get(CharacterProfileRow, "korri-1")
+    if existing is not None:
+        db.delete(existing)
+        db.commit()
+    db.add(CharacterProfileRow(id="korri-1", project_id=project_id, name="Korri"))
+    db.commit()
+    save_prop_entity(
+        db,
+        project_id,
+        PropEntity(
+            id="prop-cup-1",
+            project_id=project_id,
+            tag="prop-cup-1",
+            display_label="Cup",
+            approved_asset_id="approved-cup-1",
+        ),
+    )
+
+
 def _save_sheet(project_id: str, *, scene_id: str | None = None, composite: str = "ers-lib-1"):
     sheet = orchestrator.create_sheet(
         project_id=project_id,
@@ -64,6 +89,7 @@ def test_production_handoff_is_pointer_only_and_idempotent() -> None:
         from app.scene_creator.service import ensure_scene_id
 
         scene = ensure_scene_id(db, project_id, "")
+        _seed_canonical(db, project_id)
         sheet = _save_sheet(project_id, scene_id=scene.id, composite="ers-asset-canonical")
         doc = create_document(db, project_id, SpatialMapCreateBody(title="Schnick Coffee", sceneId=scene.id))
         place_character(

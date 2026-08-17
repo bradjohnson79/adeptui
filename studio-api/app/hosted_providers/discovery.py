@@ -618,7 +618,16 @@ def _dock_api_models_all_keyed(modality: str) -> dict[str, Any]:
         models = _normalize_provider_models(
             pid, account_ok=True, probe=probe, discovered_at=stamp
         )
-        kept = [m for m in models if m.get("modality") == modality]
+        # Only executable rows are offered as selectable cloud generators.
+        # adapterAvailable=False / executable=False rows (e.g. flux-kontext-fal)
+        # must never appear as selectable api_models (CDX-080).
+        kept = [
+            m
+            for m in models
+            if m.get("modality") == modality
+            and m.get("adapterAvailable") is True
+            and m.get("executable") is True
+        ]
         rows.extend(kept)
         by_provider[pid] = len(kept)
 

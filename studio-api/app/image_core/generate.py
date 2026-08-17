@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .capability import ADD_INSERT_DOCK, ADD_INSERT_FAL_MODEL, is_add_insert_family
 from .errors import ImageCoreError, UNSUPPORTED_OPERATION, WORKFLOW_FAILED
-from .preflight import preflight
+from .preflight import REFERENCES_UNSUPPORTED_MESSAGE, preflight, request_has_identity_refs
 from .request import ImageCoreRequest, NormalizedEnqueue
 
 
@@ -30,6 +30,14 @@ def idempotency_key(request: ImageCoreRequest) -> str:
 
 
 def _to_body(request: ImageCoreRequest, decision) -> dict[str, Any]:
+    if request_has_identity_refs(request) and (decision.runtime_operation or "") in {
+        "image.generate",
+        "text_to_image",
+        "txt2img",
+    }:
+        # Preflight refuses this combination; honor the refusal so references are
+        # never silently dropped from the enqueue body (CDX-079).
+        raise ImageCoreError(UNSUPPORTED_OPERATION, REFERENCES_UNSUPPORTED_MESSAGE)
     body = dict(request.extra or {})
     body["purpose"] = request.purpose
     body["operation"] = decision.runtime_operation

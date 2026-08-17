@@ -9,13 +9,12 @@ from sqlalchemy.orm import Session
 
 from ..asset_graph import search_assets
 from ..db import Asset
-from .schema import LIBRARY_SCHEMA_VERSION, AssetLibraryMeta
+from .schema import LIBRARY_SCHEMA_VERSION
 from .service import (
     build_folder_map,
     ensure_entity_folder,
     enrich_library_item,
     get_tree,
-    read_asset_library_meta,
     resolve_path,
 )
 from .taxonomy import (
@@ -205,13 +204,37 @@ def search_library_assets(
     system_key: Optional[str] = None,
     limit: int = 12,
 ) -> dict[str, Any]:
-    """Indexed retrieval with version/approval metadata and ambiguity reporting."""
+    """Indexed retrieval with version/approval metadata and ambiguity reporting.
+
+    - Approval truth comes from Asset.production_approval (see enrich_library_item /
+      read_asset_library_meta) - approved assets rank first (CDX-064).
+    - Global-scope assets promoted via promote_asset_global are discoverable from
+      any project (CDX-065).
+    - Retrieval pages through search_assets so older assets stay reachable instead of
+      being cut off by the most-recent scan window (CDX-067).
+    """
     parsed_type, term = _parse_entity_query(query)
     entity_type = entity_type or parsed_type
     search_q = term or query
 
-    rows = search_assets(db, project_id, search_q, global_only=False)
-    items = [enrich_library_item(a) for a in rows if a.project_id == project_id]
+    rows: list[Asset] = []
+    page_size = 100
+    max_scanned = 2000  # bounded pages; anything beyond is reachable via the paged API
+    offset = 0
+    while offset < max_scanned:
+        page = search_assets(db, project_id, search_q, global_only=False, limit=page_size, offset=offset)
+        if not page:
+            break
+        rows.extend(page)
+        offset += page_size
+        if len(page) < page_size:
+            break
+
+    items = [
+        enrich_library_item(a)
+        for a in rows
+        if a.project_id == project_id or getattr(a, "scope", "project") == "global"
+    ]
 
     if folder_id:
         items = [i for i in items if i.get("canonicalFolderId") == folder_id]
@@ -221,15 +244,6 @@ def search_library_assets(
         field = {"character": "characterId", "prop": "propId", "scene": "sceneId"}.get(entity_type)
         if field:
             items = [i for i in items if i.get(field) or entity_type in str(i.get("libraryPath") or "").lower()]
-
-    asset_by_id = {a.id: a for a in rows}
-    for item in items:
-        asset = asset_by_id.get(item["id"])
-        meta = read_asset_library_meta(asset) if asset else AssetLibraryMeta()
-        item["approvalState"] = meta.approval_state
-        item["isCanonical"] = meta.is_canonical
-        item["version"] = meta.version
-        item["override"] = meta.override
 
     items.sort(key=_asset_sort_key)
     limited = items[: max(1, min(limit, 50))]

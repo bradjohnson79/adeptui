@@ -1098,6 +1098,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         multi_shot_tools.preview_send_to_timeline,
         multi_shot_tools.apply_send_to_timeline,
     ),
+    # CDX-033: legacy ers.* 4-direction chat mutation tools are INERT - they
+    # stay registered so definitions.py closure validation passes, but
+    # exposure.py never surfaces them to the model (chat 'generate the ERS'
+    # routes to the ers.generate capability).
     "ers.create_sheet": MutationHandler(
         environment_reference_sheet.preview_create_sheet,
         environment_reference_sheet.apply_create_sheet,

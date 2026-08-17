@@ -63,6 +63,37 @@ def ensure_scene_segment(
     return seg
 
 
+def _v2_scene_readout_for_panel(
+    db: Session, project_id: str, panel: StoryboardPanelRow
+) -> dict[str, Any] | None:
+    """CDX-052: canonical v2 readout for the Script Writer scene a panel links to.
+
+    Panels created from the Storyboard Studio carry the Script Writer scene
+    heading element id in meta.scriptwriterSceneId. When the project has a v2
+    document, the storyboard prompt must reflect the typed script content
+    (the projection), not the stale legacy script_segments snapshot. Returns
+    None when no v2 scene is linked so callers keep the legacy path.
+    """
+    try:
+        meta = json.loads(panel.meta_json or "{}")
+    except Exception:
+        meta = {}
+    sw_scene = meta.get("scriptwriterSceneId")
+    if not sw_scene:
+        return None
+    try:
+        from .scriptwriter.service import scene_segment_readout
+        from .scriptwriter.store import list_documents
+
+        for doc in list_documents(db, project_id) or []:
+            readout = scene_segment_readout(doc, str(sw_scene))
+            if readout:
+                return readout
+    except Exception:
+        return None
+    return None
+
+
 def prepare_storyboard_generate(
     db: Session,
     project_id: str,
@@ -116,15 +147,30 @@ def prepare_storyboard_generate(
     seg = db.get(ScriptSegmentRow, panel.segment_id)
     body_text = ""
     if seg:
-        body_text = " ".join(
-            x
-            for x in [
-                seg.action,
-                seg.dialogue or seg.text,
-                seg.speaker and f"Speaker: {seg.speaker}",
-            ]
-            if x
-        )
+        # CDX-052: prefer the canonical v2 script projection when this panel
+        # is linked to a Script Writer scene; legacy segment fields remain the
+        # fallback.
+        v2read = _v2_scene_readout_for_panel(db, project_id, panel)
+        if v2read:
+            body_text = " ".join(
+                x
+                for x in [
+                    v2read.get("action"),
+                    v2read.get("dialogue"),
+                    v2read.get("speaker") and f"Speaker: {v2read.get('speaker')}",
+                ]
+                if x
+            )
+        else:
+            body_text = " ".join(
+                x
+                for x in [
+                    seg.action,
+                    seg.dialogue or seg.text,
+                    seg.speaker and f"Speaker: {seg.speaker}",
+                ]
+                if x
+            )
     style = body.get("style") or panel.style or "Pencil storyboard"
     prompt = storyboard_style_prompt(style, body.get("prompt") or panel.prompt or body_text)
     panel.status = "generating"
@@ -198,10 +244,11 @@ def enqueue_imagegen_job(
         "modelFamilyPreference": body.get("modelFamilyPreference") or body.get("model") or "zimage",
     }
     if str(body.get("purpose") or "") == "environment_reference_sheet":
+        # ERS is image-to-image (binding law): the authoritative source
+        # environment image stays on the payload (sourceAssetId) so the ref
+        # workflow receives real pixels. Operation remains image.generate.
         payload["operation"] = "image.generate"
         payload.pop("edit", None)
-        payload.pop("source_asset_id", None)
-        payload.pop("sourceAssetId", None)
     elif body.get("edit") or body.get("source_asset_id"):
         current_op = str(body.get("operation") or payload.get("operation") or "").strip().lower()
         if current_op not in {"image.inpaint", "image.edit", "image.reference", "native_inpaint"}:

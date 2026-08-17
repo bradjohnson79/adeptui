@@ -97,6 +97,18 @@ def validate_against_capabilities(
         errors.append("Seed is not supported by this generator (refusing silent drop).")
 
     video_ref = (request.videoReferenceAssetId or "").strip()
+    stored_videos = []
+    extra = request.providerOptions or {}
+    for item in extra.get("videoReferenceAssetIds") or []:
+        token = str(item or "").strip()
+        if token and token not in stored_videos:
+            stored_videos.append(token)
+    if video_ref and video_ref not in stored_videos:
+        stored_videos.insert(0, video_ref)
+    if caps.maximumReferenceVideos > 0 and len(stored_videos) > caps.maximumReferenceVideos:
+        errors.append(
+            f"Too many video references ({len(stored_videos)}); max is {caps.maximumReferenceVideos}."
+        )
     if video_ref:
         if not caps.supportsVideoReferences or caps.maximumReferenceVideos <= 0:
             errors.append(

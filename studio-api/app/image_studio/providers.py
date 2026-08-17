@@ -148,6 +148,13 @@ def _family_for(model_id: str) -> str:
 
 
 def _map_local_readiness(model: Any) -> ProviderReadiness:
+    """Map a local dock model's fields to readiness.
+
+    "ready" is asserted only when the model's Setup/Source Manager component
+    verifies on disk — callers must pass a disk-verified model (see
+    _local_readiness, which consults _COMPONENT_GATE_BY_MODEL). Certified
+    registry status alone never implies installed/executable (CDX-075).
+    """
     cap = str(getattr(model, "capabilityLabel", "") or "")
     lifecycle = str(getattr(model, "lifecycle", "") or "").lower()
     executable = bool(getattr(model, "executable", False))
@@ -163,10 +170,29 @@ def _map_local_readiness(model: Any) -> ProviderReadiness:
 
 
 #: Local image models whose advertised readiness is gated on a Setup component
-#: verification, so weights that are not on disk never present as ready.
+#: verification, so weights that are not on disk never present as ready
+#: (CDX-075). Mirrors production_control.model_registry._SETUP_COMPONENT_BY_MODEL_ID.
+#: A model is "ready" only when its weights verify on disk; Certified metadata
+#: alone is never install truth.
 _COMPONENT_GATE_BY_MODEL: dict[str, str] = {
+    "qwen-image-2512-local": "qwen_image_2512_models",
+    "zimage-local": "zimage_models",
+    "flux-local": "flux1_dev_local",
+    "flux-schnell-local": "flux1_schnell_local",
+    "flux-kontext-dev-local": "flux1_kontext_dev_local",
     "krea2-turbo-local": "krea2_models",
     "krea2-raw-local": "krea2_models",
+    "sana-15-local": "sana_15_local",
+    "sdxl-local": "sdxl_local",
+    "sd35-large-local": "sd35_large_local",
+    "cogview-4-local": "cogview4_local",
+    "hidream-local": "hidream_local",
+    "lumina-image-2-local": "lumina_image_2_local",
+    "pixart-sigma-local": "pixart_sigma_local",
+    "kolors-local": "kolors_local",
+    "omnigen-local": "omnigen_local",
+    "janus-pro-local": "janus_pro_local",
+    "hunyuan-image-local": "hunyuan_image_local",
 }
 
 #: Dock model → certified-registry workflow whose capability flags the

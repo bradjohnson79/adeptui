@@ -588,7 +588,13 @@ export function ImageGenPanel({
             <button type="button" onClick={() => promote("profile", { profile_kind: "character" })}>
               Character Profile
             </button>
-            <button type="button" onClick={() => promote("profile", { profile_kind: "prop" })}>
+            <button
+              type="button"
+              disabled
+              title="Use Prop Creator to save a project prop"
+              aria-disabled="true"
+              data-testid="promote-prop-disabled"
+            >
               Prop
             </button>
             <button type="button" onClick={() => promote("profile", { profile_kind: "scene" })}>

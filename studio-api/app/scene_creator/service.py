@@ -268,14 +268,9 @@ def hydrate_workspace(
     selected_profile = load_profile(db, project_id, wanted_profile) if wanted_profile else None
     if selected_profile and selected_profile.projectId != project_id:
         selected_profile = None
-    if (spatial_profile_id or "").strip() and selected_profile is not None:
-        from .production_handoff import select_profile as persist_spatial_profile
-
-        try:
-            persist_spatial_profile(db, project_id, selected_profile.handoffId)
-            selection = load_selection(db, project_id)
-        except Exception:
-            logger.exception("Scene Creator hydrate could not persist Spatial Profile selection")
+    # CDX-049: GET /workspace hydrates read-only. Selection persistence belongs
+    # to the explicit select route (POST .../spatial-profiles/{handoff_id}/select);
+    # a GET must not mutate creator state.
 
     selected_sheet_id = (sheet_id or "").strip() or (selected_profile.sheetId if selected_profile else "")
     if not selected_sheet_id and sheets and not selection.workspaceReset:
@@ -294,7 +289,8 @@ def hydrate_workspace(
     props: list[dict[str, Any]] = []
     if selected_sheet_id:
         try:
-            package, runtime = resolve_ers_for_sheet(db, project_id, selected_sheet_id)
+            # CDX-049: read-only hydration - never persist runtime packages on GET.
+            package, runtime = resolve_ers_for_sheet(db, project_id, selected_sheet_id, persist_runtime=False)
             cameras = list((package.metadata or {}).get("cameras") or [])
             # Scene Intent handoff: the sheet provenance carries the snapshot
             # (W3 stamps it at generation; W6 backfilled legacy sheets).
@@ -429,13 +425,28 @@ def hydrate_workspace(
         from ..hosted_providers.discovery import dock_api_models
 
         payload = dock_api_models("image")
-        api_models = [m for m in (payload.get("models") or []) if isinstance(m, dict)]
+        # Only selectable/executable rows may be offered as cloud generators.
+        # adapterAvailable=False / executable=False rows must not be rendered as
+        # selectable api_models (CDX-080).
+        api_models = [
+            m
+            for m in (payload.get("models") or [])
+            if isinstance(m, dict)
+            and m.get("adapterAvailable") is not False
+            and m.get("executable") is not False
+            and m.get("selectable") is not False
+        ]
     except Exception:
         api_models = []
     try:
         from .cinematographer_service import hydrate_cinematographer, sync_final_assets_from_shots
 
         pack = hydrate_cinematographer(db, project_id, scene_id=scene.id)
+        # CDX-049: read path persists ONLY a derived-state reconciliation (final
+        # assets copied from shots into the cinematographer pack when they drift).
+        # Creator-stated selection is never written here (persisted via the
+        # explicit select route); runtime ERS packages are non-persisted. This
+        # sync is intentional derived-state refresh, not a creator-truth mutation.
         if sync_final_assets_from_shots(pack, shots):
             from .cinematographer import save_pack
 
@@ -1073,6 +1084,7 @@ def approve_candidate(
     )
     shot.take_memory.takeState = _take_state
     _set_asset_approval(db, project_id, candidate.asset_id, approved=True)
+    _sync_scene_shots_collection(db, project_id, shot, candidate)
     save_scene_shot(db, project_id, shot)
     return shot
 
@@ -1244,12 +1256,24 @@ def _sync_candidate_jobs(db: Session, project_id: str, shot: SceneShot) -> None:
             continue
         job = db.get(Job, job_id)
         if job is None or job.project_id != project_id:
+            # CDX-048: the job is missing (deleted/GC'd) or belongs to another
+            # project - never leave the candidate stuck in 'generating' forever.
+            candidate.status = "failed"
+            if not candidate.error:
+                candidate.error = "The generation job is no longer available."
             continue
         status = (job.status or "").lower()
         if status in {"done", "completed", "complete", "success"}:
             asset_id = _job_asset_id(job)
             candidate.asset_id = asset_id or candidate.asset_id
-            candidate.status = "complete" if candidate.asset_id else "generating"
+            if candidate.asset_id:
+                candidate.status = "complete"
+            else:
+                # CDX-048: job finished but the output asset is unparseable/
+                # missing - fall back to failed instead of 'generating' forever.
+                candidate.status = "failed"
+                if not candidate.error:
+                    candidate.error = "Generation finished without a usable image."
         elif status in {"failed", "error", "cancelled"}:
             candidate.status = "failed"
             creator, detail = creator_facing_job_error(job.message or candidate.error or "")
@@ -1301,6 +1325,67 @@ def _set_asset_approval(db: Session, project_id: str, asset_id: str, *, approved
         labels = [x for x in labels if x != "approved_take"]
     asset.labels_json = json.dumps(labels)
     db.commit()
+
+
+def _sync_scene_shots_collection(
+    db: Session,
+    project_id: str,
+    shot: SceneShot,
+    candidate: SceneShotCandidate,
+) -> str:
+    """CDX-045: group approved scene-shot takes into a scene_shots Library collection.
+
+    Creates the collection on the first approved take and appends thereafter;
+    the collectionId is persisted on the shot's takeState so later approvals of
+    the same shot reuse the same collection. Only the approved, completed take
+    with a real asset may enter the collection - unapproved takes are never
+    grouped (approval gate). Returns the collectionId (or "" when no-op).
+    """
+    if shot.approved_candidate_id != candidate.id:
+        return ""
+    if str(getattr(candidate, "status", "") or "") != "complete":
+        return ""
+    asset_id = str(getattr(candidate, "asset_id", "") or "").strip()
+    if not asset_id:
+        return ""
+
+    from ..codirector.execution.scene_shot_collection_builder import (
+        add_scene_shots_to_collection,
+        create_scene_shots_collection,
+    )
+
+    memory = shot.take_memory or SceneShotTakeMemory()
+    take_state = dict(memory.takeState or {})
+    collection_id = str(take_state.get("collection_id") or "").strip()
+    # The per-shot flow has no SceneGenerationBatch row; the shot itself is the
+    # originating unit recorded as collection provenance (batch_id metadata).
+    batch_id = str(getattr(shot, "generation_batch_id", "") or shot.id or "")
+    if collection_id:
+        add_scene_shots_to_collection(
+            project_id, collection_id, [asset_id], batch_id=batch_id
+        )
+    else:
+        try:
+            shot_requests = [_shot_request_from_scene_shot(shot)]
+        except Exception:
+            shot_requests = []
+        collection_id = create_scene_shots_collection(
+            project_id,
+            asset_ids=[asset_id],
+            batch_id=batch_id,
+            ers_package_id=getattr(shot, "ers_package_id", "") or "",
+            shot_requests=shot_requests,
+            name="Scene Shots",
+            metadata={
+                "scene_id": shot.scene_id,
+                "sheet_id": shot.sheet_id,
+                "shot_id": shot.id,
+            },
+        )
+        take_state["collection_id"] = collection_id
+        memory.takeState = take_state
+        shot.take_memory = memory
+    return collection_id
 
 
 def _shot_request_from_scene_shot(shot: SceneShot) -> ShotRequest:
@@ -1463,6 +1548,15 @@ def _ensure_placed_project_props(db: Session, project_id: str, shot: SceneShot) 
 
 
 def _placed_project_prop_ids(db: Session, project_id: str, sheet_id: str = "") -> list[str]:
+    """Union approved PropEntity ids from the ERS package snapshot AND the live map.
+
+    CDX-014: the ERS package placement snapshot is authoritative at generation
+    time but goes stale once the creator places more approved props on the map.
+    The live Spatial Map placements are consulted in addition to the snapshot
+    (never instead of it) so approved props placed after ERS generation are
+    auto-unioned onto shots without forcing an ERS regeneration. The approved
+    (approved_asset_id) filter is kept; drafts/deleted entities are excluded.
+    """
     ids: list[str] = []
     placements: list[dict[str, Any]] = []
     if (sheet_id or "").strip():
@@ -1470,16 +1564,16 @@ def _placed_project_prop_ids(db: Session, project_id: str, sheet_id: str = "") -
             package, _runtime = resolve_ers_for_sheet(db, project_id, sheet_id)
             placements.extend([p for p in (package.placements or []) if isinstance(p, dict)])
         except Exception:
-            placements = []
-    if not placements:
-        try:
-            from ..spatial_map.service import list_documents
+            pass  # package snapshot is best-effort; the live map is still consulted below
+    try:
+        from ..spatial_map.service import list_documents
 
-            maps = list_documents(db, project_id)
-        except Exception:
-            maps = []
-        if maps:
-            placements.extend(p.model_dump() for p in (maps[0].props or []))
+        maps = list_documents(db, project_id)
+    except Exception:
+        maps = []
+    if maps:
+        # Live map is authoritative for current placements; union, dedupe below.
+        placements.extend(p.model_dump() for p in (maps[0].props or []))
     for placement in placements:
         prop_id = str(placement.get("propId") or placement.get("prop_id") or "").strip()
         if not prop_id or prop_id in ids:

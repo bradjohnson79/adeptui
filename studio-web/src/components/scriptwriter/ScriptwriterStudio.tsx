@@ -10,6 +10,14 @@ import type { EditorTab } from "../../workspacePrefs";
 import { IndentKeys, IndentParagraph } from "./richTextExtensions";
 import { elementsToHtml, isBlankHtml } from "./legacyHtml";
 import { sanitizeHtml } from "./sanitizeHtml";
+import {
+  conflictReloadState,
+  RECOVERY_RESTORED_MESSAGE,
+  RECOVERY_RESTORE_FAILED_MESSAGE,
+  shouldOfferRecovery,
+  type ScriptwriterBundle,
+} from "./recovery";
+import { resolveLinkSceneId } from "./sceneLink";
 import type { SaveState, ScriptDocument, StudioView, WritingMode } from "./types";
 import "./scriptwriter.css";
 
@@ -54,6 +62,8 @@ export function ScriptwriterStudio({
   const [proposal, setProposal] = useState<Record<string, unknown> | null>(null);
   const [timelinePrep, setTimelinePrep] = useState<Record<string, unknown> | null>(null);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  // CDX-058: explicit project-scene selection for Link to Scene (no scenes[0]).
+  const [linkSceneId, setLinkSceneId] = useState<string | null>(null);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [importText, setImportText] = useState("");
@@ -137,8 +147,12 @@ export function ScriptwriterStudio({
                   editor.commands.setContent(resolveInitialHtml(d));
                   hydrating.current = false;
                 }
-                setSaveState("save_failed");
-                setMessage("Document was updated elsewhere. Reloaded latest version — your recent edit was not saved. Please reapply.");
+                // CDX-055: the backend keeps the client's unsaved edit in the
+                // recovery payload — surface the restore affordance instead of
+                // silently dropping the in-progress edit.
+                const reload = conflictReloadState(fresh as unknown as ScriptwriterBundle);
+                setSaveState(reload.saveState);
+                setMessage(reload.message);
               } catch {
                 setSaveState("save_failed");
                 setMessage("Save failed: document was updated elsewhere and reload also failed. Please refresh the page.");
@@ -185,6 +199,24 @@ export function ScriptwriterStudio({
     hydrating.current = true;
     editor.commands.setContent(resolveInitialHtml(d));
     hydrating.current = false;
+  };
+
+  // CDX-055: reapply the server-kept unsaved edit from the recovery payload.
+  const restoreRecovery = async () => {
+    const docId = latestDocIdRef.current;
+    if (!docId) return;
+    try {
+      const res = await api.scriptwriter.restoreRecovery(project.id, docId);
+      const d = res.document as unknown as ScriptDocument;
+      setDocTracked(d);
+      syncEditorFromDoc(d);
+      setSaveState("saved");
+      setMessage(RECOVERY_RESTORED_MESSAGE);
+      await refreshNav();
+    } catch {
+      setSaveState("save_failed");
+      setMessage(RECOVERY_RESTORE_FAILED_MESSAGE);
+    }
   };
 
   const insertScene = async () => {
@@ -339,7 +371,8 @@ export function ScriptwriterStudio({
 
   const linkScene = async () => {
     if (!doc || !activeSceneId) return;
-    const sceneId = project.scenes[0]?.id;
+    // CDX-058: bind the SELECTED project scene, never project.scenes[0].
+    const sceneId = resolveLinkSceneId(project.scenes, linkSceneId);
     if (!sceneId) {
       setMessage("No project scene available to link.");
       return;
@@ -434,6 +467,16 @@ export function ScriptwriterStudio({
           {saveState.replace("_", " ")}
           {stats.pagesEstimated != null ? ` · ~${String(stats.pagesEstimated)} est. pages` : ""}
         </span>
+        {shouldOfferRecovery(saveState) ? (
+          <button
+            type="button"
+            className="ghost sw-toolbar__restore"
+            data-testid="scriptwriter-restore-recovery"
+            onClick={() => void restoreRecovery()}
+          >
+            Restore my unsaved changes
+          </button>
+        ) : null}
       </div>
 
       <div className="sw-body">
@@ -553,6 +596,21 @@ export function ScriptwriterStudio({
         <aside className="sw-inspector" data-testid="scriptwriter-inspector" aria-label="Script inspector">
           <p className="eyebrow">Inspector</p>
           <div className="row-actions">
+            <label className="sw-link-scene-picker" data-testid="scriptwriter-link-scene-picker">
+              <span>Link to project scene</span>
+              <select
+                value={linkSceneId || ""}
+                onChange={(e) => setLinkSceneId(e.target.value || null)}
+                data-testid="scriptwriter-link-scene-select"
+              >
+                <option value="">{project.scenes.length ? "First scene (default)" : "No project scenes"}</option>
+                {project.scenes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || s.id}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" data-testid="scriptwriter-analyze" onClick={() => void analyze()}>
               Analyze scene
             </button>

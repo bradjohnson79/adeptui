@@ -243,6 +243,22 @@ def apply_reference_packet(
                 )
                 blocking = True
 
+    # CDX-040: disclose pixel-slot limits even when the shot is not
+    # profile-grounded, so a qwen2512 scene shot never silently drops the ERS
+    # composite environment picture (or character/prop pictures) with no signal.
+    if not any(i.get("type") == "blocking" for i in issues):
+        for row in roles:
+            if row.get("consumption") == "unsupported" and _aid(row.get("assetId")):
+                role_name = str(row.get("name") or row.get("role") or "reference")
+                issues.append(
+                    {
+                        "type": "advisory",
+                        "code": "provider_slot",
+                        "message": f"{role_name} picture will not be loaded by this generator.",
+                    }
+                )
+                break
+
     packet["issues"] = issues
     packet["blocking"] = blocking
     ctx["referencePacket"] = packet

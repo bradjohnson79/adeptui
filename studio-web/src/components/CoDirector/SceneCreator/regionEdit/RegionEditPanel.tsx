@@ -111,7 +111,14 @@ export function RegionEditPanel({
   const fallbackRec = recommendOperationFamily(session.operation);
   const recommendCopy = coreRecommend?.message || operationRecommendCopy(session.operation, localFamily);
   const recFamily = coreRecommend?.recommendedFamily || fallbackRec.family;
-  const recLabel = recFamily === "flux" ? "FLUX" : recFamily === "zimage" ? "Z-Image" : fallbackRec.label;
+  const recLabel =
+    recFamily === "flux"
+      ? "FLUX"
+      : recFamily === "zimage"
+        ? "Z-Image"
+        : recFamily === "nano-banana-fal"
+          ? "Nano Banana 2"
+          : fallbackRec.label;
 
   const generate = async () => {
     if (!source?.assetId || unsupported || !session.hasMask) return;

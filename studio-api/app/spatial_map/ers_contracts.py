@@ -94,6 +94,10 @@ class SceneGenerationBatch(BaseModel):
     shot_requests: list[ShotRequest] = Field(default_factory=list)
     output_count: int = 4
     result_asset_ids: list[str] = Field(default_factory=list)
+    # CDX-043 approval gate: creator-approved result asset ids. Generated !=
+    # approved — send-to-timeline only places approved takes. Additive field
+    # (default empty list); older persisted batches validate unchanged.
+    approved_asset_ids: list[str] = Field(default_factory=list)
     collection_id: Optional[str] = None
     created_at: str = ""
     updated_at: str = ""

@@ -1711,7 +1711,62 @@ async def _handle_pending_execution_confirmation(
         return (False, events)
 
     if is_execution_confirmation(user_text):
-        # Dispatch the pending execution directly (spec §4, §5).
+        # CDX-084: a pending TOOL-kind execution carries a Proposal created at
+        # dispatch time. Approve that proposal (the durable approval artifact)
+        # instead of re-dispatching — re-dispatch with pre_approved=True would
+        # hard-error on approval-gated tools ("requires an approved proposal").
+        from .execution.pack_store import load_pack as load_execution_pack
+
+        pending_plan = (
+            load_execution_pack(db, project_id, pending.execution_id)
+            if pending.execution_id
+            else None
+        )
+        proposal_id = (
+            (getattr(pending_plan, "proposal_id", None) or ((pending_plan.plan_data or {}).get("proposal_id")))
+            if pending_plan is not None
+            else None
+        )
+        if proposal_id:
+            # Approve through the dispatcher bridge so the execution pack is
+            # advanced to its real terminal state (not left in PREVIEW) and the
+            # approval is recorded in the audit ledger. ProposalService.approve
+            # is idempotent, so re-approval returns the same receipt.
+            from .capabilities.registry import get_capability as _get_capability
+            from .execution.dispatcher import _approve_tool_execution as _approve_tool_pack
+
+            cap = _get_capability(pending_plan.capability)
+            if cap is None:
+                logger.warning("Cannot confirm tool execution %s: unknown capability", pending_plan.capability)
+                clear_pending(db, project_id)
+                events.append({
+                    "type": "assistant",
+                    "requestId": request_id,
+                    "content": "I couldn't proceed — that action is no longer recognized. Try asking again.",
+                })
+                return (True, events)
+            plan = await _approve_tool_pack(db, project_id, pending_plan, cap)
+            clear_pending(db, project_id)
+            events.append(_emit_execution_status_event(plan, request_id))
+            # Emit honest completion status from the pack store.
+            try:
+                from .execution.status_messenger import emit_execution_status_events
+
+                for _ev in list(
+                    emit_execution_status_events(
+                        db,
+                        project_id=project_id,
+                        request_id=request_id,
+                        execution_id=plan.execution_id,
+                    )
+                ):
+                    events.append(_ev)
+            except Exception:
+                logger.warning("status_messenger emit failed for confirmed tool approval", exc_info=True)
+            return (True, events)
+
+        # CAPABILITY_HANDLER pending execution: dispatch the pending execution
+        # directly (spec §4, §5) with the already-prepared plan_data.
         from .execution.dispatcher import dispatch as dispatch_execution
         from .routing.unified_intent import DispatchStrategy, UnifiedIntent, UnifiedIntentKind
 
@@ -1725,7 +1780,7 @@ async def _handle_pending_execution_confirmation(
             classifier_source=ui_snap.get("classifier_source", "deterministic"),
         )
 
-        plan = dispatch_execution(
+        plan = await dispatch_execution(
             db,
             project_id,
             unified_intent,
@@ -2561,7 +2616,7 @@ async def _stream_for_project_inner(
             ctx_dict = _build_execution_context(user_text, unified_intent, messages)
             ctx_dict = _enrich_execution_context(db, project_id, ctx_dict, unified_intent, messages)
 
-            plan = dispatch_execution(
+            plan = await dispatch_execution(
                 db,
                 project_id,
                 unified_intent,

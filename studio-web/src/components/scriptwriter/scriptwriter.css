@@ -151,6 +151,24 @@
   font-size: 0.75rem;
 }
 
+.sw-link-scene {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  margin-top: 0.35rem;
+}
+
+.sw-link-scene select {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 6px;
+  border: 1px solid rgba(122, 153, 182, 0.35);
+  background: #16202c;
+  color: #e8eef5;
+  max-width: 100%;
+}
+
 .sw-nav__item {
   display: block;
   width: 100%;

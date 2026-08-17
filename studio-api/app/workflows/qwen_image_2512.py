@@ -208,6 +208,131 @@ def build_qwen_2512_txt2img_workflow(
     )
 
 
+def build_qwen_2512_ref_workflow(
+    *,
+    unet_name: str,
+    clip_name: str,
+    vae_name: str,
+    positive: str,
+    negative: str = QWEN_2512_STANDARD_NEGATIVE,
+    image_name: str,
+    width: int = QWEN_2512_DEFAULT_SIZE,
+    height: int = QWEN_2512_DEFAULT_SIZE,
+    seed: int = 42,
+    steps: int = QWEN_2512_DEFAULT_STEPS,
+    cfg: float = QWEN_2512_DEFAULT_CFG,
+    sampler_name: str = QWEN_2512_DEFAULT_SAMPLER,
+    scheduler: str = QWEN_2512_DEFAULT_SCHEDULER,
+    model_shift: float = QWEN_2512_DEFAULT_SHIFT,
+    filename_prefix: str = "studio/qwen2512_ref",
+) -> dict[str, Any]:
+    """Image-conditioned Qwen-Image-2512 graph (ERS image-to-image contract).
+
+    The source environment image is genuinely consumed twice:
+    1. LoadImage -> TextEncodeQwenImageEdit tokenizes the prompt WITH the
+       image (Qwen3-VL image tokens) and VAE-encodes it into
+       reference_latents attached to the conditioning; and
+    2. comfy.model_base converts reference_latents to ref_latents, which
+       QwenImageTransformer2DModel.forward concatenates into the latent
+       sequence (index/h-offset/w-offset positioning).
+
+    This is real pixel grounding, not metadata-as-conditioning.
+    """
+    return {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {
+                "unet_name": unet_name,
+                "weight_dtype": "fp8_e4m3fn",
+            },
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {
+                "clip_name": clip_name,
+                "type": "qwen_image",
+            },
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {
+                "vae_name": vae_name,
+            },
+        },
+        "4": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {
+                "model": ["1", 0],
+                "shift": float(model_shift),
+            },
+        },
+        "5": {
+            "class_type": "LoadImage",
+            "inputs": {
+                "image": image_name,
+            },
+        },
+        "6": {
+            "class_type": "TextEncodeQwenImageEdit",
+            "inputs": {
+                "clip": ["2", 0],
+                "prompt": positive,
+                "vae": ["3", 0],
+                "image": ["5", 0],
+            },
+        },
+        "7": {
+            "class_type": "TextEncodeQwenImageEdit",
+            "inputs": {
+                "clip": ["2", 0],
+                # Empty/mild negative: do not attach a "text/logo" ban while the
+                # source café is in reference_latents (that pairing destroyed
+                # Schnick 588fc5ac into a dark field). Keep the image wired so
+                # pos/neg conditioning stay the same Qwen-Edit type.
+                "prompt": negative or "blurry, low quality, deformed architecture, extra rooms",
+                "vae": ["3", 0],
+                "image": ["5", 0],
+            },
+        },
+        "8": {
+            "class_type": "EmptyLatentImage",
+            "inputs": {
+                "width": _normalize_dimension(width, fallback=QWEN_2512_DEFAULT_SIZE),
+                "height": _normalize_dimension(height, fallback=QWEN_2512_DEFAULT_SIZE),
+                "batch_size": 1,
+            },
+        },
+        "9": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["4", 0],
+                "seed": _normalize_seed(seed),
+                "steps": max(4, int(steps)),
+                "cfg": float(cfg),
+                "sampler_name": sampler_name or QWEN_2512_DEFAULT_SAMPLER,
+                "scheduler": scheduler or QWEN_2512_DEFAULT_SCHEDULER,
+                "positive": ["6", 0],
+                "negative": ["7", 0],
+                "latent_image": ["8", 0],
+                "denoise": 1.0,
+            },
+        },
+        "10": {
+            "class_type": "VAEDecode",
+            "inputs": {
+                "samples": ["9", 0],
+                "vae": ["3", 0],
+            },
+        },
+        "11": {
+            "class_type": "SaveImage",
+            "inputs": {
+                "images": ["10", 0],
+                "filename_prefix": filename_prefix,
+            },
+        },
+    }
+
 def build_qwen_2512_character_concept_workflow(
     *,
     unet_name: str,

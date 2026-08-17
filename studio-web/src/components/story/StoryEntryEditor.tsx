@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import {
+  loadPublishedSnapshots,
+  persistPublishedSnapshots,
+  type PublishedStorySnapshot,
+} from "./storyPublishMarker";
 import "./story-editor.css";
 
 interface StoryEntry {
@@ -30,7 +35,12 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
   // keyed by entry id. Used to detect unpublished changes (dirty state).
   // Wiki Story only updates on explicit publish — Story autosave does NOT
   // trigger a Wiki compile.
-  const [lastPublished, setLastPublished] = useState<Record<string, { title: string; logline: string; shortSummary: string; longSummary: string }>>({});
+  // CDX-059: the marker is persisted locally (per project + entry id) so a
+  // reload/remount restores the correct dirty state instead of flipping a
+  // published story back to "unpublished changes".
+  const [lastPublished, setLastPublished] = useState<Record<string, PublishedStorySnapshot>>(
+    () => loadPublishedSnapshots(projectId),
+  );
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
 
@@ -43,6 +53,19 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
         if (!cancelled) {
           setEntries(list);
           if (list.length > 0) setSelectedId(list[0].id);
+          // CDX-059: prune persisted markers for entries that no longer exist
+          // (e.g. deleted in another browser), keeping the marker map bounded
+          // to live entries.
+          setLastPublished(prev => {
+            const ids = new Set(list.map(e => e.id));
+            const next = Object.fromEntries(
+              Object.entries(prev).filter(([id]) => ids.has(id)),
+            );
+            if (Object.keys(next).length !== Object.keys(prev).length) {
+              persistPublishedSnapshots(projectId, next);
+            }
+            return next;
+          });
           loadedRef.current = true;
         }
       } catch {
@@ -90,6 +113,15 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
         if (selectedId === entryId) setSelectedId(next[0]?.id || null);
         return next;
       });
+      // CDX-059: drop the deleted entry's published marker so it cannot
+      // resurface as "clean" if a new entry reuses the id.
+      setLastPublished(prev => {
+        if (!(entryId in prev)) return prev;
+        const next = { ...prev };
+        delete next[entryId];
+        persistPublishedSnapshots(projectId, next);
+        return next;
+      });
     } catch { /* ignore */ }
   };
 
@@ -121,15 +153,20 @@ export function StoryEntryEditor({ projectId, embedded = false }: StoryEntryEdit
     try {
       await api.compileCoDirectorWiki(projectId, { preserveStoryWording: true });
       // Snapshot the published values so we can detect unpublished changes.
-      setLastPublished(prev => ({
-        ...prev,
-        [selected.id]: {
-          title: selected.title,
-          logline: selected.logline,
-          shortSummary: selected.shortSummary,
-          longSummary: selected.longSummary,
-        },
-      }));
+      // CDX-059: persist the marker so a reload doesn't flip the dirty state.
+      setLastPublished(prev => {
+        const next: Record<string, PublishedStorySnapshot> = {
+          ...prev,
+          [selected.id]: {
+            title: selected.title,
+            logline: selected.logline,
+            shortSummary: selected.shortSummary,
+            longSummary: selected.longSummary,
+          },
+        };
+        persistPublishedSnapshots(projectId, next);
+        return next;
+      });
       setPublishMsg("Story saved to Wiki.");
       setTimeout(() => setPublishMsg(""), 3000);
     } catch {

@@ -26,8 +26,12 @@ import {
   conditioningModeLabel,
   identityDisabledReason,
   isIdentityEligible,
+  toApiGeneratorOption,
+  toLocalGeneratorOption,
+  type ApiGeneratorRow,
   type GeneratorOption,
   type GeneratorSourceState,
+  type LocalGeneratorRow,
 } from "./types";
 import "./generatorSource.css";
 
@@ -53,9 +57,10 @@ function CreditLabel({ opt }: { opt: GeneratorOption }) {
   if (typeof opt.credits === "number") {
     return <span className="character-core__credits" data-testid="api-credits">{opt.credits} credits</span>;
   }
+  // Fail closed (CDX-081): no balance exposed does NOT mean connected.
   return (
     <span className="character-core__credits character-core__credits--na" data-testid="api-credits-na">
-      {opt.availability || "Connected"}
+      {opt.availability || "Balance unavailable"}
     </span>
   );
 }
@@ -118,18 +123,11 @@ export function GeneratorSourceSelector({
           );
         if (cancelled) return;
 
+        // Fail closed (CDX-081): missing executable/status fields never mean
+        // available, and nothing is defaulted to "Certified".
         const opts: GeneratorOption[] = (models || [])
           .filter((m) => m.group !== "auto")
-          .map((m) => ({
-            id: m.id,
-            label: m.label,
-            family: m.id,
-            providerKind: "local",
-            executable: m.executable !== false,
-            status: m.status || "Certified",
-            supportsReferences: !!m.supportsReferences,
-            supportsEditing: !!(m as { supportsEditing?: boolean }).supportsEditing,
-          }));
+          .map((m) => toLocalGeneratorOption(m as LocalGeneratorRow));
         setLocalOptions(opts);
 
         // Recommended local = style/reference-aware recommendation, if present in list.
@@ -165,18 +163,9 @@ export function GeneratorSourceSelector({
         }
 
         if (cancelled) return;
-        const opts: GeneratorOption[] = models.map((m) => {
-          const providerId = (m.provider || "").toLowerCase();
-          const credits = providerId === "fal" ? falBalance : null;
-          return {
-            id: m.id || `${providerId}:${m.label || "model"}`,
-            label: m.label || m.id || "API model",
-            providerKind: "cloud",
-            executable: true,
-            credits,
-            availability: credits == null ? "Connected" : undefined,
-          };
-        });
+        // Availability only when the backend asserts it (CDX-081): never
+        // default executable:true, never claim "Connected" without evidence.
+        const opts: GeneratorOption[] = models.map((m) => toApiGeneratorOption(m as ApiGeneratorRow, falBalance));
         setApiOptions(opts);
       } catch {
         if (!cancelled) setApiOptions([]);
@@ -349,9 +338,10 @@ export function GeneratorSourceSelector({
         >
           <option value="">Select a cloud generator…</option>
           {apiOptions.map((o) => (
-            <option key={o.id} value={o.id}>
+            <option key={o.id} value={o.id} disabled={!o.executable}>
               {o.label}
               {hasReference ? (o.supportsReferences ? " — Reference Conditioned" : ` — ${textModeLabel}`) : ""}
+              {!o.executable ? " — unavailable" : ""}
             </option>
           ))}
         </select>

@@ -7,6 +7,12 @@ import type { SaveState, ScriptDocument } from "../../scriptwriter/types";
 import { IndentKeys, IndentParagraph } from "../../scriptwriter/richTextExtensions";
 import { elementsToHtml, isBlankHtml } from "../../scriptwriter/legacyHtml";
 import { sanitizeHtml } from "../../scriptwriter/sanitizeHtml";
+import {
+  conflictReloadState,
+  shouldOfferRecovery,
+  RECOVERY_RESTORED_MESSAGE,
+  RECOVERY_RESTORE_FAILED_MESSAGE,
+} from "../../scriptwriter/recovery";
 import { api, ApiError } from "../../../api";
 import "./ScriptwriterInline.css";
 
@@ -22,7 +28,6 @@ function resolveInitialHtml(doc: Partial<ScriptDocument> | null): string {
 }
 
 export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
-  const [docId, setDocId] = useState<string | null>(null);
   const [title, setTitle] = useState("Untitled Script");
   const [stats, setStats] = useState<Record<string, number>>({});
   const [saveState, setSaveState] = useState<SaveState>("saved");
@@ -31,6 +36,26 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
   const saveTimer = useRef<number | null>(null);
   const latestRevisionRef = useRef<number | undefined>(undefined);
   const loadedRef = useRef(false);
+  const docIdRef = useRef<string | null>(null);
+
+  // CDX-054: GET is side-effect free; the first explicit save creates the
+  // canonical document (POST /scriptwriter/documents) before autosaving.
+  const ensureDoc = useCallback(async (): Promise<string | null> => {
+    if (docIdRef.current) return docIdRef.current;
+    try {
+      const bundle = await api.scriptwriter.createDocument(projectId);
+      const d = bundle.document as unknown as { id: string; title: string; revision: number } | null;
+      if (!d?.id) throw new Error("No script document returned");
+      docIdRef.current = d.id;
+      if (d.title) setTitle(d.title);
+      latestRevisionRef.current = d.revision;
+      setStats((bundle.stats || {}) as Record<string, number>);
+      return d.id;
+    } catch {
+      setSaveState("save_failed");
+      return null;
+    }
+  }, [projectId]);
 
   const editor = useEditor({
     extensions: [
@@ -42,16 +67,17 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     ],
     content: "<p></p>",
     onUpdate: ({ editor: ed }) => {
-      if (hydrating.current || !docId) return;
+      if (hydrating.current) return;
       setSaveState("unsaved");
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(() => {
         void (async () => {
-          if (!docId) return;
+          const id = await ensureDoc();
+          if (!id) return;
           try {
             setSaveState("saving");
             const html = sanitizeHtml(ed.getHTML());
-            const res = await api.scriptwriter.autosave(projectId, docId, {
+            const res = await api.scriptwriter.autosave(projectId, id, {
               html,
               expectedRevision: latestRevisionRef.current ?? undefined,
             });
@@ -65,10 +91,10 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
             if (e instanceof ApiError && e.status === 400 && ((e.code === "SCRIPT_CONFLICT") || (String(e.message || "").includes("CONFLICT")))) {
               try {
                 const fresh = await api.scriptwriter.studio(projectId);
-                const d = fresh.document as unknown as Partial<ScriptDocument> & { id: string; title: string; revision: number };
-                if (d.id) {
+                const d = (fresh.document ?? null) as unknown as (Partial<ScriptDocument> & { id: string; title: string; revision: number }) | null;
+                if (d?.id) {
+                  docIdRef.current = d.id;
                   latestRevisionRef.current = d.revision;
-                  setDocId(d.id);
                   if (d.title) setTitle(d.title);
                 }
                 if (editor) {
@@ -76,8 +102,9 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
                   editor.commands.setContent(resolveInitialHtml(d));
                   hydrating.current = false;
                 }
-                setSaveState("save_failed");
-                setMessage("Document was updated elsewhere. Reloaded latest version.");
+                const state = conflictReloadState(fresh);
+                setSaveState(state.saveState);
+                setMessage(state.message);
               } catch { setSaveState("save_failed"); }
             } else { setSaveState("save_failed"); }
           }
@@ -93,9 +120,9 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
       try {
         const bundle = await api.scriptwriter.studio(projectId);
         if (cancelled) return;
-        const d = bundle.document as unknown as Partial<ScriptDocument> & { id: string; title: string; revision: number };
-        if (d.id) {
-          setDocId(d.id);
+        const d = (bundle.document ?? null) as unknown as (Partial<ScriptDocument> & { id: string; title: string; revision: number }) | null;
+        if (d?.id) {
+          docIdRef.current = d.id;
           setTitle(d.title);
           latestRevisionRef.current = d.revision;
         }
@@ -111,12 +138,36 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     return () => { cancelled = true; };
   }, [projectId, editor]);
 
+  // CDX-055: reapply the stored SCRIPT_CONFLICT recovery payload.
+  const restoreUnsaved = async () => {
+    const id = docIdRef.current;
+    if (!id) return;
+    try {
+      const res = await api.scriptwriter.restoreRecovery(projectId, id);
+      const d = res.document as unknown as { id: string; title: string; revision: number };
+      if (d.id) {
+        latestRevisionRef.current = d.revision;
+        if (d.title) setTitle(d.title);
+      }
+      if (editor) {
+        hydrating.current = true;
+        editor.commands.setContent(resolveInitialHtml(d as Partial<ScriptDocument>));
+        hydrating.current = false;
+      }
+      setSaveState("saved");
+      setMessage(RECOVERY_RESTORED_MESSAGE);
+    } catch {
+      setSaveState("save_failed");
+      setMessage(RECOVERY_RESTORE_FAILED_MESSAGE);
+    }
+  };
+
   const isActive = useCallback(
     (name: string, attrs?: Record<string, unknown>) => editor?.isActive(name, attrs) ?? false,
     [editor],
   );
 
-  const saveLabel = saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving..." : saveState === "save_failed" ? "Save failed" : "";
+  const saveLabel = saveState === "saved" ? "Saved" : saveState === "saving" ? "Saving..." : saveState === "save_failed" ? "Save failed" : saveState === "recovery_available" ? "Recovery available" : "";
 
   return (
     <div className="sw-inline" data-testid="scriptwriter-inline">
@@ -133,6 +184,11 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
           </div>
         </div>
         <div className="sw-inline__header-right">
+          {shouldOfferRecovery(saveState) ? (
+            <button type="button" className="primary compact" data-testid="sw-inline-restore-recovery" onClick={() => void restoreUnsaved()}>
+              Restore my unsaved changes
+            </button>
+          ) : null}
           <span className="sw-inline__save-state" data-testid="sw-inline-save-state">{saveLabel}</span>
           <button type="button" className="primary compact" data-testid="sw-inline-open-full" onClick={() => { onOpenFull?.(); }}>
             Open Full

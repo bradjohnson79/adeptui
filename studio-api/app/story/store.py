@@ -95,3 +95,27 @@ def load_document(db: Session, project_id: str) -> Optional[StoryDocumentRow]:
         .filter(StoryDocumentRow.project_id == project_id)
         .first()
     )
+
+
+def load_or_empty_document(db: Session, project_id: str):
+    """Return the saved story, or a neutral non-persisted document.
+
+    CDX-054: GET /projects/{id}/story must be side-effect free — it returns an
+    empty/neutral state instead of inserting a story_documents row. The row is
+    created only by the first explicit PUT (save_document).
+    """
+    from .models import StoryDocument
+
+    row = load_document(db, project_id)
+    if row:
+        return _row_to_doc(row)
+    now = datetime.utcnow()
+    return StoryDocument(
+        id=uuid.uuid4().hex,
+        projectId=project_id,
+        title="Untitled Story",
+        content="",
+        wordCount=0,
+        createdAt=now,
+        updatedAt=now,
+    )

@@ -93,6 +93,8 @@ def generate_images(
             # more of the reference latent preserved. Character Creator passes a
             # fidelity-first value when a Character Reference is attached.
             "denoise": body.get("denoise"),
+            "cfg": body.get("cfg"),
+            "steps": body.get("steps"),
             "grow_mask_by": body.get("grow_mask_by"),
             "masks": body.get("masks") or (intent.get("metadata") or {}).get("masks") or [],
             "purpose": body.get("purpose") or intent.get("purpose"),

@@ -17,7 +17,7 @@
 import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const SCREENSHOT_DIR = path.join("tests", "e2e", "screenshots");
 const TINY_PNG = Buffer.from(

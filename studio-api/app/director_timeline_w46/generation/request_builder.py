@@ -100,6 +100,15 @@ def build_timeline_generation_request(
         ref_ids.append(str(ref["assetId"]))
 
     video_ref_id, video_trim = _video_reference_from_batch(batch)
+    video_ids = []
+    for ref in batch.references or []:
+        if not isinstance(ref, dict) or not ref.get("assetId"):
+            continue
+        kind = str(ref.get("kind") or "").lower()
+        if "video" in kind:
+            vid = str(ref["assetId"]).strip()
+            if vid and vid not in video_ids:
+                video_ids.append(vid)
 
     mode: GenerationMode = "text_to_video"
     gen_start = None
@@ -145,11 +154,8 @@ def build_timeline_generation_request(
         strategy = "prompt_context"
         mode = "image_to_video" if mode == "text_to_video" else mode
 
-    # Image reference assets only when capabilities allow. Video refs are never
-    # stripped here — validation refuses unsupported video references.
-    if not caps.supportsMultipleImageReferences and caps.maximumReferenceImages <= 0:
-        ref_ids = []
-
+    # Never silently drop image references. Adapter validation refuses
+    # unsupported / over-limit counts. Bindings stay on the Prompt clip.
     aspect = normalize_production_aspect(aspect_ratio)
     use_draft = bool(draft_mode) if draft_mode is not None else caps.draftPathway != "none"
     if caps.draftPathway == "none":
@@ -194,6 +200,7 @@ def build_timeline_generation_request(
             "finalRequiresNewGeneration": caps.finalRequiresNewGeneration,
             "fast_generation": bool(use_draft and caps.draftPathway == "local_live"),
             "aspectWarning": aspect_warning,
+            "videoReferenceAssetIds": video_ids,
         },
         fallbackAllowed=fallback_allowed,
         continuityBridgeId=bridge_id,

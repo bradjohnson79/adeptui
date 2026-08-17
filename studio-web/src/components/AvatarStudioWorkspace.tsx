@@ -2,15 +2,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import {
+  applyApprovedIdentityToSession,
+  avatarGenerateBlockers,
   buildAvatarPrompt,
+  canGenerateAvatarSession,
   emptyAvatarSession,
   estimateDialogueSeconds,
+  pickApprovedCharacterStill,
   validateAvatarSession,
   type AvatarMode,
   type AvatarPresentationPlan,
   type AvatarProjectJob,
+  type AvatarRuntimeGate,
   type AvatarSession,
 } from "../avatar/types";
+import { CharacterReferenceAssetPicker } from "./CoDirector/characters/CharacterReferenceAssetPicker";
 import { useBindCoDirectorWorkspace, useOpenCoDirector } from "./CoDirector";
 import type { VoicePerformanceRecord } from "../contracts/voicePerformanceM410";
 import { buildAiGuidedSetupPath } from "../setup/navigation";
@@ -18,7 +24,14 @@ import type { SetupComponentStatus } from "../setup/types";
 import type { Project } from "../types";
 import type { EditorTab } from "../workspacePrefs";
 
-type ProfileItem = { id: string; name: string; kind: string; media_path?: string; tag?: string };
+type ProfileItem = {
+  id: string;
+  name: string;
+  kind: string;
+  media_path?: string;
+  tag?: string;
+  stillAssetId?: string | null;
+};
 
 type ReviewTab = "sections" | "takes" | "progress" | "completed";
 
@@ -449,6 +462,10 @@ export function AvatarStudioWorkspace({
   const [activeJob, setActiveJob] = useState<AvatarProjectJob | null>(null);
   const [needsCharacter, setNeedsCharacter] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [durationOpen, setDurationOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [backgroundPickerOpen, setBackgroundPickerOpen] = useState(false);
+  const [characterStills, setCharacterStills] = useState<Record<string, string>>({});
   const [reviewTab, setReviewTab] = useState<ReviewTab>("sections");
   const [runtimeComponents, setRuntimeComponents] = useState<SetupComponentStatus[]>([]);
   const [voiceReadiness, setVoiceReadiness] = useState<VoiceReadiness | null>(null);
@@ -474,14 +491,27 @@ export function AvatarStudioWorkspace({
       if (item?.id) merged.set(String(item.id), item);
     }
     const normalizedCharacters = [...merged.values()];
-    setCharacters(normalizedCharacters);
+    const stillEntries = await Promise.all(
+      normalizedCharacters.map(async (item) => {
+        const identity = await resolveCharacterIdentity(item.id, item.name).catch(() => null);
+        return [item.id, identity?.stillAssetId || item.stillAssetId || null] as const;
+      }),
+    );
+    const nextStills: Record<string, string> = {};
+    const charactersWithStills = normalizedCharacters.map((item) => {
+      const stillAssetId = stillEntries.find((entry) => entry[0] === item.id)?.[1] || null;
+      if (stillAssetId) nextStills[item.id] = stillAssetId;
+      return { ...item, stillAssetId };
+    });
+    setCharacterStills((prev) => ({ ...prev, ...nextStills }));
+    setCharacters(charactersWithStills);
     const assets = lib?.items || [];
     setAudioAssets(assets.filter((asset: any) => asset.kind === "audio"));
     setVideoAssets(assets.filter((asset: any) => asset.kind === "video"));
     setImageAssets(assets.filter((asset: any) => asset.kind === "image"));
     const normalized = (list || []).map((item: AvatarSession) => normalizeSession(item));
     setSessions(normalized);
-    return { sessions: normalized, characters: normalizedCharacters };
+    return { sessions: normalized, characters: charactersWithStills };
   };
 
   const loadJobs = async (sessionId: string, preferredJobId?: string | null) => {
@@ -545,29 +575,73 @@ export function AvatarStudioWorkspace({
     }
   };
 
+  const resolveCharacterIdentity = async (characterId: string, fallbackName?: string) => {
+    const [profile, refs] = await Promise.all([
+      api.getCharacterProfile(project.id, characterId).catch(() => null),
+      api.listCharacterReferences(project.id, characterId).catch(() => ({ items: [] as any[] })),
+    ]);
+    const name = String((profile as { name?: string } | null)?.name || fallbackName || "Character");
+    const picked = pickApprovedCharacterStill({
+      profile: (profile || null) as any,
+      references: (((refs as { items?: any[] })?.items || []) as any[]),
+      candidates: ((((profile as { candidates?: any[] } | null)?.candidates ||
+        (profile as { generation?: { candidates?: any[] } } | null)?.generation?.candidates ||
+        []) as any[])),
+    });
+    if (picked?.assetId) {
+      setCharacterStills((prev) => ({ ...prev, [characterId]: picked.assetId }));
+    }
+    return {
+      name,
+      stillAssetId: picked?.assetId || null,
+      stillRole: picked?.role || null,
+    };
+  };
+
   const bindCharacterSession = async (
     characterId: string,
     seededSessions?: AvatarSession[],
     seededCharacters?: ProfileItem[],
   ) => {
     const availableSessions = seededSessions || sessions;
+    const availableCharacters = seededCharacters || characters;
+    const listed = availableCharacters.find((item) => item.id === characterId);
+    const identity = await resolveCharacterIdentity(characterId, listed?.name);
     const existing = availableSessions.find((item) => item.character_profile_id === characterId);
     if (existing) {
       setNeedsCharacter(false);
-      setSession(normalizeSession(existing));
+      let next = applyApprovedIdentityToSession(normalizeSession(existing), {
+        characterId,
+        characterName: identity.name || existing.character_name,
+        stillAssetId: existing.source_still_asset_id || identity.stillAssetId,
+        stillRole: identity.stillRole,
+      });
+      if (!existing.source_still_asset_id && identity.stillAssetId) {
+        try {
+          next = normalizeSession(await api.patchAvatarSession(project.id, next.id, next));
+        } catch {
+          /* keep local identity bind if persist fails */
+        }
+      }
+      setSession(next);
+      setSessions((prev) => prev.map((item) => (item.id === next.id ? next : item)));
       await loadJobs(existing.id, existing.active_job_id);
       return;
     }
-    const availableCharacters = seededCharacters || characters;
-    const character = availableCharacters.find((item) => item.id === characterId);
-    if (!character) {
+    if (!listed && !identity.name) {
       setNeedsCharacter(true);
       setSession(null);
       return;
     }
-    const boot = normalizeSession(emptyAvatarSession(project.id, `${character.name} Presenter Session`));
-    boot.character_profile_id = characterId;
-    boot.character_name = character.name;
+    const boot = applyApprovedIdentityToSession(
+      normalizeSession(emptyAvatarSession(project.id, `${identity.name} Presenter Session`)),
+      {
+        characterId,
+        characterName: identity.name,
+        stillAssetId: identity.stillAssetId,
+        stillRole: identity.stillRole,
+      },
+    );
     const created = normalizeSession(
       await api.createAvatarSession(project.id, {
         name: boot.name,
@@ -849,9 +923,15 @@ export function AvatarStudioWorkspace({
     if (!session) return;
     setBusy(true);
     try {
-      const boot = normalizeSession(emptyAvatarSession(project.id, `Presenter ${sessions.length + 1}`));
-      boot.character_profile_id = session.character_profile_id;
-      boot.character_name = session.character_name;
+      const boot = applyApprovedIdentityToSession(
+        normalizeSession(emptyAvatarSession(project.id, `Presenter ${sessions.length + 1}`)),
+        {
+          characterId: session.character_profile_id || "",
+          characterName: session.character_name,
+          stillAssetId: session.source_still_asset_id || (session.character_profile_id ? characterStills[session.character_profile_id] : null),
+          stillRole: session.links.master_sheet_id ? "sheet" : null,
+        },
+      );
       const created = normalizeSession(
         await api.createAvatarSession(project.id, {
           name: boot.name,
@@ -1068,7 +1148,7 @@ export function AvatarStudioWorkspace({
           trackId: placementMode === "create_alternate_take" ? "avatar-alternates" : "avatar-presenter",
         },
       });
-      setMsg(`Timeline handoff proposal ${proposal.id} is ready in Co-Director Approvals.`);
+      setMsg(`Timeline handoff proposal ${proposal.id} is ready in Co-Director Approvals. It does not write the Timeline.`);
       setReviewTab("completed");
     } catch (error) {
       setMsg(error instanceof Error ? error.message : String(error));
@@ -1156,7 +1236,7 @@ export function AvatarStudioWorkspace({
             Choose Avatar
           </button>
           <button type="button" data-testid="avatar-open-character-profiles" onClick={() => onGo("characters")}>
-            Open Character Profiles
+            Open Character Creator
           </button>
         </div>
         {characters.length ? (
@@ -1220,15 +1300,15 @@ export function AvatarStudioWorkspace({
       ? activeSession.voice.audio_asset_id
       : activeSession.voice.fallback_audio_asset_id || activeSession.voice.audio_asset_id;
   const museTalkProvider = runtimeComponents.find((item) => item.id === "musetalk-1-5-local") || null;
-  const canGenerate =
-    !!activeSession.character_profile_id &&
-    (activeSession.input_mode === "approved_voice"
-      ? !!activeSession.voice.audio_asset_id &&
-        !!activeSession.voice.approved_record_id &&
-        !!activeSession.voice.approved_take_id &&
-        (activeSession.mode !== "existing_video_lipsync" || !!activeSession.source_video_asset_id)
-      : !!scriptText.trim() &&
-        (activeSession.mode !== "existing_video_lipsync" || !!activeSession.source_video_asset_id));
+  const selectedRuntimeStatus = selectedProvider
+    ? runtimeStatus(selectedProvider)
+    : { label: "Choose Runtime" as const, tone: "warn" as const };
+  const selectedRuntimeGate: AvatarRuntimeGate = selectedProvider
+    ? { id: selectedProvider.id, name: selectedProvider.name, label: selectedRuntimeStatus.label }
+    : { label: "Choose Runtime" };
+  const generateBlockers = avatarGenerateBlockers(activeSession, selectedRuntimeGate);
+  const canGenerate = canGenerateAvatarSession(activeSession, selectedRuntimeGate);
+  const generateBlockReason = generateBlockers[0]?.text || "";
   const completedTakes = activeSession.takes.filter(
     (item) => item.approved || item.status === "final" || !!item.scene_id,
   );
@@ -1263,7 +1343,8 @@ export function AvatarStudioWorkspace({
         </div>
         <div className="row avatar-head-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
           <select
-            aria-label="Avatar session"
+            aria-label="Open session"
+            title="Open a saved Avatar Studio session"
             value={activeSession.id}
             onChange={async (event) => {
               const next = normalizeSession(
@@ -1282,8 +1363,13 @@ export function AvatarStudioWorkspace({
           <button type="button" onClick={createNew} disabled={busy}>
             New Session
           </button>
-          <button type="button" onClick={() => openSetup()}>
-            Open Setup
+          <button
+            type="button"
+            onClick={() => openSetup()}
+            title="Open AI Guided Setup for avatar runtimes"
+            aria-label="Open AI Guided Setup for avatar runtimes"
+          >
+            Open Runtime Setup
           </button>
           <button type="button" className="primary" onClick={saveDraft} disabled={busy}>
             Save Draft
@@ -1318,8 +1404,15 @@ export function AvatarStudioWorkspace({
               <div className="avatar-preview-empty">
                 <strong>{activeSession.character_name || "Presenter"}</strong>
                 <span>
-                  Preview grows here after you choose a reference image or generate a take.
+                  {activeSession.character_profile_id
+                    ? "No approved Character Creator still is bound yet. Open Character Creator to approve a hero, sheet, or portrait."
+                    : "Choose a character so Avatar Studio can bind the approved still."}
                 </span>
+                <div className="avatar-inline-actions" style={{ justifyContent: "center" }}>
+                  <button type="button" onClick={() => onGo("characters")}>
+                    Open Character Creator
+                  </button>
+                </div>
               </div>
             )}
             <div className="cinematic-media-overlay" />
@@ -1357,7 +1450,7 @@ export function AvatarStudioWorkspace({
                 <span className="avatar-summary-label">Timeline</span>
                 <strong>
                   {activeJob
-                    ? `${completedSections.length}/${activeSections.length || 0} sections ready`
+                    ? `${completedSections.length}/${activeSections.length || 0} sections planned`
                     : completedTakes.length
                       ? `${completedTakes.length} ready`
                       : "No completed videos yet"}
@@ -1393,11 +1486,14 @@ export function AvatarStudioWorkspace({
             <div className="avatar-card-grid avatar-card-grid--avatars">
               {characters.map((item) => {
                 const selected = activeSession.character_profile_id === item.id;
+                const stillId = item.stillAssetId || characterStills[item.id] || null;
                 return (
                   <button
                     key={item.id}
                     type="button"
                     className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    aria-pressed={selected}
+                    aria-label={selected ? `${item.name}, current presenter` : `Select ${item.name}`}
                     onClick={() => {
                       try {
                         sessionStorage.setItem("adept_selected_character", item.id);
@@ -1409,11 +1505,15 @@ export function AvatarStudioWorkspace({
                     }}
                   >
                     <span className="avatar-choice-card__art" aria-hidden="true">
-                      {item.name.slice(0, 1).toUpperCase()}
+                      {stillId ? (
+                        <img src={api.assetUrl(stillId)} alt="" />
+                      ) : (
+                        item.name.slice(0, 1).toUpperCase()
+                      )}
                     </span>
                     <span className="avatar-choice-card__copy">
                       <strong>{item.name}</strong>
-                      <span>{selected ? "Current presenter" : "Open this presenter"}</span>
+                      <span>{selected ? "Current presenter" : stillId ? "Approved still ready" : "Open this presenter"}</span>
                     </span>
                   </button>
                 );
@@ -1426,14 +1526,25 @@ export function AvatarStudioWorkspace({
               <h3>Mode</h3>
               <Tip text="Choose the kind of presenter performance you want to build. More stylized looks stay tucked inside Advanced." />
             </div>
+            <p className="scene-meta">Card choices stay local until Save Draft or Generate.</p>
             <div className="avatar-card-grid" data-testid="avatar-mode-cards">
               {MODE_CARDS.map((item) => {
                 const selected = activeSession.mode === item.id;
+                const dubbingUnavailable =
+                  item.id === "existing_video_lipsync" &&
+                  (!museTalkProvider || runtimeStatus(museTalkProvider).label === "Not Installed");
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    className={`avatar-choice-card${selected ? " is-selected" : ""}`}
+                    className={`avatar-choice-card${selected ? " is-selected" : ""}${dubbingUnavailable ? " is-unavailable" : ""}`}
+                    aria-pressed={selected}
+                    aria-disabled={dubbingUnavailable}
+                    title={
+                      dubbingUnavailable
+                        ? "MuseTalk 1.5 is not installed, so Existing Video Dubbing cannot be prepared."
+                        : item.blurb
+                    }
                     onClick={() =>
                       patchSession({
                         mode: item.id,
@@ -1446,7 +1557,11 @@ export function AvatarStudioWorkspace({
                   >
                     <span className="avatar-choice-card__copy">
                       <strong>{item.label}</strong>
-                      <span>{item.blurb}</span>
+                      <span>
+                        {dubbingUnavailable
+                          ? "MuseTalk 1.5 is not installed, so this plan-only dubbing path is unavailable."
+                          : item.blurb}
+                      </span>
                     </span>
                   </button>
                 );
@@ -1644,7 +1759,9 @@ export function AvatarStudioWorkspace({
                   </select>
                 </div>
                 <p className="scene-meta" style={{ marginTop: "0.5rem" }}>
-                  MuseTalk 1.5 is used here as a Lip-Sync Repair and dubbing path, not a full avatar generation path.
+                  {!museTalkProvider || runtimeStatus(museTalkProvider).label === "Not Installed"
+                    ? "MuseTalk 1.5 is not installed, so Existing Video Dubbing cannot be prepared. Open Runtime Setup to install it."
+                    : "MuseTalk 1.5 is a plan-only Lip-Sync Repair and dubbing path here, not a live certified generator."}
                 </p>
               </>
             ) : null}
@@ -1662,6 +1779,7 @@ export function AvatarStudioWorkspace({
                   <button
                     key={item.id}
                     type="button"
+                    aria-pressed={selected}
                     className={`avatar-choice-card${selected ? " is-selected" : ""}`}
                     onClick={() =>
                       patchSession({
@@ -1694,6 +1812,7 @@ export function AvatarStudioWorkspace({
                   <button
                     key={item.id}
                     type="button"
+                    aria-pressed={selected}
                     className={`avatar-choice-card${selected ? " is-selected" : ""}`}
                     onClick={() =>
                       patchSession({
@@ -1728,20 +1847,23 @@ export function AvatarStudioWorkspace({
             </div>
             <div className="avatar-card-grid">
               {BACKGROUND_CARDS.map((item) => {
-                const selected = activeSession.background_choice === item.id;
+                const selected = activeSession.background_choice === item.id && !activeSession.background_asset_id;
                 return (
                   <button
                     key={item.id}
                     type="button"
+                    aria-pressed={selected}
                     className={`avatar-choice-card${selected ? " is-selected" : ""}`}
                     onClick={() =>
                       patchSession({
                         background_choice: item.id,
+                        background_asset_id: null,
                         background_mode: item.backgroundMode,
                         background_notes: item.notes,
                         look: {
                           ...activeSession.look,
                           background: item.label,
+                          environment_profile_id: null,
                         },
                       })
                     }
@@ -1754,13 +1876,53 @@ export function AvatarStudioWorkspace({
                 );
               })}
             </div>
+            <div className="avatar-inline-actions">
+              <button
+                type="button"
+                className={activeSession.background_asset_id ? "primary" : ""}
+                aria-pressed={!!activeSession.background_asset_id}
+                onClick={() => setBackgroundPickerOpen(true)}
+              >
+                {activeSession.background_asset_id ? "Change Library plate" : "Use Library plate"}
+              </button>
+              {activeSession.background_asset_id ? (
+                <span className="scene-meta">Library plate {activeSession.background_asset_id} is saved on this session.</span>
+              ) : (
+                <span className="scene-meta">Optional Library plate reuses the Character Creator picker. Unsupported generators are not listed.</span>
+              )}
+            </div>
+            <CharacterReferenceAssetPicker
+              projectId={project.id}
+              currentAssetId={activeSession.background_asset_id}
+              open={backgroundPickerOpen}
+              onCancel={() => setBackgroundPickerOpen(false)}
+              onConfirm={(asset) => {
+                patchSession({
+                  background_choice: "library_plate",
+                  background_asset_id: asset.id,
+                  background_mode: "environment",
+                  background_notes: `Library plate ${asset.tag || asset.filename || asset.id}`,
+                  look: {
+                    ...activeSession.look,
+                    background: "Library plate",
+                    environment_profile_id: asset.id,
+                  },
+                });
+                setBackgroundPickerOpen(false);
+              }}
+            />
           </section>
 
-          <section className="avatar-create-section">
-            <div className="avatar-section-title-row">
-              <h3>Duration</h3>
+          <details
+            className="avatar-advanced-panel"
+            open={durationOpen}
+            onToggle={(event) => setDurationOpen((event.currentTarget as HTMLDetailsElement).open)}
+          >
+            <summary>
+              Duration
               <Tip text="This is a section-size planning choice for long-form work. It helps you decide how much to pack into the current presenter pass." />
-            </div>
+            </summary>
+            <div className="avatar-advanced-panel__body">
             <div className="avatar-card-grid">
               {DURATION_CARDS.map((item) => {
                 const selected = activeSession.duration_class === item.id;
@@ -1768,6 +1930,7 @@ export function AvatarStudioWorkspace({
                   <button
                     key={item.id}
                     type="button"
+                    aria-pressed={selected}
                     className={`avatar-choice-card${selected ? " is-selected" : ""}`}
                     onClick={() => patchSession({ duration_class: item.id })}
                   >
@@ -1779,14 +1942,21 @@ export function AvatarStudioWorkspace({
                 );
               })}
             </div>
-          </section>
+            </div>
+          </details>
 
           {presentationPlan ? (
-            <section className="avatar-create-section" data-testid="avatar-presentation-plan">
-              <div className="avatar-section-title-row">
-                <h3>Presentation Plan</h3>
+            <details
+              className="avatar-advanced-panel"
+              data-testid="avatar-presentation-plan"
+              open={planOpen}
+              onToggle={(event) => setPlanOpen((event.currentTarget as HTMLDetailsElement).open)}
+            >
+              <summary>
+                Presentation Plan
                 <Tip text="This is your creator-facing direction plan for sectioning, delivery, gaze, gesture, pacing, transitions, pronunciation, and continuity. Save the draft anytime, or ask Co-Director to turn it into an approval-ready plan." />
-              </div>
+              </summary>
+              <div className="avatar-advanced-panel__body">
               <div className="field">
                 <label>Plan Summary</label>
                 <textarea
@@ -2007,7 +2177,8 @@ export function AvatarStudioWorkspace({
                   )}
                 </div>
               </details>
-            </section>
+              </div>
+            </details>
           ) : null}
 
           <details
@@ -2068,9 +2239,9 @@ export function AvatarStudioWorkspace({
               ) : (
                 <div className="avatar-blocked-card">
                   <strong>No avatar runtime found yet</strong>
-                  <p>Open Setup to review avatar runtimes, then let Source Manager run the approved install or repair.</p>
-                  <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")}>
-                    Open Setup
+                  <p>Open Runtime Setup to review avatar runtimes, then let Source Manager run the approved install or repair.</p>
+                  <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")} title="Open AI Guided Setup for avatar runtimes">
+                    Open Runtime Setup
                   </button>
                 </div>
               )}
@@ -2188,8 +2359,8 @@ export function AvatarStudioWorkspace({
                 <button type="button" onClick={() => void refreshRuntimeStatus()}>
                   Refresh Runtime Status
                 </button>
-                <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")}>
-                  Open Setup
+                <button type="button" onClick={() => openSetup("longcat-video-avatar-1-5-local")} title="Open AI Guided Setup for avatar runtimes">
+                  Open Runtime Setup
                 </button>
               </div>
             </div>
@@ -2201,6 +2372,8 @@ export function AvatarStudioWorkspace({
               className="primary avatar-generate-button"
               onClick={() => void generateVideo()}
               disabled={busy || !canGenerate}
+              aria-disabled={busy || !canGenerate}
+              title={!canGenerate ? generateBlockReason : "Plan sections. Live video stays uncertified."}
             >
               {busy
                 ? "Working..."
@@ -2208,15 +2381,32 @@ export function AvatarStudioWorkspace({
                   ? "Prepare Lip-Sync Repair"
                   : "Generate Avatar Video"}
             </button>
-            <p className="muted">
+            <p className="muted" data-testid="avatar-generate-reason">
               {canGenerate
                 ? activeSession.mode === "existing_video_lipsync"
-                  ? "Plan the Lip-Sync Repair, review the section, then send the approved handoff to Timeline."
-                  : "Review sections, retake the performance, then send the best result to Timeline."
-                : activeSession.input_mode === "approved_voice"
-                  ? "Attach an approved Voice Studio take before you generate."
-                  : "Add the script for this presenter section before you generate."}
+                  ? "Creates a plan-only Lip-Sync Repair job. MuseTalk is not executed here, and the Timeline handoff does not write the Timeline."
+                  : "Creates a long-form section plan. Live avatar video is not certified in this pass, and the Timeline handoff does not write the Timeline."
+                : generateBlockReason}
             </p>
+            {!canGenerate && generateBlockReason.includes("Voice Studio") ? (
+              <button type="button" onClick={() => onGo("voicestudio")}>
+                Open Voice Studio
+              </button>
+            ) : null}
+            {!canGenerate && generateBlockReason.includes("Runtime Setup") ? (
+              <button
+                type="button"
+                onClick={() => openSetup(selectedProvider?.id)}
+                title="Open AI Guided Setup for avatar runtimes"
+              >
+                Open Runtime Setup
+              </button>
+            ) : null}
+            {!canGenerate && generateBlockReason.includes("script") ? (
+              <button type="button" onClick={() => onGo("scriptwriter")}>
+                Open Scriptwriter
+              </button>
+            ) : null}
           </div>
         </aside>
       </div>
@@ -2607,8 +2797,8 @@ export function AvatarStudioWorkspace({
                 <button type="button" onClick={() => onGo("voicestudio")}>
                   Open Audio Mix
                 </button>
-                <button type="button" onClick={() => openSetup("musetalk-1-5-local")}>
-                  Open Setup
+                <button type="button" onClick={() => openSetup("musetalk-1-5-local")} title="Open AI Guided Setup for avatar runtimes">
+                  Open Runtime Setup
                 </button>
               </div>
             </article>
@@ -2660,8 +2850,8 @@ export function AvatarStudioWorkspace({
               )
             ) : !completedTakes.length ? (
               <p className="empty">
-                No completed videos yet. Send a reviewed take to Timeline to keep the presenter
-                workflow moving.
+                No completed videos yet. Timeline handoff stays a proposal and does not write the Timeline
+                unless a take already has a real asset.
               </p>
             ) : (
               <div className="avatar-take-list">

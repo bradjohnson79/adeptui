@@ -8,7 +8,7 @@ import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import type { SceneShotCandidate } from "./types";
-import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
+import { useSceneCreator } from "./useSceneCreator";
 import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
@@ -39,7 +39,6 @@ import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
   projectId: string;
-  variant: SceneCreatorVariant;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
 

@@ -4,6 +4,11 @@
  *
  * Voice this pass: metadata + uploaded audio (TTS providers stubbed, not executed).
  */
+import type {
+  CharacterCandidate,
+  CharacterProfile,
+  CharacterReference,
+} from "../components/character/types";
 
 export type AvatarMode =
   | "talking_portrait"
@@ -284,6 +289,7 @@ export type AvatarSession = {
   presentation_style?: string;
   framing_choice?: string;
   background_choice?: string;
+  background_asset_id?: string | null;
   duration_class?: string;
   presentation_plan?: AvatarPresentationPlan;
   provider_mode?: "best_match" | "choose_provider" | "compare";
@@ -445,6 +451,7 @@ export function emptyAvatarSession(projectId: string, name = "Avatar Session"): 
     presentation_style: "direct_presenter",
     framing_choice: "medium_presenter",
     background_choice: "studio_gradient",
+    background_asset_id: null,
     duration_class: "story_section",
     presentation_plan: {
       version: "m4.12",
@@ -513,29 +520,147 @@ export function buildAvatarPrompt(session: AvatarSession): { prompt: string; neg
   return { prompt, negative_prompt: neg };
 }
 
+export function resolvedAvatarAudioAssetId(session: AvatarSession): string | null {
+  if ((session.input_mode || "script") === "approved_voice") {
+    return session.voice?.audio_asset_id || null;
+  }
+  return session.voice?.fallback_audio_asset_id || session.voice?.audio_asset_id || null;
+}
+
+const HERO_STILL_ROLES = new Set([
+  "hero_identity",
+  "hero_portrait",
+  "portrait",
+  "canonical_front",
+  "front",
+]);
+const SHEET_STILL_ROLES = new Set([
+  "character_sheet",
+  "sheet",
+  "model_sheet",
+  "master_sheet",
+]);
+
+function referenceAssetId(ref: CharacterReference & Record<string, unknown>): string | null {
+  const raw = ref.asset_id ?? ref.assetId ?? (ref as { fileId?: unknown }).fileId ?? (ref as { file_id?: unknown }).file_id;
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
+}
+
+function referenceRole(ref: CharacterReference & Record<string, unknown>): string {
+  return String(ref.reference_role || (ref as { role?: unknown }).role || "");
+}
+
+export function pickApprovedCharacterStill(input: {
+  profile?: (Partial<CharacterProfile> & Record<string, unknown>) | null;
+  references?: Array<CharacterReference & Record<string, unknown>>;
+  candidates?: Array<CharacterCandidate & Record<string, unknown>>;
+}): { assetId: string; role: string } | null {
+  const refs = input.references || [];
+  const ranked = refs
+    .map((ref) => {
+      const role = referenceRole(ref);
+      const approved = ref.approval_status === "approved" ? 8 : 0;
+      const canonical = ref.canonical ? 4 : 0;
+      const hero = HERO_STILL_ROLES.has(role) ? 16 : SHEET_STILL_ROLES.has(role) ? 12 : 0;
+      return { ref, role, assetId: referenceAssetId(ref), score: approved + canonical + hero };
+    })
+    .filter((item) => item.assetId);
+  ranked.sort((a, b) => b.score - a.score);
+
+  const approvedIdentity = ranked.find(
+    (item) =>
+      item.ref.approval_status === "approved" &&
+      (HERO_STILL_ROLES.has(item.role) || SHEET_STILL_ROLES.has(item.role) || item.ref.canonical),
+  );
+  if (approvedIdentity?.assetId) {
+    return { assetId: approvedIdentity.assetId, role: approvedIdentity.role || "approved" };
+  }
+
+  const approvedOrCanonical = ranked.find(
+    (item) => item.ref.approval_status === "approved" || item.ref.canonical,
+  );
+  if (approvedOrCanonical?.assetId) {
+    return { assetId: approvedOrCanonical.assetId, role: approvedOrCanonical.role || "approved" };
+  }
+
+  for (const candidate of input.candidates || []) {
+    const sheetId = candidate.sheetAssetId || candidate.assetId;
+    if (typeof sheetId === "string" && sheetId.trim()) {
+      return { assetId: sheetId.trim(), role: "sheet" };
+    }
+  }
+
+  const profile = input.profile || {};
+  for (const key of ["sheetAssetId", "sheet_asset_id", "hero_asset_id", "portrait_asset_id", "heroAssetId"]) {
+    const value = profile[key];
+    if (typeof value === "string" && value.trim()) {
+      return { assetId: value.trim(), role: key };
+    }
+  }
+
+  return ranked[0]?.assetId ? { assetId: ranked[0].assetId, role: ranked[0].role || "reference" } : null;
+}
+
+export function applyApprovedIdentityToSession(
+  session: AvatarSession,
+  identity: {
+    characterId: string;
+    characterName: string;
+    stillAssetId?: string | null;
+    stillRole?: string | null;
+  },
+): AvatarSession {
+  const stillAssetId = identity.stillAssetId || session.source_still_asset_id || null;
+  return {
+    ...session,
+    character_profile_id: identity.characterId,
+    character_name: identity.characterName,
+    source_still_asset_id: stillAssetId,
+    look: {
+      ...session.look,
+      portrait_asset_id: stillAssetId || session.look.portrait_asset_id || null,
+    },
+    links: {
+      ...session.links,
+      master_sheet_id:
+        identity.stillRole && SHEET_STILL_ROLES.has(identity.stillRole)
+          ? stillAssetId
+          : session.links.master_sheet_id || null,
+    },
+  };
+}
+
 export function validateAvatarSession(session: AvatarSession): { level: string; text: string }[] {
   const issues: { level: string; text: string }[] = [];
-  const resolvedAudioAssetId =
-    session.input_mode === "approved_voice"
-      ? session.voice.audio_asset_id
-      : session.voice.fallback_audio_asset_id || session.voice.audio_asset_id;
+  const inputMode = session.input_mode || "script";
+  const resolvedAudioAssetId = resolvedAvatarAudioAssetId(session);
   if (!session.character_profile_id && !session.character_name && !session.source_still_asset_id) {
     issues.push({ level: "warn", text: "Identity reference missing — attach Character Profile or still" });
   }
   if (
-    session.input_mode === "approved_voice" &&
+    inputMode === "approved_voice" &&
     (!session.voice.audio_asset_id || !session.voice.approved_record_id || !session.voice.approved_take_id)
   ) {
-    issues.push({ level: "bad", text: "Choose an approved Voice Studio take or switch back to Script" });
-  }
-  if (!resolvedAudioAssetId && session.mode !== "talking_portrait") {
-    issues.push({ level: "warn", text: "Voice audio not attached (required before lip sync)" });
+    issues.push({ level: "bad", text: "Approved Voice mode requires an approved Voice Studio take" });
   }
   if (!resolvedAudioAssetId && session.lip_sync_method === "external") {
-    issues.push({ level: "bad", text: "Audio required for external lip-sync method" });
+    if (inputMode === "script") {
+      issues.push({
+        level: "warn",
+        text: "Audio not attached — script mode can still plan without lip-sync audio",
+      });
+    } else {
+      issues.push({ level: "bad", text: "Audio required for external lip-sync method" });
+    }
   }
   if (!session.dialogue_original.trim() && !session.dialogue_spoken.trim() && !resolvedAudioAssetId) {
-    issues.push({ level: "warn", text: "Dialogue empty" });
+    if (inputMode === "script") {
+      issues.push({ level: "bad", text: "Add the script for this presenter section before you generate." });
+    } else {
+      issues.push({ level: "warn", text: "Dialogue empty" });
+    }
   }
   if (session.lip_sync_method === "external" && !session.mouth_mask.placed) {
     issues.push({ level: "warn", text: "Mouth mask requires user confirmation" });
@@ -547,4 +672,60 @@ export function validateAvatarSession(session: AvatarSession): { level: string; 
     issues.push({ level: "warn", text: "Camera framing incomplete" });
   }
   return issues;
+}
+
+export type AvatarRuntimeGateLabel = "Experimental" | "Not Installed" | "Needs Repair" | "Choose Runtime";
+
+export type AvatarRuntimeGate = {
+  id?: string;
+  name?: string;
+  label: AvatarRuntimeGateLabel;
+};
+
+export function avatarGenerateBlockers(
+  session: AvatarSession,
+  runtime: AvatarRuntimeGate | null,
+): { level: string; text: string }[] {
+  const issues = validateAvatarSession(session).filter((item) => item.level === "bad");
+  const runtimeName = runtime?.name || runtime?.id || "Selected runtime";
+  if (!runtime || runtime.label === "Choose Runtime") {
+    issues.push({
+      level: "bad",
+      text: "No avatar runtime selected. Open Runtime Setup to install an avatar runtime.",
+    });
+    return issues;
+  }
+  if (runtime.label === "Not Installed") {
+    issues.push({
+      level: "bad",
+      text:
+        session.mode === "existing_video_lipsync"
+          ? "MuseTalk 1.5 is not installed, so Existing Video Dubbing cannot be prepared."
+          : `${runtimeName} is not installed. Open Runtime Setup to install it.`,
+    });
+  } else if (runtime.label === "Needs Repair") {
+    issues.push({
+      level: "bad",
+      text: `${runtimeName} needs repair. Open Runtime Setup to repair it.`,
+    });
+  }
+  return issues;
+}
+
+export function canGenerateAvatarSession(
+  session: AvatarSession,
+  runtime: AvatarRuntimeGate | null,
+): boolean {
+  return avatarGenerateBlockers(session, runtime).length === 0;
+}
+
+export function claimsLiveAvatarVideo(job: {
+  status?: string;
+  lastError?: { code?: string; message?: string } | null;
+  sections?: Array<{ outputVideoAssetId?: string | null; errorCode?: string | null }>;
+}): boolean {
+  if (job.sections?.some((section) => section.outputVideoAssetId)) return true;
+  const code = String(job.lastError?.code || "");
+  if (code.includes("PROVIDER_NOT_CERTIFIED") || code.includes("PROVIDER_NOT_INSTALLED")) return false;
+  return job.status === "completed" && !job.lastError;
 }

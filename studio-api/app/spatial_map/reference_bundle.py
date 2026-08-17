@@ -8,6 +8,27 @@ from .errors import SpatialMapErrorCode, raise_http_error
 from .schemas import SpatialCamera, SpatialMapDocument, SpatialReferenceAsset, SpatialReferenceBundle
 
 
+def _is_unplaced(placement: object) -> bool:
+    """True when no explicit grid placement coords were ever provided (CDX-025).
+
+    Unplaced characters keep the SpatialPlacement defaults x=0/z=0 with no
+    normalized grid coords; unplaced props store x/z as None. Both read as
+    'not on the grid yet' instead of a placement at the world origin (0,0).
+    """
+    nx = getattr(placement, "normalizedX", None)
+    ny = getattr(placement, "normalizedY", None)
+    if nx is not None or ny is not None:
+        return False
+    x = getattr(placement, "x", None)
+    z = getattr(placement, "z", None)
+    if x is None or z is None:
+        return True
+    try:
+        return float(x) == 0.0 and float(z) == 0.0
+    except (TypeError, ValueError):
+        return True
+
+
 def creative_position_labels(*, x: float, y: float, z: float) -> dict[str, str]:
     lateral = "center"
     if x <= -1.5:
@@ -69,10 +90,13 @@ def compile_reference_bundle(
             for row in rows
         ]
 
+    # CDX-025: only placements with an explicit grid position get a creative
+    # label. Unplaced characters default to x=0/z=0 and must not read as
+    # standing at the world origin; unplaced props keep x/z=None.
     creator_labels = {
         placement.id: creative_position_labels(x=placement.x, y=placement.y, z=placement.z)["summary"]
         for placement in [*document.characters, *document.props]
-        if getattr(placement, "placementMode", None) != "attached"
+        if getattr(placement, "placementMode", None) != "attached" and not _is_unplaced(placement)
     }
     available_directions = [view.direction for view in document.collage.views] if document.collage else []
     directional_prompts = (
@@ -208,12 +232,16 @@ def _camera_summary(camera: SpatialCamera | None) -> str:
 
 def _character_summary(bundle: SpatialReferenceBundle, item) -> str:
     label = item.label or item.characterId or "Character"
-    position = bundle.creatorPositionLabels.get(item.id) or creative_position_labels(
-        x=item.x,
-        y=item.y,
-        z=item.z,
-    )["summary"]
-    details = [f"{label} at {position}"]
+    if _is_unplaced(item):
+        # CDX-025: no explicit grid placement - do not claim world origin.
+        details = [f"{label} on the map but not placed on the grid yet"]
+    else:
+        position = bundle.creatorPositionLabels.get(item.id) or creative_position_labels(
+            x=item.x,
+            y=item.y,
+            z=item.z,
+        )["summary"]
+        details = [f"{label} at {position}"]
     if item.pose:
         details.append(item.pose)
     if item.expression:
@@ -232,12 +260,16 @@ def _prop_summary(bundle: SpatialReferenceBundle, item) -> str:
         if item.attachmentPoint and item.attachmentPoint != "unspecified":
             details.append(str(item.attachmentPoint).replace("_", " "))
         return ", ".join(part for part in details if part).strip()
-    position = bundle.creatorPositionLabels.get(item.id) or creative_position_labels(
-        x=item.x,
-        y=item.y,
-        z=item.z,
-    )["summary"]
-    details = [f"{label} at {position}"]
+    if _is_unplaced(item):
+        # CDX-025: unplaced independent prop - no world origin claim.
+        details = [f"{label} saved to the map but not placed in the scene yet"]
+    else:
+        position = bundle.creatorPositionLabels.get(item.id) or creative_position_labels(
+            x=item.x,
+            y=item.y,
+            z=item.z,
+        )["summary"]
+        details = [f"{label} at {position}"]
     if item.category:
         details.append(item.category)
     if item.state:

@@ -32,6 +32,44 @@ def _create_scene(project_id: str, name: str = "Scene A") -> str:
         db.close()
 
 
+def _seed_character(project_id: str, character_id: str) -> None:
+    """CDX-013: placements must reference a project-owned CharacterProfileRow."""
+    from app.character_identity.models import CharacterProfileRow
+
+    db = _session()
+    try:
+        existing = db.get(CharacterProfileRow, character_id)
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        db.add(CharacterProfileRow(id=character_id, project_id=project_id, name=character_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _seed_prop(project_id: str, prop_id: str) -> None:
+    """CDX-013: a non-empty propId must resolve to a project-owned PropEntity."""
+    from app.spatial_map.ers_contracts import PropEntity
+    from app.spatial_map.ers_persistence import save_prop_entity
+
+    db = _session()
+    try:
+        save_prop_entity(
+            db,
+            project_id,
+            PropEntity(
+                id=prop_id,
+                project_id=project_id,
+                tag=prop_id,
+                display_label=prop_id,
+                approved_asset_id=f"approved-{prop_id}",
+            ),
+        )
+    finally:
+        db.close()
+
+
 def _insert_asset(project_id: str, kind: str, filename: str, isolated_data_dir: Path) -> str:
     from app.db import Asset
 
@@ -61,6 +99,11 @@ def test_spatial_map_limits_enforced(client) -> None:
     create = client.post(f"/api/spatial-map/projects/{project_id}/maps", json={"title": "Stage"})
     assert create.status_code == 200
     document_id = create.json()["document"]["id"]
+
+    for index in range(5):
+        _seed_character(project_id, f"char-{index}")
+    for index in range(4):
+        _seed_prop(project_id, f"prop-{index}")
 
     for index in range(4):
         res = client.post(
@@ -107,6 +150,7 @@ def test_spatial_map_reference_bundle_and_assignment(client, isolated_data_dir: 
     scene_id = _create_scene(project_id)
     background_asset_id = _insert_asset(project_id, "environment", "panorama.png", isolated_data_dir)
     character_asset_id = _insert_asset(project_id, "image", "hero.png", isolated_data_dir)
+    _seed_character(project_id, "hero-1")
 
     create = client.post(
         f"/api/spatial-map/projects/{project_id}/maps",
@@ -211,6 +255,7 @@ def test_image_compile_preview_uses_spatial_reference_bundle(client, isolated_da
     project_id = _create_project(client, "Spatial Image Preview")
     background_asset_id = _insert_asset(project_id, "image", "spatial_bg.png", isolated_data_dir)
     character_asset_id = _insert_asset(project_id, "image", "spatial_hero.png", isolated_data_dir)
+    _seed_character(project_id, "korri")
 
     create = client.post(
         f"/api/spatial-map/projects/{project_id}/maps",
@@ -292,6 +337,7 @@ def test_storyboard_workspace_preserves_spatial_linkage(client, isolated_data_di
 
 def test_spatial_map_move_delete_and_version_bump(client) -> None:
     project_id = _create_project(client)
+    _seed_character(project_id, "hero-1")
     create = client.post(
         f"/api/spatial-map/projects/{project_id}/maps",
         json={"title": "Blocking Pass", "masterEnvironmentPrompt": "Warm lantern light across the square."},

@@ -57,6 +57,8 @@ class PromptSegment(BaseModel):
     negative_prompt: Optional[str] = None
     # W46: when set, this is an Image-Attached Prompt bound to a Timeline image clip.
     bound_image_clip_id: Optional[str] = None
+    # Canonical scene-reference binding IDs (order preserved). Alias text is display-only.
+    reference_binding_ids: list[str] = Field(default_factory=list)
 
 
 CameraMotionType = Literal[
@@ -140,6 +142,8 @@ class DirectorTimeline(BaseModel):
     next_image_tag_number: int = 1
     # W46 SA40 — compilation/provenance preference (never mutates already-generated assets).
     guidance_priority: Literal["visual_first", "prompt_first", "balanced", "custom"] = "visual_first"
+    # Idempotent Prompt-ref hydration from legacy image/video reference tracks.
+    prompt_refs_migrated: bool = False
 
     @classmethod
     def default(cls, duration_sec: float = 5.0, prompt: str = "") -> "DirectorTimeline":
@@ -185,6 +189,70 @@ def camera_prompt_hint(clips: list[CameraClip]) -> str:
     return "Camera: " + "; ".join(bits)
 
 
+def _intervals_overlap(a_start: float, a_length: float, b_start: float, b_length: float) -> bool:
+    a_end = float(a_start) + float(a_length)
+    b_end = float(b_start) + float(b_length)
+    return float(a_start) < b_end - 1e-9 and float(b_start) < a_end - 1e-9
+
+
+def _union_binding_id(segment: PromptSegment, binding_id: str) -> None:
+    token = (binding_id or "").strip()
+    if not token:
+        return
+    existing = list(segment.reference_binding_ids or [])
+    if token not in existing:
+        existing.append(token)
+        segment.reference_binding_ids = existing
+
+
+def hydrate_prompt_refs(tl: DirectorTimeline) -> DirectorTimeline:
+    """Migrate legacy Image/Video Reference tracks onto Prompt clips.
+
+    Timing and binding IDs are preserved. Legacy arrays are kept readable.
+    Idempotent: a second pass does not create extra Prompt clips.
+    """
+    if tl.prompt_refs_migrated:
+        return tl
+
+    legacy: list[TimelineClip] = []
+    for clip in list(tl.image_reference_clips or []) + list(tl.video_reference_clips or []):
+        binding_id = (getattr(clip, "reference_binding_id", None) or "").strip()
+        asset_id = (getattr(clip, "asset_id", None) or "").strip()
+        if binding_id or asset_id:
+            legacy.append(clip)
+    if not legacy:
+        tl.prompt_refs_migrated = True
+        return tl
+
+    for clip in legacy:
+        binding_id = (getattr(clip, "reference_binding_id", None) or "").strip()
+        overlapping = [
+            seg
+            for seg in tl.prompt_segments
+            if _intervals_overlap(seg.start, seg.length, clip.start, clip.length)
+        ]
+        if overlapping:
+            for seg in overlapping:
+                _union_binding_id(seg, binding_id)
+            continue
+        already = any(
+            binding_id and binding_id in (seg.reference_binding_ids or [])
+            for seg in tl.prompt_segments
+        )
+        if already:
+            continue
+        created = PromptSegment(
+            start=float(clip.start or 0.0),
+            length=max(0.1, float(clip.length or 0.1)),
+            text="",
+            reference_binding_ids=[binding_id] if binding_id else [],
+        )
+        tl.prompt_segments.append(created)
+
+    tl.prompt_refs_migrated = True
+    return tl
+
+
 def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, fallback_prompt: str = "") -> DirectorTimeline:
     if not raw or not str(raw).strip():
         return DirectorTimeline.default(fallback_duration, fallback_prompt)
@@ -196,7 +264,7 @@ def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, 
         tl = DirectorTimeline.model_validate(data)
         # Do not invent empty prompt segments — true empty tracks (W46).
         _ = fallback_prompt
-        return tl
+        return hydrate_prompt_refs(tl)
     except Exception:
         return DirectorTimeline.default(fallback_duration, fallback_prompt)
 

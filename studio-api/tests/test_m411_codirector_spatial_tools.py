@@ -41,6 +41,24 @@ def _receipt(client, project_id: str, proposal_id: str) -> dict:
     return res.json()
 
 
+def _seed_character(project_id: str, character_id: str) -> None:
+    """CDX-013: spatial.place_character must reference a project-owned CharacterProfileRow."""
+    from app.character_identity.models import CharacterProfileRow
+    from app.db import SessionLocal, init_db
+
+    init_db()
+    db = SessionLocal()
+    try:
+        existing = db.get(CharacterProfileRow, character_id)
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        db.add(CharacterProfileRow(id=character_id, project_id=project_id, name=character_id))
+        db.commit()
+    finally:
+        db.close()
+
+
 def _create_map(
     client,
     project_id: str,
@@ -48,6 +66,7 @@ def _create_map(
     title: str = "Warehouse Map",
     master_prompt: str = "Abandoned warehouse interior, damp concrete floor, practical sodium lights.",
 ) -> str:
+    _seed_character(project_id, "char-korri")
     proposal = _propose(
         client,
         project_id,

@@ -211,4 +211,14 @@ export const spatialMapApi = {
     return res.document as unknown as SpatialMapDocument;
   },
 
+  /** CDX-020: bind a Spatial Map document to a project scene explicitly. */
+  async assignScene(
+    projectId: string,
+    documentId: string,
+    body: { sceneId: string },
+  ): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.assignScene(projectId, documentId, body);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
 };

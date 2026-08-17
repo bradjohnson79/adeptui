@@ -1,5 +1,17 @@
 """Execution pack store — persists ExecutionPlan packs as project-scoped traits.
 
+CDX-089 (Phase 7) — EXECUTION-PACK OWNERSHIP (canonical decision):
+This store OWNS ExecutionPlan packs (ProjectTraitRow, category
+"codirector_execution"), written by codirector/execution/dispatcher.py
+(dispatch / approve_and_execute) and polled by execution/advance.py.
+It does NOT write ProductionJob rows — those belong exclusively to the
+Production Executive (codirector/executive/store.py), which dedupes by
+idempotency_key. The two stores are disjoint tables by design, and
+``save_pack`` upserts on (project_id, category, key=execution_id), so
+re-saving an execution_id never creates a second row.
+tests/test_engine_ownership.py asserts no double-creation across both
+stores for the same idempotency key and no cross-store writes.
+
 Mirrors the visual_sheet pack pattern (character_identity/visual_sheet.py:_save_pack)
 but scoped to the project rather than the character profile.
 

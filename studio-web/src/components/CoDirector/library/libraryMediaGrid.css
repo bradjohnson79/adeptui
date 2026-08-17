@@ -172,6 +172,55 @@
   max-width: fit-content;
 }
 
+.library-media-grid__badge--approved {
+  background: rgba(72, 199, 116, 0.16);
+  color: #b7f0c8;
+  border: 1px solid rgba(72, 199, 116, 0.4);
+}
+
+.library-media-grid__scope {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.library-media-grid__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.library-media-grid__nav--children {
+  padding-left: 8px;
+  border-left: 2px solid rgba(126, 180, 255, 0.25);
+  margin-top: -6px;
+}
+
+.library-media-grid__filter--sub {
+  font-size: 0.8rem;
+  padding: 0 12px;
+  min-height: 32px;
+}
+
+.library-media-grid__breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid rgba(126, 180, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(84, 152, 255, 0.08);
+}
+
+.library-media-grid__breadcrumb-path {
+  color: rgba(201, 210, 224, 0.92);
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .library-media-grid__state {
   display: grid;
   place-items: center;

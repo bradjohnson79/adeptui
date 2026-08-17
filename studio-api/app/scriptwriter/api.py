@@ -21,6 +21,30 @@ def _err(exc: ScriptwriterError) -> HTTPException:
     return HTTPException(status_code=400, detail=exc.to_dict())
 
 
+def _scoped_document(db: Session, project_id: str, document_id: str) -> None:
+    """CDX-053: reject cross-project access to a script document.
+
+    Every /documents/{document_id} route must prove the document belongs to
+    the path project. A document from another project is indistinguishable
+    from a missing one at the HTTP boundary (404) but carries the
+    PROJECT_SCOPE_VIOLATION code so callers can distinguish scope errors.
+    """
+    try:
+        doc = service.get_document(db, document_id)
+    except ScriptwriterError as exc:
+        raise _err(exc) from exc
+    if doc.projectId != project_id:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "PROJECT_SCOPE_VIOLATION",
+                "message": "This script document belongs to a different project.",
+                "details": {"documentId": document_id, "projectId": project_id},
+                "recoveryAction": "reload",
+            },
+        )
+
+
 class AutosaveBody(BaseModel):
     elements: Optional[list[dict[str, Any]]] = None
     html: Optional[str] = None
@@ -99,9 +123,9 @@ class SearchReplaceBody(BaseModel):
 
 @router.get("")
 def get_studio(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Read-only studio bundle. Never creates/migrates canonical rows (CDX-054)."""
     try:
-        doc = service.get_or_create_document(db, project_id)
-        return service.document_bundle(db, doc.id)
+        return service.project_bundle(db, project_id)
     except ScriptwriterError as exc:
         raise _err(exc) from exc
 
@@ -114,8 +138,19 @@ def list_docs(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return {"ok": True, "documents": [d.model_dump(mode="json") for d in list_documents(db, project_id)]}
 
 
+@router.post("/documents")
+def create_document(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Explicit creator-triggered creation (first autosave/insert). (CDX-054)"""
+    try:
+        doc = service.create_document(db, project_id)
+        return service.document_bundle(db, doc.id)
+    except ScriptwriterError as exc:
+        raise _err(exc) from exc
+
+
 @router.get("/documents/{document_id}")
 def get_doc(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.document_bundle(db, document_id)
     except ScriptwriterError as exc:
@@ -124,6 +159,7 @@ def get_doc(project_id: str, document_id: str, db: Session = Depends(get_db)) ->
 
 @router.post("/documents/{document_id}/autosave")
 def autosave(project_id: str, document_id: str, body: AutosaveBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         if body.html is not None:
             return service.autosave_html(db, document_id, body.html, expected_revision=body.expectedRevision)
@@ -132,8 +168,19 @@ def autosave(project_id: str, document_id: str, body: AutosaveBody, db: Session 
         raise _err(exc) from exc
 
 
+@router.post("/documents/{document_id}/recovery/restore")
+def recovery_restore(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
+    """Restore the stored SCRIPT_CONFLICT recovery payload (CDX-055)."""
+    try:
+        return service.restore_recovery(db, document_id)
+    except ScriptwriterError as exc:
+        raise _err(exc) from exc
+
+
 @router.post("/documents/{document_id}/scenes/insert")
 def insert_scene(project_id: str, document_id: str, body: InsertSceneBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.insert_scene(db, document_id, after_order=body.afterOrder, heading=body.heading)
     except ScriptwriterError as exc:
@@ -142,6 +189,7 @@ def insert_scene(project_id: str, document_id: str, body: InsertSceneBody, db: S
 
 @router.post("/documents/{document_id}/scenes/delete")
 def delete_scene(project_id: str, document_id: str, body: DeleteSceneBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.delete_scene(db, document_id, body.sceneHeadingId)
     except ScriptwriterError as exc:
@@ -150,6 +198,7 @@ def delete_scene(project_id: str, document_id: str, body: DeleteSceneBody, db: S
 
 @router.post("/documents/{document_id}/scenes/move")
 def move_scene(project_id: str, document_id: str, body: MoveSceneBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.move_scene(db, document_id, body.sceneHeadingId, to_index=body.toIndex)
     except ScriptwriterError as exc:
@@ -158,6 +207,7 @@ def move_scene(project_id: str, document_id: str, body: MoveSceneBody, db: Sessi
 
 @router.post("/documents/{document_id}/revisions")
 def create_revision(project_id: str, document_id: str, body: RevisionBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.create_revision_set(db, document_id, name=body.name, color=body.color, note=body.note)
     except ScriptwriterError as exc:
@@ -166,6 +216,7 @@ def create_revision(project_id: str, document_id: str, body: RevisionBody, db: S
 
 @router.post("/documents/{document_id}/revisions/compare")
 def compare(project_id: str, document_id: str, body: CompareBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.compare_revisions(db, document_id, body.revisionA, body.revisionB)
     except ScriptwriterError as exc:
@@ -174,6 +225,7 @@ def compare(project_id: str, document_id: str, body: CompareBody, db: Session = 
 
 @router.post("/documents/{document_id}/revisions/restore")
 def restore(project_id: str, document_id: str, body: RestoreBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.restore_revision(db, document_id, body.revisionId)
     except ScriptwriterError as exc:
@@ -182,6 +234,7 @@ def restore(project_id: str, document_id: str, body: RestoreBody, db: Session = 
 
 @router.post("/documents/{document_id}/import")
 def import_doc(project_id: str, document_id: str, body: ImportBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.import_text(db, document_id, body.text, fmt=body.format)
     except ScriptwriterError as exc:
@@ -190,6 +243,7 @@ def import_doc(project_id: str, document_id: str, body: ImportBody, db: Session 
 
 @router.get("/documents/{document_id}/export/fountain")
 def export_fountain(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.export_fountain(db, document_id)
     except ScriptwriterError as exc:
@@ -198,6 +252,7 @@ def export_fountain(project_id: str, document_id: str, db: Session = Depends(get
 
 @router.post("/documents/{document_id}/export/pdf")
 def export_pdf(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         root = Path(__file__).resolve().parents[3]
         out = root / "artifacts" / "m47" / "pdf"
@@ -208,6 +263,7 @@ def export_pdf(project_id: str, document_id: str, db: Session = Depends(get_db))
 
 @router.post("/documents/{document_id}/proposals/apply")
 def apply_proposal(project_id: str, document_id: str, body: ProposalApplyBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.apply_codirector_proposal(db, document_id, body.proposal)
     except ScriptwriterError as exc:
@@ -216,6 +272,7 @@ def apply_proposal(project_id: str, document_id: str, body: ProposalApplyBody, d
 
 @router.post("/documents/{document_id}/outline/convert")
 def convert_outline(project_id: str, document_id: str, body: OutlineBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.convert_outline_to_scenes(db, document_id, body.beats)
     except ScriptwriterError as exc:
@@ -224,6 +281,7 @@ def convert_outline(project_id: str, document_id: str, body: OutlineBody, db: Se
 
 @router.post("/documents/{document_id}/scenes/link")
 def link_scene(project_id: str, document_id: str, body: LinkSceneBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.link_scene(db, document_id, body.sceneHeadingId, body.projectSceneId)
     except ScriptwriterError as exc:
@@ -232,6 +290,7 @@ def link_scene(project_id: str, document_id: str, body: LinkSceneBody, db: Sessi
 
 @router.post("/documents/{document_id}/timeline/prepare")
 def timeline_prepare(project_id: str, document_id: str, body: TimelinePrepBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.prepare_timeline(db, document_id, body.sceneHeadingId)
     except ScriptwriterError as exc:
@@ -240,6 +299,7 @@ def timeline_prepare(project_id: str, document_id: str, body: TimelinePrepBody, 
 
 @router.post("/documents/{document_id}/timeline/apply-metadata")
 def timeline_apply(project_id: str, document_id: str, body: TimelineApplyBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.apply_timeline_prep_metadata(db, document_id, body.sceneHeadingId, body.metadata)
     except ScriptwriterError as exc:
@@ -248,6 +308,7 @@ def timeline_apply(project_id: str, document_id: str, body: TimelineApplyBody, d
 
 @router.post("/documents/{document_id}/analyze/scene")
 def analyze_scene(project_id: str, document_id: str, body: AnalyzeBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.analyze_scene(db, document_id, body.sceneHeadingId)
     except ScriptwriterError as exc:
@@ -256,6 +317,7 @@ def analyze_scene(project_id: str, document_id: str, body: AnalyzeBody, db: Sess
 
 @router.post("/documents/{document_id}/production-lock")
 def production_lock(project_id: str, document_id: str, body: LockBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.lock_production_numbers(db, document_id, locked=body.locked)
     except ScriptwriterError as exc:
@@ -264,6 +326,7 @@ def production_lock(project_id: str, document_id: str, body: LockBody, db: Sessi
 
 @router.post("/documents/{document_id}/undo")
 def undo_tx(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.undo(db, document_id)
     except ScriptwriterError as exc:
@@ -272,6 +335,7 @@ def undo_tx(project_id: str, document_id: str, db: Session = Depends(get_db)) ->
 
 @router.post("/documents/{document_id}/search-replace")
 def search_replace(project_id: str, document_id: str, body: SearchReplaceBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.search_replace(
             db, document_id, find=body.find, replace=body.replace, element_types=body.elementTypes or None
@@ -282,6 +346,7 @@ def search_replace(project_id: str, document_id: str, body: SearchReplaceBody, d
 
 @router.post("/documents/{document_id}/bible/propose")
 def bible_propose(project_id: str, document_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    _scoped_document(db, project_id, document_id)
     try:
         return service.propose_bible_entities(db, project_id, document_id)
     except ScriptwriterError as exc:
@@ -296,3 +361,4 @@ def mig_preview(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any
 @router.post("/migration/run")
 def mig_run(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     return run_migration(db, project_id)
+

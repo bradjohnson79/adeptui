@@ -11,7 +11,6 @@ export function SceneCreatorWorkspace({
   return (
     <SceneCreatorCore
       projectId={project.id}
-      variant="standard"
       onGoTab={(tab) => onGo?.(tab === "spatial_map" ? "spatial" : tab)}
     />
   );

@@ -42,6 +42,22 @@ def _scene(db: Session, project_id: str, scene_id: str) -> Scene | None:
     )
 
 
+# Scene Creator (amendment #51/#54) invents its own clipIds
+# (scene_shot_{shot.id}_{candidate.id} / scene_shot_{batch.id}_{index})
+# as W46 legacyClipId provenance values. Those clipIds are never registered
+# in the MAGI sequence document (the NLE editor has no scene-shot clips), so
+# the m8 CLIP_NOT_FOUND membership guard - which exists for real MAGI sequence
+# clip references - must not reject them (CDX-044). MAGI editor clip ids use
+# the clip_ prefix (see magi.sequence.validation), so this namespace cannot
+# collide with genuine sequence clips.
+SCENE_SHOT_CLIP_PREFIX = "scene_shot_"
+
+
+def _is_scene_creator_clip(clip: dict[str, Any]) -> bool:
+    """True when a clip carries a Scene Creator-invented clipId."""
+    return str(clip.get("clipId") or "").startswith(SCENE_SHOT_CLIP_PREFIX)
+
+
 def import_timeline_asset(
     db: Session,
     project_id: str,
@@ -118,6 +134,11 @@ def export_to_timeline(
     # silent skip. A project with no saved clips (never saved, or a
     # ledger-only/empty sequence) keeps the legacy asset-placement path, where
     # clipId is recorded as W46 ``legacyClipId`` metadata only.
+    #
+    # Scene Creator exports are exempt from the membership check: their clipIds
+    # are invented scene_shot_* W46 provenance values, never MAGI sequence
+    # clip references (see SCENE_SHOT_CLIP_PREFIX above), so a saved NLE
+    # sequence with clips must not reject them (CDX-044).
     from .sequence.store import get_sequence, has_saved_sequence
 
     if has_saved_sequence(project_id):
@@ -126,7 +147,12 @@ def export_to_timeline(
         if saved_clips:
             known_clip_ids = {c.get("id") for c in saved_clips}
             missing_clip_ids = sorted(
-                {str(c.get("clipId")) for c in clips if c.get("clipId")} - known_clip_ids
+                {
+                    str(c.get("clipId"))
+                    for c in clips
+                    if c.get("clipId") and not _is_scene_creator_clip(c)
+                }
+                - known_clip_ids
             )
             if missing_clip_ids:
                 return {
@@ -280,6 +306,10 @@ def _record_ledger(
                 "clipId": clip.get("clipId"),
                 "w46ClipId": w46.get("id"),
                 "assetId": clip.get("assetId"),
+                # Scene Creator handoff puts prop_ids on the clip dict; W46
+                # BatchClip is frozen with no metadata dict, so persist them
+                # on the existing exportLedger sidecar (empty list if absent).
+                "prop_ids": [str(x) for x in (clip.get("prop_ids") or []) if str(x).strip()],
             }
         )
     record_export_ledger(

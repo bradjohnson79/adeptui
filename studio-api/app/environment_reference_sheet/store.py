@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -66,9 +67,28 @@ def load_sheet(project_id: str, sheet_id: str) -> EnvironmentReferenceSheet | No
         return None
 
 
+def _parse_updated_at(value: Any) -> datetime:
+    """Parse a sheet ``updatedAt`` (UTC ISO-8601, e.g. 2026-08-14T18:07:10Z).
+
+    Malformed or missing timestamps resolve to the Unix epoch so they sort as
+    the OLDEST sheets — a sheet whose age cannot be established must never be
+    selected as the "newest" fallback by downstream callers.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def list_sheets(project_id: str) -> list[EnvironmentReferenceSheet]:
     sheets: list[EnvironmentReferenceSheet] = []
-    for path in sorted(sheets_dir(project_id).glob("*.json"), reverse=True):
+    for path in sheets_dir(project_id).glob("*.json"):
         payload = _read_json(path, None)
         if not isinstance(payload, dict):
             continue
@@ -76,4 +96,13 @@ def list_sheets(project_id: str) -> list[EnvironmentReferenceSheet]:
             sheets.append(EnvironmentReferenceSheet.model_validate(payload))
         except Exception:
             continue
+    # Newest-first by parsed updatedAt (CDX-042); filename (sheetId) is the
+    # deterministic tiebreaker. Malformed timestamps sort oldest-first.
+    sheets.sort(
+        key=lambda s: (
+            _parse_updated_at(s.updatedAt).timestamp(),
+            str(getattr(s, "sheetId", "") or ""),
+        ),
+        reverse=True,
+    )
     return sheets

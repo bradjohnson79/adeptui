@@ -470,3 +470,48 @@ def test_workspace_hydrate_resolves_sheet_id() -> None:
         assert body["resolved_ers"]["runtime"] is True
     finally:
         db.close()
+
+
+def test_workspace_api_models_exclude_non_selectable(monkeypatch) -> None:
+    """CDX-080: workspace api_models must exclude adapterUnavailable rows so the
+    Cloud Generators dropdown never offers non-executable models."""
+    from app.hosted_providers import discovery as hp_discovery
+    from app.scene_creator import service as sc_service
+
+    project_id = _create_project("Api Models Filter")
+    sheet = _save_sheet(project_id)
+    rows = [
+        {
+            "id": "flux-fal",
+            "modelId": "flux-fal",
+            "label": "FLUX Kontext — fal.ai",
+            "providerId": "fal",
+            "adapterAvailable": True,
+            "executable": True,
+            "selectable": True,
+            "readiness": "Ready",
+        },
+        {
+            "id": "flux-kontext-fal",
+            "modelId": "flux-kontext-fal",
+            "label": "FLUX Kontext Pro — fal.ai",
+            "providerId": "fal",
+            "adapterAvailable": False,
+            "executable": False,
+            "selectable": False,
+            "readiness": "Requires Adapter",
+        },
+    ]
+    monkeypatch.setattr(
+        hp_discovery,
+        "dock_api_models",
+        lambda modality, scope=None: {"models": rows, "emptyReason": None, "emptyMessage": None},
+    )
+    db = _session()
+    try:
+        body = sc_service.hydrate_workspace(db, project_id)
+        ids = [str(m.get("id") or "") for m in body["api_models"]]
+        assert "flux-fal" in ids
+        assert "flux-kontext-fal" not in ids
+    finally:
+        db.close()

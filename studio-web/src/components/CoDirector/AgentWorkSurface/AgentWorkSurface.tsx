@@ -30,6 +30,24 @@ const MAX_POLL_ATTEMPTS = 80; // ~4 minutes
 /** Surface types that come from the Spatial Map workflow. */
 const SPATIAL_SURFACE_TYPES: SurfaceType[] = ["atlas_shot_generation", "ers_generation", "scene_generation"];
 
+/** Honest regenerate-failure copy: the existing look is untouched. */
+export const REGENERATE_FAILED_MESSAGE =
+  "Regeneration failed — the existing look was not changed.";
+
+/**
+ * True when the overlay's poll budget is spent while the execution is still
+ * live. The job may legitimately still be running server-side; only the
+ * overlay stopped checking. Exposed as pure logic so the honesty contract
+ * (paused, not failed) is directly testable.
+ */
+export function pollPausedFor(
+  pack: WorkSurfaceState | null,
+  pollAttempts: number,
+  maxAttempts: number = MAX_POLL_ATTEMPTS,
+): boolean {
+  return Boolean(pack && !isTerminal(pack) && pollAttempts >= maxAttempts);
+}
+
 export function AgentWorkSurface() {
   const { uiContext, activeExecution, setActiveExecution } = useCoDirectorSession();
   const projectId = uiContext.projectId || activeExecution?.project_id || "";
@@ -40,6 +58,7 @@ export function AgentWorkSurface() {
   const [cancelling, setCancelling] = useState(false);
   const [continueError, setContinueError] = useState<string | null>(null);
   const [continuing, setContinuing] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [busyFrame, setBusyFrame] = useState<number | null>(null);
 
   const buildPack = useCallback(
@@ -113,6 +132,7 @@ export function AgentWorkSurface() {
     async (idx: number) => {
       if (!projectId || !executionId || busyFrame !== null) return;
       setBusyFrame(idx);
+      setRegenerateError(null);
       try {
         const res = await api.regenerateFrame(projectId, executionId, {
           child_index: idx,
@@ -123,6 +143,7 @@ export function AgentWorkSurface() {
         setActiveExecution(updated);
       } catch (err) {
         console.error("Regenerate frame failed:", err);
+        setRegenerateError(REGENERATE_FAILED_MESSAGE);
       } finally {
         setBusyFrame(null);
       }
@@ -134,6 +155,7 @@ export function AgentWorkSurface() {
   const handleRegenerateAll = useCallback(async () => {
     if (!projectId || !executionId || !pack) return;
     const indices = pack.child_jobs.map((j) => j.child_index);
+    setRegenerateError(null);
     for (const idx of indices) {
       setBusyFrame(idx);
       try {
@@ -146,6 +168,9 @@ export function AgentWorkSurface() {
         setActiveExecution(updated);
       } catch (err) {
         console.error("Regenerate-all failed at frame", idx, err);
+        // Any failed frame leaves a visible error; a later success does not
+        // silently erase an earlier failure within the same operation.
+        setRegenerateError(REGENERATE_FAILED_MESSAGE);
       } finally {
         setBusyFrame(null);
       }
@@ -214,6 +239,7 @@ export function AgentWorkSurface() {
   const total = pack.child_jobs.length;
   const failed = pack.child_jobs.filter((c) => c.status === "failed").length;
   const nonTerminal = !isTerminal(pack);
+  const pollPaused = pollPausedFor(pack, pollAttempts);
 
   const cancelLabel = cancelling ? "Cancelling…" : pack.status === "cancelled" ? "Cancelled" : "Cancel";
 
@@ -390,6 +416,29 @@ export function AgentWorkSurface() {
           {continueError}
         </p>
       ) : null}
+
+      {regenerateError ? (
+        <p className="agent-work-surface__error-detail" role="alert" data-testid="agent-work-regenerate-error">
+          {regenerateError}
+        </p>
+      ) : null}
+
+      {pollPaused && (
+        <div className="agent-work-surface__poll-paused" role="status" data-testid="agent-work-poll-paused">
+          <span>
+            Live progress paused — generation may still be running. The overlay stopped checking so it does not
+            poll forever; the job is not marked failed.
+          </span>
+          <button
+            type="button"
+            className="ghost"
+            onClick={() => setPollAttempts(0)}
+            data-testid="agent-work-resume-poll"
+          >
+            Resume checking
+          </button>
+        </div>
+      )}
 
       {pack.error && (
         <div className="agent-work-surface__error-detail" role="alert">

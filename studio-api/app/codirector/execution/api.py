@@ -83,7 +83,7 @@ async def start_execution(project_id: str, body: StartExecutionRequest, db: Sess
         "reference_asset_id": body.reference_asset_id,
     }
 
-    plan = dispatch(db, project_id, unified_intent, ctx, pre_approved=body.pre_approved)
+    plan = await dispatch(db, project_id, unified_intent, ctx, pre_approved=body.pre_approved)
     return plan.model_dump(mode="json")
 
 
@@ -146,7 +146,7 @@ async def approve_execution(project_id: str, execution_id: str, db: Session = De
     """
     from .dispatcher import approve_and_execute as _approve
 
-    plan = _approve(db, project_id, execution_id)
+    plan = await _approve(db, project_id, execution_id)
     if not plan:
         raise HTTPException(status_code=404, detail={
             "code": "EXECUTION_NOT_FOUND",

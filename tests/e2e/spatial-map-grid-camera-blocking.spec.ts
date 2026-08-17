@@ -1,7 +1,7 @@
 /**
  * Playwright E2E — Spatial Map Cartesian precision grid + entity blocking.
  *
- * Live Beta: ADEPT_BETA_TARGET=1 → http://127.0.0.1:8760 + API :8761
+ * Topology (current Beta, AGENTS.md §15): Studio API :8758 + local Vite dev server (5173).
  *
  * A Default 10×10 Cartesian grid (no radial rings)
  * B Placement Precision −5..+5 with visible density change
@@ -19,7 +19,7 @@ import { openCoDirectorFullScreen } from "./codirector/helpers/audit";
 
 const PROJECT_PREFIX = "SPATIAL-CARTESIAN";
 const SCREENSHOT_DIR = path.join("tests", "e2e", "screenshots", "spatial-map");
-const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8761";
+const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
   "base64",

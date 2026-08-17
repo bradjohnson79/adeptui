@@ -107,6 +107,14 @@ export type ERSExportRecord = {
   createdAt?: string | null;
 };
 
+export type ERSProvenanceRecord = {
+  createdAt: string;
+  actor: string;
+  source: string;
+  note?: string | null;
+  details: Record<string, unknown>;
+};
+
 export type EnvironmentReferenceSheet = {
   schemaVersion: number;
   sheetId: string;
@@ -128,8 +136,10 @@ export type EnvironmentReferenceSheet = {
   } | null;
   continuity: ContinuityValidationReport;
   composition: ERSCompositionRecord;
+  ers_composite_asset_id?: string | null;
   registration: ERSProjectRegistration;
   exports: ERSExportRecord[];
+  provenance?: ERSProvenanceRecord | null;
 };
 
 export type EnvironmentReferenceSheetSummary = {

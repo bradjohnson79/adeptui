@@ -1173,9 +1173,11 @@ async def correct_story_summary(
 
 # --- Refine Wiki — Creator Correction -------------------------------------
 
-# In-process preview store (previewId -> CorrectionPreview). Previews are
-# short-lived and project-scoped; apply requires a prior preview (CREATOR_APPROVES).
-_CORRECTION_PREVIEWS: dict[str, Any] = {}
+# CDX-061: correction previews are persisted in the dedicated lightweight
+# 'wiki_correction_previews' table (correction.preview_store), NOT an in-process
+# dict, so an apply issued after a server restart still resolves the preview.
+# Apply still requires a prior preview (CREATOR_APPROVES); the preview is
+# single-use and consumed on apply. Storage is bounded per project + TTL.
 
 
 class WikiCorrectionPreviewBody(BaseModel):
@@ -1229,6 +1231,8 @@ async def preview_wiki_correction(
     except Exception:  # noqa: BLE001
         provider = None
 
+    from ..codirector.wiki_intelligence.correction.preview_store import save_preview
+
     preview = await classify_correction(
         db,
         project_id,
@@ -1237,7 +1241,8 @@ async def preview_wiki_correction(
         provider=provider,
         preview_id=f"prev_{uuid.uuid4().hex[:12]}",
     )
-    _CORRECTION_PREVIEWS[preview.previewId] = preview
+    # CDX-061: persist so apply survives a server restart.
+    save_preview(db, preview)
     return {"ok": True, "preview": preview.model_dump(mode="json")}
 
 
@@ -1252,8 +1257,13 @@ async def apply_wiki_correction(
 
     from ..codirector.wiki_intelligence.compiled.page_compiler import compile_wiki_bundle_async
     from ..codirector.wiki_intelligence.correction.apply import apply_correction
+    from ..codirector.wiki_intelligence.correction.preview_store import (
+        delete_preview,
+        load_preview,
+    )
 
-    preview = _CORRECTION_PREVIEWS.get(body.previewId)
+    # CDX-061: the preview is loaded from the persisted store (survives restarts).
+    preview = load_preview(db, body.previewId)
     if preview is None:
         raise HTTPException(status_code=404, detail="preview_not_found")
     if preview.projectId != project_id:
@@ -1267,7 +1277,7 @@ async def apply_wiki_correction(
     compiled = await compile_wiki_bundle_async(db, project_id, force_full=True)
     result["compiledRevision"] = compiled.get("compiledRevision")
     # Consume the preview so it cannot be applied twice.
-    _CORRECTION_PREVIEWS.pop(body.previewId, None)
+    delete_preview(db, body.previewId)
     return result
 
 

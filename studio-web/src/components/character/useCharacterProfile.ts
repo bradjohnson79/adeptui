@@ -7,24 +7,31 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { CharacterProfile, CharacterReference } from "./types";
 
+/**
+ * Resolve the character's hero identity (CDX-004). "Selected" truth is
+ * canonical + approved only. Auto-attached generation drafts
+ * (canonical=false, approval_status=draft) must NOT surface as the hero, so
+ * no fallback chain picks an unapproved row.
+ */
 export function getHeroIdentity(refs: CharacterReference[]): CharacterReference | undefined {
-  return (
-    refs.find(
-      (r) =>
-        (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") &&
-        r.canonical &&
-        r.approval_status === "approved",
-    ) ||
-    refs.find(
-      (r) =>
-        (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") && r.canonical,
-    ) ||
-    refs.find(
-      (r) =>
-        (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") &&
-        r.approval_status === "approved",
-    ) ||
-    refs.find((r) => r.reference_role === "hero_identity" || r.reference_role === "hero_portrait")
+  return refs.find(
+    (r) =>
+      (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") &&
+      r.canonical === true &&
+      r.approval_status === "approved",
+  );
+}
+
+/**
+ * Hero reference attached but NOT yet canonical+approved (pending owner
+ * review). Used to label the draft candidate "Pending review" instead of
+ * "Selected" before approval (CDX-004).
+ */
+export function getPendingHeroIdentity(refs: CharacterReference[]): CharacterReference | undefined {
+  return refs.find(
+    (r) =>
+      (r.reference_role === "hero_identity" || r.reference_role === "hero_portrait") &&
+      !(r.canonical === true && r.approval_status === "approved"),
   );
 }
 

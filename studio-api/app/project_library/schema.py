@@ -102,6 +102,7 @@ class AssetLibraryMeta:
     prop_id: Optional[str] = None
     scene_id: Optional[str] = None
     content_hash: Optional[str] = None
+    duplicate_of: Optional[str] = None
     source_job_id: Optional[str] = None
     provider_output_id: Optional[str] = None
     version: int = 1
@@ -134,6 +135,8 @@ class AssetLibraryMeta:
             payload["sceneId"] = self.scene_id
         if self.content_hash:
             payload["contentHash"] = self.content_hash
+        if self.duplicate_of:
+            payload["duplicateOf"] = self.duplicate_of
         if self.source_job_id:
             payload["sourceJobId"] = self.source_job_id
         if self.provider_output_id:
@@ -161,6 +164,7 @@ class AssetLibraryMeta:
             prop_id=data.get("propId") or data.get("prop_id"),
             scene_id=data.get("sceneId") or data.get("scene_id"),
             content_hash=data.get("contentHash") or data.get("content_hash"),
+            duplicate_of=data.get("duplicateOf") or data.get("duplicate_of"),
             source_job_id=data.get("sourceJobId") or data.get("source_job_id"),
             provider_output_id=data.get("providerOutputId") or data.get("provider_output_id"),
             version=int(data.get("version") or 1),

@@ -121,6 +121,13 @@ class ExecutionPlan(BaseModel):
     # PREVIEW phase for NEEDS_APPROVAL capabilities). Empty/null for direct execution.
     plan_data: dict[str, Any] = Field(default_factory=dict)
 
+    # Proposal bridge (CDX-084): TOOL-kind capabilities with a non-DIRECT
+    # approval policy get a durable Proposal (ProposalService) created at
+    # dispatch time; its id is recorded here so the approve endpoint / chat
+    # confirmation can execute it through the approved tool path
+    # (ProposalService.approve → execute_approved_proposal).
+    proposal_id: Optional[str] = None
+
     # Observability trace (spec §48).
     user_turn_id: Optional[str] = None
     intent: str = ""

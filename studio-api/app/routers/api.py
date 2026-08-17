@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +15,7 @@ from ..director_timeline import (
     DirectorTimeline,
     dumps_director_timeline,
     dumps_director_timeline_preserving_embedded,
+    hydrate_prompt_refs,
     migrate_scene_to_director,
     parse_director_timeline,
     sync_legacy_fields_from_director,
@@ -73,6 +76,8 @@ from ..schemas import (
     VramProfileOut,
 )
 from ..spatial import auto_tags_from_spatial, parse_spatial_map
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -931,7 +936,7 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
-    body = ensure_tags(body)
+    body = hydrate_prompt_refs(ensure_tags(body))
     # PUT_DIRECTOR_PRESERVES_MASTER: never replace the entire director_json
     # blob. Merge the incoming DirectorTimeline fields over the existing blob
     # so embedded timelineMaster / timelineWorkspace (W46 batch state) and
@@ -985,6 +990,20 @@ def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(ge
     if not video or not Path(video).exists():
         raise HTTPException(400, "Render the scene first so mouth tracking has a video to follow")
 
+    from ..director_timeline import parse_director_timeline as _parse_director
+    from ..director_timeline_w46.generation.speech_compile import (
+        LIPSYNC_SPEAKER_REQUIRED,
+        lipsync_speaker_errors,
+    )
+
+    director = _parse_director(
+        scene.director_json,
+        fallback_duration=float(scene.duration_sec or 5.0),
+        fallback_prompt=scene.prompt or "",
+    )
+    if lipsync_speaker_errors(director):
+        raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
+
     tracks = parse_lipsync_tracks(scene.lipsync_tracks_json)
     preview_dir = settings.data_dir / "projects" / project_id / "lipsync_preview"
     preview_dir.mkdir(parents=True, exist_ok=True)
@@ -1026,6 +1045,19 @@ async def apply_dual_lipsync(project_id: str, scene_id: str, db: Session = Depen
     enabled = [t for t in tracks.tracks if t.enabled]
     if not enabled:
         raise HTTPException(400, "Enable at least one lip-sync track")
+    from ..director_timeline import parse_director_timeline as _parse_director
+    from ..director_timeline_w46.generation.speech_compile import (
+        LIPSYNC_SPEAKER_REQUIRED,
+        lipsync_speaker_errors,
+    )
+
+    director = _parse_director(
+        scene.director_json,
+        fallback_duration=float(scene.duration_sec or 5.0),
+        fallback_prompt=scene.prompt or "",
+    )
+    if lipsync_speaker_errors(director):
+        raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
     for t in enabled:
         if not t.audio_asset_id:
             raise HTTPException(400, f"{t.label} needs an audio asset")
@@ -1084,6 +1116,7 @@ async def upload_asset(
     except Exception:
         comfy_name = ""
 
+    content_hash = hashlib.sha256(content).hexdigest()
     asset = Asset(
         id=asset_id,
         project_id=project_id,
@@ -1097,6 +1130,21 @@ async def upload_asset(
     project.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(asset)
+
+    # CDX-068: classify the upload into the library and flag content-hash duplicates.
+    # The upload itself is already durable - enrichment must never roll it back or
+    # delete either copy; a duplicate is flagged, never silently dropped.
+    try:
+        from ..project_library.service import assign_asset, find_duplicates_by_hash, mark_duplicate
+
+        assign_asset(db, asset, classified_by="upload")
+        duplicates = [a for a in find_duplicates_by_hash(db, project_id, content_hash) if a.id != asset.id]
+        if duplicates:
+            mark_duplicate(db, asset, duplicates[0].id)
+    except Exception as exc:  # noqa: BLE001 - enrichment must not fail the upload
+        # Enrichment failure must not fail the creator-facing upload; the asset
+        # remains stored and library repair reclassifies it later.
+        logger.warning("upload_asset enrichment skipped for %s: %s", asset_id, exc)
     return AssetOut.model_validate(asset)
 
 
@@ -1122,6 +1170,22 @@ def _delete_asset_thumbnails(asset_dir: Path, stem: str) -> None:
             pass
 
 
+def _asset_delete_block_message(usage: dict, asset) -> str:
+    """Creator-facing message naming every entity that references the asset."""
+    names = []
+    for r in usage.get("entityRefs") or []:
+        n = (r.get("entityName") or r.get("entityId") or "").strip()
+        names.append((r.get("label") or r.get("kind") or "reference") + (" (" + n + ")" if n else ""))
+    if names:
+        head = "; ".join(names[:5])
+        extra = " (+" + str(len(names) - 5) + " more)" if len(names) > 5 else ""
+        return (
+            "This asset is still referenced: " + head + extra + ". "
+            "Detach those references before deleting, or use Force Delete to remove them."
+        )
+    return "This asset is still referenced. Remove the references before deleting, or use Force Delete."
+
+
 @router.delete("/projects/{project_id}/assets/{asset_id}")
 def delete_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
     from ..scene_references import service as scene_ref_service
@@ -1136,8 +1200,11 @@ def delete_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
             "deleteBlocked": True,
             "assetId": asset_id,
             "name": asset.tag or asset.filename,
+            "message": _asset_delete_block_message(usage, asset),
             "activeBindingCount": usage["activeBindingCount"],
+            "entityRefCount": usage["entityRefCount"],
             "bindings": usage["bindings"],
+            "entityRefs": usage["entityRefs"],
         }
 
     asset_path = Path(asset.path)
@@ -1151,6 +1218,7 @@ def delete_asset(project_id: str, asset_id: str, db: Session = Depends(get_db)):
     stem = asset_path.stem
     _delete_asset_thumbnails(asset_dir, stem)
 
+    scene_ref_service.cleanup_asset_lineage(db, asset_id)
     db.delete(asset)
     project = db.get(Project, project_id)
     if project:
@@ -1177,16 +1245,22 @@ def bulk_delete_assets(project_id: str, body: dict, db: Session = Depends(get_db
                 results.append({"assetId": asset_id, "status": "failed", "name": None})
                 continue
 
-            if not force:
-                usage = scene_ref_service.asset_usage(db, project_id, asset_id)
-                if usage["deleteBlocked"]:
-                    results.append({
-                        "assetId": asset_id,
-                        "status": "blocked",
-                        "name": asset.tag or asset.filename,
-                        "activeBindingCount": usage["activeBindingCount"],
-                    })
-                    continue
+            usage = scene_ref_service.asset_usage(db, project_id, asset_id)
+            if usage["deleteBlocked"] and not force:
+                results.append({
+                    "assetId": asset_id,
+                    "status": "blocked",
+                    "name": asset.tag or asset.filename,
+                    "message": _asset_delete_block_message(usage, asset),
+                    "activeBindingCount": usage["activeBindingCount"],
+                    "entityRefCount": usage["entityRefCount"],
+                    "entityRefs": usage["entityRefs"],
+                })
+                continue
+
+            detached = []
+            if force and usage["deleteBlocked"]:
+                detached = scene_ref_service.detach_asset_references(db, project_id, asset_id)
 
             asset_path = Path(asset.path)
             if asset_path.exists():
@@ -1199,8 +1273,16 @@ def bulk_delete_assets(project_id: str, body: dict, db: Session = Depends(get_db
             stem = asset_path.stem
             _delete_asset_thumbnails(asset_dir, stem)
 
+            lineage = scene_ref_service.cleanup_asset_lineage(db, asset_id)
             db.delete(asset)
-            results.append({"assetId": asset_id, "status": "deleted", "name": asset.tag or asset.filename})
+            results.append({
+                "assetId": asset_id,
+                "status": "deleted",
+                "name": asset.tag or asset.filename,
+                "detachedReferences": detached,
+                "versionsDeleted": lineage["versionsDeleted"],
+                "edgesDeleted": lineage["edgesDeleted"],
+            })
         except Exception:
             results.append({"assetId": asset_id, "status": "failed", "name": None})
 

@@ -179,7 +179,9 @@ def save_profile(db: Session, project_id: str, profile: SpatialProfilePointers) 
     return profile
 
 
-def _pick_sheet(project_id: str, *, scene_id: str = "", sheet_id: str = "") -> Any:
+def _pick_sheet(
+    project_id: str, *, scene_id: str = "", sheet_id: str = "", map_id: str = ""
+) -> Any:
     from ..environment_reference_sheet.store import list_sheets, load_sheet
 
     wanted = (sheet_id or "").strip()
@@ -193,6 +195,16 @@ def _pick_sheet(project_id: str, *, scene_id: str = "", sheet_id: str = "") -> A
         raise SceneCreatorHandoffError(
             "Scene Creator needs an Environment Reference Sheet. Create one in Spatial Map first."
         )
+    # CDX-037: prefer the sheet bound to the ACTIVE spatial map. The map is the
+    # canonical spatial truth; a sceneId match or the newest-with-composite
+    # fallback can otherwise pick a sibling sheet from a different map that
+    # happens to be newer or share the scene id.
+    wanted_map = (map_id or "").strip()
+    if wanted_map:
+        for sheet in sheets:
+            spatial = getattr(sheet, "spatialMap", None)
+            if spatial is not None and str(getattr(spatial, "mapId", "") or "") == wanted_map:
+                return sheet
     if scene_id:
         for sheet in sheets:
             if str(getattr(sheet, "sceneId", "") or "") == scene_id:
@@ -215,12 +227,26 @@ def _character_ids_from_map(document: Any) -> list[str]:
     return ids
 
 
-def _prop_ids_from_map(document: Any) -> list[str]:
+def _prop_ids_from_map(db: Session, project_id: str, document: Any) -> list[str]:
+    """CDX-015: apply the same approved-entity rule as _placed_project_prop_ids.
+
+    Draft/deleted PropEntities must never be written into shot.prop_entity_ids.
+    Only placements whose propId resolves to a project-owned PropEntity with an
+    approved_asset_id propagate to the shot/profiles.
+    """
+    from ..spatial_map.ers_persistence import load_prop_entity_by_id
+
     ids: list[str] = []
     for row in list(getattr(document, "props", None) or []):
-        pid = str(getattr(row, "propId", "") or getattr(row, "prop_id", "") or "")
-        if pid and pid not in ids:
-            ids.append(pid)
+        pid = str(getattr(row, "propId", "") or getattr(row, "prop_id", "") or "").strip()
+        if not pid or pid in ids:
+            continue
+        entity = load_prop_entity_by_id(db, project_id, pid)
+        if entity is None:
+            continue
+        if not (entity.approved_asset_id or "").strip():
+            continue
+        ids.append(entity.id)
     return ids
 
 
@@ -275,7 +301,7 @@ def synchronize_production_handoff(
     map_scene = str(getattr(document, "sceneId", "") or "") if document else ""
 
     scene = ensure_scene_id(db, project_id, (scene_id or "").strip() or map_scene)
-    sheet = _pick_sheet(project_id, scene_id=scene.id, sheet_id=sheet_id)
+    sheet = _pick_sheet(project_id, scene_id=scene.id, sheet_id=sheet_id, map_id=map_id)
     sheet_id_resolved = str(getattr(sheet, "sheetId", "") or "")
     try:
         package, _runtime = resolve_ers_for_sheet(db, project_id, sheet_id_resolved)
@@ -288,7 +314,7 @@ def synchronize_production_handoff(
         or ""
     )
     character_ids = _character_ids_from_map(document) if document else []
-    prop_ids = _prop_ids_from_map(document) if document else []
+    prop_ids = _prop_ids_from_map(db, project_id, document) if document else []
     pack = hydrate_cinematographer(db, project_id, scene_id=scene.id)
     cameras = _camera_pointers(pack)
 

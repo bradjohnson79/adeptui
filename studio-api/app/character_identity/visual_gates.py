@@ -7,6 +7,7 @@ Character Creator never self-approves. Gates promote provenance:
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -44,16 +45,111 @@ def _get_trait(db: Session, character_id: str, key: str) -> CharacterTraitRow | 
     )
 
 
+def _generic_profile_directions(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    """Profile-derived concept directions for non-Korri characters (CDX-002).
+
+    The Korri lock strings (black twin ponytails / purple eyes / Sun Sprite
+    Elf / wild_sun_sprite) must never leak into another character's concept
+    gate. Directions are generated from the actual Character Profile fields.
+    """
+    name = (profile.get("name") or "").strip() or "this character"
+    slug = re.sub(r"[^a-z0-9]+", "-", (profile.get("slug") or "").lower()).strip("-") or "character"
+    visual = (profile.get("visual_description") or "").strip()
+    species = (profile.get("species_or_type") or "").strip()
+    age = (profile.get("apparent_age") or "").strip()
+    gender = (profile.get("gender_presentation") or "").strip()
+    hair = profile.get("hair") or {}
+    skin = profile.get("skin") or {}
+    hair_color = (hair.get("primary_color") or "").strip()
+    hair_style = (hair.get("canonical_style") or "").strip()
+    skin_tone = (skin.get("skin_tone") or "").strip()
+    traits = [x for x in (age, species, gender, hair_color, hair_style, skin_tone) if x]
+    profile_traits = "; ".join(traits) if traits else "as described in the Character Profile"
+    hair_summary = " ".join(x for x in (hair_color, hair_style) if x).strip() or "the profile's hair"
+    brief = visual or profile_traits
+    id_prefix = slug
+
+    def _distinguishing() -> list[str]:
+        return [brief, "consistent facial features, no invented identity traits"]
+
+    return [
+        {
+            "id": f"{id_prefix}-grounded",
+            "name": "Grounded Classic",
+            "emphasis": [
+                "faithful, believable everyday presence",
+                "natural pose and soft studio lighting",
+                "identity readable at a glance",
+                "minimal styling interference",
+            ],
+            "hairstyleProposal": f"Retain {hair_summary} with simple, consistent styling.",
+            "wardrobeProposal": "Wardrobe consistent with the character's role and story; no fabric/era drift.",
+            "heritageTraits": [species] if species else ["as described in the profile"],
+            "distinguishingFeatures": _distinguishing(),
+            "strengths": "Communicates the profile faithfully and grounds the character.",
+            "continuityRisks": "Must not drift from the appearance described in the Character Profile.",
+            "reason": f"Balanced concept for {name} derived from the Character Profile.",
+            "provenance": PROPOSED,
+        },
+        {
+            "id": f"{id_prefix}-cinematic",
+            "name": "Cinematic Presence",
+            "emphasis": [
+                "stronger contrast and directed lighting",
+                "slightly elevated dramatic staging",
+                "profile-faithful identity",
+                "hero-like framing",
+            ],
+            "hairstyleProposal": f"Keep {hair_summary}; style with controlled volume and motion.",
+            "wardrobeProposal": "Same wardrobe silhouette, presented with more contrast and texture detail.",
+            "heritageTraits": [species] if species else ["as described in the profile"],
+            "distinguishingFeatures": _distinguishing(),
+            "strengths": "Best for key-art and hero-frame continuity.",
+            "continuityRisks": "Lighting must not obscure identity-critical features.",
+            "reason": f"Dramatic-but-faithful concept for {name}.",
+            "provenance": PROPOSED,
+        },
+        {
+            "id": f"{id_prefix}-editorial",
+            "name": "Editorial Styling",
+            "emphasis": [
+                "stronger wardrobe/styling read",
+                "fashion-presentation energy",
+                "identity traits unchanged",
+                "clean background for silhouette",
+            ],
+            "hairstyleProposal": f"Keep {hair_summary}; arranged with an intentional editorial finish.",
+            "wardrobeProposal": "Refined styling of the profile wardrobe; no new identity elements.",
+            "heritageTraits": [species] if species else ["as described in the profile"],
+            "distinguishingFeatures": _distinguishing(),
+            "strengths": "Useful for poster/merchandising continuity.",
+            "continuityRisks": "Styling must not change hair color, eye color, or signature traits.",
+            "reason": f"Editorial concept for {name} derived from the profile.",
+            "provenance": PROPOSED,
+        },
+    ]
+
+
 def propose_visual_directions(
     db: Session,
     project_id: str,
     character_id: str,
     directions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Store ≥3 proposed visual directions for Gate 1 (concept)."""
-    service.get_profile(db, project_id, character_id)
+    """Store ≥3 proposed visual directions for Gate 1 (concept).
+
+    CDX-002: directions are profile-derived for every character. The Korri
+    lock directions are used ONLY for the actual Korri seed profile (slug
+    "korri"). The concept gate is never auto-approved here — it stays
+    AWAITING_OWNER until the owner explicitly selects a direction.
+    """
+    profile_out = service.get_profile(db, project_id, character_id)
+    profile = profile_out.model_dump()
     if not directions or len(directions) < 3:
-        directions = default_korri_directions()
+        if str(profile.get("slug") or "").lower() == "korri":
+            directions = default_korri_directions()
+        else:
+            directions = _generic_profile_directions(profile)
     payload = {
         "gate": "concept",
         "status": "AWAITING_OWNER",

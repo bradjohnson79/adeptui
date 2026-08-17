@@ -44,6 +44,34 @@ describe("persistThenOpenSceneCreator", () => {
     });
   });
 
+  it("forwards the known sheetId + sceneId + spatialMapId into the handoff payload (CDX-020/037)", async () => {
+    vi.mocked(api.sceneCreator.productionHandoff).mockResolvedValue({
+      sceneId: "scene-1",
+      sheetId: "sheet-1",
+      handoffId: "handoff-1",
+      revision: 1,
+      selectedProfileId: "handoff-1",
+      ersPackageId: "pkg-1",
+      ersLibraryAssetId: "ers-lib",
+      spatialMapId: "map-1",
+    });
+    const onGoTab = vi.fn();
+    await persistThenOpenSceneCreator({
+      projectId: "proj-1",
+      sceneId: "scene-1",
+      sheetId: "sheet-1",
+      spatialMapId: "map-1",
+      onGoTab,
+    });
+    // The backend _pick_sheet honors sheet_id first — omitting it risks the
+    // WRONG sheet on multi-map projects.
+    expect(api.sceneCreator.productionHandoff).toHaveBeenCalledWith("proj-1", {
+      scene_id: "scene-1",
+      sheet_id: "sheet-1",
+      spatial_map_id: "map-1",
+    });
+  });
+
   it("does not navigate when persist fails", async () => {
     vi.mocked(api.sceneCreator.productionHandoff).mockRejectedValue(new Error("persist failed"));
     const onGoTab = vi.fn();

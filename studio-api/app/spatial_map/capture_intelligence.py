@@ -44,6 +44,28 @@ def _finite_world_xz(x: object, z: object) -> tuple[float, float] | None:
     return None
 
 
+def _is_unplaced(placement: object) -> bool:
+    """True when no explicit grid placement coords were ever provided (CDX-025).
+
+    Unplaced characters keep the SpatialPlacement defaults x=0/z=0 with no
+    normalized grid coords (normalizedX/normalizedY are the physical authority).
+    Unplaced props store x/z as None. Both must read as "not on the grid yet"
+    instead of a placement at the world origin (0,0).
+    """
+    nx = getattr(placement, "normalizedX", None)
+    ny = getattr(placement, "normalizedY", None)
+    if nx is not None or ny is not None:
+        return False
+    x = getattr(placement, "x", None)
+    z = getattr(placement, "z", None)
+    if x is None or z is None:
+        return True
+    try:
+        return float(x) == 0.0 and float(z) == 0.0
+    except (TypeError, ValueError):
+        return True
+
+
 class SpatialCaptureGeometryError(ValueError):
     """Creator-readable Spatial Map geometry reject. Never a raw TypeError."""
 
@@ -157,6 +179,10 @@ def _spatial_visibility_clause(
     if include_characters:
         characters: Iterable[SpatialCharacterPlacement] = document.characters
         for character in characters:
+            if _is_unplaced(character):
+                # CDX-025: a character never placed on the grid keeps the
+                # default x=0/z=0 and must NOT read as standing at world origin.
+                continue
             xz = _finite_world_xz(character.x, character.z)
             if xz is None:
                 continue

@@ -16,10 +16,18 @@ VISUAL_EDIT_CANDIDATES: dict[str, list[tuple[str, str, int, int]]] = {
 REGION_EDIT_FAMILY_CAPS: dict[str, dict[str, Any]] = {
     "zimage": {"supportsInpaint": True, "supportsEditing": True, "label": "Native Inpaint"},
     "flux": {"supportsInpaint": False, "supportsEditing": True, "label": "Image Edit"},
+    "nano-banana-fal": {"supportsInpaint": False, "supportsEditing": True, "label": "Image Edit"},
     "qwen2512": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
     "qwen": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
     "illustrious": {"supportsInpaint": False, "supportsEditing": False, "label": "Unsupported"},
 }
+
+# Add-only insert path (Fal instruction edit + existing region composite).
+ADD_INSERT_FAMILY = "nano-banana-fal"
+ADD_INSERT_FAL_MODEL = "fal-ai/nano-banana-2/edit"
+ADD_INSERT_WORKFLOW = "fal:fal-ai/nano-banana-2/edit"
+ADD_INSERT_DOCK = "nano-banana-2-fal"
+ADD_INSERT_SIZE = (1280, 720)
 
 INPAINT_WORKFLOW: dict[str, tuple[str, str]] = {
     "zimage": ("zimage.inpaint", "image.inpaint"),
@@ -85,3 +93,7 @@ def generate_workflow_key(family: str) -> str | None:
 def inpaint_workflow(family: str) -> tuple[str, str] | None:
     key = normalize_family(family)
     return INPAINT_WORKFLOW.get(key)
+
+
+def is_add_insert_family(family: str) -> bool:
+    return normalize_family(family) == ADD_INSERT_FAMILY

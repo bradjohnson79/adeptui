@@ -2,6 +2,19 @@
 
 Ties deterministic classifier → semantic fallback → stage/context adjustment
 → lane selection → observability. Single entry point for the chat turn.
+
+CDX-091 (Phase 7) — INTENT CLASSIFICATION (documented transitional hybrid):
+This orchestrator deliberately stacks FOUR classifiers — deterministic
+(routing/deterministic.py), semantic LLM fallback (routing/semantic.py),
+foundation (conversation/foundation/intent.py), and the unified vocabulary
+(routing/unified_intent.py classify_intent) — as a DOCUMENTED TRANSITIONAL
+HYBRID. Consolidating them into a single classifier is ARCHITECTURAL and
+out of scope (Phase 7 master decision). The convergence property — the
+classifiers agree on EXECUTION vs non-EXECUTION over the routing corpus
+(tests/fixtures/codirector2_route_cases.json), with a frozen set of
+documented divergence exceptions (approve/reject lanes handled outside
+execution dispatch; foundation REQUEST_ACTION overriding a proposal-class
+deterministic result) — is locked by tests/test_engine_ownership.py.
 """
 
 from __future__ import annotations

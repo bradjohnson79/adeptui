@@ -108,7 +108,14 @@ export function candidateSourceLine(cand: SceneShotCandidate, shot: SceneShot | 
   const parent = (shot?.candidates || []).find((item) => item.id === cand.parent_candidate_id);
   const sourceLabel = parent?.take_label || (cand.source_preview_asset_id ? "Preview" : "");
   const model = cand.final_model_id || cand.family || "";
-  const modelLabel = model === "zimage" ? "Z-Image" : model === "flux" ? "FLUX" : model;
+  const modelLabel =
+    model === "zimage"
+      ? "Z-Image"
+      : model === "flux"
+        ? "FLUX"
+        : model === "nano-banana-fal"
+          ? "Nano Banana 2"
+          : model;
   if (cand.kind === "region_edit") {
     const op = (cand.edit_operation || "edit").replace(/^\w/, (c) => c.toUpperCase());
     return `Source: ${sourceLabel || "Preview"} · Edit: ${op}${modelLabel ? ` · Model: ${modelLabel}` : ""}`;
@@ -145,6 +152,7 @@ const FAMILY_CAPS: Record<
 > = {
   zimage: { supportsInpaint: true, supportsEditing: true, label: "Native Inpaint" },
   flux: { supportsInpaint: false, supportsEditing: true, label: "Image Edit" },
+  "nano-banana-fal": { supportsInpaint: false, supportsEditing: true, label: "Image Edit" },
   qwen2512: { supportsInpaint: false, supportsEditing: false, label: "Unsupported" },
   qwen: { supportsInpaint: false, supportsEditing: false, label: "Unsupported" },
   illustrious: { supportsInpaint: false, supportsEditing: false, label: "Unsupported" },
@@ -167,12 +175,10 @@ export function recommendOperationFamily(operation: RegionEditOperation): {
   family: string;
   label: string;
 } {
-  if (
-    operation === "modify" ||
-    operation === "replace" ||
-    operation === "add" ||
-    operation === "remove"
-  ) {
+  if (operation === "add") {
+    return { family: "nano-banana-fal", label: "Nano Banana 2" };
+  }
+  if (operation === "modify" || operation === "replace" || operation === "remove") {
     return { family: "flux", label: "FLUX" };
   }
   return { family: "zimage", label: "Z-Image" };
