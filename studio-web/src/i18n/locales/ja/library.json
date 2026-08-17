@@ -21,5 +21,12 @@
   "deleteAssetsButton": "{{count}} 件を削除",
   "untitled": "無題",
   "project": "プロジェクト",
-  "global": "グローバル"
+  "global": "グローバル",
+  "quickPreview": "クイックプレビュー",
+  "closePreview": "プレビューを閉じる",
+  "previewKind": "種類",
+  "previewFilename": "ファイル名",
+  "previewDimensions": "サイズ",
+  "previewDuration": "長さ",
+  "previewApproved": "承認済み"
 }

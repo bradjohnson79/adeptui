@@ -7,6 +7,7 @@ import {
   mediaKindForType,
   tokenAtCaret,
   type ReferenceBindingView,
+  type ReferenceTrack,
 } from "../../sceneReferences/referenceTokens";
 
 export function PromptReferenceField({
@@ -15,6 +16,9 @@ export function PromptReferenceField({
   bindings,
   maxImages,
   maxVideos,
+  track = "prompt",
+  instructionTestId,
+  placeholder,
   onTextChange,
   onTextFocus,
   onTextBlur,
@@ -27,6 +31,9 @@ export function PromptReferenceField({
   bindings: ReferenceBindingView[];
   maxImages?: number | null;
   maxVideos?: number | null;
+  track?: Extract<ReferenceTrack, "prompt" | "camera">;
+  instructionTestId?: string;
+  placeholder?: string;
   onTextChange: (next: string) => void;
   onTextFocus?: () => void;
   onTextBlur?: () => void;
@@ -51,11 +58,15 @@ export function PromptReferenceField({
       return;
     }
     const kind = resolved.media_kind || mediaKindForType(resolved.reference_type);
-    if (kind === "image" && typeof maxImages === "number" && maxImages >= 0 && counts.image >= maxImages) {
+    if (track === "camera" && kind === "image") {
+      onReject("Camera uses @ characters and * video motion references.");
+      return;
+    }
+    if (kind === "image" && typeof maxImages === "number" && maxImages > 0 && counts.image >= maxImages) {
       onReject(`This generator supports up to ${maxImages} image references for this clip.`);
       return;
     }
-    if (kind === "video" && typeof maxVideos === "number" && maxVideos >= 0 && counts.video >= maxVideos) {
+    if (kind === "video" && typeof maxVideos === "number" && maxVideos > 0 && counts.video >= maxVideos) {
       onReject(`This generator supports up to ${maxVideos} video references for this clip.`);
       return;
     }
@@ -83,20 +94,26 @@ export function PromptReferenceField({
   }, [bindings, relinkId]);
 
   return (
-    <div className="prompt-ref-field" data-testid="prompt-reference-field">
+    <div className="prompt-ref-field" data-testid={track === "camera" ? "camera-reference-field" : "prompt-reference-field"}>
       <textarea
         ref={areaRef}
-        data-testid="timeline-prompt-instruction"
+        data-testid={instructionTestId || (track === "camera" ? "timeline-camera-instruction" : "timeline-prompt-instruction")}
         value={text}
         onChange={(e) => onTextChange(e.target.value)}
         onFocus={onTextFocus}
         onBlur={onTextBlur}
       />
-      <div className="prompt-ref-field__counts" data-testid="prompt-ref-counts">
-        {typeof maxImages === "number" ? `Image refs ${counts.image} / ${maxImages}` : null}
-        {typeof maxImages === "number" && typeof maxVideos === "number" ? " · " : null}
+      <div className="prompt-ref-field__counts" data-testid={track === "camera" ? "camera-ref-counts" : "prompt-ref-counts"}>
+        {track !== "camera" && typeof maxImages === "number" ? `Image refs ${counts.image} / ${maxImages}` : null}
+        {track !== "camera" && typeof maxImages === "number" && typeof maxVideos === "number" ? " · " : null}
         {typeof maxVideos === "number" ? `Video refs ${counts.video} / ${maxVideos}` : null}
-        {counts.entity ? `${typeof maxImages === "number" || typeof maxVideos === "number" ? " · " : ""}Entities ${counts.entity}` : null}
+        {counts.entity
+          ? `${
+              (track === "camera" ? typeof maxVideos === "number" : typeof maxImages === "number" || typeof maxVideos === "number")
+                ? " · "
+                : ""
+            }Entities ${counts.entity}`
+          : null}
       </div>
       <div className="prompt-ref-field__chips" data-testid="prompt-ref-chips">
         {bindingIds.map((id) => {
@@ -147,8 +164,8 @@ export function PromptReferenceField({
       <ReferenceTokenAutocomplete
         value={draft || (caretToken ? `${caretToken.prefix}${caretToken.query}` : "")}
         bindings={bindings}
-        track="prompt"
-        placeholder="@ character  # image  * video"
+        track={track}
+        placeholder={placeholder || (track === "camera" ? "@ character  * video" : "@ character  # image  * video")}
         onChange={setDraft}
         onCommit={(binding) => void addBinding(binding, true)}
         onReject={onReject}

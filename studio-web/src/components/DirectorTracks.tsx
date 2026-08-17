@@ -94,6 +94,8 @@ export type CameraClip = {
   execution_strategy?: string | null;
   label?: string;
   preset_id?: string | null;
+  text?: string;
+  reference_binding_ids?: string[];
 };
 export type LipSyncClip = {
   id: string;
@@ -1954,10 +1956,11 @@ export function DirectorTracks({
                 </div>
               </div>
 
-              <div className={trackRowClass(shellMode)}>
+              <div className={trackRowClass(shellMode, "timeline-v2__track-row--camera")} data-testid="timeline-camera-track">
                 <TrackHeader
                   label="CAMERA"
                   labelKey="tracks.camera"
+                  testId="timeline-v2-label-camera"
                   shellMode={shellMode}
                   onAction={() => {
                     const clip: CameraClip = {
@@ -1972,6 +1975,8 @@ export function DirectorTracks({
                       blend: 0.5,
                       rig: "dolly",
                       label: "Dolly In",
+                      text: "",
+                      reference_binding_ids: [],
                     };
                     save({ ...tl, camera_clips: [...(tl.camera_clips || []), clip] });
                   }}
@@ -1998,12 +2003,14 @@ export function DirectorTracks({
                       rig: "dolly",
                       label: tag || "Preset",
                       preset_id: e.dataTransfer.getData("application/x-adept-profile"),
+                      text: "",
+                      reference_binding_ids: [],
                     };
                     save({ ...tl, camera_clips: [...(tl.camera_clips || []), clip] });
                   }}
                 >
                   {(tl.camera_clips || []).length === 0 && workspaceLayout.showEmptyHelp && (
-                    <div className="track-empty">Add camera movement notes when the shot needs motion guidance.</div>
+                    <div className="track-empty">{t("emptyCamera")}</div>
                   )}
                   {(tl.camera_clips || []).map((clip) => (
                     <TrackClipInteractive
@@ -2034,8 +2041,22 @@ export function DirectorTracks({
                       >
                         ×
                       </button>
-                      <strong>{clip.motion_type.replace(/_/g, " ")}</strong>
-                      <span>{clip.rig}</span>
+                      {shellMode ? (
+                        <>
+                          <span className="timeline-v2__clip-tokens" data-testid={`camera-token-summary-${clip.id}`}>
+                            {tokenSummary(clip.reference_binding_ids, bindings) ||
+                              clip.motion_type.replace(/_/g, " ")}
+                          </span>
+                          {tokenSummary(clip.reference_binding_ids, bindings) && (clip.text || "").trim() ? (
+                            <span className="timeline-v2__clip-instruction">{(clip.text || "").slice(0, 40)}</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <strong>{clip.motion_type.replace(/_/g, " ")}</strong>
+                          <span>{clip.rig}</span>
+                        </>
+                      )}
                       {!shellMode ? (
                         <>
                           <select

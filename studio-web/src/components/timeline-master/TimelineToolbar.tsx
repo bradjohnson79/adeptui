@@ -4,7 +4,7 @@ import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
-import { generatorOptionsFromPayload } from "../../timelineMaster/draftCapabilities";
+import { generatorOptionsFromPayload, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import { HelpTip } from "../HelpTip";
 import {
@@ -154,8 +154,13 @@ export function TimelineToolbar({
     () => (selection.kind === "batch" ? master?.batchBlocks.find((b) => b.id === selection.id) : null),
     [master, selection],
   );
-  const selectedGen = generatorOptions.find((g) => g.id === selectedBatch?.generatorId)
-    || generatorOptions.find((g) => g.id === master?.batchBlocks[0]?.generatorId);
+  const selectedGen = resolveGeneratorOption(
+    generatorOptions,
+    selectedBatch?.generatorId,
+    master?.batchBlocks[0]?.generatorId,
+    master?.sceneGeneratorId,
+    scene.engine,
+  );
   const draftAvailable = (selectedGen?.draftPathway || "none") !== "none";
   const generating = (master?.batchBlocks || []).some((b) => b.status === "Generating");
   const canStop = generating && (selectedGen?.supportsQueuedCancel || selectedGen?.supportsRunningCancel);

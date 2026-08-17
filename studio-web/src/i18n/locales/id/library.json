@@ -21,5 +21,12 @@
   "deleteAssetsButton": "Hapus {{count}} aset",
   "untitled": "Tanpa judul",
   "project": "Proyek",
-  "global": "Global"
+  "global": "Global",
+  "quickPreview": "Pratinjau cepat",
+  "closePreview": "Tutup pratinjau",
+  "previewKind": "Jenis",
+  "previewFilename": "Nama berkas",
+  "previewDimensions": "Ukuran",
+  "previewDuration": "Durasi",
+  "previewApproved": "Disetujui"
 }

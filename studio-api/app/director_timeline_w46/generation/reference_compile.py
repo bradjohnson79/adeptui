@@ -1,7 +1,8 @@
-"""Compile Prompt-clip reference bindings to canonical Library / entity IDs.
+"""Compile Prompt-clip and Camera-clip reference bindings to canonical IDs.
 
 Never put alias text into the generation prompt. Legacy Image/Video Reference
-tracks are not compiled after hydration — Prompt clips are authoritative.
+tracks are not compiled after hydration — Prompt clips remain the scene-action
+authority; Camera clips add motion-subject / motion-reference context.
 Unsupported generators keep the binding but do not consume it. Over-limit
 bindings are kept on the clip and refused at generate — never sliced or dropped.
 """
@@ -12,7 +13,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ...director_timeline import DirectorTimeline, PromptSegment, TimelineClip, _intervals_overlap
+from ...director_timeline import CameraClip, DirectorTimeline, PromptSegment, TimelineClip, _intervals_overlap
 from ..contracts import BatchBlock, TimelineVisualAnchor, _nid
 from .contracts import VideoGeneratorCapabilities
 from .registry import get_registry
@@ -115,14 +116,40 @@ def _drop_compiled_refs(batch: BatchBlock) -> None:
         for ref in (batch.references or [])
         if not (
             isinstance(ref, dict)
-            and ref.get("source") == "prompt_clip"
+            and ref.get("source") in ("prompt_clip", "camera_clip")
         )
     ]
     batch.sourceAnchors = [
         anchor
         for anchor in (batch.sourceAnchors or [])
-        if not (anchor.kind == "video" and (anchor.label or "") == "Video Reference")
+        if not (
+            anchor.kind == "video"
+            and (anchor.label or "") in ("Video Reference", "Motion Reference")
+        )
     ]
+
+
+def _overlapping_cameras(
+    timeline: DirectorTimeline,
+    window_start: float,
+    window_end: float,
+) -> list[CameraClip]:
+    length = max(0.0, float(window_end) - float(window_start))
+    return [
+        clip
+        for clip in timeline.camera_clips or []
+        if _intervals_overlap(clip.start, clip.length, window_start, length)
+    ]
+
+
+def _already_consumed(batch: BatchBlock, binding_id: str, kind: str) -> bool:
+    token = (binding_id or "").strip()
+    for ref in batch.references or []:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("bindingId") == token and ref.get("kind") == kind and ref.get("consumed"):
+            return True
+    return False
 
 
 def apply_compiled_references(
@@ -305,6 +332,130 @@ def apply_compiled_references(
                 "identityId": resolved.get("identityId"),
                 "consumed": consumed,
                 "source": "prompt_clip",
+            }
+        ]
+
+    camera_binding_ids: list[str] = []
+    for clip in _overlapping_cameras(director_timeline, window_start, end):
+        for bid in clip.reference_binding_ids or []:
+            token = (bid or "").strip()
+            if token and token not in camera_binding_ids:
+                camera_binding_ids.append(token)
+
+    for binding_id in camera_binding_ids:
+        resolved = resolve_binding_id(db, project_id, binding_id)
+        kind = (resolved.get("mediaKind") or "").lower()
+        ref_type = (resolved.get("referenceType") or "").lower()
+        is_video = kind == "video" or ref_type == "video"
+        is_entity = kind == "entity" or ref_type in ("character", "prop")
+        is_character = ref_type == "character" or (kind == "entity" and ref_type != "prop")
+
+        if resolved["broken"] and not resolved["assetId"] and not is_entity:
+            warnings.append(
+                {
+                    "code": "BROKEN_REFERENCE",
+                    "message": "Broken Reference",
+                    "bindingId": resolved["bindingId"],
+                    "source": "camera_clip",
+                }
+            )
+            batch.references = list(batch.references or []) + [
+                {
+                    "kind": kind or "video",
+                    "role": "broken_reference",
+                    "bindingId": resolved["bindingId"],
+                    "consumed": False,
+                    "source": "camera_clip",
+                    "broken": True,
+                    "voiceCoupled": False,
+                }
+            ]
+            continue
+
+        if is_video:
+            already = _already_consumed(batch, resolved["bindingId"] or "", "video")
+            consumed = bool(already or (supports_video and resolved["assetId"]))
+            if not supports_video:
+                consumed = False
+                warnings.append(
+                    {
+                        "code": "VIDEO_MOTION_REFERENCE_UNSUPPORTED",
+                        "message": "Selected generator does not support video motion references.",
+                        "bindingId": resolved["bindingId"],
+                        "assetId": resolved["assetId"],
+                        "source": "camera_clip",
+                    }
+                )
+            elif not already and video_consumed >= max_videos:
+                consumed = False
+                warnings.append(
+                    {
+                        "code": "VIDEO_MOTION_REFERENCE_OVER_LIMIT",
+                        "message": (
+                            f"This generator supports up to {max_videos} video reference(s) for this clip."
+                        ),
+                        "bindingId": resolved["bindingId"],
+                        "source": "camera_clip",
+                    }
+                )
+            if consumed and resolved["assetId"] and not already:
+                video_consumed += 1
+                if not any(a.kind == "video" and (a.assetId or "").strip() for a in (batch.sourceAnchors or [])):
+                    batch.sourceAnchors.append(
+                        TimelineVisualAnchor(
+                            id=_nid("anc_"),
+                            kind="video",
+                            assetId=str(resolved["assetId"]),
+                            label="Motion Reference",
+                            atTime=float(window_start or 0.0),
+                            strength=1.0,
+                        )
+                    )
+            batch.references = list(batch.references or []) + [
+                {
+                    "kind": "video",
+                    "role": "motion_reference",
+                    "assetId": resolved["assetId"],
+                    "bindingId": resolved["bindingId"],
+                    "consumed": bool(consumed and resolved["assetId"]),
+                    "source": "camera_clip",
+                    "voiceCoupled": False,
+                }
+            ]
+            continue
+
+        if is_entity:
+            batch.references = list(batch.references or []) + [
+                {
+                    "kind": "entity",
+                    "role": "motion_subject" if is_character else "motion_entity",
+                    "assetId": resolved["assetId"],
+                    "bindingId": resolved["bindingId"],
+                    "identityId": resolved.get("identityId"),
+                    "consumed": False,
+                    "source": "camera_clip",
+                    "voiceCoupled": False,
+                }
+            ]
+            continue
+
+        warnings.append(
+            {
+                "code": "CAMERA_IMAGE_REFERENCE_UNSUPPORTED",
+                "message": "Camera uses @ characters and * video motion references.",
+                "bindingId": resolved["bindingId"],
+                "source": "camera_clip",
+            }
+        )
+        batch.references = list(batch.references or []) + [
+            {
+                "kind": kind or "image",
+                "role": "camera_unsupported_reference",
+                "assetId": resolved["assetId"],
+                "bindingId": resolved["bindingId"],
+                "consumed": False,
+                "source": "camera_clip",
+                "voiceCoupled": False,
             }
         ]
     return warnings

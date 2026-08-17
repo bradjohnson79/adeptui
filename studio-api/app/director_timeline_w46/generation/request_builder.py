@@ -201,6 +201,44 @@ def build_timeline_generation_request(
             "fast_generation": bool(use_draft and caps.draftPathway == "local_live"),
             "aspectWarning": aspect_warning,
             "videoReferenceAssetIds": video_ids,
+            "motionSubjectIdentityId": next(
+                (
+                    str(ref.get("identityId"))
+                    for ref in (batch.references or [])
+                    if isinstance(ref, dict) and ref.get("role") == "motion_subject" and ref.get("identityId")
+                ),
+                None,
+            ),
+            "motionSubjectBindingId": next(
+                (
+                    str(ref.get("bindingId"))
+                    for ref in (batch.references or [])
+                    if isinstance(ref, dict) and ref.get("role") == "motion_subject" and ref.get("bindingId")
+                ),
+                None,
+            ),
+            "motionReferenceAssetId": next(
+                (
+                    str(ref.get("assetId"))
+                    for ref in (batch.references or [])
+                    if isinstance(ref, dict)
+                    and ref.get("role") == "motion_reference"
+                    and ref.get("consumed")
+                    and ref.get("assetId")
+                ),
+                None,
+            ),
+            "motionReferenceBindingId": next(
+                (
+                    str(ref.get("bindingId"))
+                    for ref in (batch.references or [])
+                    if isinstance(ref, dict)
+                    and ref.get("role") == "motion_reference"
+                    and ref.get("consumed")
+                    and ref.get("bindingId")
+                ),
+                None,
+            ),
         },
         fallbackAllowed=fallback_allowed,
         continuityBridgeId=bridge_id,

@@ -21,5 +21,12 @@
   "deleteAssetsButton": "Удалить {{count}}",
   "untitled": "Без названия",
   "project": "Проект",
-  "global": "Глобально"
+  "global": "Глобально",
+  "quickPreview": "Быстрый просмотр",
+  "closePreview": "Закрыть просмотр",
+  "previewKind": "Тип",
+  "previewFilename": "Имя файла",
+  "previewDimensions": "Размер",
+  "previewDuration": "Длительность",
+  "previewApproved": "Одобрено"
 }

@@ -997,7 +997,7 @@ def run_preflight(
                         batchBlockId=batch.id,
                         fixProposal=(
                             "Keep the stored references. Switch back to a generator that supports them, "
-                            "or remove extra Prompt reference chips."
+                            "or remove extra Prompt or Camera reference chips."
                         ),
                     )
                 )

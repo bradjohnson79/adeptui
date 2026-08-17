@@ -21,5 +21,12 @@
   "deleteAssetsButton": "{{count}} اثاثے حذف کریں",
   "untitled": "بلا عنوان",
   "project": "پروجیکٹ",
-  "global": "عالمی"
+  "global": "عالمی",
+  "quickPreview": "فوری پیش نظارہ",
+  "closePreview": "پیش نظارہ بند کریں",
+  "previewKind": "قسم",
+  "previewFilename": "فائل کا نام",
+  "previewDimensions": "سائز",
+  "previewDuration": "دورانیہ",
+  "previewApproved": "منظور شدہ"
 }

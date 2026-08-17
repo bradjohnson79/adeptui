@@ -21,5 +21,12 @@
   "deleteAssetsButton": "حذف {{count}} أصول",
   "untitled": "بدون عنوان",
   "project": "المشروع",
-  "global": "عام"
+  "global": "عام",
+  "quickPreview": "معاينة سريعة",
+  "closePreview": "إغلاق المعاينة",
+  "previewKind": "النوع",
+  "previewFilename": "اسم الملف",
+  "previewDimensions": "الأبعاد",
+  "previewDuration": "المدة",
+  "previewApproved": "معتمد"
 }

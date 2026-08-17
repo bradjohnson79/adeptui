@@ -6,6 +6,7 @@ import {
   formatAutocompleteRow,
   parseTokenQuery,
   sanitizeAlias,
+  sortBindingsForTrack,
   tokenSummary,
 } from "./referenceTokens.ts";
 
@@ -66,6 +67,10 @@ test("wrong type is rejected per track", () => {
   assert.equal(bindingAcceptedOnTrack(image, "imageReference"), true);
   assert.equal(bindingAcceptedOnTrack(video, "prompt"), true);
   assert.equal(bindingAcceptedOnTrack(image, "prompt"), true);
+  assert.equal(bindingAcceptedOnTrack(video, "camera"), true);
+  assert.equal(bindingAcceptedOnTrack(image, "camera"), false);
+  assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "character", alias: "Korri" }, "camera"), true);
+  assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "prop", alias: "Cup" }, "camera"), true);
   assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "character", alias: "Korri" }, "lipsyncSpeaker"), true);
   assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "prop", alias: "Cup" }, "lipsyncSpeaker"), false);
   assert.equal(parseTokenQuery("*Kor").prefix, "*");
@@ -87,4 +92,30 @@ test("token summary stays compact and flags missing bindings", () => {
     reference_type: "image",
   };
   assert.equal(tokenSummary(["k", "b", "missing", "x", "y"], [korri, bar]), "@Korri #Bar Broken Reference +2");
+});
+
+test("camera autocomplete lists characters before videos", () => {
+  const video = {
+    id: "v",
+    asset_id: "vid",
+    alias: "Macarena",
+    media_kind: "video" as const,
+    reference_type: "video",
+  };
+  const korri = {
+    id: "k",
+    asset_id: "ak",
+    alias: "Korri",
+    media_kind: "entity" as const,
+    reference_type: "character",
+  };
+  const cup = {
+    id: "p",
+    asset_id: "ap",
+    alias: "Cup",
+    media_kind: "entity" as const,
+    reference_type: "prop",
+  };
+  const sorted = sortBindingsForTrack([video, cup, korri], "camera");
+  assert.deepEqual(sorted.map((item) => item.alias), ["Korri", "Cup", "Macarena"]);
 });

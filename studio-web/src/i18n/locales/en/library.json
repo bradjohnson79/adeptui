@@ -21,5 +21,12 @@
   "deleteAsset_one": "Delete {{count}} asset?",
   "deleteAsset_other": "Delete {{count}} assets?",
   "deleteAssetsButton": "Delete {{count}} Assets",
-  "untitled": "Untitled"
+  "untitled": "Untitled",
+  "quickPreview": "Quick Preview",
+  "closePreview": "Close preview",
+  "previewKind": "Type",
+  "previewFilename": "Filename",
+  "previewDimensions": "Size",
+  "previewDuration": "Duration",
+  "previewApproved": "Approved"
 }

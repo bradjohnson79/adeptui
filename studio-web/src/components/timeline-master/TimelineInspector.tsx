@@ -39,6 +39,8 @@ import {
   draftPathwayCopy,
   generatorOptionsFromPayload,
   promoteCopy,
+  resolveGeneratorOption,
+  supportsVideoMotionReferences,
   type TimelineGeneratorOption,
 } from "../../timelineMaster/draftCapabilities";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
@@ -307,21 +309,36 @@ export function TimelineInspector({
   );
   const selectedGenerator = useMemo(
     () =>
-      generatorOptions.find((g) => g.id === selectedBatch?.generatorId) ||
-      generatorOptions.find((g) => g.id === master?.batchBlocks[0]?.generatorId) ||
-      null,
-    [generatorOptions, master?.batchBlocks, selectedBatch?.generatorId],
+      resolveGeneratorOption(
+        generatorOptions,
+        selectedBatch?.generatorId,
+        master?.batchBlocks[0]?.generatorId,
+        master?.sceneGeneratorId,
+        scene.engine,
+      ),
+    [generatorOptions, master?.batchBlocks, master?.sceneGeneratorId, scene.engine, selectedBatch?.generatorId],
   );
   const draftPathway = selectedGenerator?.draftPathway || "none";
   const draftAvailable = draftPathway !== "none";
   const promptBindingCounts = useMemo(() => {
-    const ids = (timeline?.prompt_segments || []).flatMap((seg) => seg.reference_binding_ids || []);
+    const ids = [
+      ...(timeline?.prompt_segments || []).flatMap((seg) => seg.reference_binding_ids || []),
+      ...(timeline?.camera_clips || []).flatMap((clip) => clip.reference_binding_ids || []),
+    ];
     return countBindingsByKind(ids, bindings);
-  }, [bindings, timeline?.prompt_segments]);
+  }, [bindings, timeline?.camera_clips, timeline?.prompt_segments]);
+  const cameraBindingCounts = useMemo(
+    () => countBindingsByKind(selectedCamera?.reference_binding_ids || [], bindings),
+    [bindings, selectedCamera?.reference_binding_ids],
+  );
+  const videoMotionSupported = supportsVideoMotionReferences(selectedGenerator);
   const videoRefBlocked = Boolean(
     selectedGenerator &&
-      ((promptBindingCounts.video > 0 && !selectedGenerator.supportsVideoReferences) ||
-        promptBindingCounts.video > (selectedGenerator.maximumReferenceVideos || 0)),
+      promptBindingCounts.video > 0 &&
+      (!videoMotionSupported || promptBindingCounts.video > selectedGenerator.maximumReferenceVideos),
+  );
+  const cameraVideoUnsupported = Boolean(
+    selectedGenerator && cameraBindingCounts.video > 0 && !videoMotionSupported,
   );
   const imageRefBlocked = Boolean(
     selectedGenerator && promptBindingCounts.image > (selectedGenerator.maximumReferenceImages || 0),
@@ -489,6 +506,20 @@ export function TimelineInspector({
       camera_clips: (current.camera_clips || []).map((item) => (item.id === clip.id ? { ...item, ...patch } : item)),
     }));
   };
+
+  const persistCameraText = useCallback(
+    async (text: string) => {
+      if (!selectedCamera) return;
+      await updateCamera(selectedCamera, { text });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedCamera?.id],
+  );
+
+  const cameraTextField = useDraftField(selectedCamera?.text || "", persistCameraText, {
+    identity: `camera-text-${selectedCamera?.id || "none"}`,
+    idleMs: 400,
+  });
 
   const updateLipSyncTrack = async (track: LipSyncTrack, patch: Partial<LipSyncTrack>) => {
     await mutateTimeline((current) => {
@@ -908,6 +939,34 @@ export function TimelineInspector({
         <div className="timeline-inspector__stack">
           <label className="field"><span>Start</span><input type="number" value={selectedCamera.start} step={0.1} onChange={(e) => void updateCamera(selectedCamera, { start: Number(e.target.value) || 0 })} /></label>
           <label className="field"><span>Length</span><input type="number" value={selectedCamera.length} step={0.1} onChange={(e) => void updateCamera(selectedCamera, { length: Number(e.target.value) || 1 })} /></label>
+          <label className="field">
+            <span>{t("cameraMotionInstruction")}</span>
+            <PromptReferenceField
+              text={cameraTextField.value}
+              bindingIds={selectedCamera.reference_binding_ids || []}
+              bindings={bindings}
+              maxVideos={selectedGenerator?.maximumReferenceVideos}
+              track="camera"
+              placeholder="@ character  * video"
+              onTextChange={(next) => cameraTextField.onChange(next)}
+              onTextFocus={cameraTextField.onFocus}
+              onTextBlur={cameraTextField.onBlur}
+              onBindingsChange={(ids) => void updateCamera(selectedCamera, { reference_binding_ids: ids })}
+              onReject={setTokenError}
+              ensureBinding={ensureBinding}
+            />
+            <p className="scene-meta">{t("cameraVsTimedPrompt")}</p>
+            {tokenError ? (
+              <p className="scene-meta" data-testid="timeline-reference-type-error">
+                {tokenError}
+              </p>
+            ) : null}
+            {cameraVideoUnsupported ? (
+              <p className="scene-meta" data-testid="camera-ref-capability-warning">
+                {t("videoMotionUnsupported")}
+              </p>
+            ) : null}
+          </label>
           <label className="field">
             <span className="timeline-inspector__label">
               Motion

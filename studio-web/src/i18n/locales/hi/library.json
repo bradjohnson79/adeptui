@@ -21,5 +21,12 @@
   "deleteAssetsButton": "{{count}} एसेट हटाएँ",
   "untitled": "शीर्षकहीन",
   "project": "प्रोजेक्ट",
-  "global": "ग्लोबल"
+  "global": "ग्लोबल",
+  "quickPreview": "त्वरित पूर्वावलोकन",
+  "closePreview": "पूर्वावलोकन बंद करें",
+  "previewKind": "प्रकार",
+  "previewFilename": "फ़ाइल नाम",
+  "previewDimensions": "आकार",
+  "previewDuration": "अवधि",
+  "previewApproved": "स्वीकृत"
 }

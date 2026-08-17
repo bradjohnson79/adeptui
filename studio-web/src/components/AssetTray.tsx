@@ -11,6 +11,8 @@ import {
   type ContinuityLock,
 } from "../directorSelection";
 import { isTimelineMediaAsset, normalizeTimelineMediaKind } from "../timelineMediaTypes";
+import { LibraryQuickPreviewModal } from "./library/LibraryQuickPreviewModal";
+import { eventFromActionControl, isQuickPreviewKind } from "./library/libraryQuickPreview";
 
 export function AssetTray({
   project,
@@ -33,6 +35,7 @@ export function AssetTray({
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const [search, setSearch] = useState("");
+  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const upload = async (files: FileList | null, kind: string) => {
@@ -146,7 +149,7 @@ export function AssetTray({
       </div>
       <div className="section-label">Library</div>
       <p className="scene-meta" style={{ marginTop: 0 }}>
-        Click any item to preview it in the Preview Monitor.
+        {t("timeline:libraryPreviewHint")}
       </p>
       <div className="asset-list" data-testid="asset-library-list">
         {filtered.length === 0 && <div className="empty">No assets yet</div>}
@@ -164,6 +167,13 @@ export function AssetTray({
               aria-pressed={selected}
               aria-label={`Preview ${a.tag || a.filename}`}
               onClick={() => onSelectAsset?.(a)}
+              onDoubleClick={(e) => {
+                if (eventFromActionControl(e.target)) return;
+                const kind = normalizeTimelineMediaKind(a.kind, a.filename);
+                if (!isQuickPreviewKind(kind)) return;
+                e.preventDefault();
+                setPreviewAsset({ ...a, kind });
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
@@ -186,7 +196,11 @@ export function AssetTray({
                 <div className="scene-meta">{a.filename}</div>
                 <div className="scene-meta">{a.kind}</div>
               </div>
-              <div className="asset-item__actions" onClick={(e) => e.stopPropagation()}>
+              <div
+                className="asset-item__actions"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
                 <button
                   type="button"
                   className="ghost"
@@ -216,6 +230,7 @@ export function AssetTray({
           );
         })}
       </div>
+      <LibraryQuickPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} />
     </div>
   );
 }

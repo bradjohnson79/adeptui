@@ -21,5 +21,12 @@
   "deleteAssetsButton": "{{count}} অ্যাসেট মুছুন",
   "untitled": "শিরোনামহীন",
   "project": "প্রকল্প",
-  "global": "গ্লোবাল"
+  "global": "গ্লোবাল",
+  "quickPreview": "দ্রুত প্রিভিউ",
+  "closePreview": "প্রিভিউ বন্ধ করুন",
+  "previewKind": "ধরন",
+  "previewFilename": "ফাইলের নাম",
+  "previewDimensions": "আকার",
+  "previewDuration": "সময়কাল",
+  "previewApproved": "অনুমোদিত"
 }

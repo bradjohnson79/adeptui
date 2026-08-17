@@ -21,5 +21,12 @@
   "deleteAssetsButton": "Supprimer {{count}} fichiers",
   "untitled": "Sans titre",
   "project": "Projet",
-  "global": "Global"
+  "global": "Global",
+  "quickPreview": "Aperçu rapide",
+  "closePreview": "Fermer l’aperçu",
+  "previewKind": "Type",
+  "previewFilename": "Nom de fichier",
+  "previewDimensions": "Taille",
+  "previewDuration": "Durée",
+  "previewApproved": "Approuvé"
 }

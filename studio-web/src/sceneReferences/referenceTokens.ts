@@ -97,17 +97,37 @@ export function formatAutocompleteRow(
   return `${token} · ${type}`;
 }
 
+export type ReferenceTrack = "imageReference" | "videoReference" | "prompt" | "lipsyncSpeaker" | "camera";
+
 export function bindingAcceptedOnTrack(
   binding: ReferenceBindingView,
-  track: "imageReference" | "videoReference" | "prompt" | "lipsyncSpeaker",
+  track: ReferenceTrack,
 ): boolean {
   const kind = binding.media_kind || mediaKindForType(binding.reference_type);
   if (track === "videoReference") return kind === "video";
   if (track === "lipsyncSpeaker") {
     return kind === "entity" && binding.reference_type !== "prop";
   }
+  if (track === "camera") {
+    return kind === "video" || kind === "entity";
+  }
   if (track === "prompt") return Boolean(binding.id) && !String(binding.id).startsWith("character:");
   return kind === "image" || kind === "entity";
+}
+
+export function sortBindingsForTrack(
+  bindings: ReferenceBindingView[],
+  track: ReferenceTrack,
+): ReferenceBindingView[] {
+  if (track !== "camera") return bindings;
+  const rank = (binding: ReferenceBindingView) => {
+    if (binding.reference_type === "character") return 0;
+    const kind = binding.media_kind || mediaKindForType(binding.reference_type);
+    if (kind === "entity") return 1;
+    if (kind === "video") return 2;
+    return 3;
+  };
+  return [...bindings].sort((a, b) => rank(a) - rank(b));
 }
 
 export function isRealBindingId(id: string | null | undefined): boolean {

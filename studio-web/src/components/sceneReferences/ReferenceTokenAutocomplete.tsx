@@ -4,7 +4,9 @@ import {
   formatAutocompleteRow,
   parseTokenQuery,
   prefixForMediaKind,
+  sortBindingsForTrack,
   type ReferenceBindingView,
+  type ReferenceTrack,
 } from "../../sceneReferences/referenceTokens";
 
 export function ReferenceTokenAutocomplete({
@@ -18,7 +20,7 @@ export function ReferenceTokenAutocomplete({
 }: {
   value: string;
   bindings: ReferenceBindingView[];
-  track: "imageReference" | "videoReference" | "prompt" | "lipsyncSpeaker";
+  track: ReferenceTrack;
   onChange: (next: string) => void;
   onCommit: (binding: ReferenceBindingView) => void;
   onReject: (message: string) => void;
@@ -28,18 +30,21 @@ export function ReferenceTokenAutocomplete({
   const parsed = parseTokenQuery(value);
   const rows = useMemo(() => {
     const q = parsed.query.toLowerCase();
-    return bindings.filter((binding) => {
+    const filtered = bindings.filter((binding) => {
       if (track === "prompt" && String(binding.id || "").startsWith("character:")) return false;
       if (track === "lipsyncSpeaker" && !bindingAcceptedOnTrack(binding, "lipsyncSpeaker")) return false;
+      if (track === "camera" && !bindingAcceptedOnTrack(binding, "camera")) return false;
       const prefix = prefixForMediaKind(binding.media_kind);
       if (parsed.prefix && prefix !== parsed.prefix) return false;
       if (track === "lipsyncSpeaker" && parsed.prefix && parsed.prefix !== "@") return false;
-      if (!q) return Boolean(parsed.prefix) || track === "lipsyncSpeaker";
+      if (track === "camera" && parsed.prefix === "#") return false;
+      if (!q) return Boolean(parsed.prefix) || track === "lipsyncSpeaker" || track === "camera";
       const alias = (binding.alias || binding.asset_name || "").toLowerCase();
       const token = (binding.display_token || "").toLowerCase();
       return alias.includes(q) || token.includes(q);
     });
-  }, [bindings, parsed.prefix, parsed.query]);
+    return sortBindingsForTrack(filtered, track);
+  }, [bindings, parsed.prefix, parsed.query, track]);
 
   const commit = (binding: ReferenceBindingView) => {
     if (!bindingAcceptedOnTrack(binding, track)) {
@@ -48,9 +53,11 @@ export function ReferenceTokenAutocomplete({
           ? "Video Reference only accepts * video tokens."
           : track === "lipsyncSpeaker"
             ? "Lip Sync only accepts @ character tokens."
-            : track === "prompt"
-              ? "Pick a named reference from this project's References."
-              : "Image Reference only accepts # image or @ character/prop tokens.",
+            : track === "camera"
+              ? "Camera uses @ characters and * video motion references."
+              : track === "prompt"
+                ? "Pick a named reference from this project's References."
+                : "Image Reference only accepts # image or @ character/prop tokens.",
       );
       return;
     }
@@ -68,9 +75,11 @@ export function ReferenceTokenAutocomplete({
             ? "Video reference token"
             : track === "lipsyncSpeaker"
               ? "Lip Sync character"
-              : track === "prompt"
-                ? "Prompt reference token"
-                : "Image reference token"
+              : track === "camera"
+                ? "Camera motion reference"
+                : track === "prompt"
+                  ? "Prompt reference token"
+                  : "Image reference token"
         }
         dir="auto"
         data-testid={`ref-token-input-${track}`}

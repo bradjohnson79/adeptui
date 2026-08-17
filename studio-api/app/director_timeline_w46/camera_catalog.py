@@ -678,6 +678,8 @@ def describe_camera_clip(clip: Any) -> dict[str, Any]:
             "intensity": getattr(clip, "intensity", None),
             "subjectLock": getattr(clip, "subject_lock", None),
         },
+        "text": getattr(clip, "text", None) or "",
+        "referenceBindingIds": list(getattr(clip, "reference_binding_ids", None) or []),
     }
 
 

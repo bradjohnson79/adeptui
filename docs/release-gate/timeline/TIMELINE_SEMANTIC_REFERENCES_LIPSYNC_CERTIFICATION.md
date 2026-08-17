@@ -94,3 +94,67 @@ Live GET director on Schnick scene `e4550745-f0ef-44c8-99a5-ef9e20bd47d2`: `prom
 1. Open Schnick Coffee Timeline at `http://127.0.0.1:8760/`.
 2. Confirm no Image/Video Reference lanes; Prompt chips use `@/#/*`; Lip Sync requires a character speaker.
 3. Hot Keys tab: capture, Save, reload, Reset. Typing in Prompt must not fire Generate.
+
+## Camera Motion References + Library Quick Preview
+
+**Date:** 2026-08-17  
+**Reusable modal:** `studio-web/src/components/library/LibraryQuickPreviewModal.tsx` (wired from `AssetTray`)  
+**Local bundle:** `studio-web/dist/assets/index-DiLl2NAu.js` + `index-BuXk_7P_.css` served at `http://127.0.0.1:8760/`
+
+Camera clips persist `text` + `reference_binding_ids` and compile `@` as motion subject and `*` as motion reference. Timed Prompt stays scene-action. No Video Reference track. Voice is not coupled. Library double-click opens a read-only Quick Preview for image/video/audio.
+
+### Camera + Quick Preview verdict
+
+`GO — TIMELINE CAMERA MOTION + LIBRARY QUICK PREVIEW CERTIFIED END TO END`
+
+Independent visual: `VERIFIED — TIMELINE CAMERA MOTION REFERENCES + LIBRARY QUICK PREVIEW PASSED`
+
+### Wiring
+
+| Control | Result | Evidence |
+| --- | --- | --- |
+| Camera `@` / `*` autocomplete | PASS unit + Playwright | `bindingAcceptedOnTrack(..., "camera")`; characters sort first; Schnick `@Korri` then `*KorriPoseVideo` |
+| Camera stores binding IDs | PASS unit + Playwright | `test_timeline_camera_motion_refs.py`; director `reference_binding_ids` keep Korri + video IDs |
+| Alias rename keeps video asset | PASS Playwright | `*KorriPoseVideo` → `*KorriDanceMotion`; same binding + `asset_id` after reload |
+| Unsupported generator honesty | PASS unit + Playwright | MiniMax alias `minimax-h3` resolves to T2V caps; `camera-ref-capability-warning`; IDs kept |
+| No voice coupling | PASS unit | `compile_speech_windows` stays `speechKind=none` |
+| Shared video capacity | PASS unit | one sourceAnchor when Prompt + Camera share a video |
+| Quick Preview helpers | PASS unit + Playwright | image/video/audio modal; X + Esc; action-button dblclick does not open |
+| Locale parity | PASS | `packParity.test.ts` **3 passed** |
+| Generator alias resolve | PASS unit | `draftCapabilities.test.ts` maps `minimax-h3` → `minimax-h3-t2v-local` |
+
+### Unit / build evidence
+
+- `studio-api`: `python -m pytest tests/test_timeline_camera_motion_refs.py tests/test_timeline_prompt_refs_speech.py -q` → **15 passed** in 0.81s
+- `studio-web`: `node --test src/timelineMaster/draftCapabilities.test.ts src/sceneReferences/referenceTokens.test.ts src/components/library/libraryQuickPreview.test.ts` → **11 passed**
+- `studio-web`: `vitest run src/i18n/packParity.test.ts` → **3 passed**
+- Production web build: `tsc -b && vite build` → `index-DiLl2NAu.js`
+
+### Playwright (authoritative live run)
+
+```
+npm run test:e2e:beta -- tests/e2e/timeline/timeline-camera-motion-library-preview.spec.ts --project=chromium --retries=0
+```
+
+**2 passed (8.4s)** against UI `http://127.0.0.1:8760/` API `http://127.0.0.1:8758` `ADEPT_BETA_TARGET=1`. Schnick only. No `POST /api/projects`.
+
+1. Camera `@`/`*` store canonical IDs, rename keeps the video, MiniMax warns honestly — **5.5s**
+2. Library double-click Quick Preview for image, video, and audio; action button does not open modal — **2.4s**
+
+### E2E TRACE (this increment)
+
+| Stage | Result |
+| --- | --- |
+| User action | PASS (Camera tokens, Library double-click) |
+| Frontend | PASS `index-DiLl2NAu.js` |
+| API | PASS `/api/health` 200 during the 2-test run |
+| Backend | PASS camera compile + speech isolation units |
+| Persistence | PASS Camera `reference_binding_ids` + alias rename after reload |
+| Runtime | N/A (compile / preflight inspection; no GPU generate) |
+| Result | PASS warning + modal; bindings not dropped |
+| Reload | PASS renamed alias, same video asset |
+| Downstream | PASS no Timeline/Library mutation from Quick Preview |
+
+### Out of scope kept
+
+No new reference store, no Video/Camera Reference track, no motion sliders, no Library mutation, no document preview.

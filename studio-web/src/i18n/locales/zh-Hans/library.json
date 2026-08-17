@@ -21,5 +21,12 @@
   "deleteAssetsButton": "删除 {{count}} 个素材",
   "untitled": "未命名",
   "project": "项目",
-  "global": "全局"
+  "global": "全局",
+  "quickPreview": "快速预览",
+  "closePreview": "关闭预览",
+  "previewKind": "类型",
+  "previewFilename": "文件名",
+  "previewDimensions": "尺寸",
+  "previewDuration": "时长",
+  "previewApproved": "已批准"
 }

@@ -110,6 +110,9 @@ class CameraClip(BaseModel):
     execution_strategy: Optional[str] = None
     label: str = ""
     preset_id: Optional[str] = None
+    # Cinematography / motion-control instruction. Alias tokens are display-only.
+    text: str = ""
+    reference_binding_ids: list[str] = Field(default_factory=list)
 
 
 class DirectorTimeline(BaseModel):
@@ -181,11 +184,15 @@ def camera_prompt_hint(clips: list[CameraClip]) -> str:
             extras.append(f"subject lock {c.subject_lock:.2f}")
         if c.stabilization:
             extras.append(f"stabilization {c.stabilization}")
-        bits.append(
+        instruction = (getattr(c, "text", None) or "").strip()
+        bit = (
             f"{motion_label} on {rig_label} "
             f"(speed {c.speed:.2f}, distance {c.distance:.2f}, ease {c.ease}, shake {c.shake:.2f}"
             f"{', ' + ', '.join(extras) if extras else ''})"
         )
+        if instruction:
+            bit = f"{bit}; {instruction}"
+        bits.append(bit)
     return "Camera: " + "; ".join(bits)
 
 
