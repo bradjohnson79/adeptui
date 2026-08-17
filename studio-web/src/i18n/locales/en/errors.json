@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "Model knowledge is unavailable for the selected model.",
   "translationFailed": "Translation failed. Original text was preserved.",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "Enter a creator prompt first.",
+  "wrongReferenceType": "That file type cannot be used on this track.",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "Technical detail"
 }

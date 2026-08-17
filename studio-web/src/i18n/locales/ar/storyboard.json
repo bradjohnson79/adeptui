@@ -1,0 +1,18 @@
+{
+  "title": "استوديو لوحة القصة",
+  "library": "المكتبة",
+  "addReference": "إضافة مرجع",
+  "generateMissing": "إنشاء اللوحات الناقصة",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "إنشاء لوحة قصة 2K",
+  "exportPdf": "تصدير PDF",
+  "exportJson": "تصدير JSON",
+  "contactSheet": "ورقة اتصال",
+  "prepareTimeline": "تجهيز للخط الزمني",
+  "replace": "استبدال",
+  "remove": "إزالة",
+  "captions": "التعليقات",
+  "page": "صفحة",
+  "previousPage": "الصفحة السابقة",
+  "nextPage": "الصفحة التالية"
+}

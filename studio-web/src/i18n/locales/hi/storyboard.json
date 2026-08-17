@@ -1,0 +1,18 @@
+{
+  "title": "स्टोरीबोर्ड स्टूडियो",
+  "library": "लाइब्रेरी",
+  "addReference": "संदर्भ जोड़ें",
+  "generateMissing": "गायब पैनल जनरेट करें",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "2K स्टोरीबोर्ड जनरेट करें",
+  "exportPdf": "PDF निर्यात",
+  "exportJson": "JSON निर्यात",
+  "contactSheet": "संपर्क शीट",
+  "prepareTimeline": "टाइमलाइन के लिए तैयार करें",
+  "replace": "बदलें",
+  "remove": "हटाएँ",
+  "captions": "कैप्शन",
+  "page": "पृष्ठ",
+  "previousPage": "पिछला पृष्ठ",
+  "nextPage": "अगला पृष्ठ"
+}

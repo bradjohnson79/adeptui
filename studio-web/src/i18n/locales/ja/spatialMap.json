@@ -1,0 +1,10 @@
+{
+  "title": "空間マップ",
+  "continue": "続ける",
+  "place": "配置",
+  "camera": "カメラ",
+  "ers": "環境リファレンスシート",
+  "generateErs": "環境ビューを生成",
+  "resetLayout": "レイアウトをリセット",
+  "loading": "空間マップを読み込み中…"
+}

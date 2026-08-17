@@ -3,6 +3,7 @@
  * Express stays the Co-Director stack. Standard is a Production shell over the same blocks.
  */
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { CHARACTER_STYLE_OPTIONS } from "../../character/types";
 import { GeneratorPlanPanel } from "../../generators/GeneratorPlanPanel";
@@ -21,9 +22,10 @@ export type PropCreatorCoreProps = {
 };
 
 export function PropCreatorCore({ projectId, variant }: PropCreatorCoreProps) {
+  const { t } = useTranslation("propCreator");
   const pc = usePropCreator(projectId);
   if (pc.loading) {
-    return <p className="muted" data-testid="prop-creator-loading">Loading Prop Creator…</p>;
+    return <p className="muted" data-testid="prop-creator-loading">{t("loading")}</p>;
   }
   if (variant === "standard") {
     return <StandardLayout projectId={projectId} pc={pc} />;
@@ -392,6 +394,7 @@ function ActionsBlock({
   pc: ReturnType<typeof usePropCreator>;
   usage?: PropUsageCounts | null;
 }) {
+  const { t } = useTranslation(["propCreator", "common"]);
   const progress = plannedProgress(pc.prop?.candidates || [], plannedCandidateCount(pc.plan));
   const blockReason = propGenerateBlockReason({
     name: pc.name,
@@ -433,10 +436,10 @@ function ActionsBlock({
           title={blockReason || undefined}
           onClick={() => void pc.generate()}
         >
-          {pc.generating ? "Generating…" : "Generate Prop Images"}
+          {pc.generating ? t("propCreator:generating") : t("propCreator:generateImages")}
         </button>
         <button type="button" className="ghost" data-testid="prop-creator-save" disabled={pc.busy || !pc.name.trim()} onClick={() => void pc.save()}>
-          Save
+          {t("propCreator:save")}
         </button>
         <button type="button" className="ghost" data-testid="prop-creator-reset" onClick={() => pc.reset()}>
           Reset

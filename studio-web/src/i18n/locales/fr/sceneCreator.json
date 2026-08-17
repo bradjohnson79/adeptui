@@ -1,0 +1,18 @@
+{
+  "title": "Créateur de scènes",
+  "scenes": "Scènes",
+  "shots": "Plans",
+  "newShot": "Nouveau plan",
+  "spatialProfile": "Profil spatial",
+  "resetWorkspace": "Réinitialiser l’espace de travail",
+  "resetLayout": "Réinitialiser la disposition",
+  "cameraOrientation": "Orientation caméra 3D",
+  "inpaint": "Inpaint / édition de région",
+  "lowResPreview": "Générer un aperçu basse résolution",
+  "finalQuality": "Rendu qualité finale",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Approuver",
+  "deleteShot": "Delete shot"
+}

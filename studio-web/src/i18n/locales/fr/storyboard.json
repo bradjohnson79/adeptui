@@ -1,0 +1,18 @@
+{
+  "title": "Studio storyboard",
+  "library": "Bibliothèque",
+  "addReference": "Ajouter une référence",
+  "generateMissing": "Générer les cases manquantes",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "Générer le storyboard 2K",
+  "exportPdf": "Exporter PDF",
+  "exportJson": "Exporter JSON",
+  "contactSheet": "Planche contact",
+  "prepareTimeline": "Préparer pour la timeline",
+  "replace": "Remplacer",
+  "remove": "Retirer",
+  "captions": "Légendes",
+  "page": "Page",
+  "previousPage": "Page précédente",
+  "nextPage": "Page suivante"
+}

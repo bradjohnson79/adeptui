@@ -1,0 +1,18 @@
+{
+  "title": "منشئ المشاهد",
+  "scenes": "المشاهد",
+  "shots": "اللقطات",
+  "newShot": "لقطة جديدة",
+  "spatialProfile": "الملف المكاني",
+  "resetWorkspace": "إعادة تعيين مساحة العمل",
+  "resetLayout": "إعادة تعيين التخطيط",
+  "cameraOrientation": "اتجاه الكاميرا ثلاثية الأبعاد",
+  "inpaint": "طلاء داخلي / تحرير المنطقة",
+  "lowResPreview": "إنشاء معاينة منخفضة الدقة",
+  "finalQuality": "عرض الجودة النهائية",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "اعتماد",
+  "deleteShot": "Delete shot"
+}

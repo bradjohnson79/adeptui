@@ -50,10 +50,14 @@ class CompileBody(BaseModel):
     biblePackage: Optional[dict[str, Any]] = None
     projectId: Optional[str] = None
     sceneId: Optional[str] = None
+    projectContext: dict[str, Any] = Field(default_factory=dict)
 
 
 def _intent_from_body(body: CompileBody) -> NormalizedGenerationIntent:
     audio = body.audioIntent or normalize_audio_from_text(body.userPrompt)
+    ctx = dict(body.projectContext or {})
+    if body.projectId:
+        ctx.setdefault("projectId", body.projectId)
     return NormalizedGenerationIntent(
         userPrompt=body.userPrompt,
         negativePromptHint=body.negativePromptHint,
@@ -68,7 +72,7 @@ def _intent_from_body(body: CompileBody) -> NormalizedGenerationIntent:
         mustInclude=body.mustInclude,
         mustAvoid=body.mustAvoid,
         userOverrides=body.userOverrides,
-        projectContext={"projectId": body.projectId} if body.projectId else {},
+        projectContext=ctx,
         sceneContext={"sceneId": body.sceneId} if body.sceneId else {},
     )
 

@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { useLanguagePrefs, promptIntelligenceLanguageModules } from "../../i18n";
 import "./prompt-intelligence.css";
 import "./prompt-intelligence-v2.css";
 
@@ -50,6 +52,8 @@ export function PromptIntelligencePanel({
   onArtistStatusChange,
   qualitySlot,
 }: Props) {
+  const { t } = useTranslation(["imageGenerator", "common", "errors"]);
+  const { prefs } = useLanguagePrefs();
   const [open, setOpen] = useState(!compact || artistLayout);
   const [production, setProduction] = useState(true);
   const [providerOpt, setProviderOpt] = useState(true);
@@ -77,12 +81,21 @@ export function PromptIntelligencePanel({
   } | null>(null);
 
   useEffect(() => {
+    if (prefs.promptLanguagePolicy === "bilingual") setChineseOn(true);
+    if (prefs.promptLanguagePolicy === "english" || prefs.promptLanguagePolicy === "no_translation") {
+      setChineseOn(false);
+    }
+  }, [prefs.promptLanguagePolicy]);
+
+  useEffect(() => {
     if (!artistLayout || !onArtistStatusChange) return;
     const modeLabel =
       strategyMode === "manual" ? "Manual" : strategyMode === "automatic_certified" ? "Certified Auto" : "Co-Director";
     onArtistStatusChange(chineseOn ? `${modeLabel} · English + Chinese` : modeLabel);
   }, [artistLayout, strategyMode, chineseOn, onArtistStatusChange]);
 
+  const policyBilingual = prefs.promptLanguagePolicy === "bilingual";
+  const languageModules = promptIntelligenceLanguageModules(prefs.promptLanguagePolicy);
   const modulesEnabled = {
     ...DEFAULT_MODULES,
     productionRefinement: production,
@@ -90,7 +103,7 @@ export function PromptIntelligencePanel({
     motionRefinement: production && domain === "video",
     audioRefinement: production && ["audio", "music", "sfx", "voice"].includes(domain),
     providerOptimization: providerOpt,
-    languageModules: chineseOn ? ["en", "zh"] : ["en"],
+    languageModules: policyBilingual || chineseOn ? ["en", "zh"] : languageModules,
   };
 
   const bodyBase = (opts?: { forceGenerated?: boolean }) => {
@@ -110,14 +123,20 @@ export function PromptIntelligencePanel({
       manuallyOverridden: isOverride,
       existingFinalPrompt: isOverride ? finalPrompt : undefined,
       strategyMode,
-      projectPrefs: { strategyMode, minConfidence: "medium" },
+      projectPrefs: {
+        strategyMode,
+        minConfidence: "medium",
+        promptLanguagePolicy: prefs.promptLanguagePolicy,
+        projectPrimaryLocale: prefs.projectPrimaryLocale,
+        conversationLocale: prefs.conversationLocale,
+      },
       category: "general",
     };
   };
 
   const runEnhance = async (opts?: { forceGenerated?: boolean }) => {
     if (!creatorPrompt.trim()) {
-      setError("Enter a creator prompt first.");
+      setError(t("errors:enterPromptFirst"));
       return;
     }
     const forceGenerated = Boolean(opts?.forceGenerated);
@@ -219,25 +238,27 @@ export function PromptIntelligencePanel({
       {open ? (
         <div className="prompt-intelligence-panel__body">
           {artistLayout ? (
-            <div className="cis-pi-strategy" role="radiogroup" aria-label="Prompt Intelligence mode">
-              {(
-                [
-                  ["manual", "Manual"],
-                  ["recommend", "Co-Director"],
-                  ["automatic_certified", "Certified Auto"],
-                ] as const
-              ).map(([value, label]) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="cis-pi-strategy"
-                    checked={strategyMode === value}
-                    data-testid={`prompt-intelligence-strategy-mode-${value}`}
-                    onChange={() => setStrategyMode(value)}
-                  />
-                  {label}
-                </label>
-              ))}
+            <div className="cis-seg cis-pi-strategy" role="radiogroup" aria-label="Prompt Intelligence mode">
+              <div className="cis-seg__row">
+                {(
+                  [
+                    ["manual", "Manual"],
+                    ["recommend", "Co-Director"],
+                    ["automatic_certified", "Certified Auto"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label key={value} className="cis-seg__option">
+                    <input
+                      type="radio"
+                      name="cis-pi-strategy"
+                      checked={strategyMode === value}
+                      data-testid={`prompt-intelligence-strategy-mode-${value}`}
+                      onChange={() => setStrategyMode(value)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           ) : (
             <div className="prompt-intelligence-panel__balance" role="group" aria-label="Strategy mode">
@@ -256,25 +277,75 @@ export function PromptIntelligencePanel({
             </div>
           )}
 
-          <div className="prompt-intelligence-panel__toggles" role="group" aria-label="Prompt Intelligence modules">
-            <label>
-              <input type="checkbox" checked={production} onChange={(e) => setProduction(e.target.checked)} />
-              {artistLayout ? "Production refinement" : "Refine for production"}
-            </label>
-            <label>
-              <input type="checkbox" checked={providerOpt} onChange={(e) => setProviderOpt(e.target.checked)} />
-              Optimize for selected model
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={chineseOn}
-                data-testid="prompt-intelligence-chinese"
-                onChange={(e) => setChineseOn(e.target.checked)}
-              />
-              {artistLayout ? "English + Chinese enhancement" : "Add English + Chinese enhancement"}
-            </label>
-          </div>
+          {artistLayout ? (
+            <div className="cis-toggle-list" role="group" aria-label="Prompt Intelligence modules">
+              <label className="cis-toggle-row">
+                <span className="cis-toggle-row__copy">
+                  <strong>Production Refinement</strong>
+                  <span>Improve cinematic language and production intent.</span>
+                </span>
+                <span className="cis-toggle-row__control">
+                  <input
+                    type="checkbox"
+                    checked={production}
+                    data-testid="prompt-intelligence-production"
+                    onChange={(e) => setProduction(e.target.checked)}
+                  />
+                  <span aria-hidden="true">{production ? "On" : "Off"}</span>
+                </span>
+              </label>
+              <label className="cis-toggle-row">
+                <span className="cis-toggle-row__copy">
+                  <strong>Optimize for Selected Model</strong>
+                  <span>Adapt the compiled prompt for the selected generator.</span>
+                </span>
+                <span className="cis-toggle-row__control">
+                  <input
+                    type="checkbox"
+                    checked={providerOpt}
+                    data-testid="prompt-intelligence-optimize"
+                    onChange={(e) => setProviderOpt(e.target.checked)}
+                  />
+                  <span aria-hidden="true">{providerOpt ? "On" : "Off"}</span>
+                </span>
+              </label>
+              <label className="cis-toggle-row">
+                <span className="cis-toggle-row__copy">
+                  <strong>English + Chinese Enhancement</strong>
+                  <span>Include bilingual enhancement where supported.</span>
+                </span>
+                <span className="cis-toggle-row__control">
+                  <input
+                    type="checkbox"
+                    checked={chineseOn}
+                    data-testid="prompt-intelligence-chinese"
+                    onChange={(e) => setChineseOn(e.target.checked)}
+                  />
+                  <span aria-hidden="true">{chineseOn ? "On" : "Off"}</span>
+                </span>
+              </label>
+            </div>
+          ) : (
+            <div className="prompt-intelligence-panel__toggles" role="group" aria-label="Prompt Intelligence modules">
+              <label>
+                <input type="checkbox" checked={production} onChange={(e) => setProduction(e.target.checked)} />
+                Refine for production
+              </label>
+              <label>
+                <input type="checkbox" checked={providerOpt} onChange={(e) => setProviderOpt(e.target.checked)} />
+                Optimize for selected model
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={chineseOn}
+                  data-testid="prompt-intelligence-chinese"
+                  onChange={(e) => setChineseOn(e.target.checked)}
+                />
+                Add English + Chinese enhancement
+              </label>
+            </div>
+          )}
 
           {chineseOn ? (
             <div className="prompt-intelligence-panel__balance" role="group" aria-label="Language balance">
@@ -334,22 +405,48 @@ export function PromptIntelligencePanel({
             </div>
           ) : null}
 
-          <div className="row-actions prompt-intelligence-panel__actions">
-            <button type="button" className="primary" disabled={busy || !creatorPrompt.trim()} data-testid="prompt-intelligence-preview" onClick={() => void runEnhance()}>
+          <div className={`row-actions prompt-intelligence-panel__actions${artistLayout ? " cis-pi-actions" : ""}`}>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !creatorPrompt.trim()}
+              title={!creatorPrompt.trim() ? "Describe the shot first." : undefined}
+              data-testid="prompt-intelligence-preview"
+              onClick={() => void runEnhance()}
+            >
               {busy ? "Working…" : artistLayout ? "Preview" : "Preview Enhanced Prompt"}
             </button>
-            <button type="button" className="primary" disabled={!finalPrompt.trim()} data-testid="prompt-intelligence-apply" onClick={apply}>
+            <button
+              type="button"
+              className="primary"
+              disabled={!finalPrompt.trim()}
+              title={!finalPrompt.trim() ? "Preview an enhanced prompt first." : undefined}
+              data-testid="prompt-intelligence-apply"
+              onClick={apply}
+            >
               Apply
             </button>
-            <button type="button" disabled={busy || !record} onClick={() => void runEnhance()}>
+            <button
+              type="button"
+              disabled={busy || !record}
+              title={!record ? "Preview first to regenerate." : undefined}
+              onClick={() => void runEnhance()}
+            >
               Regenerate
             </button>
-            <button type="button" disabled={!overridden && !record} data-testid="prompt-intelligence-reset" onClick={resetGenerated}>
+            <button
+              type="button"
+              disabled={!overridden && !record}
+              title={!overridden && !record ? "Nothing to reset yet." : undefined}
+              data-testid="prompt-intelligence-reset"
+              onClick={resetGenerated}
+            >
               Reset
             </button>
             <button
               type="button"
               disabled={!record}
+              title={!record ? "Preview first to switch to English only." : undefined}
               data-testid="prompt-intelligence-use-english"
               onClick={() => {
                 setChineseOn(false);
@@ -361,6 +458,9 @@ export function PromptIntelligencePanel({
               Use English Only
             </button>
           </div>
+          {artistLayout && !creatorPrompt.trim() ? (
+            <p className="cis-pi-hint muted tiny">Describe the shot first to preview an enhanced prompt.</p>
+          ) : null}
 
           {qualitySlot}
           {artistLayout && scores ? (

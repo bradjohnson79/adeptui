@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "নির্বাচিত মডেলের জ্ঞান উপলব্ধ নয়।",
   "translationFailed": "অনুবাদ ব্যর্থ। মূল পাঠ্য সংরক্ষিত।",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "আগে একটি ক্রিয়েটর প্রম্পট লিখুন।",
+  "wrongReferenceType": "এই ফাইলের ধরন এই ট্র্যাকে ব্যবহার করা যাবে না।",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "প্রযুক্তিগত বিবরণ"
 }

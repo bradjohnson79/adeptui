@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "चयनित मॉडल का ज्ञान उपलब्ध नहीं है।",
   "translationFailed": "अनुवाद विफल। मूल पाठ सुरक्षित रखा गया।",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "पहले क्रिएटर प्रॉम्प्ट लिखें।",
+  "wrongReferenceType": "यह फ़ाइल प्रकार इस ट्रैक पर नहीं चल सकता।",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "तकनीकी विवरण"
 }

@@ -1,0 +1,18 @@
+{
+  "title": "স্টোরিবোর্ড স্টুডিও",
+  "library": "লাইব্রেরি",
+  "addReference": "রেফারেন্স যোগ",
+  "generateMissing": "অনুপস্থিত প্যানেল তৈরি",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "২কে স্টোরিবোর্ড তৈরি",
+  "exportPdf": "PDF রপ্তানি",
+  "exportJson": "JSON রপ্তানি",
+  "contactSheet": "কন্টাক্ট শিট",
+  "prepareTimeline": "টাইমলাইনের জন্য প্রস্তুত",
+  "replace": "প্রতিস্থাপন",
+  "remove": "সরান",
+  "captions": "ক্যাপশন",
+  "page": "পৃষ্ঠা",
+  "previousPage": "আগের পৃষ্ঠা",
+  "nextPage": "পরের পৃষ্ঠা"
+}

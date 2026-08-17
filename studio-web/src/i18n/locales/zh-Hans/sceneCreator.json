@@ -1,0 +1,18 @@
+{
+  "title": "场景创作",
+  "scenes": "场景",
+  "shots": "镜头",
+  "newShot": "新建镜头",
+  "spatialProfile": "空间配置",
+  "resetWorkspace": "重置工作区",
+  "resetLayout": "重置布局",
+  "cameraOrientation": "3D 相机朝向",
+  "inpaint": "局部重绘 / 区域编辑",
+  "lowResPreview": "生成低分辨率预览",
+  "finalQuality": "最终质量渲染",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "批准",
+  "deleteShot": "Delete shot"
+}

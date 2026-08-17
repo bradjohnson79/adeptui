@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "टाइमलाइन जनरेटर",
+  "magi": "MAGI संपादक",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "कैरेक्टर क्रिएटर",
+  "propCreator": "प्रॉप क्रिएटर",
+  "spatialMap": "स्पेशियल मैप",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "स्क्रिप्टराइटर",
+  "sceneCreator": "सीन क्रिएटर",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "選択したモデルの知識は利用できません。",
   "translationFailed": "翻訳に失敗しました。原文を保持しました。",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "まずクリエイターのプロンプトを入力してください。",
+  "wrongReferenceType": "このトラックではそのファイル種類は使えません。",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "技術詳細"
 }

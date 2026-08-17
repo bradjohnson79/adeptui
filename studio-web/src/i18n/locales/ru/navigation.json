@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "Генератор таймлайна",
+  "magi": "Редактор MAGI",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "Создание персонажей",
+  "propCreator": "Создание реквизита",
+  "spatialMap": "Пространственная карта",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "Сценарист",
+  "sceneCreator": "Создание сцен",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

@@ -1106,17 +1106,24 @@ textarea { min-height: 90px; resize: vertical; }
 .track-row:last-child { border-bottom: 0; }
 .track-label,
 .timeline-track-header {
-  padding: 0.45rem 0.5rem;
-  font-size: 0.78rem;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-align: left;
   color: var(--timeline-track-label-text);
   border-right: 1px solid var(--timeline-track-header-border);
   background: var(--timeline-track-header-bg);
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 0.2rem;
+  min-width: 110px;
   opacity: 1;
   filter: none;
   mix-blend-mode: normal;
+  transform: none;
 }
 .track-label__title,
 .timeline-track-header-title,
@@ -3902,8 +3909,9 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .avatar-preview-summary > div {
   padding: 0.9rem 1rem;
   border-radius: 16px;
-  background: rgba(255,255,255,0.62);
-  border: 1px solid rgba(106,163,140,0.14);
+  background: #dce8e2;
+  border: 1px solid rgba(31, 107, 82, 0.28);
+  color: #1c2b26;
 }
 .avatar-summary-label {
   display: block;
@@ -3957,9 +3965,10 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .avatar-take-card,
 .avatar-review-card {
   border-radius: 18px;
-  border: 1px solid rgba(106,163,140,0.16);
-  background: rgba(255,255,255,0.72);
-  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  border: 1px solid rgba(46, 78, 68, 0.32);
+  background: #d7e4de;
+  color: #1c2b26;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
 }
 .avatar-choice-card,
 .avatar-approved-voice-card,
@@ -3979,9 +3988,24 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .avatar-choice-card.is-selected,
 .avatar-approved-voice-card.is-selected,
 .avatar-provider-card.is-selected {
-  border-color: rgba(39, 119, 96, 0.42);
-  box-shadow: 0 16px 26px rgba(46, 117, 94, 0.12);
-  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(235,250,244,0.86));
+  border-color: #145a45;
+  box-shadow: 0 14px 24px rgba(20, 70, 54, 0.28);
+  background: #1f6b52;
+  color: #f4fff9;
+}
+.avatar-choice-card.is-unavailable,
+.avatar-choice-card[aria-disabled="true"] {
+  border-style: dashed;
+  background: #c9d5cf;
+  color: #24352f;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+.avatar-choice-card.is-unavailable:hover,
+.avatar-choice-card[aria-disabled="true"]:hover {
+  transform: none;
+  box-shadow: none;
 }
 .avatar-choice-card__art {
   width: 44px;
@@ -3990,9 +4014,15 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   display: grid;
   place-items: center;
   flex: 0 0 44px;
+  overflow: hidden;
   font-weight: 700;
   color: #fff;
   background: linear-gradient(135deg, #416b62, #78a58e);
+}
+.avatar-choice-card__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .avatar-choice-card__copy {
   display: grid;
@@ -4006,8 +4036,13 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
 .avatar-choice-card__copy span,
 .avatar-approved-voice-card span,
 .avatar-provider-card span {
-  color: var(--muted);
+  color: #355248;
   line-height: 1.35;
+}
+.avatar-choice-card.is-selected .avatar-choice-card__copy span,
+.avatar-approved-voice-card.is-selected span,
+.avatar-provider-card.is-selected span {
+  color: rgba(244, 255, 249, 0.88);
 }
 .avatar-toggle-row,
 .avatar-inline-actions {
@@ -4031,8 +4066,9 @@ button.dash-card { width: 100%; text-align: left; border-radius: 20px; padding: 
   gap: 0.45rem;
   padding: 0.95rem 1rem;
   border-radius: 18px;
-  background: rgba(249,251,250,0.92);
-  border: 1px solid rgba(106,163,140,0.16);
+  background: #dce8e2;
+  border: 1px solid rgba(31, 107, 82, 0.24);
+  color: #1c2b26;
 }
 .avatar-provider-grid {
   display: grid;
@@ -5484,8 +5520,28 @@ html[dir="rtl"] .timeline-transport,
 html[dir="rtl"] .playback-controls,
 html[dir="rtl"] video,
 html[dir="rtl"] .waveform,
-html[dir="rtl"] .director-timeline {
+html[dir="rtl"] .director-timeline,
+html[dir="rtl"] .timeline-editor-shell__tracks,
+html[dir="rtl"] .timeline-editor-shell__center,
+html[dir="rtl"] .track-ruler,
+html[dir="rtl"] .live-preview-monitor,
+html[dir="rtl"] .live-preview-stage,
+html[dir="rtl"] .timeline-workspace-monitor,
+html[dir="rtl"] .spatial-map-canvas,
+html[dir="rtl"] .storyboard-panel img,
+html[dir="rtl"] .cis-result img {
   direction: ltr;
+  unicode-bidi: isolate;
+}
+html[dir="rtl"] .live-preview-stage img,
+html[dir="rtl"] .live-preview-stage video,
+html[dir="rtl"] .timeline-workspace-monitor img,
+html[dir="rtl"] .timeline-workspace-monitor video {
+  transform: none;
+}
+.ref-chip__label,
+.ref-token-autocomplete input,
+.ref-token-autocomplete__row {
   unicode-bidi: isolate;
 }
 .language-settings {
@@ -5501,6 +5557,20 @@ html[dir="rtl"] .director-timeline {
 .language-settings select {
   min-inline-size: 12rem;
   max-inline-size: 100%;
+}
+html[lang="fr"] .workspace-tabs button,
+html[lang="es"] .workspace-tabs button,
+html[lang="pt"] .workspace-tabs button,
+html[lang="ru"] .workspace-tabs button,
+html[lang="ar"] .workspace-tabs button,
+html[lang="ur"] .workspace-tabs button {
+  white-space: normal;
+}
+html[lang="zh-Hans"],
+html[lang="ja"],
+html[lang="hi"],
+html[lang="bn"] {
+  line-height: 1.55;
 }
 .language-settings .checkbox {
   display: flex;

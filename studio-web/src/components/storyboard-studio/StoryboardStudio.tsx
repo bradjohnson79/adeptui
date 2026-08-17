@@ -2,6 +2,7 @@
  * M4.9 Professional Storyboard Studio — Library-driven production board.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
@@ -38,6 +39,7 @@ export function StoryboardStudio({
   onChange: () => Promise<void>;
   onGo: (tab: EditorTab) => void;
 }) {
+  const { t } = useTranslation(["storyboard", "common"]);
   const [document, setDocument] = useState<StoryboardDocument | null>(null);
   const [panels, setPanels] = useState<StoryboardPanelLink[]>([]);
   const [pageIndex, setPageIndex] = useState(0);
@@ -319,7 +321,7 @@ export function StoryboardStudio({
     <div className="page storyboard-studio">
       <header className="sb-header">
         <div>
-          <h1>Storyboard Studio</h1>
+          <h1>{t("storyboard:title")}</h1>
           <p className="muted">Assemble production frames from the Library. AI creates the art; Adept builds the board.</p>
         </div>
         <div className="sb-header-actions">
@@ -346,7 +348,7 @@ export function StoryboardStudio({
               void prepareTimeline(selectedPanelId ? [selectedPanelId] : undefined)
             }
           >
-            Prepare for Timeline
+            {t("storyboard:prepareTimeline")}
           </button>
           <a
             className="button"
@@ -354,7 +356,7 @@ export function StoryboardStudio({
             target="_blank"
             rel="noreferrer"
           >
-            Export PDF
+            {t("storyboard:exportPdf")}
           </a>
           <a
             className="button"
@@ -363,7 +365,7 @@ export function StoryboardStudio({
             rel="noreferrer"
             data-testid="sb-export-json"
           >
-            Export JSON
+            {t("storyboard:exportJson")}
           </a>
           <a
             className="button"
@@ -428,7 +430,7 @@ export function StoryboardStudio({
           data-testid="sb-generate-missing"
           onClick={() => void generateMissing()}
         >
-          Generate Missing Panels
+          {t("storyboard:generateMissing")}
         </button>
         <button
           type="button"
@@ -438,7 +440,7 @@ export function StoryboardStudio({
           title={pageFilled ? "Assemble this page into a 2K storyboard image" : "Fill every slot on this page first"}
           onClick={() => void compose2k()}
         >
-          Generate 2K Storyboard
+          {t("storyboard:generate2k")}
         </button>
         <button type="button" onClick={() => void reload()}>
           Refresh

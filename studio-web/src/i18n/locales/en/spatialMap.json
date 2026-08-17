@@ -1,0 +1,10 @@
+{
+  "title": "Spatial Map",
+  "continue": "Continue",
+  "place": "Place",
+  "camera": "Camera",
+  "ers": "Environment Reference Sheet",
+  "generateErs": "Generate environment views",
+  "resetLayout": "Reset Layout",
+  "loading": "Loading Spatial Map…"
+}

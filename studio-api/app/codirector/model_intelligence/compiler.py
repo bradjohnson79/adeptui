@@ -399,8 +399,17 @@ def compile_intent(
         translation_notes.append("User prohibited translation; prompt stays in source language")
     elif policy == "english":
         prompt_lang = "en"
+        translation_notes.append("Prompt language forced to English by project policy")
     elif policy == "user_language":
         prompt_lang = source_lang
+        translation_notes.append("Prompt language follows user/conversation language")
+    elif policy == "project_canonical":
+        canonical = str((intent.projectContext or {}).get("projectPrimaryLocale") or source_lang or "en")
+        prompt_lang = canonical
+        translation_notes.append(f"Prompt language uses project canonical locale {canonical}")
+    elif policy == "bilingual":
+        prompt_lang = "en+zh-Hans"
+        translation_notes.append("Bilingual English-first + Simplified Chinese (established pairing)")
     elif getattr(lang_support, "translationRecommended", True) and source_lang not in preferred:
         translation_notes.append(
             f"Model prefers prompt language(s) {preferred}; source was {source_lang}"

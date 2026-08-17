@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "El conocimiento del modelo no está disponible.",
   "translationFailed": "Falló la traducción. Se conservó el texto original.",
   "languagePackInvalid": "El paquete de idioma no superó la validación.",
-  "recoveryHint": "Inténtelo de nuevo o recupere trabajos desde Trabajos."
+  "recoveryHint": "Inténtelo de nuevo o recupere trabajos desde Trabajos.",
+  "enterPromptFirst": "Escribe primero un prompt de creador.",
+  "wrongReferenceType": "Ese tipo de archivo no se puede usar en esta pista.",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "Detalle técnico"
 }

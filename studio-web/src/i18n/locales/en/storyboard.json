@@ -1,0 +1,18 @@
+{
+  "title": "Storyboard Studio",
+  "library": "Library",
+  "addReference": "Add Reference",
+  "generateMissing": "Generate Missing Panels",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "Generate 2K Storyboard",
+  "exportPdf": "Export PDF",
+  "exportJson": "Export JSON",
+  "contactSheet": "Contact Sheet",
+  "prepareTimeline": "Prepare for Timeline",
+  "replace": "Replace",
+  "remove": "Remove",
+  "captions": "Captions",
+  "page": "Page",
+  "previousPage": "Previous page",
+  "nextPage": "Next page"
+}

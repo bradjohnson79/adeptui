@@ -1,0 +1,18 @@
+{
+  "title": "Создание сцен",
+  "scenes": "Сцены",
+  "shots": "Кажры",
+  "newShot": "Новый кадр",
+  "spatialProfile": "Пространственный профиль",
+  "resetWorkspace": "Сбросить рабочее пространство",
+  "resetLayout": "Сбросить макет",
+  "cameraOrientation": "Ориентация 3D-камеры",
+  "inpaint": "Inpaint / правка области",
+  "lowResPreview": "Создать превью низкого разрешения",
+  "finalQuality": "Финальный рендер",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Одобрить",
+  "deleteShot": "Delete shot"
+}

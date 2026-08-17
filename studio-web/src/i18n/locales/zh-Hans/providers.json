@@ -3,5 +3,9 @@
   "local": "Local",
   "fal": "fal.ai",
   "unavailable": "Provider unavailable",
-  "health": "Provider health"
+  "health": "Provider health",
+  "kie": "Kie.ai",
+  "wavespeed": "WaveSpeed.ai",
+  "hosted": "Hosted AI Providers",
+  "recommended": "Recommended"
 }

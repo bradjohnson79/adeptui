@@ -1,0 +1,10 @@
+{
+  "title": "Mapa espacial",
+  "continue": "Continuar",
+  "place": "Colocar",
+  "camera": "Cámara",
+  "ers": "Hoja de referencia de entorno",
+  "generateErs": "Generar vistas de entorno",
+  "resetLayout": "Restablecer diseño",
+  "loading": "Cargando mapa espacial…"
+}

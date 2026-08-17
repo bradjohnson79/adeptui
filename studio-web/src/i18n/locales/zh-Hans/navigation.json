@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "时间线生成器",
+  "magi": "MAGI 编辑器",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "角色创作",
+  "propCreator": "道具创作",
+  "spatialMap": "空间地图",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "编剧",
+  "sceneCreator": "场景创作",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

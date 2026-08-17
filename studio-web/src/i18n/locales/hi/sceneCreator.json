@@ -1,0 +1,18 @@
+{
+  "title": "सीन क्रिएटर",
+  "scenes": "सीन",
+  "shots": "शॉट",
+  "newShot": "नया शॉट",
+  "spatialProfile": "स्पेशियल प्रोफ़ाइल",
+  "resetWorkspace": "वर्कस्पेस रीसेट",
+  "resetLayout": "लेआउट रीसेट",
+  "cameraOrientation": "3D कैमरा ओरिएंटेशन",
+  "inpaint": "इनपेंट / क्षेत्र संपादन",
+  "lowResPreview": "लो-रेज़ प्रीव्यू जनरेट करें",
+  "finalQuality": "अंतिम गुणवत्ता रेंडर",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "स्वीकृत करें",
+  "deleteShot": "Delete shot"
+}

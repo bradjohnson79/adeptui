@@ -25,10 +25,11 @@
  * Persistence (Law #10): every placement change POSTs/PATCHes immediately.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { useCoDirectorSession } from "../CoDirectorSession";
-import { isTerminal } from "../AgentWorkSurface/types";
+import { isTerminal, type WorkSurfaceState } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
 import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
 import { ERS_GENERATOR_OPTIONS } from "./ersGenerator";
@@ -78,6 +79,8 @@ import {
   type SpatialCharacterPlacement,
   type SpatialMapDocument,
   type SpatialPropPlacement,
+  PROP_MAP_ONLY_WARNING,
+  propOptionPropagatesToSceneCreator,
   propPlacementIdentity,
 } from "./types";
 import "./spatialMap.css";
@@ -128,7 +131,31 @@ export function atlasReuseDecision(document: SpatialMapDocument | null): "reuse"
   return document ? "reuse" : "create";
 }
 
+/**
+ * CDX-029: only `atlas.generate` executions (or atlas_shot_generation
+ * surfaces) may populate the Spatial Map background. `activeExecution` is
+ * session-shared — another capability's terminal result must never be adopted
+ * as the Atlas, or a wrong environment becomes ERS/Scene Creator authority.
+ */
+export function isAtlasGenerateExecution(
+  exec: Pick<WorkSurfaceState, "capability" | "surface_type"> | null | undefined,
+): boolean {
+  if (!exec) return false;
+  const capability = String(exec.capability || "");
+  const surfaceType = String(exec.surface_type || "");
+  return capability === "atlas.generate" || surfaceType === "atlas_shot_generation";
+}
+
+/** CDX-020: selector label for a Spatial Map document. */
+function mapOptionLabel(m: SpatialMapDocument): string {
+  const title = m.title || "Spatial Map";
+  const noAtlas = m.backgroundAssetId ? "" : " (no Atlas)";
+  const stamp = (m.updatedAt || m.createdAt || "").slice(0, 10);
+  return `${title}${noAtlas} — ${stamp}`;
+}
+
 export function SpatialMapPanel({ projectId, onGoTab }: Props) {
+  const { t } = useTranslation(["spatialMap", "common"]);
   const { activeExecution, setActiveExecution } = useCoDirectorSession();
   const [document, setDocument] = useState<SpatialMapDocument | null>(null);
   const [busy, setBusy] = useState<BusyState>({ loading: true, error: null });
@@ -156,6 +183,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   const [sceneDetailsOpen, setSceneDetailsOpen] = useState(false);
   const [sceneEditOpen, setSceneEditOpen] = useState(false);
   const [sceneEditText, setSceneEditText] = useState("");
+  const [maps, setMaps] = useState<SpatialMapDocument[]>([]);
+  const [sceneOptions, setSceneOptions] = useState<Array<{ sceneId: string; name: string; status: string }>>([]);
+  const [sceneChooserOpen, setSceneChooserOpen] = useState(false);
+  const [chosenSceneId, setChosenSceneId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emptyFileInputRef = useRef<HTMLInputElement>(null);
   const ers = useErsGeneration({
@@ -167,12 +198,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   });
 
 
-  // ── Load most recent map on mount / project change ───────────────────────
+  // ── Load maps + scenes on mount / project change ────────────────────────
+  const commitDocument = useCallback((doc: SpatialMapDocument) => {
+    setDocument(doc);
+    setMaps((prev) => {
+      const exists = prev.some((m) => m.id === doc.id);
+      const next = exists ? prev.map((m) => (m.id === doc.id ? doc : m)) : [doc, ...prev];
+      return [...next].sort((a, b) =>
+        String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")),
+      );
+    });
+  }, []);
+
   const loadMap = useCallback(async () => {
     setBusy({ loading: true, error: null });
     try {
-      const doc = await spatialMapApi.getMostRecentMap(projectId);
-      setDocument(doc ? normalizeMapDocumentProps(doc) : null);
+      const docs = await spatialMapApi.listMaps(projectId);
+      const sorted = [...docs].sort((a, b) =>
+        String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")),
+      );
+      setMaps(sorted);
+      setDocument(sorted[0] ? normalizeMapDocumentProps(sorted[0]) : null);
     } catch (err) {
       setBusy({ loading: false, error: err instanceof Error ? err.message : String(err) });
       return;
@@ -180,19 +226,83 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     setBusy({ loading: false, error: null });
   }, [projectId]);
 
+  /** CDX-020: switch the active map document from the selector. */
+  const selectMap = useCallback(
+    async (mapId: string) => {
+      if (!mapId) return;
+      try {
+        const doc = await spatialMapApi.getMap(projectId, mapId);
+        commitDocument(normalizeMapDocumentProps(doc));
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Failed to open Spatial Map.");
+      }
+    },
+    [commitDocument, projectId],
+  );
+
+  /** CDX-020: best-effort scene list for the explicit handoff binding. */
+  const loadScenes = useCallback(async () => {
+    try {
+      const res = await api.getTimelineSceneStatus(projectId);
+      setSceneOptions(Array.isArray(res?.scenes) ? res.scenes : []);
+    } catch {
+      setSceneOptions([]);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadScenes();
+  }, [loadScenes]);
+
+  /** CDX-020/037: persist handoff with an EXPLICIT scene + the known sheet. */
+  const continueToSceneCreator = useCallback(
+    async (sceneId: string) => {
+      setOpMsg(null);
+      try {
+        if (document && sceneId) {
+          try {
+            const bound = await spatialMapApi.assignScene(projectId, document.id, { sceneId });
+            commitDocument(bound);
+          } catch {
+            // Binding is best-effort; the handoff still targets the explicit scene.
+          }
+        }
+        await persistThenOpenSceneCreator({
+          projectId,
+          sceneId,
+          sheetId: ers.sheetId || undefined,
+          spatialMapId: document?.id || undefined,
+          onGoTab,
+        });
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+      } finally {
+        setSceneChooserOpen(false);
+      }
+    },
+    [commitDocument, document, ers.sheetId, onGoTab, projectId],
+  );
+
+  const openSceneChooser = useCallback(() => {
+    const firstSceneId = sceneOptions[0]?.sceneId || "";
+    setChosenSceneId(document?.sceneId || firstSceneId);
+    setSceneChooserOpen(true);
+  }, [document?.sceneId, sceneOptions]);
+
   const handleUseInSceneCreator = useCallback(async () => {
     setOpMsg(null);
-    try {
-      await persistThenOpenSceneCreator({
-        projectId,
-        sceneId: document?.sceneId || undefined,
-        spatialMapId: document?.id || undefined,
-        onGoTab,
-      });
-    } catch (err) {
-      setOpMsg(err instanceof Error ? err.message : "Could not continue to Scene Creator.");
+    const boundSceneId = document?.sceneId || "";
+    const singleSceneId = sceneOptions.length === 1 ? sceneOptions[0].sceneId : "";
+    // CDX-020: never let the backend silently resolve scene "" to the first
+    // scene or an implicit "Scene 1". One scene or an existing binding is
+    // already explicit — continue directly. Multiple scenes (or none listed)
+    // require the creator's explicit choice.
+    if (sceneOptions.length <= 1 && (boundSceneId || singleSceneId)) {
+      await continueToSceneCreator(boundSceneId || singleSceneId);
+      return;
     }
-  }, [document?.id, document?.sceneId, onGoTab, projectId]);
+    openSceneChooser();
+  }, [continueToSceneCreator, document?.sceneId, openSceneChooser, sceneOptions]);
 
   useEffect(() => {
     void loadMap();
@@ -314,7 +424,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           backgroundAssetId,
           ...lineage,
         });
-        setDocument(updated);
+        commitDocument(updated);
         return updated;
       }
       const doc = await spatialMapApi.createMap(projectId, {
@@ -322,10 +432,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         backgroundAssetId,
         ...lineage,
       });
-      setDocument(doc);
+      commitDocument(doc);
       return doc;
     },
-    [document, projectId],
+    [commitDocument, document, projectId],
   );
 
   // ── Track active Co-Director execution for atlas / ERS results ──────────
@@ -335,7 +445,10 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     if (isTerminal(activeExecution)) {
       const resultIds = activeExecution.result_asset_ids || [];
       if (resultIds.length > 0) {
-        if (busyOp === "atlas") {
+        // CDX-029: only an atlas.generate execution may become the map
+        // background. activeExecution is session-shared — a foreign
+        // execution's first result asset must never be adopted.
+        if (busyOp === "atlas" && isAtlasGenerateExecution(activeExecution)) {
           const atlasAssetId = resultIds[0];
           void (async () => {
             try {
@@ -354,7 +467,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 originalEnvironmentReferenceAssetId: origRefs[0] || undefined,
               };
               const updated = await applyAtlasToMap(atlasAssetId, lineage);
-              setDocument(updated);
+              commitDocument(updated);
               setOpMsg(
                 document
                   ? document.backgroundAssetId
@@ -371,11 +484,14 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         }
       } else if (activeExecution.status === "failed" || activeExecution.status === "cancelled") {
         if (busyOp === "ers") return;
+        // CDX-029: only report the failure when the failed execution is the
+        // atlas we are waiting on — never blame a foreign execution.
+        if (busyOp === "atlas" && !isAtlasGenerateExecution(activeExecution)) return;
         setOpMsg(activeExecution.error || `${busyOp || "Operation"} failed.`);
         setBusyOp(null);
       }
     }
-  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, applyAtlasToMap, projectId, busyOp, document, sceneDescription]);
+  }, [activeExecution?.status, activeExecution?.execution_id, activeExecution?.result_asset_ids?.length, applyAtlasToMap, commitDocument, isAtlasGenerateExecution, projectId, busyOp, document, sceneDescription]);
 
   // ── Atlas Shot / ERS generation ────────────────────────────────────────
   const startAtlasGeneration = useCallback(async () => {
@@ -433,7 +549,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         sceneDescription: description,
         originalEnvironmentReferenceAssetId: asset.id,
       });
-      setDocument(updated);
+      commitDocument(updated);
       setOpMsg("Atlas Shot replaced.");
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Replace failed.");
@@ -454,7 +570,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       const updated = await spatialMapApi.updateMap(projectId, document.id, {
         sceneDescription: sceneEditText.trim(),
       });
-      setDocument(updated);
+      commitDocument(updated);
       setSceneEditOpen(false);
       setOpMsg("Scene description updated. Environment Reference Sheet now needs regeneration.");
     } catch (err) {
@@ -501,7 +617,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     setOpMsg(null);
     try {
       const updated = await spatialMapApi.updateMap(projectId, document.id, { backgroundAssetId: null });
-      setDocument(updated);
+      commitDocument(updated);
       setOpMsg("Atlas Shot removed from Spatial Map. The Library image is preserved.");
     } catch (err) {
       setOpMsg(err instanceof Error ? err.message : "Failed to remove Atlas.");
@@ -579,12 +695,12 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       if (next === gridScale) return;
       try {
         const updated = await spatialMapApi.updateMap(projectId, document.id, { gridScale: next });
-        setDocument(updated);
+        commitDocument(updated);
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to update placement precision.");
       }
     },
-    [projectId, document, gridScale],
+    [commitDocument, projectId, document, gridScale],
   );
 
   const handleCellClick = useCallback(
@@ -641,8 +757,15 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             items?: Array<{ asset_id?: string | null; canonical?: boolean; approval_status?: string }>;
           };
           const items = refs.items || [];
-          const hero = items.find((r) => r.canonical && r.approval_status === "approved") || items.find((r) => r.canonical);
-          if (hero?.asset_id) assetId = hero.asset_id;
+          // CDX-026: approved-only placement (mirrors the Prop picker, which
+          // lists approved props). A draft canonical reference must not
+          // silently become the character identity on the map.
+          const approved = items.find((r) => r.canonical && r.approval_status === "approved");
+          const onlyDrafts = items.some((r) => r.canonical) && !approved;
+          if (approved?.asset_id) assetId = approved.asset_id;
+          else if (onlyDrafts) {
+            setOpMsg(`${option.name} has only a draft reference. Place it, then approve a Character reference before capture.`);
+          }
         } catch {
           // best-effort
         }
@@ -710,6 +833,11 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
           setSelectedCameraId(null);
         } else {
           setActiveSlot({ kind: "prop", index: slot.index });
+        }
+        // CDX-012: Character-Props and Library placements are map-only —
+        // they carry propId:null and never propagate to Scene Creator shots.
+        if (!propOptionPropagatesToSceneCreator(option)) {
+          setOpMsg(PROP_MAP_ONLY_WARNING);
         }
       } catch (err) {
         setOpMsg(err instanceof Error ? err.message : "Failed to add prop.");
@@ -1029,7 +1157,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   // ── Render ────────────────────────────────────────────────────────────
   if (busy.loading) {
-    return <p className="spatial-map__busy" data-testid="spatial-map-loading">Loading Spatial Map…</p>;
+    return <p className="spatial-map__busy" data-testid="spatial-map-loading">{t("spatialMap:loading")}</p>;
   }
   if (busy.error) {
     return (
@@ -1061,6 +1189,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     ? assignedCharacters.find((c) => c.id === editorCharacter.characterId) || assignedSpatialMapCharacters([editorCharacter])[0] || null
     : null;
 
+  // CDX-020: surface the explicit map→scene binding (or its absence).
+  const boundSceneLabel = useMemo(() => {
+    if (!document?.sceneId) return "Not bound to a scene yet — choose one when using in Scene Creator.";
+    const found = sceneOptions.find((s) => s.sceneId === document.sceneId);
+    return `Bound to scene: ${found?.name || document.sceneId}`;
+  }, [document?.sceneId, sceneOptions]);
+
   const placementBannerText = (function () {
     if (!placementMode) return '';
     const verb = placementMode.action === 'move' ? 'Moving' : 'Placing';
@@ -1075,6 +1210,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
 
   return (
     <div className="spatial-map" data-testid="spatial-map-panel">
+      {maps.length > 1 ? (
+        <div className="spatial-map__selector" data-testid="spatial-map-selector">
+          <label className="spatial-map__selector-label" htmlFor="spatial-map-select">
+            {t("spatialMap:title")}
+          </label>
+          <select
+            id="spatial-map-select"
+            className="spatial-map__selector-select"
+            value={document?.id || ""}
+            onChange={(e) => void selectMap(e.target.value)}
+            aria-label="Spatial Map document"
+            data-testid="spatial-map-select"
+          >
+            {maps.map((m) => (
+              <option key={m.id} value={m.id}>
+                {mapOptionLabel(m)}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       {!hasBackground ? (
         <>
           <h3 className="spatial-map__heading">Spatial Map</h3>
@@ -1167,7 +1323,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
         </>
       ) : (
         <>
-          <h3 className="spatial-map__heading">{document?.title || "Spatial Map"}</h3>
+          <h3 className="spatial-map__heading">{document?.title || t("spatialMap:title")}</h3>
 
           <div className="spatial-map__atlas-panel" data-testid="active-atlas-panel">
             <div className="spatial-map__atlas-thumb">
@@ -1177,6 +1333,9 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               <p className="spatial-map__atlas-label">Active Atlas Shot</p>
               <p className="spatial-map__atlas-source muted">
                 {document?.backgroundAssetId ? `Asset ${document.backgroundAssetId.slice(0, 8)}…` : "No Atlas"}
+              </p>
+              <p className="spatial-map__atlas-source muted" data-testid="bound-scene-label">
+                {boundSceneLabel}
               </p>
               {document ? (
                 <div className="spatial-map__scene-context" data-testid="scene-context-summary">
@@ -1716,13 +1875,63 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 sceneDescription: description,
                 originalEnvironmentReferenceAssetId: assetId,
               });
-              setDocument(updated);
+              commitDocument(updated);
               setOpMsg("Atlas Shot replaced from Library.");
             } catch (err) {
               setOpMsg(err instanceof Error ? err.message : "Failed to replace Atlas.");
             }
           }}
         />
+      ) : null}
+
+      {sceneChooserOpen && document ? (
+        <div className="spatial-map__scene-chooser" data-testid="spatial-map-scene-chooser" role="dialog" aria-modal="true" aria-label="Choose target scene">
+          <p className="spatial-map__scene-chooser-title">Use this Spatial Map in Scene Creator</p>
+          <p className="spatial-map__scene-chooser-text">
+            Scene Creator writes shots for the scene you bind this map to. Choose the target scene explicitly so a multi-scene project never falls back to the first scene.
+          </p>
+          {sceneOptions.length > 0 ? (
+            <div className="spatial-map__scene-chooser-options" role="radiogroup" aria-label="Target scene">
+              {sceneOptions.map((s) => (
+                <label key={s.sceneId} className="spatial-map__scene-chooser-option" data-testid={`handoff-scene-option-${s.sceneId}`}>
+                  <input
+                    type="radio"
+                    name="handoff-scene"
+                    value={s.sceneId}
+                    checked={chosenSceneId === s.sceneId}
+                    onChange={() => setChosenSceneId(s.sceneId)}
+                    data-testid={`handoff-scene-${s.sceneId}`}
+                  />
+                  <span>{s.name || s.sceneId}</span>
+                  {s.status ? <span className="muted"> · {s.status}</span> : null}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="muted" data-testid="handoff-scene-none">
+              This project has no scenes yet (or the scene list is unavailable). Scene Creator will create or use the first scene — confirm to continue.
+            </p>
+          )}
+          <div className="spatial-map__scene-chooser-actions">
+            <button
+              type="button"
+              className="ui-btn ui-btn--primary"
+              disabled={sceneOptions.length > 0 && !chosenSceneId}
+              onClick={() => void continueToSceneCreator(chosenSceneId)}
+              data-testid="handoff-scene-confirm"
+            >
+              Continue to Scene Creator
+            </button>
+            <button
+              type="button"
+              className="ui-btn ui-btn--secondary"
+              onClick={() => setSceneChooserOpen(false)}
+              data-testid="handoff-scene-cancel"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

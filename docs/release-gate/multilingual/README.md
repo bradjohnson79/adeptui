@@ -1,4 +1,9 @@
-# M3.0F Multilingual Platform Certification Pack
+# M3.0F Multilingual Platform Certification Pack (HISTORICAL)
+
+> **HISTORICAL — superseded.** Current governing document:
+> [`docs/release-gate/m30f/M30F_MULTILINGUAL_END_TO_END_CERTIFICATION.md`](../m30f/M30F_MULTILINGUAL_END_TO_END_CERTIFICATION.md)
+>
+> Reports in this folder document the original M30F architecture/platform work. They are not the current end-to-end product certification.
 
 | Field | Value |
 |-------|-------|

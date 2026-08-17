@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
 import {
@@ -297,6 +298,7 @@ function MagiEditorInner({
   project: Project;
   onChange: () => Promise<void>;
 }) {
+  const { t } = useTranslation("magi");
   const {
     layout,
     setAccordion,
@@ -1715,7 +1717,7 @@ function MagiEditorInner({
       data-viewport-mode={viewportMode}
     >
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
-      <div className="magi-strip" role="banner" aria-label="MAGI Editor" data-testid="magi-strip">
+      <div className="magi-strip" role="banner" aria-label={t("title")} data-testid="magi-strip">
         <div className="magi-strip__lava" aria-hidden="true" />
         <div className="magi-strip__glow" aria-hidden="true" />
         <div className="magi-strip__track">

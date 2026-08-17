@@ -174,7 +174,17 @@
     "accessibility",
     "export",
     "onboarding",
-    "help"
+    "help",
+    "timeline",
+    "sceneCreator",
+    "imageGenerator",
+    "storyboard",
+    "characterCreator",
+    "propCreator",
+    "spatialMap",
+    "library",
+    "scriptWriter",
+    "magi"
   ],
   "betaCriticalNamespaces": [
     "common",
@@ -188,6 +198,16 @@
     "settings",
     "accessibility",
     "approval",
-    "export"
+    "export",
+    "timeline",
+    "sceneCreator",
+    "imageGenerator",
+    "storyboard",
+    "characterCreator",
+    "propCreator",
+    "spatialMap",
+    "library",
+    "scriptWriter",
+    "magi"
   ]
 }

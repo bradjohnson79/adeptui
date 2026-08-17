@@ -1,5 +1,8 @@
 # M30F I18N Architecture
 
+> **HISTORICAL.** Current governing certification:
+> [`docs/release-gate/m30f/M30F_MULTILINGUAL_END_TO_END_CERTIFICATION.md`](../m30f/M30F_MULTILINGUAL_END_TO_END_CERTIFICATION.md)
+
 | Field | Value |
 |-------|-------|
 | Branch | `phase2/codirector-m2-9-production-suite` |

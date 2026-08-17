@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Asset, Job, Project, Scene } from "../types";
 import { api } from "../api";
 import { apiUrl } from "../runtime/apiBase";
@@ -86,6 +87,7 @@ export function LivePreviewMonitor({
   /** Creator acknowledgment of a terminal failure — clears the failed overlay. */
   onDismissFailure?: (jobId: string) => void;
 }) {
+  const { t } = useTranslation("timeline");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [seq, setSeq] = useState(0);
@@ -381,7 +383,7 @@ export function LivePreviewMonitor({
   return (
     <div className="panel live-preview-monitor" data-testid="live-preview-monitor">
       <PanelHeading
-        title="Preview Monitor"
+        title={t("previewMonitor")}
         tip="Click a Library asset to preview it here. During renders, live generation frames appear when the engine provides them."
       />
       <div className="live-preview-stage" style={{ aspectRatio: aspect, height: "100%" }} data-testid="live-preview-stage">

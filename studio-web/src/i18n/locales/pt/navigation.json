@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "Gerador de timeline",
+  "magi": "Editor MAGI",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "Criador de personagens",
+  "propCreator": "Criador de props",
+  "spatialMap": "Mapa espacial",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "Roteirista",
+  "sceneCreator": "Criador de cenas",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

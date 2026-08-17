@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useLanguagePrefs } from "../../i18n";
 import {
   api,
   ApiError,
@@ -26,9 +27,7 @@ import {
   type ActionCategory,
   type ActionPlan,
   type PermissionPolicy,
-  type PlannedStep,
 } from "../../codirector/types";
-import { executeStep, type ExecuteContext } from "../../codirector/execute";
 import type { Project, SceneSetup } from "../../types";
 import {
   fetchLatestStatus,
@@ -139,7 +138,6 @@ type SessionValue = {
   cancelProposal: (proposalId: string) => Promise<void>;
   refreshProposals: () => Promise<void>;
   plan: ActionPlan | null;
-  selectedSteps: Record<string, boolean>;
   promptMode: PromptMode;
   includeProjectKnowledge: boolean;
   compileExplain: string[];
@@ -168,9 +166,7 @@ type SessionValue = {
   setAssetPickerOpen: (open: boolean) => void;
   setPromptMode: (mode: PromptMode) => void;
   setIncludeProjectKnowledge: (value: boolean) => void;
-  setSelectedStep: (stepId: string, selected: boolean) => void;
   clearConversation: () => void;
-  dismissPlan: () => void;
   bindWorkspace: (bindings: CoDirectorWorkspaceBindings) => void;
   unbindWorkspace: () => void;
   setActiveContentTab: (tab: string | null) => void;
@@ -186,7 +182,6 @@ type SessionValue = {
   refreshProviderHealth: () => Promise<void>;
   reconnect: () => Promise<void>;
   setSelectedModelId: (modelId: string | null) => void;
-  runSteps: (steps: PlannedStep[]) => Promise<void>;
   applySetup: () => Promise<void>;
   dismissSetup: () => void;
   applySuggestedPrompt: () => void;
@@ -516,6 +511,7 @@ function mergeOntoServer(
 export function CoDirectorSessionProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { prefs: languagePrefs } = useLanguagePrefs();
   const bindingsRef = useRef<CoDirectorWorkspaceBindings>({});
   const activeContentTabRef = useRef<string | null>(null);
   const [open, setOpenState] = useState(false);
@@ -594,7 +590,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
   const [expertiseMode, setExpertiseModeState] = useState<CoDirectorExpertiseMode>(() => loadExpertiseMode());
   const [applyNote, setApplyNote] = useState<string | null>(null);
   const [plan, setPlan] = useState<ActionPlan | null>(null);
-  const [selectedSteps, setSelectedSteps] = useState<Record<string, boolean>>({});
   const [promptMode, setPromptMode] = useState<PromptMode>("creative");
   const [includeProjectKnowledge, setIncludeProjectKnowledge] = useState(true);
   const [compileExplain, setCompileExplain] = useState<string[]>([]);
@@ -1253,20 +1248,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     navigate(`/project/${encodeURIComponent(suggestion.projectId)}`);
   }, [lastBoundProjectSuggestion, navigate]);
 
-  const execCtx = useCallback((): ExecuteContext => {
-    const b = bindingsRef.current;
-    return {
-      projectId: b.projectId,
-      sceneId: b.sceneId,
-      navigate: (path: string) => navigate(path),
-      goTab: b.onGoTab,
-      confirm: (msg) => window.confirm(msg),
-      onRefresh: async () => {
-        await b.onAppliedSetup?.();
-      },
-    };
-  }, [navigate]);
-
   const openSession = useCallback(
     (opts?: { prompt?: string; mode?: CoDirectorDisplayMode }) => {
       if (opts?.mode) setDisplayMode(opts.mode);
@@ -1315,7 +1296,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     setSetup(null);
     setApplyNote(null);
     setCompileExplain([]);
-    setSelectedSteps({});
     setSendError(null);
     setActivity(null);
     pendingRetryRef.current = null;
@@ -1324,11 +1304,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       markStreamingEnd(projectId);
       void api.codirectorDeleteConversation(projectId).catch(() => {});
     }
-  }, []);
-
-  const dismissPlan = useCallback(() => {
-    setPlan(null);
-    setSelectedSteps({});
   }, []);
 
   const dismissSendError = useCallback(() => setSendError(null), []);
@@ -1827,9 +1802,11 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             title: step.title || "Step",
             status: step.status || "pending",
           }));
-          // Backend plan is authoritative — never overwrite with planFromIntention.
+          // CDX-088 (Phase 7): backend intelligence plans are authoritative —
+          // the local plan state stays permanently null (planFromIntention /
+          // RECIPE_STUBS and the runSteps executor were removed). No code path
+          // may set plan to a non-null ActionPlan.
           setPlan(null);
-          setSelectedSteps({});
           setProductionAnalysis((prev) =>
             prev
               ? {
@@ -2140,6 +2117,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             mode,
             request_id: requestId,
             origin_session_id: getTabSessionId(),
+            conversationLocale: languagePrefs.conversationLocale,
             attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
             active_content_tab: activeContentTabRef.current || undefined,
           },
@@ -2315,6 +2293,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               model: selectedModelId || undefined,
               mode,
               request_id: requestId,
+              conversationLocale: languagePrefs.conversationLocale,
               attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
               active_content_tab: activeContentTabRef.current || undefined,
             },
@@ -2415,7 +2394,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         cancelledByUserRef.current = false;
       }
     },
-    [persistConversation, reconcileConversation, selectedModelId, uiContext],
+    [persistConversation, reconcileConversation, selectedModelId, uiContext, languagePrefs],
   );
 
   const uploadPendingAttachments = useCallback(
@@ -2538,7 +2517,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       }
       if (intelligenceOn) {
         setPlan(null);
-        setSelectedSteps({});
       }
 
       const preflightController = new AbortController();
@@ -2718,61 +2696,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     void send(prompt, "chat");
   }, [busy, open, send]);
 
-  const runSteps = useCallback(
-    async (steps: PlannedStep[]) => {
-      if (!plan) return;
-      if (!bindingsRef.current.projectId) {
-        setSendError({
-          code: "PROJECT_REQUIRED",
-          message: "No project selected. Select or create a project before running production steps.",
-          recommendedAction: "select_project",
-          recoverable: true,
-          category: "project",
-          retryable: true,
-          partial_work_created: false,
-        });
-        return;
-      }
-      let current = { ...plan, steps: [...plan.steps] };
-      for (const step of steps) {
-        const idx = current.steps.findIndex((s) => s.id === step.id);
-        if (idx < 0) continue;
-        current.steps[idx] = { ...current.steps[idx], status: "running" };
-        setPlan({ ...current });
-        const done = await executeStep(current.steps[idx], execCtx());
-        current.steps[idx] = done;
-        setPlan({ ...current });
-        if (done.status === "checkpoint") {
-          current.pausedAt = new Date().toISOString();
-          setPlan({ ...current });
-          setMessages((m) => [
-            ...m,
-            {
-              id: newMessageId(),
-              role: "assistant",
-              content: `Checkpoint: ${done.checkpointMessage || "Complete the manual step, then Continue."}`,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-          break;
-        }
-        if (done.reuseAssets?.length) {
-          setMessages((m) => [
-            ...m,
-            {
-              id: newMessageId(),
-              role: "assistant",
-              content: `Asset-first: found ${done.reuseAssets!.length} library matches — consider reusing before generating.`,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-        }
-      }
-      setAudit(loadAudit().slice(0, 20));
-    },
-    [execCtx, plan],
-  );
-
   const applySetup = useCallback(async () => {
     const b = bindingsRef.current;
     if (!setup || !b.projectId || !b.sceneId || applying) return;
@@ -2932,6 +2855,14 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
         mode: promptMode,
         project_id: includeProjectKnowledge ? b.projectId : undefined,
         scene_id: includeProjectKnowledge ? b.sceneId : undefined,
+        projectContext: {
+          sourceLanguage:
+            languagePrefs.promptLanguagePolicy === "project_canonical"
+              ? languagePrefs.projectPrimaryLocale
+              : languagePrefs.conversationLocale,
+          promptLanguagePolicy: languagePrefs.promptLanguagePolicy,
+          projectPrimaryLocale: languagePrefs.projectPrimaryLocale,
+        },
       });
       setCompileExplain(pkg.explain || []);
       setSuggestedPrompt(pkg.prompt || null);
@@ -2968,7 +2899,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     } finally {
       setBusy(false);
     }
-  }, [draft, includeProjectKnowledge, promptMode]);
+  }, [draft, includeProjectKnowledge, promptMode, languagePrefs]);
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const list = Array.from(files);
@@ -3275,7 +3206,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       cancelProposal,
       refreshProposals,
       plan,
-      selectedSteps,
       promptMode,
       includeProjectKnowledge,
       compileExplain,
@@ -3304,10 +3234,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setAssetPickerOpen,
       setPromptMode,
       setIncludeProjectKnowledge,
-      setSelectedStep: (stepId, selected) =>
-        setSelectedSteps((prev) => ({ ...prev, [stepId]: selected })),
       clearConversation,
-      dismissPlan,
       bindWorkspace,
       unbindWorkspace,
       setActiveContentTab,
@@ -3323,7 +3250,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       refreshProviderHealth,
       reconnect,
       setSelectedModelId,
-      runSteps,
       applySetup,
       dismissSetup: () => setSetup(null),
       applySuggestedPrompt: () => {
@@ -3392,7 +3318,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       cancelProposal,
       refreshProposals,
       plan,
-      selectedSteps,
       promptMode,
       includeProjectKnowledge,
       compileExplain,
@@ -3417,7 +3342,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       setDisplayMode,
       setContextPanelOpen,
       clearConversation,
-      dismissPlan,
       bindWorkspace,
       unbindWorkspace,
       setActiveContentTab,
@@ -3430,7 +3354,6 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       refreshProviderHealth,
       reconnect,
       setSelectedModelId,
-      runSteps,
       applySetup,
       compilePrompt,
       addFiles,

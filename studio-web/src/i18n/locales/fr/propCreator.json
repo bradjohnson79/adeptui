@@ -1,0 +1,11 @@
+{
+  "title": "Créateur d’accessoires",
+  "generate": "Générer",
+  "save": "Enregistrer",
+  "description": "Description",
+  "references": "Références",
+  "approve": "Approuver",
+  "generateImages": "Générer des images d’accessoire",
+  "generating": "Génération…",
+  "loading": "Chargement du créateur d’accessoires…"
+}

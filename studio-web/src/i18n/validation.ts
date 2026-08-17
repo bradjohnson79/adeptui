@@ -1,6 +1,7 @@
 import { BETA_CRITICAL_NAMESPACES, NAMESPACES, SUPPORTED_LOCALES } from "./registry";
 
 const SUSPICIOUS = /<\s*script|javascript:|onerror\s*=|onload\s*=/i;
+const PLURAL_SUFFIX = /_(zero|one|two|few|many|other)$/;
 
 export interface PackValidationIssue {
   locale: string;
@@ -8,6 +9,51 @@ export interface PackValidationIssue {
   key: string;
   code: string;
   message: string;
+}
+
+export interface PackParityReport {
+  locale: string;
+  namespace: string;
+  missing: string[];
+  extra: string[];
+  empty: string[];
+}
+
+export function flattenMessages(input: unknown, prefix = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      Object.assign(out, flattenMessages(value, path));
+    } else {
+      out[path] = value == null ? "" : String(value);
+    }
+  }
+  return out;
+}
+
+export function compareLocalePack(
+  en: Record<string, string>,
+  other: Record<string, string>,
+  locale: string,
+  namespace: string
+): PackParityReport {
+  const missing: string[] = [];
+  const empty: string[] = [];
+  for (const key of Object.keys(en)) {
+    if (!(key in other)) {
+      missing.push(key);
+      continue;
+    }
+    if (!String(other[key] ?? "").trim()) empty.push(key);
+  }
+  const extra = Object.keys(other).filter((key) => {
+    if (key in en) return false;
+    const base = key.replace(PLURAL_SUFFIX, "");
+    return !(base in en) && !Object.keys(en).some((k) => k.replace(PLURAL_SUFFIX, "") === base);
+  });
+  return { locale, namespace, missing, extra, empty };
 }
 
 export function validateMessageTemplates(

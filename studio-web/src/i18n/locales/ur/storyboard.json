@@ -1,0 +1,18 @@
+{
+  "title": "اسٹوری بورڈ اسٹوڈیو",
+  "library": "لائبریری",
+  "addReference": "حوالہ شامل کریں",
+  "generateMissing": "غائب پینل تیار کریں",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "2K اسٹوری بورڈ بنائیں",
+  "exportPdf": "PDF برآمد",
+  "exportJson": "JSON برآمد",
+  "contactSheet": "کنٹیکٹ شیٹ",
+  "prepareTimeline": "ٹائم لائن کے لیے تیار کریں",
+  "replace": "بدلें",
+  "remove": "ہٹائیں",
+  "captions": "کیپشن",
+  "page": "صفحہ",
+  "previousPage": "پچھلا صفحہ",
+  "nextPage": "اگلا صفحہ"
+}

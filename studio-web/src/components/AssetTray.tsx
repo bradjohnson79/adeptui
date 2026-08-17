@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Asset, EngineName, Project } from "../types";
 import { api } from "../api";
 import { PanelHeading, HelpTip } from "./HelpTip";
@@ -28,6 +29,7 @@ export function AssetTray({
   onAddAsReference?: (asset: Asset) => void;
   allowUpload?: boolean;
 }) {
+  const { t } = useTranslation(["timeline", "library", "common"]);
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
   const [search, setSearch] = useState("");
@@ -60,12 +62,8 @@ export function AssetTray({
   return (
     <div className="panel">
       <PanelHeading
-        title="Library"
-        tip={
-          allowUpload
-            ? "Upload images, audio, or video. Add to Timeline places media on a track; Add to References names it for Timeline."
-            : "Choose files already in this project's Library. Add to Timeline places media on a track; Add to References names it for Timeline."
-        }
+        title={t("timeline:library")}
+        tip={t("timeline:libraryTip")}
       />
       {allowUpload ? (
         <>
@@ -141,7 +139,7 @@ export function AssetTray({
         <input
           id="asset-library-search"
           data-testid="asset-library-search"
-          placeholder="Search Library"
+          placeholder={t("timeline:searchLibrary")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -195,7 +193,7 @@ export function AssetTray({
                   data-testid={`asset-add-timeline-${a.id}`}
                   onClick={() => onAddToTimeline?.(a)}
                 >
-                  Add to Timeline
+                  {t("timeline:addToTimeline")}
                 </button>
                 <HelpTip
                   label={getTimelineHelp("add_to_timeline").title}
@@ -207,7 +205,7 @@ export function AssetTray({
                   data-testid={`asset-add-reference-${a.id}`}
                   onClick={() => onAddAsReference?.(a)}
                 >
-                  Add to References
+                  {t("timeline:addToReferences")}
                 </button>
                 <HelpTip
                   label={getTimelineHelp("add_as_reference").title}

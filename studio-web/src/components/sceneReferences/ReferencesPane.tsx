@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Asset, Project } from "../../types";
 import { api } from "../../api";
 import { PanelHeading } from "../HelpTip";
@@ -64,6 +65,7 @@ export function ReferencesPane({
   onChange?: () => void;
   reloadKey?: number;
 }) {
+  const { t } = useTranslation(["timeline", "common", "errors"]);
   const [items, setItems] = useState<Binding[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,11 +238,11 @@ export function ReferencesPane({
       onDrop={(e) => void onDrop(e)}
     >
       <PanelHeading
-        title="References"
-        tip="Names for Library files this Timeline can use. Prefixes are just labels: @ character or prop, # image, * video. Removing a name does not delete the Library file."
+        title={t("timeline:references")}
+        tip={t("timeline:referencesTip")}
       />
       {compact ? (
-        <p className="scene-meta">Drag from Library or use Add to References. Audio stays on Lip Sync, SFX, or Music.</p>
+        <p className="scene-meta">{t("timeline:referencesHint")}</p>
       ) : (
         <p className="scene-meta" data-testid="reference-capability-status">
           {supportLabel(supportClass)}
@@ -273,11 +275,11 @@ export function ReferencesPane({
 
       {!loading && !error && filtered.length === 0 && (
         <div data-testid="references-empty">
-          <p>No named references yet. Files stay in the Library until you add them here.</p>
+          <p>{t("timeline:referencesEmpty")}</p>
           {!compact ? (
             <div className="row-actions">
               <button type="button" data-testid="ref-add-library" onClick={() => setAttachAssetId(project.assets[0]?.id || "")}>
-                Add from Library
+                {t("timeline:addFromLibrary")}
               </button>
               <button
                 type="button"
@@ -319,6 +321,7 @@ export function ReferencesPane({
                   type="button"
                   className="ref-chip__label"
                   data-testid={`reference-chip-${b.id}`}
+                  dir="auto"
                   title="Click to rename. The Timeline still uses the same file."
                   onClick={() => {
                     setRenamingId(b.id);
@@ -332,7 +335,7 @@ export function ReferencesPane({
                 type="button"
                 className="ghost"
                 data-testid={`reference-remove-${b.id}`}
-                title="Remove this name. The Library file stays."
+                title={t("timeline:removeReferenceTitle")}
                 onClick={() => void remove(b)}
               >
                 Remove

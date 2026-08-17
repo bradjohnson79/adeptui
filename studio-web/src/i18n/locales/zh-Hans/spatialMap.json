@@ -1,0 +1,10 @@
+{
+  "title": "空间地图",
+  "continue": "继续",
+  "place": "放置",
+  "camera": "相机",
+  "ers": "环境参考表",
+  "generateErs": "生成环境视图",
+  "resetLayout": "重置布局",
+  "loading": "正在加载空间地图…"
+}

@@ -1,0 +1,18 @@
+{
+  "title": "সিন ক্রিয়েটর",
+  "scenes": "দৃশ্যসমূহ",
+  "shots": "শট",
+  "newShot": "নতুন শট",
+  "spatialProfile": "স্পেশিয়াল প্রোফাইল",
+  "resetWorkspace": "ওয়ার্কস্পেস রিসেট",
+  "resetLayout": "লেআউট রিসেট",
+  "cameraOrientation": "৩ডি ক্যামেরা ওরিয়েন্টেশন",
+  "inpaint": "ইনপেইন্ট / অঞ্চল সম্পাদনা",
+  "lowResPreview": "লো-রেজ প্রিভিউ তৈরি",
+  "finalQuality": "চূড়ান্ত মানের রেন্ডার",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "অনুমোদন",
+  "deleteShot": "Delete shot"
+}

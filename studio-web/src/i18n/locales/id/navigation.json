@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "Generator Timeline",
+  "magi": "Editor MAGI",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "Pembuat Karakter",
+  "propCreator": "Pembuat Properti",
+  "spatialMap": "Peta spasial",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "Penulis naskah",
+  "sceneCreator": "Pembuat Adegan",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

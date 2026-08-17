@@ -1,0 +1,18 @@
+{
+  "title": "Criador de cenas",
+  "scenes": "Cenas",
+  "shots": "Takes",
+  "newShot": "Novo take",
+  "spatialProfile": "Perfil espacial",
+  "resetWorkspace": "Redefinir espaço de trabalho",
+  "resetLayout": "Redefinir layout",
+  "cameraOrientation": "Orientação da câmera 3D",
+  "inpaint": "Inpaint / edição de região",
+  "lowResPreview": "Gerar prévia em baixa resolução",
+  "finalQuality": "Render de qualidade final",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Aprovar",
+  "deleteShot": "Delete shot"
+}

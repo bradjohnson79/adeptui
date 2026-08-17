@@ -134,6 +134,7 @@ class CinematicGenerateRequest(BaseModel):
     spatialMapId: Optional[str] = None
     spatialMapVersion: Optional[str] = None
     spatialCameraId: Optional[str] = None
+    projectContext: dict[str, Any] = Field(default_factory=dict)
 
 
 def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, Any]:
@@ -192,6 +193,7 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
         "spatialMapId": req.spatialMapId,
         "spatialMapVersion": req.spatialMapVersion,
         "spatialCameraId": req.spatialCameraId,
+        "projectContext": dict(req.projectContext or {}),
         "cinematic": {
             "lens": ctrl.lens,
             "lighting": ctrl.lighting,

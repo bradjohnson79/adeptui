@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { frameToTimecode } from "../../magiSequence/engine";
 import type { MagiClip, MagiSequenceDocument } from "../../magiSequence/types";
 import { useMagiFocus } from "../../magiSequence/MagiFocusContext";
@@ -35,6 +36,7 @@ export function MagiSequenceTimeline({
   onDropAsset: (trackId: string, startFrame: number, assetId: string, mode: "Insert" | "Overwrite") => void;
   failedAssetIds?: ReadonlySet<string> | null;
 }) {
+  const { t } = useTranslation("magi");
   const { bindRegionProps, setFocusRegion } = useMagiFocus();
   const pxPerFrame = 2;
   const width = Math.max(960, sequence.durationFrames * pxPerFrame);
@@ -132,7 +134,7 @@ export function MagiSequenceTimeline({
           f{dragState?.mode === "playhead" ? dragState.currentFrame : sequence.playheadFrame}
         </span>
         <span className="magi-sequence-timeline__play-state" data-playing={playing}>
-          {playing ? "Playing" : "Paused"}
+          {playing ? t("playing") : t("paused")}
         </span>
         <span>Snap {sequence.snapEnabled ? "On" : "Off"}</span>
         {selectedAssetId ? (

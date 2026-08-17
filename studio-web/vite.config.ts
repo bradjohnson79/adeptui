@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Dev-server ports follow the same env vars `scripts/e2e-start.mjs` uses, so a second
@@ -28,5 +28,9 @@ export default defineConfig({
       "/api": apiTarget,
       "/media": apiTarget,
     },
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
   },
 });

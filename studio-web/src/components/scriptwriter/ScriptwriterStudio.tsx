@@ -3,12 +3,20 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api, ApiError } from "../../api";
 import type { Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import { IndentKeys, IndentParagraph } from "./richTextExtensions";
 import { elementsToHtml, isBlankHtml } from "./legacyHtml";
+import { resolveLinkSceneId } from "./sceneLink";
 import { sanitizeHtml } from "./sanitizeHtml";
+import {
+  conflictReloadState,
+  shouldOfferRecovery,
+  RECOVERY_RESTORED_MESSAGE,
+  RECOVERY_RESTORE_FAILED_MESSAGE,
+} from "./recovery";
 import type { SaveState, ScriptDocument, StudioView, WritingMode } from "./types";
 import "./scriptwriter.css";
 
@@ -37,6 +45,7 @@ export function ScriptwriterStudio({
   onGo: (tab: EditorTab) => void;
   onActiveDocumentId?: (documentId: string | undefined) => void;
 }) {
+  const { t } = useTranslation("scriptWriter");
   const [doc, setDoc] = useState<ScriptDocument | null>(null);
   const [nav, setNav] = useState<NavScene[]>([]);
   const [stats, setStats] = useState<Record<string, unknown>>({});
@@ -52,6 +61,8 @@ export function ScriptwriterStudio({
   const [proposal, setProposal] = useState<Record<string, unknown> | null>(null);
   const [timelinePrep, setTimelinePrep] = useState<Record<string, unknown> | null>(null);
   const [activeSceneId, setActiveSceneId] = useState<string | null>(null);
+  // CDX-058: the project scene the creator selected for "Link to Scene".
+  const [linkSceneId, setLinkSceneId] = useState<string>("");
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [importText, setImportText] = useState("");
@@ -68,11 +79,11 @@ export function ScriptwriterStudio({
 
   const applyBundle = useCallback(
     (bundle: Awaited<ReturnType<typeof api.scriptwriter.studio>>) => {
-      const d = bundle.document as unknown as ScriptDocument;
+      const d = (bundle.document ?? null) as unknown as ScriptDocument | null;
       setDoc(d);
-      latestRevisionRef.current = d.revision;
-      latestDocIdRef.current = d.id;
-      onActiveDocumentId?.(d.id);
+      latestRevisionRef.current = d?.revision ?? null;
+      latestDocIdRef.current = d?.id ?? null;
+      onActiveDocumentId?.(d?.id);
       setNav((bundle.navigator || []) as NavScene[]);
       setStats(bundle.stats || {});
       setContinuity(bundle.continuity || []);
@@ -89,7 +100,30 @@ export function ScriptwriterStudio({
     latestDocIdRef.current = d.id;
   }, []);
 
+  // CDX-054: GET is side-effect free, so the first explicit write creates the
+  // canonical document (POST /scriptwriter/documents) before autosaving.
+  const ensureDoc = useCallback(async (): Promise<string | null> => {
+    if (latestDocIdRef.current) return latestDocIdRef.current;
+    try {
+      const bundle = await api.scriptwriter.createDocument(project.id);
+      const d = bundle.document as unknown as ScriptDocument | null;
+      if (!d?.id) throw new Error("No script document returned");
+      applyBundle(bundle);
+      return d.id;
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Failed to create script document");
+      return null;
+    }
+  }, [project.id, applyBundle]);
+
   useEffect(() => () => onActiveDocumentId?.(undefined), [onActiveDocumentId]);
+
+  // CDX-058: default the scene picker to the current selection (scenes[0] was
+  // the historical hardcode) but keep the creator's explicit choice across
+  // project reloads.
+  useEffect(() => {
+    setLinkSceneId((prev) => prev || project.scenes[0]?.id || "");
+  }, [project]);
 
   const load = useCallback(async () => {
     const bundle = await api.scriptwriter.studio(project.id);
@@ -107,12 +141,12 @@ export function ScriptwriterStudio({
     ],
     content: "<p></p>",
     onUpdate: ({ editor: ed }) => {
-      if (hydrating.current || !latestDocIdRef.current) return;
+      if (hydrating.current) return;
       setSaveState("unsaved");
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
       saveTimer.current = window.setTimeout(() => {
         void (async () => {
-          const docId = latestDocIdRef.current;
+          const docId = await ensureDoc();
           if (!docId) return;
           try {
             setSaveState("saving");
@@ -135,8 +169,9 @@ export function ScriptwriterStudio({
                   editor.commands.setContent(resolveInitialHtml(d));
                   hydrating.current = false;
                 }
-                setSaveState("save_failed");
-                setMessage("Document was updated elsewhere. Reloaded latest version — your recent edit was not saved. Please reapply.");
+                const state = conflictReloadState(fresh);
+                setSaveState(state.saveState);
+                setMessage(state.message);
               } catch {
                 setSaveState("save_failed");
                 setMessage("Save failed: document was updated elsewhere and reload also failed. Please refresh the page.");
@@ -178,6 +213,28 @@ export function ScriptwriterStudio({
     applyBundle(bundle);
   };
 
+  // CDX-055: reapply the stored SCRIPT_CONFLICT recovery payload.
+  const restoreUnsaved = async () => {
+    const docId = latestDocIdRef.current;
+    if (!docId) return;
+    try {
+      const res = await api.scriptwriter.restoreRecovery(project.id, docId);
+      const d = res.document as unknown as ScriptDocument;
+      setDocTracked(d);
+      if (editor) {
+        hydrating.current = true;
+        editor.commands.setContent(resolveInitialHtml(d));
+        hydrating.current = false;
+      }
+      setSaveState((res.saveState as SaveState) || "saved");
+      setMessage(RECOVERY_RESTORED_MESSAGE);
+      await refreshNav();
+    } catch (e) {
+      setSaveState("save_failed");
+      setMessage(e instanceof Error ? e.message : RECOVERY_RESTORE_FAILED_MESSAGE);
+    }
+  };
+
   const syncEditorFromDoc = (d: ScriptDocument) => {
     if (!editor) return;
     hydrating.current = true;
@@ -186,8 +243,9 @@ export function ScriptwriterStudio({
   };
 
   const insertScene = async () => {
-    if (!doc) return;
-    const res = await api.scriptwriter.insertScene(project.id, doc.id, {
+    const docId = await ensureDoc();
+    if (!docId) return;
+    const res = await api.scriptwriter.insertScene(project.id, docId, {
       heading: "INT. NEW LOCATION - DAY",
     });
     const d = res.document as unknown as ScriptDocument;
@@ -314,8 +372,10 @@ export function ScriptwriterStudio({
   };
 
   const doImport = async () => {
-    if (!doc || !importText.trim()) return;
-    const res = await api.scriptwriter.importText(project.id, doc.id, importText);
+    if (!importText.trim()) return;
+    const docId = await ensureDoc();
+    if (!docId) return;
+    const res = await api.scriptwriter.importText(project.id, docId, importText);
     const d = res.document as unknown as ScriptDocument;
     setDocTracked(d);
     syncEditorFromDoc(d);
@@ -324,8 +384,9 @@ export function ScriptwriterStudio({
   };
 
   const convertBeats = async () => {
-    if (!doc) return;
-    const res = await api.scriptwriter.convertOutline(project.id, doc.id, [
+    const docId = await ensureDoc();
+    if (!docId) return;
+    const res = await api.scriptwriter.convertOutline(project.id, docId, [
       { title: "OPENING IMAGE", description: "Establish world and tone." },
       { title: "INCITING INCIDENT", description: "Disrupt the status quo." },
     ]);
@@ -337,7 +398,8 @@ export function ScriptwriterStudio({
 
   const linkScene = async () => {
     if (!doc || !activeSceneId) return;
-    const sceneId = project.scenes[0]?.id;
+    // CDX-058: bind the SELECTED project scene, not scenes[0].
+    const sceneId = resolveLinkSceneId(project.scenes, linkSceneId);
     if (!sceneId) {
       setMessage("No project scene available to link.");
       return;
@@ -394,7 +456,7 @@ export function ScriptwriterStudio({
   return (
     <div className={shellClass} data-testid="scriptwriter-studio">
       <div className="sw-toolbar" data-testid="scriptwriter-toolbar">
-        <span className="sw-toolbar__title">{doc?.title || "Scriptwriter Studio"}</span>
+        <span className="sw-toolbar__title">{doc?.title || t("studioTitle")}</span>
         <button type="button" className={view === "script" ? "primary" : "ghost"} onClick={() => setView("script")}>
           Script
         </button>
@@ -428,6 +490,16 @@ export function ScriptwriterStudio({
         <button type="button" className="ghost" data-testid="scriptwriter-command" onClick={() => setCommandOpen(true)}>
           Command
         </button>
+        {shouldOfferRecovery(saveState) ? (
+          <button
+            type="button"
+            className="ghost"
+            data-testid="scriptwriter-restore-recovery"
+            onClick={() => void restoreUnsaved()}
+          >
+            Restore my unsaved changes
+          </button>
+        ) : null}
         <span className="sw-toolbar__save" data-testid="scriptwriter-save-state">
           {saveState.replace("_", " ")}
           {stats.pagesEstimated != null ? ` · ~${String(stats.pagesEstimated)} est. pages` : ""}
@@ -560,6 +632,21 @@ export function ScriptwriterStudio({
             <button type="button" data-testid="scriptwriter-create-revision" onClick={() => void createRevision()}>
               Create revision
             </button>
+            <label className="sw-link-scene" htmlFor="scriptwriter-link-scene-select">
+              Link to scene
+              <select
+                id="scriptwriter-link-scene-select"
+                data-testid="scriptwriter-link-scene-select"
+                value={linkSceneId}
+                onChange={(e) => setLinkSceneId(e.target.value)}
+              >
+                {project.scenes.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name || s.id.slice(0, 8)}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" data-testid="scriptwriter-link-scene" onClick={() => void linkScene()}>
               Link to Scene
             </button>

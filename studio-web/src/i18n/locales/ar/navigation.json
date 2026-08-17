@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "مولّد الخط الزمني",
+  "magi": "محرر MAGI",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "منشئ الشخصيات",
+  "propCreator": "منشئ الإكسسوارات",
+  "spatialMap": "الخريطة المكانية",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "كاتب السيناريو",
+  "sceneCreator": "منشئ المشاهد",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

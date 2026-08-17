@@ -6,7 +6,8 @@ import { UnlockProjectModal } from "../components/ProjectPasswordModals";
 import { goHome } from "../navigation/projectLibrary";
 import { CoDirectorProvider } from "../core/CoDirectorContext";
 import { useTranslation } from "react-i18next";
-import { WORKSPACES, workspaceLabel } from "../core/workspaces";
+import { ProjectLanguageSync } from "../i18n";
+import { WORKSPACES } from "../core/workspaces";
 // WORKSPACES.labelKey used for i18n nav labels
 import { Timeline } from "../components/Timeline";
 import { AssetTray, PromptComposer } from "../components/AssetTray";
@@ -636,7 +637,7 @@ export default function ProjectEditor() {
   // Viewport-locked shell only for multi-pane app layouts; document pages use native window scroll.
   const lockViewportShell = showTimelineShell || tab === "spatial" || tab === "magi" || tab === "editor";
 
-  const tabLabel = t(WORKSPACES[tab].labelKey, { defaultValue: workspaceLabel(tab) });
+  const tabLabel = t(WORKSPACES[tab].labelKey);
   const selectedSceneObj = project.scenes.find((s) => s.id === selectedScene) || project.scenes[0];
 
   return (
@@ -649,6 +650,7 @@ export default function ProjectEditor() {
         activeWorkspace: tab,
       }}
     >
+      <ProjectLanguageSync project={project} />
       <ProjectCoDirectorBridge
         project={project}
         sceneId={selectedScene}

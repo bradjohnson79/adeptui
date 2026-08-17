@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "منتخب ماڈل کا علم دستیاب نہیں۔",
   "translationFailed": "ترجمہ ناکام۔ اصل متن محفوظ رکھا گیا۔",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "پہلے تخلیق کار پرامپٹ لکھیں۔",
+  "wrongReferenceType": "یہ فائل قسم اس ٹریک پر استعمال نہیں ہو سکتی۔",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "تکنیکی تفصیل"
 }

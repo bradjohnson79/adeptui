@@ -1,0 +1,11 @@
+{
+  "title": "道具创作",
+  "generate": "生成",
+  "save": "保存",
+  "description": "描述",
+  "references": "参考",
+  "approve": "批准",
+  "generateImages": "生成道具图像",
+  "generating": "生成中…",
+  "loading": "正在加载道具创建器…"
+}

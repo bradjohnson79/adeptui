@@ -1,0 +1,18 @@
+{
+  "title": "سین تخلیق کار",
+  "scenes": "سینز",
+  "shots": "شاٹس",
+  "newShot": "نیا شاٹ",
+  "spatialProfile": "اسپیشل پروفائل",
+  "resetWorkspace": "ورک اسپیس ری سیٹ",
+  "resetLayout": "لے آؤٹ ری سیٹ",
+  "cameraOrientation": "3D کیمرہ رخ",
+  "inpaint": "ان پینٹ / علاقہ ترمیم",
+  "lowResPreview": "کم ریزولوشن پیش منظر بنائیں",
+  "finalQuality": "حتمی کوالٹی رینڈر",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "منظور کریں",
+  "deleteShot": "Delete shot"
+}

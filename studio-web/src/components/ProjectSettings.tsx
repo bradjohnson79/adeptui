@@ -11,14 +11,14 @@ import { PRIMARY_PROJECT_TYPES } from "../projectTypes";
 import { HostedProvidersPanel } from "./HostedProvidersPanel";
 
 const TABS = [
-  ["general", "General"],
-  ["language", "Language"],
-  ["learning", "AI Learning"],
-  ["defaults", "Defaults"],
-  ["library", "Library"],
-  ["integrations", "AI Providers"],
-  ["rendering", "Rendering"],
-  ["collab", "Collaboration"],
+  ["general", "general"],
+  ["language", "languageTab"],
+  ["learning", "learning"],
+  ["defaults", "defaults"],
+  ["library", "library"],
+  ["integrations", "integrations"],
+  ["rendering", "rendering"],
+  ["collab", "collab"],
 ] as const;
 
 type TabId = (typeof TABS)[number][0];
@@ -74,21 +74,21 @@ export function ProjectSettings({ project, onChange }: { project: Project; onCha
             className={tab === id ? "primary" : ""}
             onClick={() => setTab(id)}
           >
-            {id === "language" ? t("common:language") : label}
+            {t(`settings:${label}`)}
           </button>
         ))}
       </div>
 
       {tab === "language" && (
         <div className="settings-panel">
-          <LanguageSettings />
+          <LanguageSettings project={project} onProjectChange={onChange} />
         </div>
       )}
 
       {tab === "general" && (
         <div className="settings-panel">
           <div className="field">
-            <label>Name</label>
+            <label>{t("settings:name")}</label>
             <input value={project.name} onChange={(e) => saveMeta({ name: e.target.value })} />
           </div>
           <div className="field">

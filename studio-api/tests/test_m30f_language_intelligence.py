@@ -98,6 +98,40 @@ def test_dialogue_variants_same_id():
     assert dlg["constructedLanguage"] is True
 
 
+def test_mil_compile_project_canonical_locale():
+    intent_obj = NormalizedGenerationIntent(
+        userPrompt="A dusk coffee bar",
+        mode="text_to_video",
+        mediaType="video",
+        forceModelId="fal_seedance",
+        projectContext={
+            "sourceLanguage": "fr",
+            "promptLanguagePolicy": "project_canonical",
+            "projectPrimaryLocale": "ja",
+        },
+    )
+    result = compile_intent(intent_obj, model_id="fal_seedance")
+    assert result.promptLanguage == "ja"
+    assert result.sourceLanguage == "fr"
+
+
+def test_mil_compile_bilingual_en_plus_zh():
+    intent_obj = NormalizedGenerationIntent(
+        userPrompt="A dusk coffee bar",
+        mode="text_to_video",
+        mediaType="video",
+        forceModelId="fal_seedance",
+        projectContext={
+            "sourceLanguage": "fr",
+            "promptLanguagePolicy": "bilingual",
+            "projectPrimaryLocale": "en",
+        },
+    )
+    result = compile_intent(intent_obj, model_id="fal_seedance")
+    assert result.promptLanguage == "en+zh-Hans"
+    assert any("Bilingual" in note for note in result.translationNotes)
+
+
 def test_mil_compile_records_language_provenance():
     intent_obj = NormalizedGenerationIntent(
         userPrompt="Cinematic I2V. Sin música de fondo.",

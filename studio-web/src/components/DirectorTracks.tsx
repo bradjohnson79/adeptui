@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { Asset, Project, Scene } from "../types";
 import { api } from "../api";
 import { LipSyncTracksPanel } from "./LipSyncTracks";
@@ -362,6 +363,7 @@ export function DirectorTracks({
   master?: SceneTimelineMaster | null;
   shellMode?: boolean;
 }) {
+  const { t } = useTranslation("timeline");
   const sel = useDirectorSelectionOptional();
   const [tl, setTl] = useState<DirectorTimeline | null>(null);  const [selectedSeg, setSelectedSeg] = useState<string>();
   const [selectedClip, setSelectedClip] = useState<string>();
@@ -1896,7 +1898,7 @@ export function DirectorTracks({
                 onDrop={(e) => onDropAsset(e, "imageReference")}
               >
                 <TrackHeader
-                  label="IMAGE REFERENCE"
+                  label={t("imageReferenceTrack")}
                   shellMode={shellMode}
                   onAction={() => {
                     const clip = {
@@ -1982,7 +1984,7 @@ export function DirectorTracks({
                 onDrop={(e) => onDropAsset(e, "videoReference")}
               >
                 <TrackHeader
-                  label="VIDEO REFERENCE"
+                  label={t("videoReferenceTrack")}
                   shellMode={shellMode}
                   onAction={() => {
                     const clip = {

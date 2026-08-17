@@ -1,0 +1,18 @@
+{
+  "title": "Студия раскадровки",
+  "library": "Библиотека",
+  "addReference": "Добавить ссылку",
+  "generateMissing": "Создать недостающие кадры",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "Создать раскадровку 2K",
+  "exportPdf": "Экспорт PDF",
+  "exportJson": "Экспорт JSON",
+  "contactSheet": "Контакт-лист",
+  "prepareTimeline": "Подготовить к таймлайну",
+  "replace": "Заменить",
+  "remove": "Убрать",
+  "captions": "Подписи",
+  "page": "Страница",
+  "previousPage": "Предыдущая страница",
+  "nextPage": "Следующая страница"
+}

@@ -1,0 +1,18 @@
+{
+  "title": "Estudio de storyboard",
+  "library": "Biblioteca",
+  "addReference": "Añadir referencia",
+  "generateMissing": "Generar paneles faltantes",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "Generar storyboard 2K",
+  "exportPdf": "Exportar PDF",
+  "exportJson": "Exportar JSON",
+  "contactSheet": "Hoja de contactos",
+  "prepareTimeline": "Preparar para la timeline",
+  "replace": "Reemplazar",
+  "remove": "Quitar",
+  "captions": "Pies de foto",
+  "page": "Página",
+  "previousPage": "Página anterior",
+  "nextPage": "Página siguiente"
+}

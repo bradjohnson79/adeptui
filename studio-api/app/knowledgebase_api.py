@@ -85,6 +85,7 @@ class CompileBody(BaseModel):
     scene_id: Optional[str] = None
     task: Optional[str] = None
     shot_overrides: dict[str, str] = Field(default_factory=dict)
+    projectContext: dict[str, Any] = Field(default_factory=dict)
 
 
 def _retrieve(model_id: str, mode: str, task: str | None) -> list[tuple[str, str]]:
@@ -296,4 +297,22 @@ def compile_prompt(body: CompileBody, db: Session = Depends(get_db)):
         "task": task,
         "sources": [{"kind": "user_intention"}, *([{"kind": "master_sheet"}] if master else [])],
     }
+    ctx = dict(body.projectContext or {})
+    if ctx:
+        policy = str(ctx.get("promptLanguagePolicy") or "auto")
+        source = str(ctx.get("sourceLanguage") or "")
+        canonical = str(ctx.get("projectPrimaryLocale") or "")
+        pkg["promptLanguagePolicy"] = policy
+        pkg["sourceLanguage"] = source
+        pkg["projectPrimaryLocale"] = canonical
+        notes = pkg.setdefault("explain", [])
+        notes.append(f"Prompt language policy: {policy}")
+        if policy == "bilingual":
+            notes.append("Bilingual English-first + Simplified Chinese")
+        elif policy == "english":
+            notes.append("Prompt language forced to English")
+        elif policy == "project_canonical" and canonical:
+            notes.append(f"Prompt language uses project canonical locale {canonical}")
+        elif source:
+            notes.append(f"Source language: {source}")
     return pkg

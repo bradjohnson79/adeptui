@@ -1,0 +1,11 @@
+{
+  "title": "Creador de props",
+  "generate": "Generar",
+  "save": "Guardar",
+  "description": "Descripción",
+  "references": "Referencias",
+  "approve": "Aprobar",
+  "generateImages": "Generar imágenes del prop",
+  "generating": "Generando…",
+  "loading": "Cargando Creador de props…"
+}

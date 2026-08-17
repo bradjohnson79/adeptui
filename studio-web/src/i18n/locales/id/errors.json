@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "Pengetahuan model tidak tersedia.",
   "translationFailed": "Terjemahan gagal. Teks asli dipertahankan.",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Coba lagi atau pulihkan pekerjaan dari Pekerjaan."
+  "recoveryHint": "Coba lagi atau pulihkan pekerjaan dari Pekerjaan.",
+  "enterPromptFirst": "Masukkan prompt kreator dulu.",
+  "wrongReferenceType": "Jenis file itu tidak bisa dipakai di trek ini.",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "Detail teknis"
 }

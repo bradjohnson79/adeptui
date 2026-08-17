@@ -1,0 +1,10 @@
+{
+  "title": "Carte spatiale",
+  "continue": "Continuer",
+  "place": "Placer",
+  "camera": "Caméra",
+  "ers": "Feuille de référence d’environnement",
+  "generateErs": "Générer les vues d’environnement",
+  "resetLayout": "Réinitialiser la disposition",
+  "loading": "Chargement de la carte spatiale…"
+}

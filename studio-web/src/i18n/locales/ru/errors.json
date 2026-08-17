@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "Знания о модели недоступны.",
   "translationFailed": "Перевод не удался. Исходный текст сохранён.",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "Сначала введите промпт.",
+  "wrongReferenceType": "Этот тип файла нельзя использовать на этой дорожке.",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "Техническая деталь"
 }

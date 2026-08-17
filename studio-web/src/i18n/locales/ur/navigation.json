@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "ٹائم لائن جنریٹر",
+  "magi": "MAGI ایڈیٹر",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "کردار تخلیق کار",
+  "propCreator": "پروپ تخلیق کار",
+  "spatialMap": "اسپیشل نقشہ",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "اسکرپٹ رائٹر",
+  "sceneCreator": "سین تخلیق کار",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

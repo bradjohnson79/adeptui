@@ -23,5 +23,18 @@
   "modelRadar": "Model Radar",
   "virtualStage": "Virtual Stage",
   "environmentStudio": "Environment Studio",
-  "productionSuite": "Production Suite"
+  "productionSuite": "Production Suite",
+  "timeline": "タイムラインジェネレーター",
+  "magi": "MAGIエディター",
+  "identityRegistry": "Approved Look",
+  "continuity": "Continuity Workspace",
+  "voiceStudio": "Voice Studio",
+  "characters": "キャラクタークリエイター",
+  "propCreator": "プロップクリエイター",
+  "spatialMap": "空間マップ",
+  "posecraft": "PoseCraft",
+  "scriptwriter": "脚本",
+  "sceneCreator": "シーンクリエイター",
+  "brandStudio": "Brand Studio",
+  "generationTools": "Generation Tools"
 }

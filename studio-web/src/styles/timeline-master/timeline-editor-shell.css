@@ -228,10 +228,11 @@
   opacity: 0.7;
 }
 
-.timeline-editor-shell__left,
-.timeline-editor-shell__right,
-.timeline-editor-shell__center {
-  min-height: 0;
+.timeline-editor-shell__tracks,
+.track-ruler,
+.live-preview-stage {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .timeline-editor-shell__left,
@@ -465,7 +466,7 @@
 .timeline-editor-shell .director-tracks--timeline-shell .track-row,
 .timeline-editor-shell .director-tracks--timeline-shell .track-ruler,
 .timeline-editor-shell .director-tracks--timeline-shell .track-playhead-rail {
-  grid-template-columns: 132px 1fr;
+  grid-template-columns: 150px 1fr;
 }
 
 .timeline-editor-shell .director-tracks--timeline-shell .track-row {
@@ -508,39 +509,84 @@
 .timeline-editor-shell .director-tracks--timeline-shell .track-label,
 .timeline-editor-shell .director-tracks--timeline-shell .track-label--shell,
 .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header {
-  padding: 0.5rem 0.55rem;
+  padding: 0.4rem 0.5rem;
   border-right: 1px solid var(--timeline-track-header-border);
   color: var(--timeline-track-label-text);
   background: var(--timeline-track-header-bg);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.2;
+  text-align: left;
+  min-width: 110px;
   opacity: 1;
   filter: none;
   mix-blend-mode: normal;
+  transform: none;
 }
 
 .timeline-editor-shell .director-tracks--timeline-shell .track-label__title,
 .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header-title,
 .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header-label {
   font-size: 0.72rem;
-  font-weight: 750;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
   text-transform: uppercase;
   color: var(--timeline-track-label-text);
   opacity: 1;
   filter: none;
+  transform: none;
+}
+
+/* Bulletproof dark-theme track-label readability: force light text on dark bg.
+   Covers both dark cases (no data-theme = :root default dark, and data-theme="aurora-night").
+   Excluded from light theme (data-theme="aurora-day") so it keeps dark-on-light treatment. */
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label--shell,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header {
+  color: rgba(238, 246, 255, 0.95) !important;
+  background-color: rgba(7, 15, 27, 0.96) !important;
+  opacity: 1 !important;
+  filter: none !important;
+  mix-blend-mode: normal !important;
+  transform: none !important;
+}
+
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label__title,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label__title *,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header-title,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header-label {
+  color: rgba(238, 246, 255, 0.95) !important;
+  -webkit-text-fill-color: rgba(238, 246, 255, 0.95) !important;
+  opacity: 1 !important;
+  filter: none !important;
+  text-shadow: none !important;
+}
+
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label__icon,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .track-label__add,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header svg,
+:root:not([data-theme="aurora-day"]) .timeline-editor-shell .director-tracks--timeline-shell .timeline-track-header button {
+  color: rgba(164, 228, 236, 0.9) !important;
+  opacity: 1 !important;
+  filter: none !important;
 }
 
 .track-label--shell {
-  justify-content: space-between;
+  justify-content: center;
 }
 
 .track-label__title {
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
   text-transform: uppercase;
   color: var(--timeline-track-label-text);
   opacity: 1;
   filter: none;
+  transform: none;
 }
 
 .track-label__tools {

@@ -1,0 +1,18 @@
+{
+  "title": "シーンクリエイター",
+  "scenes": "シーン",
+  "shots": "ショット",
+  "newShot": "新しいショット",
+  "spatialProfile": "空間プロファイル",
+  "resetWorkspace": "ワークスペースをリセット",
+  "resetLayout": "レイアウトをリセット",
+  "cameraOrientation": "3Dカメラの向き",
+  "inpaint": "インペイント / 領域編集",
+  "lowResPreview": "低解像度プレビューを生成",
+  "finalQuality": "最終品質レンダー",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "承認",
+  "deleteShot": "Delete shot"
+}

@@ -4,6 +4,7 @@
  * standalone Character Creator so they share schema, hydration, and behavior.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { CharacterActions } from "./CharacterActions";
 import { CharacterCandidateGrid } from "./CharacterCandidateGrid";
@@ -18,7 +19,12 @@ import {
   type CharacterGeneratorPlan,
 } from "./characterGeneratorPlan";
 import type { CharacterCandidate, GeneratorOption } from "./types";
-import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
+import {
+  getHeroIdentity,
+  getPendingHeroIdentity,
+  getReferenceImage,
+  useCharacterProfile,
+} from "./useCharacterProfile";
 import "./characterCore.css";
 
 type Props = {
@@ -32,6 +38,7 @@ type Props = {
 };
 
 export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, autoFocusName }: Props) {
+  const { t } = useTranslation("characterCreator");
   const cp = useCharacterProfile(projectId, characterId);
   const { profile, references } = cp;
 
@@ -40,6 +47,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [notice, setNotice] = useState("");
+  /** CDX-006: a look was approved in Express but not yet promoted to production. */
+  const [promoteReady, setPromoteReady] = useState(false);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
@@ -48,9 +57,11 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const inventoryRef = useRef<{ localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] } | null>(null);
 
   const hero = useMemo(() => getHeroIdentity(references), [references]);
+  const pendingHero = useMemo(() => getPendingHeroIdentity(references), [references]);
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
   const hasReference = !!referenceImage?.asset_id;
   const selectedAssetId = hero?.asset_id ?? null;
+  const pendingHeroAssetId = pendingHero?.asset_id ?? null;
 
   const saved = !!profile?.id;
   const canSave = !!profile?.name?.trim();
@@ -149,13 +160,22 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           sourceType: candidate.generator || candidate.provider ? "generation" : "generation",
           notes: `Approved character sheet ${candidate.label || ""}`.trim(),
         });
+        // CDX-006: approval saved — promotion is a separate explicit step.
+        setPromoteReady(true);
         try {
           await api.ownerApproveCharacterVisualSheet(projectId, characterId);
-        } catch {
-          // gate approval optional in embedded flow
+          setNotice("Character look saved.");
+        } catch (e) {
+          // CDX-002: the concept gate is never auto-approved; surface why the
+          // gate approval did not complete so the step is visible, not silent.
+          const detail = e instanceof Error ? e.message : "";
+          setNotice(
+            detail
+              ? `Character look saved. ${detail}`
+              : "Character look saved. Select a concept direction before owner-approving the visual sheet.",
+          );
         }
         await cp.refresh();
-        setNotice("Character look saved.");
       } catch (e) {
         setNotice(e instanceof Error ? e.message : "Approve failed");
       }
@@ -173,6 +193,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           sourceType,
           notes: "Used reference image as character identity (no AI generation).",
         });
+        // CDX-006: the canonical look is set; promotion remains an explicit step.
+        setPromoteReady(true);
         await cp.refresh();
         setNotice("Reference set as this character's look.");
       } catch (e) {
@@ -181,6 +203,25 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     },
     [projectId, characterId, cp],
   );
+
+  const handlePromote = useCallback(async () => {
+    setNotice("");
+    try {
+      const res = (await api.promoteCharacterIdentity(
+        projectId,
+        characterId,
+        "owner",
+      )) as { visualIdentityId?: string; bibleStableId?: string };
+      setPromoteReady(false);
+      setNotice(
+        `Promoted to production: VisualIdentity ${res.visualIdentityId || "synced"}, Bible ${
+          res.bibleStableId || "synced"
+        }.`,
+      );
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Promote failed");
+    }
+  }, [projectId, characterId]);
 
   const handleSave = useCallback(async () => {
     const ok = await cp.save({
@@ -228,7 +269,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       </div>
 
       <div className="character-core__section">
-        <h3 className="character-core__section-title">Character Sheet</h3>
+        <h3 className="character-core__section-title">{t("sheet")}</h3>
         <CharacterGeneratorPanel
           projectId={projectId}
           visualStyle={profile?.visual_style}
@@ -251,9 +292,26 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <CharacterCandidateGrid
           candidates={candidates}
           selectedAssetId={selectedAssetId}
+          pendingHeroAssetId={pendingHeroAssetId}
           onApprove={(c) => void handleApprove(c)}
           onRetry={(c) => retryHandlerRef.current?.(c)}
         />
+        {promoteReady ? (
+          <div className="character-core__promote" data-testid="character-promote-banner">
+            <span>
+              Look approved. Sync this character to production (VisualIdentity, Bible, Prompt
+              Package) to make it available across continuity.
+            </span>
+            <button
+              type="button"
+              className="character-core__button primary"
+              data-testid="character-promote-button"
+              onClick={() => void handlePromote()}
+            >
+              Promote to Production
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {notice ? (

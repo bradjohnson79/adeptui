@@ -1,0 +1,18 @@
+{
+  "title": "ストーリーボードスタジオ",
+  "library": "ライブラリ",
+  "addReference": "参照を追加",
+  "generateMissing": "不足パネルを生成",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "2Kストーリーボードを生成",
+  "exportPdf": "PDFを書き出す",
+  "exportJson": "JSONを書き出す",
+  "contactSheet": "コンタクトシート",
+  "prepareTimeline": "タイムライン用に準備",
+  "replace": "置き換え",
+  "remove": "取り除く",
+  "captions": "キャプション",
+  "page": "ページ",
+  "previousPage": "前のページ",
+  "nextPage": "次のページ"
+}

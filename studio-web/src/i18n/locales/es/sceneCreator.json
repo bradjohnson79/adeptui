@@ -1,0 +1,18 @@
+{
+  "title": "Creador de escenas",
+  "scenes": "Escenas",
+  "shots": "Tomas",
+  "newShot": "Nueva toma",
+  "spatialProfile": "Perfil espacial",
+  "resetWorkspace": "Restablecer espacio de trabajo",
+  "resetLayout": "Restablecer diseño",
+  "cameraOrientation": "Orientación de cámara 3D",
+  "inpaint": "Inpaint / edición de región",
+  "lowResPreview": "Generar vista previa de baja resolución",
+  "finalQuality": "Render de calidad final",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Aprobar",
+  "deleteShot": "Delete shot"
+}

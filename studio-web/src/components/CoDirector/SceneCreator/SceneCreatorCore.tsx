@@ -3,11 +3,13 @@
  * Co-Director Express is a launcher only (SceneCreatorExpressLauncher).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
+import { selectableCloudModels } from "./cloudModels";
 import type { SceneShotCandidate } from "./types";
-import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
+import { useSceneCreator } from "./useSceneCreator";
 import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
@@ -38,11 +40,11 @@ import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
   projectId: string;
-  variant: SceneCreatorVariant;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
 
 export function SceneCreatorCore({ projectId, onGoTab }: SceneCreatorCoreProps) {
+  const { t } = useTranslation("sceneCreator");
   const sc = useSceneCreator(projectId);
   const sheets = sc.workspace?.sheets || [];
 
@@ -54,7 +56,7 @@ export function SceneCreatorCore({ projectId, onGoTab }: SceneCreatorCoreProps) 
     return (
       <CoDirectorEmptyState
         testId="scene-creator-empty-no-ers"
-        title="Scene Creator"
+        title={t("title")}
         description="Scene Creator needs an Environment Reference Sheet. Create one in Spatial Map, or choose an existing sheet if this project already has one."
         action={
           <div className="scene-creator-core__row">
@@ -97,6 +99,7 @@ type LayoutProps = {
 };
 
 function StandardLayout({ sc, onGoTab }: LayoutProps) {
+  const { t } = useTranslation("sceneCreator");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [panes, setPanes] = useState<PaneWidths>(() => ({ ...DEFAULT_PANE_WIDTHS }));
@@ -147,7 +150,7 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
         Tools
       </button>
       <aside className="scene-creator-standard__browser" data-testid="scene-creator-browser">
-        <p className="scene-creator-core__label">Scenes</p>
+        <p className="scene-creator-core__label">{t("scenes")}</p>
         {(sc.workspace?.scenes || []).map((scene) => (
           <button
             key={scene.id}
@@ -158,9 +161,9 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
             {scene.name}
           </button>
         ))}
-        <p className="scene-creator-core__label" style={{ marginTop: "1rem" }}>Shots</p>
+        <p className="scene-creator-core__label" style={{ marginTop: "1rem" }}>{t("shots")}</p>
         <button type="button" className="ghost" onClick={sc.newShot} data-testid="scene-creator-new-shot">
-          New Shot
+          {t("newShot")}
         </button>
         {(sc.workspace?.shots || []).map((shot, index) => (
           <button
@@ -407,6 +410,7 @@ function StandardPreview({
 }
 
 function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const { t } = useTranslation("sceneCreator");
   const profiles = sc.workspace?.spatial_profiles || [];
   const [integrityOpen, setIntegrityOpen] = useState(false);
   const readiness = sc.workspace?.production_readiness || null;
@@ -417,7 +421,7 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
   const ticks = readiness?.ticks || {};
   return (
     <div className="scene-creator-profile" data-testid="scene-creator-spatial-profile">
-      <p className="scene-creator-core__label">Spatial Profile</p>
+      <p className="scene-creator-core__label">{t("spatialProfile")}</p>
       <select
         data-testid="scene-creator-spatial-profile-select"
         value={sc.selectedProfileId || ""}
@@ -488,7 +492,7 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
         onClick={() => sc.setResetConfirmOpen(true)}
         disabled={sc.busy}
       >
-        Reset Workspace
+        {t("resetWorkspace")}
       </button>
       {sc.resetConfirmOpen ? (
         <div className="scene-creator-reset-dialog" role="dialog" aria-labelledby="scene-creator-reset-title" data-testid="scene-creator-reset-dialog">
@@ -505,7 +509,7 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
               Cancel
             </button>
             <button type="button" className="ui-btn ui-btn--secondary" data-testid="scene-creator-reset-confirm" onClick={() => void sc.confirmResetWorkspace()}>
-              Reset Workspace
+              {t("resetWorkspace")}
             </button>
           </div>
         </div>
@@ -594,7 +598,7 @@ function ShotPromptBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
 }
 
 function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
-  const apiModels = sc.workspace?.api_models || [];
+  const apiModels = selectableCloudModels(sc.workspace?.api_models || []);
   const hasApi = apiModels.length > 0;
   const caps = sc.workspace?.preview_capabilities;
   const liveShot = shotWithSelectedFamily(sc.shot, sc.localFamily);

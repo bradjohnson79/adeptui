@@ -1,0 +1,11 @@
+{
+  "title": "Создание персонажей",
+  "generate": "Создать",
+  "save": "Сохранить",
+  "description": "Описание",
+  "references": "Ссылки",
+  "candidates": "Варианты",
+  "approve": "Одобрить",
+  "sheet": "Лист персонажа",
+  "profileGuided": "По профилю"
+}

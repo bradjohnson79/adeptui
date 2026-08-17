@@ -1,0 +1,18 @@
+{
+  "title": "Scene Creator",
+  "scenes": "Scenes",
+  "shots": "Shots",
+  "newShot": "New Shot",
+  "spatialProfile": "Spatial Profile",
+  "resetWorkspace": "Reset Workspace",
+  "resetLayout": "Reset Layout",
+  "cameraOrientation": "3D Camera Orientation",
+  "inpaint": "Inpaint / Region Edit",
+  "lowResPreview": "Generate Low-Res Preview",
+  "finalQuality": "Final Quality Render",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Approve",
+  "deleteShot": "Delete shot"
+}

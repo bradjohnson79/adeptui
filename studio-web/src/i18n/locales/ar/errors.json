@@ -7,5 +7,14 @@
   "modelKnowledgeUnavailable": "معرفة النموذج غير متاحة.",
   "translationFailed": "فشلت الترجمة. تم الاحتفاظ بالنص الأصلي.",
   "languagePackInvalid": "Language pack failed validation.",
-  "recoveryHint": "Try again or recover running jobs from Jobs."
+  "recoveryHint": "Try again or recover running jobs from Jobs.",
+  "enterPromptFirst": "أدخل أمر المبدع أولاً.",
+  "wrongReferenceType": "لا يمكن استخدام هذا النوع من الملفات على هذا المسار.",
+  "unsupportedGenerator": "The selected generator cannot use this reference. The name is kept.",
+  "brokenReference": "This named reference is missing its Library file.",
+  "confirmResetWorkspace": "Reset this workspace layout? Content is not deleted.",
+  "confirmRemoveReference": "Remove this name? The Library file stays.",
+  "confirmDeleteFolder": "Delete folder \"{{name}}\"?",
+  "confirmDeleteGeneration": "Delete this generation?",
+  "diagnosticsDetail": "تفاصيل تقنية"
 }

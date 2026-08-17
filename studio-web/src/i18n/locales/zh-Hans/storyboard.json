@@ -1,0 +1,18 @@
+{
+  "title": "分镜工作室",
+  "library": "资料库",
+  "addReference": "添加参考",
+  "generateMissing": "生成缺失画格",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "生成 2K 分镜",
+  "exportPdf": "导出 PDF",
+  "exportJson": "导出 JSON",
+  "contactSheet": "联系表",
+  "prepareTimeline": "准备到时间线",
+  "replace": "替换",
+  "remove": "移除",
+  "captions": "说明文字",
+  "page": "页",
+  "previousPage": "上一页",
+  "nextPage": "下一页"
+}

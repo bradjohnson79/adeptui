@@ -1,0 +1,11 @@
+{
+  "title": "منشئ الإكسسوارات",
+  "generate": "إنشاء",
+  "save": "حفظ",
+  "description": "الوصف",
+  "references": "المراجع",
+  "approve": "اعتماد",
+  "generateImages": "إنشاء صور الإكسسوار",
+  "generating": "جارٍ الإنشاء…",
+  "loading": "جارٍ تحميل منشئ الإكسسوارات…"
+}

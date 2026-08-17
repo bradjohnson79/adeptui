@@ -3,7 +3,9 @@
  * Primary surface polish: references, camera cards, provider browser, continuity, CTA, contact sheet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { languageProjectContext, useLanguagePrefs } from "../../i18n";
 import type { Job, Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
 import { ASPECT_PRESETS } from "../../workspacePrefs";
@@ -160,6 +162,8 @@ export function CinematicImageStudio({
   onChange: () => Promise<void>;
   onGo: (tab: EditorTab) => void;
 }) {
+  const { t } = useTranslation(["imageGenerator", "common"]);
+  const { prefs } = useLanguagePrefs();
   const d = projectDefaults(project);
   const [studioMode, setStudioMode] = useState<StudioMode>("generate");
   const [prompt, setPrompt] = useState("");
@@ -477,6 +481,7 @@ export function CinematicImageStudio({
             spatialMapVersion,
             spatialCameraId,
             purpose: controls.category,
+            projectContext: languageProjectContext(prefs),
             panelId: replacePanelId || undefined,
             runPromptIntelligence: true,
             advanced:
@@ -710,10 +715,10 @@ export function CinematicImageStudio({
       <div className="page cinematic-image-studio">
         <div className="cis-mode-tabs">
           <button type="button" onClick={() => setStudioMode("generate")}>
-            Generate
+            {t("imageGenerator:generate")}
           </button>
           <button type="button" className="primary" onClick={() => setStudioMode("edit")}>
-            Edit
+            {t("imageGenerator:edit")}
           </button>
         </div>
         <ImageEditWorkspace project={project} onChange={onChange} />
@@ -725,18 +730,18 @@ export function CinematicImageStudio({
     <div className="page cinematic-image-studio" data-testid="cinematic-image-studio">
       <div className="cis-mode-tabs">
         <button type="button" className="primary" onClick={() => setStudioMode("generate")}>
-          Generate
+          {t("imageGenerator:generate")}
         </button>
         <button type="button" onClick={() => setStudioMode("edit")}>
-          Edit
+          {t("imageGenerator:edit")}
         </button>
         <button type="button" className="ghost" onClick={() => onGo("script")}>
-          Open Storyboard
+          {t("imageGenerator:openStoryboard")}
         </button>
       </div>
 
       <header className="cis-header">
-        <h1>Cinematic Image Generator</h1>
+        <h1>{t("imageGenerator:title")}</h1>
         <p className="muted">
           Craft production frames for storyboard sequences — describe the shot, set references, and generate.
         </p>
@@ -822,7 +827,7 @@ export function CinematicImageStudio({
           )}
         </section>
 
-        <CisAccordion id="image-plan" title="Image Plan" defaultOpen persistKey={accordionKey}>
+        <CisAccordion id="image-plan" title={t("imageGenerator:imagePlan")} defaultOpen persistKey={accordionKey}>
           <ProductionPipelinePanel
             projectId={project.id}
             prompt={effectivePrompt(prompt, controls)}
@@ -883,7 +888,7 @@ export function CinematicImageStudio({
               data-testid="cis-add-reference"
               onClick={addReferences}
             >
-              Add Reference
+              {t("imageGenerator:addReference")}
             </button>
             {pendingIds.length ? (
               <span className="muted tiny">{pendingIds.length} selected</span>
@@ -897,7 +902,7 @@ export function CinematicImageStudio({
               </span>
             </div>
             {!activeAssets.length ? (
-              <p className="muted tiny">Select images in the Library, then click Add Reference.</p>
+              <p className="muted tiny">{t("imageGenerator:addReferenceHint")}</p>
             ) : (
               <ul className="cis-active-ref-list">
                 {activeAssets.map((asset) => {
@@ -937,7 +942,7 @@ export function CinematicImageStudio({
 
         <CisAccordion
           id="camera"
-          title="Camera"
+          title={t("imageGenerator:camera")}
           defaultOpen
           persistKey={accordionKey}
           status={`${controls.shotIntent.replace(/_/g, " ")} · ${controls.lens} · ${controls.aspectRatio}`}
@@ -1019,7 +1024,7 @@ export function CinematicImageStudio({
 
         <CisAccordion
           id="lighting"
-          title="Lighting"
+          title={t("imageGenerator:lighting")}
           persistKey={accordionKey}
           status={controls.lighting || undefined}
         >
@@ -1054,36 +1059,40 @@ export function CinematicImageStudio({
         {showHostedCard && (
           <CisAccordion
             id="hosted-api"
-            title="Hosted API Usage"
+          title={t("imageGenerator:hostedUsage")}
             persistKey={accordionKey}
             status={hostedChoice === "allow_hosted" ? "Hosted allowed" : "Local only"}
             className="cis-hosted-card"
           >
             <div className="cis-hosted-card__body" data-testid="cis-hosted-api-card">
-              <fieldset className="cis-hosted-card__options" role="radiogroup" aria-label="Generation Source">
+              <fieldset className="cis-seg cis-hosted-card__options" role="radiogroup" aria-label="Generation Source">
                 <legend>Generation Source</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="cis-hosted"
-                    checked={hostedChoice === "local_only"}
-                    onChange={() => setHostedChoice("local_only")}
-                  />
-                  <span>Local Models Only</span>
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="cis-hosted"
-                    checked={hostedChoice === "allow_hosted"}
-                    onChange={() => setHostedChoice("allow_hosted")}
-                  />
-                  <span>Allow Hosted API Models</span>
-                </label>
+                <div className="cis-seg__row">
+                  <label className="cis-seg__option">
+                    <input
+                      type="radio"
+                      name="cis-hosted"
+                      data-testid="cis-hosted-local"
+                      checked={hostedChoice === "local_only"}
+                      onChange={() => setHostedChoice("local_only")}
+                    />
+                    <span>Local Models Only</span>
+                  </label>
+                  <label className="cis-seg__option">
+                    <input
+                      type="radio"
+                      name="cis-hosted"
+                      data-testid="cis-hosted-allow"
+                      checked={hostedChoice === "allow_hosted"}
+                      onChange={() => setHostedChoice("allow_hosted")}
+                    />
+                    <span>Allow Hosted API Models</span>
+                  </label>
+                </div>
               </fieldset>
               <div className={`cis-hosted-card__cost${paidOk ? "" : " is-muted"}`}>
                 Estimated hosted cost: <strong>{paidOk ? estimateCostLabel(generateTargets) : "$0.00"}</strong>
-                <div className="tiny muted">Hosted cost applies only when hosted models are used.</div>
+                <div className="tiny muted">Hosted cost applies only when hosted models are selected.</div>
               </div>
             </div>
           </CisAccordion>
@@ -1091,7 +1100,7 @@ export function CinematicImageStudio({
 
         <CisAccordion
           id="continuity"
-          title="Continuity"
+          title={t("imageGenerator:continuity")}
           persistKey={accordionKey}
           status={selectedScene?.name || "No scene"}
         >
@@ -1160,7 +1169,7 @@ export function CinematicImageStudio({
 
         <CisAccordion
           id="prompt-intelligence"
-          title="Prompt Intelligence"
+          title={t("imageGenerator:promptIntelligence")}
           persistKey={accordionKey}
           status={piStatus}
           className="cis-pi"
@@ -1190,7 +1199,7 @@ export function CinematicImageStudio({
             onClick={() => void generate()}
             data-testid="cis-generate"
           >
-            {busy ? "Generating…" : "Generate Images"}
+            {busy ? t("imageGenerator:generating") : t("imageGenerator:generateImages")}
           </button>
           <div className="cis-generate-cta__meta">
             <span>
@@ -1255,7 +1264,7 @@ export function CinematicImageStudio({
               <div className="cis-empty-results__art" aria-hidden />
               <h3>No images generated yet</h3>
               <p>
-                Describe your shot, select references, and click <strong>Generate Images</strong>.
+                {t("imageGenerator:emptyHint")}
               </p>
             </div>
           ) : (

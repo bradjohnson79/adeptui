@@ -1,0 +1,18 @@
+{
+  "title": "Studio Storyboard",
+  "library": "Pustaka",
+  "addReference": "Tambah referensi",
+  "generateMissing": "Hasilkan panel yang hilang",
+  "generateMissingDone": "Generate Missing Panels finished.",
+  "generate2k": "Hasilkan storyboard 2K",
+  "exportPdf": "Ekspor PDF",
+  "exportJson": "Ekspor JSON",
+  "contactSheet": "Lembar kontak",
+  "prepareTimeline": "Siapkan untuk timeline",
+  "replace": "Ganti",
+  "remove": "Hapus",
+  "captions": "Keterangan",
+  "page": "Halaman",
+  "previousPage": "Halaman sebelumnya",
+  "nextPage": "Halaman berikutnya"
+}

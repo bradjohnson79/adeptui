@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
@@ -82,6 +83,7 @@ export function TimelineEditorShell({
   setSelectedScene: (id: string) => void;
   refresh: () => Promise<void>;
 }) {
+  const { t } = useTranslation(["timeline", "common", "errors"]);
   const { selection, setSelection, setZoom, zoom } = useDirectorSelection();
   const openCoDirector = useOpenCoDirector();
   const selected = useMemo(
@@ -93,7 +95,7 @@ export function TimelineEditorShell({
   const [master, setMaster] = useState<SceneTimelineMaster | null>(null);
   const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [preflightSummary, setPreflightSummary] = useState("Not run yet");
+  const [preflightSummary, setPreflightSummary] = useState(() => "");
   const [preflightBlockingCount, setPreflightBlockingCount] = useState(0);
   const [rightTab, setRightTab] = useState<"inspector" | "codirector">("inspector");
   const [undoStack, setUndoStack] = useState<DirectorTimeline[]>([]);
@@ -238,7 +240,7 @@ export function TimelineEditorShell({
     if (!selectedSceneId) return;
     setSelection({ kind: "scene", id: selectedSceneId });
     setPlayheadSec(0);
-    setPreflightSummary("Not run yet");
+    setPreflightSummary(t("common:notRunYet"));
     setUndoStack([]);
     setRedoStack([]);
     void refreshMaster();
@@ -389,9 +391,7 @@ export function TimelineEditorShell({
       const batch = master?.batchBlocks.find((b) => b.id === selection.id);
       if (!batch) return;
       if (batchHasContent(batch)) {
-        const ok = window.confirm(
-          `Remove “${batch.label}”?\n\nThis Batch has content or job history. Source assets remain in Project Library.`,
-        );
+        const ok = window.confirm(t("timeline:removeBatch", { name: batch.label }));
         if (!ok) return;
       }
       await api.directorTimelineDeleteBatch(project.id, selected.id, batch.id);
@@ -443,47 +443,47 @@ export function TimelineEditorShell({
       const clip = (timeline.image_clips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
-        confirmed = window.confirm("Remove this Image from the Timeline?\n\nSource assets remain in Project Library.");
+        confirmed = window.confirm(t("timeline:removeImage"));
       }
     } else if (clipKind === "video") {
       const clip = (timeline.video_clips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
-        confirmed = window.confirm("Remove this Video from the Timeline?\n\nSource assets remain in Project Library.");
+        confirmed = window.confirm(t("timeline:removeVideo"));
       }
     } else if (clipKind === "videoReference") {
       const clip = (timeline.video_reference_clips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
-        confirmed = window.confirm("Remove this Video Reference from the Timeline?\n\nSource assets remain in Project Library.");
+        confirmed = window.confirm(t("timeline:removeVideoReference"));
       }
     } else if (clipKind === "audio") {
       const clip = (timeline.audio_clips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
-        confirmed = window.confirm("Remove this Audio clip from the Timeline?\n\nSource assets remain in Project Library.");
+        confirmed = window.confirm(t("timeline:removeAudio"));
       }
     } else if (clipKind === "sfx") {
       const clip = (timeline.sfx_clips || []).find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
-        confirmed = window.confirm("Remove this SFX clip from the Timeline?\n\nSource assets remain in Project Library.");
+        confirmed = window.confirm(t("timeline:removeSfx"));
       }
     } else if (clipKind === "prompt") {
       const seg = (timeline.prompt_segments || []).find((c) => c.id === selection.id);
       if (!seg) return;
       if ((seg.text || "").trim()) {
-        confirmed = window.confirm("Remove this Timed Instruction?");
+        confirmed = window.confirm(t("timeline:removeInstruction"));
       }
     } else if (clipKind === "camera") {
-      confirmed = window.confirm("Remove this Camera clip from the Timeline?");
+      confirmed = window.confirm(t("timeline:removeCamera"));
     } else if (clipKind === "lipsyncClip") {
       const track = normalizeLipSyncTracks(timeline.lipsync?.tracks).find(
         (item) => item.id === selection.trackId || (item.clips || []).some((clip) => clip.id === selection.id),
       );
       const clip = track?.clips?.find((item) => item.id === selection.id);
       if (!track || !clip) return;
-      confirmed = window.confirm("Remove this Lip Sync Clip from the Timeline?");
+      confirmed = window.confirm(t("timeline:removeLipSync"));
     }
     if (!confirmed) return;
 
@@ -622,7 +622,7 @@ export function TimelineEditorShell({
   );
 
   if (!selected) {
-    return <div className="page"><p className="empty">Select a scene to open the Timeline.</p></div>;
+    return <div className="page"><p className="empty">{t("timeline:selectScene")}</p></div>;
   }
 
   const resetWorkspaceLayout = () => {
@@ -642,7 +642,7 @@ export function TimelineEditorShell({
         <div className="timeline-scene-header__identity">
           <h2>{selected.name}</h2>
           <p className="scene-meta">
-            {generatorLabel(selected.engine)} · {selected.duration_sec.toFixed(1)} sec · {master?.mode === "video_finishing" ? "Video Finishing" : "Image Planning"}
+            {generatorLabel(selected.engine)} · {t("timeline:durationSec", { seconds: selected.duration_sec.toFixed(1) })} · {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
           </p>
         </div>
         <div className="timeline-scene-header__actions">
@@ -651,35 +651,35 @@ export function TimelineEditorShell({
               type="button"
               className="timeline-scene-header__btn ghost"
               data-testid="timeline-viewer-fit"
-              title="Fit the Viewer back to the selected size"
-              aria-label="Fit the Viewer back to the selected size"
+              title={t("timeline:fitTitle")}
+              aria-label={t("timeline:fitTitle")}
               onClick={() => requestTimelineFocus({ target: "viewer", fitViewer: true })}
             >
-              Fit
+              {t("timeline:fit")}
             </button>
             <label className="timeline-scene-header__select">
-              <span className="sr-only">Viewer Size</span>
+              <span className="sr-only">{t("timeline:viewerSize")}</span>
               <select
                 value={workspaceLayout.viewerPreset}
-                aria-label="Viewer Size"
+                aria-label={t("timeline:viewerSize")}
                 data-testid="timeline-viewer-preset"
-                title="Viewer Size"
+                title={t("timeline:viewerSize")}
                 onChange={(e) =>
                   requestTimelineFocus({ target: "viewer", viewerPreset: e.target.value as TimelineViewerPreset })
                 }
               >
-                <option value="large">Large</option>
-                <option value="balanced">Balanced</option>
-                <option value="timeline_focus">Timeline Focus</option>
+                <option value="large">{t("timeline:viewerSizeLarge")}</option>
+                <option value="balanced">{t("timeline:viewerSizeBalanced")}</option>
+                <option value="timeline_focus">{t("timeline:viewerSizeTimelineFocus")}</option>
               </select>
             </label>
             <label className="timeline-scene-header__select">
-              <span className="sr-only">Picture Shape</span>
+              <span className="sr-only">{t("timeline:pictureShape")}</span>
               <select
                 data-testid="timeline-viewer-aspect"
                 value={normalizeProductionAspect(selected.aspect_ratio)}
-                title="Picture shape for this scene"
-                aria-label="Picture shape"
+                title={t("timeline:pictureShapeTitle")}
+                aria-label={t("timeline:pictureShape")}
                 onChange={(e) =>
                   void api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }).then(afterMutation)
                 }
@@ -694,33 +694,33 @@ export function TimelineEditorShell({
             <button
               type="button"
               className={`timeline-scene-header__btn ${!hideOverlay ? "primary" : "ghost"}`}
-              title={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
-              aria-label={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
+              title={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
+              aria-label={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-pressed={!hideOverlay}
               onClick={() => setHideOverlay((v) => !v)}
             >
-              Guides
+              {t("timeline:guides")}
             </button>
             <button
               type="button"
               className={`timeline-scene-header__btn ${pauseUpdates ? "primary" : "ghost"}`}
               data-testid="timeline-viewer-pause"
-              title={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
-              aria-label={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
+              title={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
+              aria-label={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
               aria-pressed={pauseUpdates}
               onClick={() => setPauseUpdates((v) => !v)}
             >
-              {pauseUpdates ? "Resume viewer" : "Pause viewer"}
+              {pauseUpdates ? t("timeline:resumeViewer") : t("timeline:pauseViewer")}
             </button>
             <button
               type="button"
               className="timeline-scene-header__btn ghost"
               data-testid="timeline-reset-layout"
-              title="Reset pane widths and Viewer size. Does not change Timeline content."
-              aria-label="Reset pane widths and Viewer size"
+              title={t("timeline:resetLayoutTitle")}
+              aria-label={t("timeline:resetLayout")}
               onClick={resetWorkspaceLayout}
             >
-              Reset Layout
+              {t("timeline:resetLayout")}
             </button>
           </div>
           <WorkspaceFullscreenControls
@@ -731,26 +731,26 @@ export function TimelineEditorShell({
           <button
             type="button"
             className={`timeline-scene-header__btn ${master?.mode === "image_planning" ? "primary" : "ghost"}`}
-            title="Set Scene mode to Image Planning"
-            aria-label="Set Scene mode to Image Planning"
+            title={t("timeline:imagePlanningTitle")}
+            aria-label={t("timeline:imagePlanningTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "image_planning").then(afterMutation)}
           >
-            Image Planning
+            {t("timeline:imagePlanning")}
           </button>
           <button
             type="button"
             className={`timeline-scene-header__btn ${master?.mode === "video_finishing" ? "primary" : "ghost"}`}
-            title="Set Scene mode to Video Finishing"
-            aria-label="Set Scene mode to Video Finishing"
+            title={t("timeline:videoFinishingTitle")}
+            aria-label={t("timeline:videoFinishingTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "video_finishing").then(afterMutation)}
           >
-            Video Finishing
+            {t("timeline:videoFinishing")}
           </button>
           <button
             type="button"
             className="timeline-scene-header__btn"
-            title="Run Co-Director Preflight for this Scene"
-            aria-label="Run Co-Director Preflight for this Scene"
+            title={t("timeline:preflightTitle")}
+            aria-label={t("timeline:preflightTitle")}
             onClick={() =>
               void api.directorTimelinePreflight(project.id, selected.id).then((result) => {
                 // Surface severity/code from findings instead of just a count. Block only
@@ -783,39 +783,39 @@ export function TimelineEditorShell({
               })
             }
           >
-            Preflight
+            {t("timeline:preflight")}
           </button>
           <button
             type="button"
             className="timeline-scene-header__btn primary"
             title={
               preflightBlockingCount > 0
-                ? `Blocked: ${preflightBlockingCount} blocking preflight finding(s). Run Preflight to see details.`
-                : "Generate the full Scene with the Timeline orchestrator"
+                ? t("timeline:generateSceneBlocked", { count: preflightBlockingCount })
+                : t("timeline:generateSceneTitle")
             }
-            aria-label="Generate the full Scene with the Timeline orchestrator"
+            aria-label={t("timeline:generateSceneTitle")}
             disabled={preflightBlockingCount > 0}
             onClick={() => void api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }).then(afterMutation)}
           >
-            Generate Scene
+            {t("timeline:generateScene")}
           </button>
           <button
             type="button"
             className="timeline-scene-header__btn ghost"
-            title="Stop remaining Scene generation jobs"
-            aria-label="Stop remaining Scene generation jobs"
+            title={t("timeline:stopJobsTitle")}
+            aria-label={t("timeline:stopJobsTitle")}
             onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "stop_remaining_scene_jobs" }).then(afterMutation)}
           >
-            Stop Jobs
+            {t("timeline:stopJobs")}
           </button>
           <button
             type="button"
             className="timeline-scene-header__btn ghost"
-            title="Resume incomplete Scene generation jobs"
-            aria-label="Resume incomplete Scene generation jobs"
+            title={t("timeline:resumeTitle")}
+            aria-label={t("timeline:resumeTitle")}
             onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }).then(afterMutation)}
           >
-            Resume
+            {t("timeline:resume")}
           </button>
         </div>
       </header>
@@ -866,7 +866,7 @@ export function TimelineEditorShell({
           data-testid="timeline-splitter-left"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize scenes and library pane"
+          aria-label={t("timeline:resizeLeft")}
           aria-valuenow={Math.round(workspaceLayout.leftWidth)}
           tabIndex={0}
           onPointerDown={startPaneResize("left")}
@@ -959,7 +959,7 @@ export function TimelineEditorShell({
           data-testid="timeline-splitter-right"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize inspector pane"
+          aria-label={t("timeline:resizeRight")}
           aria-valuenow={Math.round(workspaceLayout.rightWidth)}
           tabIndex={0}
           onPointerDown={startPaneResize("right")}
@@ -971,20 +971,20 @@ export function TimelineEditorShell({
             <button
               type="button"
               className={rightTab === "inspector" ? "primary" : "ghost"}
-              title="Show the Timeline Inspector"
-              aria-label="Show the Timeline Inspector"
+              title={t("timeline:showInspector")}
+              aria-label={t("timeline:showInspector")}
               onClick={() => setRightTab("inspector")}
             >
-              Inspector
+              {t("timeline:inspector")}
             </button>
             <button
               type="button"
               className={rightTab === "codirector" ? "primary" : "ghost"}
-              title="Show the Co-Director rail"
-              aria-label="Show the Co-Director rail"
+              title={t("timeline:showCoDirector")}
+              aria-label={t("timeline:showCoDirector")}
               onClick={() => setRightTab("codirector")}
             >
-              Co-Director
+              {t("timeline:coDirector")}
             </button>
           </div>
           {rightTab === "inspector" ? (
@@ -1000,23 +1000,20 @@ export function TimelineEditorShell({
             />
           ) : (
             <section className="panel timeline-codirector-placeholder" data-testid="timeline-codirector-rail">
-              <div className="timeline-inspector__eyebrow">Co-Director</div>
-              <p className="scene-meta">
-                Ask Co-Director to inspect this Scene, focus the Scene Prompt, move the playhead, or run Preflight.
-                Mutations use ProposalService approval — the same Timeline state as this shell.
-              </p>
+              <div className="timeline-inspector__eyebrow">{t("timeline:coDirector")}</div>
+              <p className="scene-meta">{t("timeline:coDirectorHint")}</p>
               <button
                 type="button"
                 className="primary"
-                title="Open Co-Director with a Scene Prompt focus prompt"
-                aria-label="Open Co-Director with a Scene Prompt focus prompt"
+                title={t("timeline:openCoDirectorTitle")}
+                aria-label={t("timeline:openCoDirectorTitle")}
                 onClick={() =>
                   openCoDirector(
                     `Focus the Scene Prompt for “${selected.name}” and explain Scene Prompt vs Timed Instructions. Then run Preflight.`,
                   )
                 }
               >
-                Open Co-Director
+                {t("timeline:openCoDirector")}
               </button>
             </section>
           )}

@@ -1,0 +1,18 @@
+{
+  "title": "Pembuat Adegan",
+  "scenes": "Adegan",
+  "shots": "Shot",
+  "newShot": "Shot baru",
+  "spatialProfile": "Profil spasial",
+  "resetWorkspace": "Reset ruang kerja",
+  "resetLayout": "Reset tata letak",
+  "cameraOrientation": "Orientasi kamera 3D",
+  "inpaint": "Inpaint / edit wilayah",
+  "lowResPreview": "Hasilkan pratinjau resolusi rendah",
+  "finalQuality": "Render kualitas akhir",
+  "confirmDeleteShot": "Delete this shot?",
+  "confirmResetWorkspace": "Reset this workspace? Layout returns to default. Shots are not deleted.",
+  "productionIntegrity": "Production integrity",
+  "approve": "Setujui",
+  "deleteShot": "Delete shot"
+}
