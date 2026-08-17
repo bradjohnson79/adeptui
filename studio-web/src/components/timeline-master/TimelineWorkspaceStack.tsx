@@ -200,6 +200,8 @@ export function TimelineWorkspaceStack({
       lastNonFullscreenLayout: undefined,
       leftWidth: DEFAULT_LEFT_WIDTH,
       rightWidth: DEFAULT_RIGHT_WIDTH,
+      leftDrawerOpen: true,
+      rightDrawerOpen: true,
     });
     saveProjectPreviewHeightRatio(projectId, ratio);
   }, [containerSize.height, containerSize.width, persistLayout, projectId]);

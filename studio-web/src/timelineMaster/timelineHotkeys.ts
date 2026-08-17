@@ -51,6 +51,9 @@ export const DEFAULT_HOTKEYS: TimelineHotkeyBinding[] = [
   { actionId: "toggleSnap", label: "Toggle Snap", category: "Editing", defaultShortcut: { key: "s" }, userShortcut: null, enabled: true },
   { actionId: "escape", label: "Clear selection / close overlay", category: "Editing", defaultShortcut: { key: "Escape" }, userShortcut: null, enabled: true },
   { actionId: "openHotkeys", label: "Open Hot Keys", category: "Editing", defaultShortcut: { key: "?" }, userShortcut: null, enabled: true },
+  { actionId: "toggleLeftDrawer", label: "Toggle Library & References", category: "Editing", defaultShortcut: { key: "" }, userShortcut: null, enabled: true },
+  { actionId: "toggleRightDrawer", label: "Toggle Inspector & Co-Director", category: "Editing", defaultShortcut: { key: "" }, userShortcut: null, enabled: true },
+  { actionId: "focusTimeline", label: "Focus Timeline", category: "Editing", defaultShortcut: { key: "" }, userShortcut: null, enabled: true },
   { actionId: "addPrompt", label: "Prompt clip", category: "Clips & Tracks", defaultShortcut: { key: "t" }, userShortcut: null, enabled: true },
   { actionId: "addLipSync", label: "Lip Sync clip", category: "Clips & Tracks", defaultShortcut: { key: "l" }, userShortcut: null, enabled: true },
 ];
@@ -93,8 +96,9 @@ export function chordsEqual(a: ShortcutChord, b: ShortcutChord): boolean {
 }
 
 export function formatChord(chord: ShortcutChord, platformMac = isMac()): string {
-  const parts: string[] = [];
   const n = normalizeChord(chord);
+  if (!n.key) return "—";
+  const parts: string[] = [];
   if (n.ctrl) parts.push(platformMac ? "⌘" : "Ctrl");
   if (n.shift) parts.push("Shift");
   if (n.alt) parts.push(platformMac ? "⌥" : "Alt");
@@ -113,9 +117,11 @@ export function findConflict(
   actionId: string,
   chord: ShortcutChord,
 ): TimelineHotkeyBinding | null {
+  const wanted = normalizeChord(chord);
+  if (!wanted.key) return null;
   return (
     bindings.find(
-      (item) => item.enabled && item.actionId !== actionId && chordsEqual(effectiveChord(item), chord),
+      (item) => item.enabled && item.actionId !== actionId && chordsEqual(effectiveChord(item), wanted),
     ) || null
   );
 }
@@ -189,7 +195,14 @@ export function matchHotkey(
   bindings: TimelineHotkeyBinding[],
 ): TimelineHotkeyBinding | null {
   const chord = chordFromEvent(event);
-  return bindings.find((item) => item.enabled && chordsEqual(effectiveChord(item), chord)) || null;
+  return (
+    bindings.find((item) => {
+      if (!item.enabled) return false;
+      const wanted = effectiveChord(item);
+      if (!wanted.key) return false;
+      return chordsEqual(wanted, chord);
+    }) || null
+  );
 }
 
 const commandHandlers = new Map<string, () => void>();

@@ -13,14 +13,16 @@ import {
   type TimelineFocusRequest,
 } from "../../timelineMaster/timelineFocus";
 import {
-  clampSidebarWidths,
+  clampPushedDrawerWidth,
   loadTimelineWorkspaceLayout,
+  resolveDrawerChrome,
   saveTimelineWorkspaceLayout,
   LEFT_PANE_MIN,
   LEFT_PANE_MAX,
   RIGHT_PANE_MIN,
   RIGHT_PANE_MAX,
   TIMELINE_LAYOUT_EVENT,
+  type DrawerSide,
   type TimelineViewerPreset,
   type TimelineWorkspaceLayout,
 } from "../../timelineMaster/workspaceLayout";
@@ -118,14 +120,49 @@ export function TimelineEditorShell({
     onRestoreViewMode: (mode) => setViewportMode(mode),
   });
   const [workspaceLayout, setWorkspaceLayout] = useState(() => loadTimelineWorkspaceLayout());
+  const [containerWidth, setContainerWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
+  const [lastActivatedSide, setLastActivatedSide] = useState<DrawerSide>("right");
+  const [paneDragging, setPaneDragging] = useState(false);
   const layoutRootRef = useRef<HTMLDivElement>(null);
+  const chromePrevRef = useRef<{ leftPlacement: "closed" | "push" | "overlay"; rightPlacement: "closed" | "push" | "overlay" } | undefined>(undefined);
   const paneDragRef = useRef<{
-    side: "left" | "right";
+    side: DrawerSide;
     originX: number;
     originLeft: number;
     originRight: number;
     containerWidth: number;
+    otherPushing: boolean;
   } | null>(null);
+
+  const chrome = useMemo(
+    () =>
+      resolveDrawerChrome({
+        containerWidth,
+        leftOpen: workspaceLayout.leftDrawerOpen,
+        rightOpen: workspaceLayout.rightDrawerOpen,
+        leftWidth: workspaceLayout.leftWidth,
+        rightWidth: workspaceLayout.rightWidth,
+        lastActivatedSide,
+        previous: chromePrevRef.current,
+        dragLocked: paneDragging,
+      }),
+    [
+      containerWidth,
+      lastActivatedSide,
+      paneDragging,
+      workspaceLayout.leftDrawerOpen,
+      workspaceLayout.leftWidth,
+      workspaceLayout.rightDrawerOpen,
+      workspaceLayout.rightWidth,
+    ],
+  );
+  chromePrevRef.current = { leftPlacement: chrome.leftPlacement, rightPlacement: chrome.rightPlacement };
+  const chromeRef = useRef(chrome);
+  chromeRef.current = chrome;
+  const layoutRef = useRef(workspaceLayout);
+  layoutRef.current = workspaceLayout;
 
   useEffect(() => {
     const onLayout = (event: Event) => {
@@ -136,40 +173,97 @@ export function TimelineEditorShell({
     return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
   }, []);
 
-  const commitSidebarWidths = useCallback((left: number, right: number, containerWidth?: number) => {
-    const next = clampSidebarWidths(left, right, containerWidth);
-    const saved = saveTimelineWorkspaceLayout(next);
+  useEffect(() => {
+    const node = layoutRootRef.current;
+    if (!node) return;
+    const measure = () => {
+      const width = Math.round(node.getBoundingClientRect().width);
+      if (width > 0) setContainerWidth(width);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [selected?.id]);
+
+  const persistLayout = useCallback((patch: Partial<TimelineWorkspaceLayout>) => {
+    const saved = saveTimelineWorkspaceLayout(patch);
     setWorkspaceLayout(saved);
     return saved;
   }, []);
 
-  const startPaneResize = (side: "left" | "right") => (event: ReactPointerEvent<HTMLDivElement>) => {
+  const commitPushedWidth = useCallback(
+    (side: DrawerSide, proposed: number, width: number, otherPushing: boolean) => {
+      const layout = layoutRef.current;
+      const nextWidth = clampPushedDrawerWidth({
+        side,
+        proposed,
+        otherWidth: side === "left" ? layout.rightWidth : layout.leftWidth,
+        otherPushing,
+        containerWidth: width,
+      });
+      return persistLayout(side === "left" ? { leftWidth: nextWidth } : { rightWidth: nextWidth });
+    },
+    [persistLayout],
+  );
+
+  const setDrawerOpen = useCallback(
+    (side: DrawerSide, open: boolean) => {
+      setLastActivatedSide(side);
+      persistLayout(side === "left" ? { leftDrawerOpen: open } : { rightDrawerOpen: open });
+    },
+    [persistLayout],
+  );
+
+  const toggleDrawer = useCallback(
+    (side: DrawerSide) => {
+      const layout = layoutRef.current;
+      const open = side === "left" ? !layout.leftDrawerOpen : !layout.rightDrawerOpen;
+      setDrawerOpen(side, open);
+    },
+    [setDrawerOpen],
+  );
+
+  const openRightDrawer = useCallback(() => {
+    setLastActivatedSide("right");
+    if (!layoutRef.current.rightDrawerOpen) persistLayout({ rightDrawerOpen: true });
+  }, [persistLayout]);
+
+  const focusTimelineWorkspace = useCallback(() => {
+    persistLayout({ leftDrawerOpen: false, rightDrawerOpen: false });
+  }, [persistLayout]);
+
+  const startPaneResize = (side: DrawerSide) => (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    const placement = side === "left" ? chromeRef.current.leftPlacement : chromeRef.current.rightPlacement;
+    if (placement !== "push") return;
     event.preventDefault();
-    const containerWidth = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
+    const measured = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
     const originLeft = workspaceLayout.leftWidth;
     const originRight = workspaceLayout.rightWidth;
+    const otherPushing = side === "left" ? chromeRef.current.rightPlacement === "push" : chromeRef.current.leftPlacement === "push";
     paneDragRef.current = {
       side,
       originX: event.clientX,
       originLeft,
       originRight,
-      containerWidth,
+      containerWidth: measured,
+      otherPushing,
     };
+    setPaneDragging(true);
     const target = event.currentTarget;
     target.setPointerCapture(event.pointerId);
     const onMove = (ev: PointerEvent) => {
       const drag = paneDragRef.current;
       if (!drag) return;
       const dx = ev.clientX - drag.originX;
-      if (drag.side === "left") {
-        commitSidebarWidths(drag.originLeft + dx, drag.originRight, drag.containerWidth);
-      } else {
-        commitSidebarWidths(drag.originLeft, drag.originRight - dx, drag.containerWidth);
-      }
+      const proposed = drag.side === "left" ? drag.originLeft + dx : drag.originRight - dx;
+      commitPushedWidth(drag.side, proposed, drag.containerWidth, drag.otherPushing);
     };
     const onUp = (ev: PointerEvent) => {
       paneDragRef.current = null;
+      setPaneDragging(false);
       try {
         target.releasePointerCapture(ev.pointerId);
       } catch {
@@ -184,27 +278,30 @@ export function TimelineEditorShell({
     target.addEventListener("pointercancel", onUp);
   };
 
-  const onPaneKeyDown = (side: "left" | "right") => (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  const onPaneKeyDown = (side: DrawerSide) => (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const placement = side === "left" ? chromeRef.current.leftPlacement : chromeRef.current.rightPlacement;
+    if (placement !== "push") return;
     const step = event.shiftKey ? 32 : 16;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
       return;
     }
     event.preventDefault();
-    const containerWidth = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
+    setLastActivatedSide(side);
+    const measured = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
+    const otherPushing = side === "left" ? chromeRef.current.rightPlacement === "push" : chromeRef.current.leftPlacement === "push";
+    const current = side === "left" ? workspaceLayout.leftWidth : workspaceLayout.rightWidth;
+    const paneMin = side === "left" ? LEFT_PANE_MIN : RIGHT_PANE_MIN;
+    const paneMax = side === "left" ? LEFT_PANE_MAX : RIGHT_PANE_MAX;
     if (event.key === "Home") {
-      commitSidebarWidths(side === "left" ? LEFT_PANE_MIN : workspaceLayout.leftWidth, side === "right" ? RIGHT_PANE_MIN : workspaceLayout.rightWidth, containerWidth);
+      commitPushedWidth(side, paneMin, measured, otherPushing);
       return;
     }
     if (event.key === "End") {
-      commitSidebarWidths(side === "left" ? LEFT_PANE_MAX : workspaceLayout.leftWidth, side === "right" ? RIGHT_PANE_MAX : workspaceLayout.rightWidth, containerWidth);
+      commitPushedWidth(side, paneMax, measured, otherPushing);
       return;
     }
     const delta = event.key === "ArrowRight" ? step : -step;
-    if (side === "left") {
-      commitSidebarWidths(workspaceLayout.leftWidth + delta, workspaceLayout.rightWidth, containerWidth);
-    } else {
-      commitSidebarWidths(workspaceLayout.leftWidth, workspaceLayout.rightWidth - delta, containerWidth);
-    }
+    commitPushedWidth(side, current + (side === "left" ? delta : -delta), measured, otherPushing);
   };
 
   const selectedAsset =
@@ -260,7 +357,17 @@ export function TimelineEditorShell({
       if (detail.sceneId && selected && detail.sceneId !== selected.id) {
         setSelectedScene(detail.sceneId);
       }
-      setRightTab(detail.openRightTab || "inspector");
+      if (detail.openRightTab) {
+        setRightTab(detail.openRightTab);
+        openRightDrawer();
+      } else if (
+        detail.target === "inspectorField" ||
+        detail.target === "preflightFinding" ||
+        detail.target === "queueJob"
+      ) {
+        setRightTab("inspector");
+        openRightDrawer();
+      }
       if (detail.selectionKind) {
         setSelection({
           kind: detail.selectionKind as DirectorSelectionKind,
@@ -309,7 +416,7 @@ export function TimelineEditorShell({
     };
     window.addEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
     return () => window.removeEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
-  }, [project.id, selected, setSelectedScene, setSelection, setZoom, zoom]);
+  }, [openRightDrawer, project.id, selected, setSelectedScene, setSelection, setZoom, zoom]);
 
   const afterMutation = useCallback(async () => {
     await refresh();
@@ -562,7 +669,13 @@ export function TimelineEditorShell({
       registerTimelineCommand("duplicateClip", () => duplicateSelection()),
       registerTimelineCommand("playPause", () => setPauseUpdates((v) => !v)),
       registerTimelineCommand("fullscreen", () => void workspaceFs.toggleFullscreen()),
-      registerTimelineCommand("openHotkeys", () => setRightTab("hotkeys")),
+      registerTimelineCommand("openHotkeys", () => {
+        setRightTab("hotkeys");
+        openRightDrawer();
+      }),
+      registerTimelineCommand("toggleLeftDrawer", () => toggleDrawer("left")),
+      registerTimelineCommand("toggleRightDrawer", () => toggleDrawer("right")),
+      registerTimelineCommand("focusTimeline", () => focusTimelineWorkspace()),
       registerTimelineCommand("escape", () => {
         if (retakeOpen) {
           setRetakeOpen(false);
@@ -570,6 +683,15 @@ export function TimelineEditorShell({
         }
         if (inpaintOpen) {
           setInpaintOpen(false);
+          return;
+        }
+        const current = chromeRef.current;
+        if (current.rightPlacement === "overlay" && layoutRef.current.rightDrawerOpen) {
+          persistLayout({ rightDrawerOpen: false });
+          return;
+        }
+        if (current.leftPlacement === "overlay" && layoutRef.current.leftDrawerOpen) {
+          persistLayout({ leftDrawerOpen: false });
           return;
         }
         if (selected) setSelection({ kind: "scene", id: selected.id });
@@ -586,11 +708,15 @@ export function TimelineEditorShell({
     applyHistorySnapshot,
     deleteSelection,
     duplicateSelection,
+    focusTimelineWorkspace,
     inpaintOpen,
+    openRightDrawer,
+    persistLayout,
     retakeOpen,
     selected,
     selection.kind,
     setSelection,
+    toggleDrawer,
     workspaceFs,
   ]);
 
@@ -681,6 +807,7 @@ export function TimelineEditorShell({
         {
           "--timeline-left-width": `${workspaceLayout.leftWidth}px`,
           "--timeline-right-width": `${workspaceLayout.rightWidth}px`,
+          "--timeline-drawer-handle-width": "14px",
         } as CSSProperties
       }
     >
@@ -761,6 +888,16 @@ export function TimelineEditorShell({
               onClick={() => setPauseUpdates((v) => !v)}
             >
               {pauseUpdates ? t("timeline:resumeViewer") : t("timeline:pauseViewer")}
+            </button>
+            <button
+              type="button"
+              className="timeline-v2__header-btn ghost"
+              data-testid="timeline-focus-workspace"
+              title={t("timeline:focusTimelineTitle")}
+              aria-label={t("timeline:focusTimeline")}
+              onClick={focusTimelineWorkspace}
+            >
+              {t("timeline:focusTimeline")}
             </button>
             <button
               type="button"
@@ -867,8 +1004,31 @@ export function TimelineEditorShell({
         </div>
       </header>
 
-      <div className="timeline-v2__body" ref={layoutRootRef}>
-        <aside className="timeline-v2__left">
+      <div
+        className="timeline-v2__body"
+        ref={layoutRootRef}
+        data-left-placement={chrome.leftPlacement}
+        data-right-placement={chrome.rightPlacement}
+        style={{ gridTemplateColumns: chrome.gridTemplateColumns }}
+      >
+        <button
+          type="button"
+          className="timeline-v2__drawer-handle"
+          data-testid="timeline-drawer-left-toggle"
+          aria-expanded={workspaceLayout.leftDrawerOpen}
+          aria-controls="timeline-drawer-left"
+          title={workspaceLayout.leftDrawerOpen ? t("timeline:closeLeftDrawer") : t("timeline:openLeftDrawer")}
+          aria-label={workspaceLayout.leftDrawerOpen ? t("timeline:closeLeftDrawer") : t("timeline:openLeftDrawer")}
+          onClick={() => toggleDrawer("left")}
+        >
+          {workspaceLayout.leftDrawerOpen ? "‹" : "›"}
+        </button>
+
+        <aside
+          id="timeline-drawer-left"
+          data-testid="timeline-drawer-left"
+          className={`timeline-v2__left timeline-v2__drawer timeline-v2__drawer--left timeline-v2__drawer--${chrome.leftPlacement}`}
+        >
           <div className="timeline-v2__dock timeline-v2__dock--scenes">
             <Timeline
               project={project}
@@ -903,13 +1063,14 @@ export function TimelineEditorShell({
         </aside>
 
         <div
-          className="timeline-v2__splitter"
+          className={`timeline-v2__splitter${chrome.leftPlacement === "push" ? "" : " timeline-v2__splitter--collapsed"}`}
           data-testid="timeline-splitter-left"
           role="separator"
           aria-orientation="vertical"
           aria-label={t("timeline:resizeLeft")}
           aria-valuenow={Math.round(workspaceLayout.leftWidth)}
-          tabIndex={0}
+          aria-hidden={chrome.leftPlacement !== "push"}
+          tabIndex={chrome.leftPlacement === "push" ? 0 : -1}
           onPointerDown={startPaneResize("left")}
           onKeyDown={onPaneKeyDown("left")}
         />
@@ -996,18 +1157,23 @@ export function TimelineEditorShell({
         </main>
 
         <div
-          className="timeline-v2__splitter"
+          className={`timeline-v2__splitter${chrome.rightPlacement === "push" ? "" : " timeline-v2__splitter--collapsed"}`}
           data-testid="timeline-splitter-right"
           role="separator"
           aria-orientation="vertical"
           aria-label={t("timeline:resizeRight")}
           aria-valuenow={Math.round(workspaceLayout.rightWidth)}
-          tabIndex={0}
+          aria-hidden={chrome.rightPlacement !== "push"}
+          tabIndex={chrome.rightPlacement === "push" ? 0 : -1}
           onPointerDown={startPaneResize("right")}
           onKeyDown={onPaneKeyDown("right")}
         />
 
-        <aside className="timeline-v2__right">
+        <aside
+          id="timeline-drawer-right"
+          data-testid="timeline-drawer-right"
+          className={`timeline-v2__right timeline-v2__drawer timeline-v2__drawer--right timeline-v2__drawer--${chrome.rightPlacement}`}
+        >
           <div className="timeline-v2__tabs">
             <button
               type="button"
@@ -1015,7 +1181,10 @@ export function TimelineEditorShell({
               data-testid="timeline-tab-inspector"
               title={t("timeline:showInspector")}
               aria-label={t("timeline:showInspector")}
-              onClick={() => setRightTab("inspector")}
+              onClick={() => {
+                setRightTab("inspector");
+                openRightDrawer();
+              }}
             >
               {t("timeline:inspector")}
             </button>
@@ -1025,7 +1194,10 @@ export function TimelineEditorShell({
               data-testid="timeline-tab-codirector"
               title={t("timeline:showCoDirector")}
               aria-label={t("timeline:showCoDirector")}
-              onClick={() => setRightTab("codirector")}
+              onClick={() => {
+                setRightTab("codirector");
+                openRightDrawer();
+              }}
             >
               {t("timeline:coDirector")}
             </button>
@@ -1035,13 +1207,19 @@ export function TimelineEditorShell({
               data-testid="timeline-tab-hotkeys"
               title={t("timeline:showHotKeys")}
               aria-label={t("timeline:showHotKeys")}
-              onClick={() => setRightTab("hotkeys")}
+              onClick={() => {
+                setRightTab("hotkeys");
+                openRightDrawer();
+              }}
             >
               {t("timeline:hotKeys")}
             </button>
           </div>
           <div className="timeline-v2__right-content">
-            {rightTab === "inspector" ? (
+            <div
+              className={`timeline-v2__panel timeline-v2__panel--inspector${rightTab === "inspector" ? "" : " timeline-v2__panel--inactive"}`}
+              data-testid="timeline-right-panel-inspector"
+            >
               <TimelineInspector
                 project={project}
                 scene={selected}
@@ -1052,9 +1230,17 @@ export function TimelineEditorShell({
                 onRefresh={afterMutation}
                 mutateTimeline={mutateTimeline}
               />
-            ) : rightTab === "hotkeys" ? (
+            </div>
+            <div
+              className={`timeline-v2__panel timeline-v2__panel--hotkeys${rightTab === "hotkeys" ? "" : " timeline-v2__panel--inactive"}`}
+              data-testid="timeline-right-panel-hotkeys"
+            >
               <TimelineHotKeysPane />
-            ) : (
+            </div>
+            <div
+              className={`timeline-v2__panel timeline-v2__panel--codirector${rightTab === "codirector" ? "" : " timeline-v2__panel--inactive"}`}
+              data-testid="timeline-right-panel-codirector"
+            >
               <section className="panel timeline-codirector-placeholder" data-testid="timeline-codirector-rail">
                 <div className="timeline-inspector__eyebrow">{t("timeline:coDirector")}</div>
                 <p className="scene-meta">{t("timeline:coDirectorHint")}</p>
@@ -1072,10 +1258,25 @@ export function TimelineEditorShell({
                   {t("timeline:openCoDirector")}
                 </button>
               </section>
-            )}
-            <CompactRenderQueue projectId={project.id} sceneId={selected.id} onChange={afterMutation} />
+            </div>
+            <div className="timeline-v2__right-queue">
+              <CompactRenderQueue projectId={project.id} sceneId={selected.id} onChange={afterMutation} />
+            </div>
           </div>
         </aside>
+
+        <button
+          type="button"
+          className="timeline-v2__drawer-handle"
+          data-testid="timeline-drawer-right-toggle"
+          aria-expanded={workspaceLayout.rightDrawerOpen}
+          aria-controls="timeline-drawer-right"
+          title={workspaceLayout.rightDrawerOpen ? t("timeline:closeRightDrawer") : t("timeline:openRightDrawer")}
+          aria-label={workspaceLayout.rightDrawerOpen ? t("timeline:closeRightDrawer") : t("timeline:openRightDrawer")}
+          onClick={() => toggleDrawer("right")}
+        >
+          {workspaceLayout.rightDrawerOpen ? "›" : "‹"}
+        </button>
       </div>
     </div>
   );

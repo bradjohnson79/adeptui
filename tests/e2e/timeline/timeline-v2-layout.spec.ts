@@ -151,6 +151,9 @@ test.describe("Timeline V2 layout", () => {
 
     await expect(page.getByTestId("workspace-expand")).toHaveCount(0);
     await expect(page.getByTestId("workspace-fullscreen-controls")).toHaveCount(1);
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toBeVisible();
+    await expect(page.getByTestId("timeline-drawer-right-toggle")).toBeVisible();
+    await expect(page.getByTestId("timeline-focus-workspace")).toBeVisible();
     await expect(page.getByTestId("timeline-splitter-left")).toBeVisible();
     await expect(page.getByTestId("timeline-splitter-right")).toBeVisible();
     await expect(page.getByTestId("timeline-toolbar")).toBeVisible();
@@ -217,5 +220,136 @@ test.describe("Timeline V2 layout", () => {
     await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
     const afterReload = await page.locator(".timeline-v2__body").evaluate((el) => getComputedStyle(el).gridTemplateColumns);
     expect(afterReload).toEqual(afterDrag);
+  });
+
+  test("retractable drawers persist, overlay, and do not pan Preview", async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const scene = await firstScene(request);
+    await openTimeline(page, scene.id);
+    await page.getByTestId("timeline-reset-layout").click();
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-left-placement", "push");
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-right-placement", "push");
+
+    const preview = page.getByTestId("timeline-focus-viewer");
+    const tracks = page.locator(".timeline-v2__tracks");
+    const inspectorPanel = page.getByTestId("timeline-right-panel-inspector");
+    const library = page.locator(".timeline-v2__dock--library");
+    const scenesDock = page.locator(".timeline-v2__dock--scenes");
+    const refsDock = page.locator(".timeline-v2__dock--references");
+
+    const previewWidthOpen = await preview.evaluate((el) => el.getBoundingClientRect().width);
+    await page.evaluate(() => {
+      const inspector = document.querySelector('[data-testid="timeline-inspector"]') as HTMLElement | null;
+      if (inspector) inspector.dataset.keepAlive = "drawer";
+    });
+
+    const storedOpen = await page.evaluate(() => {
+      const raw = localStorage.getItem("adept_timeline_workspace_layout_v1");
+      return raw ? (JSON.parse(raw) as { leftWidth: number; rightWidth: number }) : { leftWidth: 0, rightWidth: 0 };
+    });
+
+    await page.getByTestId("timeline-drawer-right-toggle").click();
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-right-placement", "closed");
+    const previewWidthClosed = await preview.evaluate((el) => el.getBoundingClientRect().width);
+    expect(previewWidthClosed).toBeGreaterThan(previewWidthOpen + 40);
+    const storedClosed = await page.evaluate(() => {
+      const raw = localStorage.getItem("adept_timeline_workspace_layout_v1");
+      return raw ? (JSON.parse(raw) as { rightWidth: number; rightDrawerOpen: boolean }) : { rightWidth: 0, rightDrawerOpen: true };
+    });
+    expect(storedClosed.rightDrawerOpen).toBe(false);
+    expect(storedClosed.rightWidth).toBe(storedOpen.rightWidth);
+
+    await page.getByTestId("timeline-drawer-right-toggle").click();
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-right-placement", "push");
+    await expect(page.getByTestId("timeline-inspector")).toHaveAttribute("data-keep-alive", "drawer");
+    await expect(page.getByTestId("timeline-tab-inspector")).toBeVisible();
+
+    const previewTop = await preview.evaluate((el) => el.getBoundingClientRect().top);
+    const tracksTop = await tracks.evaluate((el) => el.getBoundingClientRect().top);
+    await inspectorPanel.evaluate((el) => {
+      el.scrollTop = 240;
+    });
+    await expect.poll(async () => inspectorPanel.evaluate((el) => el.scrollTop)).toBeGreaterThan(20);
+    expect(Math.abs((await preview.evaluate((el) => el.getBoundingClientRect().top)) - previewTop)).toBeLessThan(2);
+    expect(Math.abs((await tracks.evaluate((el) => el.getBoundingClientRect().top)) - tracksTop)).toBeLessThan(2);
+
+    await page.getByTestId("timeline-tab-hotkeys").click();
+    const hotkeysPanel = page.getByTestId("timeline-right-panel-hotkeys");
+    await expect(page.getByTestId("timeline-hotkeys-pane")).toBeVisible();
+    const previewTopHotkeys = await preview.evaluate((el) => el.getBoundingClientRect().top);
+    await hotkeysPanel.evaluate((el) => {
+      el.scrollTop = 180;
+    });
+    await expect.poll(async () => hotkeysPanel.evaluate((el) => el.scrollTop)).toBeGreaterThan(10);
+    expect(Math.abs((await preview.evaluate((el) => el.getBoundingClientRect().top)) - previewTopHotkeys)).toBeLessThan(2);
+
+    await page.getByTestId("timeline-tab-inspector").click();
+    const scenesTop = await scenesDock.evaluate((el) => el.getBoundingClientRect().top);
+    const refsVisible = await refsDock.evaluate((el) => el.getBoundingClientRect().height > 8);
+    expect(refsVisible).toBeTruthy();
+    await library.evaluate((el) => {
+      el.scrollTop = 160;
+    });
+    await expect(scenesDock).toBeVisible();
+    await expect(refsDock).toBeVisible();
+    expect(Math.abs((await scenesDock.evaluate((el) => el.getBoundingClientRect().top)) - scenesTop)).toBeLessThan(8);
+
+    await page.getByTestId("timeline-drawer-left-toggle").click();
+    await page.getByTestId("timeline-drawer-left-toggle").click();
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-left-placement", "push");
+
+    await page.setViewportSize({ width: 1100, height: 900 });
+    await expect
+      .poll(async () => page.locator(".timeline-v2__body").getAttribute("data-right-placement"), { timeout: 10_000 })
+      .toBe("overlay");
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-left-placement", "push");
+    const overlayGeometry = await page.evaluate(() => {
+      const main = document.querySelector(".timeline-v2__main")?.getBoundingClientRect();
+      const raw = localStorage.getItem("adept_timeline_workspace_layout_v1");
+      const layout = raw ? JSON.parse(raw) : {};
+      return {
+        mainWidth: main?.width || 0,
+        leftWidth: layout.leftWidth,
+        rightWidth: layout.rightWidth,
+      };
+    });
+    expect(overlayGeometry.mainWidth).toBeGreaterThanOrEqual(500);
+    expect(overlayGeometry.leftWidth).toBe(storedOpen.leftWidth);
+    expect(overlayGeometry.rightWidth).toBe(storedOpen.rightWidth);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByTestId("timeline-focus-workspace").click();
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-left-placement", "closed");
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-right-placement", "closed");
+    await expect(page.getByTestId("workspace-fullscreen-controls").locator("button").first()).toHaveAttribute("aria-pressed", "false");
+    expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
+
+    await page.getByTestId("timeline-reset-layout").click();
+    const reset = await page.evaluate(() => {
+      const raw = localStorage.getItem("adept_timeline_workspace_layout_v1");
+      return raw ? JSON.parse(raw) : {};
+    });
+    expect(reset.leftDrawerOpen).toBe(true);
+    expect(reset.rightDrawerOpen).toBe(true);
+    expect(reset.leftWidth).toBe(280);
+    expect(reset.rightWidth).toBe(320);
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-left-placement", "push");
+    await expect(page.locator(".timeline-v2__body")).toHaveAttribute("data-right-placement", "push");
+
+    await expect(page.locator(".scene-block").first()).toBeVisible();
+    await page.locator(".scene-block").first().click();
+    await expect(page.getByTestId("asset-library-list")).toBeVisible();
+    const libraryItem = page.locator("[data-testid^='asset-library-item-']").first();
+    if (await libraryItem.count()) {
+      await libraryItem.click();
+      const addRef = page.locator("[data-testid^='asset-add-reference-']").first();
+      await expect(addRef).toBeVisible();
+    }
+    await page.getByTestId("timeline-tab-inspector").click();
+    await expect(page.getByTestId("timeline-inspector")).toBeVisible();
+    await page.getByTestId("timeline-tab-codirector").click();
+    await expect(page.getByTestId("timeline-codirector-rail")).toBeVisible();
+    await page.getByTestId("timeline-tab-hotkeys").click();
+    await expect(page.getByTestId("timeline-hotkeys-pane")).toBeVisible();
   });
 });

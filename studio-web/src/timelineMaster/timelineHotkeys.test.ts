@@ -40,6 +40,9 @@ test("defaults include generate, preflight, space, and open hotkeys", () => {
   assert.ok(ids.includes("preflight"));
   assert.ok(ids.includes("playPause"));
   assert.ok(ids.includes("openHotkeys"));
+  assert.ok(ids.includes("toggleLeftDrawer"));
+  assert.ok(ids.includes("toggleRightDrawer"));
+  assert.ok(ids.includes("focusTimeline"));
 });
 
 test("conflict is detected and replace unassigns the other command", () => {
@@ -58,6 +61,7 @@ test("conflict is detected and replace unassigns the other command", () => {
 test("platform labels use Ctrl or command", () => {
   assert.equal(formatChord({ key: "z", ctrl: true }, false), "Ctrl + Z");
   assert.equal(formatChord({ key: "d", ctrl: true }, true), "⌘ D");
+  assert.equal(formatChord({ key: "" }, false), "—");
 });
 
 test("text-entry targets suppress global shortcuts", () => {
@@ -91,6 +95,13 @@ test("commands dispatch the registered handler only", () => {
   runTimelineCommand("generateScene");
   runTimelineCommand("missing");
   assert.equal(count, 1);
+});
+
+test("unbound drawer commands do not steal keystrokes", () => {
+  const event = { key: "g", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
+  assert.equal(matchHotkey(event, resetHotkeys())?.actionId, "generateScene");
+  const empty = { key: "", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
+  assert.equal(matchHotkey(empty, resetHotkeys()), null);
 });
 
 test("ctrl/meta chords match", () => {
