@@ -45,11 +45,13 @@ function TrackGlyph({ name }: { name: TrackControl | "plus" }) {
 export function TimelineTrackLabel({
   label,
   labelKey,
+  testId,
   controls = ["eye", "lock"],
   onAction,
 }: {
   label: string;
   labelKey?: string;
+  testId?: string;
   controls?: TrackControl[];
   onAction?: () => void;
 }) {
@@ -57,7 +59,7 @@ export function TimelineTrackLabel({
   const text = labelKey ? t(labelKey, { defaultValue: label }) : label;
   const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return (
-    <div className="timeline-v2__track-label" data-testid={`timeline-v2-label-${slug}`}>
+    <div className="timeline-v2__track-label" data-testid={testId || `timeline-v2-label-${slug}`}>
       <span className="timeline-v2__track-label-text">{text}</span>
       <div className="timeline-v2__track-label-tools">
         {controls.map((control) => (

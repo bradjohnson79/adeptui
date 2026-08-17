@@ -59,23 +59,25 @@ export function Timeline({
       >
         <span className="scene-meta">{total.toFixed(1)}s / 20s</span>
       </PanelHeading>
-      {project.scenes.map((scene) => (
-        <div
-          key={scene.id}
-          className={`scene-block ${selectedId === scene.id ? "active" : ""}`}
-          onClick={() => onSelect(scene.id)}
-        >
-          <div className="scene-head">
-            <strong>{scene.name}</strong>
-            <span className="scene-meta scene-head__meta">
-              {scene.engine.replace(/^fal_/, "FAL/").toUpperCase()} · {scene.duration_sec}s
-            </span>
+      <div className="timeline-v2__scenes-list">
+        {project.scenes.map((scene) => (
+          <div
+            key={scene.id}
+            className={`scene-block ${selectedId === scene.id ? "active" : ""}`}
+            onClick={() => onSelect(scene.id)}
+          >
+            <div className="scene-head">
+              <strong>{scene.name}</strong>
+              <span className="scene-meta scene-head__meta">
+                {scene.engine.replace(/^fal_/, "FAL/").toUpperCase()} · {scene.duration_sec}s
+              </span>
+            </div>
+            <div className="scene-meta" style={{ marginTop: 6 }}>
+              {(sceneMeta[scene.id]?.batches ?? 0) || 0} batches · {sceneMeta[scene.id]?.status || "Draft"}
+            </div>
           </div>
-          <div className="scene-meta" style={{ marginTop: 6 }}>
-            {(sceneMeta[scene.id]?.batches ?? 0) || 0} batches · {sceneMeta[scene.id]?.status || "Draft"}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
       <button
         type="button"
         title="Add a Scene (project total capped at 20s)"

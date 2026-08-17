@@ -6,6 +6,8 @@
   "references": "রেফারেন্স",
   "inspector": "ইন্সপেক্টর",
   "coDirector": "Co-Director",
+  "hotKeys": "Hot Keys",
+  "showHotKeys": "Show Timeline Hot Keys",
   "fit": "ফিট",
   "fitTitle": "Fit the Viewer back to the selected size",
   "viewerSize": "ভিউয়ার আকার",
@@ -72,7 +74,7 @@
   "removeVideoReference": "Remove this Video Reference from the Timeline?\n\nSource assets remain in Project Library.",
   "removeAudio": "Remove this Audio clip from the Timeline?\n\nSource assets remain in Project Library.",
   "removeSfx": "Remove this SFX clip from the Timeline?\n\nSource assets remain in Project Library.",
-  "removeInstruction": "Remove this Timed Instruction?",
+  "removeInstruction": "Remove this Timed Prompt?",
   "removeCamera": "Remove this Camera clip from the Timeline?",
   "removeLipSync": "Remove this Lip Sync Clip from the Timeline?",
   "removeBatch": "Remove “{{name}}”?\n\nThis Batch has content or job history. Source assets remain in Project Library.",
@@ -81,11 +83,18 @@
   "tracks": {
     "batches": "BATCHES",
     "visual": "VISUAL",
-    "timedInstructions": "TIMED INSTRUCTIONS",
     "camera": "CAMERA",
     "audio": "AUDIO",
     "sfx": "SFX",
     "lipSync": "LIP SYNC",
-    "maskRepair": "MASK · REPAIR"
-  }
+    "maskRepair": "MASK · REPAIR",
+    "timedPrompt": "TIMED PROMPT"
+  },
+  "emptyTimedPrompt": "Add a Timed Prompt to direct the moment on screen.",
+  "emptyPromptClip": "Empty prompt",
+  "timedPromptRegion": "Region",
+  "scenePromptVsTimedPrompt": "Scene Prompt defines the overall Scene. Timed Prompt clips control particular moments on the Timeline.",
+  "timedPromptClip": "Timed Prompt",
+  "addTimedPromptTitle": "Add a Timed Prompt clip to the Timed Prompt track",
+  "removeTimedPromptTitle": "Remove the selected or last Timed Prompt clip"
 }

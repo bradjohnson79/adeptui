@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   api,
   type DirectorTimelineCameraCatalog,
@@ -171,6 +172,7 @@ export function TimelineInspector({
   ) => Promise<void>;
 }) {
   const { selection } = useDirectorSelection();
+  const { t } = useTranslation("timeline");
   const [timeline, setTimeline] = useState<DirectorTimeline | null>(null);
   const [cameraCatalog, setCameraCatalog] = useState<DirectorTimelineCameraCatalog | null>(null);
   const [generatorOptions, setGeneratorOptions] = useState<TimelineGeneratorOption[]>([]);
@@ -656,7 +658,7 @@ export function TimelineInspector({
               onBlur={scenePromptField.onBlur}
             />
             <p className="scene-meta">
-              Scene Prompt defines the overall Scene. Timed Instructions control particular moments on the Prompt track.
+              {t("scenePromptVsTimedPrompt")}
             </p>
           </label>
           <PromptIntelligencePanel
@@ -817,10 +819,16 @@ export function TimelineInspector({
 
       {selection.kind === "promptSeg" && selectedPrompt ? (
         <div className="timeline-inspector__stack">
-          <div className="timeline-inspector__eyebrow">Timed Instruction</div>
+          <div className="timeline-inspector__eyebrow">{t("timedPromptClip")}</div>
           <label className="field">
             <span>Start</span>
-            <input type="number" value={selectedPrompt.start} step={0.1} onChange={(e) => void updatePrompt(selectedPrompt, { start: Number(e.target.value) || 0 })} />
+            <input
+              type="number"
+              data-testid="timeline-timed-prompt-start"
+              value={selectedPrompt.start}
+              step={0.1}
+              onChange={(e) => void updatePrompt(selectedPrompt, { start: Number(e.target.value) || 0 })}
+            />
           </label>
           <label className="field">
             <span>Length</span>

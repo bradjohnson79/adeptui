@@ -53,21 +53,8 @@ export const CENTER_PANE_MIN = 520;
 export const SIDEBAR_GAP_PX = 16;
 export const DRAWER_HANDLE_WIDTH = 14;
 export const DRAWER_SPLITTER_WIDTH = 8;
-export const DRAWER_OVERLAY_HYSTERESIS_PX = 32;
 
 export type DrawerSide = "left" | "right";
-export type DrawerPlacement = "closed" | "push" | "overlay";
-
-export type DrawerChrome = {
-  leftPlacement: DrawerPlacement;
-  rightPlacement: DrawerPlacement;
-  leftColumnPx: number;
-  rightColumnPx: number;
-  leftSplitterPx: number;
-  rightSplitterPx: number;
-  handlePx: number;
-  gridTemplateColumns: string;
-};
 
 const VIEWER_PRESET_TARGETS: Record<TimelineViewerPreset, { at1280: number; at1920: number; min: number; max: number }> = {
   large: { at1280: 0.48, at1920: 0.52, min: 0.4, max: 0.58 },
@@ -114,8 +101,8 @@ export const DEFAULT_TIMELINE_WORKSPACE: TimelineWorkspaceLayout = {
   zoom: 1,
   leftWidth: DEFAULT_LEFT_WIDTH,
   rightWidth: DEFAULT_RIGHT_WIDTH,
-  leftDrawerOpen: true,
-  rightDrawerOpen: true,
+  leftDrawerOpen: false,
+  rightDrawerOpen: false,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -173,8 +160,8 @@ function normalizeWorkspaceLayout(parsed: Partial<TimelineWorkspaceLayout>): Tim
     trackDensity: parsed.trackDensity || "compact",
     lastNonFullscreenLayout: normalizeSnapshot(parsed.lastNonFullscreenLayout),
     zoom,
-    leftDrawerOpen: parsed.leftDrawerOpen !== false,
-    rightDrawerOpen: parsed.rightDrawerOpen !== false,
+    leftDrawerOpen: parsed.leftDrawerOpen === true,
+    rightDrawerOpen: parsed.rightDrawerOpen === true,
     ...clampSidebarWidths(
       typeof parsed.leftWidth === "number" ? parsed.leftWidth : DEFAULT_LEFT_WIDTH,
       typeof parsed.rightWidth === "number" ? parsed.rightWidth : DEFAULT_RIGHT_WIDTH,
@@ -201,134 +188,11 @@ export function clampSidebarWidths(
   };
 }
 
-export function clampPushedDrawerWidth(input: {
-  side: DrawerSide;
-  proposed: number;
-  otherWidth: number;
-  otherPushing: boolean;
-  containerWidth: number;
-}): number {
-  const paneMin = input.side === "left" ? LEFT_PANE_MIN : RIGHT_PANE_MIN;
-  const paneMax = input.side === "left" ? LEFT_PANE_MAX : RIGHT_PANE_MAX;
-  const otherCost = input.otherPushing ? input.otherWidth + DRAWER_SPLITTER_WIDTH : 0;
-  const maxThis =
-    input.containerWidth - DRAWER_HANDLE_WIDTH * 2 - otherCost - CENTER_PANE_MIN - DRAWER_SPLITTER_WIDTH;
-  return clamp(Math.round(input.proposed), paneMin, Math.min(paneMax, Math.max(paneMin, Math.round(maxThis))));
-}
-
-function pushCost(width: number) {
-  return width + DRAWER_SPLITTER_WIDTH;
-}
-
-function chromeFromPlacements(
-  leftPlacement: DrawerPlacement,
-  rightPlacement: DrawerPlacement,
-  leftWidth: number,
-  rightWidth: number,
-): DrawerChrome {
-  const leftColumnPx = leftPlacement === "push" ? leftWidth : 0;
-  const rightColumnPx = rightPlacement === "push" ? rightWidth : 0;
-  const leftSplitterPx = leftPlacement === "push" ? DRAWER_SPLITTER_WIDTH : 0;
-  const rightSplitterPx = rightPlacement === "push" ? DRAWER_SPLITTER_WIDTH : 0;
-  return {
-    leftPlacement,
-    rightPlacement,
-    leftColumnPx,
-    rightColumnPx,
-    leftSplitterPx,
-    rightSplitterPx,
-    handlePx: DRAWER_HANDLE_WIDTH,
-    gridTemplateColumns: `${DRAWER_HANDLE_WIDTH}px ${leftColumnPx}px ${leftSplitterPx}px minmax(${CENTER_PANE_MIN}px, 1fr) ${rightSplitterPx}px ${rightColumnPx}px ${DRAWER_HANDLE_WIDTH}px`,
-  };
-}
-
-export function resolveDrawerChrome(input: {
-  containerWidth: number;
-  leftOpen: boolean;
-  rightOpen: boolean;
-  leftWidth: number;
-  rightWidth: number;
-  lastActivatedSide?: DrawerSide;
-  previous?: Pick<DrawerChrome, "leftPlacement" | "rightPlacement">;
-  dragLocked?: boolean;
-}): DrawerChrome {
-  const leftWidth = clamp(
-    Math.round(Number.isFinite(input.leftWidth) ? input.leftWidth : DEFAULT_LEFT_WIDTH),
-    LEFT_PANE_MIN,
-    LEFT_PANE_MAX,
-  );
-  const rightWidth = clamp(
-    Math.round(Number.isFinite(input.rightWidth) ? input.rightWidth : DEFAULT_RIGHT_WIDTH),
-    RIGHT_PANE_MIN,
-    RIGHT_PANE_MAX,
-  );
-
-  if (input.dragLocked && input.previous) {
-    return chromeFromPlacements(
-      input.leftOpen ? input.previous.leftPlacement === "closed" ? "push" : input.previous.leftPlacement : "closed",
-      input.rightOpen ? input.previous.rightPlacement === "closed" ? "push" : input.previous.rightPlacement : "closed",
-      leftWidth,
-      rightWidth,
-    );
-  }
-
-  const budget = Math.max(0, (input.containerWidth || 0) - DRAWER_HANDLE_WIDTH * 2 - CENTER_PANE_MIN);
-  const leftCost = input.leftOpen ? pushCost(leftWidth) : 0;
-  const rightCost = input.rightOpen ? pushCost(rightWidth) : 0;
-  const leftFitsAlone = leftCost <= budget;
-  const rightFitsAlone = rightCost <= budget;
-  const bothFit = leftCost + rightCost <= budget;
-
-  let leftPlacement: DrawerPlacement = "closed";
-  let rightPlacement: DrawerPlacement = "closed";
-
-  if (input.leftOpen && input.rightOpen) {
-    if (bothFit) {
-      leftPlacement = "push";
-      rightPlacement = "push";
-    } else {
-      const preferLeft = input.lastActivatedSide !== "right";
-      if (preferLeft) {
-        if (leftFitsAlone) {
-          leftPlacement = "push";
-          rightPlacement = "overlay";
-        } else if (rightFitsAlone) {
-          leftPlacement = "overlay";
-          rightPlacement = "push";
-        } else {
-          leftPlacement = "overlay";
-          rightPlacement = "overlay";
-        }
-      } else if (rightFitsAlone) {
-        rightPlacement = "push";
-        leftPlacement = "overlay";
-      } else if (leftFitsAlone) {
-        leftPlacement = "push";
-        rightPlacement = "overlay";
-      } else {
-        leftPlacement = "overlay";
-        rightPlacement = "overlay";
-      }
-    }
-  } else if (input.leftOpen) {
-    leftPlacement = leftFitsAlone ? "push" : "overlay";
-  } else if (input.rightOpen) {
-    rightPlacement = rightFitsAlone ? "push" : "overlay";
-  }
-
-  if (input.previous) {
-    const hysteresisBudget = budget - DRAWER_OVERLAY_HYSTERESIS_PX;
-    if (input.previous.leftPlacement === "overlay" && leftPlacement === "push") {
-      const other = rightPlacement === "push" ? rightCost : 0;
-      if (leftCost + other > hysteresisBudget) leftPlacement = "overlay";
-    }
-    if (input.previous.rightPlacement === "overlay" && rightPlacement === "push") {
-      const other = leftPlacement === "push" ? leftCost : 0;
-      if (rightCost + other > hysteresisBudget) rightPlacement = "overlay";
-    }
-  }
-
-  return chromeFromPlacements(leftPlacement, rightPlacement, leftWidth, rightWidth);
+export function clampDrawerWidth(side: DrawerSide, proposed: number): number {
+  const paneMin = side === "left" ? LEFT_PANE_MIN : RIGHT_PANE_MIN;
+  const paneMax = side === "left" ? LEFT_PANE_MAX : RIGHT_PANE_MAX;
+  const fallback = side === "left" ? DEFAULT_LEFT_WIDTH : DEFAULT_RIGHT_WIDTH;
+  return clamp(Math.round(Number.isFinite(proposed) ? proposed : fallback), paneMin, paneMax);
 }
 
 export function resetTimelineWorkspaceLayout(): TimelineWorkspaceLayout {

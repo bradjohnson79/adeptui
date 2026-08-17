@@ -122,7 +122,19 @@ export function TimelineWorkspaceStack({
   useEffect(() => {
     const onLayout = (event: Event) => {
       const detail = (event as CustomEvent<TimelineWorkspaceLayout>).detail;
-      setLayout(detail || loadTimelineWorkspaceLayout());
+      const next = detail || loadTimelineWorkspaceLayout();
+      setLayout((prev) => {
+        if (
+          prev.viewerHeight === next.viewerHeight &&
+          prev.viewerPreset === next.viewerPreset &&
+          prev.trackDensity === next.trackDensity &&
+          prev.zoom === next.zoom &&
+          prev.monitorHeightPx === next.monitorHeightPx
+        ) {
+          return prev;
+        }
+        return next;
+      });
     };
     window.addEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
     return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
@@ -200,8 +212,8 @@ export function TimelineWorkspaceStack({
       lastNonFullscreenLayout: undefined,
       leftWidth: DEFAULT_LEFT_WIDTH,
       rightWidth: DEFAULT_RIGHT_WIDTH,
-      leftDrawerOpen: true,
-      rightDrawerOpen: true,
+      leftDrawerOpen: false,
+      rightDrawerOpen: false,
     });
     saveProjectPreviewHeightRatio(projectId, ratio);
   }, [containerSize.height, containerSize.width, persistLayout, projectId]);

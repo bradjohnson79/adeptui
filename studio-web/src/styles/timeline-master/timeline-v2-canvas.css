@@ -171,7 +171,26 @@
 }
 
 .timeline-v2__track-row--prompt {
-  --track-row-height: 64px;
+  --track-row-height: 48px;
+  height: var(--track-row-height);
+}
+
+.timeline-v2__track-row--prompt .timeline-v2__track-content {
+  height: var(--track-row-height);
+  overflow: hidden;
+}
+
+.timeline-v2__track-row--prompt .track-clip,
+.timeline-v2__track-row--prompt .track-clip--interactive {
+  top: 4px;
+  bottom: 4px;
+  overflow: hidden;
+}
+
+.timeline-v2__track-row--prompt .track-clip__body {
+  gap: 0;
+  padding: 0.1rem 0.35rem;
+  justify-content: center;
 }
 
 .timeline-v2__track-row--audio {

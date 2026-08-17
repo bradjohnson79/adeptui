@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
@@ -131,6 +132,7 @@ export function TimelineToolbar({
   onOpenRetake?: () => void;
 }) {
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
+  const { t } = useTranslation("timeline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generatorOptions, setGeneratorOptions] = useState(() => [] as ReturnType<typeof generatorOptionsFromPayload>);
@@ -194,7 +196,7 @@ export function TimelineToolbar({
       const target = selectedId ? segments.find((s) => s.id === selectedId) : segments[segments.length - 1];
       if (!target) return timeline;
       if ((target.text || "").trim()) {
-        const ok = window.confirm("Remove this Timed Instruction? Its text will be deleted from the Timeline.");
+        const ok = window.confirm(t("removeInstruction"));
         if (!ok) return timeline;
       }
       const next = segments.filter((s) => s.id !== target.id);
@@ -453,8 +455,8 @@ export function TimelineToolbar({
         testId="timeline-toolbar-prompt"
         onAdd={() => void addPrompt()}
         onRemove={() => void removePrompt()}
-        addTitle="Add a Timed Instruction to the Prompt track"
-        removeTitle="Remove the selected or last Timed Instruction"
+        addTitle={t("addTimedPromptTitle")}
+        removeTitle={t("removeTimedPromptTitle")}
         disabled={busy}
       />
       <PlusMinusGroup

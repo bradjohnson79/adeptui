@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  CENTER_PANE_MIN,
   DEFAULT_LEFT_WIDTH,
   DEFAULT_RIGHT_WIDTH,
   DEFAULT_TIMELINE_WORKSPACE,
   DEFAULT_VIEWER_HEIGHT,
-  DRAWER_HANDLE_WIDTH,
-  DRAWER_SPLITTER_WIDTH,
   LEFT_PANE_MAX,
   LEFT_PANE_MIN,
   MIN_MONITOR_HEIGHT,
@@ -15,12 +12,12 @@ import {
   RIGHT_PANE_MIN,
   TIMELINE_REGION_MIN_PX,
   TIMELINE_WORKSPACE_KEY,
-  clampPushedDrawerWidth,
+  clampDrawerWidth,
   clampSidebarWidths,
   clampViewerHeight,
   loadTimelineWorkspaceLayout,
   previewHeightStorageKey,
-  resolveDrawerChrome,
+  resetTimelineWorkspaceLayout,
   viewerHeightBounds,
 } from "./workspaceLayout.ts";
 
@@ -54,7 +51,7 @@ test("out-of-range persisted heights clamp to current viewport", () => {
   assert.ok(restored <= containerHeight - TIMELINE_REGION_MIN_PX);
 });
 
-test("sidebar widths clamp to pane limits without shrinking stored widths for center", () => {
+test("sidebar widths clamp to pane limits without rewriting the other side", () => {
   assert.equal(clampSidebarWidths(10, 10).leftWidth, LEFT_PANE_MIN);
   assert.equal(clampSidebarWidths(10, 10).rightWidth, RIGHT_PANE_MIN);
   assert.equal(clampSidebarWidths(900, 900).leftWidth, LEFT_PANE_MAX);
@@ -66,25 +63,13 @@ test("sidebar widths clamp to pane limits without shrinking stored widths for ce
   assert.equal(tight.rightWidth, 500);
 });
 
-test("pushed drawer drag keeps center usable without rewriting the other width", () => {
-  const roomy = clampPushedDrawerWidth({
-    side: "left",
-    proposed: 440,
-    otherWidth: 320,
-    otherPushing: true,
-    containerWidth: 1600,
-  });
-  assert.equal(roomy, 440);
-  const squeezed = clampPushedDrawerWidth({
-    side: "left",
-    proposed: 440,
-    otherWidth: 320,
-    otherPushing: true,
-    containerWidth: 1200,
-  });
-  assert.equal(squeezed, 1200 - DRAWER_HANDLE_WIDTH * 2 - (320 + DRAWER_SPLITTER_WIDTH) - CENTER_PANE_MIN - DRAWER_SPLITTER_WIDTH);
-  assert.ok(squeezed < 440);
-  assert.ok(squeezed >= LEFT_PANE_MIN);
+test("clampDrawerWidth clamps only that side to pane min/max", () => {
+  assert.equal(clampDrawerWidth("left", 10), LEFT_PANE_MIN);
+  assert.equal(clampDrawerWidth("left", 900), LEFT_PANE_MAX);
+  assert.equal(clampDrawerWidth("left", 400), 400);
+  assert.equal(clampDrawerWidth("right", 10), RIGHT_PANE_MIN);
+  assert.equal(clampDrawerWidth("right", 900), RIGHT_PANE_MAX);
+  assert.equal(clampDrawerWidth("right", 390), 390);
 });
 
 function fakeLayoutStorage(json?: string) {
@@ -104,107 +89,30 @@ function fakeLayoutStorage(json?: string) {
   } as Storage;
 }
 
-test("missing drawer open flags default to both open", () => {
+test("missing drawer open flags default to both closed", () => {
   fakeLayoutStorage(JSON.stringify({ leftWidth: 300, rightWidth: 340 }));
   const loaded = loadTimelineWorkspaceLayout();
-  assert.equal(loaded.leftDrawerOpen, true);
-  assert.equal(loaded.rightDrawerOpen, true);
+  assert.equal(loaded.leftDrawerOpen, false);
+  assert.equal(loaded.rightDrawerOpen, false);
   assert.equal(loaded.leftWidth, 300);
   assert.equal(loaded.rightWidth, 340);
-  assert.equal(DEFAULT_TIMELINE_WORKSPACE.leftDrawerOpen, true);
-  assert.equal(DEFAULT_TIMELINE_WORKSPACE.rightDrawerOpen, true);
+  assert.equal(DEFAULT_TIMELINE_WORKSPACE.leftDrawerOpen, false);
+  assert.equal(DEFAULT_TIMELINE_WORKSPACE.rightDrawerOpen, false);
 });
 
-test("explicit closed drawer flags survive load", () => {
-  fakeLayoutStorage(JSON.stringify({ leftDrawerOpen: false, rightDrawerOpen: true, leftWidth: 280, rightWidth: 390 }));
+test("explicit open drawer flags survive load", () => {
+  fakeLayoutStorage(JSON.stringify({ leftDrawerOpen: true, rightDrawerOpen: false, leftWidth: 280, rightWidth: 390 }));
   const loaded = loadTimelineWorkspaceLayout();
-  assert.equal(loaded.leftDrawerOpen, false);
-  assert.equal(loaded.rightDrawerOpen, true);
+  assert.equal(loaded.leftDrawerOpen, true);
+  assert.equal(loaded.rightDrawerOpen, false);
   assert.equal(loaded.rightWidth, 390);
 });
 
-test("resolveDrawerChrome pushes both drawers when the center still fits", () => {
-  const chrome = resolveDrawerChrome({
-    containerWidth: 1600,
-    leftOpen: true,
-    rightOpen: true,
-    leftWidth: 280,
-    rightWidth: 320,
-    lastActivatedSide: "right",
-  });
-  assert.equal(chrome.leftPlacement, "push");
-  assert.equal(chrome.rightPlacement, "push");
-  assert.equal(chrome.leftColumnPx, 280);
-  assert.equal(chrome.rightColumnPx, 320);
-  assert.ok(chrome.gridTemplateColumns.includes(`minmax(${CENTER_PANE_MIN}px, 1fr)`));
-});
-
-test("resolveDrawerChrome prefers the last-activated drawer in push when both cannot coexist", () => {
-  const containerWidth = DRAWER_HANDLE_WIDTH * 2 + CENTER_PANE_MIN + 280 + DRAWER_SPLITTER_WIDTH + 40;
-  const chrome = resolveDrawerChrome({
-    containerWidth,
-    leftOpen: true,
-    rightOpen: true,
-    leftWidth: 280,
-    rightWidth: 320,
-    lastActivatedSide: "left",
-  });
-  assert.equal(chrome.leftPlacement, "push");
-  assert.equal(chrome.rightPlacement, "overlay");
-  assert.equal(chrome.leftColumnPx, 280);
-  assert.equal(chrome.rightColumnPx, 0);
-});
-
-test("resolveDrawerChrome overlays both when neither side can push", () => {
-  const chrome = resolveDrawerChrome({
-    containerWidth: CENTER_PANE_MIN + DRAWER_HANDLE_WIDTH * 2 + 40,
-    leftOpen: true,
-    rightOpen: true,
-    leftWidth: 280,
-    rightWidth: 320,
-    lastActivatedSide: "right",
-  });
-  assert.equal(chrome.leftPlacement, "overlay");
-  assert.equal(chrome.rightPlacement, "overlay");
-  assert.equal(chrome.leftColumnPx, 0);
-  assert.equal(chrome.rightColumnPx, 0);
-});
-
-test("resolveDrawerChrome keeps overlay until the hysteresis band clears", () => {
-  const leftCost = 280 + DRAWER_SPLITTER_WIDTH;
-  const budgetExact = leftCost;
-  const containerWidth = budgetExact + DRAWER_HANDLE_WIDTH * 2 + CENTER_PANE_MIN;
-  const previous = { leftPlacement: "overlay" as const, rightPlacement: "closed" as const };
-  const stillOverlay = resolveDrawerChrome({
-    containerWidth,
-    leftOpen: true,
-    rightOpen: false,
-    leftWidth: 280,
-    rightWidth: 320,
-    previous,
-  });
-  assert.equal(stillOverlay.leftPlacement, "overlay");
-  const wide = resolveDrawerChrome({
-    containerWidth: containerWidth + 80,
-    leftOpen: true,
-    rightOpen: false,
-    leftWidth: 280,
-    rightWidth: 320,
-    previous,
-  });
-  assert.equal(wide.leftPlacement, "push");
-});
-
-test("resolveDrawerChrome does not change persisted widths", () => {
-  const chrome = resolveDrawerChrome({
-    containerWidth: 900,
-    leftOpen: true,
-    rightOpen: true,
-    leftWidth: 400,
-    rightWidth: 420,
-    lastActivatedSide: "right",
-  });
-  assert.ok(chrome.leftPlacement === "overlay" || chrome.rightPlacement === "overlay");
-  assert.ok(chrome.leftColumnPx === 0 || chrome.leftColumnPx === 400);
-  assert.ok(chrome.rightColumnPx === 0 || chrome.rightColumnPx === 420);
+test("reset layout closes both drawers and restores default widths", () => {
+  fakeLayoutStorage(JSON.stringify({ leftDrawerOpen: true, rightDrawerOpen: true, leftWidth: 400, rightWidth: 420 }));
+  const reset = resetTimelineWorkspaceLayout();
+  assert.equal(reset.leftDrawerOpen, false);
+  assert.equal(reset.rightDrawerOpen, false);
+  assert.equal(reset.leftWidth, DEFAULT_LEFT_WIDTH);
+  assert.equal(reset.rightWidth, DEFAULT_RIGHT_WIDTH);
 });

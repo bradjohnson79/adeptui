@@ -254,6 +254,7 @@ function trackContentClass(shellMode: boolean, extra = "") {
 function TrackHeader({
   label,
   labelKey,
+  testId,
   shellMode,
   controls = ["eye", "lock"],
   actionLabel,
@@ -261,6 +262,7 @@ function TrackHeader({
 }: {
   label: string;
   labelKey?: string;
+  testId?: string;
   shellMode: boolean;
   controls?: Array<"eye" | "lock" | "mute" | "solo">;
   actionLabel?: string;
@@ -271,6 +273,7 @@ function TrackHeader({
       <TimelineTrackLabel
         label={label}
         labelKey={labelKey}
+        testId={testId}
         controls={controls}
         onAction={onAction}
       />
@@ -426,7 +429,22 @@ export function DirectorTracks({
   useEffect(() => {
     const onLayout = (event: Event) => {
       const detail = (event as CustomEvent<TimelineWorkspaceLayout>).detail;
-      setWorkspaceLayout(detail || loadTimelineWorkspaceLayout());
+      const next = detail || loadTimelineWorkspaceLayout();
+      setWorkspaceLayout((prev) => {
+        if (
+          prev.zoom === next.zoom &&
+          prev.trackDensity === next.trackDensity &&
+          prev.displayMode === next.displayMode &&
+          prev.snapEnabled === next.snapEnabled &&
+          prev.playheadFollow === next.playheadFollow &&
+          prev.guidancePriority === next.guidancePriority &&
+          prev.showFilenames === next.showFilenames &&
+          prev.showThumbnails === next.showThumbnails
+        ) {
+          return prev;
+        }
+        return next;
+      });
     };
     window.addEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
     return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
@@ -1069,10 +1087,10 @@ export function DirectorTracks({
   };
 
   const deleteSeg = async () => {
-    if (!activeSeg || tl.prompt_segments.length <= 1) return;
+    if (!activeSeg) return;
     const next = tl.prompt_segments.filter((s) => s.id !== activeSeg.id);
     await save({ ...tl, prompt_segments: next });
-    selectSeg(next[0].id);
+    if (next[0]) selectSeg(next[0].id);
   };
 
   const previewMedia =
@@ -1878,11 +1896,21 @@ export function DirectorTracks({
 
               {/* Image/Video Reference lanes retired: bindings live on Prompt clips. */}
 
-              <div className={trackRowClass(shellMode, "timeline-v2__track-row--prompt")}>
-                <TrackHeader label="TIMED INSTRUCTIONS" labelKey="tracks.timedInstructions" shellMode={shellMode} onAction={addPromptSegment} actionLabel="+ Prompt" />
-                <div className={trackContentClass(shellMode)}>
+              <div
+                className={trackRowClass(shellMode, "timeline-v2__track-row--prompt")}
+                data-testid="timeline-timed-prompt-track"
+              >
+                <TrackHeader
+                  label="TIMED PROMPT"
+                  labelKey="tracks.timedPrompt"
+                  testId="timeline-v2-label-timed-prompt"
+                  shellMode={shellMode}
+                  onAction={addPromptSegment}
+                  actionLabel="+ Prompt"
+                />
+                <div className={trackContentClass(shellMode)} data-testid="timeline-timed-prompt-lane">
                   {tl.prompt_segments.length === 0 && workspaceLayout.showEmptyHelp && (
-                    <div className="track-empty">Add a timed instruction to direct the moment on screen.</div>
+                    <div className="track-empty">{t("emptyTimedPrompt")}</div>
                   )}
                   {tl.prompt_segments.map((seg) => (
                     <TrackClipInteractive
@@ -1904,8 +1932,8 @@ export function DirectorTracks({
                       <button
                         type="button"
                         className="track-clip__remove"
-                        aria-label="Remove from Timeline"
-                        title="Remove from Timeline"
+                        aria-label={t("removeInstruction")}
+                        title={t("removeInstruction")}
                         onClick={(e) => {
                           e.stopPropagation();
                           void removeClip("prompt", seg.id, clipIsPersisted(seg));
@@ -1913,15 +1941,13 @@ export function DirectorTracks({
                       >
                         ×
                       </button>
-                      <strong>{seg.region ? "Region" : `w${(seg.weight ?? 1).toFixed(1)}`}</strong>
                       <span className="timeline-v2__clip-tokens" data-testid={`prompt-token-summary-${seg.id}`}>
-                        {tokenSummary(seg.reference_binding_ids, bindings) || (seg.text ? seg.text.slice(0, 28) : "Empty prompt")}
+                        {tokenSummary(seg.reference_binding_ids, bindings) ||
+                          (seg.region ? t("timedPromptRegion") : null) ||
+                          (seg.text ? seg.text.slice(0, 36) : t("emptyPromptClip"))}
                       </span>
                       {tokenSummary(seg.reference_binding_ids, bindings) && seg.text ? (
-                        <span className="timeline-v2__clip-instruction">{seg.text.slice(0, 48)}</span>
-                      ) : null}
-                      {seg.bound_image_clip_id ? (
-                        <span className="scene-meta">Attached to image</span>
+                        <span className="timeline-v2__clip-instruction">{seg.text.slice(0, 40)}</span>
                       ) : null}
                     </TrackClipInteractive>
                   ))}

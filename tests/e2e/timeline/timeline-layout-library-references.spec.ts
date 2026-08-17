@@ -49,6 +49,13 @@ async function openTimeline(page: Page, sceneId: string) {
   await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
 }
 
+async function clickLeftDrawerHandle(page: Page) {
+  const handle = page.getByTestId("timeline-drawer-left-toggle");
+  const box = await handle.boundingBox();
+  expect(box).toBeTruthy();
+  await handle.click({ position: { x: Math.max(2, box!.width / 2), y: 16 } });
+}
+
 test.describe("Timeline layout + library references", () => {
   test.beforeEach(async ({ request }) => {
     await waitApiReady(request);
@@ -70,8 +77,18 @@ test.describe("Timeline layout + library references", () => {
     expect(images.length, "Schnick Library needs an image for wrong-type reject").toBeGreaterThan(0);
 
     await openTimeline(page, scene.id);
-    await expect(page.getByTestId("timeline-splitter-left")).toBeVisible();
-    await expect(page.getByTestId("timeline-splitter-right")).toBeVisible();
+    await page.getByTestId("timeline-reset-layout").click();
+    await page.waitForTimeout(240);
+    await clickLeftDrawerHandle(page);
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "true");
+    await expect
+      .poll(async () => {
+        const box = await page.getByTestId("timeline-splitter-left").boundingBox();
+        return box ? box.x : 0;
+      })
+      .toBeGreaterThan(200);
+    await expect(page.getByTestId("timeline-splitter-left")).toHaveCount(1);
+    await expect(page.getByTestId("timeline-splitter-right")).toHaveCount(1);
     await expect(page.getByTestId("timeline-reset-layout")).toBeVisible();
     await expect(page.getByTestId("timeline-viewer-fit")).toBeVisible();
     await expect(page.getByTestId("timeline-viewer-preset")).toBeVisible();
@@ -85,35 +102,69 @@ test.describe("Timeline layout + library references", () => {
     await expect(page.getByTestId("timeline-image-reference-track")).toHaveCount(0);
     await expect(page.getByTestId("timeline-video-reference-track")).toHaveCount(0);
 
-    const layout = page.getByTestId("timeline-editor-shell").locator(".timeline-v2__body");
-    const before = await layout.evaluate((el) => getComputedStyle(el).gridTemplateColumns);
+    const measure = () =>
+      page.evaluate(() => {
+        const box = (el: Element | null) => {
+          if (!el) return { x: 0, y: 0, width: 0, height: 0 };
+          const r = el.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        };
+        const root = document.querySelector(".timeline-v2") as HTMLElement | null;
+        const raw = localStorage.getItem("adept_timeline_workspace_layout_v1");
+        return {
+          css: root ? getComputedStyle(root).getPropertyValue("--timeline-left-width").trim() : "",
+          leftWidth: raw ? (JSON.parse(raw) as { leftWidth: number }).leftWidth : 0,
+          workspace: box(document.querySelector('[data-testid="timeline-v2-workspace"]')),
+          preview: box(document.querySelector('[data-testid="timeline-focus-viewer"]')),
+          canvas: box(document.querySelector(".timeline-v2__tracks")),
+        };
+      });
+    await expect
+      .poll(async () => {
+        const raw = await page.evaluate(() => localStorage.getItem("adept_timeline_workspace_layout_v1"));
+        return raw ? (JSON.parse(raw) as { leftWidth: number }).leftWidth : 0;
+      })
+      .toBe(280);
+    const before = await measure();
     const left = page.getByTestId("timeline-splitter-left");
-    const box = await left.boundingBox();
-    expect(box).toBeTruthy();
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + 40);
-    await page.mouse.down();
-    await page.mouse.move(box!.x + 80, box!.y + 40);
-    await page.mouse.up();
-    const afterDrag = await layout.evaluate((el) => getComputedStyle(el).gridTemplateColumns);
-    expect(afterDrag).not.toEqual(before);
+    await left.focus();
+    await page.keyboard.press("End");
+    await expect
+      .poll(async () => {
+        const raw = await page.evaluate(() => localStorage.getItem("adept_timeline_workspace_layout_v1"));
+        return raw ? (JSON.parse(raw) as { leftWidth: number }).leftWidth : 0;
+      })
+      .toBe(440);
+    const afterDrag = await measure();
+    expect(afterDrag.leftWidth).not.toEqual(before.leftWidth);
+    expect(afterDrag.css).toBe(`${afterDrag.leftWidth}px`);
+    expect(Math.abs(afterDrag.workspace.x - before.workspace.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDrag.workspace.width - before.workspace.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDrag.preview.x - before.preview.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDrag.preview.width - before.preview.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDrag.canvas.x - before.canvas.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(afterDrag.canvas.width - before.canvas.width)).toBeLessThanOrEqual(1);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
-    const afterReload = await page
-      .getByTestId("timeline-editor-shell")
-      .locator(".timeline-v2__body")
-      .evaluate((el) => getComputedStyle(el).gridTemplateColumns);
-    expect(afterReload).toEqual(afterDrag);
+    if ((await page.getByTestId("timeline-drawer-left-toggle").getAttribute("aria-expanded")) !== "true") {
+      await clickLeftDrawerHandle(page);
+    }
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "true");
+    const afterReload = await measure();
+    expect(afterReload.leftWidth).toEqual(afterDrag.leftWidth);
+    expect(afterReload.css).toEqual(afterDrag.css);
 
     await page.getByTestId("timeline-reset-layout").click();
     await expect
-      .poll(async () =>
-        page
-          .getByTestId("timeline-editor-shell")
-          .locator(".timeline-v2__body")
-          .evaluate((el) => getComputedStyle(el).gridTemplateColumns),
-      )
-      .not.toEqual(afterDrag);
+      .poll(async () => {
+        const raw = await page.evaluate(() => localStorage.getItem("adept_timeline_workspace_layout_v1"));
+        return raw ? (JSON.parse(raw) as { leftWidth: number; leftDrawerOpen: boolean }).leftWidth : 0;
+      })
+      .toBe(280);
+    await clickLeftDrawerHandle(page);
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "true");
+    await page.waitForTimeout(240);
 
     const video = (videos.find((a: { tag?: string }) => a.tag === "KorriPoseVideo") || videos[0]) as {
       id: string;
@@ -147,7 +198,7 @@ test.describe("Timeline layout + library references", () => {
     await expect(page.getByTestId(`reference-chip-${binding!.id}`)).toBeVisible({ timeout: 20_000 });
 
     await search.fill(image.tag || image.filename || image.id);
-    await page.getByTestId(`asset-add-reference-${image.id}`).click();
+    await page.getByTestId(`asset-add-reference-${image.id}`).evaluate((el: HTMLElement) => el.click());
     let imageBinding: BindingRow | undefined;
     await expect
       .poll(async () => {
@@ -156,6 +207,8 @@ test.describe("Timeline layout + library references", () => {
       }, { timeout: 20_000 })
       .toBeTruthy();
 
+    await page.getByTestId("timeline-focus-workspace").click();
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "false");
     await page.getByTestId("timeline-toolbar-prompt-add").click();
     const promptClip = page.locator('[data-testid^="track-clip-prompt-"]').last();
     await expect(promptClip).toBeVisible({ timeout: 20_000 });
@@ -166,7 +219,7 @@ test.describe("Timeline layout + library references", () => {
     const row = page.getByTestId(`ref-token-row-${binding!.id}`);
     await expect(row).toBeVisible();
     await expect(row).toContainText("Video");
-    await row.click();
+    await row.evaluate((el: HTMLElement) => el.click());
 
     await expect
       .poll(async () => {
@@ -182,7 +235,7 @@ test.describe("Timeline layout + library references", () => {
     await input.fill(`#${(image.tag || "Schn").slice(0, 4)}`);
     const imageRow = page.getByTestId(`ref-token-row-${imageBinding!.id}`);
     await expect(imageRow).toBeVisible();
-    await imageRow.click();
+    await imageRow.evaluate((el: HTMLElement) => el.click());
     await expect
       .poll(async () => {
         const director = await request.get(`${API}/api/projects/${PROJECT_ID}/scenes/${scene.id}/director`);
@@ -194,6 +247,9 @@ test.describe("Timeline layout + library references", () => {
       }, { timeout: 20_000 })
       .toBeTruthy();
 
+    await clickLeftDrawerHandle(page);
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "true");
+    await page.waitForTimeout(240);
     await page.getByTestId(`reference-chip-${binding!.id}`).click();
     await page.getByTestId(`reference-alias-input-${binding!.id}`).fill("KorriDanceMotion");
     await page.getByTestId(`reference-alias-save-${binding!.id}`).click();
@@ -201,6 +257,11 @@ test.describe("Timeline layout + library references", () => {
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
+    if ((await page.getByTestId("timeline-drawer-left-toggle").getAttribute("aria-expanded")) !== "true") {
+      await clickLeftDrawerHandle(page);
+    }
+    await expect(page.getByTestId("timeline-drawer-left-toggle")).toHaveAttribute("aria-expanded", "true");
+    await page.waitForTimeout(240);
     await expect(page.getByTestId(`reference-chip-${binding!.id}`)).toContainText("KorriDanceMotion");
     const afterDirector = await request.get(`${API}/api/projects/${PROJECT_ID}/scenes/${scene.id}/director`);
     const afterTl = await afterDirector.json();
