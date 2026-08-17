@@ -38,6 +38,7 @@ export type CinematicControls = {
   lens?: string;
   lighting?: string;
   colorTreatment?: string;
+  colorGradePreset?: string;
   visualEra?: string;
   productionStyle?: string;
   aspectRatio: string;
@@ -46,6 +47,18 @@ export type CinematicControls = {
   customShotIntent?: string;
   category: ImageCategory;
 };
+
+export const CREATOR_IMAGE_CATEGORIES: { value: Exclude<ImageCategory, "storyboard">; label: string }[] = [
+  { value: "general", label: "General" },
+  { value: "keyframe", label: "Keyframe" },
+  { value: "concept", label: "Concept" },
+  { value: "character", label: "Character" },
+  { value: "location", label: "Location" },
+  { value: "prop", label: "Prop" },
+  { value: "mood", label: "Mood" },
+];
+
+export const DEFAULT_IMAGE_CATEGORY: ImageCategory = "general";
 
 export type AdvancedDiffusionControls = {
   steps?: number;

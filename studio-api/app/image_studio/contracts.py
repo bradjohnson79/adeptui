@@ -48,12 +48,13 @@ class CinematicControls(BaseModel):
     lens: Optional[str] = None
     lighting: Optional[str] = None
     colorTreatment: Optional[str] = None
+    colorGradePreset: Optional[str] = None
     visualEra: Optional[str] = None
     productionStyle: Optional[str] = None
     aspectRatio: str = "16:9"
     shotIntent: ShotIntent = "medium"
     customShotIntent: Optional[str] = None
-    category: ImageCategory = "storyboard"
+    category: ImageCategory = "general"
 
 
 class AdvancedDiffusionControls(BaseModel):
@@ -127,7 +128,7 @@ class CinematicGenerateRequest(BaseModel):
     continuitySessionId: Optional[str] = None
     inheritContinuityFromScene: bool = False
     panelId: Optional[str] = None
-    purpose: str = "storyboard"
+    purpose: str = ""
     runPromptIntelligence: bool = True
     creativeContext: dict[str, Any] = Field(default_factory=dict)
     spatialMapId: Optional[str] = None
@@ -153,10 +154,14 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
         "lighting",
         {"setup": ctrl.lighting} if ctrl.lighting else {},
     )
+    from .color_grades import resolve_color_grade_id
+
+    grade_id = resolve_color_grade_id(ctrl.colorGradePreset, ctrl.colorTreatment)
     creative.setdefault(
         "visualLanguage",
         {
             "colorTreatment": ctrl.colorTreatment,
+            "colorGradePreset": grade_id,
             "visualEra": ctrl.visualEra,
             "productionStyle": ctrl.productionStyle,
         },
@@ -189,6 +194,7 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
             "lens": ctrl.lens,
             "lighting": ctrl.lighting,
             "colorTreatment": ctrl.colorTreatment,
+            "colorGradePreset": grade_id,
             "shotIntent": ctrl.shotIntent,
             "customShotIntent": ctrl.customShotIntent,
             "category": ctrl.category,

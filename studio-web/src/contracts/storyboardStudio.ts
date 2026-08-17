@@ -1,5 +1,6 @@
 /** M4.9 Storyboard Studio contracts */
 
+export const STORYBOARD_CAPTION_MAX = 140;
 export type StoryboardPageSize = 6 | 9 | 12;
 export type ScriptLinkStatus =
   | "linked"

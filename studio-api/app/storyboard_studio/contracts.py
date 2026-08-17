@@ -6,6 +6,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+CAPTION_MAX = 140
+
 StoryboardPageSize = Literal[6, 9, 12]
 ScriptLinkStatus = Literal[
     "linked",

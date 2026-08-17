@@ -14,12 +14,14 @@ def expand_prompt(
     cinematography: dict[str, Any] | None = None,
     lighting: dict[str, Any] | None = None,
     spatial_hints: list[str] | None = None,
+    visual_language: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     base = (prompt or "").strip()
     parts: list[str] = [base] if base else []
     style_hints = style_hints or {}
     cinematography = cinematography or {}
     lighting = lighting or {}
+    visual_language = visual_language or {}
 
     cam = cinematography.get("camera") or cinematography.get("lens") or style_hints.get("camera")
     if cam:
@@ -33,6 +35,18 @@ def expand_prompt(
     art = style_hints.get("artDirection") or style_hints.get("style")
     if art:
         parts.append(f"Art direction: {art}")
+    color_clause = ""
+    try:
+        from ..image_studio.color_grades import color_grade_prompt_clause
+
+        color_clause = color_grade_prompt_clause(
+            visual_language.get("colorGradePreset") or style_hints.get("colorGradePreset"),
+            visual_language.get("colorTreatment") or style_hints.get("colorTreatment"),
+        )
+    except Exception:
+        color_clause = ""
+    if color_clause:
+        parts.append(color_clause)
     if purpose:
         parts.append(f"Purpose: {purpose.replace('_', ' ')}")
     for c in continuity_constraints or []:
@@ -56,6 +70,7 @@ def expand_prompt(
                 "lighting": bool(light),
                 "composition": bool(comp),
                 "artDirection": bool(art),
+                "colorGrade": bool(color_clause),
                 "continuity": bool(continuity_constraints),
                 "spatial": bool(spatial_hints),
             }.items()

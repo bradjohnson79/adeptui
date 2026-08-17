@@ -66,6 +66,7 @@ def expand_prompt_route(body: dict[str, Any]) -> dict[str, Any]:
         continuity_constraints=list(body.get("continuityConstraints") or []),
         cinematography=dict(body.get("cinematography") or {}),
         lighting=dict(body.get("lighting") or {}),
+        visual_language=dict(body.get("visualLanguage") or body.get("visual_language") or {}),
     )
 
 

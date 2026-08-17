@@ -85,8 +85,13 @@ def export_pdf_bytes(project_id: str, document_id: str | None = None) -> tuple[b
         c = canvas.Canvas(buf, pagesize=letter)
         width, height = letter
         page_size = int(doc.get("pageSize") or 9)
-        cols = 3 if page_size in (6, 9) else 4
-        rows = (page_size + cols - 1) // cols
+        try:
+            from .compose import grid_for_page_size
+
+            cols, rows = grid_for_page_size(page_size)
+        except Exception:
+            cols = 3 if page_size in (6, 9) else 4
+            rows = (page_size + cols - 1) // cols
         margin = 0.6 * inch
         gap = 0.2 * inch
         usable_w = width - 2 * margin

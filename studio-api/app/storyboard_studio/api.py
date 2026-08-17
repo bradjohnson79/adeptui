@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 
 from .add_from_image import (
     add_image_to_next_panel,
+    assign_panel_asset,
+    clear_panel_asset,
+    patch_panel,
     replace_panel_image,
     undo_add_image,
     undo_replace_panel,
 )
+from .compose import compose_storyboard_2k
+from .contracts import CAPTION_MAX
 from .documents import (
     append_panel,
     ensure_document,
@@ -25,6 +30,7 @@ from .documents import (
     set_page_size,
 )
 from .export import export_adept_json, export_contact_sheet_html, export_pdf_bytes
+from .generate_missing import generate_missing_panels
 from .timeline_prep import confirm_timeline_proposal, get_proposal, prepare_timeline_from_storyboard
 
 router = APIRouter(prefix="/storyboard-studio", tags=["storyboard-studio-m49"])
@@ -84,6 +90,27 @@ class ReplacePanelBody(BaseModel):
 
 class UndoAddBody(BaseModel):
     panelId: str
+
+
+class PatchPanelBody(BaseModel):
+    label: Optional[str] = None
+    prompt: Optional[str] = None
+
+
+class AssignPanelBody(BaseModel):
+    assetId: str
+
+
+class GenerateMissingBody(BaseModel):
+    family: Literal["qwen2512", "imagen"] = "qwen2512"
+    documentId: Optional[str] = None
+    pageIndex: Optional[int] = None
+    allowDraft: bool = False
+
+
+class ComposeBody(BaseModel):
+    documentId: Optional[str] = None
+    pageIndex: int = 0
 
 
 @router.get("/projects/{project_id}/documents")
@@ -186,6 +213,56 @@ def api_undo_replace(project_id: str, body: UndoAddBody) -> dict[str, Any]:
     result = undo_replace_panel(project_id, body.panelId)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result.get("error") or "undo failed")
+    return result
+
+
+@router.patch("/projects/{project_id}/panels/{panel_id}")
+def api_patch_panel(project_id: str, panel_id: str, body: PatchPanelBody) -> dict[str, Any]:
+    if body.label is not None and len(body.label) > CAPTION_MAX:
+        body.label = body.label[:CAPTION_MAX]
+    result = patch_panel(project_id, panel_id, label=body.label, prompt=body.prompt)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "panel not found")
+    return result
+
+
+@router.post("/projects/{project_id}/panels/{panel_id}/assign")
+def api_assign_panel(project_id: str, panel_id: str, body: AssignPanelBody) -> dict[str, Any]:
+    result = assign_panel_asset(project_id, panel_id, body.assetId)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "assign failed")
+    return result
+
+
+@router.post("/projects/{project_id}/panels/{panel_id}/clear")
+def api_clear_panel(project_id: str, panel_id: str) -> dict[str, Any]:
+    result = clear_panel_asset(project_id, panel_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "clear failed")
+    return result
+
+
+@router.post("/projects/{project_id}/generate-missing")
+def api_generate_missing(project_id: str, body: GenerateMissingBody | None = None) -> dict[str, Any]:
+    body = body or GenerateMissingBody()
+    result = generate_missing_panels(
+        project_id,
+        family=body.family,
+        document_id=body.documentId,
+        page_index=body.pageIndex,
+        allow_draft=body.allowDraft,
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "generate missing failed")
+    return result
+
+
+@router.post("/projects/{project_id}/compose-2k")
+def api_compose_2k(project_id: str, body: ComposeBody | None = None) -> dict[str, Any]:
+    body = body or ComposeBody()
+    result = compose_storyboard_2k(project_id, document_id=body.documentId, page_index=body.pageIndex)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error") or "compose failed")
     return result
 
 

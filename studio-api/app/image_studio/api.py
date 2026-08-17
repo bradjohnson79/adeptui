@@ -21,6 +21,7 @@ from .continuity import (
     patch_session,
     session_to_creative_extras,
 )
+from .color_grades import list_color_grades
 from .contracts import CinematicGenerateRequest, cinematic_to_image_product_body
 from .provenance import reopen_from_asset
 from .providers import family_catalog, list_image_providers, providers_for_mode
@@ -79,6 +80,11 @@ def api_providers_for_mode(body: ModeBody) -> dict[str, Any]:
 @router.get("/families")
 def api_families() -> dict[str, Any]:
     return {"families": family_catalog()}
+
+
+@router.get("/color-grades")
+def api_color_grades() -> dict[str, Any]:
+    return {"grades": list_color_grades(), "default": "natural"}
 
 
 @router.get("/projects/{project_id}/continuity-sessions")
@@ -197,4 +203,18 @@ def api_compile_preview(
             bundle.primaryCamera.id if bundle.primaryCamera else None
         )
         product_body["spatialReferenceBundle"] = bundle.model_dump()
-    return {"imageProductBody": product_body, "continuitySessionId": req.continuitySessionId}
+    from ..image_product.prompt_intel import expand_prompt
+
+    creative = dict(product_body.get("creativeContext") or {})
+    prompt_info = expand_prompt(
+        str(product_body.get("prompt") or ""),
+        purpose=str(product_body.get("purpose") or ""),
+        cinematography=dict(creative.get("cinematography") or {}),
+        lighting=dict(creative.get("lighting") or {}),
+        visual_language=dict(creative.get("visualLanguage") or {}),
+    )
+    return {
+        "imageProductBody": product_body,
+        "continuitySessionId": req.continuitySessionId,
+        "promptIntel": prompt_info,
+    }

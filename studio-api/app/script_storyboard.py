@@ -91,7 +91,7 @@ class StoryboardPanelRow(Base):
     doc_id: Mapped[str] = mapped_column(String(36), index=True)
     segment_id: Mapped[str] = mapped_column(String(36), index=True)
     panel_index: Mapped[int] = mapped_column(Integer, default=0)
-    label: Mapped[str] = mapped_column(String(120), default="")
+    label: Mapped[str] = mapped_column(String(160), default="")
     asset_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     spatial_state_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     camera_avatar_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)

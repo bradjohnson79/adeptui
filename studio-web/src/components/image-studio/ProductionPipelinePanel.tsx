@@ -7,6 +7,7 @@ import type {
   ImagePipelineQualityProfile,
   ProductionImageRequest,
 } from "../../contracts/imagePipeline";
+import { COLOR_GRADE_OPTIONS, DEFAULT_COLOR_GRADE, type ColorGradePresetId } from "../../contracts/colorGrades";
 
 function qualityLabel(value: ImagePipelineQualityProfile): string {
   switch (value) {
@@ -60,6 +61,8 @@ type ProductionPipelinePanelProps = {
   allowApiDeployment: boolean;
   spatialMapId?: string;
   spatialMapVersion?: string;
+  colorGradePreset?: ColorGradePresetId;
+  onColorGradeChange?: (id: ColorGradePresetId) => void;
 };
 
 export function ProductionPipelinePanel({
@@ -71,6 +74,8 @@ export function ProductionPipelinePanel({
   allowApiDeployment,
   spatialMapId,
   spatialMapVersion,
+  colorGradePreset = DEFAULT_COLOR_GRADE,
+  onColorGradeChange,
 }: ProductionPipelinePanelProps) {
   const [qualityProfile, setQualityProfile] = useState<ImagePipelineQualityProfile>("enhanced");
   const [plan, setPlan] = useState<ImageGenerationPlan | null>(null);
@@ -222,6 +227,21 @@ export function ProductionPipelinePanel({
             <option value="enhanced">Enhanced</option>
             <option value="cinematic">Cinematic</option>
             <option value="studio-master">Studio Master</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="image-pipeline-color-grade">Cinematic Color Grade</label>
+          <select
+            id="image-pipeline-color-grade"
+            data-testid="cis-color-grade"
+            value={colorGradePreset}
+            onChange={(event) => onColorGradeChange?.(event.target.value as ColorGradePresetId)}
+          >
+            {COLOR_GRADE_OPTIONS.map((grade) => (
+              <option key={grade.id} value={grade.id}>
+                {grade.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="field">

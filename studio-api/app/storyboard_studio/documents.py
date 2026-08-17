@@ -177,8 +177,30 @@ def next_free_slot(project_id: str, document_id: str | None = None) -> dict[str,
     }
 
 
+def pad_empty_slots(project_id: str, document_id: str | None = None) -> StoryboardDocument:
+    """Ensure the last page has a full page of slots (empty panels allowed)."""
+    doc = get_document(project_id, document_id) if document_id else ensure_document(project_id)
+    if not doc:
+        doc = ensure_document(project_id)
+    page_size = int(doc.pageSize)
+    order = list(doc.panelOrder or [])
+    if not order:
+        needed = page_size
+    else:
+        remainder = len(order) % page_size
+        needed = 0 if remainder == 0 else page_size - remainder
+    if needed <= 0:
+        return doc
+    from .add_from_image import create_empty_panel
+
+    for _ in range(needed):
+        create_empty_panel(project_id, document_id=doc.id)
+    return get_document(project_id, doc.id) or ensure_document(project_id)
+
+
 def hydrate_panels(project_id: str, document_id: str | None = None) -> dict[str, Any]:
     """Return document + panel link rows for FE StoryboardStudio."""
+    pad_empty_slots(project_id, document_id)
     doc = get_document(project_id, document_id) if document_id else ensure_document(project_id)
     if not doc:
         doc = ensure_document(project_id)

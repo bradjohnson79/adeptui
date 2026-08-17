@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import Session
+
 from ..config import settings
 from ..db import Project, Scene, SessionLocal
 from ..script_storyboard import ScriptSegmentRow, StoryboardPanelRow, ensure_script_tables
@@ -51,6 +53,29 @@ def _save_proposal(proposal: TimelinePrepProposal) -> TimelinePrepProposal:
     return proposal
 
 
+def _v2_scene_readouts(db: Session, project_id: str) -> dict[str, dict[str, Any]]:
+    """Map Script Writer scene element id -> canonical v2 scene readout (CDX-052).
+
+    Only scene headings (the ids panels store in meta.scriptwriterSceneId) are
+    indexed; empty documents produce an empty map so callers fall back to the
+    legacy script_segments snapshot. Pure read — never writes.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        from ..scriptwriter.service import project_segments, scene_segment_readout
+        from ..scriptwriter.store import list_documents
+
+        for doc in list_documents(db, project_id) or []:
+            for seg in project_segments(doc):
+                if seg.get("segmentType") == "scene_heading" and seg.get("sceneId"):
+                    readout = scene_segment_readout(doc, str(seg["sceneId"]))
+                    if readout:
+                        out[str(seg["sceneId"])] = readout
+    except Exception:
+        pass
+    return out
+
+
 def prepare_timeline_from_storyboard(
     project_id: str,
     *,
@@ -66,6 +91,11 @@ def prepare_timeline_from_storyboard(
     with SessionLocal() as db:
         q = db.query(StoryboardPanelRow).filter(StoryboardPanelRow.project_id == project_id)
         rows = q.all()
+        # CDX-052: canonical v2 scene readouts (typed Script Writer content)
+        # keyed by the Script Writer scene element id panels link via
+        # meta.scriptwriterSceneId; the legacy script_segments snapshot remains
+        # the fallback when no v2 scene is linked.
+        v2_by_scene = _v2_scene_readouts(db, project_id)
         by_id = {r.id: r for r in rows}
         order = panel_ids or doc.panelOrder or [r.id for r in rows]
         for pid in order:
@@ -75,20 +105,37 @@ def prepare_timeline_from_storyboard(
             if approved_only and (row.approval or "").lower() not in {"approved", "final", "ok"}:
                 if any((r.approval or "").lower() in {"approved", "final", "ok"} for r in rows):
                     continue
-            dialogue = ""
-            scene_id = None
-            if row.segment_id:
-                seg = db.get(ScriptSegmentRow, row.segment_id)
-                if seg:
-                    dialogue = seg.dialogue or ""
-                    scene_id = seg.scene_id
             try:
                 meta = json.loads(row.meta_json or "{}")
             except Exception:
                 meta = {}
+            dialogue = ""
+            scene_id = None
+            v2seg = v2_by_scene.get(str(meta.get("scriptwriterSceneId") or ""))
+            if v2seg:
+                dialogue = v2seg.get("dialogue") or ""
+                # sceneId field semantics are unchanged: the project scene id
+                # from the legacy link / meta, never the v2 element id.
+                if row.segment_id:
+                    seg = db.get(ScriptSegmentRow, row.segment_id)
+                    if seg and seg.scene_id:
+                        scene_id = seg.scene_id
+            elif row.segment_id:
+                seg = db.get(ScriptSegmentRow, row.segment_id)
+                if seg:
+                    dialogue = seg.dialogue or ""
+                    scene_id = seg.scene_id
             camera = " / ".join(
-                x for x in [row.shot_size or "", row.lens or "", row.label or ""] if x
+                x for x in [row.shot_size or "", row.lens or ""] if x
             )
+            explicit_dialogue = bool(meta.get("scriptwriterDialogueId"))
+            if not explicit_dialogue and v2seg:
+                explicit_dialogue = bool(v2seg.get("dialogue"))
+            elif not explicit_dialogue and row.segment_id:
+                seg = db.get(ScriptSegmentRow, row.segment_id)
+                explicit_dialogue = bool(seg and (seg.dialogue or "").strip())
+            if not explicit_dialogue:
+                dialogue = ""
             shots.append(
                 TimelinePrepShotProposal(
                     panelId=row.id,

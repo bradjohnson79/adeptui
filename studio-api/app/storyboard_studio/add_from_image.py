@@ -264,3 +264,134 @@ def undo_add_image(project_id: str, panel_id: str) -> dict[str, Any]:
         row.updated_at = datetime.utcnow()
         db.commit()
     return {"ok": True, "panelId": panel_id, "mode": "cleared"}
+
+
+def create_empty_panel(project_id: str, *, document_id: str | None = None, label: str = "") -> dict[str, Any]:
+    """Create an empty production slot (no Library asset)."""
+    ensure_script_tables()
+    doc_layout = ensure_document(project_id)
+    target_doc_id = document_id or doc_layout.id
+    slot = next_free_slot(project_id, target_doc_id)
+    with SessionLocal() as db:
+        script_doc = get_or_create_script_doc(db, project_id)
+        segment = (
+            db.query(ScriptSegmentRow)
+            .filter(ScriptSegmentRow.project_id == project_id)
+            .order_by(ScriptSegmentRow.index.asc())
+            .first()
+        )
+        if not segment:
+            segment = ScriptSegmentRow(
+                id=str(uuid.uuid4()),
+                project_id=project_id,
+                doc_id=script_doc.id,
+                index=0,
+                segment_number=1,
+                segment_type="action",
+                text="Storyboard beat",
+                action="Storyboard beat",
+            )
+            db.add(segment)
+            db.flush()
+        count = (
+            db.query(StoryboardPanelRow)
+            .filter(StoryboardPanelRow.project_id == project_id)
+            .count()
+        )
+        panel = StoryboardPanelRow(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            doc_id=script_doc.id,
+            segment_id=segment.id,
+            panel_index=count,
+            label=label or "",
+            asset_id=None,
+            prompt="",
+            status="missing",
+            approval="draft",
+            script_sync_status="ok",
+            meta_json=json.dumps({"emptySlot": True}),
+        )
+        db.add(panel)
+        db.commit()
+        db.refresh(panel)
+        panel_id = panel.id
+    layout = append_panel(project_id, target_doc_id, panel_id)
+    return {
+        "panelId": panel_id,
+        "documentId": layout.id if layout else target_doc_id,
+        "slot": slot,
+        "assetId": None,
+    }
+
+
+def patch_panel(
+    project_id: str,
+    panel_id: str,
+    *,
+    label: str | None = None,
+    prompt: str | None = None,
+) -> dict[str, Any]:
+    from .contracts import CAPTION_MAX
+
+    ensure_script_tables()
+    with SessionLocal() as db:
+        row = db.get(StoryboardPanelRow, panel_id)
+        if not row or row.project_id != project_id:
+            return {"ok": False, "error": "panel not found"}
+        if label is not None:
+            row.label = str(label)[:CAPTION_MAX]
+        if prompt is not None:
+            row.prompt = str(prompt)
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        return {
+            "ok": True,
+            "panelId": panel_id,
+            "label": row.label or "",
+            "prompt": row.prompt or "",
+            "assetId": row.asset_id,
+        }
+
+
+def assign_panel_asset(project_id: str, panel_id: str, asset_id: str) -> dict[str, Any]:
+    from ..db import Asset
+
+    if not asset_id:
+        return {"ok": False, "error": "assetId required"}
+    ensure_script_tables()
+    with SessionLocal() as db:
+        row = db.get(StoryboardPanelRow, panel_id)
+        if not row or row.project_id != project_id:
+            return {"ok": False, "error": "panel not found"}
+        asset = db.get(Asset, asset_id)
+        if not asset or asset.project_id != project_id:
+            return {"ok": False, "error": "library asset not found"}
+        meta = _meta(row)
+        previous = {
+            "assetId": row.asset_id,
+            "prompt": row.prompt,
+            "label": row.label,
+            "status": row.status,
+        }
+        meta["previousAsset"] = previous
+        row.asset_id = asset_id
+        row.status = "complete"
+        row.meta_json = json.dumps(meta)
+        row.updated_at = datetime.utcnow()
+        db.commit()
+    return {"ok": True, "panelId": panel_id, "assetId": asset_id}
+
+
+def clear_panel_asset(project_id: str, panel_id: str) -> dict[str, Any]:
+    """Remove the image from the board. Never deletes the Library asset."""
+    ensure_script_tables()
+    with SessionLocal() as db:
+        row = db.get(StoryboardPanelRow, panel_id)
+        if not row or row.project_id != project_id:
+            return {"ok": False, "error": "panel not found"}
+        row.asset_id = None
+        row.status = "missing"
+        row.updated_at = datetime.utcnow()
+        db.commit()
+    return {"ok": True, "panelId": panel_id, "assetId": None, "cleared": True}

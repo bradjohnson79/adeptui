@@ -1316,6 +1316,45 @@ export interface RuntimeActionResponse {
   status?: RuntimeManagerStatus;
 }
 
+/**
+ * Library taxonomy types — additive mirror of project_library/schema.py
+ * FolderNode.to_dict() and project_library/service.build_folder_map.
+ * The backend library endpoint (/api/projects/{id}/library) returns these
+ * as tree.folders (nested) and folderMap (flattened).
+ */
+export interface LibraryFolderNode {
+  folderId?: string;
+  displayName?: string;
+  displayPath?: string;
+  isSystem?: boolean;
+  isRenamable?: boolean;
+  isDeletable?: boolean;
+  systemKey?: string;
+  parentFolderId?: string;
+  entityType?: string;
+  entityId?: string;
+  entityName?: string;
+  children?: LibraryFolderNode[];
+}
+
+export interface LibraryTreePayload {
+  projectId?: string;
+  librarySchemaVersion?: number;
+  folders: LibraryFolderNode[];
+  entityFolderCount?: number;
+  systemFolderCount?: number;
+}
+
+export interface LibraryFolderMapEntry {
+  folderId: string;
+  displayName?: string;
+  displayPath?: string;
+  isSystem?: boolean;
+  systemKey?: string;
+  entityType?: string;
+  entityName?: string;
+}
+
 export const api = {
   health: () => req<Health>("/api/health"),
   betaRuntimeStatus: () =>
@@ -4241,6 +4280,23 @@ export const api = {
           body: JSON.stringify(body),
         },
       ),
+    approveBatch: (
+      projectId: string,
+      batchId: string,
+      body: { asset_ids: string[] },
+    ) =>
+      req<{
+        batch: import("./components/CoDirector/SceneCreator/types").SceneGenerationBatch;
+        approved_asset_ids: string[];
+      }>(
+        `/api/scene-creator/projects/${encodeURIComponent(projectId)}/batches/${encodeURIComponent(batchId)}/approve`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+
     sendToTimeline: (
       projectId: string,
       batchId: string,
@@ -5040,6 +5096,67 @@ export const api = {
           body: JSON.stringify({ panelId }),
         }
       ),
+    patchPanel: (
+      projectId: string,
+      panelId: string,
+      body: { label?: string; prompt?: string }
+    ) =>
+      req<{ ok: boolean; panelId: string; label: string; prompt: string; assetId?: string | null }>(
+        `/api/storyboard-studio/projects/${projectId}/panels/${panelId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      ),
+    assignPanel: (projectId: string, panelId: string, assetId: string) =>
+      req<{ ok: boolean; panelId: string; assetId: string }>(
+        `/api/storyboard-studio/projects/${projectId}/panels/${panelId}/assign`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId }),
+        }
+      ),
+    clearPanel: (projectId: string, panelId: string) =>
+      req<{ ok: boolean; panelId: string; assetId: null; cleared: boolean }>(
+        `/api/storyboard-studio/projects/${projectId}/panels/${panelId}/clear`,
+        {
+          method: "POST",
+        }
+      ),
+    generateMissing: (
+      projectId: string,
+      body?: {
+        family?: "qwen2512" | "imagen";
+        documentId?: string;
+        pageIndex?: number;
+        allowDraft?: boolean;
+      }
+    ) =>
+      req<{
+        ok: boolean;
+        queued: Array<{ panelId: string; jobId?: string; family: string }>;
+        skipped: Array<{ panelId: string; reason: string }>;
+        message: string;
+      }>(`/api/storyboard-studio/projects/${projectId}/generate-missing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      }),
+    compose2k: (projectId: string, body?: { documentId?: string; pageIndex?: number }) =>
+      req<{
+        ok: boolean;
+        assetId: string;
+        width: number;
+        height: number;
+        pageIndex: number;
+        captions: string[];
+      }>(`/api/storyboard-studio/projects/${projectId}/compose-2k`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      }),
     exportPdfUrl: (projectId: string, documentId?: string) => {
       const qs = documentId ? `?documentId=${encodeURIComponent(documentId)}` : "";
       return `/api/storyboard-studio/projects/${projectId}/export.pdf${qs}`;
@@ -5314,15 +5431,9 @@ export const api = {
     const qs = q.toString();
     return req<{
       items: any[];
-      tree: {
-        projectId: string;
-        librarySchemaVersion: number;
-        folders: any[];
-        entityFolderCount: number;
-        systemFolderCount: number;
-      };
+      tree: LibraryTreePayload;
       librarySchemaVersion: number;
-      folderMap: Record<string, { folderId: string; displayName: string; displayPath: string; systemKey?: string }>;
+      folderMap: Record<string, LibraryFolderMapEntry>;
     }>(`/api/projects/${projectId}/library${qs ? `?${qs}` : ""}`);
   },
   libraryMigrate: (projectId: string) =>
@@ -5637,6 +5748,10 @@ export const api = {
       req<{ ok: boolean; documents: Array<Record<string, unknown>> }>(
         `/api/projects/${projectId}/scriptwriter/documents`,
       ),
+    createDocument: (projectId: string) => req<{ ok: boolean; document: Record<string, unknown>; stats: Record<string, unknown>; navigator: Array<Record<string, unknown>>; continuity: Array<Record<string, unknown>>; bibleCandidates: Array<Record<string, unknown>>; revisions: Array<Record<string, unknown>>; transactions: Array<Record<string, unknown>>; recovery?: Record<string, unknown> | null; paginationMode?: string }>(
+        `/api/projects/${projectId}/scriptwriter/documents`,
+        { method: "POST" },
+      ),
     document: (projectId: string, documentId: string) =>
       req<{
         ok: boolean;
@@ -5658,6 +5773,11 @@ export const api = {
       req<{ ok: boolean; document: Record<string, unknown>; saveState?: string }>(
         `/api/projects/${projectId}/scriptwriter/documents/${documentId}/autosave`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    restoreRecovery: (projectId: string, documentId: string) =>
+      req<{ ok: boolean; document: Record<string, unknown>; saveState?: string }>(
+        `/api/projects/${projectId}/scriptwriter/documents/${documentId}/recovery/restore`,
+        { method: "POST" },
       ),
     insertScene: (projectId: string, documentId: string, body?: { afterOrder?: number; heading?: string }) =>
       req<{ ok: boolean; document: Record<string, unknown> }>(

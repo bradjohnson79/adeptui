@@ -390,6 +390,7 @@ def compile_image_request(
             "visualLanguage",
             {
                 "colorTreatment": cine.get("colorTreatment"),
+                "colorGradePreset": cine.get("colorGradePreset"),
                 "visualEra": cine.get("visualEra"),
                 "productionStyle": cine.get("productionStyle"),
             },
@@ -432,6 +433,7 @@ def compile_image_request(
         continuity_constraints=list((creative.get("prohibitedChanges") or [])[:5]),
         cinematography=dict(creative.get("cinematography") or {}),
         lighting=dict(creative.get("lighting") or {}),
+        visual_language=dict(creative.get("visualLanguage") or {}),
         spatial_hints=list(
             (
                 dict(creative.get("spatial") or {}).get("promptHints")

@@ -138,6 +138,8 @@ def reopen_from_asset(project_id: str, asset_id: str) -> dict[str, Any] | None:
             or (creative.get("lighting") or {}).get("direction"),
             "colorTreatment": cinematic.get("colorTreatment")
             or (creative.get("visualLanguage") or {}).get("colorTreatment"),
+            "colorGradePreset": cinematic.get("colorGradePreset")
+            or (creative.get("visualLanguage") or {}).get("colorGradePreset"),
             "visualEra": cinematic.get("visualEra")
             or (creative.get("visualLanguage") or {}).get("visualEra"),
             "productionStyle": cinematic.get("productionStyle")

@@ -23,6 +23,8 @@ import type {
   ResolutionLabel,
   ShotIntent,
 } from "../../contracts/cinematicImageStudio";
+import { CREATOR_IMAGE_CATEGORIES, DEFAULT_IMAGE_CATEGORY } from "../../contracts/cinematicImageStudio";
+import { DEFAULT_COLOR_GRADE, resolveColorGradeId } from "../../contracts/colorGrades";
 import type { ImagePipelineDeploymentPreference } from "../../contracts/imagePipeline";
 import type { VisualContinuitySession } from "../../contracts/visualContinuity";
 import "./cinematic-image-studio.css";
@@ -52,16 +54,7 @@ const SHOT_INTENTS: { value: ShotIntent; label: string }[] = [
   { value: "custom", label: "Custom" },
 ];
 
-const CATEGORIES: { value: ImageCategory; label: string }[] = [
-  { value: "storyboard", label: "Storyboard" },
-  { value: "keyframe", label: "Keyframe" },
-  { value: "concept", label: "Concept" },
-  { value: "character", label: "Character" },
-  { value: "location", label: "Location" },
-  { value: "prop", label: "Prop" },
-  { value: "mood", label: "Mood" },
-  { value: "general", label: "General" },
-];
+const CATEGORIES = CREATOR_IMAGE_CATEGORIES;
 
 const LENS_OPTIONS: { value: string; tip: string }[] = [
   {
@@ -101,14 +94,6 @@ const LIGHTING_OPTIONS = [
   "Overcast ambient",
   "Neon night",
   "Golden hour rim",
-];
-const COLOR_OPTIONS = [
-  "Neutral cinematic",
-  "Teal & orange",
-  "Desaturated drama",
-  "Warm tungsten",
-  "Cool steel",
-  "Period Kodachrome",
 ];
 
 function projectDefaults(project: Project): Record<string, unknown> {
@@ -168,10 +153,11 @@ export function CinematicImageStudio({
   const [controls, setControls] = useState<CinematicControls>({
     aspectRatio: String(d.aspect || "16:9"),
     shotIntent: "medium",
-    category: "storyboard",
+    category: DEFAULT_IMAGE_CATEGORY,
     lens: "35mm",
     lighting: "Natural soft daylight",
     colorTreatment: "Neutral cinematic",
+    colorGradePreset: DEFAULT_COLOR_GRADE,
     customShotIntent: "",
   });
   const [resolution, setResolution] = useState<ResolutionLabel>("1K");
@@ -285,6 +271,9 @@ export function CinematicImageStudio({
                   aspectRatio: String(r.controls.aspectRatio || c.aspectRatio),
                   shotIntent: (r.controls.shotIntent as ShotIntent) || c.shotIntent,
                   category: (r.controls.category as ImageCategory) || c.category,
+                  colorGradePreset: resolveColorGradeId(
+                    String(r.controls.colorGradePreset || r.controls.colorTreatment || c.colorGradePreset || "")
+                  ),
                 }));
               }
             })
@@ -380,7 +369,12 @@ export function CinematicImageStudio({
         setControls((c) => ({ ...c, lighting: res.session.lightingDirection || c.lighting }));
       }
       if (res.session.colorTreatment) {
-        setControls((c) => ({ ...c, colorTreatment: res.session.colorTreatment || c.colorTreatment }));
+        const grade = resolveColorGradeId(res.session.colorTreatment);
+        setControls((c) => ({
+          ...c,
+          colorTreatment: res.session.colorTreatment || c.colorTreatment,
+          colorGradePreset: grade,
+        }));
       }
       if (res.session.aspectRatio) {
         setControls((c) => ({ ...c, aspectRatio: res.session.aspectRatio || c.aspectRatio }));
@@ -542,6 +536,9 @@ export function CinematicImageStudio({
           aspectRatio: String(r.controls.aspectRatio || c.aspectRatio),
           shotIntent: (r.controls.shotIntent as ShotIntent) || c.shotIntent,
           category: (r.controls.category as ImageCategory) || c.category,
+          colorGradePreset: resolveColorGradeId(
+            String(r.controls.colorGradePreset || r.controls.colorTreatment || c.colorGradePreset || "")
+          ),
         }));
       }
       if (r.continuitySessionId) {
@@ -704,6 +701,7 @@ export function CinematicImageStudio({
             <div className="field">
               <label>Category</label>
               <select
+                data-testid="cis-category"
                 value={controls.category}
                 onChange={(e) =>
                   setControls((c) => ({ ...c, category: e.target.value as ImageCategory }))
@@ -772,6 +770,10 @@ export function CinematicImageStudio({
           allowApiDeployment={paidOk}
           spatialMapId={spatialMapId}
           spatialMapVersion={spatialMapVersion}
+          colorGradePreset={resolveColorGradeId(controls.colorGradePreset || controls.colorTreatment)}
+          onColorGradeChange={(id) =>
+            setControls((c) => ({ ...c, colorGradePreset: id, colorTreatment: id }))
+          }
         />
 
         {/* 2. References */}
@@ -858,9 +860,9 @@ export function CinematicImageStudio({
           )}
         </section>
 
-        {/* Lighting / Color */}
+        {/* Lighting */}
         <section className="cis-card">
-          <h2 className="cis-card__title">Lighting & Color</h2>
+          <h2 className="cis-card__title">Lighting</h2>
           <div className="cis-row">
             <div className="field">
               <label>Lighting</label>
@@ -869,19 +871,6 @@ export function CinematicImageStudio({
                 onChange={(e) => setControls((c) => ({ ...c, lighting: e.target.value }))}
               >
                 {LIGHTING_OPTIONS.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>Color</label>
-              <select
-                value={controls.colorTreatment || ""}
-                onChange={(e) => setControls((c) => ({ ...c, colorTreatment: e.target.value }))}
-              >
-                {COLOR_OPTIONS.map((l) => (
                   <option key={l} value={l}>
                     {l}
                   </option>
