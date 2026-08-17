@@ -13,7 +13,11 @@
 | Playwright | `tests/e2e/i18n/m30f-multilingual-e2e.spec.ts` — **8 passed** |
 | Pack parity | `npm --prefix studio-web test` — **6 passed** |
 | API tests | `studio-api/tests/test_m30f_language_intelligence.py` — **22 passed** |
-| Beta | `http://127.0.0.1:8760/` (web 200), `http://127.0.0.1:8758/` (API 200) |
+| Local API | `http://127.0.0.1:8758/` (health 200) |
+| Local web | `http://127.0.0.1:8760/` (`studio-web` dist preview; supervisor restart blocked by existing :8758 listener) |
+| Hosted UI | `https://adeptui.vercel.app` |
+| Vercel | `dpl_AnrhGXh6endgTZZCkZtb4DE6B2r6` production **Ready**, git SHA `81f702ff966ae63e98629c77d206bc1962a60fce` aliased to `adeptui.vercel.app` |
+| Hosted bundle | `/assets/index-D2mvKa1k.js` contains `Generar escena`, `Estudio de storyboard`, `conversationLocale`, `m30f-interface-locale` |
 
 ## Three independent language concepts
 
@@ -36,6 +40,7 @@ Changing interface locale must not rewrite conversation locale or project canon.
 | 7 | Urdu `dir=rtl` smoke | PASS | Playwright |
 | 8 | Switch back to English; Schnick names unchanged | PASS | `Schnick Coffee` still visible |
 | 9 | 12-locale pack parity vs English keys | PASS | vitest packParity |
+| 10 | Hosted Vercel SHA = HEAD; Spanish + Arabic RTL smoke on Schnick | PASS | Production SHA `81f702f`; hosted `lang=es` `Generar escena`; hosted `dir=rtl` Arabic chrome; tracks `direction:ltr` `transform:none`; Schnick name unchanged |
 
 ## Binary verdict
 
@@ -62,3 +67,5 @@ Changing interface locale must not rewrite conversation locale or project canon.
 - Voice spoken language is independent of interface locale (by design).
 - Bilingual pairing is English + Simplified Chinese only.
 - A long-lived Studio API listener may need a process restart before live MIL compile records `promptLanguage=en+zh-Hans`; unit `compile_intent` and live Prompt Intelligence enhance cover that gate.
+- Residual inspector/placeholder copy (Scene Inspector labels, some timeline drop hints) may remain English while chrome is localized.
+- The first M30F git push failed Vercel `tsc` because concurrent untracked Spatial/Library/Character/Scriptwriter work was mixed into chrome files. Follow-up commits restored chrome-only i18n wraps, restored Spatial Map API methods, and removed `CoDirectorTaskStatus`. Clean worktree `tsc -b` passed before the successful production deploy.
