@@ -95,6 +95,8 @@ Old `.timeline-editor-shell__layout` / `.director-tracks--timeline-shell` track-
 
 ## SHA
 
-- Commit SHA: `d90c21dbe392cf5abf7e585d66157cddf6e1a135`
-- Remote `origin/beta` SHA after push: pending push
-- Vercel deployment SHA: pending deploy
+- Commit SHA: `d90c21dbe392cf5abf7e585d66157cddf6e1a135` (layout rebuild)
+- HEAD / push SHA: `a444cbb00e8f8158f5071cc10e879d51ddf0e9c7` (includes Inspector prompt-reference helpers)
+- Remote `origin/beta`: `a444cbb00e8f8158f5071cc10e879d51ddf0e9c7`
+- Vercel production: GitHub environment **Production** for `a444cbb00e8f`, status **success**, inspect `https://vercel.com/anoint/adeptui/FyXgSrigN77XQv1zTm7KYFxxyozN`
+- Hosted UI: `https://adeptui.vercel.app/` HTTP **200**, bundle `index-Zop7Wt1k.js` + `index-M6qdnPyq.css`
