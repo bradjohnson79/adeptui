@@ -2,7 +2,7 @@
  * M4.8 Cinematic Image Studio — artist-first filmmaking workspace.
  * Primary surface polish: references, camera cards, provider browser, continuity, CTA, contact sheet.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type { Job, Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
@@ -11,7 +11,10 @@ import { ImageEditWorkspace } from "../imageEdit/ImageEditWorkspace";
 import { PromptIntelligencePanel } from "../CoDirector/PromptIntelligencePanel";
 import { SpatialReferenceFieldset } from "../spatial-map/SpatialReferenceFieldset";
 import { HelpTip } from "../HelpTip";
-import { ReferenceBrowser } from "./ReferenceBrowser";
+import type { LibraryAsset } from "../CoDirector/library/assetModel";
+import { getAssetName } from "../CoDirector/library/assetModel";
+import { CisAccordion } from "./CisAccordion";
+import { isReferenceImage, ReferenceBrowser, referenceRole } from "./ReferenceBrowser";
 import { ImageProviderBrowser } from "./ImageProviderBrowser";
 import { providerSubLabel } from "./providerDisplay";
 import { ProductionPipelinePanel } from "./ProductionPipelinePanel";
@@ -137,6 +140,17 @@ function effectivePrompt(prompt: string, controls: CinematicControls): string {
   return `${prompt.trim()}\n\nCustom shot intent: ${custom}`.trim();
 }
 
+function tagFromFilename(name: string): string {
+  const stem = name.replace(/\.[^.]+$/, "").replace(/[^\w\s-]+/g, " ").trim();
+  return stem.slice(0, 80) || "library_upload";
+}
+
+function providerSupportsReferences(provider: ImageProviderDescriptor | null | undefined): boolean | null {
+  const caps = provider?.metadata?.capabilities;
+  if (!caps || typeof caps !== "object" || !("supportsReferences" in caps)) return null;
+  return Boolean((caps as { supportsReferences?: unknown }).supportsReferences);
+}
+
 export function CinematicImageStudio({
   project,
   onChange,
@@ -175,6 +189,12 @@ export function CinematicImageStudio({
   const [guidance, setGuidance] = useState<number | "">("");
   const [steps, setSteps] = useState<number | "">("");
   const [refIds, setRefIds] = useState<string[]>([]);
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const [libraryItems, setLibraryItems] = useState<LibraryAsset[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [piStatus, setPiStatus] = useState("Co-Director");
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
   const [sceneId, setSceneId] = useState("");
   const [continuityOn, setContinuityOn] = useState(false);
   const [continuitySession, setContinuitySession] = useState<VisualContinuitySession | null>(null);
@@ -188,10 +208,20 @@ export function CinematicImageStudio({
   const [undoPanelId, setUndoPanelId] = useState<string | null>(null);
   const [replacePanelId, setReplacePanelId] = useState<string | null>(null);
 
-  const images = useMemo(
-    () => project.assets.filter((a) => a.kind === "image" || a.kind === "environment"),
-    [project.assets]
-  );
+  const loadLibrary = useCallback(async () => {
+    try {
+      const res = await api.library(project.id);
+      const items = (res.items || []).filter((item: LibraryAsset) => isReferenceImage(item));
+      setLibraryItems(items);
+    } catch {
+      setLibraryItems([]);
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    void loadLibrary();
+  }, [loadLibrary, project.assets]);
+
   const scenes = useMemo(
     () => [...(project.scenes || [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
     [project.scenes]
@@ -620,6 +650,31 @@ export function CinematicImageStudio({
     }
   };
 
+  const uploadToLibrary = async (file: File | undefined) => {
+    if (!file) return;
+    setUploading(true);
+    setMsg(null);
+    try {
+      const asset = await api.uploadAsset(project.id, file, tagFromFilename(file.name), "image");
+      await onChange();
+      await loadLibrary();
+      setHighlightId(asset.id);
+      setMsg("Image added to the project Library. Select it, then click Add Reference.");
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : "Could not upload that image to the Library.");
+    } finally {
+      setUploading(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
+
+  const addReferences = () => {
+    if (!pendingIds.length) return;
+    const next = Array.from(new Set([...refIds, ...pendingIds]));
+    setRefIds(next);
+    setPendingIds([]);
+  };
+
   const groupedResults = useMemo(() => {
     const groups = new Map<string, ResultCard[]>();
     for (const r of results) {
@@ -633,6 +688,12 @@ export function CinematicImageStudio({
 
   const generateTargets = resolveTargets();
   const paidOk = hostedChoice === "allow_hosted";
+  const accordionKey = `adept_cis_accordion_${project.id}`;
+  const supportsRefs = providerSupportsReferences(generateTargets[0] || bestMatch);
+  const activeAssets: LibraryAsset[] = refIds.map((id) => {
+    const found = libraryItems.find((item) => item.id === id);
+    return found || { id, tag: id.slice(0, 8), kind: "image" };
+  });
   const showHostedCard =
     mode === "all_models" ||
     paidConfirmIds.length > 0 ||
@@ -761,30 +822,126 @@ export function CinematicImageStudio({
           )}
         </section>
 
-        <ProductionPipelinePanel
-          projectId={project.id}
-          prompt={effectivePrompt(prompt, controls)}
-          purpose={controls.category}
-          referenceAssetIds={refIds}
-          deploymentPreference={pipelineDeploymentPreference}
-          allowApiDeployment={paidOk}
-          spatialMapId={spatialMapId}
-          spatialMapVersion={spatialMapVersion}
-          colorGradePreset={resolveColorGradeId(controls.colorGradePreset || controls.colorTreatment)}
-          onColorGradeChange={(id) =>
-            setControls((c) => ({ ...c, colorGradePreset: id, colorTreatment: id }))
+        <CisAccordion id="image-plan" title="Image Plan" defaultOpen persistKey={accordionKey}>
+          <ProductionPipelinePanel
+            projectId={project.id}
+            prompt={effectivePrompt(prompt, controls)}
+            purpose={controls.category}
+            referenceAssetIds={refIds}
+            deploymentPreference={pipelineDeploymentPreference}
+            allowApiDeployment={paidOk}
+            spatialMapId={spatialMapId}
+            spatialMapVersion={spatialMapVersion}
+            colorGradePreset={resolveColorGradeId(controls.colorGradePreset || controls.colorTreatment)}
+            onColorGradeChange={(id) =>
+              setControls((c) => ({ ...c, colorGradePreset: id, colorTreatment: id }))
+            }
+            hideTitle
+          />
+        </CisAccordion>
+
+        <CisAccordion
+          id="references"
+          title="References"
+          defaultOpen
+          persistKey={accordionKey}
+          status={refIds.length ? `${refIds.length} active` : undefined}
+          headerAction={
+            <>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                data-testid="cis-upload-library-input"
+                onChange={(event) => void uploadToLibrary(event.target.files?.[0])}
+              />
+              <button
+                type="button"
+                className="ghost"
+                disabled={uploading}
+                data-testid="cis-upload-library"
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                {uploading ? "Uploading…" : "Upload Image to Library"}
+              </button>
+            </>
           }
-        />
+        >
+          <ReferenceBrowser
+            assets={libraryItems}
+            pendingIds={pendingIds}
+            activeIds={refIds}
+            highlightId={highlightId}
+            onPendingChange={setPendingIds}
+          />
+          <div className="cis-ref-bind">
+            <button
+              type="button"
+              className="primary"
+              disabled={!pendingIds.length}
+              data-testid="cis-add-reference"
+              onClick={addReferences}
+            >
+              Add Reference
+            </button>
+            {pendingIds.length ? (
+              <span className="muted tiny">{pendingIds.length} selected</span>
+            ) : null}
+          </div>
+          <div className="cis-active-refs" data-testid="cis-active-references">
+            <div className="cis-active-refs__header">
+              <h3>Active References</h3>
+              <span className="muted tiny" data-testid="cis-active-ref-count">
+                {refIds.length} active reference{refIds.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {!activeAssets.length ? (
+              <p className="muted tiny">Select images in the Library, then click Add Reference.</p>
+            ) : (
+              <ul className="cis-active-ref-list">
+                {activeAssets.map((asset) => {
+                  const role = referenceRole(asset);
+                  const supported = supportsRefs;
+                  return (
+                    <li key={asset.id} className="cis-active-ref-chip" data-testid={`cis-active-ref-${asset.id}`}>
+                      <img src={api.assetUrl(asset.id)} alt="" />
+                      <span className="cis-active-ref-chip__meta">
+                        <strong>{getAssetName(asset)}</strong>
+                        <span>
+                          {role}
+                          {supported === true ? " ✓" : supported === false ? " ⚠" : ""}
+                        </span>
+                        {supported === false ? (
+                          <span className="cis-active-ref-chip__warn">
+                            Selected generator cannot directly use this reference.
+                          </span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost"
+                        aria-label={`Remove ${getAssetName(asset)}`}
+                        data-testid={`cis-remove-ref-${asset.id}`}
+                        onClick={() => setRefIds((prev) => prev.filter((id) => id !== asset.id))}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </CisAccordion>
 
-        {/* 2. References */}
-        <section className="cis-card">
-          <h2 className="cis-card__title">References</h2>
-          <ReferenceBrowser assets={images} selectedIds={refIds} onChange={setRefIds} />
-        </section>
-
-        {/* 3. Camera */}
-        <section className="cis-card">
-          <h2 className="cis-card__title">Camera</h2>
+        <CisAccordion
+          id="camera"
+          title="Camera"
+          defaultOpen
+          persistKey={accordionKey}
+          status={`${controls.shotIntent.replace(/_/g, " ")} · ${controls.lens} · ${controls.aspectRatio}`}
+        >
           <div className="cis-row">
             <div className="field">
               <label>Shot Intent</label>
@@ -858,11 +1015,14 @@ export function CinematicImageStudio({
               />
             </div>
           )}
-        </section>
+        </CisAccordion>
 
-        {/* Lighting */}
-        <section className="cis-card">
-          <h2 className="cis-card__title">Lighting</h2>
+        <CisAccordion
+          id="lighting"
+          title="Lighting"
+          persistKey={accordionKey}
+          status={controls.lighting || undefined}
+        >
           <div className="cis-row">
             <div className="field">
               <label>Lighting</label>
@@ -878,54 +1038,63 @@ export function CinematicImageStudio({
               </select>
             </div>
           </div>
-        </section>
+        </CisAccordion>
 
-        {/* Provider browser for All Models */}
         {mode === "all_models" && (
-          <section className="cis-card">
-            <h2 className="cis-card__title">All Image Models</h2>
+          <CisAccordion id="all-models" title="All Image Models" persistKey={accordionKey}>
             <ImageProviderBrowser
               providers={allProviders.length ? allProviders : providers}
               selectedIds={selectedProviderIds}
               bestMatchId={bestMatch?.id}
               onChange={setSelectedProviderIds}
             />
-          </section>
+          </CisAccordion>
         )}
 
         {showHostedCard && (
-          <section className="cis-hosted-card" data-testid="cis-hosted-api-card">
-            <strong>Hosted API Usage</strong>
-            <div className="cis-hosted-card__options" role="radiogroup" aria-label="Hosted API usage">
-              <label>
-                <input
-                  type="radio"
-                  name="cis-hosted"
-                  checked={hostedChoice === "local_only"}
-                  onChange={() => setHostedChoice("local_only")}
-                />
-                <span>Use Local Models Only</span>
-              </label>
-              <label>
-                <input
-                  type="radio"
-                  name="cis-hosted"
-                  checked={hostedChoice === "allow_hosted"}
-                  onChange={() => setHostedChoice("allow_hosted")}
-                />
-                <span>Allow Hosted API Models</span>
-              </label>
+          <CisAccordion
+            id="hosted-api"
+            title="Hosted API Usage"
+            persistKey={accordionKey}
+            status={hostedChoice === "allow_hosted" ? "Hosted allowed" : "Local only"}
+            className="cis-hosted-card"
+          >
+            <div className="cis-hosted-card__body" data-testid="cis-hosted-api-card">
+              <fieldset className="cis-hosted-card__options" role="radiogroup" aria-label="Generation Source">
+                <legend>Generation Source</legend>
+                <label>
+                  <input
+                    type="radio"
+                    name="cis-hosted"
+                    checked={hostedChoice === "local_only"}
+                    onChange={() => setHostedChoice("local_only")}
+                  />
+                  <span>Local Models Only</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="cis-hosted"
+                    checked={hostedChoice === "allow_hosted"}
+                    onChange={() => setHostedChoice("allow_hosted")}
+                  />
+                  <span>Allow Hosted API Models</span>
+                </label>
+              </fieldset>
+              <div className={`cis-hosted-card__cost${paidOk ? "" : " is-muted"}`}>
+                Estimated hosted cost: <strong>{paidOk ? estimateCostLabel(generateTargets) : "$0.00"}</strong>
+                <div className="tiny muted">Hosted cost applies only when hosted models are used.</div>
+              </div>
             </div>
-            <div className="cis-hosted-card__cost">
-              Estimated cost: <strong>{paidOk ? estimateCostLabel(generateTargets) : "$0.00"}</strong>
-              <div className="tiny muted">Only applicable when hosted models are selected.</div>
-            </div>
-          </section>
+          </CisAccordion>
         )}
 
-        {/* Continuity */}
-        <section className="cis-card">
-          <h2 className="cis-card__title">Continuity</h2>
+        <CisAccordion
+          id="continuity"
+          title="Continuity"
+          persistKey={accordionKey}
+          status={selectedScene?.name || "No scene"}
+        >
           <div className="cis-continuity-grid">
             <div className="cis-continuity-stat">
               <span>Current Scene</span>
@@ -977,22 +1146,25 @@ export function CinematicImageStudio({
             </label>
             {replacePanelId ? <span className="pill warn">Replacing storyboard panel</span> : null}
           </div>
-        </section>
+          <SpatialReferenceFieldset
+            projectId={project.id}
+            value={{ spatialMapId, spatialMapVersion, spatialCameraId }}
+            onChange={(patch) => {
+              if ("spatialMapId" in patch) setSpatialMapId(patch.spatialMapId);
+              if ("spatialMapVersion" in patch) setSpatialMapVersion(patch.spatialMapVersion);
+              if ("spatialCameraId" in patch) setSpatialCameraId(patch.spatialCameraId);
+            }}
+            testIdPrefix="image"
+          />
+        </CisAccordion>
 
-        <SpatialReferenceFieldset
-          projectId={project.id}
-          value={{ spatialMapId, spatialMapVersion, spatialCameraId }}
-          onChange={(patch) => {
-            if ("spatialMapId" in patch) setSpatialMapId(patch.spatialMapId);
-            if ("spatialMapVersion" in patch) setSpatialMapVersion(patch.spatialMapVersion);
-            if ("spatialCameraId" in patch) setSpatialCameraId(patch.spatialCameraId);
-          }}
-          testIdPrefix="image"
-        />
-
-        {/* Prompt Intelligence */}
-        <section className="cis-card cis-pi">
-          <h2 className="cis-card__title">Prompt Intelligence</h2>
+        <CisAccordion
+          id="prompt-intelligence"
+          title="Prompt Intelligence"
+          persistKey={accordionKey}
+          status={piStatus}
+          className="cis-pi"
+        >
           <PromptIntelligencePanel
             projectId={project.id}
             domain="image"
@@ -1004,9 +1176,10 @@ export function CinematicImageStudio({
             }
             modelId={generateTargets[0]?.modelId || bestMatch?.modelId || bestMatch?.family || "qwen2512"}
             onApply={(payload) => setPrompt(payload.finalProviderPrompt)}
+            onArtistStatusChange={setPiStatus}
             artistLayout
           />
-        </section>
+        </CisAccordion>
 
         {/* Generate CTA */}
         <section className="cis-generate-cta">

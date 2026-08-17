@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { api } from "../../api";
-import type { Asset } from "../../types";
+import type { LibraryAsset } from "../CoDirector/library/assetModel";
+import { getAssetName, isAudioAsset, isImageAsset, isVideoAsset } from "../CoDirector/library/assetModel";
 
 export type ReferenceFilter =
   | "all"
@@ -21,36 +22,41 @@ const FILTERS: { id: ReferenceFilter; label: string }[] = [
   { id: "storyboard", label: "Storyboard" },
 ];
 
-function assetTypeLabel(asset: Asset): string {
-  const tag = (asset.tag || "").toLowerCase();
+export function isReferenceImage(asset: LibraryAsset): boolean {
+  if (isVideoAsset(asset) || isAudioAsset(asset)) return false;
+  if (isImageAsset(asset)) return true;
   const kind = (asset.kind || "").toLowerCase();
-  if (kind.includes("character") || tag.includes("char") || tag.includes("portrait")) return "Character Image";
-  if (kind.includes("location") || kind.includes("environment") || tag.includes("corridor") || tag.includes("loc"))
-    return "Background";
+  return (
+    kind.includes("environment") ||
+    kind.includes("character") ||
+    kind.includes("prop") ||
+    kind.includes("location") ||
+    kind.includes("storyboard")
+  );
+}
+
+export function referenceRole(asset: LibraryAsset): string {
+  if (asset.characterId) return "Character";
+  if (asset.propId) return "Prop";
+  if (asset.sceneId) return "Location";
+  const kind = (asset.kind || "").toLowerCase();
+  const tag = (asset.tag || "").toLowerCase();
+  if (kind.includes("character") || tag.includes("char") || tag.includes("portrait")) return "Character";
   if (kind.includes("prop") || tag.includes("prop")) return "Prop";
+  if (kind.includes("location") || kind.includes("environment") || tag.includes("loc")) return "Location";
   if (kind.includes("storyboard") || tag.includes("board")) return "Storyboard";
-  if (kind === "image") return "Image";
-  return kind ? kind[0].toUpperCase() + kind.slice(1) : "Image";
+  return "Image";
 }
 
-function assetBadge(asset: Asset): string | null {
-  const type = assetTypeLabel(asset);
-  if (type === "Character Image") return "Character";
-  if (type === "Background") return "Location";
-  if (type === "Prop") return "Prop";
-  if (type === "Storyboard") return "Storyboard";
-  return null;
-}
-
-function matchesFilter(asset: Asset, filter: ReferenceFilter): boolean {
+function matchesFilter(asset: LibraryAsset, filter: ReferenceFilter): boolean {
   if (filter === "all" || filter === "images") return true;
-  const type = assetTypeLabel(asset).toLowerCase();
-  if (filter === "characters") return type.includes("character");
-  if (filter === "locations") return type.includes("background") || type.includes("location");
-  if (filter === "props") return type.includes("prop");
-  if (filter === "storyboard") return type.includes("storyboard");
+  const role = referenceRole(asset).toLowerCase();
+  if (filter === "characters") return role === "character";
+  if (filter === "locations") return role === "location";
+  if (filter === "props") return role === "prop";
+  if (filter === "storyboard") return role === "storyboard";
   if (filter === "previous") {
-    const tag = (asset.tag || "").toLowerCase();
+    const tag = `${asset.tag || ""} ${asset.filename || ""}`.toLowerCase();
     return tag.includes("frame") || tag.includes("gen") || tag.includes("take");
   }
   return true;
@@ -58,32 +64,38 @@ function matchesFilter(asset: Asset, filter: ReferenceFilter): boolean {
 
 export function ReferenceBrowser({
   assets,
-  selectedIds,
-  onChange,
+  pendingIds,
+  activeIds,
+  highlightId,
+  onPendingChange,
 }: {
-  assets: Asset[];
-  selectedIds: string[];
-  onChange: (ids: string[]) => void;
+  assets: LibraryAsset[];
+  pendingIds: string[];
+  activeIds: string[];
+  highlightId?: string | null;
+  onPendingChange: (ids: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ReferenceFilter>("all");
   const [hoverId, setHoverId] = useState<string | null>(null);
 
-  const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const pending = useMemo(() => new Set(pendingIds), [pendingIds]);
+  const active = useMemo(() => new Set(activeIds), [activeIds]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return assets.filter((asset) => {
       if (!matchesFilter(asset, filter)) return false;
       if (!q) return true;
-      const hay = `${asset.tag || ""} ${asset.filename || ""} ${assetTypeLabel(asset)}`.toLowerCase();
+      const hay = `${getAssetName(asset)} ${asset.filename || ""} ${referenceRole(asset)}`.toLowerCase();
       return hay.includes(q);
     });
   }, [assets, filter, query]);
 
   const toggle = (id: string) => {
-    if (selected.has(id)) onChange(selectedIds.filter((item) => item !== id));
-    else onChange([...selectedIds, id]);
+    if (active.has(id)) return;
+    if (pending.has(id)) onPendingChange(pendingIds.filter((item) => item !== id));
+    else onPendingChange([...pendingIds, id]);
   };
 
   const hoverAsset = hoverId ? assets.find((a) => a.id === hoverId) : null;
@@ -115,41 +127,49 @@ export function ReferenceBrowser({
         </div>
       </div>
 
-      {selectedIds.length > 0 && (
-        <p className="cis-ref-browser__count">{selectedIds.length} selected</p>
+      {pendingIds.length > 0 && (
+        <p className="cis-ref-browser__count" data-testid="cis-ref-selected-count">
+          {pendingIds.length} selected
+        </p>
       )}
 
       {!visible.length ? (
         <p className="muted cis-empty-inline">No matching references in this project yet.</p>
       ) : (
-        <div className="cis-ref-grid">
-          {visible.map((asset) => {
-            const isSelected = selected.has(asset.id);
-            const tag = asset.tag ? `@${asset.tag}` : asset.filename || "Untitled";
-            const badge = assetBadge(asset);
-            return (
-              <button
-                key={asset.id}
-                type="button"
-                className={`cis-ref-card${isSelected ? " is-selected" : ""}`}
-                onClick={() => toggle(asset.id)}
-                onMouseEnter={() => setHoverId(asset.id)}
-                onMouseLeave={() => setHoverId((current) => (current === asset.id ? null : current))}
-                aria-pressed={isSelected}
-                data-testid={`cis-ref-card-${asset.id}`}
-              >
-                <span className="cis-ref-card__thumb">
-                  <img src={api.assetUrl(asset.id)} alt="" loading="lazy" />
-                </span>
-                <span className="cis-ref-card__meta">
-                  <span className="cis-ref-card__tag">{tag}</span>
-                  <span className="cis-ref-card__type">{assetTypeLabel(asset)}</span>
-                  {badge ? <span className="cis-ref-card__badge">{badge}</span> : null}
-                  {isSelected ? <span className="cis-ref-card__selected">Selected ✓</span> : null}
-                </span>
-              </button>
-            );
-          })}
+        <div className="cis-ref-scroller" data-testid="cis-ref-scroller">
+          <div className="cis-ref-grid">
+            {visible.map((asset) => {
+              const isPending = pending.has(asset.id);
+              const isActive = active.has(asset.id);
+              const isHighlight = highlightId === asset.id;
+              const name = getAssetName(asset);
+              const role = referenceRole(asset);
+              return (
+                <button
+                  key={asset.id}
+                  type="button"
+                  className={`cis-ref-card${isPending ? " is-selected" : ""}${isActive ? " is-active-ref" : ""}${isHighlight ? " is-highlight" : ""}`}
+                  onClick={() => toggle(asset.id)}
+                  onMouseEnter={() => setHoverId(asset.id)}
+                  onMouseLeave={() => setHoverId((current) => (current === asset.id ? null : current))}
+                  aria-pressed={isPending || isActive}
+                  disabled={isActive}
+                  title={isActive ? "Already added as a reference" : undefined}
+                  data-testid={`cis-ref-card-${asset.id}`}
+                >
+                  <span className="cis-ref-card__thumb">
+                    <img src={api.assetUrl(asset.id)} alt="" loading="lazy" />
+                  </span>
+                  <span className="cis-ref-card__meta">
+                    <span className="cis-ref-card__tag">{name}</span>
+                    <span className="cis-ref-card__type">{role}</span>
+                    {isActive ? <span className="cis-ref-card__selected">Already added</span> : null}
+                    {isPending && !isActive ? <span className="cis-ref-card__selected">Selected ✓</span> : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -157,8 +177,8 @@ export function ReferenceBrowser({
         <div className="cis-ref-hover-preview" aria-hidden>
           <img src={api.assetUrl(hoverAsset.id)} alt="" />
           <div>
-            <strong>{hoverAsset.tag ? `@${hoverAsset.tag}` : hoverAsset.filename}</strong>
-            <span>{assetTypeLabel(hoverAsset)}</span>
+            <strong>{getAssetName(hoverAsset)}</strong>
+            <span>{referenceRole(hoverAsset)}</span>
           </div>
         </div>
       ) : null}

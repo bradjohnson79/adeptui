@@ -507,6 +507,15 @@ def compile_image_request(
             rid_s = str(rid or "").strip()
             if rid_s and rid_s not in ref_ids:
                 ref_ids.append(rid_s)
+        for aid in body.get("referenceAssetIds") or []:
+            aid_s = str(aid or "").strip()
+            if aid_s and aid_s not in ref_ids:
+                ref_ids.append(aid_s)
+        if ref_ids:
+            creative["reference_image_ids"] = list(ref_ids)
+            ctx = dict(body.get("creativeContext") or {}) if isinstance(body.get("creativeContext"), dict) else {}
+            ctx["reference_image_ids"] = list(ref_ids)
+            body["creativeContext"] = ctx
 
     source_asset = body.get("sourceAssetId") or body.get("source_asset_id")
     if purpose == "environment_reference_sheet":

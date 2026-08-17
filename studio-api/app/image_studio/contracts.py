@@ -168,6 +168,8 @@ def cinematic_to_image_product_body(req: CinematicGenerateRequest) -> dict[str, 
     )
     if req.continuitySessionId:
         creative["continuitySessionId"] = req.continuitySessionId
+    if req.referenceAssetIds:
+        creative["reference_image_ids"] = list(req.referenceAssetIds)
 
     body: dict[str, Any] = {
         "prompt": req.prompt,

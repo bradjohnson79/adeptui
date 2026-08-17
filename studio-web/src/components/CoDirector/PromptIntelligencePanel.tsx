@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../api";
 import "./prompt-intelligence.css";
 import "./prompt-intelligence-v2.css";
@@ -19,6 +19,8 @@ type Props = {
   compact?: boolean;
   /** Artist-facing layout for Cinematic Image Generator (no debug chrome). */
   artistLayout?: boolean;
+  /** Optional accordion summary for artist layout. */
+  onArtistStatusChange?: (status: string) => void;
   /** Optional quality meter host rendered below the action row. */
   qualitySlot?: ReactNode;
 };
@@ -45,6 +47,7 @@ export function PromptIntelligencePanel({
   onApply,
   compact = false,
   artistLayout = false,
+  onArtistStatusChange,
   qualitySlot,
 }: Props) {
   const [open, setOpen] = useState(!compact || artistLayout);
@@ -72,6 +75,13 @@ export function PromptIntelligencePanel({
     providerCompatibility: number;
     recommendedStrategyConfidence: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (!artistLayout || !onArtistStatusChange) return;
+    const modeLabel =
+      strategyMode === "manual" ? "Manual" : strategyMode === "automatic_certified" ? "Certified Auto" : "Co-Director";
+    onArtistStatusChange(chineseOn ? `${modeLabel} · English + Chinese` : modeLabel);
+  }, [artistLayout, strategyMode, chineseOn, onArtistStatusChange]);
 
   const modulesEnabled = {
     ...DEFAULT_MODULES,
@@ -324,7 +334,7 @@ export function PromptIntelligencePanel({
             </div>
           ) : null}
 
-          <div className="row-actions">
+          <div className="row-actions prompt-intelligence-panel__actions">
             <button type="button" className="primary" disabled={busy || !creatorPrompt.trim()} data-testid="prompt-intelligence-preview" onClick={() => void runEnhance()}>
               {busy ? "Working…" : artistLayout ? "Preview" : "Preview Enhanced Prompt"}
             </button>

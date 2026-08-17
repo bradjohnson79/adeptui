@@ -63,6 +63,7 @@ type ProductionPipelinePanelProps = {
   spatialMapVersion?: string;
   colorGradePreset?: ColorGradePresetId;
   onColorGradeChange?: (id: ColorGradePresetId) => void;
+  hideTitle?: boolean;
 };
 
 export function ProductionPipelinePanel({
@@ -76,6 +77,7 @@ export function ProductionPipelinePanel({
   spatialMapVersion,
   colorGradePreset = DEFAULT_COLOR_GRADE,
   onColorGradeChange,
+  hideTitle = false,
 }: ProductionPipelinePanelProps) {
   const [qualityProfile, setQualityProfile] = useState<ImagePipelineQualityProfile>("enhanced");
   const [plan, setPlan] = useState<ImageGenerationPlan | null>(null);
@@ -200,8 +202,8 @@ export function ProductionPipelinePanel({
   }
 
   return (
-    <section className="cis-card" data-testid="image-pipeline-panel">
-      <h2 className="cis-card__title">Image Plan</h2>
+    <section className={hideTitle ? "cis-plan-body" : "cis-card"} data-testid="image-pipeline-panel">
+      {hideTitle ? null : <h2 className="cis-card__title">Image Plan</h2>}
       <p className="muted" style={{ marginTop: 0 }}>
         Shape the shot before you generate so the story beat, staging, and route are clear.
       </p>
