@@ -18,7 +18,7 @@ export function ReferenceTokenAutocomplete({
 }: {
   value: string;
   bindings: ReferenceBindingView[];
-  track: "imageReference" | "videoReference";
+  track: "imageReference" | "videoReference" | "prompt" | "lipsyncSpeaker";
   onChange: (next: string) => void;
   onCommit: (binding: ReferenceBindingView) => void;
   onReject: (message: string) => void;
@@ -29,9 +29,12 @@ export function ReferenceTokenAutocomplete({
   const rows = useMemo(() => {
     const q = parsed.query.toLowerCase();
     return bindings.filter((binding) => {
+      if (track === "prompt" && String(binding.id || "").startsWith("character:")) return false;
+      if (track === "lipsyncSpeaker" && !bindingAcceptedOnTrack(binding, "lipsyncSpeaker")) return false;
       const prefix = prefixForMediaKind(binding.media_kind);
       if (parsed.prefix && prefix !== parsed.prefix) return false;
-      if (!q) return Boolean(parsed.prefix);
+      if (track === "lipsyncSpeaker" && parsed.prefix && parsed.prefix !== "@") return false;
+      if (!q) return Boolean(parsed.prefix) || track === "lipsyncSpeaker";
       const alias = (binding.alias || binding.asset_name || "").toLowerCase();
       const token = (binding.display_token || "").toLowerCase();
       return alias.includes(q) || token.includes(q);
@@ -43,7 +46,11 @@ export function ReferenceTokenAutocomplete({
       onReject(
         track === "videoReference"
           ? "Video Reference only accepts * video tokens."
-          : "Image Reference only accepts # image or @ character/prop tokens.",
+          : track === "lipsyncSpeaker"
+            ? "Lip Sync only accepts @ character tokens."
+            : track === "prompt"
+              ? "Pick a named reference from this project's References."
+              : "Image Reference only accepts # image or @ character/prop tokens.",
       );
       return;
     }
@@ -56,7 +63,16 @@ export function ReferenceTokenAutocomplete({
       <input
         value={value}
         placeholder={placeholder}
-        aria-label={track === "videoReference" ? "Video reference token" : "Image reference token"}
+        aria-label={
+          track === "videoReference"
+            ? "Video reference token"
+            : track === "lipsyncSpeaker"
+              ? "Lip Sync character"
+              : track === "prompt"
+                ? "Prompt reference token"
+                : "Image reference token"
+        }
+        dir="auto"
         data-testid={`ref-token-input-${track}`}
         onFocus={() => setOpen(true)}
         onChange={(e) => {
@@ -83,6 +99,7 @@ export function ReferenceTokenAutocomplete({
                   type="button"
                   className="ref-token-autocomplete__row"
                   data-testid={`ref-token-row-${binding.id}`}
+                  dir="auto"
                   onClick={(e) => {
                     e.stopPropagation();
                     commit(binding);

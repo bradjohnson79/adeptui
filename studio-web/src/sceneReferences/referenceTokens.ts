@@ -99,11 +99,67 @@ export function formatAutocompleteRow(
 
 export function bindingAcceptedOnTrack(
   binding: ReferenceBindingView,
-  track: "imageReference" | "videoReference",
+  track: "imageReference" | "videoReference" | "prompt" | "lipsyncSpeaker",
 ): boolean {
   const kind = binding.media_kind || mediaKindForType(binding.reference_type);
   if (track === "videoReference") return kind === "video";
+  if (track === "lipsyncSpeaker") {
+    return kind === "entity" && binding.reference_type !== "prop";
+  }
+  if (track === "prompt") return Boolean(binding.id) && !String(binding.id).startsWith("character:");
   return kind === "image" || kind === "entity";
+}
+
+export function isRealBindingId(id: string | null | undefined): boolean {
+  const token = (id || "").trim();
+  return Boolean(token) && !token.startsWith("character:");
+}
+
+export function tokenAtCaret(
+  text: string,
+  caret: number,
+): { prefix: "@" | "#" | "*" | null; query: string; start: number; end: number } | null {
+  const pos = Math.max(0, Math.min(caret, (text || "").length));
+  const before = (text || "").slice(0, pos);
+  const match = before.match(/([@#*])([A-Za-z0-9_]*)$/);
+  if (!match || match.index == null) return null;
+  return {
+    prefix: match[1] as "@" | "#" | "*",
+    query: match[2] || "",
+    start: match.index,
+    end: pos,
+  };
+}
+
+export function tokenSummary(
+  ids: string[] | null | undefined,
+  bindings: ReferenceBindingView[],
+  limit = 3,
+): string {
+  const tokens = (ids || []).map((id) => {
+    const binding = bindings.find((item) => item.id === id);
+    if (!binding) return "Broken Reference";
+    return displayToken(binding.alias || binding.asset_name, binding.media_kind);
+  });
+  const shown = tokens.slice(0, limit);
+  const extra = tokens.length - shown.length;
+  if (!shown.length) return "";
+  return extra > 0 ? `${shown.join(" ")} +${extra}` : shown.join(" ");
+}
+
+export function countBindingsByKind(
+  ids: string[] | null | undefined,
+  bindings: ReferenceBindingView[],
+): { image: number; video: number; entity: number } {
+  const counts = { image: 0, video: 0, entity: 0 };
+  for (const id of ids || []) {
+    const binding = bindings.find((item) => item.id === id);
+    const kind = binding?.media_kind || mediaKindForType(binding?.reference_type || "image");
+    if (kind === "video") counts.video += 1;
+    else if (kind === "entity") counts.entity += 1;
+    else counts.image += 1;
+  }
+  return counts;
 }
 
 export function assetDurationSec(asset: { duration_sec?: number | null; prompt_meta_json?: string | null } | undefined): number | null {

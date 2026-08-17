@@ -6,6 +6,7 @@ import {
   formatAutocompleteRow,
   parseTokenQuery,
   sanitizeAlias,
+  tokenSummary,
 } from "./referenceTokens.ts";
 
 test("sanitizeAlias strips prefix and spaces", () => {
@@ -63,5 +64,27 @@ test("wrong type is rejected per track", () => {
   assert.equal(bindingAcceptedOnTrack(image, "videoReference"), false);
   assert.equal(bindingAcceptedOnTrack(video, "imageReference"), false);
   assert.equal(bindingAcceptedOnTrack(image, "imageReference"), true);
+  assert.equal(bindingAcceptedOnTrack(video, "prompt"), true);
+  assert.equal(bindingAcceptedOnTrack(image, "prompt"), true);
+  assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "character", alias: "Korri" }, "lipsyncSpeaker"), true);
+  assert.equal(bindingAcceptedOnTrack({ ...image, media_kind: "entity", reference_type: "prop", alias: "Cup" }, "lipsyncSpeaker"), false);
   assert.equal(parseTokenQuery("*Kor").prefix, "*");
+});
+
+test("token summary stays compact and flags missing bindings", () => {
+  const korri = {
+    id: "k",
+    asset_id: "ak",
+    alias: "Korri",
+    media_kind: "entity" as const,
+    reference_type: "character",
+  };
+  const bar = {
+    id: "b",
+    asset_id: "ab",
+    alias: "Bar",
+    media_kind: "image" as const,
+    reference_type: "image",
+  };
+  assert.equal(tokenSummary(["k", "b", "missing", "x", "y"], [korri, bar]), "@Korri #Bar Broken Reference +2");
 });
