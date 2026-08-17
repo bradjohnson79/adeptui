@@ -210,3 +210,69 @@ NOT EXECUTED in this program (read-only remediation constraints + environment):
 
 **FINAL VERDICT: READY FOR VERCEL DEPLOYMENT (code-level); live-runtime certification is the deployment workstream's first task. 81/97 findings FIXED + VERIFIED, 7 architectural decisions documented, 8 concurrent-deferred, 0 rejected.**
 
+---
+
+## 15. DEPLOYMENT + LIVE CERTIFICATION CLOSURE (2026-08-17)
+
+> This section is the deployment-workstream closure record appended by the master agent (Phase 14 of the Deployment + Live Certification Closure program). It does not alter the 97-item register above; it records what was deployed, what was proven live, and what is honestly disclosed.
+
+### 15.1 Chain of custody (FREEZE to RECONCILE to COMMIT to DEPLOY to LIVE CERTIFY)
+
+| Phase | Result | Evidence |
+| --- | --- | --- |
+| 0 Freeze/reconcile | PASS | All workstreams quiet at freeze; 178 M + 580 ?? classified on the packet board; no concurrent edits lost |
+| 1 Disk-integrity audit | PASS | 39/39 remediation markers present and committed |
+| 2 Concurrent-deferred CDX | CLOSED | Disk review: CDX-028/035/039-part FIXED by concurrent committed code; CDX-036-part/038/077/032-part/092-part accepted-deferred with disclosure |
+| 3 Architectural items | PASS | Documented + canaried (CDX-057 settings-blob canaries, CDX-077 nano-banana fallback, CDX-038 dual ERS hooks, CDX-032 lineage JSON, CDX-092 runtime alias, CDX-036 stale comment, CDX-085/089/091 decision-documented) |
+| 4 Commit classification | PASS | Recorded on packet board (includes/excludes) |
+| 5 Pre-commit regression | PASS | Backend 179 passed + 4 live-cert skips + 5 xfailed; tsc exit 0; vitest 361 passed / 0 failed; production build exit 0 |
+| 6 Commit + push | PASS | Commit 484ac2c pushed to origin/beta; parity local == origin == 484ac2c; 241 files; excludes documented |
+| 7 Backend restart | PASS | :8758 health 200 on current code; ComfyUI :8188 200; Ollama online |
+| 8 Vercel deploy | PASS | Deployment adeptui-clp63ygde-anoint Ready / Production, alias adeptui.vercel.app; hosted bundle carries navy-tab CSS (#14294a + tab rules) |
+| 9 Live-cert layer | PASS | ADEPT_LIVE_CERT=1 gives 4 passed (character/prop/scene/ERS real-enqueue) + durable Job rows + real queue receipts |
+
+### 15.2 Phase 10 — Live system gates A to H (against :8758, real project 2347bf46-3762-4763-86c5-4a6032522278)
+
+| Gate | Verdict | Live evidence |
+| --- | --- | --- |
+| A Approval gate | PASS (live negative + positive) | Unapproved shot send-to-timeline returns 400 "Approve a take before sending to Timeline."; batch-level 409 APPROVAL_REQUIRED covered by test_scene_batch_approval_gate.py; positive path proven in D |
+| B Character live | PASS | /api/projects/{pid}/characters 200 (2 characters); Korri detail 200 with approval_status, active version |
+| C Scriptwriter + project isolation | PASS | Same-project v2 doc 170f3a24-571d-410b-ba1c-b1125a4b1794 -> 200 with content. Cross-project content isolation VERIFIED live: foreign/legacy doc (project 23556 in script_docs) requested under this project scope -> 400 SCRIPT_LOAD_FAILED, no content leaked; nonexistent doc under scope -> 400 SCRIPT_LOAD_FAILED. The 404 PROJECT_SCOPE_VIOLATION branch exists in scriptwriter/api.py _scoped_document (lines 36-45) but is not live-triggerable with current data (script_documents_v2 holds exactly one doc, owned by this project); covered by unit tests. Isolation property (no cross-project content) holds live. |
+| D Approval to Library to Timeline to W46 master | PASS | Real chain executed live: approve Take A (200) -> asset 54774aad-7022-4bd7-974d-29b8e29bf58c production_approval=approved (Library flag) -> send-to-timeline (200, batchBlock bb_b51ce27a0e5a) -> W46 master visualClips=1 containing assetId 54774aad-7022-4bd7-974d-29b8e29bf58c -> ASSET_PRESENT_IN_MASTER: True |
+| E ERS maps/sheets | PASS | Sheets 200 (1 sheet, newest-first ordering True); maps 200 (3 documents, versions 109/26/3) |
+| F Media serving + lock guard | PASS | Real asset served 200 image/png (1,033,250 bytes) via /api/assets/{id}/file; nonexistent path returns {"error":"not found"}; .. backslash traversal not served; project-lock 403 covered by test_project_lock_media.py |
+| G Library approval truth | PASS | Library 200, 100 items, tree + folderMap present; approvalState:"approved" on 2 items including the just-approved take 54774aad-7022-4bd7-974d-29b8e29bf58c |
+| H Capabilities | PASS | /api/capabilities 200; top-level callable array 57 entries; counts.locally_verified 56 (field path corrected per independent verifier: callable is top-level, not counts.callable) |
+
+Legacy-data finding (D, documented, not a current-code defect): the only previously-approved take in the project referenced asset 10094cb3-7022-4bd7-974d-29b8e29bf58c whose assets row had been deleted before the delete-guard (CDX-063) landed — its asset_versions/asset_edges rows still exist, proving the deletion did not go through the current guard (which calls cleanup_asset_lineage). Live send-to-timeline for that stale take returned 502 ASSET_OWNERSHIP — the current guard correctly refuses dangling/foreign refs. The positive chain with a valid approved asset passes (above).
+
+### 15.3 Phase 11 — Hosted E2E (Vercel frontend to Cloudflare tunnel to Studio API)
+
+| Leg | Verdict | Evidence |
+| --- | --- | --- |
+| Hosted frontend | PASS | https://adeptui.vercel.app/ 200 HTML; bundle index-BBdu2pYf.js wires API base https://api-beta.adeptui.org |
+| Tunnel routing | PASS | https://api-beta.adeptui.org/api/health 200 {"ok":true,"comfy_reachable":true} |
+| Hosted data chain | PASS | Through the tunnel: W46 master 200 with the approved-asset clip (54774aad-7022-4bd7-974d-29b8e29bf58c); workspace 200 (4 shots); library 200 (100 items, 2 approved incl. target) |
+| Browser-render leg | NOT EXECUTED - ENVIRONMENT-BLOCKED | Playwright chromium spawn denied by DSH sandbox (spawn EPERM); full-access escalation failed closed (approval unanswered in-session, two attempts + probe). Not faked. Render leg covered on identical code by the prior local Playwright W46 run (4 passed, 2026-08-17, TIMELINE_SEMANTIC_REFERENCES_LIPSYNC_CERTIFICATION.md) and Phase 8 hosted-bundle CSS/SHA verification. |
+
+### 15.4 Phase 12 — Qwen/ERS close-out
+
+| Item | Result |
+| --- | --- |
+| Disk parity | PASS — 12 Qwen/ERS backend files committed (a103dba + 484ac2c), zero dirty at close-out |
+| Tests | 24 passed (test_qwen_i2i_ers.py + test_ers_image_product.py, re-run 2026-08-17) |
+| Verdict | PARTIAL PASS carried from concurrent closure report (pixels not same-set; Visual Canon VLM unavailable) — disclosed, not certified as pixel-consistent |
+
+### 15.5 Phase 13 — W46 timeline reconciliation
+
+| Item | Result |
+| --- | --- |
+| Live master | 200 — version 1, mode video_finishing, orchestrator sequential_continuity, continuityPolicy present, migratedFromDirectorJson True |
+| Clip presence | batchBlock bb_b51ce27a0e5a (Draft, order 1) holds 1 visualClip: assetId 54774aad-7022-4bd7-974d-29b8e29bf58c, legacyClipId scene_shot_88539183-6fd2-495a-aa48-e406a3653cd5_8df4ba42-ff75-44d6-a4ef-b2e042c906fd |
+| Tests | 39 passed (test_timeline_handoff_integrity.py, test_timeline_continuity_contracts.py, test_timeline_reference_aliases.py, test_timeline_prompt_refs_speech.py) |
+
+### 15.6 Post-deploy branch advancement (verified, not a stop condition)
+
+The W46 workstream pushed 3 FE/docs commits after 484ac2c (94c5292 drawers, c19ab13 cert, cc6c00d docs). Vercel auto-deployed: alias adeptui.vercel.app now points at deployment q7ko5z6to (created 01:10:30 PDT, seconds after the cc6c00d push). Parity verified: local HEAD == origin/beta == cc6c00d; diff 94c5292..cc6c00d is docs + 1 e2e spec only (no shipped code); hosted bundle still contains navy-tab CSS (#14294a, tab-bg vars) and drawer code. Stop conditions checked and not triggered.
+
+

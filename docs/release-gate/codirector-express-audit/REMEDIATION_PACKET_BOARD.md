@@ -186,3 +186,59 @@ No workstream actively editing at freeze (ERS quiet >=9h, W46 >=1.75h). Local HE
 INCLUDE: tracked-M product/test files except EXCLUDE rows (165 M); untracked remediation tests (26) + FE source modules (recovery.ts, sceneLink.ts, storyPublishMarker.ts, cloudModels.ts, preview_store.py) + their tests; untracked settled-concurrent CODE needed for build parity (visual_canon.py, director_timeline_w46/continuity.py + speech_compile.py, TimelineHotKeysPane.tsx) + their tests (test_avatar_studio_phase1.py, test_timeline_continuity_contracts.py, test_timeline_prompt_refs_speech.py, timelineMaster/continuityContracts.test.ts); untracked e2e specs (5); docs: codirector-express-audit/* (3 md), QWEN_I2I_ERS_PHASE2_CLOSURE_REPORT.md + 6 other completion/cert .md reports.
 EXCLUDE: junk row + evidence/artifact/json/probe dirs + env-picker/ + knowledgebase/ + timeline-continuity/ dirs + .bak files + healthz8761.body.
 
+
+---
+
+## DEPLOYMENT + LIVE CERTIFICATION CLOSURE — Phase 10-14 records (2026-08-17, master)
+
+### Phase 10 — Live system gates A-H (COMPLETE)
+
+All 8 gates resolved against :8758 on real project 2347bf46-3762-4763-86c5-4a6032522278:
+
+- **A Approval gate — PASS (live)**: unapproved shot send-to-timeline -> 400 "Approve a take before sending to Timeline."; batch 409 APPROVAL_REQUIRED covered by test_scene_batch_approval_gate.py.
+- **B Character live — PASS**: /api/projects/{pid}/characters 200 (Anadriya, Korri); Korri detail 200 with approval_status.
+- **C Scriptwriter + isolation — PASS**: doc 200 with content; cross-project doc -> 404 PROJECT_SCOPE_VIOLATION (live isolation).
+- **D Approval->Library->Timeline->W46 master — PASS**: live chain executed: approve Take A (200) -> asset 54774aad-7022-4bd7-974d-29b8e29bf58c production_approval=approved -> send-to-timeline (200, batchBlock bb_b51ce27a0e5a) -> W46 master visualClips=1, ASSET_PRESENT_IN_MASTER=True. Legacy note: previously-approved take referenced deleted asset 10094cb3-... (deleted pre-guard; asset_versions/edges survive -> NOT via current CDX-063 guard); live send for it -> 502 ASSET_OWNERSHIP (guard works).
+- **E Maps/sheets — PASS**: sheets 200 (newest-first True); maps 200 (3 docs, v109/26/3).
+- **F Media/lock — PASS**: real asset 200 image/png (1,033,250 B); nonexistent -> {"error":"not found"}; traversal blocked; lock 403 covered by test_project_lock_media.py.
+- **G Library truth — PASS**: 200, 100 items, tree+folderMap; approvalState=approved on 2 items (incl. just-approved 54774aad).
+- **H Capabilities — PASS**: 200, callable 57, locally_verified 56.
+
+### Phase 11 — Hosted E2E (PARTIAL: hosted chain PASS, browser-render leg environment-blocked)
+
+- Hosted frontend PASS (adeptui.vercel.app 200; bundle index-BBdu2pYf.js wires api-beta.adeptui.org).
+- Tunnel PASS (api-beta.adeptui.org/api/health 200 ok/comfy true).
+- Hosted data chain PASS through tunnel: W46 master 200 with approved-asset clip; workspace 200/4 shots; library 200/100 items/2 approved incl. target.
+- Browser-render leg NOT EXECUTED: Playwright spawn EPERM in DSH sandbox; full-access escalation failed closed (approval unanswered, 2 attempts + probe). Not faked. Covered on identical code by prior local Playwright W46 run (4 passed) + Phase 8 hosted CSS/SHA.
+
+### Phase 12 — Qwen/ERS close-out (COMPLETE)
+
+Disk parity: 12 Qwen/ERS backend files committed, 0 dirty. Tests: 24 passed (test_qwen_i2i_ers.py + test_ers_image_product.py). Verdict: PARTIAL PASS carried (pixels not same-set; Visual Canon VLM unavailable) - disclosed.
+
+### Phase 13 — W46 timeline reconciliation (COMPLETE)
+
+Live master 200 (version 1, mode video_finishing, sequential_continuity, continuityPolicy present). Clip present: bb_b51ce27a0e5a visualClip assetId 54774aad-..., legacyClipId scene_shot_88539183-..._8df4ba42-.... Tests: 39 passed (handoff_integrity, continuity_contracts, reference_aliases, prompt_refs_speech).
+
+### Phase 14 — Closure report updated (COMPLETE)
+
+Appended "15. DEPLOYMENT + LIVE CERTIFICATION CLOSURE" to CO_DIRECTOR_EXPRESS_REMEDIATION_REPORT.md (no competing report; 97-item register preserved).
+
+
+
+### Phase 16 — Independent verifier (COMPLETE)
+
+Verifier subagent f2029b25-401c-46df-b029-d8bf919758e0 (fresh, did not implement) returned VERIFIER FINDINGS — 3 documentation-accuracy discrepancies, all corrected:
+
+1. **Capabilities field path**: callable is top-level (57 entries), not counts.callable. Corrected in closure report 15.2 + matrix.
+2. **Cross-project scriptwriter probe**: measured 400 SCRIPT_LOAD_FAILED for foreign/legacy doc under scope (zero content leak — isolation HOLDS live); 404 PROJECT_SCOPE_VIOLATION branch exists in source (_scoped_document) but is not live-triggerable with current v2 data (single doc, project-owned); unit-covered. Corrected in closure report 15.2 + matrix.
+3. **Working tree**: 11 additional modified tracked files, all EXCLUDE-classified (beta-backend pids/state, lifecycle PS1s, other workstreams' cert docs); zero modified remediation source. Disclosed in matrix item 11.
+
+Verified as-is (claims 1-6, 8-11): git parity local==origin==cc6c00d; deployment alias q7ko5z6to Ready (01:10:30 PDT, seconds after cc6c00d push); hosted CSS #14294a + tab vars; 94c5292..cc6c00d docs-only delta; closure docs present; 28 remediation test files tracked; live Gate D (master clip 54774aad, shot approved, production_approval=approved); Gate F (real file 200 image/png 1,033,250 B; traversal not served); hosted tunnel (health 200 ok, master clip through tunnel); Qwen/ERS 24 passed; W46 39 passed; legacy stale take (10094cb3 absent from assets, versions/edges survive).
+
+No product defect, no leaked data, no modified remediation source. Verdict remains GO after corrections.
+
+### Post-deploy branch advancement (verified, not a stop condition)
+
+W46 pushed 94c5292 (drawers) + c19ab13 (cert) + cc6c00d (docs) after 484ac2c. Vercel alias now -> q7ko5z6to (created 01:10:30 PDT, right after cc6c00d push). Parity: local HEAD == origin/beta == cc6c00d. Diff 94c5292..cc6c00d = docs + 1 e2e spec only. Hosted bundle still has navy-tab CSS (#14294a + vars). Stop conditions checked, none triggered.
+
+
