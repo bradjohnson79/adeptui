@@ -46,15 +46,22 @@ import type {
   SpatialAssignSceneBody,
   SpatialCameraCreateBody,
   SpatialCameraUpdateBody,
+  SpatialCapturePlanBody,
+  SpatialCapturePlanResponse,
   SpatialCharacterPlacementBody,
   SpatialCharacterPlacementUpdateBody,
+  SpatialCollageCreateBody,
+  SpatialConsistencyCheckResponse,
   SpatialMapCreateBody,
   SpatialMapDocumentResponse,
   SpatialMapListResponse,
   SpatialMapUpdateBody,
+  SpatialMovementPathCreateBody,
   SpatialPropPlacementBody,
   SpatialPropPlacementUpdateBody,
   SpatialReferenceBundleResponse,
+  Spatial360ViewUpsertBody,
+  SpatialVariantCreateBody,
 } from "./contracts/spatialMapM411";
 import type { AvatarProjectJob } from "./avatar/types";
 import type { StatusRegistryCheck, StatusRun } from "./codirector/status/types";
@@ -4597,6 +4604,8 @@ export const api = {
         clear_reference?: boolean;
         generator?: Record<string, unknown>;
         use_as_identity?: boolean;
+        approved_asset_id?: string | null;
+        library_asset_id?: string | null;
         identity_asset_id?: string;
       },
     ) =>
@@ -5538,8 +5547,20 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    createPath: (projectId: string, documentId: string, body: SpatialMovementPathCreateBody) =>
+      req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/paths`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     assignScene: (projectId: string, documentId: string, body: SpatialAssignSceneBody) =>
       req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/assign-scene`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    createVariant: (projectId: string, documentId: string, body: SpatialVariantCreateBody) =>
+      req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/variants`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -5551,6 +5572,32 @@ export const api = {
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/reference-bundle?${query.toString()}`
       );
     },
+    createCollage: (projectId: string, documentId: string, body: SpatialCollageCreateBody) =>
+      req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/collage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    upsertCollageView: (
+      projectId: string,
+      documentId: string,
+      direction: string,
+      body: Spatial360ViewUpsertBody
+    ) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/collage/views/${direction}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      ),
+    capturePlan: (projectId: string, documentId: string, body: SpatialCapturePlanBody) =>
+      req<SpatialCapturePlanResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/capture-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     moveCharacter: (
       projectId: string,
       documentId: string,
@@ -5634,6 +5681,15 @@ export const api = {
       req<SpatialMapDocumentResponse>(
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/cameras/${cameraId}`,
         { method: "DELETE" }
+      ),
+    consistencyCheck: (projectId: string, documentId: string) =>
+      req<SpatialConsistencyCheckResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/consistency-check`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        }
       ),
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>

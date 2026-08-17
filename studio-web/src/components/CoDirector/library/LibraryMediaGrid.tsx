@@ -5,26 +5,16 @@
  * with a creator-facing media browser: filter chips, thumbnail cards, and a
  * preview modal. Fetches api.library directly and renders friendly labels
  * (no UUIDs, no JSON, no evidence bullets).
- *
- * Phase 6 parity with the Standard LibraryPanel:
- *  - CDX-017: Approved badge for approved props / approved takes /
- *    production_approval=approved assets.
- *  - CDX-071: entity associations resolve to names from the payload tree
- *    (never raw UUIDs in the preview dialog).
- *  - CDX-074: consumes payload.tree/folderMap for folder-chip navigation and
- *    a Project/Global scope toggle, matching the canonical library behavior.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { useCoDirectorSession } from "../CoDirectorSession";
 import {
   FILTERS,
-  getApprovalBadge,
-  getAssetAssociationLabel,
-  getAssetKindText,
   getAssetName,
+  getAssetKindText,
   getCardPreviewUrl,
   getDisplayDate,
   getDocumentKind,
@@ -32,11 +22,8 @@ import {
   isImageAsset,
   isVideoAsset,
   matchesFilter,
-  resolveLinkedEntityName,
   type AssetFilterId,
   type LibraryAsset,
-  type LibraryFolderMapEntry,
-  type LibraryFolderNode,
 } from "./assetModel";
 import "./libraryMediaGrid.css";
 
@@ -52,19 +39,19 @@ type ConfirmState =
   | { kind: "blocked"; blocked: BulkDeleteResult[] }
   | null;
 
-type FolderFilter = { folderId?: string; systemKey?: string; label?: string };
+function getAssociationLabel(asset: LibraryAsset): string {
+  const parts: string[] = [];
+  if (asset.characterId) parts.push("Character");
+  if (asset.sceneId) parts.push("Scene");
+  if (parts.length === 0 && asset.libraryPath) {
+    const seg = asset.libraryPath.split("/").filter(Boolean).pop();
+    return seg ? seg.replace(/[-_]/g, " ") : "";
+  }
+  return parts.join(" · ");
+}
 
-function CardMeta({
-  asset,
-  duration,
-  folders,
-}: {
-  asset: LibraryAsset;
-  duration?: string;
-  folders: LibraryFolderNode[] | null;
-}) {
-  const association = getAssetAssociationLabel(asset, folders);
-  const approval = getApprovalBadge(asset);
+function CardMeta({ asset, duration }: { asset: LibraryAsset; duration?: string }) {
+  const association = getAssociationLabel(asset);
   return (
     <div className="library-media-grid__meta">
       <strong>{getAssetName(asset)}</strong>
@@ -73,14 +60,6 @@ function CardMeta({
         {duration ? ` · ${duration}` : ""}
         {asset.created_at ? ` · ${getDisplayDate(asset)}` : ""}
       </span>
-      {approval ? (
-        <span
-          className="library-media-grid__badge library-media-grid__badge--approved"
-          data-testid="library-approval-badge"
-        >
-          ✓ {approval.label}
-        </span>
-      ) : null}
       {association ? <span className="library-media-grid__badge">{association}</span> : null}
     </div>
   );
@@ -116,14 +95,12 @@ function MediaCard({
   selectMode,
   selected,
   onToggleSelect,
-  folders,
 }: {
   asset: LibraryAsset;
   onOpen: () => void;
   selectMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
-  folders: LibraryFolderNode[] | null;
 }) {
   const previewUrl = getCardPreviewUrl(asset);
 
@@ -152,7 +129,7 @@ function MediaCard({
         />
       ) : null}
       <div className="library-media-grid__thumb">{preview}</div>
-      <CardMeta asset={asset} folders={folders} />
+      <CardMeta asset={asset} />
     </>
   );
 
@@ -248,15 +225,7 @@ function PreviewMedia({ asset }: { asset: LibraryAsset }) {
   );
 }
 
-function PreviewModal({
-  asset,
-  onClose,
-  folders,
-}: {
-  asset: LibraryAsset;
-  onClose: () => void;
-  folders: LibraryFolderNode[] | null;
-}) {
+function PreviewModal({ asset, onClose }: { asset: LibraryAsset; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -264,12 +233,6 @@ function PreviewModal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  // CDX-071: resolve entity ids to names from the payload tree — never UUIDs.
-  const characterName = resolveLinkedEntityName(asset, folders, "character");
-  const propName = resolveLinkedEntityName(asset, folders, "prop");
-  const sceneName = resolveLinkedEntityName(asset, folders, "scene");
-  const approval = getApprovalBadge(asset);
 
   return createPortal(
     <div className="library-media-preview" role="dialog" aria-modal="true" aria-label={`${getAssetName(asset)} preview`}>
@@ -282,12 +245,10 @@ function PreviewModal({
           <dl>
             <dt>Type</dt>
             <dd>{getAssetKindText(asset)}</dd>
-            {approval ? (<><dt>Approval</dt><dd>✓ {approval.label}</dd></>) : null}
             {asset.created_at ? (<><dt>Created</dt><dd>{getDisplayDate(asset)}</dd></>) : null}
             {asset.libraryPath ? (<><dt>Folder</dt><dd>{asset.libraryPath}</dd></>) : null}
-            {characterName ? (<><dt>Linked Character</dt><dd>{characterName}</dd></>) : null}
-            {propName ? (<><dt>Linked Prop</dt><dd>{propName}</dd></>) : null}
-            {sceneName ? (<><dt>Linked Scene</dt><dd>{sceneName}</dd></>) : null}
+            {asset.characterId ? (<><dt>Linked Character</dt><dd>{asset.characterId}</dd></>) : null}
+            {asset.sceneId ? (<><dt>Linked Scene</dt><dd>{asset.sceneId}</dd></>) : null}
           </dl>
         </div>
       </div>
@@ -431,12 +392,7 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   const { activeExecution } = useCoDirectorSession();
   const [filter, setFilter] = useState<AssetFilterId>("all");
   const [query, setQuery] = useState("");
-  // CDX-074: project/global scope parity with the Standard LibraryPanel.
-  const [scope, setScope] = useState<"project" | "global">("project");
-  const [folderFilter, setFolderFilter] = useState<FolderFilter | null>(null);
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
-  const [treeFolders, setTreeFolders] = useState<LibraryFolderNode[]>([]);
-  const [folderMap, setFolderMap] = useState<Record<string, LibraryFolderMapEntry>>({});
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
@@ -446,34 +402,18 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const libraryParams = useMemo(
-    () => ({
-      q: query.trim() || undefined,
-      scope,
-      folder: folderFilter?.folderId || undefined,
-      system_key: folderFilter?.systemKey || undefined,
-    }),
-    [query, scope, folderFilter],
-  );
-
-  const applyPayload = useCallback((payload: Awaited<ReturnType<typeof api.library>>) => {
-    setAssets(Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : []);
-    setTreeFolders(Array.isArray(payload?.tree?.folders) ? payload.tree.folders : []);
-    setFolderMap(payload?.folderMap || {});
-  }, []);
-
   const refresh = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const payload = await api.library(projectId, libraryParams);
-      applyPayload(payload);
+      const payload = await api.library(projectId, { q: query.trim() || undefined });
+      setAssets(Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
-  }, [projectId, libraryParams, applyPayload]);
+  }, [projectId, query]);
 
   // Live update: refresh when an execution completes or produces new assets.
   useEffect(() => {
@@ -489,10 +429,10 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
     setBusy(true);
     setError(null);
     api
-      .library(projectId, libraryParams)
+      .library(projectId, { q: query.trim() || undefined })
       .then((payload) => {
         if (cancelled) return;
-        applyPayload(payload);
+        setAssets(Array.isArray(payload?.items) ? (payload.items as LibraryAsset[]) : []);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -504,7 +444,7 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, libraryParams, applyPayload]);
+  }, [projectId, query]);
 
   const filtered = useMemo(
     () => assets.filter((a) => matchesFilter(a, filter)),
@@ -581,67 +521,9 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
 
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
 
-  // CDX-074: folder navigation derived from the payload taxonomy tree.
-  const activeFolder = useMemo(() => {
-    if (!folderFilter) return null;
-    return (
-      treeFolders.find(
-        (f) =>
-          (f.folderId && f.folderId === folderFilter.folderId) ||
-          (f.systemKey && f.systemKey === folderFilter.systemKey),
-      ) || null
-    );
-  }, [treeFolders, folderFilter]);
-
-  const isFolderActive = useCallback(
-    (folder: LibraryFolderNode) =>
-      Boolean(folder.systemKey && folder.systemKey === folderFilter?.systemKey) ||
-      Boolean(folder.folderId && folder.folderId === folderFilter?.folderId),
-    [folderFilter],
-  );
-
-  const selectFolder = useCallback((folder: LibraryFolderNode | null) => {
-    if (!folder) {
-      setFolderFilter(null);
-      return;
-    }
-    if (!folder.folderId && !folder.systemKey) return;
-    setFolderFilter({
-      folderId: folder.folderId,
-      systemKey: folder.systemKey,
-      label: folder.displayName,
-    });
-  }, []);
-
-  const activeFolderPath = useMemo(() => {
-    if (!folderFilter) return undefined;
-    if (folderFilter.folderId && folderMap[folderFilter.folderId]?.displayPath) {
-      return folderMap[folderFilter.folderId].displayPath;
-    }
-    return folderFilter.label;
-  }, [folderFilter, folderMap]);
-
   return (
     <div className="library-media-grid" data-testid="library-media-grid">
       <div className="library-media-grid__toolbar">
-        <div className="library-media-grid__scope" role="group" aria-label="Library scope">
-          <button
-            type="button"
-            className={`library-media-grid__filter${scope === "project" ? " is-active" : ""}`}
-            onClick={() => setScope("project")}
-            data-testid="library-scope-project"
-          >
-            {t("library:project")}
-          </button>
-          <button
-            type="button"
-            className={`library-media-grid__filter${scope === "global" ? " is-active" : ""}`}
-            onClick={() => setScope("global")}
-            data-testid="library-scope-global"
-          >
-            {t("library:global")}
-          </button>
-        </div>
         <div className="library-media-grid__search">
           <input
             type="search"
@@ -676,7 +558,7 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
                 disabled={selectableIds.length === 0}
                 data-testid="library-select-all"
               >
-                {allSelected ? "Clear Selection" : "Select All"}
+                {allSelected ? t("library:clearSelection") : t("library:selectAll")}
               </button>
               <button
                 type="button"
@@ -709,63 +591,6 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
         </div>
       </div>
 
-      {treeFolders.length > 0 ? (
-        <div className="library-media-grid__nav" role="navigation" aria-label="Library folders" data-testid="library-folder-nav">
-          <button
-            type="button"
-            className={`library-media-grid__filter${!folderFilter ? " is-active" : ""}`}
-            onClick={() => selectFolder(null)}
-            data-testid="library-folder-all"
-          >
-            All folders
-          </button>
-          {treeFolders.map((folder) => (
-            <button
-              key={folder.folderId || folder.systemKey || folder.displayName || "folder"}
-              type="button"
-              className={`library-media-grid__filter${isFolderActive(folder) ? " is-active" : ""}`}
-              onClick={() => selectFolder(folder)}
-              data-testid="library-folder-chip"
-            >
-              {folder.displayName || "Folder"}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {activeFolder?.children?.length ? (
-        <div
-          className="library-media-grid__nav library-media-grid__nav--children"
-          role="navigation"
-          aria-label="Library subfolders"
-          data-testid="library-folder-subnav"
-        >
-          {activeFolder.children.map((child) => (
-            <button
-              key={child.folderId || child.systemKey || child.displayName || "child"}
-              type="button"
-              className={`library-media-grid__filter library-media-grid__filter--sub${isFolderActive(child) ? " is-active" : ""}`}
-              onClick={() => selectFolder(child)}
-              data-testid="library-folder-subchip"
-            >
-              {child.displayName || "Folder"}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {folderFilter ? (
-        <div className="library-media-grid__breadcrumb" data-testid="library-folder-breadcrumb">
-          <span className="library-media-grid__breadcrumb-path">📁 {activeFolderPath || folderFilter.label || "Folder"}</span>
-          <button
-            type="button"
-            className="library-media-grid__filter"
-            onClick={() => selectFolder(null)}
-            data-testid="library-folder-clear"
-          >
-            Clear folder
-          </button>
-        </div>
-      ) : null}
-
       {busy ? (
         <SkeletonGrid />
       ) : error ? (
@@ -778,12 +603,8 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
         </div>
       ) : assets.length === 0 ? (
         <div className="library-media-grid__state" data-testid="library-empty">
-          <strong>{scope === "global" ? "No global assets yet." : "No project assets yet."}</strong>
-          <p>
-            {scope === "global"
-              ? "Assets promoted to the global library will appear here."
-              : "Generated and uploaded images, videos, audio and documents will appear here."}
-          </p>
+          <strong>No project assets yet.</strong>
+          <p>Generated and uploaded images, videos, audio and documents will appear here.</p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="library-media-grid__state" data-testid="library-empty-filter">
@@ -800,13 +621,12 @@ export function LibraryMediaGrid({ projectId, onGoTab }: Props) {
               selectMode={selectMode}
               selected={selectedIds.has(asset.id)}
               onToggleSelect={() => toggleSelect(asset.id)}
-              folders={treeFolders}
             />
           ))}
         </div>
       )}
 
-      {previewAsset ? <PreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} folders={treeFolders} /> : null}
+      {previewAsset ? <PreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} /> : null}
       {confirmState ? (
         <ConfirmDialog
           state={confirmState}

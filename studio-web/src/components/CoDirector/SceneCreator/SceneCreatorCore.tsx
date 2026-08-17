@@ -7,9 +7,8 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../../api";
 import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
-import { selectableCloudModels } from "./cloudModels";
 import type { SceneShotCandidate } from "./types";
-import { useSceneCreator } from "./useSceneCreator";
+import { useSceneCreator, type SceneCreatorVariant } from "./useSceneCreator";
 import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
@@ -40,6 +39,7 @@ import "./sceneCreator.css";
 
 export type SceneCreatorCoreProps = {
   projectId: string;
+  variant: SceneCreatorVariant;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
 };
 
@@ -598,7 +598,7 @@ function ShotPromptBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
 }
 
 function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
-  const apiModels = selectableCloudModels(sc.workspace?.api_models || []);
+  const apiModels = sc.workspace?.api_models || [];
   const hasApi = apiModels.length > 0;
   const caps = sc.workspace?.preview_capabilities;
   const liveShot = shotWithSelectedFamily(sc.shot, sc.localFamily);
