@@ -5,7 +5,6 @@ import { CoDirectorActivityPanel } from "./CoDirectorActivityPanel";
 import { CoDirectorChangeReview } from "./CoDirectorChangeReview";
 import { CoDirectorMessage } from "./CoDirectorMessage";
 import { CoDirectorWelcome } from "./CoDirectorWelcome";
-import { CoDirectorTaskStatus } from "./CoDirectorTaskStatus";
 import { CoDirectorProposalCard } from "./CoDirectorProposalCard";
 import { CoDirectorRelationshipCard } from "./CoDirectorRelationshipCard";
 import { CoDirectorProjectPulse } from "./CoDirectorProjectPulse";
@@ -168,7 +167,6 @@ export function CoDirectorConversation({ compactWelcome = false }: { compactWelc
         </div>
       )}
 
-      {plan && !executionActive && <CoDirectorTaskStatus />}
 
       {!executionActive &&
         proposals.map((proposal) => (
