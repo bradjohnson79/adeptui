@@ -2,6 +2,8 @@
 
 **Status:** Governing document for this closure.
 **Date:** 2026-08-17
+**Closure commit:** `6536b243fea5b7741e7c2a03ea950709d7a6c651` (pushed; local == origin/beta)
+**Deployed:** alias `adeptui.vercel.app` -> `adeptui-6cz6x2o3r-anoint` (Ready, built from closure push)
 **Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`
 **Branch:** beta
 **Live API:** `http://127.0.0.1:8758` · **Tunnel:** `https://api-beta.adeptui.org` · **Hosted UI:** `https://adeptui.vercel.app`
@@ -127,5 +129,6 @@ No cross-project IDs. No second prop system. No second ERS architecture.
 
 ## Independent verifier
 
-Required verdict: **VERIFIED — SPATIAL PROP + ERS PRODUCTION BINDING PASSED** (pending) ·
+Required verdict: **VERIFIED — SPATIAL PROP + ERS PRODUCTION BINDING PASSED** (independent verifier `6a22a4c2`, re-verified on settled tree) ·
 Qwen: **QWEN LOCAL ERS I2I — NOT AVAILABLE; UI CAPABILITY HONEST**.
+Deployment: commit `6536b24` pushed, Vercel Ready, hosted bundle carries the new bound/unavailable strings; hosted tunnel smoke passed (map slot 1 bound, workspace shows E2E Standard Cup, Qwen draft / GPT ready).
