@@ -95,8 +95,6 @@ Old `.timeline-editor-shell__layout` / `.director-tracks--timeline-shell` track-
 
 ## SHA
 
-Fill at commit:
-
-- Commit SHA:
-- Remote `origin/beta` SHA after push:
-- Vercel deployment SHA:
+- Commit SHA: `d90c21dbe392cf5abf7e585d66157cddf6e1a135`
+- Remote `origin/beta` SHA after push: pending push
+- Vercel deployment SHA: pending deploy
