@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CENTER_PANE_MIN,
+  DEFAULT_LEFT_WIDTH,
+  DEFAULT_RIGHT_WIDTH,
   DEFAULT_VIEWER_HEIGHT,
+  LEFT_PANE_MAX,
+  LEFT_PANE_MIN,
   MIN_MONITOR_HEIGHT,
+  RIGHT_PANE_MAX,
+  RIGHT_PANE_MIN,
   TIMELINE_REGION_MIN_PX,
+  clampSidebarWidths,
   clampViewerHeight,
   previewHeightStorageKey,
   viewerHeightBounds,
@@ -37,4 +45,20 @@ test("out-of-range persisted heights clamp to current viewport", () => {
   const restored = clampViewerHeight(containerHeight * 0.95, containerHeight, viewportWidth);
   assert.equal(restored, max);
   assert.ok(restored <= containerHeight - TIMELINE_REGION_MIN_PX);
+});
+
+test("sidebar widths clamp to pane limits", () => {
+  assert.equal(clampSidebarWidths(10, 10).leftWidth, LEFT_PANE_MIN);
+  assert.equal(clampSidebarWidths(10, 10).rightWidth, RIGHT_PANE_MIN);
+  assert.equal(clampSidebarWidths(900, 900).leftWidth, LEFT_PANE_MAX);
+  assert.equal(clampSidebarWidths(900, 900).rightWidth, RIGHT_PANE_MAX);
+  assert.equal(clampSidebarWidths(DEFAULT_LEFT_WIDTH, DEFAULT_RIGHT_WIDTH).leftWidth, DEFAULT_LEFT_WIDTH);
+  assert.equal(clampSidebarWidths(DEFAULT_LEFT_WIDTH, DEFAULT_RIGHT_WIDTH).rightWidth, DEFAULT_RIGHT_WIDTH);
+});
+
+test("sidebar widths keep a usable center column", () => {
+  const next = clampSidebarWidths(420, 480, 1200);
+  assert.ok(next.leftWidth + next.rightWidth <= 1200 - CENTER_PANE_MIN);
+  assert.ok(next.leftWidth >= LEFT_PANE_MIN);
+  assert.ok(next.rightWidth >= RIGHT_PANE_MIN);
 });

@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  bindingAcceptedOnTrack,
+  displayToken,
+  formatAutocompleteRow,
+  parseTokenQuery,
+  sanitizeAlias,
+} from "./referenceTokens.ts";
+
+test("sanitizeAlias strips prefix and spaces", () => {
+  assert.equal(sanitizeAlias("*Korri Pose Video"), "KorriPoseVideo");
+  assert.equal(sanitizeAlias("@Korri"), "Korri");
+  assert.equal(sanitizeAlias("#Schnick Counter"), "SchnickCounter");
+});
+
+test("displayToken uses typed prefixes", () => {
+  assert.equal(displayToken("Korri", "entity"), "@Korri");
+  assert.equal(displayToken("SchnickCounterWide", "image"), "#SchnickCounterWide");
+  assert.equal(displayToken("KorriPoseVideo", "video"), "*KorriPoseVideo");
+});
+
+test("autocomplete rows include token and type", () => {
+  assert.equal(
+    formatAutocompleteRow({
+      id: "1",
+      asset_id: "a",
+      alias: "KorriPoseVideo",
+      media_kind: "video",
+      reference_type: "video",
+      duration_sec: 4.8,
+    }),
+    "*KorriPoseVideo · Video · 4.8s",
+  );
+  assert.equal(
+    formatAutocompleteRow({
+      id: "2",
+      asset_id: "b",
+      alias: "Korri",
+      media_kind: "entity",
+      reference_type: "character",
+    }),
+    "@Korri · Character",
+  );
+});
+
+test("wrong type is rejected per track", () => {
+  const video = {
+    id: "v",
+    asset_id: "vid",
+    alias: "KorriPoseVideo",
+    media_kind: "video" as const,
+    reference_type: "video",
+  };
+  const image = {
+    id: "i",
+    asset_id: "img",
+    alias: "SchnickCounterWide",
+    media_kind: "image" as const,
+    reference_type: "image",
+  };
+  assert.equal(bindingAcceptedOnTrack(video, "videoReference"), true);
+  assert.equal(bindingAcceptedOnTrack(image, "videoReference"), false);
+  assert.equal(bindingAcceptedOnTrack(video, "imageReference"), false);
+  assert.equal(bindingAcceptedOnTrack(image, "imageReference"), true);
+  assert.equal(parseTokenQuery("*Kor").prefix, "*");
+});

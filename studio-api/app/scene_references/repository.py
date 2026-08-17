@@ -49,6 +49,8 @@ def binding_to_dict(row: SceneReferenceBinding) -> dict[str, Any]:
         "order_index": int(row.order_index or 0),
         "requested_weight": row.requested_weight,
         "notes": row.notes,
+        "alias": getattr(row, "alias", None),
+        "media_kind": getattr(row, "media_kind", None),
         "asset_name": getattr(asset, "tag", None) or getattr(asset, "filename", None),
         "thumbnail_url": f"/api/assets/{row.asset_id}/file" if row.asset_id else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -85,6 +87,47 @@ def get_binding(db: Session, project_id: str, binding_id: str) -> SceneReference
     return row
 
 
+def find_soft_deleted_binding(
+    db: Session,
+    project_id: str,
+    *,
+    scope_type: str,
+    scope_id: str,
+    asset_id: str,
+    reference_type: str,
+) -> SceneReferenceBinding | None:
+    q = select(SceneReferenceBinding).where(
+        SceneReferenceBinding.project_id == project_id,
+        SceneReferenceBinding.scope_type == scope_type,
+        SceneReferenceBinding.scope_id == scope_id,
+        SceneReferenceBinding.asset_id == asset_id,
+        SceneReferenceBinding.reference_type == reference_type,
+        SceneReferenceBinding.deleted_at.is_not(None),
+    )
+    return db.scalars(q).first()
+
+
+def restore_binding(
+    db: Session,
+    row: SceneReferenceBinding,
+    data: dict[str, Any],
+    *,
+    actor: str = "user",
+) -> SceneReferenceBinding:
+    row.deleted_at = None
+    row.alias = data.get("alias")
+    row.media_kind = data.get("media_kind")
+    if data.get("usage_modes") is not None:
+        row.usage_modes_json = _dumps(data.get("usage_modes") or [])
+    if data.get("reference_roles") is not None:
+        row.reference_roles_json = _dumps(data.get("reference_roles") or [])
+    row.enabled = bool(data.get("enabled", True))
+    row.updated_by = actor
+    row.updated_at = _now()
+    db.flush()
+    return row
+
+
 def next_order_index(db: Session, project_id: str, scope_type: str, scope_id: str) -> int:
     rows = list_bindings(db, project_id, scope_type=scope_type, scope_id=scope_id)
     if not rows:
@@ -110,6 +153,8 @@ def create_binding(db: Session, data: dict[str, Any], *, actor: str = "user") ->
         order_index=int(data.get("order_index") if data.get("order_index") is not None else 0),
         requested_weight=data.get("requested_weight"),
         notes=data.get("notes"),
+        alias=data.get("alias"),
+        media_kind=data.get("media_kind"),
         created_by=actor,
         updated_by=actor,
         created_at=_now(),
@@ -139,6 +184,8 @@ def update_binding(
         "notes": "notes",
         "identity_id": "identity_id",
         "identity_version_id": "identity_version_id",
+        "alias": "alias",
+        "media_kind": "media_kind",
     }
     for src, dest in mapping.items():
         if src in patch and patch[src] is not None:
@@ -165,6 +212,7 @@ def update_binding(
 
 def soft_delete_binding(db: Session, row: SceneReferenceBinding, *, actor: str = "user") -> None:
     row.deleted_at = _now()
+    row.alias = None
     row.updated_by = actor
     row.updated_at = _now()
     audit(

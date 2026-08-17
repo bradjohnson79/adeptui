@@ -190,6 +190,22 @@ export function resolvePreviewComposition(args: {
 }): PreviewComposition {
   const { scene, libraryAsset, activeJob, preview } = args;
 
+  if (args.selection.kind === "imageReferenceClip") {
+    const clip = (args.timeline?.image_reference_clips || []).find((item) => item.id === args.selection.id);
+    if (clip?.asset_id) {
+      return {
+        kind: "timeline_frame",
+        visualSrc: api.assetUrl(clip.asset_id),
+        mediaKind: "image",
+        promptText: "Image Reference — appearance guidance",
+        promptLabel: clip.label || "Image Reference",
+        batchId: null,
+        batchLocalTime: 0,
+        visualLocalTime: Math.max(0, args.playheadSec - (clip.start || 0)),
+      };
+    }
+  }
+
   if (args.selection.kind === "videoReferenceClip") {
     const clip = (args.timeline?.video_reference_clips || []).find((item) => item.id === args.selection.id);
     if (clip?.asset_id) {

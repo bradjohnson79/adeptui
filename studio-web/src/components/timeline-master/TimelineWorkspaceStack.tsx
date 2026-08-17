@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  DEFAULT_LEFT_WIDTH,
+  DEFAULT_RIGHT_WIDTH,
   DEFAULT_VIEWER_PRESET,
   TIMELINE_LAYOUT_EVENT,
   clampViewerHeight,
@@ -29,9 +31,7 @@ export function TimelineWorkspaceStack({
 }: {
   monitor: ReactNode;
   timeline: ReactNode;
-  /** Extra compact controls rendered beside the Viewer preset controls. */
   extraControls?: ReactNode;
-  /** Project-scoped preview height preference key. */
   projectId?: string | null;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -198,6 +198,8 @@ export function TimelineWorkspaceStack({
       trackDensity: "compact",
       zoom: 1,
       lastNonFullscreenLayout: undefined,
+      leftWidth: DEFAULT_LEFT_WIDTH,
+      rightWidth: DEFAULT_RIGHT_WIDTH,
     });
     saveProjectPreviewHeightRatio(projectId, ratio);
   }, [containerSize.height, containerSize.width, persistLayout, projectId]);
@@ -234,6 +236,9 @@ export function TimelineWorkspaceStack({
         resetLayout();
         return;
       }
+      if (detail.fitViewer) {
+        fitToPreset();
+      }
       if (detail.viewerPreset) {
         applyPreset(detail.viewerPreset);
       }
@@ -248,7 +253,7 @@ export function TimelineWorkspaceStack({
     };
     window.addEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
     return () => window.removeEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
-  }, [applyPreset, enterFullscreen, exitFullscreen, fullscreenViewer, persistLayout, resetLayout]);
+  }, [applyPreset, enterFullscreen, exitFullscreen, fitToPreset, fullscreenViewer, persistLayout, resetLayout]);
 
   useEffect(() => {
     if (!fullscreenViewer) return;
@@ -369,46 +374,11 @@ export function TimelineWorkspaceStack({
         data-testid="timeline-workspace-monitor"
         data-preview-height={Math.round(viewerHeightPx)}
       >
-        <div className="timeline-workspace-monitor__controls" role="toolbar" aria-label="Preview Monitor controls">
-          <div className="timeline-workspace-monitor__controls-group">
-            <button
-              type="button"
-              title="Fit the Viewer back to the selected preset"
-              aria-label="Fit the Viewer back to the selected preset"
-              onClick={fitToPreset}
-            >
-              Fit
-            </button>
-            <label className="timeline-workspace-monitor__select">
-              <span>Viewer Size</span>
-              <select
-                value={layout.viewerPreset}
-                aria-label="Viewer Size"
-                data-testid="timeline-viewer-preset"
-                onChange={(e) => applyPreset(e.target.value as TimelineViewerPreset)}
-              >
-                <option value="large">Large</option>
-                <option value="balanced">Balanced</option>
-                <option value="timeline_focus">Timeline Focus</option>
-              </select>
-            </label>
-          </div>
-          <div className="timeline-workspace-monitor__controls-group">
+        {extraControls ? (
+          <div className="timeline-workspace-monitor__controls" role="toolbar" aria-label="Preview extra controls">
             {extraControls}
-            <button
-              type="button"
-              title={fullscreenViewer ? "Exit fullscreen viewer layout" : "Expand the Viewer to focus mode"}
-              aria-label={fullscreenViewer ? "Exit fullscreen viewer layout" : "Expand the Viewer to focus mode"}
-              data-testid="timeline-viewer-fullscreen"
-              onClick={() => {
-                if (fullscreenViewer) exitFullscreen();
-                else enterFullscreen();
-              }}
-            >
-              {fullscreenViewer ? "Exit Full Screen" : "Full Screen"}
-            </button>
           </div>
-        </div>
+        ) : null}
         <div className="timeline-workspace-monitor__body">{monitor}</div>
       </div>
       {!fullscreenViewer ? (

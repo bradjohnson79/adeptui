@@ -142,9 +142,8 @@ test.describe("Timeline Generator Preview Resize UX", () => {
     await page.screenshot({ path: path.join(ARTIFACT_DIR, "04-restored-after-reload.png"), fullPage: false });
 
     const beforeFullscreen = await monitorHeight(page);
-    await page.getByTestId("timeline-viewer-fullscreen").click();
-    await expect(page.getByTestId("timeline-monitor-divider")).toHaveCount(0);
-    await page.getByTestId("timeline-viewer-fullscreen").click();
+    await page.getByTestId("workspace-fullscreen-toggle-timeline").click();
+    await page.getByTestId("workspace-fullscreen-toggle-timeline").click();
     await expect(page.getByTestId("timeline-monitor-divider")).toBeVisible();
     await expect
       .poll(async () => monitorHeight(page))

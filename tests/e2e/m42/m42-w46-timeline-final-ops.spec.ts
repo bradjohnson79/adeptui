@@ -112,7 +112,7 @@ test.describe("M42 W46 Timeline Final Ops (SA78)", () => {
     await expect(page.getByTestId("timeline-viewer-preset")).toBeVisible();
     await page.getByTestId("timeline-viewer-preset").selectOption("balanced");
     await expect(page.getByTestId("timeline-viewer-preset")).toHaveValue("balanced");
-    await expect(page.getByTestId("timeline-viewer-fullscreen")).toBeVisible();
+    await expect(page.getByTestId("workspace-fullscreen-controls")).toBeVisible();
   });
 
   test("1280 and 1920: toolbar Lip Sync + zoom remain visible", async ({ page }) => {

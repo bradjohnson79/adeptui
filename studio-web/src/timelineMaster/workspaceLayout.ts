@@ -29,6 +29,8 @@ export type TimelineWorkspaceLayout = {
   customPriorityOrder?: string[];
   lastNonFullscreenLayout?: TimelineViewerLayoutSnapshot;
   zoom: number;
+  leftWidth: number;
+  rightWidth: number;
 };
 
 export const DEFAULT_VIEWER_PRESET: TimelineViewerPreset = "large";
@@ -38,6 +40,15 @@ export const MIN_MONITOR_HEIGHT = 260;
 export const COLLAPSED_MONITOR_HEIGHT = 96;
 /** Reserved for toolbar + compact track viewport under the divider. */
 export const TIMELINE_REGION_MIN_PX = 140;
+
+export const DEFAULT_LEFT_WIDTH = 280;
+export const DEFAULT_RIGHT_WIDTH = 320;
+export const LEFT_PANE_MIN = 200;
+export const LEFT_PANE_MAX = 420;
+export const RIGHT_PANE_MIN = 240;
+export const RIGHT_PANE_MAX = 480;
+export const CENTER_PANE_MIN = 480;
+export const SIDEBAR_GAP_PX = 16;
 
 const VIEWER_PRESET_TARGETS: Record<TimelineViewerPreset, { at1280: number; at1920: number; min: number; max: number }> = {
   large: { at1280: 0.48, at1920: 0.52, min: 0.4, max: 0.58 },
@@ -82,6 +93,8 @@ export const DEFAULT_TIMELINE_WORKSPACE: TimelineWorkspaceLayout = {
   playheadFollow: true,
   guidancePriority: "visual_first",
   zoom: 1,
+  leftWidth: DEFAULT_LEFT_WIDTH,
+  rightWidth: DEFAULT_RIGHT_WIDTH,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -139,7 +152,46 @@ function normalizeWorkspaceLayout(parsed: Partial<TimelineWorkspaceLayout>): Tim
     trackDensity: parsed.trackDensity || "compact",
     lastNonFullscreenLayout: normalizeSnapshot(parsed.lastNonFullscreenLayout),
     zoom,
+    ...clampSidebarWidths(
+      typeof parsed.leftWidth === "number" ? parsed.leftWidth : DEFAULT_LEFT_WIDTH,
+      typeof parsed.rightWidth === "number" ? parsed.rightWidth : DEFAULT_RIGHT_WIDTH,
+    ),
   };
+}
+
+export function clampSidebarWidths(
+  left: number,
+  right: number,
+  containerWidth?: number,
+): { leftWidth: number; rightWidth: number } {
+  let leftWidth = clamp(
+    Math.round(Number.isFinite(left) ? left : DEFAULT_LEFT_WIDTH),
+    LEFT_PANE_MIN,
+    LEFT_PANE_MAX,
+  );
+  let rightWidth = clamp(
+    Math.round(Number.isFinite(right) ? right : DEFAULT_RIGHT_WIDTH),
+    RIGHT_PANE_MIN,
+    RIGHT_PANE_MAX,
+  );
+  if (typeof containerWidth === "number" && containerWidth > 0) {
+    const maxSides = Math.max(LEFT_PANE_MIN + RIGHT_PANE_MIN, containerWidth - CENTER_PANE_MIN - SIDEBAR_GAP_PX);
+    if (leftWidth + rightWidth > maxSides) {
+      const overflow = leftWidth + rightWidth - maxSides;
+      const shrinkLeft = Math.min(overflow, Math.max(0, leftWidth - LEFT_PANE_MIN));
+      leftWidth -= shrinkLeft;
+      rightWidth -= Math.min(overflow - shrinkLeft, Math.max(0, rightWidth - RIGHT_PANE_MIN));
+    }
+  }
+  return { leftWidth, rightWidth };
+}
+
+export function resetTimelineWorkspaceLayout(): TimelineWorkspaceLayout {
+  return saveTimelineWorkspaceLayout({
+    ...DEFAULT_TIMELINE_WORKSPACE,
+    viewerHeight: getPresetViewerRatio(DEFAULT_VIEWER_PRESET, currentViewportWidth()),
+    lastNonFullscreenLayout: undefined,
+  });
 }
 
 export function getPresetViewerRatio(preset: TimelineViewerPreset, viewportWidth: number): number {

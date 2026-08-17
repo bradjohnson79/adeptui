@@ -24,6 +24,8 @@ def _video_reference_from_batch(batch: BatchBlock) -> tuple[str | None, dict[str
         kind = str(ref.get("kind") or ref.get("role") or "").lower()
         rid = str(ref.get("assetId") or "").strip()
         if rid and ("video" in kind or kind == "motion"):
+            if ref.get("consumed") is False:
+                continue
             asset_id = asset_id or rid
             if isinstance(ref.get("trim"), dict):
                 trim = ref.get("trim")
@@ -88,11 +90,14 @@ def build_timeline_generation_request(
     # Also accept references dict entries (image only — video is a dedicated field).
     ref_ids: list[str] = []
     for ref in batch.references or []:
-        if isinstance(ref, dict) and ref.get("assetId"):
-            kind = str(ref.get("kind") or "").lower()
-            if "video" in kind:
-                continue
-            ref_ids.append(str(ref["assetId"]))
+        if not isinstance(ref, dict) or not ref.get("assetId"):
+            continue
+        if ref.get("consumed") is False:
+            continue
+        kind = str(ref.get("kind") or "").lower()
+        if "video" in kind:
+            continue
+        ref_ids.append(str(ref["assetId"]))
 
     video_ref_id, video_trim = _video_reference_from_batch(batch)
 

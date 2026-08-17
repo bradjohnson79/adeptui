@@ -50,45 +50,16 @@ def _load_director_timeline(
     )
 
 
-def _bind_video_reference_anchor(batch: BatchBlock, director_timeline: DirectorTimeline | None) -> None:
-    """Ensure a video sourceAnchor exists when a Video Reference clip is on the Timeline.
+def _bind_video_reference_anchor(
+    batch: BatchBlock,
+    director_timeline: DirectorTimeline | None,
+    db: Session | None = None,
+    project_id: str | None = None,
+) -> None:
+    """Bind Image / Video Reference clips by canonical ID. Never consume alias text."""
+    from .generation.reference_compile import apply_compiled_references
 
-    One clip max. Does not drop an existing video anchor.
-    """
-    if any(a.kind == "video" and (a.assetId or "").strip() for a in (batch.sourceAnchors or [])):
-        return
-    clips = list(getattr(director_timeline, "video_reference_clips", None) or [])
-    chosen = next((c for c in clips if getattr(c, "asset_id", None)), None)
-    if chosen is None:
-        return
-    from .contracts import TimelineVisualAnchor, _nid
-
-    batch.sourceAnchors = [
-        a for a in (batch.sourceAnchors or []) if a.kind != "video"
-    ]
-    trim_in = float(getattr(chosen, "trim_start", 0.0) or 0.0)
-    length = float(getattr(chosen, "length", 0.0) or 0.0)
-    batch.sourceAnchors.append(
-        TimelineVisualAnchor(
-            id=_nid("anc_"),
-            kind="video",
-            assetId=str(chosen.asset_id),
-            label="Video Reference",
-            atTime=float(getattr(chosen, "start", 0.0) or 0.0),
-            strength=1.0,
-        )
-    )
-    refs = [r for r in (batch.references or []) if not (
-        isinstance(r, dict) and str(r.get("kind") or "") == "videoReference"
-    )]
-    refs.append(
-        {
-            "kind": "videoReference",
-            "assetId": str(chosen.asset_id),
-            "trim": {"in": trim_in, "out": trim_in + length} if length else None,
-        }
-    )
-    batch.references = refs
+    apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
 
 
 def _halt_adapter_jobs(halt_jobs: list[tuple[str, GenerationJobRef]]) -> None:
@@ -333,7 +304,7 @@ def submit_batch_generation(
     scene_row = store.get_scene(db, project_id, scene_id)
     aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
     director_timeline = _load_director_timeline(db, project_id, scene_id)
-    _bind_video_reference_anchor(batch, director_timeline)
+    _bind_video_reference_anchor(batch, director_timeline, db=db, project_id=project_id)
 
     try:
         from .continuity import active_bridge_for_target

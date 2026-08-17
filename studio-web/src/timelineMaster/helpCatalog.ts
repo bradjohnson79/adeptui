@@ -120,8 +120,8 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   },
   add_as_reference: {
     id: "add_as_reference",
-    title: "Add as Reference",
-    body: "Attaches this asset as optional supporting guidance for identity, wardrobe, props, or environment. Distinct from placing it on the Timeline.",
+    title: "Add to References",
+    body: "Gives this Library item a reference name so Timeline can use it. Does not place it on a playback track. Removing the name does not delete the Library file.",
     scope: "item",
   },
   camera_motion: {

@@ -20,6 +20,12 @@ import {
 import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
 import { formatBatchStatus } from "../timelineMaster/contracts";
+import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
+import {
+  assetDurationSec,
+  displayToken,
+  type ReferenceBindingView,
+} from "../sceneReferences/referenceTokens";
 
 function continuityChipLabel(status: string | undefined, stale?: boolean) {
   if (stale) return "Needs update";
@@ -43,6 +49,7 @@ export type TimelineClip = {
   volume?: number;
   fade_in?: number;
   fade_out?: number;
+  reference_binding_id?: string | null;
 };
 export type PromptSegment = {
   id: string;
@@ -113,6 +120,8 @@ export type DirectorTimeline = {
   video_clips: TimelineClip[];
   /** Motion/performance reference — independent of the output Video track. One clip this milestone. */
   video_reference_clips?: TimelineClip[];
+  /** Image / entity reference — distinct from VISUAL playback images. */
+  image_reference_clips?: TimelineClip[];
   prompt_segments: PromptSegment[];
   camera_clips?: CameraClip[];
   audio_clips: TimelineClip[];
@@ -291,14 +300,14 @@ function TrackHeader({
   return (
     <div className="track-label track-label--shell">
       <span className="track-label__title">{label}</span>
-      <div className="track-label__tools" aria-hidden>
+      <div className="track-label__tools">
         {controls.map((control) => (
-          <span key={control} className="track-label__icon">
+          <span key={control} className="track-label__icon" aria-hidden>
             <TrackGlyph name={control} />
           </span>
         ))}
         {onAction ? (
-          <button type="button" className="track-label__add" aria-label={`Add ${label}`} onClick={onAction}>
+          <button type="button" className="track-label__add" aria-label={`Add ${label}`} data-testid={`track-add-${label.toLowerCase().replace(/\s+/g, "-")}`} onClick={onAction}>
             <TrackGlyph name="plus" />
           </button>
         ) : null}
@@ -358,13 +367,16 @@ export function DirectorTracks({
   const [selectedClip, setSelectedClip] = useState<string>();
   const [timelineRefsEnabled, setTimelineRefsEnabled] = useState(false);
   const [selectedClipKind, setSelectedClipKind] = useState<
-    "imageClip" | "videoClip" | "videoReferenceClip" | "camera" | "audio" | "sfx" | null
+    "imageClip" | "videoClip" | "videoReferenceClip" | "imageReferenceClip" | "camera" | "audio" | "sfx" | null
   >(null);
   const [refsCounts, setRefsCounts] = useState<Record<string, number>>({});
   const [saving, setSaving] = useState(false);
   const [tagWarnings, setTagWarnings] = useState<string[]>([]);
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
+  const [bindings, setBindings] = useState<ReferenceBindingView[]>([]);
+  const [tokenDraft, setTokenDraft] = useState<Record<string, string>>({});
+  const [tokenError, setTokenError] = useState<string | null>(null);
   // Consolidated, non-spammy save error state. A failed save preserves local
   // drafts (tl is set before the API call) and surfaces a single status; it
   // does not trigger repeated retries (API_ERROR_CONSOLIDATED_NO_SPAM).
@@ -405,7 +417,15 @@ export function DirectorTracks({
       setSelectedSeg(s.id);
       setSelectedClip(undefined);
       setSelectedClipKind(null);
-    } else if (s.kind === "imageClip" || s.kind === "videoClip" || s.kind === "camera" || s.kind === "audio" || s.kind === "sfx") {
+    } else if (
+      s.kind === "imageClip" ||
+      s.kind === "videoClip" ||
+      s.kind === "videoReferenceClip" ||
+      s.kind === "imageReferenceClip" ||
+      s.kind === "camera" ||
+      s.kind === "audio" ||
+      s.kind === "sfx"
+    ) {
       setSelectedClip(s.id);
       setSelectedClipKind(s.kind);
       setSelectedSeg(undefined);
@@ -419,10 +439,6 @@ export function DirectorTracks({
   const setZoom = sel?.setZoom ?? (() => undefined);
   const snap = sel?.snap ?? workspaceLayout.snapEnabled;
   const setSnap = sel?.setSnap ?? (() => undefined);
-  const fileImageRef = useRef<HTMLInputElement>(null);
-  const fileVideoRef = useRef<HTMLInputElement>(null);
-  const fileAudioRef = useRef<HTMLInputElement>(null);
-  const fileSfxRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api
@@ -441,6 +457,48 @@ export function DirectorTracks({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      api.sceneReferences.list(project.id, { scopeType: "project", scopeId: project.id }),
+      api.listCharacterProfiles(project.id).catch(() => ({ items: [] })),
+    ])
+      .then(([res, characters]) => {
+        if (cancelled) return;
+        const items = ((res.items || []) as ReferenceBindingView[]).map((binding) => {
+          const asset = project.assets.find((a) => a.id === binding.asset_id);
+          return { ...binding, duration_sec: assetDurationSec(asset) };
+        });
+        const boundIdentities = new Set(items.map((item) => item.identity_id).filter(Boolean));
+        const extra: ReferenceBindingView[] = [];
+        for (const profile of characters.items || []) {
+          if (boundIdentities.has(profile.id)) continue;
+          const name = String(profile.name || "").trim();
+          if (!name) continue;
+          const asset =
+            project.assets.find((a) => (a.tag || "").toLowerCase() === name.toLowerCase() && a.kind === "image") ||
+            project.assets.find((a) => a.kind === "image");
+          extra.push({
+            id: `character:${profile.id}`,
+            asset_id: asset?.id || "",
+            identity_id: profile.id,
+            alias: name.replace(/\s+/g, ""),
+            media_kind: "entity",
+            reference_type: "character",
+            display_token: `@${name.replace(/\s+/g, "")}`,
+            asset_name: name,
+          });
+        }
+        setBindings([...items, ...extra]);
+      })
+      .catch(() => {
+        if (!cancelled) setBindings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.assets, project.id, reloadKey]);
+
+  useEffect(() => {
     if (!scene) return;
     const token = ++loadTokenRef.current;
     let cancelled = false;
@@ -452,6 +510,7 @@ export function DirectorTracks({
           ...d,
           image_clips: freeImageClips(d as DirectorTimeline),
           video_reference_clips: (d as DirectorTimeline).video_reference_clips || [],
+          image_reference_clips: (d as DirectorTimeline).image_reference_clips || [],
           lipsync: { tracks: normalizeLipSyncTracks((d as DirectorTimeline).lipsync?.tracks) },
         } as DirectorTimeline;
         setTl(next);
@@ -475,6 +534,7 @@ export function DirectorTracks({
           image_clips: [],
           video_clips: [],
           video_reference_clips: [],
+          image_reference_clips: [],
           prompt_segments: [],
           camera_clips: [],
           audio_clips: [],
@@ -663,11 +723,12 @@ export function DirectorTracks({
   );
   const boardWidth = Math.max(480, boardDuration * 90 * zoom);
 
-  const laneClipsFor = (kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera") => {
+  const laneClipsFor = (kind: "image" | "video" | "videoReference" | "imageReference" | "prompt" | "audio" | "sfx" | "camera") => {
     if (!tl) return [] as Array<{ id: string; start: number; length: number }>;
     if (kind === "image") return tl.image_clips || [];
     if (kind === "video") return tl.video_clips || [];
     if (kind === "videoReference") return tl.video_reference_clips || [];
+    if (kind === "imageReference") return tl.image_reference_clips || [];
     if (kind === "prompt") return tl.prompt_segments || [];
     if (kind === "audio") return tl.audio_clips || [];
     if (kind === "sfx") return tl.sfx_clips || [];
@@ -677,7 +738,7 @@ export function DirectorTracks({
   // CLIP_OVERLAP_GUARD: clips on the same lane may not overlap. Moves clamp
   // flush against the neighbor; trims clamp at the neighbor boundary.
   const clampToLane = (
-    kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera",
+    kind: "image" | "video" | "videoReference" | "imageReference" | "prompt" | "audio" | "sfx" | "camera",
     id: string,
     start: number,
     length: number,
@@ -714,7 +775,7 @@ export function DirectorTracks({
   };
 
   const commitClipGeometry = (
-    kind: "image" | "video" | "videoReference" | "prompt" | "audio" | "sfx" | "camera",
+    kind: "image" | "video" | "videoReference" | "imageReference" | "prompt" | "audio" | "sfx" | "camera",
     id: string,
     next: ClipGeometry,
     mode: ClipDragMode,
@@ -760,6 +821,19 @@ export function DirectorTracks({
       });
       return;
     }
+    if (kind === "imageReference") {
+      void save({
+        ...tl,
+        image_reference_clips: (tl.image_reference_clips || []).map((c) => {
+          if (c.id !== id) return c;
+          const delta = start - c.start;
+          const trim_start =
+            mode === "trim-left" ? Math.max(0, (c.trim_start || 0) + delta) : c.trim_start;
+          return { ...c, start, length, trim_start };
+        }),
+      });
+      return;
+    }
     if (kind === "prompt") {
       void save({
         ...tl,
@@ -785,64 +859,10 @@ export function DirectorTracks({
     setSelectedSeg(id);
     sel?.setSelection({ kind: "promptSeg", id });
   };
-  const selectClip = (kind: "imageClip" | "videoClip" | "videoReferenceClip" | "camera" | "audio" | "sfx", id: string) => {
+  const selectClip = (kind: "imageClip" | "videoClip" | "videoReferenceClip" | "imageReferenceClip" | "camera" | "audio" | "sfx", id: string) => {
     setSelectedClip(id);
     setSelectedClipKind(kind);
     sel?.setSelection({ kind, id });
-  };
-
-  const uploadAndAdd = async (kind: "image" | "video" | "audio" | "sfx", file: File) => {
-    const tag = `${scene.name}_${kind}_${nid()}`.replace(/\s+/g, "_").toLowerCase();
-    const assetKind = kind === "sfx" ? "audio" : kind;
-    const asset = (await api.uploadAsset(project.id, file, tag, assetKind)) as Asset;
-    const next = { ...tl };
-
-    if (kind === "image") {
-      const start = imageClips.reduce((m, c) => Math.max(m, c.start + c.length), 0);
-      const clip: TimelineClip = {
-        id: nid(),
-        start: snapTime(Math.min(start, Math.max(0, duration - 1)), snap),
-        length: Math.min(2, duration),
-        label: `Image ${imageClips.length + 1}`,
-        role: "guide",
-        display_tag: null,
-        asset_id: asset.id,
-      };
-      next.image_clips = [...imageClips, clip];
-      next.media_mode = "image";
-      selectClip("imageClip", clip.id);
-    } else if (kind === "video") {
-      next.media_mode = "video";
-      next.video_clips = [
-        {
-          id: nid(),
-          start: 0,
-          length: duration,
-          label: "Video",
-          asset_id: asset.id,
-          trim_start: 0,
-        },
-      ];
-      selectClip("videoClip", next.video_clips[0].id);
-    } else if (kind === "audio") {
-      next.audio_clips = [
-        ...tl.audio_clips,
-        { id: nid(), start: 0, length: duration, label: "Audio", asset_id: asset.id, volume: 1 },
-      ];
-    } else {
-      next.sfx_clips = [
-        ...tl.sfx_clips,
-        {
-          id: nid(),
-          start: snapTime(Math.min(1, duration - 0.5), snap),
-          length: 1,
-          label: "SFX",
-          asset_id: asset.id,
-          volume: 1,
-        },
-      ];
-    }
-    await save(next);
   };
 
   const addImageFromLibrary = async (assetId: string) => {
@@ -891,26 +911,111 @@ export function DirectorTracks({
     selectClip("imageClip", clip.id);
   };
 
-  const addVideoReferenceFromLibrary = async (assetId: string) => {
-    if (!assetId) return;
+  const addVideoReferenceFromLibrary = async (assetId: string, binding?: ReferenceBindingView) => {
+    if (!assetId && !binding) return;
+    const resolved = binding || bindings.find((item) => item.asset_id === assetId);
+    if (resolved && resolved.media_kind && resolved.media_kind !== "video") {
+      setTokenError("Video Reference only accepts * video tokens.");
+      return;
+    }
     const clip: TimelineClip = {
       id: nid(),
       start: 0,
       length: Math.min(duration, 5),
-      label: "Video Reference",
-      asset_id: assetId,
+      label: resolved ? displayToken(resolved.alias || resolved.asset_name, "video") : "Video Reference",
+      asset_id: resolved?.asset_id || assetId,
+      reference_binding_id: resolved?.id || null,
       trim_start: 0,
     };
     await save({ ...tl, video_reference_clips: [clip] });
     selectClip("videoReferenceClip", clip.id);
   };
 
-  const onDropAsset = async (e: React.DragEvent, kind: "image" | "audio" | "sfx" | "videoReference") => {
+  const addImageReferenceFromLibrary = async (assetId: string, binding?: ReferenceBindingView) => {
+    if (!assetId && !binding) return;
+    const resolved = binding || bindings.find((item) => item.asset_id === assetId);
+    if (resolved && resolved.media_kind === "video") {
+      setTokenError("Image Reference only accepts # image or @ character/prop tokens.");
+      return;
+    }
+    const imageClips = tl.image_reference_clips || [];
+    const clip: TimelineClip = {
+      id: nid(),
+      start: 0,
+      length: Math.min(duration, 5),
+      label: resolved
+        ? displayToken(resolved.alias || resolved.asset_name, resolved.media_kind || "image")
+        : "Image Reference",
+      asset_id: resolved?.asset_id || assetId,
+      reference_binding_id: resolved?.id || null,
+    };
+    await save({ ...tl, image_reference_clips: [...imageClips, clip] });
+    selectClip("imageReferenceClip", clip.id);
+  };
+
+  const assignBindingToClip = async (
+    track: "imageReference" | "videoReference",
+    clipId: string,
+    binding: ReferenceBindingView,
+  ) => {
+    setTokenError(null);
+    let resolved = binding;
+    if (binding.id.startsWith("character:")) {
+      if (!binding.asset_id) {
+        setTokenError("Broken Reference — this character needs an approved picture in the Library.");
+        return;
+      }
+      const created = (await api.sceneReferences.attach(project.id, {
+        asset_id: binding.asset_id,
+        scope_type: "project",
+        scope_id: project.id,
+        reference_type: "character",
+        media_kind: "entity",
+        identity_id: binding.identity_id,
+        alias: binding.alias,
+        usage_modes: ["identity", "appearance"],
+        reference_roles: ["character"],
+      })) as ReferenceBindingView;
+      resolved = { ...binding, ...created, id: String(created.id) };
+    }
+    if (track === "videoReference") {
+      await save({
+        ...tl,
+        video_reference_clips: (tl.video_reference_clips || []).map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                asset_id: resolved.asset_id,
+                reference_binding_id: resolved.id,
+                label: displayToken(resolved.alias || resolved.asset_name, "video"),
+              }
+            : c,
+        ),
+      });
+      return;
+    }
+    await save({
+      ...tl,
+      image_reference_clips: (tl.image_reference_clips || []).map((c) =>
+        c.id === clipId
+          ? {
+              ...c,
+              asset_id: resolved.asset_id,
+              reference_binding_id: resolved.id,
+              label: displayToken(resolved.alias || resolved.asset_name, resolved.media_kind || "image"),
+            }
+          : c,
+      ),
+    });
+  };
+
+  const onDropAsset = async (e: React.DragEvent, kind: "image" | "audio" | "sfx" | "videoReference" | "imageReference") => {
     e.preventDefault();
     const assetId = e.dataTransfer.getData("application/x-adept-asset");
     if (!assetId) return;
     if (kind === "image") await addImageFromLibrary(assetId);
     else if (kind === "videoReference") await addVideoReferenceFromLibrary(assetId);
+    else if (kind === "imageReference") await addImageReferenceFromLibrary(assetId);
     else if (kind === "audio") {
       await save({
         ...tl,
@@ -1048,7 +1153,7 @@ export function DirectorTracks({
   };
 
   const removeClip = async (
-    kind: "image" | "video" | "videoReference" | "audio" | "sfx" | "prompt" | "camera",
+    kind: "image" | "video" | "videoReference" | "imageReference" | "audio" | "sfx" | "prompt" | "camera",
     id: string,
     persisted: boolean,
   ) => {
@@ -1064,6 +1169,7 @@ export function DirectorTracks({
     if (kind === "image") next.image_clips = tl.image_clips.filter((c) => c.id !== id);
     if (kind === "video") next.video_clips = tl.video_clips.filter((c) => c.id !== id);
     if (kind === "videoReference") next.video_reference_clips = (tl.video_reference_clips || []).filter((c) => c.id !== id);
+    if (kind === "imageReference") next.image_reference_clips = (tl.image_reference_clips || []).filter((c) => c.id !== id);
     if (kind === "audio") next.audio_clips = tl.audio_clips.filter((c) => c.id !== id);
     if (kind === "sfx") next.sfx_clips = tl.sfx_clips.filter((c) => c.id !== id);
     if (kind === "prompt") next.prompt_segments = tl.prompt_segments.filter((c) => c.id !== id);
@@ -1234,51 +1340,11 @@ export function DirectorTracks({
 
       {showTracks && (
         <>
-          <input
-            ref={fileImageRef}
-            type="file"
-            accept="image/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) uploadAndAdd("image", f);
-              e.target.value = "";
-            }}
-          />
-          <input
-            ref={fileVideoRef}
-            type="file"
-            accept="video/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) uploadAndAdd("video", f);
-              e.target.value = "";
-            }}
-          />
-          <input
-            ref={fileAudioRef}
-            type="file"
-            accept="audio/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) uploadAndAdd("audio", f);
-              e.target.value = "";
-            }}
-          />
-          <input
-            ref={fileSfxRef}
-            type="file"
-            accept="audio/*"
-            hidden
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) uploadAndAdd("sfx", f);
-              e.target.value = "";
-            }}
-          />
-
+          {tokenError ? (
+            <p className="scene-meta" role="alert" data-testid="timeline-reference-type-error">
+              {tokenError}
+            </p>
+          ) : null}
           {!shellMode ? (
             <>
               <div className="director-toolbar">
@@ -1296,40 +1362,55 @@ export function DirectorTracks({
                 </button>
 
                 {tl.media_mode === "image" ? (
-                  <>
-                    <button type="button" onClick={() => fileImageRef.current?.click()}>
-                      Add Image
-                    </button>
-                    {images.length > 0 && (
-                      <select
-                        defaultValue=""
-                        aria-label="Library Image"
-                        onChange={(e) => {
-                          addImageFromLibrary(e.target.value);
-                          e.target.value = "";
-                        }}
-                      >
-                        <option value="">Library Image…</option>
-                        {images.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            @{a.tag || a.filename}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </>
-                ) : (
-                  <button type="button" onClick={() => fileVideoRef.current?.click()}>
-                    {videoClip?.asset_id ? "Replace Video" : "Add Video"}
-                  </button>
-                )}
-
-                <button type="button" onClick={() => fileAudioRef.current?.click()}>
-                  Add Audio
-                </button>
-                <button type="button" onClick={() => fileSfxRef.current?.click()}>
-                  Add SFX
-                </button>
+                  images.length > 0 ? (
+                    <select
+                      defaultValue=""
+                      aria-label="Library Image"
+                      onChange={(e) => {
+                        addImageFromLibrary(e.target.value);
+                        e.target.value = "";
+                      }}
+                    >
+                      <option value="">Library Image…</option>
+                      {images.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          @{a.tag || a.filename}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null
+                ) : videos.length > 0 ? (
+                  <select
+                    defaultValue=""
+                    aria-label="Library Video"
+                    onChange={(e) => {
+                      const assetId = e.target.value;
+                      e.currentTarget.value = "";
+                      if (!assetId) return;
+                      void save({
+                        ...tl,
+                        media_mode: "video",
+                        video_clips: [
+                          {
+                            id: nid(),
+                            start: 0,
+                            length: duration,
+                            label: "Video",
+                            asset_id: assetId,
+                            trim_start: 0,
+                          },
+                        ],
+                      });
+                    }}
+                  >
+                    <option value="">{videoClip?.asset_id ? "Replace from Library…" : "Library Video…"}</option>
+                    {videos.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        @{a.tag || a.filename}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
 
                 {selectedImageClip && (
                   <button type="button" onClick={() => void addAttachedPrompt()}>
@@ -1648,7 +1729,7 @@ export function DirectorTracks({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => onDropAsset(e, "image")}
                 >
-                  <TrackHeader label="VISUAL" shellMode={shellMode} onAction={() => fileImageRef.current?.click()} actionLabel="+ Image" />
+                  <TrackHeader label="VISUAL" shellMode={shellMode} />
                   <div className="track-lane">
                     {imageClips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add an image clip or drop an image here.</div>
@@ -1725,7 +1806,7 @@ export function DirectorTracks({
                 </div>
               ) : (
                 <div className="track-row">
-                  <TrackHeader label="VISUAL" shellMode={shellMode} controls={["eye", "lock"]} onAction={() => fileVideoRef.current?.click()} actionLabel="+ Video" />
+                  <TrackHeader label="VISUAL" shellMode={shellMode} controls={["eye", "lock"]} />
                   <div className="track-lane">
                     {tl.video_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add a video clip or switch back to image planning.</div>
@@ -1810,6 +1891,92 @@ export function DirectorTracks({
 
               <div
                 className="track-row"
+                data-testid="timeline-image-reference-track"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => onDropAsset(e, "imageReference")}
+              >
+                <TrackHeader
+                  label="IMAGE REFERENCE"
+                  shellMode={shellMode}
+                  onAction={() => {
+                    const clip = {
+                      id: nid(),
+                      start: 0,
+                      length: Math.min(duration, 5),
+                      label: "Image Reference",
+                      asset_id: null,
+                      reference_binding_id: null,
+                    };
+                    void save({ ...tl, image_reference_clips: [...(tl.image_reference_clips || []), clip] });
+                    selectClip("imageReferenceClip", clip.id);
+                  }}
+                  actionLabel="+ Clip"
+                />
+                <div className="track-lane">
+                  {(tl.image_reference_clips || []).length === 0 && workspaceLayout.showEmptyHelp && (
+                    <div className="track-empty">
+                      Drop a named image or character. Type # or @ to pick a reference.
+                    </div>
+                  )}
+                  {(tl.image_reference_clips || []).map((clip) => {
+                    const binding = bindings.find((item) => item.id === clip.reference_binding_id);
+                    const broken = Boolean(clip.reference_binding_id && !binding);
+                    return (
+                      <TrackClipInteractive
+                        key={clip.id}
+                        clipId={clip.id}
+                        start={clip.start}
+                        length={clip.length}
+                        boardDuration={boardDuration}
+                        boardWidthPx={boardWidth}
+                        snapEnabled={snap}
+                        snapStep={snap ? 1 / sceneFps : 0.01}
+                        selected={selectedClip === clip.id}
+                        className="media"
+                        domId={`timeline-track-item-imageReferenceClip-${clip.id}`}
+                        testId={`track-clip-image-ref-${clip.id}`}
+                        onSelect={() => selectClip("imageReferenceClip", clip.id)}
+                        onCommit={(next, mode) => commitClipGeometry("imageReference", clip.id, next, mode)}
+                      >
+                        <button
+                          type="button"
+                          className="track-clip__remove"
+                          aria-label="Remove from Timeline"
+                          title="Remove from Timeline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void removeClip("imageReference", clip.id, Boolean(clip.asset_id || clip.reference_binding_id));
+                          }}
+                        >
+                          ×
+                        </button>
+                        <strong>
+                          {broken
+                            ? "Broken Reference"
+                            : binding
+                              ? displayToken(binding.alias || binding.asset_name, binding.media_kind || "image")
+                              : clip.label || "Image Reference"}
+                        </strong>
+                        <ReferenceTokenAutocomplete
+                          value={tokenDraft[clip.id] ?? ""}
+                          bindings={bindings}
+                          track="imageReference"
+                          placeholder="# or @ name"
+                          onChange={(next) => setTokenDraft((prev) => ({ ...prev, [clip.id]: next }))}
+                          onCommit={(item) => {
+                            setTokenDraft((prev) => ({ ...prev, [clip.id]: "" }));
+                            void assignBindingToClip("imageReference", clip.id, item);
+                          }}
+                          onReject={setTokenError}
+                        />
+                      </TrackClipInteractive>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div
+                className="track-row"
                 data-testid="timeline-video-reference-track"
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "videoReference")}
@@ -1838,7 +2005,8 @@ export function DirectorTracks({
                     </div>
                   )}
                   {(tl.video_reference_clips || []).map((clip) => {
-                    const asset = clip.asset_id ? assetsById.get(clip.asset_id) : undefined;
+                    const binding = bindings.find((item) => item.id === clip.reference_binding_id);
+                    const broken = Boolean(clip.reference_binding_id && !binding);
                     return (
                       <TrackClipInteractive
                         key={clip.id}
@@ -1863,35 +2031,30 @@ export function DirectorTracks({
                           title="Remove from Timeline"
                           onClick={(e) => {
                             e.stopPropagation();
-                            void removeClip("videoReference", clip.id, Boolean(clip.asset_id));
+                            void removeClip("videoReference", clip.id, Boolean(clip.asset_id || clip.reference_binding_id));
                           }}
                         >
                           ×
                         </button>
-                        <strong>{clip.label || "Video Reference"}</strong>
-                        <span>
-                          {asset ? `@${asset.tag || asset.filename}` : "empty"} · {clip.start.toFixed(1)}–
-                          {(clip.start + clip.length).toFixed(1)}s
-                        </span>
-                        {!shellMode ? (
-                          <select
-                            value={clip.asset_id || ""}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              save({
-                                ...tl,
-                                video_reference_clips: [{ ...clip, asset_id: e.target.value || null }],
-                              })
-                            }
-                          >
-                            <option value="">Asset…</option>
-                            {videos.map((a) => (
-                              <option key={a.id} value={a.id}>
-                                @{a.tag || a.filename}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
+                        <strong>
+                          {broken
+                            ? "Broken Reference"
+                            : binding
+                              ? displayToken(binding.alias || binding.asset_name, "video")
+                              : clip.label || "Video Reference"}
+                        </strong>
+                        <ReferenceTokenAutocomplete
+                          value={tokenDraft[clip.id] ?? ""}
+                          bindings={bindings}
+                          track="videoReference"
+                          placeholder="* name"
+                          onChange={(next) => setTokenDraft((prev) => ({ ...prev, [clip.id]: next }))}
+                          onCommit={(item) => {
+                            setTokenDraft((prev) => ({ ...prev, [clip.id]: "" }));
+                            void assignBindingToClip("videoReference", clip.id, item);
+                          }}
+                          onReject={setTokenError}
+                        />
                       </TrackClipInteractive>
                     );
                   })}
@@ -2097,7 +2260,7 @@ export function DirectorTracks({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "audio")}
               >
-                <TrackHeader label="AUDIO" shellMode={shellMode} controls={["mute", "solo"]} onAction={() => fileAudioRef.current?.click()} actionLabel="+ Audio" />
+                <TrackHeader label="AUDIO" shellMode={shellMode} controls={["mute", "solo"]} />
                 <div className="track-lane">
                   {tl.audio_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Add ambience, score, or dialogue stems for this scene.</div>
@@ -2163,7 +2326,7 @@ export function DirectorTracks({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "sfx")}
               >
-                <TrackHeader label="SFX" shellMode={shellMode} controls={["mute", "solo"]} onAction={() => fileSfxRef.current?.click()} actionLabel="+ SFX" />
+                <TrackHeader label="SFX" shellMode={shellMode} controls={["mute", "solo"]} />
                 <div className="track-lane">
                   {tl.sfx_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Drop quick impact or spot effects here.</div>

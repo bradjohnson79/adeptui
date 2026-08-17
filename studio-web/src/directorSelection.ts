@@ -4,6 +4,7 @@ export type DirectorSelectionKind =
   | "imageClip"
   | "videoClip"
   | "videoReferenceClip"
+  | "imageReferenceClip"
   | "camera"
   | "audio"
   | "sfx"

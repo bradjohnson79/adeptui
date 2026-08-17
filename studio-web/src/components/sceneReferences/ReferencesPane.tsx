@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Project } from "../../types";
+import type { Asset, Project } from "../../types";
 import { api } from "../../api";
 import { PanelHeading } from "../HelpTip";
+import {
+  chipLabel,
+  mediaKindForAssetKind,
+  referenceTypeForAssetKind,
+  sanitizeAlias,
+  type ReferenceBindingView,
+} from "../../sceneReferences/referenceTokens";
 
-type Binding = {
-  id: string;
-  asset_id: string;
+type Binding = ReferenceBindingView & {
   scope_type: string;
   scope_id: string;
-  reference_type: string;
   usage_modes: string[];
   reference_roles: string[];
   enabled: boolean;
   order_index: number;
-  identity_id?: string | null;
   identity_version_id?: string | null;
-  asset_name?: string | null;
   thumbnail_url?: string | null;
   approval_status?: string | null;
   inherited_from?: string | null;
@@ -54,11 +56,13 @@ export function ReferencesPane({
   sceneId,
   workflowTab,
   onChange,
+  reloadKey = 0,
 }: {
   project: Project;
   sceneId: string | null;
   workflowTab?: string;
   onChange?: () => void;
+  reloadKey?: number;
 }) {
   const [items, setItems] = useState<Binding[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,9 +72,13 @@ export function ReferencesPane({
   const [attachAssetId, setAttachAssetId] = useState("");
   const [attachType, setAttachType] = useState("character");
 
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+
   const workflowKey = WORKFLOW_BY_TAB[workflowTab || "timeline"] || "timeline";
-  const scopeId = sceneId || "project";
-  const scopeType = sceneId ? "scene" : "project";
+  const compact = workflowKey === "timeline";
+  const scopeId = compact ? project.id : sceneId || "project";
+  const scopeType = compact ? "project" : sceneId ? "scene" : "project";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,7 +107,7 @@ export function ReferencesPane({
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, reloadKey]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -107,6 +115,7 @@ export function ReferencesPane({
     return items.filter(
       (b) =>
         (b.asset_name || "").toLowerCase().includes(q) ||
+        (b.alias || "").toLowerCase().includes(q) ||
         b.reference_type.includes(q) ||
         (b.reference_roles || []).join(" ").toLowerCase().includes(q)
     );
@@ -158,6 +167,31 @@ export function ReferencesPane({
     onChange?.();
   };
 
+  const attachAsset = async (asset: Pick<Asset, "id" | "kind" | "tag" | "filename">) => {
+    if (asset.kind === "audio") {
+      setError("Audio stays on Lip Sync, SFX, or Music. It cannot be a typed reference.");
+      return;
+    }
+    const mediaKind = mediaKindForAssetKind(asset.kind);
+    const referenceType = referenceTypeForAssetKind(asset.kind);
+    if (!mediaKind || !referenceType) {
+      setError("Only images and videos can be named as references.");
+      return;
+    }
+    await api.sceneReferences.attach(project.id, {
+      asset_id: asset.id,
+      scope_type: scopeType,
+      scope_id: scopeId,
+      reference_type: referenceType,
+      media_kind: mediaKind,
+      alias: sanitizeAlias(asset.tag || asset.filename || referenceType),
+      usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
+      reference_roles: [referenceType],
+    });
+    await load();
+    onChange?.();
+  };
+
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     const assetId =
@@ -165,6 +199,11 @@ export function ReferencesPane({
       e.dataTransfer.getData("text/asset-id") ||
       e.dataTransfer.getData("text/plain");
     if (!assetId) return;
+    const asset = project.assets.find((item) => item.id === assetId);
+    if (asset) {
+      await attachAsset(asset);
+      return;
+    }
     await api.sceneReferences.attach(project.id, {
       asset_id: assetId,
       scope_type: scopeType,
@@ -173,6 +212,15 @@ export function ReferencesPane({
       usage_modes: ["informational"],
       reference_roles: ["reference"],
     });
+    await load();
+    onChange?.();
+  };
+
+  const rename = async (b: Binding) => {
+    const alias = sanitizeAlias(renameValue);
+    if (!alias) return;
+    await api.sceneReferences.update(project.id, b.id, { alias });
+    setRenamingId(null);
     await load();
     onChange?.();
   };
@@ -189,14 +237,18 @@ export function ReferencesPane({
     >
       <PanelHeading
         title="References"
-        tip="Intentionally attached visual guidance for the active scene/scope. Uploading to Assets does not attach a reference."
+        tip="Names for Library files this Timeline can use. Prefixes are just labels: @ character or prop, # image, * video. Removing a name does not delete the Library file."
       />
-      <p className="scene-meta" data-testid="reference-capability-status">
-        {supportLabel(supportClass)}
-        {supportClass === "prompt_guided" ? " — prompt guidance only, not image conditioning" : ""}
-        {" · "}
-        Readiness: {String(readiness.referenceReadiness || "—")} (not Continuity Score)
-      </p>
+      {compact ? (
+        <p className="scene-meta">Drag from Library or use Add to References. Audio stays on Lip Sync, SFX, or Music.</p>
+      ) : (
+        <p className="scene-meta" data-testid="reference-capability-status">
+          {supportLabel(supportClass)}
+          {supportClass === "prompt_guided" ? " — prompt guidance only, not image conditioning" : ""}
+          {" · "}
+          Readiness: {String(readiness.referenceReadiness || "—")} (not Continuity Score)
+        </p>
+      )}
 
       <div className="field">
         <label htmlFor="ref-filter">Filter</label>
@@ -221,23 +273,74 @@ export function ReferencesPane({
 
       {!loading && !error && filtered.length === 0 && (
         <div data-testid="references-empty">
-          <p>No references attached to this scope. Assets stay in the library until you attach them.</p>
-          <div className="row-actions">
-            <button type="button" data-testid="ref-add-library" onClick={() => setAttachAssetId(project.assets[0]?.id || "")}>
-              Add from Library
-            </button>
-            <button
-              type="button"
-              data-testid="ref-copy-previous"
-              onClick={() => void copyPrevious()}
-              disabled={!sceneId}
-            >
-              Copy from previous scene
-            </button>
-          </div>
+          <p>No named references yet. Files stay in the Library until you add them here.</p>
+          {!compact ? (
+            <div className="row-actions">
+              <button type="button" data-testid="ref-add-library" onClick={() => setAttachAssetId(project.assets[0]?.id || "")}>
+                Add from Library
+              </button>
+              <button
+                type="button"
+                data-testid="ref-copy-previous"
+                onClick={() => void copyPrevious()}
+                disabled={!sceneId}
+              >
+                Copy from previous scene
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
+      {compact ? (
+        <ul className="ref-chip-list" data-testid="references-list">
+          {filtered.map((b) => (
+            <li key={b.id} className="ref-chip" data-testid={`reference-binding-${b.id}`}>
+              {renamingId === b.id ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void rename(b);
+                  }}
+                >
+                  <input
+                    data-testid={`reference-alias-input-${b.id}`}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    aria-label="Reference name"
+                    autoFocus
+                  />
+                  <button type="submit" data-testid={`reference-alias-save-${b.id}`}>
+                    Save
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className="ref-chip__label"
+                  data-testid={`reference-chip-${b.id}`}
+                  title="Click to rename. The Timeline still uses the same file."
+                  onClick={() => {
+                    setRenamingId(b.id);
+                    setRenameValue(b.alias || b.asset_name || "");
+                  }}
+                >
+                  {b.broken ? "Broken Reference" : chipLabel(b)}
+                </button>
+              )}
+              <button
+                type="button"
+                className="ghost"
+                data-testid={`reference-remove-${b.id}`}
+                title="Remove this name. The Library file stays."
+                onClick={() => void remove(b)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
       <ul className="asset-list" data-testid="references-list">
         {filtered.map((b) => (
           <li key={b.id} data-testid={`reference-binding-${b.id}`} className={!b.enabled ? "muted" : ""}>
@@ -268,8 +371,9 @@ export function ReferencesPane({
           </li>
         ))}
       </ul>
+      )}
 
-      {(preflight?.excluded as unknown[])?.length ? (
+      {!compact && (preflight?.excluded as unknown[])?.length ? (
         <div data-testid="references-excluded">
           <p className="scene-meta">Excluded (with reasons — never silent):</p>
           <ul>
@@ -283,6 +387,7 @@ export function ReferencesPane({
         </div>
       ) : null}
 
+      {!compact ? (
       <div className="field" data-testid="references-attach-form">
         <label>Attach asset id</label>
         <input value={attachAssetId} onChange={(e) => setAttachAssetId(e.target.value)} placeholder="asset uuid" />
@@ -298,6 +403,7 @@ export function ReferencesPane({
           Attach reference
         </button>
       </div>
+      ) : null}
     </div>
   );
 }

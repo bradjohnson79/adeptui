@@ -260,10 +260,19 @@ export function TimelineInspector({
   const draftPathway = selectedGenerator?.draftPathway || "none";
   const draftAvailable = draftPathway !== "none";
   const videoRefAttached = Boolean(
-    (timeline?.video_reference_clips || []).some((c) => c.asset_id) ||
+    (timeline?.video_reference_clips || []).some((c) => c.asset_id || c.reference_binding_id) ||
       selectedBatch?.sourceAnchors?.some((a) => a.kind === "video" && a.assetId),
   );
+  const imageRefAttached = Boolean(
+    (timeline?.image_reference_clips || []).some((c) => c.asset_id || c.reference_binding_id),
+  );
   const videoRefBlocked = Boolean(videoRefAttached && selectedGenerator && !selectedGenerator.supportsVideoReferences);
+  const imageRefBlocked = Boolean(
+    imageRefAttached &&
+      selectedGenerator &&
+      !selectedGenerator.supportsMultipleImageReferences &&
+      (selectedGenerator.maximumReferenceImages || 0) <= 0,
+  );
   useEffect(() => {
     setDraftMode(draftAvailable);
   }, [draftAvailable, selectedBatch?.id, selectedBatch?.generatorId]);
@@ -1016,7 +1025,12 @@ export function TimelineInspector({
           </p>
           {videoRefBlocked ? (
             <p className="scene-meta" data-testid="timeline-video-ref-blocked">
-              Selected model does not support video reference. Remove the Video Reference clip or choose a model that can use motion reference.
+              Selected model does not support video reference. The * video name stays, but this model will not use it.
+            </p>
+          ) : null}
+          {imageRefBlocked ? (
+            <p className="scene-meta" data-testid="timeline-image-ref-blocked">
+              Selected model does not support image reference. The # / @ name stays, but this model will not use it.
             </p>
           ) : null}
           {selectedGenerator &&
@@ -1032,7 +1046,6 @@ export function TimelineInspector({
               type="button"
               className="primary"
               data-testid="timeline-generate-draft"
-              disabled={videoRefBlocked}
               onClick={() =>
                 void api
                   .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, {
@@ -1047,7 +1060,6 @@ export function TimelineInspector({
               <button
                 type="button"
                 data-testid="timeline-generate-final"
-                disabled={videoRefBlocked}
                 onClick={() =>
                   void api
                     .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })

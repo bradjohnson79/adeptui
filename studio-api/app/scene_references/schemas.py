@@ -23,6 +23,8 @@ class SceneReferenceBindingCreate(BaseModel):
     order_index: Optional[int] = None
     requested_weight: Optional[float] = None
     notes: Optional[str] = None
+    alias: Optional[str] = None
+    media_kind: Optional[str] = None
 
 
 class SceneReferenceBindingUpdate(BaseModel):
@@ -38,6 +40,8 @@ class SceneReferenceBindingUpdate(BaseModel):
     order_index: Optional[int] = None
     requested_weight: Optional[float] = None
     notes: Optional[str] = None
+    alias: Optional[str] = None
+    media_kind: Optional[str] = None
 
 
 class SceneReferenceBindingOut(BaseModel):
@@ -59,6 +63,12 @@ class SceneReferenceBindingOut(BaseModel):
     order_index: int
     requested_weight: Optional[float] = None
     notes: Optional[str] = None
+    alias: Optional[str] = None
+    media_kind: Optional[str] = None
+    display_token: Optional[str] = None
+    broken: bool = False
+    broken_reason: Optional[str] = None
+    alias_adjusted: bool = False
     inherited_from: Optional[str] = None
     is_override: bool = False
     asset_name: Optional[str] = None

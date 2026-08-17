@@ -43,6 +43,8 @@ REFERENCE_TYPES = frozenset(
         "motion",
         "negative",
         "other",
+        "image",
+        "video",
     }
 )
 

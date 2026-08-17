@@ -33,6 +33,7 @@ class TimelineClip(BaseModel):
     volume: float = 1.0
     fade_in: float = 0.0
     fade_out: float = 0.0
+    reference_binding_id: Optional[str] = None
 
 
 class ImageClip(TimelineClip):
@@ -129,6 +130,7 @@ class DirectorTimeline(BaseModel):
     image_clips: list[ImageClip] = Field(default_factory=list)
     video_clips: list[TimelineClip] = Field(default_factory=list)
     video_reference_clips: list[TimelineClip] = Field(default_factory=list)
+    image_reference_clips: list[TimelineClip] = Field(default_factory=list)
     prompt_segments: list[PromptSegment] = Field(default_factory=list)
     camera_clips: list[CameraClip] = Field(default_factory=list)
     audio_clips: list[TimelineClip] = Field(default_factory=list)
@@ -153,6 +155,7 @@ class DirectorTimeline(BaseModel):
             sfx_clips=[],
             video_clips=[],
             video_reference_clips=[],
+            image_reference_clips=[],
             lipsync=LipSyncTracks.default(),
             playhead=0.0,
             guidance_priority="visual_first",

@@ -18,6 +18,7 @@ export function AssetTray({
   onSelectAsset,
   onAddToTimeline,
   onAddAsReference,
+  allowUpload = true,
 }: {
   project: Project;
   onChange: () => void;
@@ -25,9 +26,11 @@ export function AssetTray({
   onSelectAsset?: (asset: Asset) => void;
   onAddToTimeline?: (asset: Asset) => void;
   onAddAsReference?: (asset: Asset) => void;
+  allowUpload?: boolean;
 }) {
   const [tag, setTag] = useState("");
   const [filter, setFilter] = useState<"all" | "image" | "audio" | "video">("all");
+  const [search, setSearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const upload = async (files: FileList | null, kind: string) => {
@@ -47,67 +50,80 @@ export function AssetTray({
     () => project.assets.filter((a) => isTimelineMediaAsset(a)),
     [project.assets],
   );
-  const filtered = timelineAssets.filter(
-    (a) => filter === "all" || normalizeTimelineMediaKind(a.kind, a.filename) === filter,
-  );
+  const filtered = timelineAssets.filter((a) => {
+    if (filter !== "all" && normalizeTimelineMediaKind(a.kind, a.filename) !== filter) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return (a.tag || "").toLowerCase().includes(q) || (a.filename || "").toLowerCase().includes(q);
+  });
 
   return (
     <div className="panel">
       <PanelHeading
-        title="Assets"
-        tip="Upload images, audio, or video. Optional Reference Name lets you use @name in prompts. Add to Timeline places media on a track; Add as Reference attaches optional supporting guidance."
+        title="Library"
+        tip={
+          allowUpload
+            ? "Upload images, audio, or video. Add to Timeline places media on a track; Add to References names it for Timeline."
+            : "Choose files already in this project's Library. Add to Timeline places media on a track; Add to References names it for Timeline."
+        }
       />
-      <p className="scene-meta">
-        Give assets a short Reference Name so they can be recognized in prompts and reference lists. Leave empty to
-        auto-generate a safe name.
-      </p>
-      <div className="field">
-        <label>Reference Name (optional)</label>
-        <input
-          placeholder="korri_front"
-          value={tag}
-          onChange={(e) => setTag(e.target.value)}
-          aria-describedby="asset-ref-name-hint"
-        />
-        <p id="asset-ref-name-hint" className="scene-meta">
-          {tag.trim() ? `Use in prompts as: @${tag.trim()}` : "Auto name assigned on upload if left empty."}
-        </p>
-      </div>
-      <div className="row-actions">
-        <button onClick={() => fileRef.current?.click()}>Upload image</button>
-        <label className="ghost">
-          <button
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "file";
-              input.accept = "audio/*";
-              input.onchange = () => upload(input.files, "audio");
-              input.click();
-            }}
-          >
-            Upload audio
-          </button>
-        </label>
-        <button
-          onClick={() => {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "video/*";
-            input.onchange = () => upload(input.files, "video");
-            input.click();
-          }}
-        >
-          Upload video
-        </button>
-      </div>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        hidden
-        multiple
-        onChange={(e) => upload(e.target.files, "image")}
-      />
+      {allowUpload ? (
+        <>
+          <p className="scene-meta">
+            Give assets a short Reference Name so they can be recognized in prompts and reference lists. Leave empty to
+            auto-generate a safe name.
+          </p>
+          <div className="field">
+            <label>Reference Name (optional)</label>
+            <input
+              placeholder="korri_front"
+              value={tag}
+              onChange={(e) => setTag(e.target.value)}
+              aria-describedby="asset-ref-name-hint"
+            />
+            <p id="asset-ref-name-hint" className="scene-meta">
+              {tag.trim() ? `Use in prompts as: @${tag.trim()}` : "Auto name assigned on upload if left empty."}
+            </p>
+          </div>
+          <div className="row-actions">
+            <button onClick={() => fileRef.current?.click()}>Upload image</button>
+            <label className="ghost">
+              <button
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.accept = "audio/*";
+                  input.onchange = () => upload(input.files, "audio");
+                  input.click();
+                }}
+              >
+                Upload audio
+              </button>
+            </label>
+            <button
+              onClick={() => {
+                const input = document.createElement("input");
+                input.type = "file";
+                input.accept = "video/*";
+                input.onchange = () => upload(input.files, "video");
+                input.click();
+              }}
+            >
+              Upload video
+            </button>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            multiple
+            onChange={(e) => upload(e.target.files, "image")}
+          />
+        </>
+      ) : (
+        <p className="scene-meta">Use files from this project's Library. Uploads stay in the Library page.</p>
+      )}
       <div className="asset-filters">
         {(["all", "image", "audio", "video"] as const).map((f) => (
           <button
@@ -119,6 +135,16 @@ export function AssetTray({
             {f}
           </button>
         ))}
+      </div>
+      <div className="field">
+        <label className="sr-only" htmlFor="asset-library-search">Search Library</label>
+        <input
+          id="asset-library-search"
+          data-testid="asset-library-search"
+          placeholder="Search Library"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
       <div className="section-label">Library</div>
       <p className="scene-meta" style={{ marginTop: 0 }}>
@@ -170,23 +196,23 @@ export function AssetTray({
                   onClick={() => onAddToTimeline?.(a)}
                 >
                   Add to Timeline
-                  <HelpTip
-                    label={getTimelineHelp("add_to_timeline").title}
-                    content={getTimelineHelp("add_to_timeline").body}
-                  />
                 </button>
+                <HelpTip
+                  label={getTimelineHelp("add_to_timeline").title}
+                  content={getTimelineHelp("add_to_timeline").body}
+                />
                 <button
                   type="button"
                   className="ghost"
                   data-testid={`asset-add-reference-${a.id}`}
                   onClick={() => onAddAsReference?.(a)}
                 >
-                  Add as Reference
-                  <HelpTip
-                    label={getTimelineHelp("add_as_reference").title}
-                    content={getTimelineHelp("add_as_reference").body}
-                  />
+                  Add to References
                 </button>
+                <HelpTip
+                  label={getTimelineHelp("add_as_reference").title}
+                  content={getTimelineHelp("add_as_reference").body}
+                />
               </div>
             </div>
           );

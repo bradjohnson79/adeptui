@@ -29,6 +29,7 @@ export type TimelineFocusRequest = {
   zoomDelta?: number;
   trackDensity?: "compact" | "comfortable" | "expanded";
   layoutReset?: boolean;
+  fitViewer?: boolean;
   openInpaint?: boolean;
 };
 

@@ -37,6 +37,7 @@ class SceneReferenceBinding(Base):
             "reference_type",
             name="uq_srb_scope_asset_type",
         ),
+        Index("uq_srb_project_alias", "project_id", "alias", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
@@ -59,6 +60,8 @@ class SceneReferenceBinding(Base):
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     requested_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    alias: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    media_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
     updated_by: Mapped[str] = mapped_column(String(64), nullable=False, default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

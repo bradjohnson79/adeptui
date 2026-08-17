@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
@@ -6,10 +6,19 @@ import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePr
 import type { DirectorSelectionKind } from "../../directorSelection";
 import {
   focusDomId,
+  requestTimelineFocus,
   TIMELINE_FOCUS_EVENT,
   TIMELINE_FOCUS_IDS,
   type TimelineFocusRequest,
 } from "../../timelineMaster/timelineFocus";
+import {
+  clampSidebarWidths,
+  loadTimelineWorkspaceLayout,
+  saveTimelineWorkspaceLayout,
+  TIMELINE_LAYOUT_EVENT,
+  type TimelineViewerPreset,
+  type TimelineWorkspaceLayout,
+} from "../../timelineMaster/workspaceLayout";
 import {
   WorkspaceFullscreenBanner,
   WorkspaceFullscreenControls,
@@ -100,6 +109,95 @@ export function TimelineEditorShell({
     viewMode: viewportMode,
     onRestoreViewMode: (mode) => setViewportMode(mode),
   });
+  const [workspaceLayout, setWorkspaceLayout] = useState(() => loadTimelineWorkspaceLayout());
+  const layoutRootRef = useRef<HTMLDivElement>(null);
+  const paneDragRef = useRef<{
+    side: "left" | "right";
+    originX: number;
+    originLeft: number;
+    originRight: number;
+    containerWidth: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const onLayout = (event: Event) => {
+      const detail = (event as CustomEvent<TimelineWorkspaceLayout>).detail;
+      setWorkspaceLayout(detail || loadTimelineWorkspaceLayout());
+    };
+    window.addEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
+    return () => window.removeEventListener(TIMELINE_LAYOUT_EVENT, onLayout as EventListener);
+  }, []);
+
+  const commitSidebarWidths = useCallback((left: number, right: number, containerWidth?: number) => {
+    const next = clampSidebarWidths(left, right, containerWidth);
+    const saved = saveTimelineWorkspaceLayout(next);
+    setWorkspaceLayout(saved);
+    return saved;
+  }, []);
+
+  const startPaneResize = (side: "left" | "right") => (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const containerWidth = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
+    const originLeft = workspaceLayout.leftWidth;
+    const originRight = workspaceLayout.rightWidth;
+    paneDragRef.current = {
+      side,
+      originX: event.clientX,
+      originLeft,
+      originRight,
+      containerWidth,
+    };
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const drag = paneDragRef.current;
+      if (!drag) return;
+      const dx = ev.clientX - drag.originX;
+      if (drag.side === "left") {
+        commitSidebarWidths(drag.originLeft + dx, drag.originRight, drag.containerWidth);
+      } else {
+        commitSidebarWidths(drag.originLeft, drag.originRight - dx, drag.containerWidth);
+      }
+    };
+    const onUp = (ev: PointerEvent) => {
+      paneDragRef.current = null;
+      try {
+        target.releasePointerCapture(ev.pointerId);
+      } catch {
+        /* already released */
+      }
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+    };
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
+  };
+
+  const onPaneKeyDown = (side: "left" | "right") => (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 32 : 16;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") {
+      return;
+    }
+    event.preventDefault();
+    const containerWidth = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
+    if (event.key === "Home") {
+      commitSidebarWidths(side === "left" ? 200 : workspaceLayout.leftWidth, side === "right" ? 240 : workspaceLayout.rightWidth, containerWidth);
+      return;
+    }
+    if (event.key === "End") {
+      commitSidebarWidths(side === "left" ? 420 : workspaceLayout.leftWidth, side === "right" ? 480 : workspaceLayout.rightWidth, containerWidth);
+      return;
+    }
+    const delta = event.key === "ArrowRight" ? step : -step;
+    if (side === "left") {
+      commitSidebarWidths(workspaceLayout.leftWidth + delta, workspaceLayout.rightWidth, containerWidth);
+    } else {
+      commitSidebarWidths(workspaceLayout.leftWidth, workspaceLayout.rightWidth - delta, containerWidth);
+    }
+  };
 
   const selectedAsset =
     (libraryPreviewId && project.assets.find((asset) => asset.id === libraryPreviewId)) || null;
@@ -270,6 +368,7 @@ export function TimelineEditorShell({
           (next.image_clips || []).some((c) => c.id === s.id) ||
           (next.video_clips || []).some((c) => c.id === s.id) ||
           (next.video_reference_clips || []).some((c) => c.id === s.id) ||
+          (next.image_reference_clips || []).some((c) => c.id === s.id) ||
           (next.audio_clips || []).some((c) => c.id === s.id) ||
           (next.sfx_clips || []).some((c) => c.id === s.id) ||
           (next.camera_clips || []).some((c) => c.id === s.id) ||
@@ -324,10 +423,11 @@ export function TimelineEditorShell({
       return;
     }
 
-    const kindMap: Record<string, "image" | "video" | "videoReference" | "audio" | "sfx" | "prompt" | "camera" | "lipsyncClip"> = {
+    const kindMap: Record<string, "image" | "video" | "videoReference" | "imageReference" | "audio" | "sfx" | "prompt" | "camera" | "lipsyncClip"> = {
       imageClip: "image",
       videoClip: "video",
       videoReferenceClip: "videoReference",
+      imageReferenceClip: "imageReference",
       audio: "audio",
       sfx: "sfx",
       promptSeg: "prompt",
@@ -392,6 +492,7 @@ export function TimelineEditorShell({
       if (clipKind === "image") next.image_clips = (current.image_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "video") next.video_clips = (current.video_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "videoReference") next.video_reference_clips = (current.video_reference_clips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "imageReference") next.image_reference_clips = (current.image_reference_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "audio") next.audio_clips = (current.audio_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "sfx") next.sfx_clips = (current.sfx_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "prompt") next.prompt_segments = (current.prompt_segments || []).filter((c) => c.id !== selection.id);
@@ -444,6 +545,8 @@ export function TimelineEditorShell({
           };
           if (selection.kind === "imageClip") return { ...current, image_clips: dup(current.image_clips || []) };
           if (selection.kind === "videoClip") return { ...current, video_clips: dup(current.video_clips || []) };
+          if (selection.kind === "videoReferenceClip") return { ...current, video_reference_clips: dup(current.video_reference_clips || []) };
+          if (selection.kind === "imageReferenceClip") return { ...current, image_reference_clips: dup(current.image_reference_clips || []) };
           if (selection.kind === "promptSeg") return { ...current, prompt_segments: dup(current.prompt_segments || []) };
           if (selection.kind === "audio") return { ...current, audio_clips: dup(current.audio_clips || []) };
           if (selection.kind === "sfx") return { ...current, sfx_clips: dup(current.sfx_clips || []) };
@@ -500,15 +603,18 @@ export function TimelineEditorShell({
   const handleAddAssetAsReference = useCallback(
     async (asset: Asset) => {
       if (!selected) return;
-      const referenceType =
-        asset.kind === "image" ? "character" : asset.kind === "video" ? "environment" : "prop";
+      if (asset.kind === "audio") return;
+      const mediaKind = asset.kind === "video" ? "video" : asset.kind === "image" ? "image" : null;
+      if (!mediaKind) return;
       await api.sceneReferences.attach(project.id, {
         asset_id: asset.id,
-        scope_type: "scene",
-        scope_id: selected.id,
-        reference_type: referenceType,
-        usage_modes: ["appearance"],
-        reference_roles: [referenceType],
+        scope_type: "project",
+        scope_id: project.id,
+        reference_type: mediaKind,
+        media_kind: mediaKind,
+        alias: (asset.tag || asset.filename || mediaKind).replace(/\s+/g, ""),
+        usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
+        reference_roles: [mediaKind],
       });
       await afterMutation();
     },
@@ -519,48 +625,9 @@ export function TimelineEditorShell({
     return <div className="page"><p className="empty">Select a scene to open the Timeline.</p></div>;
   }
 
-  const previewExtraControls = (
-    <>
-      <label className="field" style={{ margin: 0 }}>
-        <span className="sr-only">Picture Shape</span>
-        <select
-          data-testid="timeline-viewer-aspect"
-          value={normalizeProductionAspect(selected.aspect_ratio)}
-          title="Picture shape for this scene"
-          aria-label="Picture shape"
-          onChange={(e) =>
-            void api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }).then(afterMutation)
-          }
-        >
-          {PRODUCTION_ASPECTS.map((ratio) => (
-            <option key={ratio} value={ratio}>
-              {ratio}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className={!hideOverlay ? "primary" : "ghost"}
-        title={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
-        aria-label={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
-        aria-pressed={!hideOverlay}
-        onClick={() => setHideOverlay((v) => !v)}
-      >
-        Guides
-      </button>
-      <button
-        type="button"
-        className={pauseUpdates ? "primary" : "ghost"}
-        title={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
-        aria-label={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
-        aria-pressed={pauseUpdates}
-        onClick={() => setPauseUpdates((v) => !v)}
-      >
-        {pauseUpdates ? "Resume" : "Pause"}
-      </button>
-    </>
-  );
+  const resetWorkspaceLayout = () => {
+    requestTimelineFocus({ target: "viewer", layoutReset: true });
+  };
 
   return (
     <div
@@ -579,6 +646,83 @@ export function TimelineEditorShell({
           </p>
         </div>
         <div className="timeline-scene-header__actions">
+          <div className="timeline-scene-header__viewer" data-testid="timeline-scene-header-viewer">
+            <button
+              type="button"
+              className="timeline-scene-header__btn ghost"
+              data-testid="timeline-viewer-fit"
+              title="Fit the Viewer back to the selected size"
+              aria-label="Fit the Viewer back to the selected size"
+              onClick={() => requestTimelineFocus({ target: "viewer", fitViewer: true })}
+            >
+              Fit
+            </button>
+            <label className="timeline-scene-header__select">
+              <span className="sr-only">Viewer Size</span>
+              <select
+                value={workspaceLayout.viewerPreset}
+                aria-label="Viewer Size"
+                data-testid="timeline-viewer-preset"
+                title="Viewer Size"
+                onChange={(e) =>
+                  requestTimelineFocus({ target: "viewer", viewerPreset: e.target.value as TimelineViewerPreset })
+                }
+              >
+                <option value="large">Large</option>
+                <option value="balanced">Balanced</option>
+                <option value="timeline_focus">Timeline Focus</option>
+              </select>
+            </label>
+            <label className="timeline-scene-header__select">
+              <span className="sr-only">Picture Shape</span>
+              <select
+                data-testid="timeline-viewer-aspect"
+                value={normalizeProductionAspect(selected.aspect_ratio)}
+                title="Picture shape for this scene"
+                aria-label="Picture shape"
+                onChange={(e) =>
+                  void api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }).then(afterMutation)
+                }
+              >
+                {PRODUCTION_ASPECTS.map((ratio) => (
+                  <option key={ratio} value={ratio}>
+                    {ratio}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className={`timeline-scene-header__btn ${!hideOverlay ? "primary" : "ghost"}`}
+              title={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
+              aria-label={hideOverlay ? "Show Viewer guides and status overlays" : "Hide Viewer guides and status overlays"}
+              aria-pressed={!hideOverlay}
+              onClick={() => setHideOverlay((v) => !v)}
+            >
+              Guides
+            </button>
+            <button
+              type="button"
+              className={`timeline-scene-header__btn ${pauseUpdates ? "primary" : "ghost"}`}
+              data-testid="timeline-viewer-pause"
+              title={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
+              aria-label={pauseUpdates ? "Resume Viewer updates" : "Pause Viewer updates"}
+              aria-pressed={pauseUpdates}
+              onClick={() => setPauseUpdates((v) => !v)}
+            >
+              {pauseUpdates ? "Resume viewer" : "Pause viewer"}
+            </button>
+            <button
+              type="button"
+              className="timeline-scene-header__btn ghost"
+              data-testid="timeline-reset-layout"
+              title="Reset pane widths and Viewer size. Does not change Timeline content."
+              aria-label="Reset pane widths and Viewer size"
+              onClick={resetWorkspaceLayout}
+            >
+              Reset Layout
+            </button>
+          </div>
           <WorkspaceFullscreenControls
             fs={workspaceFs}
             expandActive={viewportMode === "EXPANDED"}
@@ -676,7 +820,13 @@ export function TimelineEditorShell({
         </div>
       </header>
 
-      <div className="timeline-editor-shell__layout">
+      <div
+        className="timeline-editor-shell__layout"
+        ref={layoutRootRef}
+        style={{
+          gridTemplateColumns: `${workspaceLayout.leftWidth}px 8px minmax(0, 1fr) 8px ${workspaceLayout.rightWidth}px`,
+        }}
+      >
         <aside className="timeline-editor-shell__left">
           <div className="timeline-editor-shell__dock timeline-editor-shell__dock--scenes">
             <Timeline
@@ -697,6 +847,7 @@ export function TimelineEditorShell({
               onSelectAsset={(asset) => setLibraryPreviewId(asset.id)}
               onAddToTimeline={(asset) => void handleAddAssetToTimeline(asset)}
               onAddAsReference={(asset) => void handleAddAssetAsReference(asset)}
+              allowUpload={false}
             />
           </div>
           <div className="timeline-editor-shell__dock">
@@ -704,15 +855,27 @@ export function TimelineEditorShell({
               project={project}
               sceneId={selected.id}
               workflowTab="timeline"
+              reloadKey={reloadKey}
               onChange={() => void refresh()}
             />
           </div>
         </aside>
 
+        <div
+          className="timeline-editor-shell__splitter"
+          data-testid="timeline-splitter-left"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize scenes and library pane"
+          aria-valuenow={Math.round(workspaceLayout.leftWidth)}
+          tabIndex={0}
+          onPointerDown={startPaneResize("left")}
+          onKeyDown={onPaneKeyDown("left")}
+        />
+
         <main className="timeline-editor-shell__center">
           <TimelineWorkspaceStack
             projectId={project.id}
-            extraControls={previewExtraControls}
             monitor={
               <div id={TIMELINE_FOCUS_IDS.viewer} data-testid="timeline-focus-viewer" tabIndex={-1}>
                 <TimelinePreviewComposer
@@ -790,6 +953,18 @@ export function TimelineEditorShell({
             }
           />
         </main>
+
+        <div
+          className="timeline-editor-shell__splitter"
+          data-testid="timeline-splitter-right"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize inspector pane"
+          aria-valuenow={Math.round(workspaceLayout.rightWidth)}
+          tabIndex={0}
+          onPointerDown={startPaneResize("right")}
+          onKeyDown={onPaneKeyDown("right")}
+        />
 
         <aside className="timeline-editor-shell__right">
           <div className="timeline-editor-shell__tabs">
