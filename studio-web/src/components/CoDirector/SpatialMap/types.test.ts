@@ -8,8 +8,11 @@ import {
   PROP_RELATIONSHIPS,
   PROP_SLOTS,
   SLOT_COLORS,
+  PROP_BOUND_TO_APPROVED_MESSAGE,
+  PROP_BOUND_UNAPPROVED_MESSAGE,
   PROP_MAP_ONLY_SOURCES,
   PROP_MAP_ONLY_WARNING,
+  propPlacementIsBoundApproved,
   attachedSlotFromSlotIndex,
   characterTag,
   normalizePropAttachment,
@@ -239,3 +242,29 @@ describe("CDX-012 prop source classification (map-only honesty)", () => {
     expect(PROP_MAP_ONLY_WARNING).toContain("will not appear in Scene Creator");
   });
 });
+describe("Prop production binding states (Spatial Prop + ERS Production Binding)", () => {
+  it("reports a placement as bound-approved only when propId matches an approved project option", () => {
+    const options = [
+      { id: "78c5be96-cd03-4969-9f8b-655fcefd28ea", source: "project" },
+      { id: "library-asset-1", source: "library" },
+      { id: "char-prop-1", source: "character" },
+    ];
+    expect(propPlacementIsBoundApproved({ propId: "78c5be96-cd03-4969-9f8b-655fcefd28ea" }, options)).toBe(true);
+    expect(propPlacementIsBoundApproved({ propId: "missing-id" }, options)).toBe(false);
+    expect(propPlacementIsBoundApproved({ propId: "library-asset-1" }, options)).toBe(false);
+    expect(propPlacementIsBoundApproved({ propId: "char-prop-1" }, options)).toBe(false);
+    expect(propPlacementIsBoundApproved({ propId: null }, options)).toBe(false);
+    expect(propPlacementIsBoundApproved(null, options)).toBe(false);
+    expect(propPlacementIsBoundApproved(undefined, options)).toBe(false);
+  });
+
+  it("PROP_BOUND_TO_APPROVED_MESSAGE is creator-facing and positive", () => {
+    expect(PROP_BOUND_TO_APPROVED_MESSAGE).toContain("Bound to approved Project Prop");
+    expect(PROP_BOUND_TO_APPROVED_MESSAGE).toContain("included in Scene Creator shots");
+  });
+
+  it("PROP_BOUND_UNAPPROVED_MESSAGE is honest about non-approved project props", () => {
+    expect(PROP_BOUND_UNAPPROVED_MESSAGE).toContain("not approved for production");
+  });
+});
+

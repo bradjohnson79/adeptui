@@ -1581,7 +1581,13 @@ def _placed_project_prop_ids(db: Session, project_id: str, sheet_id: str = "") -
         entity = load_prop_entity_by_id(db, project_id, prop_id)
         if entity is None:
             continue
-        if not (entity.approved_asset_id or "").strip():
+        approved_asset_id = (entity.approved_asset_id or "").strip()
+        if not approved_asset_id:
+            continue
+        # CDX-015 hardening: the approved asset row must still exist. A prop
+        # whose approved asset was deleted (stale/deleted prop ID) is not
+        # production-truth and must not propagate a dangling reference.
+        if db.get(Asset, approved_asset_id) is None:
             continue
         ids.append(entity.id)
     return ids

@@ -74,6 +74,27 @@ def _seed_prop(project_id: str, prop_id: str, *, approved: bool = True) -> PropE
             approved_asset_id=f"approved-{prop_id}" if approved else None,
         )
         save_prop_entity(db, project_id, prop)
+        if approved:
+            # Mirror production: approval sets production_approval on a real
+            # asset row. The CDX-015 stale-asset hardening requires the row.
+            from app.db import Asset, Project
+
+            if db.get(Asset, f"approved-{prop_id}") is None:
+                if db.get(Project, project_id) is None:
+                    db.add(Project(id=project_id, name=f"project-{project_id[:8]}"))
+                    db.commit()
+                db.add(
+                    Asset(
+                        id=f"approved-{prop_id}",
+                        project_id=project_id,
+                        tag=prop_id,
+                        kind="image",
+                        filename=f"approved-{prop_id}.png",
+                        path=f"/fake/approved-{prop_id}.png",
+                        production_approval="approved",
+                    )
+                )
+                db.commit()
         return prop
     finally:
         db.close()

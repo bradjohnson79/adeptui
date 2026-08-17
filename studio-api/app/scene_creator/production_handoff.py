@@ -17,6 +17,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..db import Asset
+
 HANDOFF_CATEGORY = "scene_production_handoff"
 SELECTION_CATEGORY = "scene_spatial_profile_selection"
 SELECTION_KEY = "selected"
@@ -244,7 +246,13 @@ def _prop_ids_from_map(db: Session, project_id: str, document: Any) -> list[str]
         entity = load_prop_entity_by_id(db, project_id, pid)
         if entity is None:
             continue
-        if not (entity.approved_asset_id or "").strip():
+        approved_asset_id = (entity.approved_asset_id or "").strip()
+        if not approved_asset_id:
+            continue
+        # CDX-015 hardening: the approved asset row must still exist. A prop
+        # whose approved asset was deleted (stale/deleted prop ID) is not
+        # production-truth and must not propagate a dangling reference.
+        if db.get(Asset, approved_asset_id) is None:
             continue
         ids.append(entity.id)
     return ids

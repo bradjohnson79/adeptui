@@ -32,7 +32,7 @@ import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
 import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
-import { ERS_GENERATOR_OPTIONS } from "./ersGenerator";
+import { ERS_GENERATOR_OPTIONS, ersGeneratorOptionDisabled } from "./ersGenerator";
 import { useErsGeneration } from "./useErsGeneration";
 import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { CharacterInspector } from "./CharacterInspector";
@@ -834,6 +834,29 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   );
 
 
+
+  const handleBindProp = useCallback(
+    async (slot: SlotDef, option: SavedOption) => {
+      if (!document || !option.id || option.source !== "project") return;
+      const placement = placementForSlot(slot);
+      if (!placement || slot.kind !== "prop") return;
+      const propPlacement = placement as SpatialPropPlacement;
+      try {
+        const updated = await spatialMapApi.updateProp(projectId, document.id, propPlacement.id, {
+          propId: option.id,
+          category: "project",
+        });
+        setDocument(normalizeMapDocumentProps(updated));
+        setSelectedPlacementId(propPlacement.id);
+        setActiveSlot({ kind: "prop", index: slot.index });
+        setSelectedCameraId(null);
+        setOpMsg(null);
+      } catch (err) {
+        setOpMsg(err instanceof Error ? err.message : "Failed to bind Project Prop.");
+      }
+    },
+    [document, placementForSlot, projectId],
+  );
   const applyVisible = (doc: SpatialMapDocument, kind: 'character' | 'prop' | 'camera', id: string, next: boolean): SpatialMapDocument => {
     if (kind === 'camera') return { ...doc, cameras: doc.cameras.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
     if (kind === 'character') return { ...doc, characters: doc.characters.map((c) => (c.id === id ? { ...c, visible: next } : c)) };
@@ -1618,6 +1641,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                       }
                     }}
                     onAdd={(option) => void handleAddProp(slot, option)}
+                    onBindProp={(option) => void handleBindProp(slot, option)}
                     onPlace={() => placement && beginPlacement("place", "prop", placement.id, placement.label || placement.tag, slot.index)}
                     onMove={() => placement && beginPlacement("move", "prop", placement.id, placement.label || placement.tag, slot.index)}
                     onRemove={() => void handleSlotRemove(slot)}
@@ -1792,11 +1816,18 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               disabled={ers.busy}
               onChange={(e) => ers.setSelectedGenerator(e.target.value as typeof ers.selectedGenerator)}
             >
-              {ERS_GENERATOR_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
+              {ERS_GENERATOR_OPTIONS.map((opt) => {
+                const disabled = ersGeneratorOptionDisabled(
+                  opt.id,
+                  ers.qwenI2IReady,
+                  ers.gptI2IReady,
+                );
+                return (
+                  <option key={opt.id} value={opt.id} disabled={disabled}>
+                    {disabled ? opt.label + " — Unavailable for ERS" : opt.label}
+                  </option>
+                );
+              })}
             </select>
             {ers.generatorBlockReason ? (
               <p className="spatial-map__ers-generator-reason" data-testid="ers-generator-reason" role="status">

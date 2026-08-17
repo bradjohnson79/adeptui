@@ -26,6 +26,19 @@ export const ERS_GENERATOR_OPTIONS: ReadonlyArray<{ id: ErsGeneratorId; label: s
   { id: "gpt-image-2", label: "GPT Image 2 — API" },
 ];
 
+/** Whether an ERS generator option may be selected at all. A generator that
+ * cannot consume the source environment image (I2I) is surfaced as disabled at
+ * selection time — the late runtime message alone is not honest enough (§17). */
+export function ersGeneratorOptionDisabled(
+  id: ErsGeneratorId,
+  qwenI2IReady?: boolean | null,
+  gptI2IReady?: boolean | null,
+): boolean {
+  if (id === "qwen2512" && qwenI2IReady === false) return true;
+  if (id === "gpt-image-2" && gptI2IReady === false) return true;
+  return false;
+}
+
 export const QWEN_NOT_READY_MESSAGE =
   "Qwen Image is not ready. Choose GPT Image 2 or repair the local installation.";
 

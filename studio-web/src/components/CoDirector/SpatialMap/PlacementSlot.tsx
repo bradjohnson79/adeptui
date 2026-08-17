@@ -22,9 +22,12 @@ import {
 } from "./placementArm";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import {
+  PROP_BOUND_TO_APPROVED_MESSAGE,
+  PROP_BOUND_UNAPPROVED_MESSAGE,
   PROP_MAP_ONLY_WARNING,
   SLOT_COLORS,
   propOptionPropagatesToSceneCreator,
+  propPlacementIsBoundApproved,
   propSourceGroupLabel,
   type SavedOption,
   type SlotDef,
@@ -40,6 +43,7 @@ type Props = {
   placing: boolean;
   onSelect: () => void;
   onAdd: (option: SavedOption) => void;
+  onBindProp?: (option: SavedOption) => void;
   onPlace: () => void;
   onMove: () => void;
   onRemove: () => void;
@@ -61,6 +65,7 @@ export function PlacementSlot({
   placing,
   onSelect,
   onAdd,
+  onBindProp,
   onPlace,
   onMove,
   onRemove,
@@ -217,7 +222,73 @@ export function PlacementSlot({
                 Map only
               </span>
             ) : null}
+            {!isCharacter && propPlacement && propPlacement.propId && propPlacementIsBoundApproved(propPlacement, savedOptions) ? (
+              <span
+                className="spatial-map__bound-badge"
+                data-testid={`prop-bound-approved-${slot.index}`}
+              >
+                Bound
+              </span>
+            ) : null}
+            {!isCharacter && propPlacement && propPlacement.propId && !propPlacementIsBoundApproved(propPlacement, savedOptions) ? (
+              <span
+                className="spatial-map__maponly-badge"
+                data-testid={`prop-bound-unapproved-${slot.index}`}
+              >
+                Not approved
+              </span>
+            ) : null}
           </div>
+          {!isCharacter && propPlacement && !propPlacement.propId && onBindProp ? (
+            <div
+              className="spatial-map__slot-bind"
+              onClick={(e) => e.stopPropagation()}
+              data-testid={`prop-bind-${slot.index}`}
+            >
+              <p className="spatial-map__maponly-note" role="status" data-testid={`prop-maponly-note-${slot.index}`}>
+                {PROP_MAP_ONLY_WARNING}
+              </p>
+              <select
+                className="spatial-map__slot-select"
+                value=""
+                aria-label={`Bind ${displayName || "prop"} to an approved Project Prop`}
+                data-testid={`prop-bind-select-${slot.index}`}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (!id) return;
+                  const option = savedOptions.find((o) => o.id === id);
+                  if (option) onBindProp(option);
+                }}
+              >
+                <option value="">Select Saved Prop</option>
+                {savedOptions
+                  .filter((o) => (o.source || "library") === "project")
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          ) : null}
+          {!isCharacter && propPlacement && propPlacement.propId && propPlacementIsBoundApproved(propPlacement, savedOptions) ? (
+            <p
+              className="spatial-map__bound-note"
+              role="status"
+              data-testid={`prop-bound-note-${slot.index}`}
+            >
+              {PROP_BOUND_TO_APPROVED_MESSAGE}
+            </p>
+          ) : null}
+          {!isCharacter && propPlacement && propPlacement.propId && !propPlacementIsBoundApproved(propPlacement, savedOptions) ? (
+            <p
+              className="spatial-map__maponly-note"
+              role="status"
+              data-testid={`prop-unapproved-note-${slot.index}`}
+            >
+              {PROP_BOUND_UNAPPROVED_MESSAGE}
+            </p>
+          ) : null}
           {attached && propPlacement ? (
             <div className="spatial-map__entity-card-meta spatial-map__attach-tags" data-testid={`prop-attach-tags-${slot.index}`}>
               {characterSlotTag(propPlacement.attachedCharacterSlot) ? (

@@ -240,6 +240,27 @@ export const PROP_MAP_ONLY_WARNING =
   "Map-only placement — this prop will not appear in Scene Creator shots. " +
   "Bind an approved Project Prop to propagate into shots.";
 
+/** Positive state shown once a placement binds to an approved Project Prop. */
+export const PROP_BOUND_TO_APPROVED_MESSAGE =
+  "Bound to approved Project Prop — included in Scene Creator shots.";
+
+/** Positive state shown once a placement binds to a Project Prop that is not
+ * approved for production (still honest: it will not propagate). */
+export const PROP_BOUND_UNAPPROVED_MESSAGE =
+  "Project Prop selected, but it is not approved for production.";
+
+/** A placement resolves to a canonical approved Project Prop when it carries a
+ * propId that matches a project-source saved option (approved-only list). */
+export function propPlacementIsBoundApproved(
+  placement: Pick<SpatialPropPlacement, "propId"> | null | undefined,
+  savedOptions: ReadonlyArray<Pick<SavedOption, "id" | "source">>,
+): boolean {
+  if (!placement || !placement.propId) return false;
+  return savedOptions.some(
+    (o) => o.id === placement.propId && (o.source || "library") === "project",
+  );
+}
+
 export type SlotColorKey = "red" | "blue" | "orange" | "green" | "purple" | "brown" | "aqua" | "gray";
 
 export type SlotDef = {

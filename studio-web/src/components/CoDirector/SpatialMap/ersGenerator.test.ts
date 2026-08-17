@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   ERS_GENERATOR_DEFAULT,
   ERS_GENERATOR_OPTIONS,
@@ -14,6 +14,7 @@ import {
   QWEN_I2I_NOT_READY_MESSAGE,
   QWEN_NOT_READY_MESSAGE,
   buildErsStartContext,
+  ersGeneratorOptionDisabled,
   formatErsProvenance,
   generatorBlockReason,
   hasAuthoritativeEnvironmentSource,
@@ -148,5 +149,17 @@ describe("ERS generator selector", () => {
     expect(generatorBlockReason("qwen2512", true, true, true, true, false)).toBe(
       ERS_NO_SOURCE_MESSAGE,
     );
+  });
+
+  it("disables a generator at selection time when its I2I path is unavailable", () => {
+    // Qwen cannot be selected when local Qwen I2I is not ready (pixel-verified unavailable).
+    expect(ersGeneratorOptionDisabled("qwen2512", false, true)).toBe(true);
+    expect(ersGeneratorOptionDisabled("qwen2512", null, true)).toBe(false);
+    expect(ersGeneratorOptionDisabled("qwen2512", true, true)).toBe(false);
+    // GPT Image 2 is disabled only when its own I2I path is unavailable.
+    expect(ersGeneratorOptionDisabled("gpt-image-2", true, false)).toBe(true);
+    expect(ersGeneratorOptionDisabled("gpt-image-2", true, true)).toBe(false);
+    // Unknown readiness never disables (honest unknown -> keep selectable, block reason shows).
+    expect(ersGeneratorOptionDisabled("qwen2512", undefined, undefined)).toBe(false);
   });
 });

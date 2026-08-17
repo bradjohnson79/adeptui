@@ -61,7 +61,9 @@ export type ErsGenerationState = {
   zombie: boolean;
   selectedGenerator: ErsGeneratorId;
   qwenReady: boolean | null;
+  qwenI2IReady: boolean | null;
   gptReady: boolean | null;
+  gptI2IReady: boolean | null;
   generatorBlockReason: string | null;
   sheetId: string | null;
   semanticGate: ErsSemanticGate | null;
@@ -783,7 +785,9 @@ export function useErsGeneration({
     zombie,
     selectedGenerator,
     qwenReady,
+    qwenI2IReady,
     gptReady,
+    gptI2IReady,
     generatorBlockReason: blockReason,
     sheetId,
     semanticGate,
