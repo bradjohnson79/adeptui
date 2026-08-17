@@ -15,6 +15,7 @@ import {
   type TimelineClip,
 } from "../DirectorTracks";
 import { TimelineSettingsDrawer } from "./TimelineSettingsDrawer";
+import { registerTimelineCommand } from "../../timelineMaster/timelineHotkeys";
 
 function nid() {
   return Math.random().toString(36).slice(2, 10);
@@ -179,6 +180,7 @@ export function TimelineToolbar({
         text: "",
         weight: 1,
         region: null,
+        reference_binding_ids: [],
       };
       return { ...timeline, prompt_segments: [...segments, segment] };
     });
@@ -368,6 +370,13 @@ export function TimelineToolbar({
     });
   };
 
+  const setMode = async (next: "image_planning" | "video_finishing") => {
+    if (master?.mode === next) return;
+    await run(async () => {
+      await api.directorTimelineSetMode(projectId, scene.id, next);
+    });
+  };
+
   const preflight = async () => {
     setBusy(true);
     try {
@@ -388,6 +397,24 @@ export function TimelineToolbar({
       await api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
     });
   };
+
+  useEffect(() => {
+    const unsubscribers = [
+      registerTimelineCommand("generateScene", () => void generateScene("full")),
+      registerTimelineCommand("preflight", () => void preflight()),
+      registerTimelineCommand("retake", () => onOpenRetake?.()),
+      registerTimelineCommand("imagePlanning", () => void setMode("image_planning")),
+      registerTimelineCommand("videoFinishing", () => void setMode("video_finishing")),
+      registerTimelineCommand("zoomIn", () => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))),
+      registerTimelineCommand("zoomOut", () => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))),
+      registerTimelineCommand("toggleSnap", () => setSnap(!snap)),
+      registerTimelineCommand("addPrompt", () => void addPrompt()),
+      registerTimelineCommand("addLipSync", () => void addLipSyncTrack()),
+    ];
+    return () => {
+      unsubscribers.forEach((off) => off());
+    };
+  }, [addLipSyncTrack, addPrompt, generateScene, onOpenRetake, preflight, setMode, setSnap, setZoom, snap, zoom]);
 
   const modeLabel = master?.mode === "video_finishing" ? "Video Finishing" : "Image Planning";
   const modeTitle =
@@ -466,6 +493,7 @@ export function TimelineToolbar({
         type="button"
         title="Run Co-Director Preflight inspection for this Scene"
         aria-label="Run Co-Director Preflight inspection for this Scene"
+        data-testid="timeline-toolbar-preflight"
         onClick={() => void preflight()}
       >
         Preflight <Help id="preflight" />

@@ -77,6 +77,7 @@ export interface TimelinePromptSegment {
   executionStrategy: PromptStrategy;
   versionId: string;
   legacyPromptSegmentId?: string | null;
+  referenceBindingIds?: string[];
 }
 
 export interface ExecutionSnapshot {

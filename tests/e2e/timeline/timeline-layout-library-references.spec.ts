@@ -82,10 +82,10 @@ test.describe("Timeline layout + library references", () => {
     await expect(page.getByText("Upload image", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Upload video", { exact: true })).toHaveCount(0);
     await expect(page.getByText("Upload audio", { exact: true })).toHaveCount(0);
-    await expect(page.getByTestId("timeline-image-reference-track")).toBeVisible();
-    await expect(page.getByTestId("timeline-video-reference-track")).toBeVisible();
+    await expect(page.getByTestId("timeline-image-reference-track")).toHaveCount(0);
+    await expect(page.getByTestId("timeline-video-reference-track")).toHaveCount(0);
 
-    const layout = page.getByTestId("timeline-editor-shell").locator(".timeline-editor-shell__layout");
+    const layout = page.getByTestId("timeline-editor-shell").locator(".timeline-v2__body");
     const before = await layout.evaluate((el) => getComputedStyle(el).gridTemplateColumns);
     const left = page.getByTestId("timeline-splitter-left");
     const box = await left.boundingBox();
@@ -101,7 +101,7 @@ test.describe("Timeline layout + library references", () => {
     await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
     const afterReload = await page
       .getByTestId("timeline-editor-shell")
-      .locator(".timeline-editor-shell__layout")
+      .locator(".timeline-v2__body")
       .evaluate((el) => getComputedStyle(el).gridTemplateColumns);
     expect(afterReload).toEqual(afterDrag);
 
@@ -110,7 +110,7 @@ test.describe("Timeline layout + library references", () => {
       .poll(async () =>
         page
           .getByTestId("timeline-editor-shell")
-          .locator(".timeline-editor-shell__layout")
+          .locator(".timeline-v2__body")
           .evaluate((el) => getComputedStyle(el).gridTemplateColumns),
       )
       .not.toEqual(afterDrag);
@@ -156,8 +156,11 @@ test.describe("Timeline layout + library references", () => {
       }, { timeout: 20_000 })
       .toBeTruthy();
 
-    await page.getByTestId("track-add-video-reference").click();
-    const input = page.getByTestId("ref-token-input-videoReference").first();
+    await page.getByTestId("timeline-toolbar-prompt-add").click();
+    const promptClip = page.locator('[data-testid^="track-clip-prompt-"]').last();
+    await expect(promptClip).toBeVisible({ timeout: 20_000 });
+    await promptClip.click();
+    const input = page.getByTestId("ref-token-input-prompt");
     await expect(input).toBeVisible({ timeout: 20_000 });
     await input.fill(`*${binding!.alias || "Kor"}`);
     const row = page.getByTestId(`ref-token-row-${binding!.id}`);
@@ -169,8 +172,10 @@ test.describe("Timeline layout + library references", () => {
       .poll(async () => {
         const beforeDirector = await request.get(`${API}/api/projects/${PROJECT_ID}/scenes/${scene.id}/director`);
         const beforeTl = await beforeDirector.json();
-        const clip = (beforeTl.video_reference_clips || [])[0];
-        return clip?.reference_binding_id === binding!.id && clip?.asset_id === binding!.asset_id;
+        const seg = (beforeTl.prompt_segments || []).find((item: { reference_binding_ids?: string[] }) =>
+          (item.reference_binding_ids || []).includes(binding!.id),
+        );
+        return Boolean(seg);
       }, { timeout: 20_000 })
       .toBeTruthy();
 
@@ -178,8 +183,16 @@ test.describe("Timeline layout + library references", () => {
     const imageRow = page.getByTestId(`ref-token-row-${imageBinding!.id}`);
     await expect(imageRow).toBeVisible();
     await imageRow.click();
-    await expect(page.getByTestId("timeline-reference-type-error")).toBeVisible();
-    await expect(page.getByTestId("timeline-reference-type-error")).toContainText("Video Reference");
+    await expect
+      .poll(async () => {
+        const director = await request.get(`${API}/api/projects/${PROJECT_ID}/scenes/${scene.id}/director`);
+        const tl = await director.json();
+        const seg = (tl.prompt_segments || []).find((item: { reference_binding_ids?: string[] }) =>
+          (item.reference_binding_ids || []).includes(binding!.id),
+        );
+        return Boolean(seg?.reference_binding_ids?.includes(imageBinding!.id));
+      }, { timeout: 20_000 })
+      .toBeTruthy();
 
     await page.getByTestId(`reference-chip-${binding!.id}`).click();
     await page.getByTestId(`reference-alias-input-${binding!.id}`).fill("KorriDanceMotion");
@@ -191,10 +204,11 @@ test.describe("Timeline layout + library references", () => {
     await expect(page.getByTestId(`reference-chip-${binding!.id}`)).toContainText("KorriDanceMotion");
     const afterDirector = await request.get(`${API}/api/projects/${PROJECT_ID}/scenes/${scene.id}/director`);
     const afterTl = await afterDirector.json();
-    const afterClip = (afterTl.video_reference_clips || [])[0];
-    expect(afterClip?.reference_binding_id, "clip must key off binding id, not alias text").toBe(binding!.id);
-    expect(afterClip?.asset_id).toBe(binding!.asset_id);
-    await expect(page.getByTestId(`track-clip-video-ref-${afterClip.id}`)).toContainText("KorriDanceMotion");
+    const afterSeg = (afterTl.prompt_segments || []).find((item: { reference_binding_ids?: string[] }) =>
+      (item.reference_binding_ids || []).includes(binding!.id),
+    );
+    expect(afterSeg?.reference_binding_ids, "prompt must key off binding id, not alias text").toContain(binding!.id);
+    await expect(page.getByTestId(`prompt-token-summary-${afterSeg.id}`)).toContainText("KorriDanceMotion");
 
     const renamed = (await listedBindings()).find((item) => item.id === binding!.id);
     expect(renamed?.alias).toBe("KorriDanceMotion");
@@ -202,7 +216,12 @@ test.describe("Timeline layout + library references", () => {
 
     await page.getByTestId(`reference-remove-${binding!.id}`).click();
     await expect(page.getByTestId(`reference-chip-${binding!.id}`)).toHaveCount(0);
-    const stillLib = await request.get(`${API}/api/assets/${video.id}/file`);
-    expect(stillLib.status()).not.toBe(404);
+    const stillProject = await request.get(`${API}/api/projects/${PROJECT_ID}`);
+    expect(stillProject.ok(), await stillProject.text()).toBeTruthy();
+    const stillAssets = (await stillProject.json()).assets || [];
+    expect(
+      (Array.isArray(stillAssets) ? stillAssets : []).some((item: { id?: string }) => item.id === video.id),
+      "removing a Timeline reference must not delete the Library video",
+    ).toBeTruthy();
   });
 });

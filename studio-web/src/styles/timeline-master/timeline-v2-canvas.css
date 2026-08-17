@@ -1,0 +1,167 @@
+/* Timeline V2 canvas: ruler + track rows. Layout only. No generic element selectors. */
+
+.timeline-v2__canvas {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  margin: 0;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.timeline-v2__canvas-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.timeline-v2__board {
+  position: relative;
+  min-width: 100%;
+  background: linear-gradient(180deg, #0c121b, #090e16);
+  border: 1px solid rgba(124, 156, 188, 0.14);
+}
+
+.timeline-v2__ruler,
+.timeline-v2__playhead-rail,
+.timeline-v2__track-row {
+  display: grid;
+  grid-template-columns: var(--timeline-track-label-width, 132px) minmax(0, 1fr);
+  min-height: var(--track-row-height, 56px);
+  direction: ltr;
+}
+
+.timeline-v2__ruler {
+  position: sticky;
+  top: 0;
+  z-index: 7;
+  min-height: 28px;
+  backdrop-filter: blur(8px);
+  color: var(--timeline-v2-track-label-muted, rgba(225, 232, 242, 0.52));
+}
+
+.timeline-v2__playhead-rail {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--timeline-track-label-width, 132px) minmax(0, 1fr);
+  min-height: 0;
+  pointer-events: none;
+  z-index: 5;
+  direction: ltr;
+}
+
+.timeline-v2__ruler-gutter,
+.timeline-v2__playhead-gutter,
+.timeline-v2__track-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--timeline-v2-track-label-bg, rgba(8, 12, 19, 0.96));
+  border-right: 1px solid rgba(122, 153, 182, 0.16);
+}
+
+.timeline-v2__track-label {
+  display: flex;
+  align-items: center;
+  padding-inline: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--timeline-v2-track-label-color);
+  opacity: 1;
+  transform: none;
+  filter: none;
+  mix-blend-mode: normal;
+  text-shadow: none;
+  -webkit-text-fill-color: var(--timeline-v2-track-label-color);
+  min-width: 0;
+}
+
+.timeline-v2__track-label-text {
+  color: var(--timeline-v2-track-label-color);
+  -webkit-text-fill-color: var(--timeline-v2-track-label-color);
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.timeline-v2__track-label-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-inline-start: auto;
+}
+
+.timeline-v2__track-label-icon {
+  color: var(--timeline-v2-track-label-muted);
+  opacity: 1;
+  display: inline-flex;
+}
+
+.timeline-v2__track-label-add {
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(122, 153, 182, 0.22);
+  background: rgba(45, 212, 191, 0.1);
+  color: var(--timeline-v2-track-label-color);
+  cursor: pointer;
+}
+
+.timeline-v2__track-content {
+  min-width: 0;
+  min-height: var(--track-row-height, 56px);
+  position: relative;
+}
+
+.timeline-v2__ruler-lane,
+.timeline-v2__playhead-lane {
+  min-width: 0;
+  position: relative;
+}
+
+.timeline-v2__ruler-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.timeline-v2__ruler-tick--origin {
+  transform: none;
+}
+
+.timeline-v2__track-row--batch {
+  --track-row-height: 48px;
+}
+
+.timeline-v2__track-row--prompt {
+  --track-row-height: 64px;
+}
+
+.timeline-v2__track-row--audio {
+  --track-row-height: 44px;
+}
+
+.timeline-v2__track-row--lipsync {
+  --track-row-height: 52px;
+}
+
+.timeline-v2__clip-tokens {
+  color: var(--timeline-v2-track-label-color);
+  font-weight: 600;
+}
+
+.timeline-v2__clip-instruction {
+  color: var(--timeline-v2-track-label-muted);
+}

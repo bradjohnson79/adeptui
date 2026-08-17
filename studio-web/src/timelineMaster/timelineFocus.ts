@@ -22,7 +22,7 @@ export type TimelineFocusRequest = {
   playheadSec?: number;
   findingCode?: string;
   jobId?: string;
-  openRightTab?: "inspector" | "codirector";
+  openRightTab?: "inspector" | "codirector" | "hotkeys";
   viewerPreset?: "large" | "balanced" | "timeline_focus";
   fullscreen?: boolean;
   zoom?: number;

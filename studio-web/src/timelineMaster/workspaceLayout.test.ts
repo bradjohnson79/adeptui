@@ -57,7 +57,7 @@ test("sidebar widths clamp to pane limits", () => {
 });
 
 test("sidebar widths keep a usable center column", () => {
-  const next = clampSidebarWidths(420, 480, 1200);
+  const next = clampSidebarWidths(440, 500, 1200);
   assert.ok(next.leftWidth + next.rightWidth <= 1200 - CENTER_PANE_MIN);
   assert.ok(next.leftWidth >= LEFT_PANE_MIN);
   assert.ok(next.rightWidth >= RIGHT_PANE_MIN);

@@ -77,7 +77,8 @@ test.describe("@critical @beta timeline draft-first aspect video-ref UI", () => 
 
     await openTimeline(page, project.id);
     await expect(page.getByTestId("timeline-viewer-aspect")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("timeline-video-reference-track")).toBeVisible();
+    await expect(page.getByTestId("timeline-video-reference-track")).toHaveCount(0);
+    await expect(page.getByTestId("timeline-image-reference-track")).toHaveCount(0);
 
     const batchChip = page.getByTestId(`timeline-batch-${batchId}`);
     if (await batchChip.count()) {

@@ -1,6 +1,8 @@
 # Timeline Layout + Library References — Certification
 
-**Status:** Governing document for this milestone.  
+> **Historical.** Superseded for Timeline chrome/layout by `docs/release-gate/timeline/TIMELINE_V2_LAYOUT_REBUILD_CERTIFICATION.md`. Keep this document for the Library references / alias-rename product gate; do not cite it as current Timeline layout truth.
+
+**Status:** Historical for layout; still valid for Library references behavior.  
 **Date:** 2026-08-16  
 **Project:** Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278`  
 **Branch:** `beta`  

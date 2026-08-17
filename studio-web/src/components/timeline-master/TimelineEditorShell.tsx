@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
@@ -16,6 +16,10 @@ import {
   clampSidebarWidths,
   loadTimelineWorkspaceLayout,
   saveTimelineWorkspaceLayout,
+  LEFT_PANE_MIN,
+  LEFT_PANE_MAX,
+  RIGHT_PANE_MIN,
+  RIGHT_PANE_MAX,
   TIMELINE_LAYOUT_EVENT,
   type TimelineViewerPreset,
   type TimelineWorkspaceLayout,
@@ -27,6 +31,13 @@ import {
   type WorkspaceViewportMode,
 } from "../../workspace/fullscreen";
 import { useDirectorSelection } from "../DirectorSelectionContext";
+import {
+  isEditableTarget,
+  loadHotkeys,
+  matchHotkey,
+  registerTimelineCommand,
+  runTimelineCommand,
+} from "../../timelineMaster/timelineHotkeys";
 import { DirectorTracks, lipSyncTrackHasContent, normalizeLipSyncTracks, type DirectorTimeline } from "../DirectorTracks";
 import { TimelinePreviewComposer } from "./TimelinePreviewComposer";
 import { Timeline } from "../Timeline";
@@ -37,11 +48,14 @@ import { TimelineWorkspaceStack } from "./TimelineWorkspaceStack";
 import { TimelineToolbar } from "./TimelineToolbar";
 import { SceneStatusStrip } from "./SceneStatusStrip";
 import { TimelineInspector } from "./TimelineInspector";
+import { TimelineHotKeysPane } from "./TimelineHotKeysPane";
 import { CompactRenderQueue } from "./CompactRenderQueue";
 import { TimelineGeneratorBanner } from "./TimelineGeneratorBanner";
 import { TimelineInpaintWorkspace } from "./TimelineInpaintWorkspace";
 import { TimelineRetakeDrawer } from "./TimelineRetakeDrawer";
 import "../../styles/timeline-master/timeline-editor-shell.css";
+import "../../styles/timeline-master/timeline-v2-shell.css";
+import "../../styles/timeline-master/timeline-v2-canvas.css";
 
 function generatorLabel(engine: string) {
   if (engine === "auto") return "Auto";
@@ -51,14 +65,6 @@ function generatorLabel(engine: string) {
   if (engine === "hunyuan13b") return "HunyuanVideo 13B";
   if (engine === "wan") return "WAN 2.2";
   return engine.replace(/^fal_/, "").replace(/_/g, " ");
-}
-
-function isEditableTarget(target: EventTarget | null) {
-  const el = target as HTMLElement | null;
-  if (!el) return false;
-  if (el.isContentEditable) return true;
-  const tag = el.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(el.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function batchHasContent(batch: BatchBlock) {
@@ -97,7 +103,7 @@ export function TimelineEditorShell({
   const [reloadKey, setReloadKey] = useState(0);
   const [preflightSummary, setPreflightSummary] = useState(() => "");
   const [preflightBlockingCount, setPreflightBlockingCount] = useState(0);
-  const [rightTab, setRightTab] = useState<"inspector" | "codirector">("inspector");
+  const [rightTab, setRightTab] = useState<"inspector" | "codirector" | "hotkeys">("inspector");
   const [undoStack, setUndoStack] = useState<DirectorTimeline[]>([]);
   const [redoStack, setRedoStack] = useState<DirectorTimeline[]>([]);
   const [focusFinding, setFocusFinding] = useState<string | null>(null);
@@ -186,11 +192,11 @@ export function TimelineEditorShell({
     event.preventDefault();
     const containerWidth = layoutRootRef.current?.getBoundingClientRect().width || window.innerWidth;
     if (event.key === "Home") {
-      commitSidebarWidths(side === "left" ? 200 : workspaceLayout.leftWidth, side === "right" ? 240 : workspaceLayout.rightWidth, containerWidth);
+      commitSidebarWidths(side === "left" ? LEFT_PANE_MIN : workspaceLayout.leftWidth, side === "right" ? RIGHT_PANE_MIN : workspaceLayout.rightWidth, containerWidth);
       return;
     }
     if (event.key === "End") {
-      commitSidebarWidths(side === "left" ? 420 : workspaceLayout.leftWidth, side === "right" ? 480 : workspaceLayout.rightWidth, containerWidth);
+      commitSidebarWidths(side === "left" ? LEFT_PANE_MAX : workspaceLayout.leftWidth, side === "right" ? RIGHT_PANE_MAX : workspaceLayout.rightWidth, containerWidth);
       return;
     }
     const delta = event.key === "ArrowRight" ? step : -step;
@@ -520,49 +526,85 @@ export function TimelineEditorShell({
     setSelection({ kind: "scene", id: selected.id });
   }, [afterMutation, master, mutateTimeline, project.id, selected, selection.id, selection.kind, selection.trackId, setSelection]);
 
+  const duplicateSelection = useCallback(() => {
+    if (!selected || !selection.kind || selection.kind === "scene") return;
+    void mutateTimeline((current) => {
+      const dup = <T extends { id: string; start: number }>(items: T[]): T[] => {
+        const item = items.find((c) => c.id === selection.id);
+        if (!item) return items;
+        return [...items, { ...item, id: Math.random().toString(36).slice(2, 10), start: item.start + 0.25 }];
+      };
+      if (selection.kind === "imageClip") return { ...current, image_clips: dup(current.image_clips || []) };
+      if (selection.kind === "videoClip") return { ...current, video_clips: dup(current.video_clips || []) };
+      if (selection.kind === "videoReferenceClip") return { ...current, video_reference_clips: dup(current.video_reference_clips || []) };
+      if (selection.kind === "imageReferenceClip") return { ...current, image_reference_clips: dup(current.image_reference_clips || []) };
+      if (selection.kind === "promptSeg") return { ...current, prompt_segments: dup(current.prompt_segments || []) };
+      if (selection.kind === "audio") return { ...current, audio_clips: dup(current.audio_clips || []) };
+      if (selection.kind === "sfx") return { ...current, sfx_clips: dup(current.sfx_clips || []) };
+      if (selection.kind === "camera") return { ...current, camera_clips: dup(current.camera_clips || []) };
+      return current;
+    });
+  }, [mutateTimeline, selected, selection.id, selection.kind]);
+
+  useEffect(() => {
+    const duration = selected?.duration_sec || 5;
+    const unsubscribers = [
+      registerTimelineCommand("undo", () => void applyHistorySnapshot("undo")),
+      registerTimelineCommand("redo", () => void applyHistorySnapshot("redo")),
+      registerTimelineCommand("deleteClip", () => {
+        if (!selection.kind || selection.kind === "scene") return;
+        void deleteSelection();
+      }),
+      registerTimelineCommand("deleteClipBackspace", () => {
+        if (!selection.kind || selection.kind === "scene") return;
+        void deleteSelection();
+      }),
+      registerTimelineCommand("duplicateClip", () => duplicateSelection()),
+      registerTimelineCommand("playPause", () => setPauseUpdates((v) => !v)),
+      registerTimelineCommand("fullscreen", () => void workspaceFs.toggleFullscreen()),
+      registerTimelineCommand("openHotkeys", () => setRightTab("hotkeys")),
+      registerTimelineCommand("escape", () => {
+        if (retakeOpen) {
+          setRetakeOpen(false);
+          return;
+        }
+        if (inpaintOpen) {
+          setInpaintOpen(false);
+          return;
+        }
+        if (selected) setSelection({ kind: "scene", id: selected.id });
+      }),
+      registerTimelineCommand("playheadLeft", () => setPlayheadSec((t) => Math.max(0, t - 0.1))),
+      registerTimelineCommand("playheadRight", () => setPlayheadSec((t) => Math.min(duration, t + 0.1))),
+      registerTimelineCommand("playheadLeftLarge", () => setPlayheadSec((t) => Math.max(0, t - 1))),
+      registerTimelineCommand("playheadRightLarge", () => setPlayheadSec((t) => Math.min(duration, t + 1))),
+    ];
+    return () => {
+      unsubscribers.forEach((off) => off());
+    };
+  }, [
+    applyHistorySnapshot,
+    deleteSelection,
+    duplicateSelection,
+    inpaintOpen,
+    retakeOpen,
+    selected,
+    selection.kind,
+    setSelection,
+    workspaceFs,
+  ]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditableTarget(e.target)) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault();
-        void applyHistorySnapshot("undo");
-        return;
-      }
-      if ((mod && e.key.toLowerCase() === "y") || (mod && e.shiftKey && e.key.toLowerCase() === "z")) {
-        e.preventDefault();
-        void applyHistorySnapshot("redo");
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        if (!selected || !selection.kind || selection.kind === "scene") return;
-        void mutateTimeline((current) => {
-          const dup = <T extends { id: string; start: number }>(items: T[]): T[] => {
-            const item = items.find((c) => c.id === selection.id);
-            if (!item) return items;
-            return [...items, { ...item, id: Math.random().toString(36).slice(2, 10), start: item.start + 0.25 }];
-          };
-          if (selection.kind === "imageClip") return { ...current, image_clips: dup(current.image_clips || []) };
-          if (selection.kind === "videoClip") return { ...current, video_clips: dup(current.video_clips || []) };
-          if (selection.kind === "videoReferenceClip") return { ...current, video_reference_clips: dup(current.video_reference_clips || []) };
-          if (selection.kind === "imageReferenceClip") return { ...current, image_reference_clips: dup(current.image_reference_clips || []) };
-          if (selection.kind === "promptSeg") return { ...current, prompt_segments: dup(current.prompt_segments || []) };
-          if (selection.kind === "audio") return { ...current, audio_clips: dup(current.audio_clips || []) };
-          if (selection.kind === "sfx") return { ...current, sfx_clips: dup(current.sfx_clips || []) };
-          if (selection.kind === "camera") return { ...current, camera_clips: dup(current.camera_clips || []) };
-          return current;
-        });
-        return;
-      }
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (!selection.kind || selection.kind === "scene") return;
+      const hit = matchHotkey(e, loadHotkeys());
+      if (!hit) return;
       e.preventDefault();
-      void deleteSelection();
+      runTimelineCommand(hit.actionId);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [applyHistorySnapshot, deleteSelection, mutateTimeline, selected, selection.id, selection.kind]);
+  }, []);
 
   const handleAddAssetToTimeline = useCallback(
     async (asset: Asset) => {
@@ -632,24 +674,30 @@ export function TimelineEditorShell({
   return (
     <div
       ref={workspaceFs.containerRef}
-      className={`timeline-editor-shell${viewportMode === "EXPANDED" ? " is-expanded-viewport" : ""}`}
+      className="timeline-v2"
       data-testid="timeline-editor-shell"
       data-viewport-mode={viewportMode}
+      style={
+        {
+          "--timeline-left-width": `${workspaceLayout.leftWidth}px`,
+          "--timeline-right-width": `${workspaceLayout.rightWidth}px`,
+        } as CSSProperties
+      }
     >
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
       <TimelineGeneratorBanner />
-      <header className="timeline-scene-header panel" data-testid="timeline-scene-header">
-        <div className="timeline-scene-header__identity">
-          <h2>{selected.name}</h2>
-          <p className="scene-meta">
+      <header className="timeline-v2__header" data-testid="timeline-scene-header">
+        <div className="timeline-v2__header-identity">
+          <h2 className="timeline-v2__header-title">{selected.name}</h2>
+          <p className="timeline-v2__header-meta">
             {generatorLabel(selected.engine)} · {t("timeline:durationSec", { seconds: selected.duration_sec.toFixed(1) })} · {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
           </p>
         </div>
-        <div className="timeline-scene-header__actions">
-          <div className="timeline-scene-header__viewer" data-testid="timeline-scene-header-viewer">
+        <div className="timeline-v2__header-actions">
+          <div className="timeline-v2__header-viewer" data-testid="timeline-scene-header-viewer">
             <button
               type="button"
-              className="timeline-scene-header__btn ghost"
+              className="timeline-v2__header-btn ghost"
               data-testid="timeline-viewer-fit"
               title={t("timeline:fitTitle")}
               aria-label={t("timeline:fitTitle")}
@@ -657,9 +705,10 @@ export function TimelineEditorShell({
             >
               {t("timeline:fit")}
             </button>
-            <label className="timeline-scene-header__select">
+            <label className="timeline-v2__header-select">
               <span className="sr-only">{t("timeline:viewerSize")}</span>
               <select
+                className="timeline-v2__header-select-control"
                 value={workspaceLayout.viewerPreset}
                 aria-label={t("timeline:viewerSize")}
                 data-testid="timeline-viewer-preset"
@@ -673,9 +722,10 @@ export function TimelineEditorShell({
                 <option value="timeline_focus">{t("timeline:viewerSizeTimelineFocus")}</option>
               </select>
             </label>
-            <label className="timeline-scene-header__select">
+            <label className="timeline-v2__header-select">
               <span className="sr-only">{t("timeline:pictureShape")}</span>
               <select
+                className="timeline-v2__header-select-control"
                 data-testid="timeline-viewer-aspect"
                 value={normalizeProductionAspect(selected.aspect_ratio)}
                 title={t("timeline:pictureShapeTitle")}
@@ -693,7 +743,7 @@ export function TimelineEditorShell({
             </label>
             <button
               type="button"
-              className={`timeline-scene-header__btn ${!hideOverlay ? "primary" : "ghost"}`}
+              className={`timeline-v2__header-btn ${!hideOverlay ? "primary" : "ghost"}`}
               title={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-label={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-pressed={!hideOverlay}
@@ -703,7 +753,7 @@ export function TimelineEditorShell({
             </button>
             <button
               type="button"
-              className={`timeline-scene-header__btn ${pauseUpdates ? "primary" : "ghost"}`}
+              className={`timeline-v2__header-btn ${pauseUpdates ? "primary" : "ghost"}`}
               data-testid="timeline-viewer-pause"
               title={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
               aria-label={pauseUpdates ? t("timeline:resumeViewerTitle") : t("timeline:pauseViewerTitle")}
@@ -714,7 +764,7 @@ export function TimelineEditorShell({
             </button>
             <button
               type="button"
-              className="timeline-scene-header__btn ghost"
+              className="timeline-v2__header-btn ghost"
               data-testid="timeline-reset-layout"
               title={t("timeline:resetLayoutTitle")}
               aria-label={t("timeline:resetLayout")}
@@ -725,12 +775,11 @@ export function TimelineEditorShell({
           </div>
           <WorkspaceFullscreenControls
             fs={workspaceFs}
-            expandActive={viewportMode === "EXPANDED"}
-            onExpand={() => setViewportMode((m) => (m === "EXPANDED" ? "STANDARD" : "EXPANDED"))}
+            showExpand={false}
           />
           <button
             type="button"
-            className={`timeline-scene-header__btn ${master?.mode === "image_planning" ? "primary" : "ghost"}`}
+            className={`timeline-v2__header-btn ${master?.mode === "image_planning" ? "primary" : "ghost"}`}
             title={t("timeline:imagePlanningTitle")}
             aria-label={t("timeline:imagePlanningTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "image_planning").then(afterMutation)}
@@ -739,7 +788,7 @@ export function TimelineEditorShell({
           </button>
           <button
             type="button"
-            className={`timeline-scene-header__btn ${master?.mode === "video_finishing" ? "primary" : "ghost"}`}
+            className={`timeline-v2__header-btn ${master?.mode === "video_finishing" ? "primary" : "ghost"}`}
             title={t("timeline:videoFinishingTitle")}
             aria-label={t("timeline:videoFinishingTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "video_finishing").then(afterMutation)}
@@ -748,15 +797,12 @@ export function TimelineEditorShell({
           </button>
           <button
             type="button"
-            className="timeline-scene-header__btn"
+            className="timeline-v2__header-btn"
             title={t("timeline:preflightTitle")}
             aria-label={t("timeline:preflightTitle")}
+            data-testid="timeline-header-preflight"
             onClick={() =>
               void api.directorTimelinePreflight(project.id, selected.id).then((result) => {
-                // Surface severity/code from findings instead of just a count. Block only
-                // on blocking severities (error/critical); warnings/advisories do not block
-                // generation. This consumes the refined preflight contract directly rather
-                // than reconstructing readiness from a count.
                 const blocking = result.findings.filter((f) =>
                   ["error", "critical", "blocker"].includes(String(f.severity || "").toLowerCase()),
                 );
@@ -787,13 +833,14 @@ export function TimelineEditorShell({
           </button>
           <button
             type="button"
-            className="timeline-scene-header__btn primary"
+            className="timeline-v2__header-btn primary"
             title={
               preflightBlockingCount > 0
                 ? t("timeline:generateSceneBlocked", { count: preflightBlockingCount })
                 : t("timeline:generateSceneTitle")
             }
             aria-label={t("timeline:generateSceneTitle")}
+            data-testid="timeline-header-generate"
             disabled={preflightBlockingCount > 0}
             onClick={() => void api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }).then(afterMutation)}
           >
@@ -801,7 +848,7 @@ export function TimelineEditorShell({
           </button>
           <button
             type="button"
-            className="timeline-scene-header__btn ghost"
+            className="timeline-v2__header-btn ghost"
             title={t("timeline:stopJobsTitle")}
             aria-label={t("timeline:stopJobsTitle")}
             onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "stop_remaining_scene_jobs" }).then(afterMutation)}
@@ -810,7 +857,7 @@ export function TimelineEditorShell({
           </button>
           <button
             type="button"
-            className="timeline-scene-header__btn ghost"
+            className="timeline-v2__header-btn ghost"
             title={t("timeline:resumeTitle")}
             aria-label={t("timeline:resumeTitle")}
             onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }).then(afterMutation)}
@@ -820,15 +867,9 @@ export function TimelineEditorShell({
         </div>
       </header>
 
-      <div
-        className="timeline-editor-shell__layout"
-        ref={layoutRootRef}
-        style={{
-          gridTemplateColumns: `${workspaceLayout.leftWidth}px 8px minmax(0, 1fr) 8px ${workspaceLayout.rightWidth}px`,
-        }}
-      >
-        <aside className="timeline-editor-shell__left">
-          <div className="timeline-editor-shell__dock timeline-editor-shell__dock--scenes">
+      <div className="timeline-v2__body" ref={layoutRootRef}>
+        <aside className="timeline-v2__left">
+          <div className="timeline-v2__dock timeline-v2__dock--scenes">
             <Timeline
               project={project}
               selectedId={selected.id}
@@ -839,7 +880,7 @@ export function TimelineEditorShell({
               onChange={() => void refresh()}
             />
           </div>
-          <div className="timeline-editor-shell__dock">
+          <div className="timeline-v2__dock timeline-v2__dock--library">
             <AssetTray
               project={project}
               onChange={() => void refresh()}
@@ -850,7 +891,7 @@ export function TimelineEditorShell({
               allowUpload={false}
             />
           </div>
-          <div className="timeline-editor-shell__dock">
+          <div className="timeline-v2__dock timeline-v2__dock--references">
             <ReferencesPane
               project={project}
               sceneId={selected.id}
@@ -862,7 +903,7 @@ export function TimelineEditorShell({
         </aside>
 
         <div
-          className="timeline-editor-shell__splitter"
+          className="timeline-v2__splitter"
           data-testid="timeline-splitter-left"
           role="separator"
           aria-orientation="vertical"
@@ -873,7 +914,7 @@ export function TimelineEditorShell({
           onKeyDown={onPaneKeyDown("left")}
         />
 
-        <main className="timeline-editor-shell__center">
+        <main className="timeline-v2__main">
           <TimelineWorkspaceStack
             projectId={project.id}
             monitor={
@@ -900,7 +941,7 @@ export function TimelineEditorShell({
               </div>
             }
             timeline={
-              <div className="timeline-editor-shell__tracks">
+              <div className="timeline-v2__tracks">
                 <SceneStatusStrip projectId={project.id} />
                 <TimelineToolbar
                   projectId={project.id}
@@ -955,7 +996,7 @@ export function TimelineEditorShell({
         </main>
 
         <div
-          className="timeline-editor-shell__splitter"
+          className="timeline-v2__splitter"
           data-testid="timeline-splitter-right"
           role="separator"
           aria-orientation="vertical"
@@ -966,11 +1007,12 @@ export function TimelineEditorShell({
           onKeyDown={onPaneKeyDown("right")}
         />
 
-        <aside className="timeline-editor-shell__right">
-          <div className="timeline-editor-shell__tabs">
+        <aside className="timeline-v2__right">
+          <div className="timeline-v2__tabs">
             <button
               type="button"
               className={rightTab === "inspector" ? "primary" : "ghost"}
+              data-testid="timeline-tab-inspector"
               title={t("timeline:showInspector")}
               aria-label={t("timeline:showInspector")}
               onClick={() => setRightTab("inspector")}
@@ -980,44 +1022,59 @@ export function TimelineEditorShell({
             <button
               type="button"
               className={rightTab === "codirector" ? "primary" : "ghost"}
+              data-testid="timeline-tab-codirector"
               title={t("timeline:showCoDirector")}
               aria-label={t("timeline:showCoDirector")}
               onClick={() => setRightTab("codirector")}
             >
               {t("timeline:coDirector")}
             </button>
+            <button
+              type="button"
+              className={rightTab === "hotkeys" ? "primary" : "ghost"}
+              data-testid="timeline-tab-hotkeys"
+              title={t("timeline:showHotKeys")}
+              aria-label={t("timeline:showHotKeys")}
+              onClick={() => setRightTab("hotkeys")}
+            >
+              {t("timeline:hotKeys")}
+            </button>
           </div>
-          {rightTab === "inspector" ? (
-            <TimelineInspector
-              project={project}
-              scene={selected}
-              master={master}
-              reloadKey={reloadKey}
-              preflightSummary={preflightSummary}
-              focusFinding={focusFinding}
-              onRefresh={afterMutation}
-              mutateTimeline={mutateTimeline}
-            />
-          ) : (
-            <section className="panel timeline-codirector-placeholder" data-testid="timeline-codirector-rail">
-              <div className="timeline-inspector__eyebrow">{t("timeline:coDirector")}</div>
-              <p className="scene-meta">{t("timeline:coDirectorHint")}</p>
-              <button
-                type="button"
-                className="primary"
-                title={t("timeline:openCoDirectorTitle")}
-                aria-label={t("timeline:openCoDirectorTitle")}
-                onClick={() =>
-                  openCoDirector(
-                    `Focus the Scene Prompt for “${selected.name}” and explain Scene Prompt vs Timed Instructions. Then run Preflight.`,
-                  )
-                }
-              >
-                {t("timeline:openCoDirector")}
-              </button>
-            </section>
-          )}
-          <CompactRenderQueue projectId={project.id} sceneId={selected.id} onChange={afterMutation} />
+          <div className="timeline-v2__right-content">
+            {rightTab === "inspector" ? (
+              <TimelineInspector
+                project={project}
+                scene={selected}
+                master={master}
+                reloadKey={reloadKey}
+                preflightSummary={preflightSummary}
+                focusFinding={focusFinding}
+                onRefresh={afterMutation}
+                mutateTimeline={mutateTimeline}
+              />
+            ) : rightTab === "hotkeys" ? (
+              <TimelineHotKeysPane />
+            ) : (
+              <section className="panel timeline-codirector-placeholder" data-testid="timeline-codirector-rail">
+                <div className="timeline-inspector__eyebrow">{t("timeline:coDirector")}</div>
+                <p className="scene-meta">{t("timeline:coDirectorHint")}</p>
+                <button
+                  type="button"
+                  className="primary"
+                  title={t("timeline:openCoDirectorTitle")}
+                  aria-label={t("timeline:openCoDirectorTitle")}
+                  onClick={() =>
+                    openCoDirector(
+                      `Focus the Scene Prompt for “${selected.name}” and explain Scene Prompt vs Timed Instructions. Then run Preflight.`,
+                    )
+                  }
+                >
+                  {t("timeline:openCoDirector")}
+                </button>
+              </section>
+            )}
+            <CompactRenderQueue projectId={project.id} sceneId={selected.id} onChange={afterMutation} />
+          </div>
         </aside>
       </div>
     </div>

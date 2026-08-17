@@ -20,6 +20,14 @@ import {
 } from "../DirectorTracks";
 import { HelpTip } from "../HelpTip";
 import { PromptIntelligencePanel } from "../CoDirector/PromptIntelligencePanel";
+import { PromptReferenceField } from "../sceneReferences/PromptReferenceField";
+import { ReferenceTokenAutocomplete } from "../sceneReferences/ReferenceTokenAutocomplete";
+import {
+  countBindingsByKind,
+  displayToken,
+  isRealBindingId,
+  type ReferenceBindingView,
+} from "../../sceneReferences/referenceTokens";
 import {
   SearchableGroupedSelect,
   type SearchableGroupedSelectGroup,
@@ -169,6 +177,9 @@ export function TimelineInspector({
   const [draftMode, setDraftMode] = useState(true);
   const [showProjectStyle, setShowProjectStyle] = useState(false);
   const [scenePromptDraftBase, setScenePromptDraftBase] = useState(scene.prompt || "");
+  const [bindings, setBindings] = useState<ReferenceBindingView[]>([]);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+  const [speakerDraft, setSpeakerDraft] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -190,6 +201,45 @@ export function TimelineInspector({
   useEffect(() => {
     setScenePromptDraftBase(scene.prompt || "");
   }, [scene.id, scene.prompt]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      api.sceneReferences.list(project.id, { scopeType: "project", scopeId: project.id }),
+      api.listCharacterProfiles(project.id).catch(() => ({ items: [] as { id: string; name?: string }[] })),
+    ])
+      .then(([res, characters]) => {
+        if (cancelled) return;
+        const items = (res.items || []) as ReferenceBindingView[];
+        const boundIdentities = new Set(items.map((item) => item.identity_id).filter(Boolean));
+        const extra: ReferenceBindingView[] = [];
+        for (const profile of characters.items || []) {
+          if (boundIdentities.has(profile.id)) continue;
+          const name = String(profile.name || "").trim();
+          if (!name) continue;
+          const asset =
+            project.assets.find((a) => (a.tag || "").toLowerCase() === name.toLowerCase() && a.kind === "image") ||
+            project.assets.find((a) => a.kind === "image");
+          extra.push({
+            id: `character:${profile.id}`,
+            asset_id: asset?.id || "",
+            identity_id: profile.id,
+            alias: name.replace(/\s+/g, ""),
+            media_kind: "entity",
+            reference_type: "character",
+            display_token: `@${name.replace(/\s+/g, "")}`,
+            asset_name: name,
+          });
+        }
+        setBindings([...items, ...extra]);
+      })
+      .catch(() => {
+        if (!cancelled) setBindings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.assets, project.id, reloadKey]);
 
   useEffect(() => {
     let alive = true;
@@ -254,24 +304,25 @@ export function TimelineInspector({
     [master, selection.id],
   );
   const selectedGenerator = useMemo(
-    () => generatorOptions.find((g) => g.id === selectedBatch?.generatorId) || null,
-    [generatorOptions, selectedBatch?.generatorId],
+    () =>
+      generatorOptions.find((g) => g.id === selectedBatch?.generatorId) ||
+      generatorOptions.find((g) => g.id === master?.batchBlocks[0]?.generatorId) ||
+      null,
+    [generatorOptions, master?.batchBlocks, selectedBatch?.generatorId],
   );
   const draftPathway = selectedGenerator?.draftPathway || "none";
   const draftAvailable = draftPathway !== "none";
-  const videoRefAttached = Boolean(
-    (timeline?.video_reference_clips || []).some((c) => c.asset_id || c.reference_binding_id) ||
-      selectedBatch?.sourceAnchors?.some((a) => a.kind === "video" && a.assetId),
+  const promptBindingCounts = useMemo(() => {
+    const ids = (timeline?.prompt_segments || []).flatMap((seg) => seg.reference_binding_ids || []);
+    return countBindingsByKind(ids, bindings);
+  }, [bindings, timeline?.prompt_segments]);
+  const videoRefBlocked = Boolean(
+    selectedGenerator &&
+      ((promptBindingCounts.video > 0 && !selectedGenerator.supportsVideoReferences) ||
+        promptBindingCounts.video > (selectedGenerator.maximumReferenceVideos || 0)),
   );
-  const imageRefAttached = Boolean(
-    (timeline?.image_reference_clips || []).some((c) => c.asset_id || c.reference_binding_id),
-  );
-  const videoRefBlocked = Boolean(videoRefAttached && selectedGenerator && !selectedGenerator.supportsVideoReferences);
   const imageRefBlocked = Boolean(
-    imageRefAttached &&
-      selectedGenerator &&
-      !selectedGenerator.supportsMultipleImageReferences &&
-      (selectedGenerator.maximumReferenceImages || 0) <= 0,
+    selectedGenerator && promptBindingCounts.image > (selectedGenerator.maximumReferenceImages || 0),
   );
   useEffect(() => {
     setDraftMode(draftAvailable);
@@ -324,6 +375,9 @@ export function TimelineInspector({
         : undefined,
     [selectedLipSyncTrack, selection.id, selection.kind],
   );
+  useEffect(() => {
+    setSpeakerDraft("");
+  }, [selectedLipSyncClip?.id]);
   const audioAssets = useMemo(
     () => project.assets.filter((asset) => asset.kind === "audio"),
     [project.assets],
@@ -358,6 +412,39 @@ export function TimelineInspector({
       { refresh: opts?.refresh !== false ? true : false },
     );
   };
+
+  const ensureBinding = useCallback(
+    async (binding: ReferenceBindingView): Promise<ReferenceBindingView | null> => {
+      if (isRealBindingId(binding.id)) return binding;
+      if (!String(binding.id || "").startsWith("character:")) {
+        setTokenError("Pick a named reference from this project's References.");
+        return null;
+      }
+      if (!binding.asset_id) {
+        setTokenError("This character needs a picture in the Library before Timeline can use it.");
+        return null;
+      }
+      const created = (await api.sceneReferences.attach(project.id, {
+        asset_id: binding.asset_id,
+        scope_type: "project",
+        scope_id: project.id,
+        reference_type: "character",
+        media_kind: "entity",
+        identity_id: binding.identity_id,
+        alias: binding.alias,
+        usage_modes: ["identity", "appearance"],
+        reference_roles: ["character"],
+      })) as ReferenceBindingView;
+      const resolved = { ...binding, ...created, id: String(created.id) };
+      setBindings((current) => {
+        const withoutSynthetic = current.filter((item) => item.id !== binding.id && item.id !== resolved.id);
+        return [...withoutSynthetic, resolved];
+      });
+      await onRefresh();
+      return resolved;
+    },
+    [onRefresh, project.id],
+  );
 
   const persistScenePrompt = useCallback(
     async (text: string) => {
@@ -745,13 +832,31 @@ export function TimelineInspector({
           </label>
           <label className="field">
             <span>Instruction</span>
-            <textarea
-              data-testid="timeline-prompt-instruction"
-              value={promptSegField.value}
-              onChange={(e) => promptSegField.onChange(e.target.value)}
-              onFocus={promptSegField.onFocus}
-              onBlur={promptSegField.onBlur}
+            <PromptReferenceField
+              text={promptSegField.value}
+              bindingIds={selectedPrompt.reference_binding_ids || []}
+              bindings={bindings}
+              maxImages={selectedGenerator?.maximumReferenceImages}
+              maxVideos={selectedGenerator?.maximumReferenceVideos}
+              onTextChange={(next) => promptSegField.onChange(next)}
+              onTextFocus={promptSegField.onFocus}
+              onTextBlur={promptSegField.onBlur}
+              onBindingsChange={(ids) => void updatePrompt(selectedPrompt, { reference_binding_ids: ids })}
+              onReject={setTokenError}
+              ensureBinding={ensureBinding}
             />
+            {tokenError ? (
+              <p className="scene-meta" data-testid="timeline-reference-type-error">
+                {tokenError}
+              </p>
+            ) : null}
+            {imageRefBlocked || videoRefBlocked ? (
+              <p className="scene-meta" data-testid="prompt-ref-capability-warning">
+                {videoRefBlocked
+                  ? "Selected generator does not support Video Reference."
+                  : "This generator cannot use all stored image references. Stored references are kept; generation is refused until you switch models or remove extras."}
+              </p>
+            ) : null}
           </label>
         </div>
       ) : null}
@@ -1030,7 +1135,7 @@ export function TimelineInspector({
           ) : null}
           {imageRefBlocked ? (
             <p className="scene-meta" data-testid="timeline-image-ref-blocked">
-              Selected model does not support image reference. The # / @ name stays, but this model will not use it.
+              This generator cannot use all stored image references. Stored references are kept; generation is refused until you switch models or remove extras.
             </p>
           ) : null}
           {selectedGenerator &&
@@ -1322,28 +1427,44 @@ export function TimelineInspector({
             />
           </label>
           <label className="field">
-            <span>Character Name</span>
-            <input
-              value={selectedLipSyncClip.character_name || ""}
-              placeholder="Who speaks in this clip?"
-              onChange={(e) =>
-                void updateLipSyncClip(selectedLipSyncTrack, selectedLipSyncClip, {
-                  character_name: e.target.value || null,
-                })
+            <span>Character</span>
+            <ReferenceTokenAutocomplete
+              value={speakerDraft}
+              bindings={bindings}
+              track="lipsyncSpeaker"
+              placeholder={
+                selectedLipSyncClip.speaker_binding_id
+                  ? displayToken(
+                      bindings.find((item) => item.id === selectedLipSyncClip.speaker_binding_id)?.alias ||
+                        selectedLipSyncClip.character_name,
+                      "entity",
+                    ) || "@ character"
+                  : "@ character"
               }
+              onChange={setSpeakerDraft}
+              onCommit={(binding) => {
+                void (async () => {
+                  const resolved = await ensureBinding(binding);
+                  if (!resolved || !isRealBindingId(resolved.id)) {
+                    setTokenError("Lip Sync only accepts @ character tokens.");
+                    return;
+                  }
+                  setSpeakerDraft("");
+                  void updateLipSyncClip(selectedLipSyncTrack, selectedLipSyncClip, {
+                    speaker_binding_id: resolved.id,
+                    character_id: resolved.identity_id || null,
+                    character_name: resolved.alias || resolved.asset_name || null,
+                  });
+                })();
+              }}
+              onReject={setTokenError}
             />
-          </label>
-          <label className="field">
-            <span>Character ID</span>
-            <input
-              value={selectedLipSyncClip.character_id || ""}
-              placeholder="Optional character profile ID"
-              onChange={(e) =>
-                void updateLipSyncClip(selectedLipSyncTrack, selectedLipSyncClip, {
-                  character_id: e.target.value || null,
-                })
-              }
-            />
+            {selectedLipSyncClip.audio_asset_id && !selectedLipSyncClip.speaker_binding_id ? (
+              <p className="scene-meta" data-testid="lipsync-speaker-required">
+                Assign a character to this Lip Sync clip.
+              </p>
+            ) : null}
+            {tokenError ? <p className="scene-meta">{tokenError}</p> : null}
           </label>
           <label className="field">
             <span>Dialogue Audio</span>

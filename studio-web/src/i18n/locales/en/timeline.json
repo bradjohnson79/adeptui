@@ -6,6 +6,8 @@
   "references": "References",
   "inspector": "Inspector",
   "coDirector": "Co-Director",
+  "hotKeys": "Hot Keys",
+  "showHotKeys": "Show Timeline Hot Keys",
   "fit": "Fit",
   "fitTitle": "Fit the Viewer back to the selected size",
   "viewerSize": "Viewer Size",
@@ -71,5 +73,15 @@
   "removeLipSync": "Remove this Lip Sync Clip from the Timeline?",
   "removeBatch": "Remove “{{name}}”?\n\nThis Batch has content or job history. Source assets remain in Project Library.",
   "zoom": "Timeline zoom",
-  "durationSec": "{{seconds}} sec"
+  "durationSec": "{{seconds}} sec",
+  "tracks": {
+    "batches": "BATCHES",
+    "visual": "VISUAL",
+    "timedInstructions": "TIMED INSTRUCTIONS",
+    "camera": "CAMERA",
+    "audio": "AUDIO",
+    "sfx": "SFX",
+    "lipSync": "LIP SYNC",
+    "maskRepair": "MASK · REPAIR"
+  }
 }

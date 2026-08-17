@@ -43,11 +43,11 @@ export const TIMELINE_REGION_MIN_PX = 140;
 
 export const DEFAULT_LEFT_WIDTH = 280;
 export const DEFAULT_RIGHT_WIDTH = 320;
-export const LEFT_PANE_MIN = 200;
-export const LEFT_PANE_MAX = 420;
-export const RIGHT_PANE_MIN = 240;
-export const RIGHT_PANE_MAX = 480;
-export const CENTER_PANE_MIN = 480;
+export const LEFT_PANE_MIN = 220;
+export const LEFT_PANE_MAX = 440;
+export const RIGHT_PANE_MIN = 260;
+export const RIGHT_PANE_MAX = 500;
+export const CENTER_PANE_MIN = 520;
 export const SIDEBAR_GAP_PX = 16;
 
 const VIEWER_PRESET_TARGETS: Record<TimelineViewerPreset, { at1280: number; at1920: number; min: number; max: number }> = {

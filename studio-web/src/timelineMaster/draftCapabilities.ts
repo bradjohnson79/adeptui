@@ -15,6 +15,7 @@ export type TimelineGeneratorOption = {
   supportsVideoReferences: boolean;
   supportsMultipleImageReferences: boolean;
   maximumReferenceImages: number;
+  maximumReferenceVideos: number;
   supportedAspectRatios: string[];
 };
 
@@ -45,6 +46,7 @@ export function generatorOptionsFromPayload(payload: Record<string, unknown>): T
       supportsVideoReferences: Boolean(a.supportsVideoReferences),
       supportsMultipleImageReferences: Boolean(a.supportsMultipleImageReferences),
       maximumReferenceImages: Number(a.maximumReferenceImages || 0),
+      maximumReferenceVideos: Number(a.maximumReferenceVideos || 0),
       supportedAspectRatios: Array.isArray(a.supportedAspectRatios)
         ? a.supportedAspectRatios.map((x) => String(x))
         : [],

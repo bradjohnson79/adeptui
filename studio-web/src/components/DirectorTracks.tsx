@@ -19,12 +19,16 @@ import {
   formatTimelineTime,
 } from "./timeline-master/TimelineSettingsDrawer";
 import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
+import { TimelineTrackLabel } from "./timeline-master/TimelineTrackLabel";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
 import { formatBatchStatus } from "../timelineMaster/contracts";
 import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
+// TS6133 unblock: JSX usage removed by in-progress refactor; keep symbol for re-wire.
+void ReferenceTokenAutocomplete;
 import {
   assetDurationSec,
   displayToken,
+  tokenSummary,
   type ReferenceBindingView,
 } from "../sceneReferences/referenceTokens";
 
@@ -67,6 +71,7 @@ export type PromptSegment = {
   model_prompt?: string | null;
   negative_prompt?: string | null;
   bound_image_clip_id?: string | null;
+  reference_binding_ids?: string[];
 };
 export type CameraClip = {
   id: string;
@@ -98,6 +103,7 @@ export type LipSyncClip = {
   status?: string;
   character_id?: string | null;
   character_name?: string | null;
+  speaker_binding_id?: string | null;
   audio_asset_id?: string | null;
   follow_policy?: string | null;
 };
@@ -133,6 +139,7 @@ export type DirectorTimeline = {
   next_image_tag_number?: number;
   /** How visual / prompt / camera guidance is weighted at compile time. */
   guidance_priority?: TimelineWorkspaceLayout["guidancePriority"];
+  prompt_refs_migrated?: boolean;
 };
 
 function nid() {
@@ -182,6 +189,7 @@ function normalizeLipSyncClip(raw: Partial<LipSyncClip> | null | undefined): Lip
     status: (raw?.status || "").trim() || "draft",
     character_id: raw?.character_id || null,
     character_name: raw?.character_name || null,
+    speaker_binding_id: raw?.speaker_binding_id || null,
     audio_asset_id: raw?.audio_asset_id || null,
     follow_policy: (raw?.follow_policy || "").trim() || "follow_audio",
   };
@@ -233,86 +241,49 @@ export function lipSyncTrackHasContent(track: LipSyncTrack | null | undefined) {
   );
 }
 
-function TrackGlyph({ name }: { name: "eye" | "lock" | "mute" | "solo" | "plus" }) {
-  const common = { width: 12, height: 12, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.5 } as const;
-  if (name === "eye") {
-    return (
-      <svg {...common} aria-hidden>
-        <path d="M1.5 8s2.4-4 6.5-4 6.5 4 6.5 4-2.4 4-6.5 4-6.5-4-6.5-4Z" />
-        <circle cx="8" cy="8" r="2" />
-      </svg>
-    );
-  }
-  if (name === "lock") {
-    return (
-      <svg {...common} aria-hidden>
-        <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
-        <path d="M5.5 7V5.5A2.5 2.5 0 0 1 8 3a2.5 2.5 0 0 1 2.5 2.5V7" />
-      </svg>
-    );
-  }
-  if (name === "mute") {
-    return (
-      <svg {...common} aria-hidden>
-        <path d="M3 6h2.5L8.5 3v10l-3-3H3Z" />
-        <path d="M11 6l3 4M14 6l-3 4" />
-      </svg>
-    );
-  }
-  if (name === "solo") {
-    return (
-      <svg {...common} aria-hidden>
-        <path d="M12.5 4.5A5.5 5.5 0 1 0 8 13.5c2.4 0 4-1.5 4-3.2 0-1.1-.8-2-1.8-2H8.6" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...common} aria-hidden>
-      <path d="M8 3v10M3 8h10" />
-    </svg>
-  );
+function trackRowClass(shellMode: boolean, extra = "") {
+  const base = shellMode ? "timeline-v2__track-row" : "track-row";
+  return extra ? `${base} ${extra}` : base;
+}
+
+function trackContentClass(shellMode: boolean, extra = "") {
+  const base = shellMode ? "timeline-v2__track-content" : "track-lane";
+  return extra ? `${base} ${extra}` : base;
 }
 
 function TrackHeader({
   label,
+  labelKey,
   shellMode,
   controls = ["eye", "lock"],
   actionLabel,
   onAction,
 }: {
   label: string;
+  labelKey?: string;
   shellMode: boolean;
   controls?: Array<"eye" | "lock" | "mute" | "solo">;
   actionLabel?: string;
   onAction?: () => void;
 }) {
-  if (!shellMode) {
+  if (shellMode) {
     return (
-      <div className="track-label">
-        {label}
-        {onAction ? (
-          <button className="ghost" style={{ padding: "0.15rem 0.45rem", marginTop: 4 }} onClick={onAction}>
-            {actionLabel}
-          </button>
-        ) : null}
-      </div>
+      <TimelineTrackLabel
+        label={label}
+        labelKey={labelKey}
+        controls={controls}
+        onAction={onAction}
+      />
     );
   }
   return (
-    <div className="track-label track-label--shell">
-      <span className="track-label__title">{label}</span>
-      <div className="track-label__tools">
-        {controls.map((control) => (
-          <span key={control} className="track-label__icon" aria-hidden>
-            <TrackGlyph name={control} />
-          </span>
-        ))}
-        {onAction ? (
-          <button type="button" className="track-label__add" aria-label={`Add ${label}`} data-testid={`track-add-${label.toLowerCase().replace(/\s+/g, "-")}`} onClick={onAction}>
-            <TrackGlyph name="plus" />
-          </button>
-        ) : null}
-      </div>
+    <div className="track-label">
+      {label}
+      {onAction ? (
+        <button className="ghost" style={{ padding: "0.15rem 0.45rem", marginTop: 4 }} onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -364,6 +335,7 @@ export function DirectorTracks({
   shellMode?: boolean;
 }) {
   const { t } = useTranslation("timeline");
+  void t;
   const sel = useDirectorSelectionOptional();
   const [tl, setTl] = useState<DirectorTimeline | null>(null);  const [selectedSeg, setSelectedSeg] = useState<string>();
   const [selectedClip, setSelectedClip] = useState<string>();
@@ -378,6 +350,8 @@ export function DirectorTracks({
   const [sendBusy, setSendBusy] = useState(false);
   const [bindings, setBindings] = useState<ReferenceBindingView[]>([]);
   const [tokenDraft, setTokenDraft] = useState<Record<string, string>>({});
+  void tokenDraft;
+  void setTokenDraft;
   const [tokenError, setTokenError] = useState<string | null>(null);
   // Consolidated, non-spammy save error state. A failed save preserves local
   // drafts (tl is set before the API call) and surfaces a single status; it
@@ -596,14 +570,14 @@ export function DirectorTracks({
 
   if (!scene) {
     return (
-      <div className={shellMode ? "director-tracks director-tracks--timeline-shell" : "panel"} data-testid="timeline-track-board">
+      <div className={shellMode ? "timeline-v2__canvas" : "panel"} data-testid="timeline-track-board">
         <p className="empty">{shellMode ? "Select a Scene in the left rail." : "Select a scene"}</p>
       </div>
     );
   }
   if (!tl) {
     return (
-      <div className={shellMode ? "director-tracks director-tracks--timeline-shell" : "panel"} data-testid="timeline-track-board">
+      <div className={shellMode ? "timeline-v2__canvas" : "panel"} data-testid="timeline-track-board">
         <p className="scene-meta">{shellMode ? "Loading Timeline tracks…" : "Loading…"}</p>
       </div>
     );
@@ -1010,6 +984,7 @@ export function DirectorTracks({
       ),
     });
   };
+  void assignBindingToClip;
 
   const onDropAsset = async (e: React.DragEvent, kind: "image" | "audio" | "sfx" | "videoReference" | "imageReference") => {
     e.preventDefault();
@@ -1059,6 +1034,7 @@ export function DirectorTracks({
       text: "",
       weight: 1,
       region: null,
+      reference_binding_ids: [],
     };
     await save({ ...tl, prompt_segments: [...tl.prompt_segments, seg] });
     selectSeg(seg.id);
@@ -1219,7 +1195,7 @@ export function DirectorTracks({
     Boolean(clip.asset_id || (clip.text && clip.text.trim()));
 
   return (
-    <div className={`panel director-tracks${shellMode ? " director-tracks--timeline-shell" : ""}`}>
+    <div className={shellMode ? "timeline-v2__canvas" : "panel director-tracks"}>
       {!shellMode ? (
         <>
           <p className="scene-meta" style={{ margin: "0 0 0.35rem", letterSpacing: "0.04em", textTransform: "uppercase", fontSize: "0.7rem" }}>
@@ -1541,7 +1517,7 @@ export function DirectorTracks({
           )}
 
           <div
-            className="track-board-scroll"
+            className={shellMode ? "timeline-v2__canvas-scroll" : "track-board-scroll"}
             ref={boardScrollRef}
             data-testid="timeline-track-scroll"
             onScroll={(e) =>
@@ -1549,7 +1525,7 @@ export function DirectorTracks({
             }
           >
             <div
-              className={`track-board track-board--${workspaceLayout.trackDensity}`}
+              className={shellMode ? "timeline-v2__board" : `track-board track-board--${workspaceLayout.trackDensity}`}
               style={{ width: boardWidth, minWidth: "100%", position: "relative" }}
               tabIndex={0}
               onKeyDown={onPlayheadKey}
@@ -1563,10 +1539,10 @@ export function DirectorTracks({
               data-zoom={String(zoom)}
               data-board-width={String(boardWidth)}
             >
-              <div className="track-ruler" data-testid="timeline-ruler">
-                <div className="track-ruler__gutter" aria-hidden />
+              <div className={shellMode ? "timeline-v2__ruler" : "track-ruler"} data-testid="timeline-ruler">
+                <div className={shellMode ? "timeline-v2__ruler-gutter" : "track-ruler__gutter"} aria-hidden />
                 <div
-                  className="track-ruler__lane"
+                  className={shellMode ? "timeline-v2__ruler-lane" : "track-ruler__lane"}
                   onClick={(e) => seekPlayhead(e.clientX, e.currentTarget)}
                   onPointerDown={(e) => {
                     const lane = e.currentTarget;
@@ -1589,7 +1565,15 @@ export function DirectorTracks({
                   {Array.from({ length: Math.floor(boardDuration) + 1 }).map((_, i) => (
                     <span
                       key={i}
-                      className={i === 0 ? "track-ruler__tick track-ruler__tick--origin" : "track-ruler__tick"}
+                      className={
+                        shellMode
+                          ? i === 0
+                            ? "timeline-v2__ruler-tick timeline-v2__ruler-tick--origin"
+                            : "timeline-v2__ruler-tick"
+                          : i === 0
+                            ? "track-ruler__tick track-ruler__tick--origin"
+                            : "track-ruler__tick"
+                      }
                       style={{ left: `${(i / Math.max(0.1, boardDuration)) * 100}%` }}
                     >
                       {formatTimelineTime(i, workspaceLayout.displayMode, sceneFps)}
@@ -1597,7 +1581,7 @@ export function DirectorTracks({
                   ))}
                   {rulerHoverSec != null && (
                     <span
-                      className="track-ruler__hover"
+                      className={shellMode ? "timeline-v2__ruler-hover" : "track-ruler__hover"}
                       style={{ left: `${(rulerHoverSec / Math.max(0.1, boardDuration)) * 100}%` }}
                     >
                       {formatTimelineTime(rulerHoverSec, workspaceLayout.displayMode, sceneFps)}
@@ -1605,9 +1589,9 @@ export function DirectorTracks({
                   )}
                 </div>
               </div>
-              <div className="track-playhead-rail" aria-hidden={false}>
-                <div className="track-playhead-rail__gutter" aria-hidden />
-                <div className="track-playhead-rail__lane">
+              <div className={shellMode ? "timeline-v2__playhead-rail" : "track-playhead-rail"} aria-hidden={false}>
+                <div className={shellMode ? "timeline-v2__playhead-gutter" : "track-playhead-rail__gutter"} aria-hidden />
+                <div className={shellMode ? "timeline-v2__playhead-lane" : "track-playhead-rail__lane"}>
                   <div
                     ref={playheadRef}
                     className="track-playhead"
@@ -1621,9 +1605,10 @@ export function DirectorTracks({
               </div>
 
               {shellMode && (
-                <div className="track-row track-row--batch">
+                <div className={trackRowClass(shellMode, "timeline-v2__track-row--batch")}>
                   <TrackHeader
                     label="BATCHES"
+                    labelKey="tracks.batches"
                     shellMode={shellMode}
                     onAction={() => {
                       if (!scene) return;
@@ -1631,7 +1616,7 @@ export function DirectorTracks({
                     }}
                     actionLabel="+ Batch"
                   />
-                  <div className="track-lane track-lane--batch" data-testid="timeline-batch-lane">
+                  <div className={trackContentClass(shellMode)} data-testid="timeline-batch-lane">
                     {batchWindows.length === 0 ? (
                       <div className="track-empty">Create a batch to plan how this scene renders over time.</div>
                     ) : (
@@ -1727,12 +1712,12 @@ export function DirectorTracks({
 
               {tl.media_mode === "image" ? (
                 <div
-                  className="track-row"
+                  className={trackRowClass(shellMode)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => onDropAsset(e, "image")}
                 >
-                  <TrackHeader label="VISUAL" shellMode={shellMode} />
-                  <div className="track-lane">
+                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} />
+                  <div className={trackContentClass(shellMode)}>
                     {imageClips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add an image clip or drop an image here.</div>
                     )}
@@ -1807,9 +1792,9 @@ export function DirectorTracks({
                   </div>
                 </div>
               ) : (
-                <div className="track-row">
-                  <TrackHeader label="VISUAL" shellMode={shellMode} controls={["eye", "lock"]} />
-                  <div className="track-lane">
+                <div className={trackRowClass(shellMode)}>
+                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} controls={["eye", "lock"]} />
+                  <div className={trackContentClass(shellMode)}>
                     {tl.video_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add a video clip or switch back to image planning.</div>
                     )}
@@ -1891,181 +1876,11 @@ export function DirectorTracks({
                 </div>
               )}
 
-              <div
-                className="track-row"
-                data-testid="timeline-image-reference-track"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onDropAsset(e, "imageReference")}
-              >
-                <TrackHeader
-                  label={t("imageReferenceTrack")}
-                  shellMode={shellMode}
-                  onAction={() => {
-                    const clip = {
-                      id: nid(),
-                      start: 0,
-                      length: Math.min(duration, 5),
-                      label: "Image Reference",
-                      asset_id: null,
-                      reference_binding_id: null,
-                    };
-                    void save({ ...tl, image_reference_clips: [...(tl.image_reference_clips || []), clip] });
-                    selectClip("imageReferenceClip", clip.id);
-                  }}
-                  actionLabel="+ Clip"
-                />
-                <div className="track-lane">
-                  {(tl.image_reference_clips || []).length === 0 && workspaceLayout.showEmptyHelp && (
-                    <div className="track-empty">
-                      Drop a named image or character. Type # or @ to pick a reference.
-                    </div>
-                  )}
-                  {(tl.image_reference_clips || []).map((clip) => {
-                    const binding = bindings.find((item) => item.id === clip.reference_binding_id);
-                    const broken = Boolean(clip.reference_binding_id && !binding);
-                    return (
-                      <TrackClipInteractive
-                        key={clip.id}
-                        clipId={clip.id}
-                        start={clip.start}
-                        length={clip.length}
-                        boardDuration={boardDuration}
-                        boardWidthPx={boardWidth}
-                        snapEnabled={snap}
-                        snapStep={snap ? 1 / sceneFps : 0.01}
-                        selected={selectedClip === clip.id}
-                        className="media"
-                        domId={`timeline-track-item-imageReferenceClip-${clip.id}`}
-                        testId={`track-clip-image-ref-${clip.id}`}
-                        onSelect={() => selectClip("imageReferenceClip", clip.id)}
-                        onCommit={(next, mode) => commitClipGeometry("imageReference", clip.id, next, mode)}
-                      >
-                        <button
-                          type="button"
-                          className="track-clip__remove"
-                          aria-label="Remove from Timeline"
-                          title="Remove from Timeline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void removeClip("imageReference", clip.id, Boolean(clip.asset_id || clip.reference_binding_id));
-                          }}
-                        >
-                          ×
-                        </button>
-                        <strong>
-                          {broken
-                            ? "Broken Reference"
-                            : binding
-                              ? displayToken(binding.alias || binding.asset_name, binding.media_kind || "image")
-                              : clip.label || "Image Reference"}
-                        </strong>
-                        <ReferenceTokenAutocomplete
-                          value={tokenDraft[clip.id] ?? ""}
-                          bindings={bindings}
-                          track="imageReference"
-                          placeholder="# or @ name"
-                          onChange={(next) => setTokenDraft((prev) => ({ ...prev, [clip.id]: next }))}
-                          onCommit={(item) => {
-                            setTokenDraft((prev) => ({ ...prev, [clip.id]: "" }));
-                            void assignBindingToClip("imageReference", clip.id, item);
-                          }}
-                          onReject={setTokenError}
-                        />
-                      </TrackClipInteractive>
-                    );
-                  })}
-                </div>
-              </div>
+              {/* Image/Video Reference lanes retired: bindings live on Prompt clips. */}
 
-              <div
-                className="track-row"
-                data-testid="timeline-video-reference-track"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => onDropAsset(e, "videoReference")}
-              >
-                <TrackHeader
-                  label={t("videoReferenceTrack")}
-                  shellMode={shellMode}
-                  onAction={() => {
-                    const clip = {
-                      id: nid(),
-                      start: 0,
-                      length: Math.min(duration, 5),
-                      label: "Video Reference",
-                      asset_id: null,
-                      trim_start: 0,
-                    };
-                    void save({ ...tl, video_reference_clips: [clip] });
-                    selectClip("videoReferenceClip", clip.id);
-                  }}
-                  actionLabel="+ Clip"
-                />
-                <div className="track-lane">
-                  {(tl.video_reference_clips || []).length === 0 && workspaceLayout.showEmptyHelp && (
-                    <div className="track-empty">
-                      Drop one video that shows how the shot should move. The picture still says who and what.
-                    </div>
-                  )}
-                  {(tl.video_reference_clips || []).map((clip) => {
-                    const binding = bindings.find((item) => item.id === clip.reference_binding_id);
-                    const broken = Boolean(clip.reference_binding_id && !binding);
-                    return (
-                      <TrackClipInteractive
-                        key={clip.id}
-                        clipId={clip.id}
-                        start={clip.start}
-                        length={clip.length}
-                        boardDuration={boardDuration}
-                        boardWidthPx={boardWidth}
-                        snapEnabled={snap}
-                        snapStep={snap ? 1 / sceneFps : 0.01}
-                        selected={selectedClip === clip.id}
-                        className="media video"
-                        domId={`timeline-track-item-videoReferenceClip-${clip.id}`}
-                        testId={`track-clip-video-ref-${clip.id}`}
-                        onSelect={() => selectClip("videoReferenceClip", clip.id)}
-                        onCommit={(next, mode) => commitClipGeometry("videoReference", clip.id, next, mode)}
-                      >
-                        <button
-                          type="button"
-                          className="track-clip__remove"
-                          aria-label="Remove from Timeline"
-                          title="Remove from Timeline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void removeClip("videoReference", clip.id, Boolean(clip.asset_id || clip.reference_binding_id));
-                          }}
-                        >
-                          ×
-                        </button>
-                        <strong>
-                          {broken
-                            ? "Broken Reference"
-                            : binding
-                              ? displayToken(binding.alias || binding.asset_name, "video")
-                              : clip.label || "Video Reference"}
-                        </strong>
-                        <ReferenceTokenAutocomplete
-                          value={tokenDraft[clip.id] ?? ""}
-                          bindings={bindings}
-                          track="videoReference"
-                          placeholder="* name"
-                          onChange={(next) => setTokenDraft((prev) => ({ ...prev, [clip.id]: next }))}
-                          onCommit={(item) => {
-                            setTokenDraft((prev) => ({ ...prev, [clip.id]: "" }));
-                            void assignBindingToClip("videoReference", clip.id, item);
-                          }}
-                          onReject={setTokenError}
-                        />
-                      </TrackClipInteractive>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="track-row">
-                <TrackHeader label="TIMED INSTRUCTIONS" shellMode={shellMode} onAction={addPromptSegment} actionLabel="+ Prompt" />
-                <div className="track-lane">
+              <div className={trackRowClass(shellMode, "timeline-v2__track-row--prompt")}>
+                <TrackHeader label="TIMED INSTRUCTIONS" labelKey="tracks.timedInstructions" shellMode={shellMode} onAction={addPromptSegment} actionLabel="+ Prompt" />
+                <div className={trackContentClass(shellMode)}>
                   {tl.prompt_segments.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Add a timed instruction to direct the moment on screen.</div>
                   )}
@@ -2099,7 +1914,12 @@ export function DirectorTracks({
                         ×
                       </button>
                       <strong>{seg.region ? "Region" : `w${(seg.weight ?? 1).toFixed(1)}`}</strong>
-                      <span>{seg.text ? seg.text.slice(0, 28) : "Empty prompt"}</span>
+                      <span className="timeline-v2__clip-tokens" data-testid={`prompt-token-summary-${seg.id}`}>
+                        {tokenSummary(seg.reference_binding_ids, bindings) || (seg.text ? seg.text.slice(0, 28) : "Empty prompt")}
+                      </span>
+                      {tokenSummary(seg.reference_binding_ids, bindings) && seg.text ? (
+                        <span className="timeline-v2__clip-instruction">{seg.text.slice(0, 48)}</span>
+                      ) : null}
                       {seg.bound_image_clip_id ? (
                         <span className="scene-meta">Attached to image</span>
                       ) : null}
@@ -2108,9 +1928,10 @@ export function DirectorTracks({
                 </div>
               </div>
 
-              <div className="track-row">
+              <div className={trackRowClass(shellMode)}>
                 <TrackHeader
                   label="CAMERA"
+                  labelKey="tracks.camera"
                   shellMode={shellMode}
                   onAction={() => {
                     const clip: CameraClip = {
@@ -2131,7 +1952,7 @@ export function DirectorTracks({
                   actionLabel="+ Camera"
                 />
                 <div
-                  className="track-lane"
+                  className={trackContentClass(shellMode)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
@@ -2258,12 +2079,12 @@ export function DirectorTracks({
               </div>
 
               <div
-                className="track-row"
+                className={trackRowClass(shellMode, "timeline-v2__track-row--audio")}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "audio")}
               >
-                <TrackHeader label="AUDIO" shellMode={shellMode} controls={["mute", "solo"]} />
-                <div className="track-lane">
+                <TrackHeader label="AUDIO" labelKey="tracks.audio" shellMode={shellMode} controls={["mute", "solo"]} />
+                <div className={trackContentClass(shellMode)}>
                   {tl.audio_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Add ambience, score, or dialogue stems for this scene.</div>
                   )}
@@ -2324,12 +2145,12 @@ export function DirectorTracks({
               </div>
 
               <div
-                className="track-row"
+                className={trackRowClass(shellMode, "timeline-v2__track-row--audio")}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "sfx")}
               >
-                <TrackHeader label="SFX" shellMode={shellMode} controls={["mute", "solo"]} />
-                <div className="track-lane">
+                <TrackHeader label="SFX" labelKey="tracks.sfx" shellMode={shellMode} controls={["mute", "solo"]} />
+                <div className={trackContentClass(shellMode)}>
                   {tl.sfx_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Drop quick impact or spot effects here.</div>
                   )}
@@ -2395,16 +2216,20 @@ export function DirectorTracks({
                 return (
                   <div
                     key={track.id}
-                    className={`track-row${trackSelected ? " track-row--selected" : ""}`}
+                    className={trackRowClass(
+                      shellMode,
+                      `${trackSelected ? "is-selected " : ""}timeline-v2__track-row--lipsync`.trim(),
+                    )}
                   >
                     <TrackHeader
-                      label={shellMode ? `LIP SYNC ${index + 1}` : track.label || `Lip Sync ${index + 1}`}
+                      label={shellMode ? (index === 0 ? "LIP SYNC" : `LIP SYNC ${index + 1}`) : track.label || `Lip Sync ${index + 1}`}
+                      labelKey={index === 0 ? "tracks.lipSync" : undefined}
                       shellMode={shellMode}
                       controls={["eye", "lock"]}
                     />
                     <div
                       id={`timeline-track-item-lipsyncTrack-${track.id}`}
-                      className={`track-lane${trackSelected ? " track-lane--selected" : ""}`}
+                      className={trackContentClass(shellMode, trackSelected ? "is-selected" : "")}
                       tabIndex={-1}
                       onClick={() =>
                         sel?.setSelection({
@@ -2432,6 +2257,7 @@ export function DirectorTracks({
                               type="button"
                               id={`timeline-track-item-lipsyncClip-${clip.id}`}
                               className={`track-clip lipsync lipsync-clip ${clipSelected ? "active" : ""}`}
+                              data-testid={`track-clip-lipsync-${clip.id}`}
                               style={pct(clip.start, clip.length, boardDuration)}
                               onClick={(event) => {
                                 event.stopPropagation();
@@ -2443,9 +2269,22 @@ export function DirectorTracks({
                                 });
                               }}
                             >
-                              <strong>{clip.label || "Lip Sync Clip"}</strong>
-                              <span>{clip.character_name || track.character_name || track.label || `Lip Sync ${index + 1}`}</span>
-                              <span>Status: {clip.status || "draft"}</span>
+                              <strong className="timeline-v2__clip-tokens">
+                                {(() => {
+                                  const speaker = bindings.find((item) => item.id === clip.speaker_binding_id);
+                                  return speaker
+                                    ? displayToken(speaker.alias || speaker.asset_name, speaker.media_kind || "entity")
+                                    : clip.character_name
+                                      ? `@${clip.character_name.replace(/\s+/g, "")}`
+                                      : clip.label || "Lip Sync Clip";
+                                })()}
+                              </strong>
+                              <span className="timeline-v2__clip-instruction">
+                                {(() => {
+                                  const asset = project.assets.find((item) => item.id === clip.audio_asset_id);
+                                  return asset?.filename || asset?.tag || clip.audio_asset_id || "No audio";
+                                })()}
+                              </span>
                             </button>
                           );
                         })
@@ -2456,9 +2295,9 @@ export function DirectorTracks({
               })}
 
               {shellMode && (
-                <div className="track-row">
-                  <TrackHeader label="MASK · REPAIR" shellMode={shellMode} controls={["eye", "lock"]} />
-                  <div className="track-lane">
+                <div className={trackRowClass(shellMode)}>
+                  <TrackHeader label="MASK · REPAIR" labelKey="tracks.maskRepair" shellMode={shellMode} controls={["eye", "lock"]} />
+                  <div className={trackContentClass(shellMode)}>
                     {repairWindows.length === 0 ? (
                       <div className="track-empty">Repair ranges will appear here when a batch needs a focused fix.</div>
                     ) : (
