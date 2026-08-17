@@ -161,8 +161,8 @@ Old `.timeline-editor-shell__layout` / `.director-tracks--timeline-shell` track-
 
 ## SHA
 
-- Drawer workspace commit SHA: recorded at commit time below after push
-- HEAD / push SHA: pending this increment
-- Remote `origin/beta`: pending this increment
-- Vercel production: pending this increment
-- Hosted UI: `https://adeptui.vercel.app/`
+- Drawer workspace commit SHA: `94c5292ac2068863edcb47303aa45ed2f7911bad`
+- HEAD / push SHA: `94c5292ac2068863edcb47303aa45ed2f7911bad`
+- Remote `origin/beta`: `94c5292ac2068863edcb47303aa45ed2f7911bad`
+- Vercel production: GitHub environment **Production** for `94c5292`, status **success**, inspect `https://vercel.com/anoint/adeptui/4h5x9wXUS1y8SV9ziRFSSpiDpzvJ`
+- Hosted UI: `https://adeptui.vercel.app/` HTTP **200**, bundle `index-BBdu2pYf.js` + `index-BDkZK984.css` (drawer testids present in hosted JS)
