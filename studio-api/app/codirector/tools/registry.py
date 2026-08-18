@@ -60,6 +60,7 @@ from .handlers import (
     script_timing,
     storyboard_timing,
     pillar_comparison,
+    production,
 )
 
 ReadHandler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -76,6 +77,11 @@ class MutationHandler:
 _READ_HANDLERS: dict[str, ReadHandler] = {
     "get_project_profile": project.get_project_profile,
     "get_project_status": project.get_project_status,
+    "project.production_snapshot": production.read_production_snapshot,
+    "production.memory": production.read_production_memory,
+    "production.resolve_reference": production.resolve_production_reference,
+    "candidate.list": production.list_candidates,
+    "candidate.resolve": production.resolve_candidate,
     "list_scenes": scenes.list_scenes,
     "get_scene": scenes.get_scene,
     "get_active_scene": scenes.get_active_scene,
@@ -945,6 +951,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "timeline.propose_add_prompt_segment": MutationHandler(
         director_timeline_tools.preview_propose_add_prompt_segment,
         director_timeline_tools.apply_propose_add_prompt_segment,
+    ),
+    "timeline.build_shot": MutationHandler(
+        director_timeline_tools.preview_build_shot,
+        director_timeline_tools.apply_build_shot,
     ),
     "timeline.propose_add_camera": MutationHandler(
         director_timeline_tools.preview_propose_add_camera,

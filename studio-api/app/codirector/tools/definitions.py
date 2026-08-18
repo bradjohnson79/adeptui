@@ -2769,7 +2769,49 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(ToolParameter("sheetId", "string", required=True, max_length=64),),
         result_char_budget=24000,
     ),
-)
+
+    ToolDefinition(
+        tool_id="project.production_snapshot",
+        kind="read",
+        title="Project production state snapshot",
+        description="Compact current production state: active scene, Spatial Map saved/current version + dirty flag, cameras, ERS sheet + status, recent candidate assets (C1-A style tags), Timeline revision + batches, active jobs, and recent production events. Composed from authoritative stores; never mutates.",
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="production.memory",
+        kind="read",
+        title="Recent production memory",
+        description="Structured recent Co-Director tool actions (with outcomes), production events, and job lifecycle for the project. Use to answer what happened, what we did last, and retake/approval history questions.",
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="production.resolve_reference",
+        kind="read",
+        title="Resolve production reference",
+        description="Resolve a conversational reference like C1-A, the first C2 shot, shot frame 1, the close-up to concrete candidate asset ids. Returns matched candidates with asset ids, ambiguity flag, and a note. Never writes.",
+        capability="project",
+        parameters=(
+            ToolParameter("ref", "string", required=True, description="The user reference text, e.g. C1-A or the second C3 image.", max_length=200),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="candidate.list",
+        kind="read",
+        title="List generation candidates",
+        description="Recent generation candidates for the project (scene creator / multi-shot / imagegen outputs) with asset ids, tags, camera and variant parsed (e.g. tag scene_creator_mini_8_C2_B -> camera C2, variant B), and approval state.",
+        capability="project",
+        parameters=(
+            ToolParameter("limit", "integer", description="Maximum candidates to return.", minimum=1, maximum=50),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="candidate.resolve",
+        kind="read",
+        title="Resolve candidate reference",
+        description="Resolve a candidate reference (tag, ordinal, or camera label) to concrete assets. Alias of production.resolve_reference for candidate-specific questions.",
+        capability="project",
+        parameters=(ToolParameter("ref", "string", required=True, description="Reference text such as C1-A.", max_length=200),),
+    ),)
 
 MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
     ToolDefinition(
@@ -4867,6 +4909,30 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
         ),
     ),
     ToolDefinition(
+        tool_id="timeline.build_shot",
+        kind="mutating",
+        title="Build timeline shot",
+        description="Composite production action: resolve the image asset, add it as an Image clip (sequential start by default), and optionally add a matched Timed Prompt segment carrying userDirection vs productionPrompt and exact dialogue. Uses real timeline state; returns clipId, segmentId, start, duration, and the new timeline revision. Same mutation surface as the Timeline toolbar after approval.",
+        capability="project",
+        pinned_resources=("scene",),
+        parameters=(
+            ToolParameter("sceneId", "string", required=True, max_length=36),
+            ToolParameter("assetId", "string", required=True, max_length=64),
+            ToolParameter("label", "string", max_length=120),
+            ToolParameter("start", "number", minimum=0),
+            ToolParameter("length", "number", minimum=0.1, maximum=20),
+            ToolParameter("prompt", "string", max_length=8000),
+            ToolParameter("userDirection", "string", max_length=8000),
+            ToolParameter("productionPrompt", "string", max_length=8000),
+            ToolParameter("dialogue", "string", max_length=8000),
+            ToolParameter("addPromptSegment", "boolean"),
+            ToolParameter("userDirection", "string", max_length=8000),
+            ToolParameter("productionPrompt", "string", max_length=8000),
+            ToolParameter("dialogue", "string", max_length=8000),
+            ToolParameter("timelineRevision", "integer", minimum=1),
+        ),
+    ),
+    ToolDefinition(
         tool_id="timeline.propose_add_camera",
         kind="mutating",
         title="Add timeline camera clip",
@@ -6444,3 +6510,46 @@ class ToolContext:
     capabilities: dict[str, Any] = field(default_factory=dict)
     # Project unlock grant token from cookie/header (never a password).
     unlock_token: Optional[str] = None
+    ToolDefinition(
+        tool_id="project.production_snapshot",
+        kind="read",
+        title="Project production state snapshot",
+        description="Compact current production state: active scene, Spatial Map saved/current version + dirty flag, cameras, ERS sheet + status, recent candidate assets (C1-A style tags), Timeline revision + batches, active jobs, and recent production events. Composed from authoritative stores; never mutates.",
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="production.memory",
+        kind="read",
+        title="Recent production memory",
+        description="Structured recent Co-Director tool actions (with outcomes), production events, and job lifecycle for the project. Use to answer 'what happened', 'what did we do last', and retake/approval history questions.",
+        capability="project",
+    ),
+    ToolDefinition(
+        tool_id="production.resolve_reference",
+        kind="read",
+        title="Resolve production reference",
+        description="Resolve a conversational reference like 'C1-A', 'the first C2 shot', 'shot frame 1', 'the close-up' to concrete candidate asset ids. Returns matched candidates with asset ids, ambiguity flag, and a note. Never writes.",
+        capability="project",
+        parameters=(
+            ToolParameter("ref", "string", required=True, description="The user's reference text, e.g. 'C1-A' or 'the second C3 image'.", max_length=200),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="candidate.list",
+        kind="read",
+        title="List generation candidates",
+        description="Recent generation candidates for the project (scene creator / multi-shot / imagegen outputs) with asset ids, tags, camera and variant parsed (e.g. tag scene_creator_mini_8_C2_B -> camera C2, variant B), and approval state.",
+        capability="project",
+        parameters=(
+            ToolParameter("limit", "integer", description="Maximum candidates to return.", minimum=1, maximum=50),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="candidate.resolve",
+        kind="read",
+        title="Resolve candidate reference",
+        description="Resolve a candidate reference (tag, ordinal, or camera label) to concrete assets. Alias of production.resolve_reference for candidate-specific questions.",
+        capability="project",
+        parameters=(ToolParameter("ref", "string", required=True, description="Reference text such as 'C1-A'.", max_length=200),),
+    ),
+

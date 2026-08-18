@@ -636,7 +636,7 @@ class ToolExecutionService:
             ),
             baseResourceVersions=base_versions,
         )
-        return ProposalService.create_tool_proposal(
+        proposal = ProposalService.create_tool_proposal(
             db,
             project_id=project_id,
             payload=payload,
@@ -645,6 +645,29 @@ class ToolExecutionService:
             request_id=request_id,
             created_by=created_by,
         )
+        # Direct execution authority (production-orchestrator milestone):
+        # routine reversible tools auto-execute through the existing proposal
+        # machinery when the project is set to "direct" and the proposal was
+        # created inside a chat turn (request_id present). The user explicit
+        # instruction is the authorization; the receipt records it. Any
+        # failure falls back to the pending proposal (user approval in UI).
+        try:
+            from ..execution_authority import should_auto_approve
+
+            if should_auto_approve(db, project_id, definition.tool_id, request_id):
+                ProposalService.approve(
+                    db,
+                    project_id=project_id,
+                    proposal_id=proposal.id,
+                    note="Auto-approved (direct execution authority - user command in this turn)",
+                    decided_by="user_command",
+                )
+        except Exception:  # noqa: BLE001 - fall back to the pending proposal card
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        return proposal
 
     @staticmethod
     def _build_preview(ctx: ToolContext, definition: ToolDefinition, arguments: dict[str, Any]) -> ToolPreview:

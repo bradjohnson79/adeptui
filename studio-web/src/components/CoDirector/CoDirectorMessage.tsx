@@ -3,6 +3,7 @@ import { useCoDirectorSession } from "./CoDirectorSession";
 import type { CoDirectorMessage as Msg, CoDirectorMessageExecution } from "./types";
 import { renderAssistantMarkdown } from "./assistantMarkdown";
 import GenerationQueueCard from "./GenerationQueueCard";
+import { CoDirectorMediaCardGrid, type MediaCardItem } from "./CoDirectorMediaCardGrid";
 
 const MESSAGE_TYPE_LABELS: Record<string, string> = {
   recommendation: "Recommendation",
@@ -128,6 +129,15 @@ export function CoDirectorMessage({
       )}
       {isCompletion && hasExecutionPayload ? (
         <ExecutionSummaryCard execution={message.execution as CoDirectorMessageExecution} />
+      ) : null}
+      {(isCompletion || isExecutionStatus) && hasExecutionPayload ? (
+        <CoDirectorMediaCardGrid
+          assetIds={(message.execution?.result_asset_ids || []).filter(Boolean) as string[]}
+          children={((message.execution?.child_jobs || []) as Array<{ asset_id?: string | null; label?: string }>)
+            .map((c): MediaCardItem | null => (c.asset_id ? { assetId: c.asset_id, label: c.label || undefined } : null))
+            .filter((x): x is MediaCardItem => x !== null)}
+          title="Generated media"
+        />
       ) : null}
       {message.status === "cancelled" && <span className="codirector-msg-status">Stopped</span>}
       {message.status === "interrupted" && (

@@ -543,6 +543,24 @@ def assign_asset(
     write_asset_library_meta(asset, meta)
     db.add(asset)
     db.commit()
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=asset.project_id,
+            scene_id=None,
+            event_type="library.asset_ingested",
+            actor=ACTOR_SYSTEM,
+            actor_detail="library:assign_asset",
+            subject_kind="asset",
+            subject_id=asset.id,
+            summary=f"Asset {asset.tag or asset.filename} added to Library ({library_path or target_key})",
+            payload={"assetId": asset.id, "tag": asset.tag, "libraryPath": library_path},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return meta
 
 

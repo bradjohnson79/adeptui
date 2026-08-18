@@ -113,6 +113,24 @@ def add_batch(
     master.batchBlocks.append(batch)
     master.batchBlocks.sort(key=lambda b: b.order)
     store.save_master(db, project_id, scene_id, master)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.batch_created",
+            actor=ACTOR_USER,
+            actor_detail="timeline:add_batch",
+            subject_kind="batch",
+            subject_id=batch.id,
+            summary=f"Batch {batch.label} created (order {order + 1})",
+            payload={"batchId": batch.id, "label": batch.label, "order": order, "generatorId": batch.generatorId, "plannedDuration": batch.duration.plannedDuration},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "batch": batch.model_dump(), "master": master.model_dump(), "mock": False}
 
 
@@ -146,6 +164,24 @@ def duplicate_batch(db: Session, project_id: str, scene_id: str, batch_id: str) 
     master.batchBlocks.append(clone)
     master.batchBlocks.sort(key=lambda b: b.order)
     store.save_master(db, project_id, scene_id, master)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.batch_created",
+            actor=ACTOR_USER,
+            actor_detail="timeline:duplicate_batch",
+            subject_kind="batch",
+            subject_id=clone.id,
+            summary=f"Batch {clone.label} duplicated from {src.label}",
+            payload={"batchId": clone.id, "sourceBatchId": batch_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "batch": clone.model_dump(), "mock": False}
 
 
@@ -178,6 +214,24 @@ def delete_batch(db: Session, project_id: str, scene_id: str, batch_id: str) -> 
         workspace=workspace,
         bump_revision=True,
     )
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.batch_deleted",
+            actor=ACTOR_USER,
+            actor_detail="timeline:delete_batch",
+            subject_kind="batch",
+            subject_id=batch_id,
+            summary=f"Batch {batch.label} deleted",
+            payload={"batchId": batch_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "deleted": batch_id, "stashed": True, "mock": False}
 
 

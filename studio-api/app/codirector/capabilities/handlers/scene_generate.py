@@ -108,6 +108,13 @@ def handle(
     parsed_shots = parse_shot_requests(shot_requests_raw)
 
     # Output count law: never invent extra shots beyond the explicit requests.
+    # The dispatcher may pass output_count=None (kwarg present, no value), so
+    # coerce defensively instead of crashing on max(1, None) (orchestrator
+    # milestone, mission Part 34 - partial failure safety).
+    try:
+        output_count = int(output_count)
+    except (TypeError, ValueError):
+        output_count = 4
     effective_count = min(len(parsed_shots), max(1, output_count))
     if not parsed_shots:
         # No explicit shots — return an empty plan. Do NOT silently fabricate.
@@ -206,6 +213,25 @@ def handle(
                 },
             }
         )
+
+    try:
+        from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id or None,
+            event_type="scene_creator.generation_started",
+            actor=ACTOR_CODIRECTOR,
+            actor_detail="capability:scene.generate",
+            subject_kind="execution",
+            subject_id=execution_id,
+            summary=f"Scene Creator generation started ({len(job_ids)} shot job(s))",
+            payload={"executionId": execution_id, "jobIds": job_ids, "shotCount": len(shots)},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
 
     return {
         "job_ids": job_ids,

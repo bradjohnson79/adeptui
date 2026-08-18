@@ -40,9 +40,19 @@ S = CapabilityStatus
 
 #: How long a snapshot may be reused before a read re-probes. Refresh is also explicit via
 #: POST /api/capabilities/refresh.
-SNAPSHOT_TTL_SEC = 20.0
+#: Production-orchestrator amendment: probe_setup costs ~50s on this deployment, so a
+#: 20s TTL made EVERY tool-calling chat turn stall ~85s (unusable conversational
+#: production). 300s bounds re-probes to every 5 minutes; the dashboard refresh
+#: endpoint still forces an immediate re-probe when a user changes setup state.
+SNAPSHOT_TTL_SEC = 300.0
 
-_cache: dict[str, Any] = {"snapshot": None, "at": 0.0, "project_id": None}
+# Multi-slot snapshot cache keyed by project_id (None = global slot). The web
+# UI polls /api/capabilities (global) while Co-Director proposes with a project
+# key; a single slot made every poll evict the other key and re-trigger the
+# ~50s probe on the next tool call (orchestrator milestone, Part 49).
+# Bounded: at most _CACHE_SLOTS keys, oldest evicted.
+_CACHE_SLOTS = 5
+_cache: dict[str, Any] = {"_slots": {}, "_order": []}
 _lock = asyncio.Lock()
 
 Evaluator = Callable[[CapabilityDefinition, ProbeSnapshot], CapabilityEvaluation]
@@ -992,19 +1002,24 @@ def _snapshot_out(snapshot: ProbeSnapshot) -> CapabilitySnapshotOut:
 
 async def _get_snapshot(*, project_id: str | None, force: bool) -> ProbeSnapshot:
     async with _lock:
-        cached = _cache.get("snapshot")
+        key = project_id or "__global__"
+        slots = _cache["_slots"]
+        order = _cache["_order"]
+        cached = slots.get(key)
         fresh = (
             cached is not None
             and not force
-            and _cache.get("project_id") == project_id
-            and (time.monotonic() - float(_cache.get("at") or 0.0)) < SNAPSHOT_TTL_SEC
+            and (time.monotonic() - cached[1]) < SNAPSHOT_TTL_SEC
         )
         if fresh:
-            return cached  # type: ignore[return-value]
+            return cached[0]
         snapshot = await build_snapshot(project_id=project_id)
-        _cache["snapshot"] = snapshot
-        _cache["at"] = time.monotonic()
-        _cache["project_id"] = project_id
+        if key not in slots:
+            order.append(key)
+        slots[key] = (snapshot, time.monotonic())
+        while len(order) > _CACHE_SLOTS:
+            oldest = order.pop(0)
+            slots.pop(oldest, None)
         return snapshot
 
 
@@ -1065,6 +1080,5 @@ async def get_capability(capability_id: str, *, project_id: str | None = None) -
 
 
 def invalidate_cache() -> None:
-    _cache["snapshot"] = None
-    _cache["at"] = 0.0
-    _cache["project_id"] = None
+    _cache["_slots"] = {}
+    _cache["_order"] = []

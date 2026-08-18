@@ -642,6 +642,22 @@ async def _prepare_chat_request(
         wiki_block = compact_wiki_context(db, project_id)
         if wiki_block:
             context = (context or "") + "\n\n" + wiki_block
+        # Production State Snapshot + recent activity (production-orchestrator
+        # milestone): automatic, bounded awareness of Spatial Map / ERS /
+        # candidates / timeline / jobs / events. Best-effort: a failing
+        # projection never breaks the chat turn.
+        try:
+            from .production_state.snapshot import render_production_snapshot_block
+            from .production_state.memory import production_memory_block
+
+            prod_block = render_production_snapshot_block(db, project_id, scene_id)
+            if prod_block:
+                context = (context or "") + "\n\n" + prod_block
+            mem_block = production_memory_block(db, project_id, scene_id)
+            if mem_block:
+                context = (context or "") + "\n\n" + mem_block
+        except Exception:
+            pass
         attachment_block = attachment_context_block(
             db, project_id=project_id, attachment_ids=attachment_ids
         )
@@ -1418,6 +1434,16 @@ def _build_execution_context(
     if capability == "storyboard.generate":
         ctx["user_instructions"] = user_text
 
+    # Production-orchestrator milestone: scene.generate needs explicit shot
+    # requests to enqueue real jobs (output-count law - the handler never
+    # invents shots). Derive shot_requests_raw from the user message so
+    # "Create images from the ERS using the four saved cameras." produces a
+    # real generation instead of an empty plan.
+    if capability == "scene.generate" and not ctx.get("shot_requests_raw"):
+        ctx["shot_requests_raw"] = user_text
+        if "count" not in ctx:
+            ctx["count"] = 4
+
     return ctx
 
 
@@ -1500,6 +1526,19 @@ def _enrich_execution_context(
     ctx.setdefault("spatial_map_summary", _resolve_spatial_map_summary(db, project_id))
     ctx.setdefault("ers_packages", _resolve_ers_summary(db, project_id))
     ctx.setdefault("scene_batches", _resolve_scene_batches_summary(db, project_id))
+
+    # Production-orchestrator milestone: scene.generate grounds on the current
+    # Environment Reference Sheet. Resolve the newest sheet (mission Part 41 -
+    # always the current ERS revision, never an earlier one).
+    if capability == "scene.generate" and not ctx.get("ers_package_id"):
+        try:
+            from ..environment_reference_sheet.store import list_sheets
+
+            sheets = list_sheets(project_id)
+            if sheets:
+                ctx["ers_package_id"] = str(getattr(sheets[0], "sheetId", "") or "")
+        except Exception:
+            pass
 
     return ctx
 

@@ -312,6 +312,24 @@ def _save_document(db: Session, row: SpatialMapDocumentRow, document: SpatialMap
     row.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(row)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=row.scene_id,
+            event_type="spatial_map.saved",
+            actor=ACTOR_USER,
+            actor_detail="spatial:commit_document",
+            subject_kind="spatial_map",
+            subject_id=document_id,
+            summary=f"Spatial Map saved as version {next_version}",
+            payload={"documentId": document_id, "savedVersion": next_version},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return _parse_document(row)
 
 
@@ -513,7 +531,26 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
     if body.gridScale is not None:
         document.gridScale = clamp_grid_scale(body.gridScale)
         refresh_derived_cells(document)
-    return _save_document(db, row, document)
+    saved = _save_document(db, row, document)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=row.scene_id,
+            event_type="spatial_map.updated",
+            actor=ACTOR_USER,
+            actor_detail="spatial:update_document",
+            subject_kind="spatial_map",
+            subject_id=document_id,
+            summary="Spatial Map edited (unsaved changes)",
+            payload={"documentId": document_id, "dirty": True},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+    return saved
 
 
 def commit_document(
@@ -723,7 +760,26 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
         )
     )
     _apply_placement_from_body(document.cameras[-1], body, document)
-    return _save_document(db, row, document)
+    saved = _save_document(db, row, document)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=row.scene_id,
+            event_type="camera.created",
+            actor=ACTOR_USER,
+            actor_detail="spatial:create_camera",
+            subject_kind="camera",
+            subject_id=document.cameras[-1].id,
+            summary=f"Camera {document.cameras[-1].label} created",
+            payload={"documentId": document_id, "cameraId": document.cameras[-1].id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+    return saved
 
 
 def update_camera(
@@ -746,7 +802,26 @@ def update_camera(
     for key, value in updates.items():
         setattr(camera, key, value)
     _sync_coords_after_update(camera, updates, document)
-    return _save_document(db, row, document)
+    saved = _save_document(db, row, document)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=row.scene_id,
+            event_type="camera.updated",
+            actor=ACTOR_USER,
+            actor_detail="spatial:update_camera",
+            subject_kind="camera",
+            subject_id=camera_id,
+            summary=f"Camera {camera.label} updated",
+            payload={"documentId": document_id, "cameraId": camera_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+    return saved
 
 
 def _orientation_to_yaw(orientation: str | None) -> float:
@@ -861,7 +936,26 @@ def remove_camera(db: Session, project_id: str, document_id: str, camera_id: str
     document.cameras = [item for item in document.cameras if item.id != camera_id]
     if removed.hero and document.cameras:
         document.cameras[0].hero = True
-    return _save_document(db, row, document)
+    saved = _save_document(db, row, document)
+    try:
+        from ..production_events import ACTOR_USER, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=row.scene_id,
+            event_type="camera.deleted",
+            actor=ACTOR_USER,
+            actor_detail="spatial:remove_camera",
+            subject_kind="camera",
+            subject_id=camera_id,
+            summary=f"Camera {removed.label} deleted",
+            payload={"documentId": document_id, "cameraId": camera_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+    return saved
 
 
 def create_path(db: Session, project_id: str, document_id: str, body: SpatialMovementPathCreateBody) -> SpatialMapDocument:

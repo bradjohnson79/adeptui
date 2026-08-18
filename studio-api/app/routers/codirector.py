@@ -636,6 +636,100 @@ async def get_production_state(project_id: str, db: Session = Depends(get_db)) -
     return {"projectId": project_id, "productionState": ps.model_dump(mode="json")}
 
 
+@router.get("/projects/{project_id}/production-snapshot")
+async def get_production_snapshot(
+    project_id: str,
+    scene_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Compact production state snapshot (orchestrator milestone, mission Part 1)."""
+    from ..codirector.production_state.snapshot import build_production_snapshot
+
+    return build_production_snapshot(db, project_id, scene_id)
+
+
+@router.get("/projects/{project_id}/production-memory")
+async def get_production_memory(
+    project_id: str,
+    scene_id: Optional[str] = None,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Structured production memory (mission Parts 3-4)."""
+    from ..codirector.production_state.memory import build_production_memory
+
+    memory = build_production_memory(db, project_id, scene_id)
+    memory["toolActions"] = (memory.get("toolActions") or [])[: max(1, min(limit, 50))]
+    return memory
+
+
+@router.get("/projects/{project_id}/production-events")
+async def get_production_events(
+    project_id: str,
+    scene_id: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Recent production events (mission Part 2)."""
+    from ..production_events import list_production_events
+
+    return {"projectId": project_id, "events": list_production_events(db, project_id, scene_id=scene_id, limit=limit)}
+
+
+@router.post("/projects/{project_id}/production-resolve-reference")
+async def resolve_production_reference_endpoint(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Resolve a conversational production reference to candidates (mission Part 4)."""
+    from ..codirector.production_state.memory import resolve_reference
+
+    ref = str((body or {}).get("ref") or "").strip()
+    scene_id = (body or {}).get("sceneId") or None
+    return resolve_reference(db, project_id, ref, scene_id=scene_id)
+
+
+@router.get("/projects/{project_id}/execution-authority")
+async def get_execution_authority_endpoint(
+    project_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Project execution authority (proposals | direct)."""
+    from ..codirector.execution_authority import (
+        AUTHORITY_PROPOSALS,
+        ROUTINE_TOOLS,
+        get_execution_authority,
+    )
+
+    return {
+        "projectId": project_id,
+        "executionAuthority": get_execution_authority(db, project_id),
+        "default": AUTHORITY_PROPOSALS,
+        "routineTools": sorted(ROUTINE_TOOLS),
+    }
+
+
+class ExecutionAuthorityBody(BaseModel):
+    executionAuthority: str
+
+
+@router.put("/projects/{project_id}/execution-authority")
+async def set_execution_authority_endpoint(
+    project_id: str,
+    body: ExecutionAuthorityBody,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Set project execution authority (proposals | direct)."""
+    from ..codirector.execution_authority import set_execution_authority
+
+    try:
+        value = set_execution_authority(db, project_id, body.executionAuthority)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    return {"projectId": project_id, "executionAuthority": value}
+
+
 @router.get("/projects/{project_id}/relationship")
 async def get_relationship_profile(project_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
     from ..codirector.conversation.discovery import load_discovery_bundle

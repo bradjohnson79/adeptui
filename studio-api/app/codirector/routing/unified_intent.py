@@ -153,6 +153,16 @@ def from_route_decision(route_decision: Optional[Any]) -> UnifiedIntent:
 # ids registered in ``capabilities.registry`` (atlas.generate, ers.generate,
 # scene.generate).
 _CAPABILITY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # --- Production-orchestrator milestone: conversational production commands ---
+    # "images from the ERS" / "shots using the saved cameras" → scene.generate
+    (re.compile(r"\b(?:create|generate|make|render)\b.*\bimages?\b.*\bfrom\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package))\b", re.I), "scene.generate"),
+    (re.compile(r"\b(?:create|generate|make|render)\b.*\b(?:shots?|images?)\b.*\b(?:using|from|with)\s+(?:the\s+)?(?:[a-z]+\s+)?(?:saved\s+)?cameras?\b", re.I), "scene.generate"),
+    # Timeline edits → timeline.add_asset (TOOL capability; curated tools path)
+    (re.compile(r"\b(?:put|add|place|move|insert|attach)\b.*\b(?:on|to|into|in|at|onto)\s+(?:the\s+)?timeline\b", re.I), "timeline.add_asset"),
+    (re.compile(r"\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track)\b", re.I), "timeline.add_asset"),
+    (re.compile(r"\b(?:create|make|add|build|start)\s+(?:a\s+|the\s+|another\s+|next\s+)?batch\b", re.I), "timeline.add_asset"),
+    (re.compile(r"\b(?:16\s*:\s*9|21\s*:\s*9|9\s*:\s*16|1\s*:\s*1)\b", re.I), "timeline.add_asset"),
+
     # --- m413 Spatial Map + Atlas + ERS + Scene Creator (specific first) ---
     # Atlas shot (roofless top-down environment reference) — must precede the
     # generic "shot"/"image" patterns so it wins.

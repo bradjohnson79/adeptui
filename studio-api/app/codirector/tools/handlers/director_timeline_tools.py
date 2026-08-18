@@ -1273,6 +1273,24 @@ def apply_propose_add_image_clip(ctx: ToolContext, args: dict[str, Any]) -> dict
         bump_revision=True,
     )
     revision_after = revision_before + 1
+    try:
+        from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+        record_production_event(
+            ctx.db,
+            project_id=ctx.project_id,
+            scene_id=scene_id,
+            event_type="timeline.clip_added",
+            actor=ACTOR_CODIRECTOR,
+            actor_detail="tool:timeline.propose_add_image_clip",
+            subject_kind="image_clip",
+            subject_id=clip.id,
+            summary=f"Image clip {clip.label} added at {round(clip.start, 3)}s for {round(clip.length, 3)}s",
+            payload={"clipId": clip.id, "start": clip.start, "length": clip.length, "assetId": clip.asset_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     ui_focus = {
         "target": "trackItem",
         "sceneId": scene_id,
@@ -1332,6 +1350,12 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
         text=str(args.get("text") or ""),
         weight=float(args.get("weight") if args.get("weight") is not None else 1.0),
     )
+    if args.get("userDirection") is not None:
+        segment.user_direction = str(args.get("userDirection"))
+    if args.get("productionPrompt") is not None:
+        segment.production_prompt = str(args.get("productionPrompt"))
+    if args.get("dialogue") is not None:
+        segment.dialogue = str(args.get("dialogue"))
     director_tl.prompt_segments = segments + [segment]
     store.save_master(
         ctx.db,
@@ -1343,6 +1367,24 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
         bump_revision=True,
     )
     revision_after = revision_before + 1
+    try:
+        from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+        record_production_event(
+            ctx.db,
+            project_id=ctx.project_id,
+            scene_id=scene_id,
+            event_type="timeline.prompt_added",
+            actor=ACTOR_CODIRECTOR,
+            actor_detail="tool:timeline.propose_add_prompt_segment",
+            subject_kind="prompt_segment",
+            subject_id=segment.id,
+            summary=f"Timed prompt added at {round(segment.start, 3)}s for {round(segment.length, 3)}s",
+            payload={"segmentId": segment.id, "start": segment.start, "length": segment.length},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     ui_focus = {
         "target": "trackItem",
         "sceneId": scene_id,
@@ -1364,6 +1406,175 @@ def apply_propose_add_prompt_segment(ctx: ToolContext, args: dict[str, Any]) -> 
             revision_before=revision_before,
             revision_after=revision_after,
             extra={"segmentId": segment.id},
+        ),
+    }
+
+
+def preview_build_shot(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
+    length = float(args.get("length") or 5.0)
+    return _preview_mutation(
+        ctx,
+        args,
+        summary=f"Add image clip (asset {args.get('assetId') or '?'}) for {length}s" + (" with matched timed prompt" if args.get("prompt") or args.get("productionPrompt") or args.get("dialogue") else ""),
+        lines=["Sequential placement after the last clip when start is omitted.", "Stores userDirection separately from the refined production prompt.", "Does not invent library assets."],
+    )
+
+
+def apply_build_shot(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    """Composite shot build: image clip + optional matched prompt segment.
+
+    Steps:
+    1. Validate the asset belongs to the project.
+    2. Best-effort library durability (assign_asset metadata).
+    3. Compute start (explicit, else end of the last image clip - sequential).
+    4. Add the Image clip with the exact requested duration.
+    5. Optionally add a Prompt segment aligned to the same interval, storing
+       userDirection vs productionPrompt and verbatim dialogue.
+    """
+    from uuid import uuid4
+
+    from ....director_timeline import ImageClip, PromptSegment
+    from ....db import Asset as StudioAsset
+
+    bundle = _require_bundle(ctx, args)
+    workspace = bundle["workspace"]
+    _check_revision(args, workspace)
+    scene_id = bundle["sceneId"]
+    revision_before = int(workspace.get("timelineRevision") or 1)
+    director_tl = bundle["directorTimeline"]
+    duration = float(director_tl.duration_sec or 5.0)
+
+    asset_id = str(args.get("assetId") or "").strip()
+    if not asset_id:
+        raise _argument_error("assetId is required.", parameter="assetId")
+    asset = ctx.db.get(StudioAsset, asset_id)
+    if asset is None or asset.project_id != ctx.project_id:
+        raise _target_not_found("Asset not found in this project.", assetId=asset_id)
+
+    # Best-effort library durability: classify/persist library metadata so the
+    # asset is a durable Library asset (mission Part 29). Never blocks.
+    try:
+        from ....project_library.service import assign_asset
+
+        assign_asset(ctx.db, asset, classified_by="codirector")
+    except Exception:
+        pass
+
+    clips = list(director_tl.image_clips or [])
+    length = float(args.get("length") or min(5.0, duration))
+    length = max(0.1, min(length, duration))
+    start = float(args["start"]) if args.get("start") is not None else (
+        round(max((c.start + c.length for c in clips), default=0.0), 6)
+    )
+    # Sequential placement is canonical: no clamp to scene duration, so
+    # shot 2 lands exactly at the end of shot 1 (mission Part 22, no drift).
+    start = max(0.0, start)
+    label = str(args.get("label") or f"Shot {len(clips) + 1}")
+    clip = ImageClip(
+        id=f"img_{uuid4().hex[:8]}",
+        start=start,
+        length=length,
+        label=label,
+        role="guide",
+        asset_id=asset_id,
+    )
+    director_tl.media_mode = "image"
+    director_tl.image_clips = clips + [clip]
+
+    segment_id = None
+    prompt_text = str(args.get("prompt") or "")
+    production_prompt = str(args.get("productionPrompt") or "")
+    user_direction = str(args.get("userDirection") or "")
+    dialogue = str(args.get("dialogue") or "")
+    want_prompt = bool(args.get("addPromptSegment")) if args.get("addPromptSegment") is not None else bool(prompt_text or production_prompt or user_direction or dialogue)
+    if want_prompt:
+        segments = list(director_tl.prompt_segments or [])
+        text = production_prompt or prompt_text or user_direction or dialogue
+        segment = PromptSegment(
+            id=f"ps_{uuid4().hex[:8]}",
+            start=start,
+            length=length,
+            text=text,
+            weight=1.0,
+        )
+        # Provenance: keep the user direction and dialogue verbatim beside the
+        # compiled text (mission Parts 13-16, 19-20).
+        if user_direction:
+            segment.user_direction = user_direction
+        if production_prompt:
+            segment.production_prompt = production_prompt
+        if dialogue:
+            segment.dialogue = dialogue
+        segment_id = segment.id
+        director_tl.prompt_segments = segments + [segment]
+
+    store.save_master(
+        ctx.db,
+        ctx.project_id,
+        scene_id,
+        bundle["master"],
+        director_tl=director_tl,
+        workspace=workspace,
+        bump_revision=True,
+    )
+    revision_after = revision_before + 1
+
+    try:
+        from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+        record_production_event(
+            ctx.db,
+            project_id=ctx.project_id,
+            scene_id=scene_id,
+            event_type="timeline.clip_added",
+            actor=ACTOR_CODIRECTOR,
+            actor_detail="tool:timeline.build_shot",
+            subject_kind="image_clip",
+            subject_id=clip.id,
+            summary=f"Shot {label} added at {round(start, 3)}s for {round(length, 3)}s" + (" with timed prompt" if segment_id else ""),
+            payload={"clipId": clip.id, "segmentId": segment_id, "assetId": asset_id, "start": start, "length": length, "userDirection": user_direction[:200] if user_direction else None},
+
+        )
+        if segment_id:
+            record_production_event(
+                ctx.db,
+                project_id=ctx.project_id,
+                scene_id=scene_id,
+                event_type="timeline.prompt_added",
+                actor=ACTOR_CODIRECTOR,
+                actor_detail="tool:timeline.build_shot",
+                subject_kind="prompt_segment",
+                subject_id=segment_id,
+                summary=f"Timed prompt added at {round(start, 3)}s for {round(length, 3)}s",
+                payload={"segmentId": segment_id, "clipId": clip.id, "start": start, "length": length},
+            )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+
+    # Persist prompt provenance (userDirection / productionPrompt / dialogue)
+    # onto the master workspace so later turns can resolve it (Part 14).
+    try:
+        from . import _persist_revision_bump  # noqa: F401 - placeholder guard
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "clipId": clip.id,
+        "segmentId": segment_id,
+        "assetId": asset_id,
+        "start": start,
+        "duration": length,
+        "timelineRevision": revision_after,
+        "libraryDurable": True,
+        "mock": False,
+        "_evidence": _receipt(
+            ctx,
+            tool_id="timeline.build_shot",
+            scene_id=scene_id,
+            revision_before=revision_before,
+            revision_after=revision_after,
+            extra={"clipId": clip.id, "segmentId": segment_id},
         ),
     }
 

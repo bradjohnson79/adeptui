@@ -41,13 +41,11 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-
 _DIRECTIONS: tuple[str, ...] = ("north", "east", "south", "west")
 _ERS_PURPOSE = "environment_reference_sheet"
 # Live Qwen qwen2512.txt2img probe 2026-08-16: native 2560x1440 decoded cleanly
 # (Comfy success, ~86s warm, peak ~30GB / 32GB, no OOM). Product uses native 2K.
 _ERS_2K_16_9 = (2560, 1440)
-
 
 def ers_2k_pixels(aspect: str = "16:9") -> tuple[int, int]:
     """2K-class ERS pixels. 16:9 is the probed native size; other aspects use compile 2K."""
@@ -59,8 +57,6 @@ def ers_2k_pixels(aspect: str = "16:9") -> tuple[int, int]:
     w, h = _ASPECT.get(key, (1920, 1080))
     scale = float(_RES_SCALE.get("2K", 1.25))
     return max(64, int(w * scale / 8) * 8), max(64, int(h * scale / 8) * 8)
-
-
 
 def image_core_prompt(plan: Any, fallback: str = "") -> str:
     """Image Core intent/prompt contract.
@@ -80,7 +76,6 @@ def image_core_prompt(plan: Any, fallback: str = "") -> str:
         if isinstance(text, str) and text.strip():
             return text.strip()
     return (fallback or "").strip()
-
 
 def _creator_model_body(
     *,
@@ -120,7 +115,6 @@ def _creator_model_body(
         out["lockModelFamily"] = True
         out.setdefault("source", "api")
     return out
-
 
 def build_ers_image_body(
     *,
@@ -173,7 +167,6 @@ def build_ers_image_body(
     body.pop("edit", None)
     return body
 
-
 def _spatial_map_reference_id(plan: Any, spatial_document: Any) -> str:
     raw = (
         getattr(plan, "reference_image", None)
@@ -182,11 +175,9 @@ def _spatial_map_reference_id(plan: Any, spatial_document: Any) -> str:
     )
     return str(raw).strip() if raw else ""
 
-
 def _gpt_i2i_official_id() -> str:
     """Canonical Kie Market id for GPT Image 2 image-to-image. Never T2I."""
     return "gpt-image-2-image-to-image"
-
 
 def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
     """Resolve through image-product. Refuse instead of silently substituting."""
@@ -226,7 +217,6 @@ def _pin_resolved_capability(body: dict[str, Any]) -> dict[str, Any]:
         body["modelFamilyPreference"] = official
     return body
 
-
 def _reuse_existing_ers_job(db: Session | None, project_id: str, tag: str) -> Any | None:
     """Duplicate-submit idempotency: reuse an in-flight job with the same tag."""
     if db is None or not tag:
@@ -260,14 +250,12 @@ def _reuse_existing_ers_job(db: Session | None, project_id: str, tag: str) -> An
             return job
     return None
 
-
 def _enqueue_ers_image_product(db, project_id, body, scene_id=None):
     """Single image-product enqueue for ERS. Creator model already pinned."""
     from ....storyboard_jobs import enqueue_imagegen_job
 
     job = enqueue_imagegen_job(db, project_id, body, scene_id=scene_id)
     return {"jobId": job.id, "jobs": [{"jobId": job.id}]}
-
 
 def persist_ers_composite_asset(
     db: Any = None,
@@ -352,7 +340,6 @@ def persist_ers_composite_asset(
         "has_reference": bool(asset_id),
     }
 
-
 def _stamp_ers_job_on_sheet(sheet: Any, *, job_id: str, package_id: str) -> None:
     """Record the queued Image Core job so persist can fill the composite later."""
     provenance = getattr(sheet, "provenance", None)
@@ -368,9 +355,7 @@ def _stamp_ers_job_on_sheet(sheet: Any, *, job_id: str, package_id: str) -> None
         "on complete and sets ers_composite_asset_id so has_reference is true."
     )
 
-
 _GENERIC_SHEET_DESCRIPTION = "Programmatically composed environment reference sheet."
-
 
 def _load_asset_prompt_meta(db: Session | None, asset_id: str) -> dict[str, Any]:
     """Best-effort prompt_meta for an asset (atlas Scene Intent recovery)."""
@@ -387,8 +372,6 @@ def _load_asset_prompt_meta(db: Session | None, asset_id: str) -> dict[str, Any]
     except Exception:
         pass
     return {}
-
-
 
 def _placement_dict(item: Any) -> dict[str, Any]:
     if isinstance(item, dict):
@@ -421,7 +404,6 @@ def _placement_dict(item: Any) -> dict[str, Any]:
         if hasattr(item, key):
             out[key] = getattr(item, key)
     return out
-
 
 def _character_identity_text(db: Session | None, project_id: str, character_id: str) -> dict[str, Any]:
     """Approved identity as text + asset id stamp. Never pixel refs on ERS T2I."""
@@ -471,7 +453,6 @@ def _character_identity_text(db: Session | None, project_id: str, character_id: 
         logger.debug("ERS character identity text unavailable for %s", character_id, exc_info=True)
     return result
 
-
 def _prop_identity_text(db: Session | None, project_id: str, prop_id: str) -> dict[str, Any]:
     result: dict[str, Any] = {
         "propId": prop_id,
@@ -502,7 +483,6 @@ def _prop_identity_text(db: Session | None, project_id: str, prop_id: str) -> di
     except Exception:
         logger.debug("ERS prop identity text unavailable for %s", prop_id, exc_info=True)
     return result
-
 
 def _resolve_ers_grounding(
     db: Session | None,
@@ -552,15 +532,10 @@ def _resolve_ers_grounding(
         for p in (getattr(spatial_document, "props", None) or [])
         if _placement_dict(p).get("visible", True)
     ]
-    camera_names = [
-        str(getattr(c, "label", "") or "").strip()
-        for c in (getattr(spatial_document, "cameras", None) or [])
-        if getattr(c, "visible", True)
-    ]
-
-    from ....spatial_map.ers_projection import compile_structured_blocking
+    from ....spatial_map.ers_projection import compile_structured_blocking, compile_structured_cameras
 
     blocking = compile_structured_blocking([*visible_characters, *visible_props])
+    camera_compile = compile_structured_cameras(getattr(spatial_document, "cameras", None) or [])
     contextual_subjects: list[str] = []
     character_ids: list[str] = []
     prop_ids: list[str] = []
@@ -645,7 +620,9 @@ def _resolve_ers_grounding(
         "original_environment_reference_asset_id": original_ref_id,
         "characters": [n for n in char_names if n],
         "props": [n for n in prop_names if n],
-        "cameras": [n for n in camera_names if n],
+        "cameras": list(camera_compile.get("cameras") or []),
+        "camera_lines": list(camera_compile.get("lines") or []),
+        "camera_labels": list(camera_compile.get("labels") or []),
         "contextual_subjects": contextual_subjects,
         "character_ids": list(dict.fromkeys(character_ids)),
         "prop_ids": list(dict.fromkeys(prop_ids)),
@@ -656,7 +633,6 @@ def _resolve_ers_grounding(
         "prop_placements": visible_props,
         "blocking": blocking,
     }
-
 
 def _public_asset_url(asset_id: str) -> str:
     """Public URL a hosted provider (Kie/fal) can fetch for pixel grounding."""
@@ -672,7 +648,6 @@ def _public_asset_url(asset_id: str) -> str:
     if not base:
         return ""
     return f"{base}/api/assets/{asset_id}/file"
-
 
 def _ers_sheet_prompt(
     sheet: Any,
@@ -721,6 +696,7 @@ def _ers_sheet_prompt(
         characters=list(grounding.get("characters") or []),
         props=list(grounding.get("props") or []),
         cameras=list(grounding.get("cameras") or []),
+        camera_facts=list(grounding.get("camera_lines") or []),
         contextual_subjects=list(grounding.get("contextual_subjects") or []),
         atlas_note=str(spatial.get("backgroundAssetId") or grounding.get("atlas_asset_id") or ""),
         visual_canon=(visual_canon.model_dump() if visual_canon is not None else None),
@@ -738,7 +714,6 @@ def _ers_sheet_prompt(
     )()
     return image_core_prompt(core_plan, fallback=seed)
 
-
 def _is_qwen2512_selection(creator_model: dict[str, Any]) -> bool:
     """True when the creator selected (or defaults to) the Qwen-Image-2512 family."""
     blob = " ".join(
@@ -746,7 +721,6 @@ def _is_qwen2512_selection(creator_model: dict[str, Any]) -> bool:
         for k in ("model", "modelFamilyPreference", "forceWorkflowKey")
     ).lower()
     return "qwen2512" in blob or "qwen_image_2512" in blob
-
 
 def _ers_i2i_workflow_key() -> str:
     """The certified Qwen image-to-image workflow for ERS, or '' when unavailable.
@@ -765,7 +739,6 @@ def _ers_i2i_workflow_key() -> str:
         return ""
     return "qwen2512.ref"
 
-
 def _is_explicit_gpt_image_2(creator_model: dict[str, Any]) -> bool:
     """True only when the creator explicitly selected GPT Image 2 (Kie)."""
     blob = " ".join(
@@ -773,7 +746,6 @@ def _is_explicit_gpt_image_2(creator_model: dict[str, Any]) -> bool:
         for k in ("hostedModelId", "kieImageModelId", "model", "modelFamilyPreference")
     ).lower()
     return "gpt-image-2" in blob or "gpt_image_2" in blob
-
 
 def handle(
     db: Session,
@@ -1045,6 +1017,9 @@ def handle(
     ctx["approvedCharacterAssetIds"] = list(grounding.get("approved_character_asset_ids") or [])
     ctx["approvedPropAssetIds"] = list(grounding.get("approved_prop_asset_ids") or [])
     ctx["contextualSubjects"] = list(grounding.get("contextual_subjects") or [])
+    ctx["cameras"] = list(grounding.get("cameras") or [])
+    ctx["cameraLines"] = list(grounding.get("camera_lines") or [])
+    ctx["gridScale"] = int(getattr(spatial_document, "gridScale", 0) or 0)
     if canon is not None:
         ctx["visualCanon"] = {
             "version": canon.version,
@@ -1187,6 +1162,25 @@ def handle(
         provenance.details = details
     save_ers_package(db, project_id, package)
     save_sheet(sheet)
+
+    try:
+        from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id or None,
+            event_type="ers.generation_started",
+            actor=ACTOR_CODIRECTOR,
+            actor_detail="capability:ers.generate",
+            subject_kind="sheet",
+            subject_id=str(getattr(sheet, "sheetId", "") or ""),
+            summary=f"ERS generation started (job {job_id[:8]})",
+            payload={"jobId": job_id, "sheetId": str(getattr(sheet, "sheetId", "") or ""), "packageId": package.id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
 
     return {
         "job_ids": [job_id],

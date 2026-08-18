@@ -57,6 +57,12 @@ class PromptSegment(BaseModel):
     negative_prompt: Optional[str] = None
     # W46: when set, this is an Image-Attached Prompt bound to a Timeline image clip.
     bound_image_clip_id: Optional[str] = None
+    # Production-orchestrator provenance: the creator original direction and
+    # exact dialogue stay separate from the refined production prompt (mission
+    # Parts 13-16, 19-20, 52). Never overwritten by refinement.
+    user_direction: Optional[str] = None
+    production_prompt: Optional[str] = None
+    dialogue: Optional[str] = None
     # Canonical scene-reference binding IDs (order preserved). Alias text is display-only.
     reference_binding_ids: list[str] = Field(default_factory=list)
 

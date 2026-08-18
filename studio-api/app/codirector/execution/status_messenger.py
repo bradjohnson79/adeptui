@@ -207,7 +207,7 @@ def append_execution_status_message(
         return None
     try:
         # Local import to avoid a hard dependency on service.py at module load.
-        from .service import append_assistant_completion
+        from ...service import append_assistant_completion
 
         event = build_execution_status_event(
             db,

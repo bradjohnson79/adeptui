@@ -201,6 +201,34 @@ _SEND_TO_TIMELINE_PATTERN = re.compile(
     re.I,
 )
 
+# --- Production-orchestrator milestone: conversational production commands ---
+#
+# "create images from the ERS" / "generate images from the ers using the four saved cameras"
+# -> scene.generate grounded in the current ERS package + spatial cameras.
+_ERS_TO_SCENE_PATTERN = re.compile(
+    r"\b(?:create|generate|make|render|build)\b.*\bimages?\b.*\bfrom\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package))\b",
+    re.I,
+)
+
+# "create shots using the four saved cameras" / "make images from the saved cameras"
+_CAMERA_SHOTS_PATTERN = re.compile(
+    r"\b(?:create|generate|make|render)\b.*\b(?:shots?|images?)\b.*\b(?:using|from|with)\s+(?:the\s+)?(?:[a-z]+\s+)?(?:saved\s+)?cameras?\b",
+    re.I,
+)
+
+# Timeline edit vocabulary (mission Parts 17-28): put/add/move on the timeline,
+# timed prompts, batches, generator selection, frame size, exact durations.
+_TIMELINE_EDIT_PATTERN = re.compile(
+    r"\b(?:put|add|place|move|drop|insert|attach)\b.*\b(?:on|to|into|in|at|onto)\s+(?:the\s+)?timeline\b"
+    r"|\b(?:put|add|place|move)\b.*\b(?:at|near)\s+(?:the\s+)?(?:start|beginning|end|top|head)\s+of\s+(?:the\s+)?timeline\b"
+    r"|\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track)\b"
+    r"|\b(?:create|make|add|build|start)\s+(?:a\s+|the\s+|another\s+|next\s+)?batch\b"
+    r"|\b(?:run|generate)\s+(?:this|the|that|it|batch\s*\d*)\s+(?:in|with)\s+(?:minimax|qwen|ltx|hunyuan)\b"
+    r"|\b(?:make|set)\s+(?:the\s+)?(?:clip|shot|batch|it|this)\s+\d+\s*seconds?\b"
+    r"|\b(?:16\s*:\s*9|21\s*:\s*9|9\s*:\s*16|1\s*:\s*1)\b",
+    re.I,
+)
+
 
 NAVIGATION_TARGETS: dict[str, str] = {
     "script writer": "script_writer",
@@ -359,6 +387,30 @@ def classify_deterministic(
             writeAllowed=False,
             destructive=False,
             evidence=["Negation detected — action intent negated by user"],
+        )
+    # 1.5 Production-orchestrator commands (mission): explicit production verbs
+    # run BEFORE the approve/reject checks so phrases like "put it at the start of
+    # Timeline" (which contains the approve word "start") route to execution.
+    if _ERS_TO_SCENE_PATTERN.search(message) or _CAMERA_SHOTS_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="scene.generate",
+            confidence=0.9,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched ERS/scene-creator production pattern"],
+        )
+
+    if _TIMELINE_EDIT_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="timeline.edit",
+            confidence=0.88,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched timeline edit pattern"],
         )
 
     # 2. NAVIGATE (§8.1)
@@ -570,6 +622,7 @@ def classify_deterministic(
             destructive=False,
             evidence=["Matched scene shot generation pattern"],
         )
+
 
     # "regenerate shot 2" → scene.generate targeted regen (capability id
     # resolved downstream; the shot index is extracted by the LLM/curated

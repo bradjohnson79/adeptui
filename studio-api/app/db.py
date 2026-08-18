@@ -210,6 +210,32 @@ class CoDirectorConversationEvent(Base):
 # --------------------------------------------------------------------------
 
 
+class ProductionEvent(Base):
+    """Project-scoped production event stream (M034 - Co-Director production orchestrator).
+
+    Append-only record of production changes (spatial map, cameras, ERS,
+    scene-creator candidates, library, timeline, jobs) so Co-Director can
+    know what happened - including changes the user made manually through
+    the UI. Recording is best-effort and never blocks the triggering
+    operation (see app/production_events.py).
+    """
+
+    __tablename__ = "production_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    scene_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    actor: Mapped[str] = mapped_column(String(16), default="system")
+    # user | codirector | system
+    actor_detail: Mapped[str] = mapped_column(String(64), default="")
+    subject_kind: Mapped[str] = mapped_column(String(32), default="")
+    subject_id: Mapped[str] = mapped_column(String(64), default="")
+    summary: Mapped[str] = mapped_column(String(400), default="")
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class ProductionBible(Base):
     __tablename__ = "production_bibles"
 
