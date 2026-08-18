@@ -332,6 +332,25 @@ def _ensure_output_asset_ids(db: Session, row: Job, params: dict[str, Any]) -> l
     if ids:
         params["outputAssetIds"] = ids
         row.params_json = json.dumps(params)
+        # LoRA + execution provenance parity: attach the lora block to the
+        # library asset so video generations are inspectable like images.
+        try:
+            for aid in ids:
+                asset = db.get(Asset, str(aid)) if aid else None
+                if asset is None:
+                    continue
+                try:
+                    raw = asset.prompt_meta_json or "{}"
+                    meta = json.loads(raw) if isinstance(raw, str) else (raw or {})
+                except Exception:
+                    meta = {}
+                if isinstance(meta, dict):
+                    meta["lora"] = params.get("lora_provenance")
+                    meta.setdefault("engine", "ltx")
+                    asset.prompt_meta_json = json.dumps(meta)
+                    db.add(asset)
+        except Exception:
+            pass
         db.add(row)
         try:
             db.commit()

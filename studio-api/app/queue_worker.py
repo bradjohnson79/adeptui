@@ -1105,12 +1105,22 @@ class JobQueue:
             if is_timeline_batch:
                 try:
                     out_asset = Asset(
-                        id=str(uuid4()),
+                        id=str(uuid.uuid4()),
                         project_id=project.id,
                         kind="video",
                         filename=dest.name,
                         path=str(dest),
                         tag=f"batch_{params.get('batchBlockId', 'tl')[:8]}",
+                        # LoRA + execution provenance rides the library asset so
+                        # video generations are inspectable like image outputs.
+                        prompt_meta_json=json.dumps(
+                            {
+                                "lora": params.get("lora_provenance"),
+                                "engine": str(scene.engine or ""),
+                                "workflowKey": getattr(contract, "leaf_workflow_key", "") or "",
+                                "comfyPromptId": job.comfy_prompt_id or "",
+                            }
+                        ),
                     )
                     db.add(out_asset)
                     db.commit()

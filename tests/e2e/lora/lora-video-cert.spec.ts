@@ -112,5 +112,15 @@ test.describe("LoRA video runtime certification (live)", () => {
     expect(loraNode.inputs.lora_name.length).toBeGreaterThan(0);
     // Video actually produced.
     expect(Object.keys(history.outputs || {}).length).toBeGreaterThan(0);
+    // Library asset carries the LoRA provenance (image/video parity).
+    const outAssetId = (params.outputAssetIds || [])[0] || params.output_asset_id;
+    expect(outAssetId, "batch output asset id").toBeTruthy();
+    const lib = (await (await request.get(`${API}/api/projects/${projectId}/library`)).json()) as { items: any[] };
+    const item = (lib.items || []).find((i) => i.id === outAssetId);
+    expect(item, "batch output must be in the project Library").toBeTruthy();
+    const meta =
+      typeof item.prompt_meta_json === "string" ? JSON.parse(item.prompt_meta_json) : item.prompt_meta_json;
+    expect(meta?.lora?.loraId).toBe(ltxLoraId);
+    expect(meta?.lora?.strength).toBe(0.6);
   });
 });
