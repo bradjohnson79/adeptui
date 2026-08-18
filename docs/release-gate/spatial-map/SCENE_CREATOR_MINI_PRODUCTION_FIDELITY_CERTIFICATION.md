@@ -153,12 +153,16 @@ validator (fal google/gemini-2.5-flash-lite) — **but independent review fails
 character identity on 7/8** (see §10). The automated PASS is therefore NOT
 sufficient for the GO gate.
 
-| Camera | Size | Primary | A | B |
+Automated validator (flash-lite): 8/8 PASS. Independent review (see §10): **1/8 PASS (C1-B)** —
+identity substitution on C1-A/C2-A/C2-B/C3-B/C4-A/C4-B, required character
+absent/substituted on C3-A, shot-size mismatch on C4-A/C4-B.
+
+| Camera | Size | Primary | A (auto / independent) | B (auto / independent) |
 |--------|------|---------|---|---|
-| C1 | wide | auto | PASS | PASS |
-| C2 | medium | Korri | PASS | PASS |
-| C3 | medium_close | Korri | PASS | PASS |
-| C4 | close_up | auto | PASS | PASS |
+| C1 | wide | auto | PASS / identity FAIL | PASS / **PASS** |
+| C2 | medium | Korri | PASS / identity FAIL | PASS / identity FAIL |
+| C3 | medium_close | Korri | PASS / absent-substituted FAIL | PASS / identity FAIL |
+| C4 | close_up | auto | PASS / identity + shot-size FAIL | PASS / identity + shot-size FAIL |
 
 **Qwen Image (local) C2 pair** `f3d4c8b0-…` + regenerate + fresh take `9e0f6c2d-…`:
 Qwen executes locally (1280×720, correct frame size, hero-inset reference, no ERS
@@ -262,6 +266,20 @@ independent vision reviewers FAIL 7/8 — a validation-strictness gap (Part 45
 stop condition) that this milestone tightened in code (identity facts in the
 validation fact card + stricter identity rubric), but the certified candidates
 still fail the identity gate.
+
+**Reconciled reviewer matrix (Subagent C final):** GPT take 1/8 PASS (C1-B);
+stricter reading (gemini-2.5-flash presence dissent on C1-B) → 0/8. Qwen 0/8
+(absent everywhere — automated FAIL verdicts visually confirmed). Camera
+references: geography + environment continuity PASS; the reviewer's subject
+(Korri) criterion does not apply to camera references (Part 17: viewpoint/framing
+canon, not scene art); the "stale" flags in the review pack came from the
+pre-staleness-fix artifact dump — live state is stale:false. The shot-scale
+finding on references needs human spot-check (the reviewer's rubric was
+character-focused).
+
+Continuity failures the automated validator MISSED (all confirmed by reviewers):
+(1) identity substitution on 6 GPT candidates; (2) absent/substituted required
+character on C3-A; (3) close-up shot-size mismatch on C4-A/C4-B.
 
 ## 11. Verdict
 

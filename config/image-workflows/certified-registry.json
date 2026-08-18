@@ -958,7 +958,7 @@
         ]
       },
       "limitations": [
-        "ERS image-to-image contract: source environment image is consumed via LoadImage + TextEncodeQwenImageEdit (image tokens + reference latents). Promotion to Certified requires the Phase 2R live runtime proof."
+        "ERS image-to-image contract: source environment image is consumed via LoadImage + TextEncodeQwenImageEdit (image tokens + reference latents). Certified by the Phase 2R live runtime proof (certificationRecordId phase2-qwen2512-ref-ers-i2i-2026-08-16) and exercised by Scene Creator Mini live takes."
       ],
       "vramProfile": {
         "minimumGb": 16,
