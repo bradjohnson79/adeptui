@@ -262,6 +262,52 @@ class LoraSpec:
         return asdict(self)
 
 
+def wire_lora_nodes(
+    graph: dict[str, Any],
+    *,
+    lora: 'LoraSpec | None' = None,
+    model_ref: list[Any],
+    clip_ref: list[Any] | None = None,
+    node_id: str = "20",
+) -> tuple[list[Any], list[Any] | None]:
+    """Append a LoRA loader node to a graph; return the new model/clip refs.
+
+    Uses full ``LoraLoader`` when a CLIP ref is available (SDXL-style
+    checkpoints expose MODEL+CLIP), ``LoraLoaderModelOnly`` otherwise
+    (FLUX / Z-Image / Qwen transformer paths load CLIP separately).
+    ``lora`` is a ``LoraSpec`` with ``resolvedName``/``loraId`` + ``strength``.
+    """
+    if lora is None:
+        return model_ref, clip_ref
+    strength = float(getattr(lora, "strength", 0.8) or 0.8)
+    name = str(getattr(lora, "resolvedName", None) or getattr(lora, "loraId", "") or "").strip()
+    if not name:
+        return model_ref, clip_ref
+    if clip_ref is not None:
+        graph[node_id] = {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": list(model_ref),
+                "clip": list(clip_ref),
+                "lora_name": name,
+                "strength_model": strength,
+                "strength_clip": strength,
+            },
+            "_meta": {"title": f"LoRA — {name}", "adeptLora": True},
+        }
+        return [node_id, 0], [node_id, 1]
+    graph[node_id] = {
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {
+            "model": list(model_ref),
+            "lora_name": name,
+            "strength_model": strength,
+        },
+        "_meta": {"title": f"LoRA — {name}", "adeptLora": True},
+    }
+    return [node_id, 0], None
+
+
 def krea2_lora_search_roots(settings: Any) -> list[Path]:
     """LoRA search roots: configured Krea 2 / Adept model roots first."""
     roots: list[Path] = []

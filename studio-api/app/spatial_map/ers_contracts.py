@@ -294,6 +294,8 @@ class SceneShot(BaseModel):
     prop_entity_ids: list[str] = Field(default_factory=list)
     camera: SceneCreatorCamera = Field(default_factory=SceneCreatorCamera)
     generator: GeneratorSourceSelection = Field(default_factory=GeneratorSourceSelection)
+    # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
+    lora: Optional[dict[str, Any]] = None
     candidates: list[SceneShotCandidate] = Field(default_factory=list)
     approved_candidate_id: Optional[str] = None
     take_memory: SceneShotTakeMemory = Field(default_factory=SceneShotTakeMemory)

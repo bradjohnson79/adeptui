@@ -45,9 +45,20 @@ def build_leaf_graph(
     moodboard_references: Optional[list[Any]] = None,
     lora_id: Optional[str] = None,
     lora_strength: Optional[float] = None,
+    lora_name: Optional[str] = None,
     grow_mask_by: int = 6,
 ) -> dict[str, Any]:
     """Build a Comfy (or adapter) graph from a resolved contract. Builder imports only here."""
+    from .asset_refs import LoraSpec
+
+    lora_spec: Optional[LoraSpec] = None
+    if lora_name:
+        lora_spec = LoraSpec(
+            loraId=str(lora_name),
+            strength=float(lora_strength) if lora_strength is not None else 0.8,
+            resolvedName=str(lora_name),
+            resolved=True,
+        )
     if isinstance(contract, CanonicalImageWorkflowContract):
         key = contract.workflow_key
         builder_path = contract.builder_path
@@ -70,6 +81,7 @@ def build_leaf_graph(
             steps=steps,
             cfg=cfg,
             filename_prefix=filename_prefix,
+            lora=lora_spec,
         )
 
     if key in {"zimage.ref_edit"}:
@@ -226,6 +238,7 @@ def build_leaf_graph(
                 scheduler=settings.qwen_image_2512_scheduler,
                 model_shift=settings.qwen_image_2512_shift,
                 filename_prefix=filename_prefix,
+                lora=lora_spec,
             )
 
         variant = "profile" if key == "qwen2512.character_profile" else "concept"
@@ -301,7 +314,7 @@ def build_leaf_graph(
             if moodboard_references is not None
             else _contract_list("moodboard_references", "moodboardReferences"),
         )
-        effective_lora_id = lora_id
+        effective_lora_id = lora_name or lora_id
         contract_lora_strength: Optional[float] = None
         if effective_lora_id is None:
             if isinstance(contract, CanonicalImageWorkflowContract):
@@ -377,6 +390,7 @@ def build_leaf_graph(
             t5_name=getattr(settings, "imagegen_flux_t5", "t5xxl_fp16.safetensors"),
             vae_name=getattr(settings, "imagegen_flux_vae", "ae.safetensors"),
             steps=steps if steps != 8 else getattr(settings, "imagegen_flux_steps", 20),
+            lora=lora_spec,
             cfg=cfg if cfg != 1.0 else getattr(settings, "imagegen_flux_cfg", 1.0),
             filename_prefix=filename_prefix,
         )
@@ -441,6 +455,7 @@ def build_leaf_graph(
             steps=steps,
             cfg=cfg,
             filename_prefix=filename_prefix,
+            lora=lora_spec,
         )
 
     if key.startswith("imagen."):

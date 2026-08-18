@@ -199,6 +199,7 @@ export type SceneShot = {
   prop_entity_ids: string[];
   camera: SceneCreatorCamera;
   generator: GeneratorSourceSelection;
+  lora?: { loraId: string; name: string; strength: number } | null;
   candidates: SceneShotCandidate[];
   approved_candidate_id?: string | null;
   take_memory: SceneShotTakeMemory;

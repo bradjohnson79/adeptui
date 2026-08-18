@@ -422,6 +422,12 @@ try:
 
         app.include_router(image_product_router, prefix="/api")
         try:
+            from .lora_registry.router import router as lora_registry_router
+
+            app.include_router(lora_registry_router, prefix="/api")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("lora_registry router unavailable: %s", exc)
+        try:
             from .image_studio.api import router as image_studio_router
 
             app.include_router(image_studio_router, prefix="/api")

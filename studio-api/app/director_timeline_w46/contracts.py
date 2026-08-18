@@ -120,6 +120,11 @@ class TimelinePromptSegment(BaseModel):
     versionId: str = Field(default_factory=lambda: _nid("psv_"))
     legacyPromptSegmentId: Optional[str] = None
     referenceBindingIds: list[str] = Field(default_factory=list)
+    # Production-orchestrator provenance: creator original direction and exact
+    # dialogue preserved beside the refined production prompt (mission Part 14).
+    userDirection: Optional[str] = None
+    productionPrompt: Optional[str] = None
+    dialogue: Optional[str] = None
 
 
 class ExecutionSnapshot(BaseModel):
@@ -260,6 +265,9 @@ class BatchBlock(BaseModel):
     repairRanges: list[RepairRange] = Field(default_factory=list)
     references: list[dict[str, Any]] = Field(default_factory=list)
     speechWindows: list[dict[str, Any]] = Field(default_factory=list)
+    # Shared LoRA registry selection applied to this batch's generations
+    # ({loraId, name, strength}). None = no LoRA (baseline behavior).
+    lora: Optional[dict[str, Any]] = None
     configFingerprint: Optional[str] = None
     createdAt: str = Field(default_factory=_now)
     updatedAt: str = Field(default_factory=_now)

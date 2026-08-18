@@ -131,6 +131,7 @@ def build_zimage_txt2img_workflow(
     steps: int = 8,
     cfg: float = 1.0,
     filename_prefix: str = "studio/zimg_txt2img",
+    lora: Any = None,
 ) -> dict[str, Any]:
     """
     Production Z-Image Turbo text-to-image graph.
@@ -138,7 +139,7 @@ def build_zimage_txt2img_workflow(
     Uses UNETLoader + CLIPLoader(lumina2) + TextEncodeZImageOmni — never
     CheckpointLoaderSimple (diffusion-only UNET is not a full checkpoint).
     """
-    return {
+    graph = {
         "1": {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": unet_name, "weight_dtype": "default"},
@@ -198,6 +199,14 @@ def build_zimage_txt2img_workflow(
             "inputs": {"images": ["9", 0], "filename_prefix": filename_prefix},
         },
     }
+    if lora is not None:
+        from ..image_runtime.asset_refs import wire_lora_nodes
+
+        model_ref, _clip = wire_lora_nodes(
+            graph, lora=lora, model_ref=["1", 0], clip_ref=None, node_id="20"
+        )
+        graph["4"]["inputs"]["model"] = list(model_ref)
+    return graph
 
 
 def build_zimage_ref_workflow(

@@ -557,6 +557,10 @@ def create_or_update_shot(
         shot.camera = SceneCreatorCamera.model_validate(camera)
     if generator:
         shot.generator = GeneratorSourceSelection.model_validate(generator)
+        if isinstance(generator.get("lora"), dict):
+            shot.lora = dict(generator["lora"])
+        elif "lora" in generator:
+            shot.lora = None
     save_scene_shot(db, project_id, shot)
     return shot
 
@@ -575,6 +579,7 @@ def _enqueue_shot_candidates(
     quality_profile: str = "final",
     camera_record: Any = None,
     diagnostic_mode: str = "",
+    lora: dict[str, Any] | None = None,
 ) -> list[SceneShotCandidate]:
     package, runtime = resolve_ers_for_sheet(db, project_id, shot.sheet_id)
     shot.ers_package_id = package.id
@@ -698,6 +703,9 @@ def _enqueue_shot_candidates(
         index = plan["index"] + index_offset
         body = dict(body_base)
         body["modelFamilyPreference"] = plan["family"]
+        effective_lora = lora or shot.lora
+        if effective_lora:
+            body["lora"] = dict(effective_lora)
         plan_extras = extras
         if extras.get("strategy") == "A" and certified_visual_edit_path(plan["family"]) is None:
             if use_core and not draft:
@@ -957,6 +965,7 @@ def generate_candidates(
     local_family: str = "",
     api_model: str = "",
     candidate_count: int = 4,
+    lora: dict[str, Any] | None = None,
 ) -> SceneShot:
     shot = _require_shot(db, project_id, shot_id)
     if _approved_candidate(shot) is not None:
@@ -971,6 +980,7 @@ def generate_candidates(
         local_family=local_family,
         api_model=api_model,
         candidate_count=candidate_count,
+        lora=lora,
     )
     shot.candidates = candidates
     shot.take_memory = _seed_take_memory(shot, package, user_correction={})
@@ -988,6 +998,7 @@ def retake_shot(
     api_enabled: bool = False,
     local_family: str = "",
     api_model: str = "",
+    lora: dict[str, Any] | None = None,
 ) -> SceneShot:
     """Non-destructive Re-Take. Take A stays until Take B is approved."""
     shot = _require_shot(db, project_id, shot_id)
@@ -1026,6 +1037,7 @@ def retake_shot(
         candidate_count=1,
         index_offset=len(prior),
         camera_record=_camera_record_for_shot(db, project_id, shot),
+        lora=lora,
     )
     shot.candidates = prior + [c for c in new_cands if c.id not in {p.id for p in prior}]
     shot.approved_candidate_id = approved_id

@@ -176,12 +176,17 @@ def build_txt2img_workflow(
     steps: int = 20,
     cfg: float = 3.5,
     filename_prefix: str = "studio/imagegen",
+    lora: Any = None,
 ) -> dict[str, Any]:
     """
     Minimal checkpoint txt2img graph compatible with standard Comfy CheckpointLoaderSimple.
     Swap checkpoint for FLUX/SD3.5/HiDream weights as configured.
+
+    ``lora`` (optional LoraSpec) inserts a LoraLoader node between the
+    checkpoint and the sampler/text encoders - baseline graph is unchanged
+    when no LoRA is selected.
     """
-    return {
+    graph = {
         "1": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
@@ -222,6 +227,16 @@ def build_txt2img_workflow(
             "inputs": {"images": ["6", 0], "filename_prefix": filename_prefix},
         },
     }
+    if lora is not None:
+        from .image_runtime.asset_refs import wire_lora_nodes
+
+        model_ref, clip_ref = wire_lora_nodes(
+            graph, lora=lora, model_ref=["1", 0], clip_ref=["1", 1]
+        )
+        graph["2"]["inputs"]["clip"] = list(clip_ref)
+        graph["3"]["inputs"]["clip"] = list(clip_ref)
+        graph["5"]["inputs"]["model"] = list(model_ref)
+    return graph
 
 
 def build_img2img_edit_stub(

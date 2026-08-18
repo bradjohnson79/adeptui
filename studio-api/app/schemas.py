@@ -473,6 +473,8 @@ class RenderRequest(BaseModel):
     strength_preset: Optional[str] = None
     strength: Optional[float] = None
     ingredients_ic_lora: Optional[bool] = None
+    # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
+    lora: Optional[dict] = None
     # M3.0h local-first provenance / paid-fallback gates
     providerPreference: Optional[str] = "local"
     paidFallbackApproved: bool = False

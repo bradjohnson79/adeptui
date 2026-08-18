@@ -188,6 +188,7 @@ def build_timeline_generation_request(
         seed=None,
         cameraMotion=None,
         providerOptions={
+            "lora": batch.lora,
             "planningStartImageAssetId": planning_start,
             "originalGeneratorId": generator_id,
             "selectedGenerator": snapshot.selectedGenerator,

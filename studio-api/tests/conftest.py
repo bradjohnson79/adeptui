@@ -12,7 +12,13 @@ import pytest
 
 # This must happen before any test module can import app.*. Both Settings and the
 # SQLAlchemy engine are constructed at import time.
-_TEST_DATA_DIR = Path(tempfile.mkdtemp(prefix="aivideostudio-phase0-")).resolve()
+_TEST_DATA_DIR = Path(
+    os.environ.get("ADEPT_TEST_DATA_DIR")
+    or (Path(__file__).resolve().parents[1] / ".adept-tmp" / "pytest-data")
+).resolve()
+# tempfile.mkdtemp creates 0o700 dirs that some sandboxes (DSH workspace-write)
+# deny child writes to; a workspace-backed dir avoids that entirely.
+_TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 os.environ["STUDIO_DATA_DIR"] = str(_TEST_DATA_DIR)
 # App startup would otherwise promote a real .env fal key into the store, which means a
 # live network probe on every test that exercises the lifespan.

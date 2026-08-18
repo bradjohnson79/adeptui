@@ -36,6 +36,7 @@ import { DownloadSourcesPanel } from "./DownloadSourcesPanel";
 import { HostedProvidersSetupPanel } from "./HostedProvidersSetupPanel";
 import { isApiKeyCatalogComponent } from "./hostedProviderSetupCopy";
 import { ModelStoragePanel } from "./ModelStoragePanel";
+import { LoRASetupSection } from "./lora/LoRASetupSection";
 import { PanelHeading } from "./HelpTip";
 import { AddSourceWorkflow } from "./install/AddSourceWorkflow";
 import { InstallProgressCard } from "./install/InstallProgressCard";
@@ -1576,6 +1577,8 @@ export function SetupWizardPanel({ projectId }: { projectId?: string }) {
         </p>
       </section>
       <SetupSummary status={status} preparing={preparing} projectId={projectId} onPrepare={() => void preparePlan()} />
+
+      <LoRASetupSection onMessage={setMessage} />
 
       {message && <div className="setup-message" role="status">{message}</div>}
 

@@ -90,8 +90,9 @@ def _build_qwen_2512_graph(
     scheduler: str,
     model_shift: float,
     filename_prefix: str,
+    lora: Any = None,
 ) -> dict[str, Any]:
-    return {
+    graph = {
         "1": {
             "class_type": "UNETLoader",
             "inputs": {
@@ -171,6 +172,14 @@ def _build_qwen_2512_graph(
             },
         },
     }
+    if lora is not None:
+        from ..image_runtime.asset_refs import wire_lora_nodes
+
+        model_ref, _clip = wire_lora_nodes(
+            graph, lora=lora, model_ref=["1", 0], clip_ref=None, node_id="20"
+        )
+        graph["4"]["inputs"]["model"] = list(model_ref)
+    return graph
 
 
 def build_qwen_2512_txt2img_workflow(
@@ -189,6 +198,7 @@ def build_qwen_2512_txt2img_workflow(
     scheduler: str = QWEN_2512_DEFAULT_SCHEDULER,
     model_shift: float = QWEN_2512_DEFAULT_SHIFT,
     filename_prefix: str = "studio/qwen2512_txt2img",
+    lora: Any = None,
 ) -> dict[str, Any]:
     return _build_qwen_2512_graph(
         unet_name=unet_name,
@@ -204,6 +214,7 @@ def build_qwen_2512_txt2img_workflow(
         sampler_name=sampler_name,
         scheduler=scheduler,
         model_shift=model_shift,
+        lora=lora,
         filename_prefix=filename_prefix,
     )
 

@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../api";
 import { sceneCreatorApi } from "./sceneCreatorApi";
+import type { LoraSelection } from "../../lora/LoRASelector";
 import { normalizeProductionAspect, type ProductionAspectRatio } from "../../../workspacePrefs";
 import type {
   CinematicShotControls,
@@ -70,6 +71,7 @@ export function useSceneCreator(projectId: string) {
   const [propIds, setPropIds] = useState<string[]>([]);
   const [localEnabled, setLocalEnabled] = useState(true);
   const [localFamily, setLocalFamily] = useState("");
+  const [lora, setLora] = useState<LoraSelection | null>(null);
   const [apiEnabled, setApiEnabled] = useState(false);
   const [apiModel, setApiModel] = useState("");
   const [cinematographer, setCinematographer] = useState<SceneCinematographerPack | null>(null);
@@ -112,6 +114,13 @@ export function useSceneCreator(projectId: string) {
 
   const applyShot = useCallback((next: SceneShot | null, placedPropIds: string[] = []) => {
     setShot(next);
+    if (next?.lora) {
+      setLora({
+        loraId: String(next.lora.loraId || ""),
+        name: String(next.lora.name || ""),
+        strength: Number(next.lora.strength ?? 0.8),
+      });
+    }
     if (!next) {
       if (placedPropIds.length) setPropIds(placedPropIds);
       return;
@@ -262,6 +271,7 @@ export function useSceneCreator(projectId: string) {
         api_enabled: apiEnabled,
         local_family: localFamily,
         api_model: apiModel,
+        lora: lora ? { ...lora } : null,
       },
     });
     applyShot(res.shot);
@@ -352,6 +362,7 @@ export function useSceneCreator(projectId: string) {
         api_enabled: apiEnabled,
         local_family: localFamily,
         api_model: apiModel,
+        lora: lora ? { ...lora } : null,
       });
       applyShot(res.shot);
       startPoll(res.shot.id);
@@ -362,7 +373,7 @@ export function useSceneCreator(projectId: string) {
     } finally {
       endSubmit();
     }
-  }, [applyShot, apiEnabled, apiModel, correction, localEnabled, localFamily, persistShot, projectId, shot, startPoll]);
+  }, [applyShot, apiEnabled, apiModel, correction, lora, localEnabled, localFamily, persistShot, projectId, shot, startPoll]);
 
   const sendToTimeline = useCallback(async () => {
     if (!shot) return;
@@ -836,6 +847,8 @@ export function useSceneCreator(projectId: string) {
     setLocalEnabled,
     localFamily,
     setLocalFamily,
+    lora,
+    setLora,
     apiEnabled,
     setApiEnabled,
     apiModel,

@@ -16,6 +16,7 @@ import { HelpTip } from "../HelpTip";
 import type { LibraryAsset } from "../CoDirector/library/assetModel";
 import { getAssetName } from "../CoDirector/library/assetModel";
 import { CisAccordion } from "./CisAccordion";
+import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
 import { isReferenceImage, ReferenceBrowser, referenceRole } from "./ReferenceBrowser";
 import { ImageProviderBrowser } from "./ImageProviderBrowser";
 import { providerSubLabel } from "./providerDisplay";
@@ -153,6 +154,34 @@ function providerSupportsReferences(provider: ImageProviderDescriptor | null | u
   return Boolean((caps as { supportsReferences?: unknown }).supportsReferences);
 }
 
+
+function LoraAccordionSection({
+  targets,
+  loraSelection,
+  setLoraSelection,
+}: {
+  targets: ImageProviderDescriptor[];
+  loraSelection: LoraSelection | null;
+  setLoraSelection: (selection: LoraSelection | null) => void;
+}) {
+  const families = Array.from(
+    new Set(targets.map((t) => t.family || t.modelId || "").filter(Boolean)),
+  );
+  // LoRA selectors render only for a single active model family; hosted
+  // providers expose no compatible LoRAs so the registry returns empty and
+  // the selector stays hidden (no misleading options).
+  if (families.length !== 1) return null;
+  return (
+    <div style={{ marginTop: "0.75rem" }}>
+      <LoRASelector
+        modelFamily={families[0]}
+        modality="image"
+        value={loraSelection}
+        onChange={setLoraSelection}
+      />
+    </div>
+  );
+}
 export function CinematicImageStudio({
   project,
   onChange,
@@ -189,6 +218,7 @@ export function CinematicImageStudio({
   const [paidConfirmIds, setPaidConfirmIds] = useState<string[]>([]);
   const [hostedChoice, setHostedChoice] = useState<"local_only" | "allow_hosted">("local_only");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [loraSelection, setLoraSelection] = useState<LoraSelection | null>(null);
   const [seed, setSeed] = useState(project.seed ?? -1);
   const [guidance, setGuidance] = useState<number | "">("");
   const [steps, setSteps] = useState<number | "">("");
@@ -494,10 +524,19 @@ export function CinematicImageStudio({
                 : undefined,
           });
 
-          const body = {
+          const body: Record<string, unknown> = {
             ...(preview.imageProductBody || {}),
             lockModelFamily: true,
           };
+          // Shared LoRA registry: single-family generations only. Mixed-family
+          // batches (all_models) never carry a LoRA — the registry refuses
+          // incompatible selections and the UI hides the selector there.
+          const uniqueFamilies = Array.from(
+            new Set(targets.map((t) => t.family || t.modelId || "").filter(Boolean)),
+          );
+          if (loraSelection && uniqueFamilies.length === 1) {
+            body.lora = { ...loraSelection };
+          }
           if (preview.continuitySessionId && !continuitySession) {
             try {
               const s = await api.imageStudio.getContinuitySession(
@@ -782,7 +821,7 @@ export function CinematicImageStudio({
             </div>
             <div className="field">
               <label>Mode</label>
-              <select value={mode} onChange={(e) => setMode(e.target.value as GenerationMode)}>
+              <select data-testid="cis-mode" value={mode} onChange={(e) => setMode(e.target.value as GenerationMode)}>
                 <option value="best_match">Best Match</option>
                 <option value="choose_model">Choose Model</option>
                 <option value="all_models">All Image Models</option>
@@ -811,7 +850,7 @@ export function CinematicImageStudio({
           {mode === "choose_model" && (
             <div className="field" style={{ marginTop: "0.65rem" }}>
               <label>Model</label>
-              <select value={chosenProviderId} onChange={(e) => setChosenProviderId(e.target.value)}>
+              <select data-testid="cis-model" value={chosenProviderId} onChange={(e) => setChosenProviderId(e.target.value)}>
                 <option value="">Select a model…</option>
                 {providers.map((p) => {
                   const sub = providerSubLabel(p);
@@ -1223,6 +1262,7 @@ export function CinematicImageStudio({
 
         <details
           className="cis-card"
+          data-testid="cis-advanced"
           open={advancedOpen}
           onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
         >
@@ -1254,6 +1294,11 @@ export function CinematicImageStudio({
               />
             </div>
           </div>
+          <LoraAccordionSection
+            targets={generateTargets}
+            loraSelection={loraSelection}
+            setLoraSelection={setLoraSelection}
+          />
         </details>
 
         {/* Results */}

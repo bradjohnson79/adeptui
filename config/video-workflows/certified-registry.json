@@ -95,7 +95,14 @@
       "modelFamily": "LTX 2.3",
       "capabilityId": "video.ltx.simple_i2v",
       "providerKind": "local",
-      "certificationRecordId": "CERT-WF-LTX-001-20260729-003"
+      "certificationRecordId": "CERT-WF-LTX-001-20260729-003",
+      "optionalInputs": [
+        "loraId",
+        "loraStrength"
+      ],
+      "optionalNodes": [
+        "LoraLoaderModelOnly"
+      ]
     },
     {
       "modality": "video",
@@ -178,7 +185,14 @@
       "modelFamily": "LTX 2.3",
       "capabilityId": "video.ltx.scene",
       "providerKind": "local",
-      "certificationRecordId": "CERT-WF-LTX-002-20260729-003"
+      "certificationRecordId": "CERT-WF-LTX-002-20260729-003",
+      "optionalInputs": [
+        "loraId",
+        "loraStrength"
+      ],
+      "optionalNodes": [
+        "LoraLoaderModelOnly"
+      ]
     },
     {
       "modality": "video",
@@ -264,11 +278,20 @@
       "builder": "build_ltx_25_t2v",
       "builderPath": "app.workflows.ltx_25_builder:build_ltx_25_t2v",
       "requiredNodes": [
-        "UNETLoader", "VAELoader", "CLIPLoader",
-        "CLIPTextEncode", "LTXVConditioning",
-        "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
-        "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
-        "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo"
+        "UNETLoader",
+        "VAELoader",
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "LTXVConditioning",
+        "ModelSamplingLTXV",
+        "LTXVScheduler",
+        "RandomNoise",
+        "KSamplerSelect",
+        "STGGuiderNode",
+        "LTXVBaseSampler",
+        "LTXVTiledVAEDecode",
+        "CreateVideo",
+        "SaveVideo"
       ],
       "requiredModels": [
         "ltx_2_5_checkpoint",
@@ -338,11 +361,22 @@
       "builder": "build_ltx_25_i2v",
       "builderPath": "app.workflows.ltx_25_builder:build_ltx_25_i2v",
       "requiredNodes": [
-        "UNETLoader", "VAELoader", "CLIPLoader",
-        "CLIPTextEncode", "LTXVConditioning", "LoadImage", "LTXVImgToVideo",
-        "ModelSamplingLTXV", "LTXVScheduler", "RandomNoise",
-        "KSamplerSelect", "STGGuiderNode", "LTXVBaseSampler",
-        "LTXVTiledVAEDecode", "CreateVideo", "SaveVideo"
+        "UNETLoader",
+        "VAELoader",
+        "CLIPLoader",
+        "CLIPTextEncode",
+        "LTXVConditioning",
+        "LoadImage",
+        "LTXVImgToVideo",
+        "ModelSamplingLTXV",
+        "LTXVScheduler",
+        "RandomNoise",
+        "KSamplerSelect",
+        "STGGuiderNode",
+        "LTXVBaseSampler",
+        "LTXVTiledVAEDecode",
+        "CreateVideo",
+        "SaveVideo"
       ],
       "requiredModels": [
         "ltx_2_5_checkpoint",

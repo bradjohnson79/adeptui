@@ -23,6 +23,10 @@ class ImageProvenance(BaseModel):
     intentId: Optional[str] = None
     toolId: Optional[str] = None
     settings: dict[str, Any] = Field(default_factory=dict)
+    # LoRA provenance (Adept LoRA support): populated only when a LoRA was
+    # actually applied. Keeps the asset reproducible/inspectable without a
+    # separate LoRA history system.
+    lora: Optional[dict[str, Any]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump()

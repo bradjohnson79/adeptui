@@ -5499,6 +5499,32 @@ export const api = {
     fd.append("approved", approved ? "true" : "false");
     return req<any>(`/api/marketplace/${itemId}/install`, { method: "POST", body: fd });
   },
+  // ── Shared LoRA Registry (Adept UI LoRA support) ───────────────────────
+  loras: {
+    list: () => req<{ loras: any[]; count: number }>(`/api/loras`),
+    catalog: () => req<{ items: any[] }>(`/api/loras/catalog`),
+    compatible: (modelFamily: string, modality?: string) => {
+      const q = new URLSearchParams({ modelFamily });
+      if (modality) q.set("modality", modality);
+      return req<{ loras: any[]; count: number }>(`/api/loras/compatible?${q.toString()}`);
+    },
+    scan: () => req<{ candidates: any[] }>(`/api/loras/scan`),
+    detect: (autoEnable = true) =>
+      req<{ registered: any[]; count: number }>(`/api/loras/detect?auto_enable=${autoEnable}`, { method: "POST" }),
+    register: (body: Record<string, unknown>) =>
+      req<any>(`/api/loras/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    enable: (loraId: string) => req<any>(`/api/loras/${encodeURIComponent(loraId)}/enable`, { method: "POST" }),
+    disable: (loraId: string) => req<any>(`/api/loras/${encodeURIComponent(loraId)}/disable`, { method: "POST" }),
+    remove: (loraId: string, deleteFile = false, approved = false) =>
+      req<any>(`/api/loras/${encodeURIComponent(loraId)}?delete_file=${deleteFile}&approved=${approved}`, { method: "DELETE" }),
+    download: (loraId: string, approved = false) =>
+      req<any>(`/api/loras/${encodeURIComponent(loraId)}/download?approved=${approved}`, { method: "POST" }),
+    refresh: () => req<{ ok: boolean; loras: any[] }>(`/api/loras/refresh`, { method: "POST" }),
+  },
   loraStack: (scope = "global") => req<{ scope: string; stack: any[] }>(`/api/lora/stack?scope=${encodeURIComponent(scope)}`),
   putLoraStack: (scope: string, stack: any[]) =>
     req(`/api/lora/stack`, {
@@ -5695,6 +5721,48 @@ export const api = {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         }
+      ),
+    miniTakePreview: (projectId: string, documentId: string) =>
+      req<{
+        saved: boolean;
+        isDirty: boolean;
+        cameraCount: number;
+        outputCount: number;
+        labels: string[];
+        latestTakeId?: string;
+      }>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take/preview`),
+    createMiniTake: (
+      projectId: string,
+      documentId: string,
+      body: { generator: string; aspectRatio: string; cameraIds?: string[] },
+    ) =>
+      req<{ take: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    getMiniTake: (projectId: string, documentId: string, takeId: string) =>
+      req<{ take: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take/${takeId}`,
+      ),
+    regenerateMiniTake: (
+      projectId: string,
+      documentId: string,
+      takeId: string,
+      body: { cameraId?: string | null },
+    ) =>
+      req<{ take: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take/${takeId}/regenerate`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    sendMiniTakeToLibrary: (
+      projectId: string,
+      documentId: string,
+      takeId: string,
+      body: { resultIds: string[] },
+    ) =>
+      req<{ take: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take/${takeId}/send-to-library`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>

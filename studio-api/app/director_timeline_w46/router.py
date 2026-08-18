@@ -103,6 +103,8 @@ def delete_batch(project_id: str, scene_id: str, batch_id: str, db: Session = De
 class PatchBatchBody(BaseModel):
     label: Optional[str] = None
     generatorId: Optional[str] = None
+    # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
+    lora: Optional[dict[str, Any]] = None
     plannedDuration: Optional[float] = None
     promptSegments: Optional[list[dict[str, Any]]] = None
     sourceAnchors: Optional[list[dict[str, Any]]] = None

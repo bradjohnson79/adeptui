@@ -44,6 +44,7 @@ import {
   type TimelineGeneratorOption,
 } from "../../timelineMaster/draftCapabilities";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
+import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
 
 function executionLabel(engine: string) {
   return engine.startsWith("fal_") ? "Hosted" : engine === "auto" ? "Automatic" : "Local";
@@ -401,6 +402,50 @@ export function TimelineInspector({
     () => project.assets.filter((asset) => asset.kind === "audio"),
     [project.assets],
   );
+
+  const [loraSelection, setLoraSelection] = useState<LoraSelection | null>(null);
+
+  // Prefill the drawer LoRA from the scene W46 batch config (batch[0] is
+  // the authoritative first-generation config) and persist changes to every
+  // batch so the selected generation action actually uses the LoRA.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .directorTimelineMaster(project.id, scene.id)
+      .then((payload) => {
+        if (cancelled) return;
+        const master = payload.master as SceneTimelineMaster | undefined;
+        const first = master?.batchBlocks?.find((b) => b.lora?.loraId);
+        if (first?.lora) {
+          setLoraSelection({
+            loraId: first.lora.loraId,
+            name: first.lora.name || "",
+            strength: Number(first.lora.strength ?? 0.8),
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, scene.id]);
+
+  const applySceneLora = async (selection: LoraSelection | null) => {
+    setLoraSelection(selection);
+    try {
+      const payload = await api.directorTimelineMaster(project.id, scene.id);
+      const master = payload.master as SceneTimelineMaster | undefined;
+      const batches = master?.batchBlocks || [];
+      for (const batch of batches) {
+        await api.directorTimelinePatchBatch(project.id, scene.id, batch.id, {
+          lora: selection ? { ...selection } : null,
+        });
+      }
+    } catch {
+      /* registry/batch updates are best-effort in the drawer; the generation
+         worker validates selections and refuses incompatible ones */
+    }
+  };
 
   const updateScene = async (patch: Partial<Scene>, opts?: { refresh?: boolean }) => {
     await api.updateScene(project.id, scene.id, { ...scene, ...patch });
@@ -843,6 +888,12 @@ export function TimelineInspector({
           </InspectorAccordion>
 
           <InspectorAccordion title="Advanced" testId="timeline-inspector-advanced">
+            <LoRASelector
+              modelFamily={scene.engine}
+              modality="video"
+              value={loraSelection}
+              onChange={(selection) => void applySceneLora(selection)}
+            />
             <SceneProductionReadinessPanel project={project} scene={scene} />
           </InspectorAccordion>
         </div>

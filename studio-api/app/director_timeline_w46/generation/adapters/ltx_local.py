@@ -115,6 +115,7 @@ class LtxLocalAdapter:
             "tailAssetId": request.tailAssetId,
             "aspectRatio": request.aspectRatio,
             "resolution": request.resolution,
+            "lora": request.lora or request.providerOptions.get("lora"),
             "draftMode": bool(request.providerOptions.get("draftMode")),
             "continuityStrategy": request.continuityStrategy
             if request.continuityStrategy not in ("native_tail", "native_extend")

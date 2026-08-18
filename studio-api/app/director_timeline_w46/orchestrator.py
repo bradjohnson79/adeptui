@@ -429,6 +429,25 @@ def submit_batch_generation(
         submission=submission,
     )
 
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.generation_started",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:submit_batch_generation",
+            subject_kind="batch",
+            subject_id=batch.id,
+            summary=f"Generation started for batch {batch.label} via {adapter.id}",
+            payload={"batchId": batch.id, "generatorId": adapter.id, "snapshotId": snap.id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+
     return {
         "ok": True,
         "batchBlockId": batch.id,
@@ -516,6 +535,24 @@ def complete_batch_candidate(
         if job.executionSnapshotId == execution_snapshot_id:
             job.status = "completed"
     store.save_master(db, project_id, scene_id, master)
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.generation_completed",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:complete_batch_candidate",
+            subject_kind="candidate",
+            subject_id=cand.id,
+            summary=f"Generation completed for batch {batch.label} (candidate {cand.label}, asset {asset_id[:8]})",
+            payload={"batchId": batch_id, "candidateId": cand.id, "assetId": asset_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {
         "ok": True,
         "candidate": cand.model_dump(),
@@ -577,6 +614,24 @@ def approve_candidate(
     # SEQUENTIAL_SUBMISSION_CHAIN: Approved is a terminal state — free the
     # provider slot for the next Queued batch (no-op when none queued).
     chain = submit_next_queued_batch(db, project_id, scene_id)
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.candidate_approved",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:approve_candidate",
+            subject_kind="candidate",
+            subject_id=candidate_id,
+            summary=f"Candidate {cand.label} approved for batch {batch.label} (asset {cand.assetId[:8]})",
+            payload={"batchId": batch_id, "candidateId": candidate_id, "assetId": cand.assetId},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "approvedClip": batch.approvedClip.model_dump(), "batchStatus": batch.status, "placement": placement, "sequentialChain": chain, "mock": False}
 
 
@@ -603,6 +658,24 @@ def reject_candidate(
     cand.takeState = state
     cand.approved = False
     store.save_master(db, project_id, scene_id, master)
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.candidate_rejected",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:reject_candidate",
+            subject_kind="candidate",
+            subject_id=candidate_id,
+            summary=f"Candidate rejected for batch {batch.label}",
+            payload={"batchId": batch_id, "candidateId": candidate_id},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "candidate": cand.model_dump(), "mock": False}
 
 
@@ -634,6 +707,8 @@ def touch_batch_config(
     if "generatorId" in patch:
         batch.generatorId = patch["generatorId"]
         batch.generatorOverride = True
+    if "lora" in patch:
+        batch.lora = patch["lora"] if isinstance(patch["lora"], dict) and patch["lora"].get("loraId") else None
     if "plannedDuration" in patch:
         batch.duration.plannedDuration = float(patch["plannedDuration"])
     if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
@@ -754,6 +829,24 @@ def add_clip_to_batch(
 
     batch.configFingerprint = compute_config_fingerprint(batch)
     store.save_master(db, project_id, scene_id, master)
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.clip_added",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:add_clip_to_batch",
+            subject_kind="clip",
+            subject_id=clip.id,
+            summary=f"{kind.capitalize()} clip added to batch {batch.label}",
+            payload={"batchId": batch_id, "clipId": clip.id, "kind": kind},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return {"ok": True, "batch": batch.model_dump(), "clip": clip.model_dump(), "mock": False}
 
 
@@ -1302,6 +1395,24 @@ def retake_batch(
     result["retakeMode"] = mode
     result["priorSnapshotsPreserved"] = True
     result["continuityAware"] = aware
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.retake_started",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:retake_batch",
+            subject_kind="batch",
+            subject_id=batch_id,
+            summary=f"Retake started for batch {batch.label} (mode={mode})",
+            payload={"batchId": batch_id, "mode": mode, "continuityAware": aware},
+
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
     return result
 
 

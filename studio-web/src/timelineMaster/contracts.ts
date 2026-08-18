@@ -198,6 +198,7 @@ export interface BatchBlock {
   approvedClip?: ApprovedClip | null;
   repairRanges: RepairRange[];
   references: Record<string, unknown>[];
+  lora?: { loraId: string; name: string; strength: number } | null;
   configFingerprint?: string | null;
   createdAt: string;
   updatedAt: string;

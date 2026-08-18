@@ -9,6 +9,7 @@ import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import type { SceneShotCandidate } from "./types";
 import { useSceneCreator } from "./useSceneCreator";
+import { LoRASelector } from "../../lora/LoRASelector";
 import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
 import { OrientationAccordion } from "./cinematographer/OrientationAccordion";
@@ -706,6 +707,15 @@ function GeneratorBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
         {sc.localEnabled ? `${caps?.local?.label || "Economy Preview Available"} for local generators. ` : ""}
         {apiLabel}
       </p>
+      <details className="scene-creator-core__advanced" data-testid="scene-creator-advanced">
+        <summary>Advanced</summary>
+        <LoRASelector
+          modelFamily={sc.localFamily || "auto"}
+          modality="image"
+          value={sc.lora}
+          onChange={sc.setLora}
+        />
+      </details>
     </div>
   );
 }

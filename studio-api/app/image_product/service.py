@@ -97,11 +97,34 @@ def generate_images(
             "steps": body.get("steps"),
             "grow_mask_by": body.get("grow_mask_by"),
             "masks": body.get("masks") or (intent.get("metadata") or {}).get("masks") or [],
+            # Shared LoRA registry selection (single LoRA per generation, Phase 1).
+            # Also preserves the legacy project stack as metadata-only passthrough.
+            "lora": body.get("lora") or None,
+            "loras": body.get("loras") or [],
             "purpose": body.get("purpose") or intent.get("purpose"),
             "operation": intent.get("operation") or body.get("operation"),
             "creativeContext": body.get("creativeContext") if isinstance(body.get("creativeContext"), dict) else {},
             "productionDock": dock_meta,
             "preferenceProvenance": (dock_meta or {}).get("provenance"),
+            "commitToLibrary": body.get("commitToLibrary", True),
+            "sourceFeature": body.get("sourceFeature")
+            or (
+                (body.get("creativeContext") or {}).get("sourceFeature")
+                if isinstance(body.get("creativeContext"), dict)
+                else None
+            ),
+            "miniTakeId": body.get("miniTakeId")
+            or (
+                (body.get("creativeContext") or {}).get("miniTakeId")
+                if isinstance(body.get("creativeContext"), dict)
+                else None
+            ),
+            "miniVariation": body.get("miniVariation")
+            or (
+                (body.get("creativeContext") or {}).get("miniVariation")
+                if isinstance(body.get("creativeContext"), dict)
+                else None
+            ),
         }
         pin_provider = str((pinned or {}).get("provider") or "").strip().lower()
         if pin_provider == "fal" or params.get("falImageModelId"):

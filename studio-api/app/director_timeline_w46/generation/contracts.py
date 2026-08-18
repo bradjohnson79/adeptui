@@ -83,6 +83,8 @@ class TimelineGenerationRequest(BaseModel):
     seed: Optional[int] = None
     cameraMotion: Optional[str] = None
     providerOptions: dict[str, Any] = Field(default_factory=dict)
+    # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
+    lora: Optional[dict[str, Any]] = None
     fallbackAllowed: bool = False
     continuityBridgeId: Optional[str] = None
     lastFrameAssetId: Optional[str] = None

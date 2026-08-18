@@ -58,11 +58,13 @@
         "prompt"
       ],
       "optionalInputs": [
+        "height",
+        "loraId",
+        "loraStrength",
         "negative",
         "seed",
-        "width",
-        "height",
-        "steps"
+        "steps",
+        "width"
       ],
       "supportedOutputs": [
         "png",
@@ -114,7 +116,10 @@
         "nodeInventoryHash": "sha256:f425b8f3803b2d6bb4782d8951e34742556c723bf6ed6712d626efd478b848d1",
         "modelInventoryHash": "sha256:d97372ae8b1672fb35db0790ccf05a6eff649c5342c81a82a49b9ac1229b4a97"
       },
-      "certificationRecordId": "CERT-IMG-ZIMAGE-TXT2IMG-001-20260729-003"
+      "certificationRecordId": "CERT-IMG-ZIMAGE-TXT2IMG-001-20260729-003",
+      "optionalNodes": [
+        "LoraLoaderModelOnly"
+      ]
     },
     {
       "workflowId": "IMG-ZIMAGE-REF-001",
@@ -461,12 +466,14 @@
         "vae"
       ],
       "optionalInputs": [
+        "cfg",
+        "height",
+        "loraId",
+        "loraStrength",
         "negative",
         "seed",
-        "width",
-        "height",
         "steps",
-        "cfg"
+        "width"
       ],
       "supportedOutputs": [
         "png"
@@ -512,7 +519,10 @@
         "liveTestPromptId": "0c18e4d8-8b00-4d67-8e77-bcb93d7df5ea",
         "liveTestDate": "2026-08-13"
       },
-      "certificationRecordId": "CR-FLUX-TXT2IMG-20260813-001"
+      "certificationRecordId": "CR-FLUX-TXT2IMG-20260813-001",
+      "optionalNodes": [
+        "LoraLoaderModelOnly"
+      ]
     },
     {
       "workflowId": "IMG-FLUX-IMG2IMG-001",
@@ -802,12 +812,14 @@
         "prompt"
       ],
       "optionalInputs": [
+        "cfg",
+        "height",
+        "loraId",
+        "loraStrength",
         "negative",
         "seed",
-        "width",
-        "height",
         "steps",
-        "cfg"
+        "width"
       ],
       "supportedOutputs": [
         "png",
@@ -854,7 +866,10 @@
         "state": "HIGH"
       },
       "fingerprints": {},
-      "certificationRecordId": "m42-w43-qwen2512-txt2img-smoke-2026-07-31"
+      "certificationRecordId": "m42-w43-qwen2512-txt2img-smoke-2026-07-31",
+      "optionalNodes": [
+        "LoraLoaderModelOnly"
+      ]
     },
     {
       "workflowId": "IMG-QWEN2512-REF-001",
@@ -952,8 +967,8 @@
         "state": "HIGH"
       },
       "fingerprints": {
-        "graphHash": "sha256:b985aefc9435641250c76dcf9e149514b7442cf7af9c783062da2b31abdd0768",
-        "builderHash": "sha256:e12e18761422d65f1af52544520be3a093222e07f73374f18e0163f1cfe9f325",
+        "graphHash": "sha256:40ca923a4492f476ac153db1c6837926e7d8e2e5af7e173262f94b58d19d3006",
+        "builderHash": "sha256:2162e688661d3a76b893dccb920e0d8697f4bd41bbb8a076de605818dcd95e6c",
         "nodeInventoryHash": "sha256:2445c65464a778310a1ee927d630da0f90eb35c8004947b763b53fffba7d66e2",
         "modelInventoryHash": "sha256:8d5fc318865f46c91d617e553045405fe5f89b6a86ef820d5fd636ca75d75f32"
       },
@@ -1442,12 +1457,14 @@
         "prompt"
       ],
       "optionalInputs": [
+        "cfg",
+        "height",
+        "loraId",
+        "loraStrength",
         "negative",
         "seed",
-        "width",
-        "height",
         "steps",
-        "cfg"
+        "width"
       ],
       "supportedOutputs": [
         "png",
@@ -1507,7 +1524,10 @@
         "nodeInventoryHash": "sha256:4839c9c7bcf599c479e2206e793abd1e423d57956a1388b9b370ff10bb8915d4",
         "modelInventoryHash": "sha256:b8a825feeda83ba38460a355abb46dce14439a148c8d0e8e9039a06d6db80f5b"
       },
-      "certificationRecordId": "CERT-IMG-ILLUSTRIOUS-TXT2IMG-001-20260813-001"
+      "certificationRecordId": "CERT-IMG-ILLUSTRIOUS-TXT2IMG-001-20260813-001",
+      "optionalNodes": [
+        "LoraLoader"
+      ]
     },
     {
       "workflowId": "IMG-QWEN-TXT2IMG-001",
@@ -1981,12 +2001,14 @@
         "checkpoint"
       ],
       "optionalInputs": [
+        "cfg",
+        "height",
+        "loraId",
+        "loraStrength",
         "negative",
         "seed",
-        "width",
-        "height",
         "steps",
-        "cfg"
+        "width"
       ],
       "supportedOutputs": [
         "png"
@@ -2025,7 +2047,10 @@
         "state": "UNKNOWN"
       },
       "fingerprints": {},
-      "certificationRecordId": null
+      "certificationRecordId": null,
+      "optionalNodes": [
+        "LoraLoader"
+      ]
     },
     {
       "workflowId": "IMG-UPSCALE-001",

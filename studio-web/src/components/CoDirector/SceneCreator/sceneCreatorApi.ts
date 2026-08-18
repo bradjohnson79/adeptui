@@ -54,6 +54,16 @@ export type GenerateShotInput = {
   local_family?: string;
   api_model?: string;
   candidate_count?: number;
+  lora?: { loraId: string; name: string; strength: number } | null;
+};
+
+export type RetakeShotInput = {
+  correction: string;
+  local_enabled: boolean;
+  api_enabled: boolean;
+  local_family?: string;
+  api_model?: string;
+  lora?: { loraId: string; name: string; strength: number } | null;
 };
 
 export const sceneCreatorApi = {

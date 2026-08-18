@@ -161,6 +161,7 @@ def build_flux_txt2img_workflow(
     sampler_name: str = "euler",
     scheduler: str = "simple",
     filename_prefix: str = "studio/flux",
+    lora: Any = None,
 ) -> dict[str, Any]:
     """Build a FLUX.1 txt2img ComfyUI workflow graph."""
     loaders, model_id, vae_id, clip_id = _flux_model_nodes(
@@ -201,7 +202,15 @@ def build_flux_txt2img_workflow(
         sampler_node_id="6",
         filename_prefix=filename_prefix,
     )
-    return {**loaders, **conditioning, **latent, **sampler, **decode_save}
+    graph = {**loaders, **conditioning, **latent, **sampler, **decode_save}
+    if lora is not None:
+        from ..image_runtime.asset_refs import wire_lora_nodes
+
+        model_ref, _clip = wire_lora_nodes(
+            graph, lora=lora, model_ref=["1", 0], clip_ref=None, node_id="9"
+        )
+        graph["6"]["inputs"]["model"] = list(model_ref)
+    return graph
 
 
 def build_flux_img2img_workflow(

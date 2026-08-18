@@ -29,6 +29,7 @@ def _fingerprint(batch: BatchBlock) -> str:
         ],
         "refs": batch.references,
         "repairs": [r.model_dump() for r in batch.repairRanges],
+        "lora": batch.lora,
     }
     raw = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]

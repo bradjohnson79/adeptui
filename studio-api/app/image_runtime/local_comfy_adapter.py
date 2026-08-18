@@ -55,6 +55,8 @@ async def submit(
     outpaint_top: int = 0,
     outpaint_right: int = 256,
     outpaint_bottom: int = 256,
+    lora_name: Optional[str] = None,
+    lora_strength: Optional[float] = None,
     **_extra: Any,
 ) -> dict[str, Any]:
     """Queue a local Comfy graph. Same verb as kie/fal submit.
@@ -96,6 +98,8 @@ async def submit(
             outpaint_top=outpaint_top,
             outpaint_right=outpaint_right,
             outpaint_bottom=outpaint_bottom,
+            lora_name=lora_name,
+            lora_strength=lora_strength,
         )
         wf = prepare_executable_graph(
             contract,

@@ -138,6 +138,8 @@ class GenerateShotBody(BaseModel):
     local_family: str = ""
     api_model: str = ""
     candidate_count: int = 4
+    # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
+    lora: Optional[dict[str, Any]] = None
 
 
 class RetakeShotBody(BaseModel):
@@ -146,6 +148,7 @@ class RetakeShotBody(BaseModel):
     api_enabled: bool = False
     local_family: str = ""
     api_model: str = ""
+    lora: Optional[dict[str, Any]] = None
 
 
 class ApproveCandidateBody(BaseModel):
@@ -779,6 +782,7 @@ def api_generate_shot(
             local_family=body.local_family,
             api_model=body.api_model,
             candidate_count=body.candidate_count,
+            lora=body.lora,
         )
     except Exception as exc:
         raise _service_error(exc) from exc
@@ -805,6 +809,7 @@ def api_retake_shot(
             api_enabled=body.api_enabled,
             local_family=body.local_family,
             api_model=body.api_model,
+            lora=body.lora,
         )
     except Exception as exc:
         raise _service_error(exc) from exc

@@ -796,6 +796,51 @@ class JobQueue:
                 params, getattr(scene, "director_json", "") or ""
             )
 
+            # Shared LoRA Registry (video path): resolve the selected LoRA
+            # against the ACTIVE video engine. Refuses disabled / incompatible
+            # / missing selections with a clear error — never substitutes.
+            lora_video_name: Optional[str] = None
+            lora_video_strength = 0.8
+            lora_sel = params.get("lora")
+            if lora_sel is None and isinstance(params.get("loras"), list) and params.get("loras"):
+                lora_sel = params["loras"][0]
+            if lora_sel is None:
+                # Legacy scene-render fallback: Timeline right drawer stores the
+                # scene-level LoRA in director_json (W46 batches keep their own).
+                try:
+                    _dj = json.loads(getattr(scene, "director_json", "") or "{}")
+                    if isinstance(_dj, dict) and _dj.get("lora"):
+                        lora_sel = _dj["lora"]
+                except Exception:
+                    lora_sel = None
+            if lora_sel is not None and not use_ingredients:
+                from .lora_registry.registry import resolve_comfy_lora_name, resolve_lora_for_generation
+
+                lora_rec = resolve_lora_for_generation(lora_sel, resolved_engine, "video")
+                lora_video_name = resolve_comfy_lora_name(lora_rec)
+                if isinstance(lora_sel, dict) and lora_sel.get("strength") is not None:
+                    try:
+                        lora_video_strength = float(lora_sel["strength"])
+                    except (TypeError, ValueError):
+                        lora_video_strength = float(lora_rec.recommended_strength or 0.8)
+                else:
+                    lora_video_strength = float(lora_rec.recommended_strength or 0.8)
+                params["lora_provenance"] = {
+                    "loraId": lora_rec.id,
+                    "name": lora_rec.name,
+                    "version": lora_rec.version,
+                    "modelFamily": lora_rec.model_family,
+                    "compatibleModelFamilies": list(lora_rec.compatible_model_families),
+                    "strength": lora_video_strength,
+                    "baseGenerator": resolved_engine,
+                    "sourceTool": "timeline",
+                    "filePath": lora_rec.file_path,
+                    "category": lora_rec.category,
+                    "modality": lora_rec.modality,
+                }
+                job.message = f"Preparing {scene.name} · {resolved_engine} · LoRA {lora_rec.name}"
+                db.commit()
+
             # M41 4.1B: WorkflowResolver selects leaf workflow — QueueWorker executes only.
             from .video_runtime.workflow_resolver import resolve_from_scene_params
             from .video_runtime.workflow_execute import build_leaf_graph, prepare_executable_graph
@@ -874,7 +919,12 @@ class JobQueue:
                 db.commit()
 
             async def _run_graph(wf: dict, workflow_key: str):
-                wf = prepare_executable_graph(contract, wf, enforce_certified_fingerprint=True)
+                # A graph with an explicitly selected LoRA intentionally exercises
+                # the declared optional inputs (loraId/loraStrength) and is verified
+                # by the LoRA graph tests instead of the baseline topology hash.
+                wf = prepare_executable_graph(
+                    contract, wf, enforce_certified_fingerprint=not bool(lora_video_name)
+                )
                 prompt_id = await comfy.queue_prompt(wf, workflow_key=workflow_key)
                 job.comfy_prompt_id = prompt_id
                 self.bind_prompt(job.id, prompt_id)
@@ -903,6 +953,8 @@ class JobQueue:
                     steps=steps,
                     filename_prefix=prefix,
                     wan_segment="start_mid",
+                    lora_name=lora_video_name,
+                    lora_strength=lora_video_strength,
                 )
                 hist_a = await _run_graph(wf_a, "wan.three_frame")
                 files_a = comfy.find_output_files(hist_a)
@@ -926,6 +978,8 @@ class JobQueue:
                     steps=steps,
                     filename_prefix=prefix,
                     wan_segment="mid_end",
+                    lora_name=lora_video_name,
+                    lora_strength=lora_video_strength,
                 )
                 hist_b = await _run_graph(wf_b, "wan.three_frame")
                 files_b = comfy.find_output_files(hist_b)
@@ -954,6 +1008,8 @@ class JobQueue:
                     audio_file=audio,
                     steps=steps,
                     filename_prefix=prefix,
+                    lora_name=lora_video_name,
+                    lora_strength=lora_video_strength,
                 )
                 workflow_key = contract.leaf_workflow_key
 
@@ -1106,8 +1162,15 @@ class JobQueue:
                         "localFirstProvenance": provenance,
                         "ltxStartFrameBinding": bind,
                         "executionClass": "REAL_LOCAL_EXECUTION",
+                        "lora": params.get("lora_provenance"),
                     }
                 )
+                if params.get("lora_provenance"):
+                    from .video_runtime.job_model import merge_video_runtime_history
+
+                    job.history_json = merge_video_runtime_history(
+                        job.history_json, {"lora": params["lora_provenance"]}
+                    )
             except Exception:
                 pass
             db.commit()
@@ -2829,6 +2892,49 @@ class JobQueue:
             "model": model,
             "checkpoint": ckpt,
         }
+
+        # Shared LoRA Registry: resolve the selected LoRA against the ACTIVE
+        # model family. Refuses disabled / incompatible / missing selections
+        # with a clear error — never silently substitutes another LoRA.
+        lora_resolved = None
+        lora_comfy_name: Optional[str] = None
+        lora_strength = 0.8
+        lora_sel = params.get("lora")
+        if lora_sel is None and isinstance(params.get("loras"), list) and params.get("loras"):
+            lora_sel = params["loras"][0]
+        if lora_sel is not None:
+            from .lora_registry.registry import resolve_comfy_lora_name, resolve_lora_for_generation
+
+            lora_family = str(
+                (pinned or {}).get("modelFamily") or intent.enginePreference or model or ""
+            ).strip()
+            lora_resolved = resolve_lora_for_generation(lora_sel, lora_family, "image")
+            lora_comfy_name = resolve_comfy_lora_name(lora_resolved)
+            if isinstance(lora_sel, dict) and lora_sel.get("strength") is not None:
+                try:
+                    lora_strength = float(lora_sel["strength"])
+                except (TypeError, ValueError):
+                    lora_strength = float(lora_resolved.recommended_strength or 0.8)
+            else:
+                lora_strength = float(lora_resolved.recommended_strength or 0.8)
+            if lora_resolved.strength_min is not None and lora_strength < float(lora_resolved.strength_min):
+                lora_strength = float(lora_resolved.strength_min)
+            if lora_resolved.strength_max is not None and lora_strength > float(lora_resolved.strength_max):
+                lora_strength = float(lora_resolved.strength_max)
+            params["lora_provenance"] = {
+                "loraId": lora_resolved.id,
+                "name": lora_resolved.name,
+                "version": lora_resolved.version,
+                "modelFamily": lora_resolved.model_family,
+                "compatibleModelFamilies": list(lora_resolved.compatible_model_families),
+                "strength": lora_strength,
+                "baseGenerator": lora_family,
+                "sourceTool": params.get("sourceFeature") or "image-generator",
+                "filePath": lora_resolved.file_path,
+                "category": lora_resolved.category,
+                "modality": lora_resolved.modality,
+            }
+            job.message = f"ImageGen · {contract.workflow_key} · {ckpt} · LoRA {lora_resolved.name}"
         job.params_json = json.dumps(params)
         db.commit()
 
@@ -2910,7 +3016,13 @@ class JobQueue:
             contract=contract,
             settings=settings,
             expected_graph_hash=expected_fp,
-            enforce_certified_fingerprint=contract.status == "Certified" and not allow_draft,
+            # Certified baseline graphs stay drift-checked; a graph with an
+            # explicitly selected LoRA intentionally exercises the declared
+            # optional inputs (loraId/loraStrength) and is verified by the
+            # LoRA graph tests instead of the baseline fingerprint.
+            enforce_certified_fingerprint=(
+                contract.status == "Certified" and not allow_draft and lora_resolved is None
+            ),
             prompt=build_prompt,
             negative=negative or "blurry, low quality, watermark",
             width=width,
@@ -2925,6 +3037,8 @@ class JobQueue:
             checkpoint=ckpt if not use_zimage else None,
             denoise=denoise,
             grow_mask_by=grow_mask_by,
+            lora_name=lora_comfy_name,
+            lora_strength=lora_strength,
             outpaint_left=int(outpaint.get("left") or 0),
             outpaint_top=int(outpaint.get("top") or 0),
             outpaint_right=int(outpaint.get("right") or (256 if "outpaint" in contract.workflow_key else 0)),
@@ -2956,6 +3070,7 @@ class JobQueue:
                 "style": style,
                 "edit_op": edit_op,
                 "loras": params.get("loras") or [],
+                "lora": params.get("lora_provenance"),
                 "aspect": params.get("aspect"),
                 "reasons": reasons,
                 "workflowKey": contract.workflow_key,
@@ -3472,6 +3587,21 @@ class JobQueue:
         if tmp_path.resolve() != dest.resolve():
             shutil.copy2(tmp_path, dest)
 
+        overlay_meta: dict | None = None
+        try:
+            ctx_early = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+            intent_early = params.get("imageIntent") if isinstance(params.get("imageIntent"), dict) else {}
+            purpose_early = str(
+                intent_early.get("purpose") or ctx_early.get("objective") or params.get("purpose") or ""
+            )
+            if purpose_early == "environment_reference_sheet":
+                from .spatial_map.ers_camera_overlay import stamp_saved_cameras_on_ers
+
+                overlay_meta = stamp_saved_cameras_on_ers(dest, db, project.id, params)
+        except Exception:
+            logger.exception("ERS camera overlay stamp failed for job %s", job.id)
+            overlay_meta = {"status": "failed"}
+
         parent_id = source_asset_id or params.get("source_asset_id")
         if job.kind != "imagegen_edit" and not parent_id:
             parent_id = None
@@ -3499,6 +3629,8 @@ class JobQueue:
             validation=gate.to_dict() if hasattr(gate, "to_dict") else dict(gate or {}),
             intentId=intent_id,
             settings={"checkpoint": ckpt, "model": stamp_model or str((params.get("imageRuntime") or {}).get("officialModelId") or params.get("officialModelId") or "") or model, "checksum": getattr(gate, "checksum", None)},
+            # LoRA provenance rides the same asset record — no separate history.
+            lora=params.get("lora_provenance"),
         )
 
         intent_metadata = {}
@@ -3520,6 +3652,12 @@ class JobQueue:
             "originalEnvironmentReferenceAssetIds": creative_ctx.get(
                 "originalEnvironmentReferenceAssetIds"
             ),
+            "cameraOverlay": overlay_meta,
+            "sourceFeature": params.get("sourceFeature") or creative_ctx.get("sourceFeature"),
+            "libraryVisible": params.get("commitToLibrary", True) is not False
+            and creative_ctx.get("commitToLibrary", True) is not False,
+            "miniTakeId": params.get("miniTakeId") or creative_ctx.get("miniTakeId"),
+            "miniVariation": params.get("miniVariation") or creative_ctx.get("miniVariation"),
         }
         asset = Asset(
             id=str(uuid.uuid4()),
@@ -3595,6 +3733,24 @@ class JobQueue:
             ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
             intent = params.get("imageIntent") if isinstance(params.get("imageIntent"), dict) else {}
             purpose = str(intent.get("purpose") or ctx.get("objective") or params.get("purpose") or "")
+            try:
+                from .production_events import ACTOR_SYSTEM, record_production_event
+
+                record_production_event(
+                    db,
+                    project_id=project.id,
+                    scene_id=str(params.get("scene_id") or "") or None,
+                    event_type=("ers.generation_completed" if purpose == "environment_reference_sheet" else "candidate.generated"),
+                    actor=ACTOR_SYSTEM,
+                    actor_detail="queue_worker:imagegen_commit",
+                    subject_kind="asset",
+                    subject_id=asset.id,
+                    summary=f"Generated {params.get('tag') or 'image'} (asset {asset.id[:8]})",
+                    payload={"assetId": asset.id, "tag": params.get("tag"), "purpose": purpose},
+
+                )
+            except Exception:  # noqa: BLE001 - event recording never breaks the operation
+                pass
             if purpose == "environment_reference_sheet":
                 from .codirector.capabilities.handlers.ers_generate import persist_ers_composite_asset
 

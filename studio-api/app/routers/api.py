@@ -1368,6 +1368,8 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         params["strength"] = body.strength
     if body.ingredients_ic_lora is not None:
         params["ingredients_ic_lora"] = body.ingredients_ic_lora
+    if body.lora:
+        params["lora"] = body.lora
     if body.providerPreference:
         params["providerPreference"] = body.providerPreference
     params["paidFallbackApproved"] = bool(body.paidFallbackApproved)

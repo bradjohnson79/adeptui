@@ -64,6 +64,8 @@ def build_ltx_scene_workflow(
     cfg: float = 1.0,
     filename_prefix: str = "studio/ltx_scene",
     text_encoder: str = "gemma_3_12B_it_fp4_mixed.safetensors",
+    lora_name: Optional[str] = None,
+    lora_strength: float = 0.8,
 ) -> dict[str, Any]:
     """
     Practical LTX I2V workflow using LTXDirector + LTXDirectorGuide.
@@ -295,6 +297,21 @@ def build_ltx_scene_workflow(
         }
         # Prefer video frames from separate if available; keep simple CreateVideo path
 
+    # Shared LoRA registry: optional LoraLoaderModelOnly between the
+    # checkpoint and LTXDirector. Baseline graph stays unchanged when no
+    # LoRA is selected (fingerprint-safe).
+    if lora_name:
+        wf["1L"] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": [n_ckpt, 0],
+                "lora_name": lora_name,
+                "strength_model": float(lora_strength),
+            },
+            "_meta": {"title": f"LoRA — {lora_name}", "adeptLora": True},
+        }
+        wf[n_dir]["inputs"]["model"] = ["1L", 0]
+
     return wf
 
 
@@ -312,9 +329,11 @@ def build_ltx_simple_i2v(
     steps: int = 8,
     filename_prefix: str = "studio/ltx_simple",
     text_encoder: str = "gemma_3_12B_it_fp4_mixed.safetensors",
+    lora_name: Optional[str] = None,
+    lora_strength: float = 0.8,
 ) -> dict[str, Any]:
     """Fallback simpler LTXVImgToVideo path if Director graph fails validation/execution."""
-    return {
+    graph = {
         "1": {
             "class_type": "CheckpointLoaderSimple",
             "inputs": {"ckpt_name": checkpoint},
@@ -404,3 +423,16 @@ def build_ltx_simple_i2v(
             },
         },
     }
+    if lora_name:
+        graph["1L"] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": ["1", 0],
+                "lora_name": lora_name,
+                "strength_model": float(lora_strength),
+            },
+            "_meta": {"title": f"LoRA — {lora_name}", "adeptLora": True},
+        }
+        graph["8"]["inputs"]["model"] = ["1L", 0]
+        graph["9"]["inputs"]["model"] = ["1L", 0]
+    return graph
