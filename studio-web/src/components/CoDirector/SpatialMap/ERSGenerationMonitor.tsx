@@ -7,6 +7,8 @@
 import { useState } from "react";
 import { api } from "../../../api";
 import { formatErsProvenance } from "./ersGenerator";
+import { SpatialMapSaveControls } from "./SpatialMapSaveControls";
+import type { SpatialMapSaveStatus } from "./useSpatialMapSave";
 import type { ErsGenerationState } from "./useErsGeneration";
 
 type Props = {
@@ -18,6 +20,11 @@ type Props = {
   onUseAnyway?: () => void;
   /** Save Gate: disable "Use in Scene Creator" until the map is saved & clean. */
   useInSceneCreatorDisabled?: boolean;
+  saveStatus?: SpatialMapSaveStatus;
+  saveIsDirty?: boolean;
+  saveError?: string | null;
+  saveDisabled?: boolean;
+  onSaveSpatialMap?: () => void;
 };
 
 function formatElapsed(sec: number): string {
@@ -34,6 +41,11 @@ export function ERSGenerationMonitor({
   onOpenFullSize,
   onUseAnyway,
   useInSceneCreatorDisabled = false,
+  saveStatus = "idle",
+  saveIsDirty = false,
+  saveError = null,
+  saveDisabled = false,
+  onSaveSpatialMap,
 }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   if (state.phase === "idle" && !state.compositeAssetId) return null;
@@ -186,6 +198,19 @@ export function ERSGenerationMonitor({
           <button type="button" className="ui-btn ui-btn--secondary" onClick={onOpenInLibrary}>
             Open in Library
           </button>
+          {onSaveSpatialMap ? (
+            <SpatialMapSaveControls
+              status={saveStatus}
+              isDirty={saveIsDirty}
+              error={saveError}
+              disabled={saveDisabled}
+              onSave={onSaveSpatialMap}
+              saveTestId="spatial-map-save-bottom"
+              stateTestId="spatial-map-save-state-bottom"
+              errorTestId="spatial-map-save-error-bottom"
+              buttonClassName="ui-btn ui-btn--secondary"
+            />
+          ) : null}
           <button
             type="button"
             className="ui-btn ui-btn--primary"

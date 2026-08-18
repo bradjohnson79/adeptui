@@ -37,6 +37,10 @@ type CameraBody = {
   cameraSlot?: number;
   orientation?: string;
   fovPreset?: string;
+  /** Scene Creator Mini: framing-only shot size (auto|wide|medium_wide|medium|medium_close|close_up|extreme_close). */
+  shotSize?: string;
+  /** Scene Creator Mini: auto|environment|<characterId>. */
+  primarySubject?: string;
   normalizedX?: number | null;
   normalizedY?: number | null;
   gridRow?: number;

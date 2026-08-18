@@ -118,14 +118,6 @@ async def run_ers_semantic_gate(
             **extra,
         }
 
-    api_key = get_secret("kie_api_key")
-    if not api_key:
-        return _result(
-            ERS_GATE_NOT_VERIFIED,
-            "Semantic review was not run — no vision-capable provider is configured.",
-            reason="no_vlm_configured",
-        )
-
     generated_path = Path(str(generated_image_path or ""))
     if not generated_path.is_file():
         return _result(
@@ -142,40 +134,44 @@ async def run_ers_semantic_gate(
             reason="generated_unreadable",
         )
 
-    content: list[dict[str, Any]] = [{"type": "text", "text": _GATE_INSTRUCTIONS}]
     intent_text = (intent_summary or "").strip() or "(no environment intent was recorded)"
     header = f"Environment Reference Sheet: {sheet_name}\n\nENVIRONMENT INTENT SUMMARY:\n{intent_text}"
+    parts: list[dict[str, Any]] = []
     if source_image_url:
-        content.append({"type": "text", "text": header + "\n\nIMAGE 1 — SOURCE environment (authority):"})
-        content.append({"type": "image_url", "image_url": {"url": source_image_url}})
-        content.append({"type": "text", "text": "IMAGE 2 — GENERATED Environment Reference Sheet (under review):"})
+        parts.append({"type": "text", "text": header + "\n\nIMAGE 1 — SOURCE environment (authority):"})
+        parts.append({"type": "image_url", "image_url": {"url": source_image_url}})
+        parts.append({"type": "text", "text": "IMAGE 2 — GENERATED Environment Reference Sheet (under review):"})
     else:
-        content.append({"type": "text", "text": header + "\n\nGENERATED Environment Reference Sheet (under review):"})
-    content.append({"type": "image_url", "image_url": {"url": generated_url}})
+        parts.append({"type": "text", "text": header + "\n\nGENERATED Environment Reference Sheet (under review):"})
+    parts.append({"type": "image_url", "image_url": {"url": generated_url}})
 
-    try:
-        from ...hosted_providers.adapters.kie_adapter import chat_kie
+    from .vision_review import chat_vision
 
-        response = await chat_kie(
-            api_key,
-            model_id=model_id,
-            messages=[{"role": "user", "content": content}],
-            temperature=0.0,
-            timeout_sec=90.0,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("ERS semantic gate call failed: %s", exc)
-        return _result(
-            ERS_GATE_NOT_VERIFIED,
-            "Semantic review could not reach the vision provider.",
-            reason="vlm_error",
-        )
-
+    response = await chat_vision(
+        instructions=_GATE_INSTRUCTIONS,
+        parts=parts,
+        model_id=model_id,
+        temperature=0.0,
+        timeout_sec=90.0,
+    )
     if not response.get("ok"):
+        reason = str(response.get("reason") or response.get("error") or "vlm_error")
+        if reason == "no_vlm_configured":
+            return _result(
+                ERS_GATE_NOT_VERIFIED,
+                "Semantic review was not run — no vision-capable provider is configured.",
+                reason="no_vlm_configured",
+            )
+        if reason == "vlm_error":
+            return _result(
+                ERS_GATE_NOT_VERIFIED,
+                "Semantic review could not reach the vision provider.",
+                reason="vlm_error",
+            )
         return _result(
             ERS_GATE_NOT_VERIFIED,
             "Semantic review was not completed by the vision provider.",
-            reason=str(response.get("error") or "vlm_error"),
+            reason=reason,
         )
 
     parsed = parse_ers_gate_verdict(str(response.get("output") or ""))

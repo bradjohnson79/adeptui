@@ -320,6 +320,11 @@ def compile_image_request(
     operation = str(body.get("operation") or "image.generate")
     if body.get("edit") or body.get("source_asset_id") or body.get("sourceAssetId"):
         operation = "image.edit"
+    # qwen2512.ref is certified reference I2I (ERS / Scene Creator Mini), not
+    # Scene Creator region-edit. Keep generate+source pixels; never flip to edit.
+    if str(body.get("forceWorkflowKey") or "").strip() == "qwen2512.ref":
+        operation = "image.generate"
+        body.pop("edit", None)
     if purpose in {"storyboard", "storyboard_frame"}:
         operation = "image.storyboard_frame"
     if purpose == "environment_reference_sheet":

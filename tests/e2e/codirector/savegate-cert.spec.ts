@@ -152,4 +152,60 @@ test.describe('Spatial Map Save Gate — Schnick Coffee ERS gating (F, H, I)', (
     const badges = page.locator('[data-testid^=prop-maponly-badge]');
     console.log('I: maponly badges (compact chips, fine):', await badges.count());
   });
+
+  test('Part 0: top and bottom Save share one state', async ({ page }) => {
+    await openSpatial(page, SCHNICK);
+    const monitor = page.locator('[data-testid=ers-generation-monitor]');
+    await expect(monitor).toBeVisible({ timeout: 30000 });
+    expect(await monitor.getAttribute('data-phase')).toBe('complete');
+    const topBtn = page.locator('[data-testid=spatial-map-save]');
+    const bottomBtn = page.locator('[data-testid=spatial-map-save-bottom]');
+    const topState = page.locator('[data-testid=spatial-map-save-state]');
+    const bottomState = page.locator('[data-testid=spatial-map-save-state-bottom]');
+    const useSC = page.locator('[data-testid=use-in-scene-creator]');
+    await expect(bottomBtn).toBeVisible();
+
+    const camVis = page.locator('[data-testid=camera-visible-0]');
+    await expect(camVis).toBeVisible({ timeout: 20000 });
+    await camVis.click();
+    await expect(topState).toHaveText(/Unsaved changes/, { timeout: 20000 });
+    await expect(bottomState).toHaveText(/Unsaved changes/);
+    await expect(useSC).toBeDisabled();
+
+    await bottomBtn.click();
+    await expect(topState).toHaveText('Saved', { timeout: 20000 });
+    await expect(bottomState).toHaveText('Saved');
+    await expect(useSC).toBeEnabled();
+
+    await camVis.click();
+    await expect(topState).toHaveText(/Unsaved changes/, { timeout: 20000 });
+    await expect(bottomState).toHaveText(/Unsaved changes/);
+    await expect(useSC).toBeDisabled();
+
+    await topBtn.click();
+    await expect(topState).toHaveText('Saved', { timeout: 20000 });
+    await expect(bottomState).toHaveText('Saved');
+    await expect(useSC).toBeEnabled();
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('[data-testid=spatial-map-panel]')).toBeVisible({ timeout: 60000 });
+    await page.waitForTimeout(3000);
+    await expect(page.locator('[data-testid=spatial-map-save-state]')).toHaveText('Saved', { timeout: 20000 });
+    await expect(page.locator('[data-testid=spatial-map-save-state-bottom]')).toHaveText('Saved');
+  });
+
+  test('Scene Creator Mini accordion sits under ERS', async ({ page }) => {
+    await openSpatial(page, SCHNICK);
+    const monitor = page.locator('[data-testid=ers-generation-monitor]');
+    await expect(monitor).toBeVisible({ timeout: 30000 });
+    const mini = page.locator('[data-testid=scene-creator-mini]');
+    await expect(mini).toBeVisible();
+    await page.locator('[data-testid=scene-creator-mini-toggle]').click();
+    const enable = page.locator('[data-testid=scene-creator-mini-enable]');
+    await enable.click();
+    await expect(enable).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('[data-testid=scene-creator-mini-output]')).toContainText('Output:');
+    const generate = page.locator('[data-testid=scene-creator-mini-generate]');
+    await expect(generate).toBeVisible();
+  });
 });

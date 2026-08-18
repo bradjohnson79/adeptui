@@ -70,6 +70,45 @@ def test_schnick_coffee_compile_has_ers_sections_not_character_sheet() -> None:
     assert "32m" not in lowered
 
 
+def test_camera_lock_uses_spatial_map_slots_not_prose_guesses() -> None:
+    compiled = compile_environment_reference_sheet_prompt(
+        environment_name="Schnick Coffee",
+        cameras=[
+            {
+                "id": "cam-1",
+                "cameraSlot": 0,
+                "gridColumn": 1,
+                "gridRow": 2,
+                "normalizedX": -0.4,
+                "normalizedY": -0.3,
+                "orientation": "E",
+                "yawDegrees": 90,
+                "fovPreset": "wide",
+                "visible": True,
+            },
+            {
+                "id": "cam-4",
+                "cameraSlot": 3,
+                "gridColumn": 6,
+                "gridRow": 7,
+                "normalizedX": 0.1,
+                "normalizedY": 0.5,
+                "orientation": "N",
+                "yawDegrees": 0,
+                "fovPreset": "medium",
+                "visible": True,
+            },
+        ],
+    )
+    prompt = compiled["prompt"]
+    assert "CAMERA PLACEMENT IS CANONICAL" in prompt
+    assert "Exact active camera count: 2" in prompt
+    assert "C1" in prompt and "C4" in prompt
+    assert "Facing: E (yaw 90)" in prompt
+    assert "Do not paint competing camera glyphs" in prompt
+    assert "Cameras (scale / blocking on the map only if listed)" not in prompt
+
+
 def test_purpose_environment_reference_sheet_uses_ers_compiler() -> None:
     compiled = compile_image_request(
         "proj-schnick-ers",
@@ -82,6 +121,8 @@ def test_purpose_environment_reference_sheet_uses_ers_compiler() -> None:
             "lockModelFamily": True,
             "width": 1280,
             "height": 720,
+            "sourceAssetId": "atlas-schnick",
+            "referenceImage": "atlas-schnick",
         },
     )
     intent = compiled["imageIntent"]

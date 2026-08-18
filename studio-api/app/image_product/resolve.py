@@ -119,6 +119,9 @@ def _wants_edit(src: dict[str, Any], intent: dict[str, Any]) -> bool:
     purpose = str(intent.get("purpose") or src.get("purpose") or "").strip()
     if purpose == "environment_reference_sheet":
         return False
+    force = str(src.get("forceWorkflowKey") or intent.get("forceWorkflowKey") or "").strip()
+    if force == "qwen2512.ref":
+        return False
     if intent.get("operation") == "image.edit":
         return True
     if src.get("edit") is True:

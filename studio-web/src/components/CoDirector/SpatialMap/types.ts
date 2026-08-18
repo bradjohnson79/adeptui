@@ -107,12 +107,41 @@ export type SpatialCamera = _SpatialCamera & {
   cameraSlot: number;
   orientation: string;
   fovPreset: string;
+  /** Scene Creator Mini: framing-only shot size (auto|wide|medium_wide|medium|medium_close|close_up|extreme_close). */
+  shotSize?: string;
+  /** Scene Creator Mini: auto|environment|<characterId>. */
+  primarySubject?: string;
   normalizedX?: number | null;
   normalizedY?: number | null;
   gridRow: number;
   gridColumn: number;
   visible?: boolean;
 };
+
+export const SHOT_SIZES = [
+  "auto",
+  "wide",
+  "medium_wide",
+  "medium",
+  "medium_close",
+  "close_up",
+  "extreme_close",
+] as const;
+export type ShotSize = (typeof SHOT_SIZES)[number];
+
+export function normalizeShotSize(value: string | null | undefined): ShotSize {
+  const v = String(value || "auto").trim().toLowerCase().replace(/[ -]/g, "_");
+  return (SHOT_SIZES as readonly string[]).includes(v) ? (v as ShotSize) : "auto";
+}
+
+export function shotSizeLabel(value: string | null | undefined): string {
+  const v = normalizeShotSize(value);
+  if (v === "auto") return "Auto";
+  return v
+    .split("_")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
 
 /** Atlas Scene Intent — compact semantic snapshot taken at Atlas creation. */
 export type SceneIntent = {

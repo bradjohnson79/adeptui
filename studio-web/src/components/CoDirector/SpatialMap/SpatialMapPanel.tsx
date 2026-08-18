@@ -31,7 +31,10 @@ import { CoDirectorEmptyState } from "../cards";
 import { useCoDirectorSession } from "../CoDirectorSession";
 import { isTerminal } from "../AgentWorkSurface/types";
 import { EntityPicker } from "./EntityPicker";
+import { CameraReferenceStrip } from "./CameraReferenceStrip";
 import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
+import { SceneCreatorMini } from "./SceneCreatorMini";
+import { SpatialMapSaveControls } from "./SpatialMapSaveControls";
 import { ERS_GENERATOR_OPTIONS, ersGeneratorOptionDisabled } from "./ersGenerator";
 import { useErsGeneration } from "./useErsGeneration";
 import { useSpatialMapSaveHooks } from "./useSpatialMapSave";
@@ -72,9 +75,12 @@ import {
   CAMERA_SLOTS,
   CHARACTER_SLOTS,
   PROP_SLOTS,
+  SHOT_SIZES,
   type SavedOption,
   SLOT_COLORS,
   type ActivePlacement,
+  normalizeShotSize,
+  shotSizeLabel,
   type SlotDef,
   type SpatialCamera,
   type SpatialCharacterPlacement,
@@ -1123,6 +1129,50 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     [document, projectId],
   );
 
+  const handleShotSizeCamera = useCallback(
+    async (cameraId: string, shotSize: string) => {
+      if (!document) return;
+      const next = String(shotSize || "auto").trim().toLowerCase().replace(/[ -]/g, "_") || "auto";
+      setDocument((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cameras: prev.cameras.map((c) => (c.id === cameraId ? { ...c, shotSize: next } : c)),
+        };
+      });
+      try {
+        const updated = await spatialMapApi.updateCamera(projectId, document.id, cameraId, { shotSize: next });
+        setDocument(updated);
+      } catch (err) {
+        setDocument(document);
+        setOpMsg(err instanceof Error ? err.message : "Failed to set camera shot size.");
+      }
+    },
+    [document, projectId],
+  );
+
+  const handlePrimarySubjectCamera = useCallback(
+    async (cameraId: string, primarySubject: string) => {
+      if (!document) return;
+      const next = String(primarySubject || "auto").trim() || "auto";
+      setDocument((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          cameras: prev.cameras.map((c) => (c.id === cameraId ? { ...c, primarySubject: next } : c)),
+        };
+      });
+      try {
+        const updated = await spatialMapApi.updateCamera(projectId, document.id, cameraId, { primarySubject: next });
+        setDocument(updated);
+      } catch (err) {
+        setDocument(document);
+        setOpMsg(err instanceof Error ? err.message : "Failed to set primary subject.");
+      }
+    },
+    [document, projectId],
+  );
+
   const handleMoveCamera = useCallback((cameraId: string) => {
     const camera = findCamera(cameraId);
     if (!camera) return;
@@ -1430,31 +1480,16 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               >
                 Open in Library
               </button>
-              <button
-                type="button"
-                className="ui-btn ui-btn--primary"
-                onClick={() => void saveState.handleSave()}
-                disabled={saveState.status === "saving" || !document}
-                aria-label="Save Spatial Map"
-                data-testid="spatial-map-save"
-              >
-                {saveState.status === "saving" ? "Saving…" : "Save Spatial Map"}
-              </button>
-              <span
-                className={"spatial-map__save-state" + (saveState.isDirty ? " is-dirty" : " is-saved")}
-                data-testid="spatial-map-save-state"
-              >
-                {saveState.status === "error"
-                  ? "Save failed"
-                  : saveState.isDirty
-                    ? "Unsaved changes"
-                    : "Saved"}
-              </span>
-              {saveState.status === "error" && saveState.error ? (
-                <p className="spatial-map__hint spatial-map__hint--error" role="alert" data-testid="spatial-map-save-error">
-                  {saveState.error}
-                </p>
-              ) : null}
+              <SpatialMapSaveControls
+                status={saveState.status}
+                isDirty={saveState.isDirty}
+                error={saveState.error}
+                disabled={!document}
+                onSave={() => void saveState.handleSave()}
+                saveTestId="spatial-map-save"
+                stateTestId="spatial-map-save-state"
+                errorTestId="spatial-map-save-error"
+              />
             </div>
           </div>
 
@@ -1595,6 +1630,8 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               camera={selectedCamera}
               onRotate={(orientation) => void handleRotateCamera(selectedCamera.id, orientation)}
               onFovChange={(fovPreset) => void handleFovCamera(selectedCamera.id, fovPreset)}
+              onShotSizeChange={(shotSize) => void handleShotSizeCamera(selectedCamera.id, shotSize)}
+              onPrimarySubjectChange={(primarySubject) => void handlePrimarySubjectCamera(selectedCamera.id, primarySubject)}
               onMove={() => handleMoveCamera(selectedCamera.id)}
               onRemove={() => void handleRemoveCamera(selectedCamera.id)}
             />
@@ -1776,9 +1813,53 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                     </div>
                     </div>
                     {camera ? (
+                      <>
                       <span className="spatial-map__entity-card-meta spatial-map__slot-status">
-                        {camera.orientation || "N"} · {String(camera.fovPreset || "medium").toLowerCase()}
+                        {camera.orientation || "N"} · {String(camera.fovPreset || "medium").toLowerCase()} · {shotSizeLabel(camera.shotSize)}
                       </span>
+                      <div className="spatial-map__camera-shot-controls">
+                        <label className="spatial-map__camera-shot-field">
+                          <span>Shot Size</span>
+                          <select
+                            value={normalizeShotSize(camera.shotSize)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              void handleShotSizeCamera(camera.id, e.target.value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            data-testid={`camera-shot-size-${slot.index}`}
+                            aria-label={`Set ${slot.label} shot size`}
+                          >
+                            {SHOT_SIZES.map((size) => (
+                              <option key={size} value={size}>{shotSizeLabel(size)}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="spatial-map__camera-shot-field">
+                          <span>Primary Subject</span>
+                          <select
+                            value={camera.primarySubject || "auto"}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              void handlePrimarySubjectCamera(camera.id, e.target.value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            data-testid={`camera-primary-subject-${slot.index}`}
+                            aria-label={`Set ${slot.label} primary subject`}
+                          >
+                            <option value="auto">Auto</option>
+                            <option value="environment">Environment</option>
+                            {(document?.characters || [])
+                              .filter((c) => c.visible !== false && (c.gridRow >= 0 || typeof c.normalizedX === "number"))
+                              .map((c) => (
+                                <option key={c.characterId} value={c.characterId}>
+                                  {c.label || c.tag || c.characterId}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                      </div>
+                      </>
                     ) : (
                       <button
                         type="button"
@@ -1909,6 +1990,27 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             onUseInSceneCreator={() => void handleUseInSceneCreator()}
             onUseAnyway={() => void ers.useAnyway()}
             useInSceneCreatorDisabled={saveState.isDirty}
+            saveStatus={saveState.status}
+            saveIsDirty={saveState.isDirty}
+            saveError={saveState.error}
+            saveDisabled={!document}
+            onSaveSpatialMap={() => void saveState.handleSave()}
+          />
+
+          <CameraReferenceStrip
+            projectId={projectId}
+            documentId={document.id}
+            cameraLabels={Object.fromEntries((document.cameras || []).map((c) => [c.id, c.cameraSlot >= 0 ? `C${c.cameraSlot + 1}` : c.label]))}
+            generator={ers.selectedGenerator}
+            canGenerate={!saveState.isDirty && (document.cameras || []).length > 0}
+          />
+          <SceneCreatorMini
+            projectId={projectId}
+            document={document}
+            isDirty={saveState.isDirty}
+            qwenI2IReady={ers.qwenI2IReady}
+            gptI2IReady={ers.gptI2IReady}
+            onOpenSceneCreator={() => void handleUseInSceneCreator()}
           />
 
           {opMsg && ers.phase === "idle" ? <p className="spatial-map__hint">{opMsg}</p> : null}

@@ -40,13 +40,24 @@ _VOLATILE_INPUT_KEYS = frozenset(
     }
 )
 
+# Certified qwen2512.ref lists width/height as optionalInputs. Frame size is a
+# runtime parameter (ERS sheets, Scene Creator Mini 16:9), not topology.
+_RUNTIME_VOLATILE_BY_WORKFLOW = {
+    "qwen2512.ref": frozenset({"width", "height"}),
+}
 
-def _redact_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
+
+def _redact_inputs(
+    inputs: Mapping[str, Any],
+    *,
+    extra_volatile: frozenset[str] | None = None,
+) -> dict[str, Any]:
+    volatile = _VOLATILE_INPUT_KEYS if not extra_volatile else (_VOLATILE_INPUT_KEYS | extra_volatile)
     out: dict[str, Any] = {}
     for k, v in inputs.items():
         if isinstance(v, list) and len(v) >= 1 and not isinstance(v[0], (dict, list)):
             out[k] = v
-        elif str(k) in _VOLATILE_INPUT_KEYS:
+        elif str(k) in volatile:
             out[k] = "<redacted>"
         elif isinstance(v, (str, int, float, bool)) or v is None:
             out[k] = v
@@ -55,7 +66,11 @@ def _redact_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def canonicalize_graph(graph: Mapping[str, Any] | None) -> str:
+def canonicalize_graph(
+    graph: Mapping[str, Any] | None,
+    *,
+    extra_volatile: frozenset[str] | None = None,
+) -> str:
     if not graph:
         return "{}"
     normalized: dict[str, Any] = {}
@@ -66,13 +81,21 @@ def canonicalize_graph(graph: Mapping[str, Any] | None) -> str:
         entry: dict[str, Any] = {"class_type": node.get("class_type")}
         inputs = node.get("inputs")
         if isinstance(inputs, Mapping):
-            entry["inputs"] = _redact_inputs(inputs)
+            entry["inputs"] = _redact_inputs(inputs, extra_volatile=extra_volatile)
         normalized[str(nid)] = entry
     return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def graph_hash(graph: Mapping[str, Any] | None) -> str:
-    return _sha256_hex(canonicalize_graph(graph).encode("utf-8"))
+def graph_hash(
+    graph: Mapping[str, Any] | None,
+    *,
+    extra_volatile: frozenset[str] | None = None,
+    workflow_key: str | None = None,
+) -> str:
+    extra = extra_volatile
+    if extra is None and workflow_key:
+        extra = _RUNTIME_VOLATILE_BY_WORKFLOW.get(workflow_key)
+    return _sha256_hex(canonicalize_graph(graph, extra_volatile=extra).encode("utf-8"))
 
 
 def inventory_hash(items: list[str] | tuple[str, ...] | None) -> str:
@@ -129,7 +152,7 @@ def assert_no_graph_drift(
     workflow_key: str,
     workflow_version: str,
 ) -> str:
-    actual = graph_hash(built_graph)
+    actual = graph_hash(built_graph, workflow_key=workflow_key)
     if not expected_graph_hash:
         return actual
     if actual != expected_graph_hash:

@@ -5789,6 +5789,15 @@ export const api = {
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/mini-take/${takeId}/send-to-library`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
+    listCameraReferences: (projectId: string, documentId: string) =>
+      req<{ references: Record<string, unknown>[]; count: number; staleCount: number }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/camera-references`,
+      ),
+    generateCameraReference: (projectId: string, documentId: string, cameraId: string, body: { generator: string }) =>
+      req<{ reference: Record<string, unknown> }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/camera-references/${cameraId}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>
     req<{ id: string; project_id: string; scene_id: string; guidance: string; doc: any }>(

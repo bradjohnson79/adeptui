@@ -3823,6 +3823,25 @@ class JobQueue:
                     )
                 except Exception:
                     logger.exception("ERS semantic gate failed for job %s", job.id)
+            # Scene Creator Mini candidate validation (production continuity
+            # gate). Runs for miniTakeId jobs only; idempotent; never blocks
+            # completion or the ERS path. A transient VLM error leaves the
+            # result VALIDATING (retried by a later hydrate poll).
+            mini_take_id = str(params.get("miniTakeId") or ctx.get("miniTakeId") or "").strip()
+            if mini_take_id:
+                try:
+                    from .spatial_map.mini_validation import (
+                        run_candidate_validation_for_job,
+                    )
+
+                    await run_candidate_validation_for_job(
+                        project_id=project.id,
+                        take_id=mini_take_id,
+                        job_id=str(job.id),
+                        asset_path=str(dest),
+                    )
+                except Exception:
+                    logger.exception("Mini candidate validation failed for job %s", job.id)
         except Exception:
             logger.exception("ERS composite persist failed for job %s", job.id)
         db.commit()

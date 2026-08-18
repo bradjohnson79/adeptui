@@ -3,7 +3,7 @@
  */
 import { useEffect, useState } from "react";
 import { rotateOrientation } from "./gridGeometry";
-import type { SpatialCamera } from "./types";
+import { normalizeShotSize, SHOT_SIZES, shotSizeLabel, type SpatialCamera } from "./types";
 
 function normalizeFovPreset(value: string | null | undefined): "narrow" | "medium" | "wide" {
   const v = String(value || "medium").trim().toLowerCase();
@@ -14,11 +14,13 @@ type Props = {
   camera: SpatialCamera;
   onRotate: (orientation: string) => void;
   onFovChange: (fovPreset: string) => void;
+  onShotSizeChange: (shotSize: string) => void;
+  onPrimarySubjectChange: (primarySubject: string) => void;
   onMove: () => void;
   onRemove: () => void;
 };
 
-export function CameraInspector({ camera, onRotate, onFovChange, onMove, onRemove }: Props) {
+export function CameraInspector({ camera, onRotate, onFovChange, onShotSizeChange, onPrimarySubjectChange, onMove, onRemove }: Props) {
   const orientation = camera.orientation || "N";
   const savedFov = normalizeFovPreset(camera.fovPreset);
   const [pendingFov, setPendingFov] = useState<"narrow" | "medium" | "wide" | null>(null);
@@ -78,6 +80,35 @@ export function CameraInspector({ camera, onRotate, onFovChange, onMove, onRemov
             {preset[0].toUpperCase() + preset.slice(1)}
           </button>
         ))}
+      </div>
+      <div className="spatial-map__camera-inspector-row">
+        <span className="spatial-map__camera-inspector-label">Shot Size</span>
+        <select
+          className="spatial-map__camera-inspector-select"
+          value={normalizeShotSize(camera.shotSize)}
+          onChange={(e) => onShotSizeChange(e.target.value)}
+          data-testid="camera-shot-size"
+          aria-label={`Set ${label} shot size`}
+        >
+          {SHOT_SIZES.map((size) => (
+            <option key={size} value={size}>
+              {shotSizeLabel(size)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="spatial-map__camera-inspector-row">
+        <span className="spatial-map__camera-inspector-label">Primary Subject</span>
+        <select
+          className="spatial-map__camera-inspector-select"
+          value={camera.primarySubject || "auto"}
+          onChange={(e) => onPrimarySubjectChange(e.target.value)}
+          data-testid="camera-primary-subject"
+          aria-label={`Set ${label} primary subject`}
+        >
+          <option value="auto">Auto</option>
+          <option value="environment">Environment</option>
+        </select>
       </div>
       <div className="spatial-map__camera-inspector-row">
         <button

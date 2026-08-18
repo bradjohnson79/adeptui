@@ -97,6 +97,49 @@ def test_qwen2512_ref_registry_entry_is_certified() -> None:
     assert "reference_image" in wf.required_inputs
 
 
+def _qwen_ref_graph(width: int, height: int) -> dict:
+    return build_qwen_2512_ref_workflow(
+        unet_name=settings.qwen_image_2512_unet,
+        clip_name=settings.qwen_image_2512_clip,
+        vae_name=settings.qwen_image_2512_vae,
+        positive="same environment, north elevation",
+        negative="",
+        image_name="atlas.png",
+        width=width,
+        height=height,
+        seed=7,
+        steps=50,
+        cfg=4.0,
+        model_shift=settings.qwen_image_2512_shift,
+    )
+
+
+def test_qwen2512_ref_frame_size_is_runtime_not_topology() -> None:
+    from app.image_runtime.fingerprints import assert_no_graph_drift, WorkflowGraphDriftError
+
+    wf = get_workflow("qwen2512.ref")
+    expected = wf.fingerprints.get("graphHash")
+    square = _qwen_ref_graph(1328, 1328)
+    wide = _qwen_ref_graph(1280, 720)
+    assert graph_hash(square, workflow_key="qwen2512.ref") == expected
+    assert graph_hash(wide, workflow_key="qwen2512.ref") == expected
+    assert_no_graph_drift(
+        built_graph=wide,
+        expected_graph_hash=expected,
+        workflow_key="qwen2512.ref",
+        workflow_version="1.0.0",
+    )
+    broken = dict(wide)
+    broken["5"] = {"class_type": "SaveVideo", "inputs": {"image": "atlas.png"}}
+    with pytest.raises(WorkflowGraphDriftError):
+        assert_no_graph_drift(
+            built_graph=broken,
+            expected_graph_hash=expected,
+            workflow_key="qwen2512.ref",
+            workflow_version="1.0.0",
+        )
+
+
 def test_ers_i2i_workflow_key_available_when_certified() -> None:
     assert ers_generate._ers_i2i_workflow_key() == "qwen2512.ref"
 

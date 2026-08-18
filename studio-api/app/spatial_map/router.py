@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from .scene_creator_mini import (
+    MiniRegenerateBody,
+    MiniSendBody,
+    MiniTakeCreateBody,
+)
 from .schemas import (
     SpatialAssignSceneBody,
     SpatialCameraCreateBody,
@@ -327,3 +333,118 @@ def api_consistency_check(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return consistency_check(db, project_id, document_id).model_dump()
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/mini-take/preview")
+def api_mini_take_preview(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .scene_creator_mini import active_cameras_for_document, latest_mini_take, mini_output_count
+
+    document = get_document(db, project_id, document_id)
+    compiled = active_cameras_for_document(document)
+    saved = bool(document.savedVersion) and document.savedVersion == document.version
+    count = int(compiled.get("count") or 0)
+    latest = latest_mini_take(project_id, document_id)
+    return {
+        "saved": saved,
+        "isDirty": not saved,
+        "cameraCount": count,
+        "outputCount": mini_output_count(count),
+        "labels": list(compiled.get("labels") or []),
+        "cameras": list(compiled.get("cameras") or []),
+        "latestTakeId": (latest or {}).get("id"),
+    }
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/mini-take")
+def api_create_mini_take(
+    project_id: str,
+    document_id: str,
+    body: MiniTakeCreateBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .scene_creator_mini import create_mini_take
+
+    parsed = body or MiniTakeCreateBody()
+    return {"take": create_mini_take(db, project_id, document_id, parsed)}
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/mini-take/{take_id}")
+def api_get_mini_take(
+    project_id: str,
+    document_id: str,
+    take_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .scene_creator_mini import get_mini_take
+
+    return {"take": get_mini_take(db, project_id, take_id)}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/mini-take/{take_id}/regenerate")
+def api_regenerate_mini_take(
+    project_id: str,
+    document_id: str,
+    take_id: str,
+    body: MiniRegenerateBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .scene_creator_mini import regenerate_mini
+
+    return {"take": regenerate_mini(db, project_id, document_id, take_id, body or MiniRegenerateBody())}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/mini-take/{take_id}/send-to-library")
+def api_send_mini_to_library(
+    project_id: str,
+    document_id: str,
+    take_id: str,
+    body: MiniSendBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .scene_creator_mini import send_selected_to_library
+
+    return {"take": send_selected_to_library(db, project_id, take_id, body or MiniSendBody())}
+
+
+class CameraReferenceGenerateBody(BaseModel):
+    generator: Literal["qwen2512", "gpt-image-2"] = "qwen2512"
+
+
+@router.get("/projects/{project_id}/maps/{document_id}/camera-references")
+def api_list_camera_references(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .camera_reference import list_refs
+    from .service import get_document
+
+    document = get_document(db, project_id, document_id)
+    return list_refs(db, project_id, document)
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/camera-references/{camera_id}")
+def api_generate_camera_reference(
+    project_id: str,
+    document_id: str,
+    camera_id: str,
+    body: CameraReferenceGenerateBody | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .camera_reference import enqueue_camera_ref
+    from .service import get_document
+
+    document = get_document(db, project_id, document_id)
+    camera = next(
+        (c for c in getattr(document, "cameras", None) or [] if str(getattr(c, "id", "") or "") == camera_id),
+        None,
+    )
+    if camera is None:
+        raise HTTPException(404, "Camera not found in this Spatial Map.")
+    generator = (body.generator if body is not None else "qwen2512") or "qwen2512"
+    record = enqueue_camera_ref(db, project_id, document, camera, generator)
+    return {"reference": record}

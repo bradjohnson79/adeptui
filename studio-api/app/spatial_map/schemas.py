@@ -31,6 +31,29 @@ SpatialDirection = Literal[
     "hero",
 ]
 SpatialCaptureMode = Literal["environment_only", "include_characters"]
+ShotSize = Literal[
+    "auto",
+    "wide",
+    "medium_wide",
+    "medium",
+    "medium_close",
+    "close_up",
+    "extreme_close",
+]
+# Camera-level shot-size field (Scene Creator Mini production fidelity).
+# AUTO lets Co-Director infer framing; explicit values are framing-only and
+# never authorize camera relocation.
+SHOT_SIZES: tuple[str, ...] = (
+    "auto",
+    "wide",
+    "medium_wide",
+    "medium",
+    "medium_close",
+    "close_up",
+    "extreme_close",
+)
+PRIMARY_SUBJECT_AUTO = "auto"
+PRIMARY_SUBJECT_ENVIRONMENT = "environment"
 SpatialBundleTarget = Literal["image", "video"]
 SpatialPathSubjectType = Literal["character", "prop", "camera"]
 SpatialMapTypedErrorCode = Literal[
@@ -163,6 +186,10 @@ class SpatialCamera(BaseModel):
     cameraSlot: int = -1
     orientation: str = "N"  # N, NE, E, SE, S, SW, W, NW
     fovPreset: str = "medium"  # narrow, medium, wide
+    # Scene Creator Mini production fidelity: shot size is framing-only
+    # (never camera relocation); primary subject is auto|environment|<characterId>.
+    shotSize: str = "auto"
+    primarySubject: str = "auto"
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: int = -1
@@ -350,6 +377,7 @@ class SpatialMapUpdateBody(BaseModel):
     masterEnvironmentPrompt: Optional[str] = None
     providerHonesty: Optional[ProviderHonestyMode] = None
     gridScale: Optional[int] = None
+    anchors: Optional[list[SpatialAnchor]] = None
     sceneDescription: Optional[str] = None
     sceneIntent: Optional[SceneIntent] = None
     originalEnvironmentReferenceAssetId: Optional[str] = None
@@ -445,6 +473,8 @@ class SpatialCameraCreateBody(BaseModel):
     cameraSlot: int = -1
     orientation: str = "N"
     fovPreset: str = "medium"
+    shotSize: str = "auto"
+    primarySubject: str = "auto"
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: int = -1
@@ -556,6 +586,8 @@ class SpatialCameraUpdateBody(BaseModel):
     cameraSlot: Optional[int] = None
     orientation: Optional[str] = None
     fovPreset: Optional[str] = None
+    shotSize: Optional[str] = None
+    primarySubject: Optional[str] = None
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: Optional[int] = None

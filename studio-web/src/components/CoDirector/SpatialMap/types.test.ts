@@ -4,6 +4,8 @@ import {
   ATTACHMENT_POINTS,
   CAMERA_SLOTS,
   CHARACTER_SLOTS,
+  normalizeShotSize,
+  shotSizeLabel,
   PLACEMENT_MODES,
   PROP_RELATIONSHIPS,
   PROP_SLOTS,
@@ -270,4 +272,30 @@ describe("Prop production binding states (Spatial Prop + ERS Production Binding)
     expect(PROP_BOUND_UNAPPROVED_MESSAGE).toContain("not approved for production");
   });
 });
+
+describe("Camera shot size (Scene Creator Mini)", () => {
+  it("normalizes product shot-size values", () => {
+    expect(normalizeShotSize("auto")).toBe("auto");
+    expect(normalizeShotSize("wide")).toBe("wide");
+    expect(normalizeShotSize("MEDIUM")).toBe("medium");
+    expect(normalizeShotSize("medium close")).toBe("medium_close");
+    expect(normalizeShotSize("close-up")).toBe("close_up");
+    expect(normalizeShotSize("medium_close")).toBe("medium_close");
+    expect(normalizeShotSize("extreme_close")).toBe("extreme_close");
+    expect(normalizeShotSize(null)).toBe("auto");
+    expect(normalizeShotSize("bogus")).toBe("auto");
+  });
+
+  it("labels shot sizes for the camera card", () => {
+    expect(shotSizeLabel("auto")).toBe("Auto");
+    expect(shotSizeLabel("wide")).toBe("Wide");
+    expect(shotSizeLabel("medium_wide")).toBe("Medium Wide");
+    expect(shotSizeLabel("medium")).toBe("Medium");
+    expect(shotSizeLabel("medium_close")).toBe("Medium Close");
+    expect(shotSizeLabel("close_up")).toBe("Close Up");
+    expect(shotSizeLabel("extreme_close")).toBe("Extreme Close");
+    expect(shotSizeLabel(undefined)).toBe("Auto");
+  });
+});
+
 

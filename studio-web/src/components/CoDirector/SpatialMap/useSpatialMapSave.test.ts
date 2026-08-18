@@ -11,6 +11,7 @@ import {
   spatialMapIsSaved,
   spatialMapSaveDerivation,
 } from "./useSpatialMapSave";
+import { spatialMapSaveButtonLabel, spatialMapSaveStateLabel } from "./SpatialMapSaveControls";
 import type { SpatialMapDocument } from "./types";
 
 function doc(version: string, savedVersion?: string | null): SpatialMapDocument {
@@ -54,5 +55,15 @@ describe("Spatial Map Save Gate — dirty/saved derivation (Tests A, B, C, D)", 
 
   it("savedVersion equal but map null-safe (no crash)", () => {
     expect(spatialMapSaveDerivation(undefined as unknown as SpatialMapDocument | null).isDirty).toBe(true);
+  });
+
+  it("top and bottom Save share the same status copy", () => {
+    expect(spatialMapSaveButtonLabel("saving")).toBe("Saving…");
+    expect(spatialMapSaveButtonLabel("idle")).toBe("Save Spatial Map");
+    expect(spatialMapSaveStateLabel("error", true)).toBe("Save failed");
+    expect(spatialMapSaveStateLabel("saving", true)).toBe("Saving…");
+    expect(spatialMapSaveStateLabel("idle", true)).toBe("Unsaved changes");
+    expect(spatialMapSaveStateLabel("saved", false)).toBe("Saved");
+    expect(spatialMapSaveStateLabel("idle", false)).toBe("Saved");
   });
 });

@@ -37,6 +37,7 @@ from .attachment import (
     validate_prop_attachment,
 )
 from .schemas import (
+    SpatialAnchor,
     SpatialAssignSceneBody,
     SpatialCamera,
     SpatialCameraCreateBody,
@@ -531,6 +532,8 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
     if body.gridScale is not None:
         document.gridScale = clamp_grid_scale(body.gridScale)
         refresh_derived_cells(document)
+    if body.anchors is not None:
+        document.anchors = [SpatialAnchor(**a) if not isinstance(a, SpatialAnchor) else a for a in body.anchors]
     saved = _save_document(db, row, document)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -752,6 +755,8 @@ def create_camera(db: Session, project_id: str, document_id: str, body: SpatialC
             cameraSlot=body.cameraSlot,
             orientation=body.orientation,
             fovPreset=body.fovPreset,
+            shotSize=body.shotSize,
+            primarySubject=body.primarySubject,
             gridRow=body.gridRow,
             gridColumn=body.gridColumn,
             normalizedX=body.normalizedX,

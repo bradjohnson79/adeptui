@@ -1178,7 +1178,8 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
 .spatial-map__ers-live-bar-fill { display: block; height: 100%; width: 32%; border-radius: inherit; background: var(--accent, #2dd4bf); }
 .spatial-map__ers-live-bar.is-indeterminate .spatial-map__ers-live-bar-fill { width: 36%; animation: ers-live-indeterminate 1.2s ease-in-out infinite; }
 @keyframes ers-live-indeterminate { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
-.spatial-map__ers-live-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.spatial-map__ers-live-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.spatial-map__ers-live-actions .spatial-map__save-state { margin-right: 0.15rem; }
 .spatial-map__ers-live-banner {
   margin: 0.5rem 0 0;
   padding: 0.5rem 0.7rem;
@@ -1404,3 +1405,87 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
   gap: 0.5rem;
   margin-top: 0.7rem;
 }
+
+.spatial-map__mini {
+  margin-top: 0.75rem;
+  border: 1px solid var(--line, rgba(148, 220, 255, 0.18));
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.6rem 0.55rem;
+  background: var(--panel, rgba(12, 20, 34, 0.55));
+}
+.spatial-map__mini-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.spatial-map__mini-toggle {
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.15rem 0;
+  flex: 1;
+  text-align: left;
+}
+.spatial-map__mini-body { margin-top: 0.45rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.spatial-map__mini-enable {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  color: var(--muted);
+}
+.spatial-map__mini-enable.is-on {
+  color: var(--accent, #2dd4bf);
+}
+.spatial-map__mini-enable.is-off {
+  color: var(--muted);
+}
+.spatial-map__mini-enable:hover .spatial-map__slot-toggle:not(:disabled) {
+  border-color: var(--accent, #2dd4bf);
+}
+.spatial-map__mini-controls { display: flex; flex-wrap: wrap; gap: 0.7rem; }
+.spatial-map__mini-controls label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.75rem; color: var(--muted); }
+.spatial-map__mini-controls select { min-width: 9rem; }
+.spatial-map__mini-math { font-size: 0.78rem; margin: 0; color: var(--ink); }
+.spatial-map__mini-results { display: flex; flex-direction: column; gap: 0.7rem; }
+.spatial-map__mini-take-id { font-size: 0.75rem; color: var(--muted); margin: 0; }
+.spatial-map__mini-camera-title { font-weight: 700; margin: 0 0 0.3rem; }
+.spatial-map__mini-pair { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.spatial-map__mini-card { display: flex; flex-direction: column; gap: 0.25rem; width: 9.5rem; font-size: 0.72rem; }
+.spatial-map__mini-card img { width: 100%; height: 5.4rem; object-fit: cover; border-radius: 0.35rem; background: #111; }
+.spatial-map__mini-footer { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.spatial-map__mini-link { background: none; border: 0; color: var(--muted); font-size: 0.75rem; text-decoration: underline; cursor: pointer; padding: 0; align-self: flex-start; }
+
+/* Scene Creator Mini production fidelity: validation chips, shot controls, camera refs */
+.spatial-map__mini-card-meta { display: flex; flex-direction: column; gap: 0.15rem; }
+.spatial-map__mini-chip { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em; padding: 0.1rem 0.35rem; border-radius: 0.6rem; width: fit-content; }
+.spatial-map__mini-chip.is-pass { background: #12351f; color: #5ee08a; }
+.spatial-map__mini-chip.is-failed { background: #3b1216; color: #ff8f9a; }
+.spatial-map__mini-chip.is-validating, .spatial-map__mini-chip.is-generating { background: #1c2a3a; color: #9fc3e8; }
+.spatial-map__mini-chip.is-unavailable { background: #3a3111; color: #f5d778; }
+.spatial-map__mini-chip.is-stale { background: #3a3111; color: #f5d778; }
+.spatial-map__mini-card.is-continuity_failed { outline: 1px solid #7f1d1d; }
+.spatial-map__mini-card.is-validation_unavailable { outline: 1px dashed #7c6a1f; }
+
+.spatial-map__camera-shot-controls { display: flex; flex-direction: column; gap: 0.3rem; padding: 0.3rem 0.1rem; }
+.spatial-map__camera-shot-field { display: flex; align-items: center; gap: 0.35rem; font-size: 0.68rem; color: var(--muted); }
+.spatial-map__camera-shot-field select { font-size: 0.68rem; max-width: 9.5rem; padding: 0.1rem 0.25rem; }
+.spatial-map__camera-inspector-select { font-size: 0.72rem; padding: 0.15rem 0.3rem; }
+
+.spatial-map__camera-refs { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.spatial-map__camera-refs-title { font-weight: 700; margin: 0; }
+.spatial-map__camera-refs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.6rem; }
+.spatial-map__camera-ref { display: flex; flex-direction: column; gap: 0.3rem; border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.4rem; }
+.spatial-map__camera-ref.is-stale { border-color: #7c6a1f; }
+.spatial-map__camera-ref-head { display: flex; align-items: center; justify-content: space-between; gap: 0.3rem; }
+.spatial-map__camera-ref-label { font-weight: 700; font-size: 0.72rem; }
+.spatial-map__camera-ref-body img { width: 100%; height: 5rem; object-fit: cover; border-radius: 0.3rem; background: #111; }
+.spatial-map__camera-ref-empty { font-size: 0.66rem; color: var(--muted); min-height: 5rem; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0.3rem; }
+.spatial-map__camera-ref-meta { font-size: 0.62rem; color: var(--muted); min-height: 0.9rem; }
