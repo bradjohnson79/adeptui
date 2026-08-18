@@ -776,6 +776,38 @@
   color: #f0a0a0;
 }
 
+/* —— Save Spatial Map cluster (explicit commit boundary) —— */
+.spatial-map__save-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.spatial-map__save-cluster .ui-btn {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
+.spatial-map__save-state {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.spatial-map__save-state.is-dirty {
+  color: var(--warn, #fbbf24);
+}
+
+.spatial-map__save-state.is-saved {
+  color: var(--ok, #34d399);
+}
+
+.spatial-map__hint--error {
+  flex: 1 1 100%;
+  color: var(--danger, #f87171);
+}
+
 @media (max-width: 600px) {
   .spatial-map__atlas-panel {
     flex-direction: column;
@@ -1193,6 +1225,14 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
   color: var(--danger, #f87171);
 }
 
+/* Capability-aware ERS hint: muted, not an alarming error (Save Gate cleanup). */
+.spatial-map__ers-generator-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 /* Scene / Location Description + Scene Context (W2: Scene Intent lineage) */
 .spatial-map__scene-desc {
   display: flex;
@@ -1287,12 +1327,17 @@ button.spatial-map__fov-btn[aria-pressed="true"]:focus-visible {
   max-width: 18rem;
 }
 
-/* —— Map-only prop honesty (CDX-012) —— */
+/* —— Map-only prop descriptor (CDX-012, Save Gate cleanup) —— */
+/* Muted informational text, not an alarming warning. Binding controls remain
+ * on the slot; the text simply describes the map-only state. */
 .spatial-map__maponly-note {
   margin: 0.3rem 0 0;
   font-size: 0.7rem;
   line-height: 1.35;
-  color: #f0b35c;
+  color: var(--muted);
+}
+.spatial-map__maponly-note--muted {
+  color: var(--muted);
 }
 .spatial-map__maponly-badge {
   display: inline-block;

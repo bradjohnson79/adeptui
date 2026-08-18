@@ -160,6 +160,8 @@ export type SpatialMapDocument = {
   assignedSceneIds: string[];
   createdAt: string;
   updatedAt: string;
+  savedAt?: string | null;
+  savedVersion?: string | null;
 };
 
 export type SpatialMapCreateBody = {

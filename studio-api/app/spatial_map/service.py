@@ -516,6 +516,42 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
     return _save_document(db, row, document)
 
 
+def commit_document(
+    db: Session,
+    project_id: str,
+    document_id: str,
+) -> SpatialMapDocument:
+    """Explicit Save commit (Spatial Map Save Gate).
+
+    Stamps savedAt + savedVersion = the version AFTER this write, so the
+    frontend gate is: dirty = savedVersion != version. Any subsequent edit
+    bumps version and the map becomes dirty again; the map is only committed
+    when the user explicitly clicks Save Spatial Map. Never called implicitly.
+    """
+    row = _row_or_404(db, project_id, document_id)
+    document = _parse_document(row)
+    _validate_document_attachments(document)
+    now = _now()
+    document.updatedAt = now
+    if not document.createdAt:
+        document.createdAt = document.updatedAt
+    next_version = _next_version(document.version)
+    document.version = next_version
+    # Commit marker equals the version this write produced.
+    document.savedAt = now
+    document.savedVersion = next_version
+    document.projectId = row.project_id
+    document.sceneId = row.scene_id
+    document.locationId = row.location_id
+    document.warnings = consistency_warnings(document)
+    row.title = document.title
+    row.document_json = document.model_dump_json()
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _parse_document(row)
+
+
 def place_character(
     db: Session,
     project_id: str,

@@ -300,6 +300,7 @@ export type SpatialProfile = {
   sceneId?: string;
   sheetId?: string;
   spatialMapId?: string;
+  mapVersion?: string;
   ersPackageId?: string;
   ersLibraryAssetId?: string;
   aspectRatio?: string;

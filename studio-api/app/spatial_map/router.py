@@ -26,6 +26,7 @@ from .schemas import (
 )
 from .service import (
     build_reference_bundle,
+    commit_document,
     consistency_check,
     create_camera,
     create_capture_plan,
@@ -77,6 +78,20 @@ def api_update_map(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     return {"document": update_document(db, project_id, document_id, body).model_dump()}
+
+
+@router.post("/projects/{project_id}/maps/{document_id}/save")
+def api_commit_map(
+    project_id: str,
+    document_id: str,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Explicit Save Spatial Map commit. Stamps savedAt + savedVersion.
+
+    The frontend gates 'Use in Scene Creator' on savedVersion == version, so
+    this is the authoritative commit boundary; it is never called implicitly.
+    """
+    return {"document": commit_document(db, project_id, document_id).model_dump()}
 
 
 @router.post("/projects/{project_id}/maps/{document_id}/characters")

@@ -38,6 +38,8 @@ class SpatialProfilePointers(BaseModel):
     sceneId: str = ""
     sheetId: str = ""
     spatialMapId: str = ""
+    # Version of the Spatial Map document consumed at handoff time.
+    mapVersion: str = ""
     ersPackageId: str = ""
     ersLibraryAssetId: str = ""
     aspectRatio: str = "16:9"
@@ -82,6 +84,7 @@ def pointer_fingerprint(profile: SpatialProfilePointers) -> str:
         "sceneId": profile.sceneId,
         "sheetId": profile.sheetId,
         "spatialMapId": profile.spatialMapId,
+        "mapVersion": profile.mapVersion,
         "ersPackageId": profile.ersPackageId,
         "ersLibraryAssetId": profile.ersLibraryAssetId,
         "aspectRatio": profile.aspectRatio,
@@ -389,6 +392,7 @@ def synchronize_production_handoff(
         sceneId=scene.id,
         sheetId=sheet_id_resolved,
         spatialMapId=map_id,
+        mapVersion=str(getattr(document, "version", "") or ""),
         ersPackageId=str(package.id or ""),
         ersLibraryAssetId=ers_library,
         aspectRatio=aspect,
@@ -442,6 +446,7 @@ def select_profile(db: Session, project_id: str, handoff_id: str) -> dict[str, A
             "ersPackageId": "",
             "ersLibraryAssetId": "",
             "spatialMapId": "",
+            "mapVersion": "",
             "profile": None,
         }
     profile = load_profile(db, project_id, wanted)
@@ -461,6 +466,7 @@ def select_profile(db: Session, project_id: str, handoff_id: str) -> dict[str, A
         "ersPackageId": profile.ersPackageId,
         "ersLibraryAssetId": profile.ersLibraryAssetId,
         "spatialMapId": profile.spatialMapId,
+        "mapVersion": profile.mapVersion,
         "profile": profile.model_dump(),
     }
 

@@ -77,6 +77,12 @@ export const spatialMapApi = {
     return res.document as unknown as SpatialMapDocument;
   },
 
+  /** Explicit Save commit (Spatial Map Save Gate). Stamps savedAt + savedVersion. */
+  async saveMap(projectId: string, documentId: string): Promise<SpatialMapDocument> {
+    const res = await api.spatialMap.saveMap(projectId, documentId);
+    return res.document as unknown as SpatialMapDocument;
+  },
+
   async placeCharacter(
     projectId: string,
     documentId: string,

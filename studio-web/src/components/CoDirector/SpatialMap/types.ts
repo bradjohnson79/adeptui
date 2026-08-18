@@ -140,6 +140,9 @@ export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props
   originatingUserPrompt?: string;
   /** Server-computed lineage fingerprint for ERS staleness. */
   groundingFingerprint?: string;
+  /** Explicit Save commit marker (Spatial Map Save Gate). Dirty = savedVersion !== version. */
+  savedAt?: string | null;
+  savedVersion?: string | null;
 };
 
 /** Body types extended with V1 Cartesian grid fields. */
@@ -235,10 +238,11 @@ export function propSourceGroupLabel(
   return "Library (map only)";
 }
 
-/** Creator-facing warning for a map-only prop placement (CDX-012). */
+/** Neutral descriptor for a map-only prop placement (CDX-012, Save Gate cleanup).
+ * No longer an alarming warning: the map is the authoritative source and
+ * binding controls remain available on the slot. */
 export const PROP_MAP_ONLY_WARNING =
-  "Map-only placement — this prop will not appear in Scene Creator shots. " +
-  "Bind an approved Project Prop to propagate into shots.";
+  "Map-only placement — bind an approved Project Prop to include this prop in Scene Creator shots.";
 
 /** Positive state shown once a placement binds to an approved Project Prop. */
 export const PROP_BOUND_TO_APPROVED_MESSAGE =

@@ -9,6 +9,7 @@ import { normalizeErsError, stripHandlerError } from "./ersErrorMessage";
 import {
   ERS_GENERATOR_DEFAULT,
   buildErsStartContext,
+  ersGeneratorOptionDisabled,
   formatErsProvenance,
   generatorBlockReason,
   hasAuthoritativeEnvironmentSource,
@@ -641,6 +642,20 @@ export function useErsGeneration({
       cancelled = true;
     };
   }, []);
+
+  // Capability-aware ERS selection: once readiness resolves, if the currently
+  // selected generator cannot perform I2I but another compatible generator is
+  // ready, auto-select the compatible one. This keeps the ERS workflow usable
+  // without a persistent red "unavailable" error during normal operation.
+  useEffect(() => {
+    if (qwenI2IReady === null && gptI2IReady === null) return; // readiness not resolved yet
+    const currentDisabled = ersGeneratorOptionDisabled(selectedGenerator, qwenI2IReady, gptI2IReady);
+    if (!currentDisabled) return; // current choice is fine
+    const preferred = qwenI2IReady ? "qwen2512" : gptI2IReady ? "gpt-image-2" : null;
+    if (preferred && preferred !== selectedGenerator) {
+      setSelectedGeneratorState(preferred);
+    }
+  }, [qwenI2IReady, gptI2IReady, selectedGenerator]);
 
   // CDX-072: if the project changes without a remount, re-seed the generator
   // from the NEW project's stored choice so project B never inherits

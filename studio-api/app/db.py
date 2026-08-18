@@ -684,7 +684,17 @@ class ProductionJobAudit(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-engine = create_engine(f"sqlite:///{settings.data_dir / 'studio.db'}", future=True)
+engine = create_engine(
+    f"sqlite:///{settings.data_dir / 'studio.db'}",
+    future=True,
+    # SQLite default QueuePool (5 + 10 overflow) exhausts under the Spatial Map
+    # panel's parallel mount requests (maps + providers + scenes + ERS refresh)
+    # during live browser certification. A larger pool is safe for SQLite with
+    # this app's short transactions and keeps concurrent reads from blocking.
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=60,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

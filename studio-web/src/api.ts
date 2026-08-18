@@ -5529,6 +5529,11 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    /** Explicit Save commit (Spatial Map Save Gate). Stamps savedAt + savedVersion. */
+    saveMap: (projectId: string, documentId: string) =>
+      req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/save`, {
+        method: "POST",
+      }),
     placeCharacter: (projectId: string, documentId: string, body: SpatialCharacterPlacementBody) =>
       req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}/characters`, {
         method: "POST",

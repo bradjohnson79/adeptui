@@ -34,6 +34,7 @@ import { EntityPicker } from "./EntityPicker";
 import { ERSGenerationMonitor } from "./ERSGenerationMonitor";
 import { ERS_GENERATOR_OPTIONS, ersGeneratorOptionDisabled } from "./ersGenerator";
 import { useErsGeneration } from "./useErsGeneration";
+import { useSpatialMapSaveHooks } from "./useSpatialMapSave";
 import { persistThenOpenSceneCreator } from "../SceneCreator/persistThenOpenSceneCreator";
 import { CharacterInspector } from "./CharacterInspector";
 import { PlacementSlot } from "./PlacementSlot";
@@ -189,6 +190,14 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
     setActiveExecution,
   });
 
+  // Explicit Save commit boundary (Spatial Map Save Gate). "Use in Scene
+  // Creator" is gated on isSaved && !isDirty; this hook never auto-saves.
+  const saveState = useSpatialMapSaveHooks({
+    projectId,
+    document,
+    onCommitted: (committed) => setDocument(normalizeMapDocumentProps(committed)),
+  });
+
 
   // ── Load most recent map on mount / project change ───────────────────────
   const loadMap = useCallback(async () => {
@@ -249,13 +258,19 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
   }, [projectId, selectedSceneId, document?.sceneId, document?.id, ers.sheetId, onGoTab]);
 
   const handleUseInSceneCreator = useCallback(async () => {
+    // Save Gate: never hand off an unsaved revision. The button is disabled
+    // when dirty; this guard is defense in depth against any stale path.
+    if (saveState.isDirty) {
+      setOpMsg("Save Spatial Map before using it in Scene Creator.");
+      return;
+    }
     const needsChoice = sceneOptions.length > 1 || !document?.sceneId;
     if (needsChoice && sceneOptions.length > 0) {
       setSceneChooserOpen(true);
       return;
     }
     await doSceneCreatorHandoff();
-  }, [sceneOptions.length, document?.sceneId, doSceneCreatorHandoff]);
+  }, [sceneOptions.length, document?.sceneId, doSceneCreatorHandoff, saveState.isDirty]);
 
   // CDX-020: switching maps loads the chosen document (never the most-recent).
   const handleSelectMap = useCallback((documentId: string) => {
@@ -1404,6 +1419,43 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               <button type="button" className="ui-btn ui-btn--secondary spatial-map__atlas-btn" onClick={() => void handleReplaceGenerate()} disabled={isGenerating} aria-label="Generate another Atlas Shot with Co-Director" data-testid="atlas-regenerate-btn">Generate New</button>
               <button type="button" className="ui-btn ui-btn--secondary spatial-map__atlas-btn spatial-map__atlas-remove" onClick={() => void handleRemoveAtlas()} aria-label="Remove Atlas Shot from Spatial Map" data-testid="atlas-remove-btn">Remove</button>
             </div>
+
+            <div className="spatial-map__save-cluster" data-testid="spatial-map-save-cluster">
+              <button
+                type="button"
+                className="ui-btn ui-btn--secondary"
+                onClick={() => onGoTab?.("library")}
+                aria-label="Open in Library"
+                data-testid="spatial-map-open-library"
+              >
+                Open in Library
+              </button>
+              <button
+                type="button"
+                className="ui-btn ui-btn--primary"
+                onClick={() => void saveState.handleSave()}
+                disabled={saveState.status === "saving" || !document}
+                aria-label="Save Spatial Map"
+                data-testid="spatial-map-save"
+              >
+                {saveState.status === "saving" ? "Saving…" : "Save Spatial Map"}
+              </button>
+              <span
+                className={"spatial-map__save-state" + (saveState.isDirty ? " is-dirty" : " is-saved")}
+                data-testid="spatial-map-save-state"
+              >
+                {saveState.status === "error"
+                  ? "Save failed"
+                  : saveState.isDirty
+                    ? "Unsaved changes"
+                    : "Saved"}
+              </span>
+              {saveState.status === "error" && saveState.error ? (
+                <p className="spatial-map__hint spatial-map__hint--error" role="alert" data-testid="spatial-map-save-error">
+                  {saveState.error}
+                </p>
+              ) : null}
+            </div>
           </div>
 
           {maps.length > 1 ? (
@@ -1824,13 +1876,13 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
                 );
                 return (
                   <option key={opt.id} value={opt.id} disabled={disabled}>
-                    {disabled ? opt.label + " — Unavailable for ERS" : opt.label}
+                    {disabled ? opt.label + " (not ready for ERS)" : opt.label}
                   </option>
                 );
               })}
             </select>
             {ers.generatorBlockReason ? (
-              <p className="spatial-map__ers-generator-reason" data-testid="ers-generator-reason" role="status">
+              <p className="spatial-map__ers-generator-hint" data-testid="ers-generator-reason" role="status">
                 {ers.generatorBlockReason}
               </p>
             ) : null}
@@ -1856,6 +1908,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             onOpenInLibrary={() => onGoTab?.("library")}
             onUseInSceneCreator={() => void handleUseInSceneCreator()}
             onUseAnyway={() => void ers.useAnyway()}
+            useInSceneCreatorDisabled={saveState.isDirty}
           />
 
           {opMsg && ers.phase === "idle" ? <p className="spatial-map__hint">{opMsg}</p> : null}

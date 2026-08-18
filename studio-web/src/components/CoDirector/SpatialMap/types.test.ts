@@ -239,7 +239,10 @@ describe("CDX-012 prop source classification (map-only honesty)", () => {
     for (const source of PROP_MAP_ONLY_SOURCES) {
       expect(propPlacementIdentity({ id: "x", source }).propId).toBeNull();
     }
-    expect(PROP_MAP_ONLY_WARNING).toContain("will not appear in Scene Creator");
+    // Save Gate cleanup: the map-only descriptor is neutral and actionable,
+    // no longer an alarming "will not appear in shots" warning.
+    expect(PROP_MAP_ONLY_WARNING).toContain("bind an approved Project Prop");
+    expect(PROP_MAP_ONLY_WARNING).not.toContain("will not appear");
   });
 });
 describe("Prop production binding states (Spatial Prop + ERS Production Binding)", () => {

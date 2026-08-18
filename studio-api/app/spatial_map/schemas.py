@@ -298,6 +298,11 @@ class SpatialMapDocument(BaseModel):
     assignedSceneIds: list[str] = Field(default_factory=list)
     createdAt: str = ""
     updatedAt: str = ""
+    # Explicit Save commit marker (Spatial Map Save Gate): stamped only by the
+    # POST /save endpoint. Dirty = savedVersion !== version (any edit bumps
+    # version via _save_document; a fresh/unsaved map has savedVersion unset).
+    savedAt: Optional[str] = None
+    savedVersion: Optional[str] = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

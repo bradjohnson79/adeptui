@@ -16,6 +16,8 @@ type Props = {
   onUseInSceneCreator?: () => void;
   onOpenFullSize?: (url: string) => void;
   onUseAnyway?: () => void;
+  /** Save Gate: disable "Use in Scene Creator" until the map is saved & clean. */
+  useInSceneCreatorDisabled?: boolean;
 };
 
 function formatElapsed(sec: number): string {
@@ -31,6 +33,7 @@ export function ERSGenerationMonitor({
   onUseInSceneCreator,
   onOpenFullSize,
   onUseAnyway,
+  useInSceneCreatorDisabled = false,
 }: Props) {
   const [showDetails, setShowDetails] = useState(false);
   if (state.phase === "idle" && !state.compositeAssetId) return null;
@@ -183,7 +186,14 @@ export function ERSGenerationMonitor({
           <button type="button" className="ui-btn ui-btn--secondary" onClick={onOpenInLibrary}>
             Open in Library
           </button>
-          <button type="button" className="ui-btn ui-btn--primary" onClick={onUseInSceneCreator}>
+          <button
+            type="button"
+            className="ui-btn ui-btn--primary"
+            onClick={onUseInSceneCreator}
+            disabled={useInSceneCreatorDisabled}
+            data-testid="use-in-scene-creator"
+            title={useInSceneCreatorDisabled ? "Save Spatial Map first" : undefined}
+          >
             Use in Scene Creator
           </button>
         </div>
