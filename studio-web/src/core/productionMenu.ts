@@ -56,7 +56,7 @@ export type ProductionMenuEntryDef = {
   workspace?: EditorTab;
   coDirectorAction?: CoDirectorQuickActionId;
   availabilityKey?: ProductionAvailabilityKey;
-  /** Avatar Studio requires a selected Character Profile */
+  /** When true, Production menu routes through a character picker instead of the workspace. */
   requiresCharacter?: boolean;
 };
 
@@ -198,15 +198,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         action: "workspace",
         workspace: "profiles",
       },
-      {
-        id: "bible",
-        label: "Production Bible",
-        description: "Canonical narrative and production information",
-        helpLabel: "What is Production Bible?",
-        helpContent: "Canonical narrative and production information for the project.",
-        action: "workspace",
-        workspace: "bible",
-      },
     ],
   },
   {
@@ -273,7 +264,6 @@ export const PRODUCTION_MENU_CATALOG: readonly ProductionCategoryDef[] = [
         helpContent: "Create speaking portrait performances for a selected character.",
         action: "workspace",
         workspace: "avatar",
-        requiresCharacter: true,
       },
       {
         id: "brandstudio",

@@ -94,7 +94,7 @@ test.describe("M42 Production categorized menu", () => {
     const profiles = menu.getByTestId("production-cat-profiles");
     await expect(profiles.getByTestId("production-item-characters")).toContainText("Character Creator");
     await expect(profiles.getByTestId("production-item-profiles")).toContainText("Project Profile");
-    await expect(profiles.getByTestId("production-item-bible")).toContainText("Production Bible");
+    await expect(profiles.getByTestId("production-item-bible")).toHaveCount(0);
 
     const pre = menu.getByTestId("production-cat-pre-production");
     await expect(pre.getByTestId("production-item-continuity")).toContainText("Continuity");

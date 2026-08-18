@@ -107,11 +107,13 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         rawPrefsRef.current = prefs || null;
         packLoadedRef.current = true;
         if (prefs && inventoryRef.current) applyHydration(prefs, inventoryRef.current);
+        else setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
         prefsHydratedRef.current = true;
       } catch {
         if (!cancelled) {
           packLoadedRef.current = true;
           prefsHydratedRef.current = true;
+          setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
         }
       }
     })();

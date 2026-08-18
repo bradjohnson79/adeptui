@@ -6,7 +6,7 @@
  * Use as Character Identity is a CANDIDATE path, not auto-approve:
  * reference → mark as identity candidate → user explicitly approves → hero_identity.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import { CharacterReferenceAssetPicker } from "../CoDirector/characters/CharacterReferenceAssetPicker";
 import type { LibraryAsset } from "../CoDirector/library/assetModel";
@@ -36,6 +36,10 @@ export function CharacterReferenceControl({
   const [error, setError] = useState<string | null>(null);
   const [useAsIdentity, setUseAsIdentity] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setUseAsIdentity(false);
+  }, [characterId]);
 
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
   const refAssetId = referenceImage?.asset_id ?? null;

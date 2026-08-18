@@ -7,7 +7,7 @@ import { goHome } from "../navigation/projectLibrary";
 import { CoDirectorProvider } from "../core/CoDirectorContext";
 import { useTranslation } from "react-i18next";
 import { ProjectLanguageSync } from "../i18n";
-import { WORKSPACES } from "../core/workspaces";
+import { WORKSPACES, coDirectorProjectPath, isStandaloneBibleWorkspace } from "../core/workspaces";
 // WORKSPACES.labelKey used for i18n nav labels
 import { Timeline } from "../components/Timeline";
 import { AssetTray, PromptComposer } from "../components/AssetTray";
@@ -48,7 +48,6 @@ import { GenerationToolsHub } from "../components/GenerationTools/GenerationTool
 import { BrandStudioWorkspace } from "../components/GenerationTools/BrandStudioWorkspace";
 import { PoseCraftWorkspace } from "../components/GenerationTools/PoseCraftWorkspace";
 import { ScriptwriterStudio } from "../components/scriptwriter/ScriptwriterStudio";
-import { ProductionBibleWorkspace } from "../components/ProductionBibleWorkspace";
 import { ContinuityWorkspace } from "../components/continuity/ContinuityWorkspace";
 import { ReferencesPane } from "../components/sceneReferences/ReferencesPane";
 import { TimelineCharacterCreatorPanel } from "../components/TimelineCharacterCreatorPanel";
@@ -541,6 +540,10 @@ export default function ProjectEditor() {
     const query = new URLSearchParams(locationSearch);
     const raw = query.get("workspace") ?? query.get("tab");
     const requested = resolveWorkspace(raw);
+    if (isStandaloneBibleWorkspace(requested)) {
+      navigate(coDirectorProjectPath(id), { replace: true });
+      return;
+    }
     // ROUTING CONTRACT: Open Project (no ?workspace= param) ALWAYS lands on
     // the project landing page. Workspace memory never silently reroutes a
     // plain project open — resume only happens via the intentional Continue
@@ -568,6 +571,10 @@ export default function ProjectEditor() {
       if (!id) return;
       const resolved = resolveWorkspace(next);
       if (!resolved) return;
+      if (isStandaloneBibleWorkspace(resolved)) {
+        navigate(coDirectorProjectPath(id), { replace: true });
+        return;
+      }
       setTab(resolved);
       // ROUTING CONTRACT: the project landing page is the bare URL — no
       // workspace query param. Named workspaces carry an explicit param.
@@ -765,8 +772,6 @@ export default function ProjectEditor() {
           onGo={go}
           onAskCoDirector={(p) => openCoDirector(p, { autoSend: Boolean(p) })}
         />
-      ) : tab === "bible" ? (
-        <ProductionBibleWorkspace project={project} onChange={refresh} />
       ) : tab === "continuity" ? (
         <ContinuityWorkspace project={project} onChange={refresh} onGo={go} />
       ) : tab === "settings" ? (

@@ -560,6 +560,7 @@ export function CharacterProfileWorkspace({
 
       {selectedId ? (
         <CharacterCore
+          key={selectedId}
           projectId={project.id}
           characterId={selectedId}
           autoFocusName={autoFocusNew}

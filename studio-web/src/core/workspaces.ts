@@ -367,8 +367,9 @@ export const WORKSPACES = {
     order: 10,
     description: "Canon production bible and continuity.",
     capabilityBadges: ["Bible", "Continuity"],
-    toolbarEligible: true,
-    commandPalette: true,
+    toolbarEligible: false,
+    commandPalette: false,
+    menuHidden: true,
   },
   identityregistry: {
     label: "Approved Look",
@@ -538,4 +539,13 @@ export function commandPaletteWorkspaces(): EditorTab[] {
     const def = WORKSPACES[tab] as WorkspaceDefinition;
     return def.commandPalette !== false && !isMenuHidden(tab);
   }).sort((a, b) => WORKSPACES[a].label.localeCompare(WORKSPACES[b].label));
+}
+
+/** Standalone Production Bible page is internal memory — send creators to Co-Director. */
+export function isStandaloneBibleWorkspace(tab: EditorTab | null | undefined): boolean {
+  return tab === "bible";
+}
+
+export function coDirectorProjectPath(projectId: string): string {
+  return `/co-director?projectId=${encodeURIComponent(projectId)}`;
 }

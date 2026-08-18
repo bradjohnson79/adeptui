@@ -39,6 +39,56 @@ export function getReferenceImage(refs: CharacterReference[]): CharacterReferenc
   return refs.find((r) => r.reference_role === "reference_image" && r.asset_id);
 }
 
+/** Form fields that must fully replace on load so empty legacy values do not keep the previous character. */
+const CHARACTER_FORM_STRING_KEYS = [
+  "name",
+  "role",
+  "description",
+  "visual_description",
+  "visual_style",
+  "gender_presentation",
+  "apparent_age",
+  "species_or_type",
+  "body_type",
+  "height_description",
+] as const;
+
+export type PendingCharacterPatch = {
+  characterId: string;
+  fields: Record<string, unknown>;
+};
+
+/** Full replace: null/undefined form strings become "" so Load Character cannot leak the previous profile. */
+export function replaceCharacterProfile(raw: CharacterProfile | null | undefined): CharacterProfile | null {
+  if (!raw) return null;
+  const next: CharacterProfile = { ...raw };
+  for (const key of CHARACTER_FORM_STRING_KEYS) {
+    if (next[key] == null) next[key] = "";
+  }
+  return next;
+}
+
+export function pendingPatchForCurrentCharacter(
+  pending: PendingCharacterPatch | null,
+  currentCharacterId: string | null,
+): Record<string, unknown> | null {
+  if (!pending || !currentCharacterId || pending.characterId !== currentCharacterId) return null;
+  return pending.fields;
+}
+
+export function applyLoadedCharacterState(args: {
+  requestedCharacterId: string;
+  currentCharacterId: string | null;
+  profile: CharacterProfile | null | undefined;
+  references: CharacterReference[] | undefined;
+}): { profile: CharacterProfile | null; references: CharacterReference[] } | "stale" {
+  if (!args.currentCharacterId || args.currentCharacterId !== args.requestedCharacterId) return "stale";
+  return {
+    profile: replaceCharacterProfile(args.profile ?? null),
+    references: Array.isArray(args.references) ? args.references : [],
+  };
+}
+
 export type UseCharacterProfileResult = {
   profile: CharacterProfile | null;
   references: CharacterReference[];
@@ -70,12 +120,14 @@ export function useCharacterProfile(
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingRef = useRef<Record<string, unknown> | null>(null);
+  const pendingRef = useRef<PendingCharacterPatch | null>(null);
+  const loadGenRef = useRef(0);
   const idRef = useRef<string | null>(characterId);
   idRef.current = characterId;
 
   const refresh = useCallback(async () => {
     const cid = idRef.current;
+    const gen = ++loadGenRef.current;
     if (!projectId || !cid) {
       setProfile(null);
       setReferences([]);
@@ -88,26 +140,42 @@ export function useCharacterProfile(
         api.getCharacterProfile(projectId, cid),
         api.listCharacterReferences(projectId, cid).catch(() => ({ items: [] as CharacterReference[] })),
       ]);
-      setProfile(p as CharacterProfile);
-      setReferences(((refs as { items?: CharacterReference[] }).items || []) as CharacterReference[]);
+      if (gen !== loadGenRef.current) return;
+      const applied = applyLoadedCharacterState({
+        requestedCharacterId: cid,
+        currentCharacterId: idRef.current,
+        profile: p as CharacterProfile,
+        references: (refs as { items?: CharacterReference[] }).items,
+      });
+      if (applied === "stale") return;
+      setProfile(applied.profile);
+      setReferences(applied.references);
     } catch (e) {
+      if (gen !== loadGenRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load character.");
     } finally {
-      setLoading(false);
+      if (gen === loadGenRef.current) setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, characterId]);
 
   useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingRef.current = null;
+    setProfile(null);
+    setReferences([]);
     void refresh();
   }, [refresh]);
 
   const flushPending = useCallback(async () => {
     const cid = idRef.current;
-    const pending = pendingRef.current;
+    const fields = pendingPatchForCurrentCharacter(pendingRef.current, cid);
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!projectId || !cid || !pending) return;
-    await api.patchCharacterProfile(projectId, cid, pending);
     pendingRef.current = null;
+    if (!projectId || !cid || !fields) return;
+    await api.patchCharacterProfile(projectId, cid, fields);
     setSavedAt(new Date().toISOString());
   }, [projectId]);
 
@@ -116,7 +184,8 @@ export function useCharacterProfile(
       const cid = idRef.current;
       if (!projectId || !cid) return;
       setProfile((prev) => (prev ? ({ ...prev, ...fields } as CharacterProfile) : prev));
-      pendingRef.current = { ...(pendingRef.current || {}), ...fields };
+      const prevFields = pendingPatchForCurrentCharacter(pendingRef.current, cid) || {};
+      pendingRef.current = { characterId: cid, fields: { ...prevFields, ...fields } };
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
         void flushPending().catch((e) => {
@@ -155,8 +224,9 @@ export function useCharacterProfile(
       setSaving(true);
       setError("");
       try {
-        if (fields) {
-          pendingRef.current = { ...(pendingRef.current || {}), ...fields };
+        if (fields && cid) {
+          const prevFields = pendingPatchForCurrentCharacter(pendingRef.current, cid) || {};
+          pendingRef.current = { characterId: cid, fields: { ...prevFields, ...fields } };
         }
         await flushPending();
         return true;

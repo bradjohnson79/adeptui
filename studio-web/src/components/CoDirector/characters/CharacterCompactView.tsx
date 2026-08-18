@@ -32,6 +32,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   return (
     <div className="character-compact__detail">
       <CharacterCore
+        key={characterId}
         projectId={projectId}
         characterId={characterId}
         onDeleted={() => onOpenFull?.("__delete__")}

@@ -5,8 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 import { candidateSelectionLabel } from "./types";
-import type { CharacterReference } from "./types";
-import { getHeroIdentity, getPendingHeroIdentity } from "./useCharacterProfile";
+import type { CharacterProfile, CharacterReference } from "./types";
+import {
+  applyLoadedCharacterState,
+  getHeroIdentity,
+  getPendingHeroIdentity,
+  pendingPatchForCurrentCharacter,
+  replaceCharacterProfile,
+} from "./useCharacterProfile";
 
 function ref(over: Partial<CharacterReference>): CharacterReference {
   return {
@@ -85,5 +91,112 @@ describe("candidateSelectionLabel (CDX-004 grid)", () => {
 
   it("Selected wins over Pending review", () => {
     expect(candidateSelectionLabel({ isSelected: true, isPendingReview: true })).toBe("Selected");
+  });
+});
+
+describe("Load Character atomic replace", () => {
+  const korri: CharacterProfile = {
+    id: "char-a",
+    name: "Korri",
+    gender_presentation: "female",
+    visual_style: "anime",
+    description: "A grounded heroine.",
+  };
+  const korriRefs: CharacterReference[] = [
+    ref({
+      id: "ref-a",
+      asset_id: "korri-ref",
+      reference_role: "reference_image",
+      canonical: false,
+      approval_status: "draft",
+    }),
+  ];
+
+  it("A → B replaces name, gender, style, description, and references", () => {
+    const loadedA = applyLoadedCharacterState({
+      requestedCharacterId: "char-a",
+      currentCharacterId: "char-a",
+      profile: korri,
+      references: korriRefs,
+    });
+    expect(loadedA).not.toBe("stale");
+    if (loadedA === "stale") return;
+    expect(loadedA.profile?.name).toBe("Korri");
+    expect(loadedA.references[0]?.asset_id).toBe("korri-ref");
+
+    const loadedB = applyLoadedCharacterState({
+      requestedCharacterId: "char-b",
+      currentCharacterId: "char-b",
+      profile: {
+        id: "char-b",
+        name: "Anadriya",
+        gender_presentation: "nonbinary",
+        visual_style: "cinematic",
+        description: "An elven scout.",
+      },
+      references: [],
+    });
+    expect(loadedB).not.toBe("stale");
+    if (loadedB === "stale") return;
+    expect(loadedB.profile).toEqual(
+      expect.objectContaining({
+        name: "Anadriya",
+        gender_presentation: "nonbinary",
+        visual_style: "cinematic",
+        description: "An elven scout.",
+      }),
+    );
+    expect(loadedB.references).toEqual([]);
+  });
+
+  it("does not keep the previous gender when B omits gender", () => {
+    const replaced = replaceCharacterProfile({
+      id: "char-b",
+      name: "Anadriya",
+      gender_presentation: undefined,
+      visual_style: "cinematic",
+      description: "An elven scout.",
+    });
+    expect(replaced?.gender_presentation).toBe("");
+    expect(replaced?.gender_presentation).not.toBe("female");
+  });
+
+  it("does not flush a pending patch from A against B", () => {
+    const pendingA = { characterId: "char-a", fields: { name: "Korri", gender_presentation: "female" } };
+    expect(pendingPatchForCurrentCharacter(pendingA, "char-b")).toBeNull();
+    expect(pendingPatchForCurrentCharacter(pendingA, "char-a")).toEqual(pendingA.fields);
+  });
+
+  it("ignores a stale in-flight load after the selected id changes", () => {
+    expect(
+      applyLoadedCharacterState({
+        requestedCharacterId: "char-a",
+        currentCharacterId: "char-b",
+        profile: korri,
+        references: korriRefs,
+      }),
+    ).toBe("stale");
+  });
+
+  it("clears a previous reference preview when the next character has none", () => {
+    const withImage = applyLoadedCharacterState({
+      requestedCharacterId: "char-a",
+      currentCharacterId: "char-a",
+      profile: korri,
+      references: korriRefs,
+    });
+    expect(withImage).not.toBe("stale");
+    if (withImage === "stale") return;
+    expect(withImage.references.some((r) => r.asset_id === "korri-ref")).toBe(true);
+
+    const empty = applyLoadedCharacterState({
+      requestedCharacterId: "char-b",
+      currentCharacterId: "char-b",
+      profile: { id: "char-b", name: "Anadriya" },
+      references: [],
+    });
+    expect(empty).not.toBe("stale");
+    if (empty === "stale") return;
+    expect(empty.references).toEqual([]);
   });
 });

@@ -122,13 +122,13 @@ export function CharacterSheetGenerator({
       try {
         const res = await api.getCharacterVisualSheet(projectId, characterId);
         const cands = readCandidates(res);
-        if (!cancelled && cands.length) {
+        if (!cancelled) {
           setCandidates(cands);
           onCandidates(cands);
           // GET returns the last saved pack and does not hydrate live job
           // status. Resume the existing advance poller so failed imagegen
           // jobs leave "Generating..." without a second poller.
-          if (!cands.every(viewsTerminal) && !inFlightRef.current) {
+          if (cands.length && !cands.every(viewsTerminal) && !inFlightRef.current) {
             inFlightRef.current = true;
             setPhase("generating");
             setMessage("Generating…");
