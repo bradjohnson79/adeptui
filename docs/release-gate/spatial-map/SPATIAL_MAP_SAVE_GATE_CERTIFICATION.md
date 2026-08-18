@@ -98,3 +98,13 @@ Screenshots: tests/e2e/screenshots/spatial-map/savegate-unsaved.png, savegate-cl
 - Discrepancies (non-blocking, environmental): intermittent single-worker API event-loop stalls caused request timeouts that all passed on retry; the observed Save failed state was the correct error-path UI (stalled save must not report Saved).
 
 **FINAL VERDICT: GO — SPATIAL MAP SAVE GATE AND HANDOFF CERTIFIED**
+
+## Deployment (Vercel) — completed 2026-08-18
+
+- Production deployment: `https://adeptui-75iterern-anoint.vercel.app` (Inspect: vercel.com/anoint/adeptui/7mW7mK9gXy7W4kP7SGTM6TvWaBQc), **aliased to `https://adeptui.vercel.app`**.
+- Deploy method: Vercel CLI 58.9.0 from repo root (`vercel --prod --yes`; project `anoint/adeptui`, Root Directory `studio-web`).
+- Build on Vercel: `tsc -b && vite build` (4149 modules), Ready in 54 s, build cache restored.
+- **Deployed bundle: `assets/index-C60rVAwu.js`** (9,914,943 bytes) — verified live to contain `Save Spatial Map`, `Unsaved changes`, `not ready for ERS`, `spatial-map-save` testid. (Hash differs from the local `index-BT5cNjzY.js` only because Vercel resolves dependencies in its own build environment; content is the tested HEAD `ca8ac48` revision.)
+- Deployed revision correspondence: local HEAD == remote `beta` == `ca8ac48` (feat(spatial-map): save gate + ERS warning cleanup); the Vercel build ran from this committed revision.
+- Hosted smoke (Playwright against https://adeptui.vercel.app): PASS — page loads (title Adept UI Studio), serves bundle `index-C60rVAwu.js`.
+- Hosted API path: `https://adeptui.vercel.app` -> secure bridge `api-beta.adeptui.org` -> Studio API :8758 (tunnel healthz 200, CORS verified in prior missions).
