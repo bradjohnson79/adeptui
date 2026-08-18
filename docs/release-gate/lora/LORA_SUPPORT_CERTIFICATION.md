@@ -155,9 +155,32 @@ Playwright live certification (`tests/e2e/lora/`):
 
 ## 9. Independent certification
 
-Subagent C (independent, fresh agent) — see its report; verdict appended
-here after completion.
+Subagent C (independent, fresh agent) — **CERTIFICATION: PASS**.
+All 8 gates certified live (registry API + determinism, install/detect
+idempotency + register/remove, enable/disable, image runtime load with Comfy
+LoraLoader node evidence, video runtime load with LoraLoaderModelOnly node
+evidence, provenance persistence, UI smoke in a fresh Playwright spec, and
+code/architecture review). One non-blocking finding (video library asset
+provenance only in job params) was fixed and re-certified — see below.
 
-## 10. Final verdict
+## 10. Post-review fixes (Subagent C finding closed)
 
-(filled by the governing agent after Subagent C returns)
+- queue_worker: pre-existing bare `uuid4()` NameError silently skipped the
+  Timeline batch output Asset registration (the W46 fallback then created
+  the asset without provenance). Fixed to `uuid.uuid4()`; the batch asset now
+  carries `prompt_meta_json` with the LoRA/engine/workflow provenance block.
+- `ltx_local._ensure_output_asset_ids` fallback now attaches the LoRA
+  provenance block to the library asset as well (image/video parity).
+- `lora-video-cert.spec.ts` asserts the library asset carries the LoRA
+  provenance — re-run: PASS (48.2s, live LTX render).
+
+## 11. Final verdict
+
+**GO — ADEPT UI LoRA SUPPORT CERTIFIED**
+
+Evidence recap: 12 backend registry tests, 206 regression tests, 279/280
+full-suite (1 pre-existing unrelated failure), 4 frontend client tests, live
+Playwright certification 7/7 UI + 1/1 video (image + video runtime loads,
+provenance, disable/remove, baseline regression, compatibility
+disjointness), independent Subagent C PASS, deployed to
+https://adeptui.vercel.app from the tested revision.
