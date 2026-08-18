@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .... import avatar_studio as avatar
-from ....avatar_runtimes import inspect_runtime
+from ....avatar_runtimes import inspect_runtime, runtime_gate_line
 from ..definitions import ToolContext, ToolPreview
 
 
@@ -349,6 +349,82 @@ async def check_continuity(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
     }
 
 
+def _apply_compact_session_args(session: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    source_kind = _string(args, "sourceKind")
+    if source_kind in {"character", "library", "still", "video"}:
+        session["source_kind"] = source_kind
+    source_asset = _string(args, "sourceAssetId")
+    if source_asset:
+        if session.get("source_kind") == "video":
+            session["source_video_asset_id"] = source_asset
+        else:
+            session["source_still_asset_id"] = source_asset
+    generator_id = _string(args, "generatorId") or _string(args, "providerId")
+    if generator_id:
+        session["provider_choice"] = generator_id
+        session["model_id"] = generator_id
+        session["provider_mode"] = "choose_provider"
+    aspect = _string(args, "aspect")
+    if aspect:
+        look = session.get("look") if isinstance(session.get("look"), dict) else {}
+        camera = session.get("camera") if isinstance(session.get("camera"), dict) else {}
+        look["aspect"] = aspect
+        camera["aspect"] = aspect
+        session["look"] = look
+        session["camera"] = camera
+    direction = _string(args, "directionPrompt")
+    if direction:
+        session["direction_prompt"] = direction
+    speaker_a_label = _string(args, "speakerALabel")
+    speaker_b_label = _string(args, "speakerBLabel")
+    speaker_a_id = _string(args, "speakerAId")
+    speaker_b_id = _string(args, "speakerBId")
+    dialogue_a = _string(args, "speakerADialogue")
+    dialogue_b = _string(args, "speakerBDialogue")
+    speakers = list(session.get("speakers") or [])
+    if not speakers:
+        speakers = [{"id": "speaker-a", "label": "Person 1", "character_id": session.get("character_profile_id")}]
+    if speaker_a_label or speaker_a_id:
+        found = next((item for item in speakers if item.get("id") == "speaker-a"), None)
+        if found is None:
+            found = {"id": "speaker-a", "label": "Person 1"}
+            speakers.insert(0, found)
+        if speaker_a_label:
+            found["label"] = speaker_a_label
+        if speaker_a_id:
+            found["character_id"] = speaker_a_id
+    if speaker_b_label or speaker_b_id or dialogue_b:
+        found = next((item for item in speakers if item.get("id") == "speaker-b"), None)
+        if found is None:
+            found = {"id": "speaker-b", "label": "Person 2", "character_id": None}
+            speakers.append(found)
+        if speaker_b_label:
+            found["label"] = speaker_b_label
+        if speaker_b_id:
+            found["character_id"] = speaker_b_id
+    session["speakers"] = speakers
+    order = _string(args, "conversationOrder") or ((session.get("conversation") or {}).get("order") if isinstance(session.get("conversation"), dict) else "a_then_b")
+    if order not in {"a_then_b", "b_then_a"}:
+        order = "a_then_b"
+    if dialogue_a or dialogue_b:
+        session["mode_kind"] = "conversation" if dialogue_b else session.get("mode_kind") or "single"
+        session["conversation"] = {
+            "order": order,
+            "turns": [
+                {"speakerId": "speaker-a", "dialogue": dialogue_a or str(session.get("dialogue_original") or "")},
+                *([{"speakerId": "speaker-b", "dialogue": dialogue_b}] if dialogue_b else []),
+            ],
+        }
+        session["dialogue_original"] = "\n\n".join(
+            item["dialogue"] for item in session["conversation"]["turns"] if item.get("dialogue")
+        )
+    elif order:
+        conversation = session.get("conversation") if isinstance(session.get("conversation"), dict) else {"turns": []}
+        conversation["order"] = order
+        session["conversation"] = conversation
+    return session
+
+
 def preview_create_plan(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     _, session = _session_data(ctx, args)
     plan = _apply_plan_overrides(
@@ -382,6 +458,7 @@ def preview_create_plan(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
 
 def apply_create_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     session_row, session = _session_data(ctx, args)
+    session = _apply_compact_session_args(session, args)
     target_duration_ms = max(
         2000,
         _int(
@@ -395,11 +472,15 @@ def apply_create_plan(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     session["presentation_plan"] = _apply_plan_overrides(plan, args)
     avatar._write_session(session_row, session)
     ctx.db.commit()
+    provider_id = avatar._select_provider(session, _string(args, "generatorId") or _string(args, "providerId") or None)
+    ready, gate = runtime_gate_line(provider_id)
     return {
         "ok": True,
         "session": avatar._row_to_data(session_row),
         "presentationPlan": session["presentation_plan"],
         "persisted": True,
+        "executed": ready,
+        "runtimeGate": None if ready else gate,
         "_evidence": {"source": "avatar_studio.presentation_plan"},
     }
 
@@ -431,19 +512,31 @@ def preview_create_job(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
 
 
 def apply_create_job(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    session_id = _session_id(ctx, args)
-    return avatar.create_avatar_job(
+    session_row, session = _session_data(ctx, args)
+    session = _apply_compact_session_args(session, args)
+    avatar._write_session(session_row, session)
+    ctx.db.commit()
+    session_id = str(session_row.id)
+    provider_id = avatar._select_provider(session, _string(args, "generatorId") or _string(args, "providerId") or None)
+    ready, gate = runtime_gate_line(provider_id)
+    job = avatar.create_avatar_job(
         ctx.project_id,
         session_id,
         avatar.CreateAvatarJobBody(
-            providerId=_string(args, "providerId") or None,
+            providerId=provider_id,
             scriptSourceId=_string(args, "scriptSourceId") or None,
-            startImmediately=_bool(args, "startImmediately", False),
+            startImmediately=_bool(args, "startImmediately", False) if ready else False,
             overlapMs=_int(args, "overlapMs", 250),
             targetSectionDurationMs=_int(args, "targetSectionDurationMs", 0) or None,
         ),
         db=ctx.db,
     )
+    if isinstance(job, dict):
+        job["executed"] = ready
+        job["runtimeGate"] = None if ready else gate
+        job["persisted"] = True
+        job["ok"] = True
+    return job
 
 
 def preview_adjust_section(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:

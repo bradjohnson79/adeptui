@@ -246,3 +246,49 @@ def overlay_track_preview(
     cap.release()
     writer.release()
     return out_path
+
+
+def detect_face_rois_in_image(image_path: Path, max_faces: int = 2) -> list[dict[str, Any]]:
+    """Detect up to two face boxes on a still. Labels stay Person 1 / Person 2."""
+    import cv2
+
+    image = cv2.imread(str(image_path))
+    if image is None:
+        raise RuntimeError(f"Could not open still: {image_path}")
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    faces: list[dict[str, Any]] = []
+    try:
+        import mediapipe as mp
+
+        detector = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.4)
+        result = detector.process(rgb)
+        detector.close()
+        detections = list(result.detections or [])[: max(1, max_faces)]
+        for det in detections:
+            bbox = det.location_data.relative_bounding_box
+            faces.append(
+                {
+                    "bbox": {
+                        "x": float(max(0.0, bbox.xmin)),
+                        "y": float(max(0.0, bbox.ymin)),
+                        "w": float(max(0.04, bbox.width)),
+                        "h": float(max(0.04, bbox.height)),
+                    }
+                }
+            )
+    except Exception:
+        faces = []
+    faces.sort(key=lambda item: float((item.get("bbox") or {}).get("x") or 0.0))
+    labeled: list[dict[str, Any]] = []
+    for index, face in enumerate(faces[:max_faces]):
+        labeled.append(
+            {
+                "id": "speaker-a" if index == 0 else "speaker-b",
+                "label": f"Person {index + 1}",
+                "character_id": None,
+                "bbox": face.get("bbox"),
+                "mask_asset_id": None,
+            }
+        )
+    return labeled
+

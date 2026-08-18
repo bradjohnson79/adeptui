@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from .avatar_runtimes import inspect_runtime
+from .avatar_runtimes import inspect_runtime, list_avatar_generator_capabilities, runtime_gate_line
 from .character_identity.voice_runtime import _register_asset
 from .config import settings
-from .db import Base, Project, engine, get_db
+from .db import Asset, Base, Project, engine, get_db
 
 router = APIRouter(tags=["avatar-studio"])
 
@@ -292,8 +292,25 @@ def _empty(project_id: str, name: str = "Avatar Session") -> dict[str, Any]:
         "background_asset_id": None,
         "duration_class": "story_section",
         "provider_mode": "best_match",
-        "provider_choice": None,
-        "model_id": "ltx_2_5_distilled",
+        "provider_choice": "infinitetalk-local",
+        "model_id": "infinitetalk-local",
+        "source_kind": "character",
+        "mode_kind": "single",
+        "speakers": [
+            {
+                "id": "speaker-a",
+                "label": "Person 1",
+                "character_id": None,
+                "bbox": None,
+                "mask_asset_id": None,
+            }
+        ],
+        "conversation": {
+            "order": "a_then_b",
+            "turns": [{"speakerId": "speaker-a", "dialogue": ""}],
+        },
+        "lora": None,
+        "direction_prompt": "",
         "prompt": "",
         "negative_prompt": (
             "identity drift, teeth distortion, frozen face, overactive facial motion, "
@@ -351,15 +368,17 @@ def _validate(data: dict[str, Any]) -> list[dict[str, str]]:
     if data.get("lip_sync_method") == "external" and not mouth.get("placed"):
         issues.append({"level": "warn", "text": "Mouth mask requires user confirmation"})
     if not (data.get("dialogue_original") or data.get("dialogue_spoken") or resolved_audio):
-        if input_mode == "script":
-            issues.append(
-                {
-                    "level": "bad",
-                    "text": "Add the script for this presenter section before you generate.",
-                }
-            )
-        else:
-            issues.append({"level": "warn", "text": "Dialogue empty"})
+        turns = ((data.get("conversation") or {}).get("turns") or []) if isinstance(data.get("conversation"), dict) else []
+        if not any(str(turn.get("dialogue") or "").strip() for turn in turns if isinstance(turn, dict)):
+            if input_mode == "script":
+                issues.append(
+                    {
+                        "level": "bad",
+                        "text": "Add the script for this presenter section before you generate.",
+                    }
+                )
+            else:
+                issues.append({"level": "warn", "text": "Dialogue empty"})
     return issues
 
 
@@ -368,6 +387,47 @@ def _loads(value: str | None, fallback: Any) -> Any:
         return json.loads(value or "")
     except Exception:
         return fallback
+
+
+def _hydrate_compact(data: dict[str, Any]) -> dict[str, Any]:
+    if not data.get("source_kind"):
+        if data.get("source_video_asset_id"):
+            data["source_kind"] = "video"
+        elif data.get("character_profile_id"):
+            data["source_kind"] = "character"
+        elif data.get("source_still_asset_id"):
+            data["source_kind"] = "library"
+        else:
+            data["source_kind"] = "character"
+    data.setdefault("mode_kind", "single")
+    if not isinstance(data.get("speakers"), list) or not data.get("speakers"):
+        label = str(data.get("character_name") or "").strip() or "Person 1"
+        data["speakers"] = [
+            {
+                "id": "speaker-a",
+                "label": label,
+                "character_id": data.get("character_profile_id"),
+                "bbox": None,
+                "mask_asset_id": None,
+            }
+        ]
+    if not isinstance(data.get("conversation"), dict):
+        data["conversation"] = {
+            "order": "a_then_b",
+            "turns": [{"speakerId": "speaker-a", "dialogue": str(data.get("dialogue_original") or "")}],
+        }
+    data.setdefault("lora", None)
+    data.setdefault("direction_prompt", "")
+    look = data.get("look") if isinstance(data.get("look"), dict) else {}
+    look.setdefault("aspect", "16:9")
+    data["look"] = look
+    camera = data.get("camera") if isinstance(data.get("camera"), dict) else {}
+    camera.setdefault("aspect", look.get("aspect") or "16:9")
+    data["camera"] = camera
+    model_id = str(data.get("model_id") or "")
+    if model_id in {"ltx_2_5_distilled", "ltx-2-5-distilled", "minimax-h3", "echomimic-v2-local"}:
+        data["model_id"] = "infinitetalk-local"
+    return data
 
 
 def _row_to_data(row: AvatarSessionRow) -> dict[str, Any]:
@@ -379,6 +439,7 @@ def _row_to_data(row: AvatarSessionRow) -> dict[str, Any]:
     data["name"] = row.name or data.get("name") or "Avatar Session"
     data["updated_at"] = row.updated_at or data.get("updated_at")
     data.setdefault("active_job_id", None)
+    data = _hydrate_compact(data)
     data["presentation_plan"] = _compose_presentation_plan(data, keep_existing=True)
     return data
 
@@ -907,6 +968,24 @@ def _select_provider(session: dict[str, Any], requested_provider: str | None) ->
     )
 
 
+def _conversation_turns(session: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(session.get("mode_kind") or "single") != "conversation":
+        return []
+    conversation = session.get("conversation") if isinstance(session.get("conversation"), dict) else {}
+    turns = list(conversation.get("turns") or [])
+    order = str(conversation.get("order") or "a_then_b")
+    first = "speaker-b" if order == "b_then_a" else "speaker-a"
+    second = "speaker-a" if first == "speaker-b" else "speaker-b"
+    by_id = {str(turn.get("speakerId") or ""): turn for turn in turns if isinstance(turn, dict)}
+    ordered: list[dict[str, Any]] = []
+    for speaker_id in (first, second):
+        turn = by_id.get(speaker_id) or {}
+        dialogue = str(turn.get("dialogue") or "").strip()
+        if dialogue:
+            ordered.append({"speakerId": speaker_id, "dialogue": dialogue})
+    return ordered
+
+
 def _build_section_plan(
     session: dict[str, Any],
     *,
@@ -915,13 +994,21 @@ def _build_section_plan(
     overlap_ms: int,
     script_source_id: str | None,
 ) -> list[dict[str, Any]]:
+    conversation_turns = _conversation_turns(session)
     text = str(session.get("dialogue_spoken") or session.get("dialogue_original") or "").strip()
+    if conversation_turns:
+        text = "\n\n".join(turn["dialogue"] for turn in conversation_turns)
     audio_asset_id = _resolved_audio_asset_id(session)
     if not text and not audio_asset_id:
         raise _raise_avatar_error(AvatarErrorCode.SECTION_INPUT_REQUIRED)
-    chunks = _chunk_script(text, target_duration_ms)
+    chunks = [turn["dialogue"] for turn in conversation_turns] if conversation_turns else _chunk_script(text, target_duration_ms)
     if not chunks:
         chunks = [text or "Approved voice performance"]
+    speakers = {
+        str(item.get("id") or ""): item
+        for item in (session.get("speakers") or [])
+        if isinstance(item, dict)
+    }
     plan = _compose_presentation_plan(session, target_duration_ms=target_duration_ms, keep_existing=True)
     plan_sections = plan.get("sections") if isinstance(plan.get("sections"), list) else []
     shared_style_profile_id = f"avatar-style-{session['id']}"
@@ -934,11 +1021,15 @@ def _build_section_plan(
         overlap_before = overlap_ms if index > 0 else 0
         overlap_after = overlap_ms if index < len(chunks) - 1 else 0
         section_id = f"avssec-{uuid.uuid4().hex[:10]}"
+        speaker_id = conversation_turns[index]["speakerId"] if index < len(conversation_turns) else None
+        speaker = speakers.get(str(speaker_id or "")) or {}
         presentation_plan = {
             "avatarPresentationPlanVersion": "m4.12",
             "sharedStyleProfileId": shared_style_profile_id,
             "identityProfileRef": avatar_id,
-            "characterName": session.get("character_name") or "Presenter",
+            "characterName": speaker.get("label") or session.get("character_name") or "Presenter",
+            "speakerId": speaker_id,
+            "speakerLabel": speaker.get("label"),
             "scriptSourceId": script_source_id,
             "providerId": provider_id,
             "presentationStyle": session.get("presentation_style"),
@@ -978,6 +1069,8 @@ def _build_section_plan(
                 "id": section_id,
                 "order": index,
                 "scriptText": chunk,
+                "speakerId": speaker_id,
+                "speakerLabel": speaker.get("label"),
                 "audioStartMs": cursor_ms,
                 "audioEndMs": cursor_ms + duration_ms,
                 "overlapBeforeMs": overlap_before,
@@ -1239,6 +1332,37 @@ class TimelinePrepareBody(BaseModel):
     confirmReplace: bool = False
 
 
+def _resolve_asset_path(db: Session, asset_id: str | None) -> Path | None:
+    if not asset_id:
+        return None
+    asset = db.get(Asset, asset_id)
+    if not asset or not asset.path:
+        return None
+    path = Path(str(asset.path))
+    return path if path.is_file() else None
+
+
+def _register_video_asset(db: Session, project_id: str, path: Path, *, name: str) -> str:
+    aid = str(uuid.uuid4())
+    db.add(
+        Asset(
+            id=aid,
+            project_id=project_id,
+            kind="video",
+            filename=name if name.lower().endswith(".mp4") else f"{name}.mp4",
+            path=str(path),
+            tag="avatar_assembly",
+        )
+    )
+    db.flush()
+    return aid
+
+
+@router.get("/avatar-runtimes")
+def list_avatar_runtimes():
+    return {"runtimes": list_avatar_generator_capabilities()}
+
+
 @router.get("/projects/{project_id}/avatar-sessions")
 def list_sessions(project_id: str, db: Session = Depends(get_db)):
     _project_or_404(db, project_id)
@@ -1314,6 +1438,31 @@ def validate_session(project_id: str, session_id: str, db: Session = Depends(get
     data = _row_to_data(row)
     issues = _validate(data)
     return {"ok": not any(i["level"] == "bad" for i in issues), "issues": issues}
+
+
+@router.post("/projects/{project_id}/avatar-sessions/{session_id}/detect-speakers")
+def detect_session_speakers(project_id: str, session_id: str, db: Session = Depends(get_db)):
+    row = _session_or_404(db, project_id, session_id)
+    data = _row_to_data(row)
+    asset_id = str(data.get("source_still_asset_id") or "").strip()
+    if not asset_id:
+        return {"speakers": data.get("speakers") or [], "faceCount": 0, "message": "Add a still first."}
+    path = _resolve_asset_path(db, asset_id)
+    if not path:
+        raise HTTPException(status_code=404, detail={"code": "STILL_MISSING", "message": "Still file is missing."})
+    from .mouth_tracker import detect_face_rois_in_image
+
+    faces = detect_face_rois_in_image(path, max_faces=2)
+    if len(faces) == 1 and data.get("source_kind") == "character" and data.get("character_profile_id") and data.get("character_name"):
+        faces[0]["character_id"] = data.get("character_profile_id")
+        faces[0]["label"] = str(data.get("character_name"))
+    if faces:
+        data["speakers"] = faces
+        if len(faces) < 2 and data.get("mode_kind") == "conversation":
+            data["mode_kind"] = "single"
+        _write_session(row, data)
+        db.commit()
+    return {"speakers": data.get("speakers") or faces, "faceCount": len(faces)}
 
 
 @router.post("/projects/{project_id}/avatar-sessions/{session_id}/takes")
@@ -1606,19 +1755,42 @@ def assemble_avatar_job(project_id: str, job_id: str, db: Session = Depends(get_
         db.commit()
         raise _raise_avatar_error(AvatarErrorCode.ASSEMBLY_TRANSITION_VALIDATION_REQUIRED)
     job["status"] = JOB_COMPLETED
-    job["assemblyState"] = "assembled_stub"
+    stitch_used = False
+    composite_id = None
+    stitch_message = "Assembly contract passed, but this pass does not render a final composite video yet."
+    paths: list[Path] = []
+    for section in sections:
+        resolved = _resolve_asset_path(db, str(section.get("outputVideoAssetId") or "") or None)
+        if resolved:
+            paths.append(resolved)
+    if len(paths) >= 2:
+        try:
+            from .media_ops import stitch_videos
+
+            out_path = _project_video_dir(project_id) / f"{job_id}-assembled.mp4"
+            stitch_videos(paths, out_path)
+            composite_id = _register_video_asset(db, project_id, out_path, name=f"{job_id}-assembled.mp4")
+            stitch_used = True
+            stitch_message = "Conversation segments were joined in speaking order."
+        except Exception:
+            stitch_used = False
+            composite_id = None
+            stitch_message = "Assembly contract passed. Join stays a stub until certified talking-head files exist."
+    job["assemblyState"] = "assembled" if stitch_used else "assembled_stub"
     job["assembly"] = {
-        "compositeVideoAssetId": None,
-        "stub": True,
-        "message": "Assembly contract passed, but this pass does not render a final composite video yet.",
+        "compositeVideoAssetId": composite_id,
+        "stub": not stitch_used,
+        "message": stitch_message,
         "validatedAt": (job.get("transitionValidation") or {}).get("updatedAt"),
         "provenance": {
             "assemblyVersion": int(job.get("assemblyVersion") or 1),
             "scriptSource": job.get("scriptSource") or {},
             "voiceAsset": job.get("voiceAsset") or {},
+            "stitchUsed": stitch_used,
             "sectionMap": [
                 {
                     "sectionId": section.get("id"),
+                    "speakerId": section.get("speakerId"),
                     "status": section.get("status"),
                     "versionHistory": section.get("versionHistory") or [],
                     "retakeHistory": section.get("retakeHistory") or [],

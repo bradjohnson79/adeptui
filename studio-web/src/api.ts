@@ -3257,6 +3257,31 @@ export const api = {
     }),
   deleteAvatarSession: (projectId: string, sessionId: string) =>
     req(`/api/projects/${projectId}/avatar-sessions/${sessionId}`, { method: "DELETE" }),
+  listAvatarRuntimeCapabilities: () =>
+    req<{ runtimes: Array<{
+      id: string;
+      displayName: string;
+      listedAsAvatarGenerator: boolean;
+      supportsSpeakerSelection: boolean;
+      supportsConversation: boolean;
+      supportsNativeMultiSpeaker: boolean;
+      supportsAudio: boolean;
+      supportsLoRA: boolean;
+      supportedAspectRatios: string[];
+      loraModelFamily: string;
+    }> }>("/api/avatar-runtimes"),
+  detectAvatarSpeakers: (projectId: string, sessionId: string) =>
+    req<{
+      speakers: Array<{
+        id: string;
+        label: string;
+        character_id?: string | null;
+        bbox?: { x: number; y: number; w: number; h: number } | null;
+        mask_asset_id?: string | null;
+      }>;
+      faceCount: number;
+      message?: string;
+    }>(`/api/projects/${projectId}/avatar-sessions/${sessionId}/detect-speakers`, { method: "POST" }),
   validateAvatarSession: (projectId: string, sessionId: string) =>
     req<{ ok: boolean; issues: { level: string; text: string }[] }>(
       `/api/projects/${projectId}/avatar-sessions/${sessionId}/validate`,

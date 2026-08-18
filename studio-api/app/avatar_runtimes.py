@@ -54,6 +54,14 @@ class AvatarRuntimeSpec:
     notes: tuple[str, ...] = ()
     blockers: tuple[str, ...] = ()
     license_notes: tuple[str, ...] = ()
+    listed_as_avatar_generator: bool = False
+    supports_speaker_selection: bool = False
+    supports_conversation: bool = False
+    supports_native_multi_speaker: bool = False
+    supports_audio: bool = True
+    supports_lora: bool = False
+    supported_aspect_ratios: tuple[str, ...] = ("16:9", "9:16", "1:1", "4:5", "3:2", "21:9")
+    lora_model_family: str = "video"
 
 
 MB = 1024 * 1024
@@ -111,6 +119,13 @@ _RUNTIME_SPECS: tuple[AvatarRuntimeSpec, ...] = (
             "Windows is not documented by the official upstream.",
             "Live deployment-grade VRAM floor still needs real benchmark evidence.",
         ),
+        listed_as_avatar_generator=True,
+        supports_speaker_selection=False,
+        supports_conversation=True,
+        supports_native_multi_speaker=False,
+        supports_audio=True,
+        supports_lora=False,
+        lora_model_family="longcat",
     ),
     AvatarRuntimeSpec(
         component_id="infinitetalk-local",
@@ -172,6 +187,13 @@ _RUNTIME_SPECS: tuple[AvatarRuntimeSpec, ...] = (
             "Windows is not documented by the official upstream.",
             "Exact total storage and VRAM floor remain upstream unknowns.",
         ),
+        listed_as_avatar_generator=True,
+        supports_speaker_selection=False,
+        supports_conversation=True,
+        supports_native_multi_speaker=False,
+        supports_audio=True,
+        supports_lora=False,
+        lora_model_family="wan",
     ),
     AvatarRuntimeSpec(
         component_id="musetalk-1-5-local",
@@ -459,6 +481,40 @@ def component_metadata(component_id: str) -> dict[str, Any]:
     }
 
 
+def list_avatar_generator_capabilities() -> list[dict[str, Any]]:
+    payload = []
+    for spec in _RUNTIME_SPECS:
+        payload.append(
+            {
+                "id": spec.component_id,
+                "displayName": spec.display_name,
+                "listedAsAvatarGenerator": spec.listed_as_avatar_generator,
+                "supportsSpeakerSelection": spec.supports_speaker_selection,
+                "supportsConversation": spec.supports_conversation,
+                "supportsNativeMultiSpeaker": spec.supports_native_multi_speaker,
+                "supportsAudio": spec.supports_audio,
+                "supportsLoRA": spec.supports_lora,
+                "supportedAspectRatios": list(spec.supported_aspect_ratios),
+                "loraModelFamily": spec.lora_model_family,
+            }
+        )
+    return payload
+
+
+def runtime_gate_line(provider_id: str) -> tuple[bool, str]:
+    try:
+        runtime = inspect_runtime(provider_id)
+    except Exception:
+        runtime = {"displayName": provider_id, "healthState": "not_installed", "certifiedReady": False}
+    name = str(runtime.get("displayName") or provider_id)
+    health = str(runtime.get("healthState") or "not_installed")
+    if health == "not_installed":
+        return False, f"{name} is not installed. Open Runtime Setup to install it."
+    if runtime.get("certifiedReady") is True:
+        return True, ""
+    return False, f"{name} needs repair — Open Runtime Setup"
+
+
 def inspect_runtime(component_id: str) -> dict[str, Any]:
     spec = get_spec(component_id)
     status = _read_status(component_id)
@@ -566,6 +622,15 @@ def inspect_runtime(component_id: str) -> dict[str, Any]:
         "notes": list(spec.notes),
         "officialOs": list(spec.official_os),
         "windowsDocumented": spec.windows_documented,
+        "listedAsAvatarGenerator": spec.listed_as_avatar_generator,
+        "supportsSpeakerSelection": spec.supports_speaker_selection,
+        "supportsConversation": spec.supports_conversation,
+        "supportsNativeMultiSpeaker": spec.supports_native_multi_speaker,
+        "supportsAudio": spec.supports_audio,
+        "supportsLoRA": spec.supports_lora,
+        "supportedAspectRatios": list(spec.supported_aspect_ratios),
+        "loraModelFamily": spec.lora_model_family,
+        "certifiedReady": False,
     }
 
 

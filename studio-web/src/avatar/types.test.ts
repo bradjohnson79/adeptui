@@ -90,7 +90,7 @@ describe("canGenerate matches validate + not-installed", () => {
     const issues = validateAvatarSession(session);
     expect(issues.some((item) => item.level === "bad")).toBe(false);
     expect(issues.some((item) => item.text.includes("script mode can still plan"))).toBe(true);
-    expect(canGenerateAvatarSession(session, experimental)).toBe(true);
+    expect(canGenerateAvatarSession(session, { ...experimental, certifiedReady: true })).toBe(true);
   });
 
   it("disables generate when the badge is Not Installed", () => {
@@ -122,7 +122,9 @@ describe("canGenerate matches validate + not-installed", () => {
 
   it("does not treat Experimental as a fake live-gen success", () => {
     const session = scriptSession();
-    expect(canGenerateAvatarSession(session, experimental)).toBe(true);
+    const blockers = avatarGenerateBlockers(session, experimental);
+    expect(canGenerateAvatarSession(session, experimental)).toBe(false);
+    expect(blockers.some((item) => item.text.includes("needs repair — Open Runtime Setup"))).toBe(true);
     expect(
       claimsLiveAvatarVideo({
         status: "failed",

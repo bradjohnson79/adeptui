@@ -299,6 +299,21 @@ export type AvatarSession = {
   negative_prompt: string;
   source_video_asset_id?: string | null;
   source_still_asset_id?: string | null;
+  source_kind?: "character" | "library" | "still" | "video";
+  mode_kind?: "single" | "conversation";
+  speakers?: Array<{
+    id: string;
+    label: string;
+    character_id?: string | null;
+    bbox?: { x: number; y: number; w: number; h: number } | null;
+    mask_asset_id?: string | null;
+  }>;
+  conversation?: {
+    order: "a_then_b" | "b_then_a";
+    turns: Array<{ speakerId: string; dialogue: string }>;
+  };
+  lora?: { loraId: string; name: string; strength: number } | null;
+  direction_prompt?: string;
   active_job_id?: string | null;
   mouth_mask: MouthMaskState;
   lip_sync_method: "external" | "native" | "none";
@@ -475,8 +490,25 @@ export function emptyAvatarSession(projectId: string, name = "Avatar Session"): 
       updatedAt: now,
     },
     provider_mode: "best_match",
-    provider_choice: null,
-    model_id: "ltx_2_5_distilled",
+    provider_choice: "infinitetalk-local",
+    model_id: "infinitetalk-local",
+    source_kind: "character",
+    mode_kind: "single",
+    speakers: [
+      {
+        id: "speaker-a",
+        label: "Person 1",
+        character_id: null,
+        bbox: null,
+        mask_asset_id: null,
+      },
+    ],
+    conversation: {
+      order: "a_then_b",
+      turns: [{ speakerId: "speaker-a", dialogue: "" }],
+    },
+    lora: null,
+    direction_prompt: "",
     prompt: "",
     negative_prompt:
       "identity drift, teeth distortion, frozen face, overactive facial motion, mouth drift, cropped chin, background warping, duplicate characters, blurry, low quality",
@@ -617,7 +649,18 @@ export function applyApprovedIdentityToSession(
     ...session,
     character_profile_id: identity.characterId,
     character_name: identity.characterName,
+    source_kind: session.source_kind || "character",
     source_still_asset_id: stillAssetId,
+    speakers: [
+      {
+        id: "speaker-a",
+        label: identity.characterName || "Person 1",
+        character_id: identity.characterId || null,
+        bbox: session.speakers?.[0]?.bbox || null,
+        mask_asset_id: session.speakers?.[0]?.mask_asset_id || null,
+      },
+      ...(session.speakers || []).filter((item) => item.id !== "speaker-a"),
+    ],
     look: {
       ...session.look,
       portrait_asset_id: stillAssetId || session.look.portrait_asset_id || null,
@@ -636,8 +679,20 @@ export function validateAvatarSession(session: AvatarSession): { level: string; 
   const issues: { level: string; text: string }[] = [];
   const inputMode = session.input_mode || "script";
   const resolvedAudioAssetId = resolvedAvatarAudioAssetId(session);
-  if (!session.character_profile_id && !session.character_name && !session.source_still_asset_id) {
+  const sourceKind = session.source_kind || "character";
+  if (
+    sourceKind === "character" &&
+    !session.character_profile_id &&
+    !session.character_name &&
+    !session.source_still_asset_id
+  ) {
     issues.push({ level: "warn", text: "Identity reference missing — attach Character Profile or still" });
+  }
+  if ((sourceKind === "library" || sourceKind === "still") && !session.source_still_asset_id) {
+    issues.push({ level: "bad", text: "Pick a Library image or still before you generate." });
+  }
+  if (sourceKind === "video" && !session.source_video_asset_id) {
+    issues.push({ level: "bad", text: "Pick an existing video before you generate." });
   }
   if (
     inputMode === "approved_voice" &&
@@ -655,7 +710,16 @@ export function validateAvatarSession(session: AvatarSession): { level: string; 
       issues.push({ level: "bad", text: "Audio required for external lip-sync method" });
     }
   }
-  if (!session.dialogue_original.trim() && !session.dialogue_spoken.trim() && !resolvedAudioAssetId) {
+  const conversationDialogue = (session.conversation?.turns || [])
+    .map((turn) => String(turn.dialogue || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  if (
+    !session.dialogue_original.trim() &&
+    !session.dialogue_spoken.trim() &&
+    !conversationDialogue &&
+    !resolvedAudioAssetId
+  ) {
     if (inputMode === "script") {
       issues.push({ level: "bad", text: "Add the script for this presenter section before you generate." });
     } else {
@@ -680,6 +744,7 @@ export type AvatarRuntimeGate = {
   id?: string;
   name?: string;
   label: AvatarRuntimeGateLabel;
+  certifiedReady?: boolean;
 };
 
 export function avatarGenerateBlockers(
@@ -687,11 +752,11 @@ export function avatarGenerateBlockers(
   runtime: AvatarRuntimeGate | null,
 ): { level: string; text: string }[] {
   const issues = validateAvatarSession(session).filter((item) => item.level === "bad");
-  const runtimeName = runtime?.name || runtime?.id || "Selected runtime";
+  const runtimeName = runtime?.name || runtime?.id || "InfiniteTalk";
   if (!runtime || runtime.label === "Choose Runtime") {
     issues.push({
       level: "bad",
-      text: "No avatar runtime selected. Open Runtime Setup to install an avatar runtime.",
+      text: "No avatar runtime selected. Open Runtime Setup.",
     });
     return issues;
   }
@@ -703,10 +768,12 @@ export function avatarGenerateBlockers(
           ? "MuseTalk 1.5 is not installed, so Existing Video Dubbing cannot be prepared."
           : `${runtimeName} is not installed. Open Runtime Setup to install it.`,
     });
-  } else if (runtime.label === "Needs Repair") {
+    return issues;
+  }
+  if (runtime.certifiedReady !== true) {
     issues.push({
       level: "bad",
-      text: `${runtimeName} needs repair. Open Runtime Setup to repair it.`,
+      text: `${runtimeName} needs repair — Open Runtime Setup`,
     });
   }
   return issues;
