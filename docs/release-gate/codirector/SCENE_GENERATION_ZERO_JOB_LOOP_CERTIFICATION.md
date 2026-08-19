@@ -64,12 +64,60 @@ chat call times out with no execution pack created.
 
 ## 5. Multi-reviewer matrix (Phase 28/29)
 
-See .runtime/zero_job/REVIEWER_[A-D].md (attached).
+Independent review reports: `.runtime/zero_job/REVIEWER_[A-D].md`.
 
-## 6. Git
+| Reviewer | Scope | Verdict |
+|----------|-------|---------|
+| A — Frontend state machine | render/poller/hydration/SSE/retry paths; ZERO-JOBS LAW unit tests (re-ran AgentWorkSurface.test.ts: 13/13 pass) | **PASS** — "0 / 0 + active spinner in a non-terminal state" unreachable |
+| B — Backend lifecycle | dispatch terminality (both dispatch + approve paths), advance heal once + idempotent terminal advance, cancel zero-children, active/latest heal + project scoping, event lifecycle (EXECUTION_STARTED only in 4 gated sites; every start has a terminal counterpart), 9 contract tests | **PASS** — all six checks (a–f) hold. Non-blocking follow-up flagged: `events.py:278` bridges job events under category `execution_pack` while pack_store writes `codirector_execution` (pre-existing best-effort SSE bridge mismatch, out of 0/0 scope) |
+| C — Playwright evidence | spec truly reproduces the bug (code-verified vs pre-fix `17df308^`: 3/4 tests FAIL pre-fix), post-fix assertions close the loop, screenshots attributable to fixed build | **PASS** |
+| D — Request stability | poller never loops on empty job list; chained setTimeout (no stacking); 80-attempt budget; measured 0 advance calls (phantom) / 9 in 25s (real job); backend heal publishes one event | **PASS** |
 
-Branch: feat/scene-generation-zero-job-fix (see final report for HEAD).
+Evidence gaps raised by C were closed in-session: the 4/4 Playwright run was re-executed and retained at `artifacts/zero-job/playwright-retained-run.json` (4 expected, 0 unexpected, 0 flaky). Post-restart soak retained at `.runtime/zero_job/soak-post-restart.json` (4/4: 2 zero-shot → failed+advance-stable, 2 valid → queued with children; active/latest → real pack, no phantom).
+
+## 6. Final independent scorecard (Phase 29)
+
+| # | Field | Result | Evidence |
+|---|-------|--------|----------|
+| 1 | Root Cause Proven | PASS | Doc §1; live repro `83fe6e1b` (queued/0 pre-fix); Reviewer C code-verified pre-fix behavior |
+| 2 | Planning State | PASS | `preparing` allowed with 0 jobs only pre-enqueue (defensive; backend never persists PREPARING); Reviewer A |
+| 3 | Zero Jobs Terminal | PASS | Live: zero-shot → `failed` (post-restart repro `7262d106` + soak); advance stays failed |
+| 4 | Backend Lifecycle | PASS | Dispatcher/advance/cancel/pack_store contracts; 9 new tests + 80 execution regressions green (re-verified 2026-08-19) |
+| 5 | Polling Stops | PASS | `pollerShouldRun` false for zero jobs; MAX 80; terminal stops chain; Reviewer D |
+| 6 | Cancel | PASS | zero children → CANCELLED immediately (unit test); user-facing cancel guarded by flags |
+| 7 | Retry | PASS | `handleRetry` → fresh `startExecution` with `retryContext`, never reuses stale pack; Reviewer A (d) |
+| 8 | Reload | PASS | `active/latest` heals zero-child packs; hydration skips them; Playwright test 3 |
+| 9 | Project Isolation | PASS | Live: zero-shot on 42dcee6d → failed; Schnick active/latest unaffected (its own pack); per-project scoping in pack_store/dispatcher |
+| 10 | Co-Director Path | PASS | Real `start_execution` → dispatch → handler chain (same as CD deterministic path, matches stuck packs' `classifier_source: deterministic`); Playwright on real /co-director route |
+| 11 | Runtime-Unavailable Path | PASS | Unit test: all children enqueue-fail → terminal failed |
+| 12 | Playwright | PASS | 4/4, retained JSON report (re-run after API restart) |
+| 13 | 10x Soak | PASS | 10/10 pre-restart (5 zero-shot → failed, 5 valid → queued) + 4/4 post-restart retained soak |
+| 14 | Request Stability | PASS | Measured 0 advance calls in phantom state, 9 over 25s real job (3s cadence); Reviewer D |
+| 15 | Live Schnick | PASS | Post-restart repros on Schnick Coffee; screenshots artifacts/zero-job/*.png; live page "Queuing 1 shot…", never 0/0 |
+
+## 7. Git
+
+Branch: `feat/scene-generation-zero-job-fix` @ `a26f02f` (pushed to origin; base = already-pushed `feat/scene-creator-mini-production-fidelity` @ `aa6b72b` — parallel movement-segments work excluded from this branch's ancestry). Two commits: `f327a4b` (fix, 12 files) + `a26f02f` (docs).
 
 ## Verdict
 
-(issued after reviewer matrix)
+**GO — CO-DIRECTOR SCENE GENERATION 0/0 LOOP FIXED AND CERTIFIED**
+
+Issued 2026-08-19 after: (1) live reproduction before fix (queued 0/0 on Schnick Coffee,
+executions `83fe6e1b`, `3f47e96a`, `591a8778`); (2) the fix implemented at every layer
+(handler contract → dispatcher → advance heal → cancel → active/latest → frontend
+phantom/poller/hydration/SSE); (3) live verification after fix on the real Beta API
+(repro terminal failed; advance stable; 9 phantom packs healed; active/latest clean;
+4/4 post-restart soak; project-isolation probe); (4) 10x soak 10/10; (5) Playwright 4/4
+on the real /co-director route (retained report); (6) request stability measured
+(0 advance calls in phantom states; 9 over 25s for a real job = bounded 3s cadence);
+(7) backend 9 new + 80 regression tests, frontend 13 AgentWorkSurface tests + full
+CoDirector suite green; (8) four independent reviewers (A state machine, B backend
+lifecycle, C Playwright evidence, D request stability) — all PASS; (9) final 15-field
+scorecard (see §6) — 15/15 PASS, no mandatory blockers.
+
+ZERO JOBS = NOT RUNNING is now enforced at every layer: a zero-job execution is terminal
+before any start event, polling never runs with zero jobs, reload can never rehydrate a
+phantom, cancel immediately terminates zero-job packs, and retry starts a fresh
+transaction. No valid or error path leaves Scene Generation at 0/0 with an active
+spinner indefinitely.
