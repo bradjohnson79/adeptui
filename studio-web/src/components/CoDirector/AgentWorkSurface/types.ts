@@ -69,6 +69,8 @@ export interface WorkSurfaceState {
   project_id?: string;
   character_id?: string | null;
   scene_id?: string | null;
+  /** Backend ExecutionPlan.plan_data (retry context, spatial map id, …). */
+  plan_data?: Record<string, unknown> | null;
 }
 
 /** Empty state — normal mode, no active execution. */

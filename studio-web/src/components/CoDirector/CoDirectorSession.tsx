@@ -1012,7 +1012,10 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           const activeRes = await api.getActiveExecution(projectId);
           if (cancelled || lastLoadedProjectIdRef.current !== projectId) return;
           const exec = activeRes?.execution;
-          if (exec && !["completed", "failed", "cancelled"].includes(exec.status)) {
+          // ZERO-JOBS LAW: never rehydrate a phantom generation — a
+          // non-terminal execution with zero child jobs must not reclaim
+          // the right pane as an infinite 0/0 spinner.
+          if (exec && !["completed", "failed", "cancelled"].includes(exec.status) && (exec.child_jobs || []).length > 0) {
             setActiveExecution({
               mode: "agent_work",
               execution_id: exec.execution_id,
@@ -1703,7 +1706,18 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
           // non-preview status (e.g. "queued") arrives and activates the
           // overlay. This also prevents a stale preview from overwriting a
           // legitimately active (non-preview) execution in `activeExecution`.
-          if (execPayload?.execution_id && execPayload.status !== "preview") {
+          // ZERO-JOBS LAW (Phase 4/19): never activate the work surface as
+          // RUNNING from an event that carries zero child jobs — that would
+          // render an infinite 0/0 spinner. The backend no longer publishes
+          // such events for scene generation; this is the defensive net.
+          const zeroJobNonTerminal =
+            Boolean(execPayload) &&
+            (execPayload?.child_jobs || []).length === 0 &&
+            execPayload?.status !== "preview" &&
+            execPayload?.status !== "completed" &&
+            execPayload?.status !== "failed" &&
+            execPayload?.status !== "cancelled";
+          if (execPayload?.execution_id && execPayload.status !== "preview" && !zeroJobNonTerminal) {
             executionCreated = true;
             const execProjectId = b.projectId || "";
             const surfaceType = (execPayload.surface_type as WorkSurfaceState["surface_type"]) || "";
@@ -1905,6 +1919,18 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             } else {
               try {
                 bindingsRef.current.onGoTab?.("scriptwriter");
+              } catch {
+                /* tab binding optional */
+              }
+            }
+          }
+          if (uiAction === "open_avatar_studio") {
+            const workspaceUrl = String(result.workspaceUrl || "");
+            if (workspaceUrl) {
+              navigate(workspaceUrl);
+            } else {
+              try {
+                bindingsRef.current.onGoTab?.("avatar");
               } catch {
                 /* tab binding optional */
               }
@@ -2120,6 +2146,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             conversationLocale: languagePrefs.conversationLocale,
             attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
             active_content_tab: activeContentTabRef.current || undefined,
+            workspace_tab: b.workspaceTab || undefined,
+            workspaceTab: b.workspaceTab || undefined,
           },
           { signal: controller.signal, onEvent },
         );
@@ -2296,6 +2324,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               conversationLocale: languagePrefs.conversationLocale,
               attachment_ids: turnAttachmentIds.length ? turnAttachmentIds : undefined,
               active_content_tab: activeContentTabRef.current || undefined,
+              workspace_tab: b.workspaceTab || undefined,
+              workspaceTab: b.workspaceTab || undefined,
             },
             { signal: controller.signal },
           );

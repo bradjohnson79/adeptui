@@ -48,6 +48,43 @@ export function pollPausedFor(
   return Boolean(pack && !isTerminal(pack) && pollAttempts >= maxAttempts);
 }
 
+export type SceneGenerationPhase = 
+  | "phantom"   // non-terminal with zero jobs — invalid production state
+  | "preparing" // PLANNING allowed temporarily with zero jobs
+  | "queuing"   // real jobs exist, parent still queued
+  | "running"   // real jobs exist, parent running
+  | "terminal"; // completed / failed / cancelled
+
+/** ZERO-JOBS LAW (Phase 19): the scene-generation phase for a pack. */
+export function sceneGenerationPhase(pack: WorkSurfaceState | null): SceneGenerationPhase {
+  if (!pack || isTerminal(pack)) return "terminal";
+  if ((pack.child_jobs || []).length === 0) {
+    // PLANNING with zero jobs is the only allowed empty non-terminal phase.
+    return pack.status === "preparing" ? "preparing" : "phantom";
+  }
+  return pack.status === "queued" ? "queuing" : "running";
+}
+
+/** ZERO-JOBS LAW (Phase 10): the poller must never run against zero jobs. */
+export function pollerShouldRun(pack: WorkSurfaceState | null): boolean {
+  if (!pack || isTerminal(pack)) return false;
+  return (pack.child_jobs || []).length > 0;
+}
+
+/** Phase 18 copy: the progress line for a scene-generation surface. */
+export function sceneGenerationProgressText(
+  surfaceType: string,
+  phase: SceneGenerationPhase,
+  completed: number,
+  total: number,
+): string {
+  if (phase === "phantom") return "Scene generation could not start.";
+  if (phase === "preparing") return "Preparing scene generation…";
+  if (phase === "queuing") return `Queuing ${total} shot${total === 1 ? "" : "s"}…`;
+  if (surfaceType === "storyboard_generation") return `${completed} / ${total} Outputs Complete`;
+  return `${completed} / ${total}${total > 1 ? " Complete" : ""}`;
+}
+
 export function AgentWorkSurface() {
   const { uiContext, activeExecution, setActiveExecution } = useCoDirectorSession();
   const projectId = uiContext.projectId || activeExecution?.project_id || "";
@@ -84,6 +121,7 @@ export function AgentWorkSurface() {
       result_asset_ids: res.result_asset_ids || [],
       collection_id: res.collection_id,
       error: res.error,
+      plan_data: res.plan_data || undefined,
       project_id: projectId,
     }),
     [projectId],
@@ -108,8 +146,11 @@ export function AgentWorkSurface() {
   }, [projectId, executionId, setActiveExecution, buildPack]);
 
   useEffect(() => {
+    // ZERO-JOBS LAW: never poll a non-terminal pack with zero child jobs.
+    // There is no async job materialization contract — zero jobs means the
+    // generation did not start, and the backend heals the plan to FAILED.
     if (!projectId || !executionId) return;
-    if (!pack || isTerminal(pack)) return;
+    if (!pollerShouldRun(pack)) return;
     if (pollAttempts >= MAX_POLL_ATTEMPTS) return;
 
     const timer = setTimeout(() => {
@@ -213,6 +254,37 @@ export function AgentWorkSurface() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [pack, handleClose]);
 
+  // ZERO-JOBS LAW (Phase 16): Retry starts a FRESH generation transaction
+  // from the pack retryContext — never reuses stale empty job arrays.
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = useCallback(async () => {
+    if (!projectId || !pack || retrying) return;
+    setRetrying(true);
+    try {
+      const planData = pack.plan_data as Record<string, unknown> | undefined;
+      const retryCtx = (planData?.retryContext as Record<string, unknown> | undefined) || {};
+      const res = await api.startExecution(projectId, {
+        capability: pack.capability,
+        context: {
+          ...retryCtx,
+          scene_id: pack.scene_id || "",
+        },
+      });
+      const updated = buildPack(res);
+      setPack(updated);
+      setActiveExecution(updated);
+      setPollAttempts(0);
+      if ((updated.child_jobs || []).length > 0 && !isTerminal(updated)) {
+        void advance();
+      }
+    } catch (err) {
+      console.error("Retry scene generation failed:", err);
+      setPack((prev) => (prev ? { ...prev, error: err instanceof Error ? err.message : "Retry failed." } : prev));
+    } finally {
+      setRetrying(false);
+    }
+  }, [projectId, pack, retrying, buildPack, setActiveExecution, advance]);
+
   const handleContinueToSceneCreator = useCallback(async () => {
     setContinueError(null);
     setContinuing(true);
@@ -240,6 +312,10 @@ export function AgentWorkSurface() {
   const failed = pack.child_jobs.filter((c) => c.status === "failed").length;
   const nonTerminal = !isTerminal(pack);
   const pollPaused = pollPausedFor(pack, pollAttempts);
+  // ZERO-JOBS LAW (Phase 19): a non-terminal pack with zero jobs is a
+  // phantom generation — render the terminal empty state, never a spinner.
+  const phase = sceneGenerationPhase(pack);
+  const phantomGeneration = phase === "phantom";
 
   const cancelLabel = cancelling ? "Cancelling…" : pack.status === "cancelled" ? "Cancelled" : "Cancel";
 
@@ -263,16 +339,14 @@ export function AgentWorkSurface() {
         )}
         <div className="agent-work-surface__progress">
           <span className="agent-work-surface__progress-count">
-            {surfaceType === "storyboard_generation"
-              ? `${completed} / ${total} Outputs Complete`
-              : `${completed} / ${total}${total > 1 ? " Complete" : ""}`}
+            {sceneGenerationProgressText(surfaceType, phase, completed, total)}
           </span>
           {failed > 0 && (
             <span className="agent-work-surface__failed-count">
               {failed} failed
             </span>
           )}
-          {pack.status === "running" || pack.status === "queued" ? (
+          {phantomGeneration ? null : pack.status === "running" || pack.status === "queued" ? (
             <span className="agent-work-surface__spinner" aria-label="Working" />
           ) : pack.status === "completed" ? (
             <span className="agent-work-surface__done">✓ Complete</span>
@@ -281,7 +355,7 @@ export function AgentWorkSurface() {
           ) : pack.status === "cancelled" ? (
             <span className="agent-work-surface__cancelled">Cancelled</span>
           ) : null}
-          {nonTerminal && (
+          {nonTerminal && !phantomGeneration && (
             <button
               type="button"
               className="ghost agent-work-surface__cancel-btn"
@@ -408,6 +482,27 @@ export function AgentWorkSurface() {
             data-testid="agent-work-close"
           >
             Close
+          </button>
+        </div>
+      )}
+      {phantomGeneration && (
+        <div className="agent-work-surface__action-row" data-testid="agent-work-empty">
+          <button
+            type="button"
+            className="ui-btn ui-btn--primary"
+            onClick={() => void handleRetry()}
+            disabled={retrying}
+            data-testid="agent-work-retry"
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </button>
+          <button
+            type="button"
+            className="ghost"
+            onClick={handleClose}
+            data-testid="agent-work-dismiss"
+          >
+            Dismiss
           </button>
         </div>
       )}

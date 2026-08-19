@@ -86,6 +86,7 @@ def handle(
     output_count: int = 4,
     visual_style: str = "",
     character_names: list[str] | None = None,
+    scene_id: str = "",
 ) -> dict[str, Any]:
     """Generate N scene images from parsed shot requests.
 
@@ -117,7 +118,27 @@ def handle(
         output_count = 4
     effective_count = min(len(parsed_shots), max(1, output_count))
     if not parsed_shots:
-        # No explicit shots — return an empty plan. Do NOT silently fabricate.
+        # ZERO-JOBS LAW (scene generation 0/0 loop): no shots parsed is a
+        # TERMINAL failure, never a running plan. The frontend must see a
+        # failed state with zero jobs, not an indefinite spinner.
+        error = "No valid scene-generation jobs were created. Provide explicit shot requests (comma- or newline-separated shot text)."
+        try:
+            from ....production_events import ACTOR_CODIRECTOR, record_production_event
+
+            record_production_event(
+                db,
+                project_id=project_id,
+                scene_id=scene_id or None,
+                event_type="scene_creator.generation_failed",
+                actor=ACTOR_CODIRECTOR,
+                actor_detail="capability:scene.generate",
+                subject_kind="execution",
+                subject_id=execution_id,
+                summary="Scene Creator generation could not start (no shots parsed)",
+                payload={"executionId": execution_id, "accepted": 0, "rejected": 0, "error": error},
+            )
+        except Exception:  # noqa: BLE001 - event recording never breaks the operation
+            pass
         return {
             "job_ids": [],
             "child_jobs": [],
@@ -125,6 +146,10 @@ def handle(
             "ers_package_id": ers_package_id or "",
             "shot_count": 0,
             "purpose": "scene_generation",
+            "status": "failed",
+            "accepted": 0,
+            "rejected": 0,
+            "error": error,
             "note": "No shot requests provided. Pass explicit comma- or newline-separated shot text.",
         }
 
@@ -214,6 +239,8 @@ def handle(
             }
         )
 
+    accepted = sum(1 for c in child_jobs if c.get("status") == "queued")
+    rejected = sum(1 for c in child_jobs if c.get("status") == "failed")
     try:
         from ....production_events import ACTOR_CODIRECTOR, record_production_event
 
@@ -226,8 +253,8 @@ def handle(
             actor_detail="capability:scene.generate",
             subject_kind="execution",
             subject_id=execution_id,
-            summary=f"Scene Creator generation started ({len(job_ids)} shot job(s))",
-            payload={"executionId": execution_id, "jobIds": job_ids, "shotCount": len(shots)},
+            summary=f"Scene Creator generation started ({accepted} accepted / {rejected} rejected)",
+            payload={"executionId": execution_id, "jobIds": job_ids, "shotCount": len(shots), "accepted": accepted, "rejected": rejected},
 
         )
     except Exception:  # noqa: BLE001 - event recording never breaks the operation
@@ -240,4 +267,8 @@ def handle(
         "ers_package_id": ers_package.id if ers_package else (ers_package_id or ""),
         "shot_count": len(shots),
         "purpose": "scene_generation",
+        "status": "queued" if accepted > 0 else "failed",
+        "accepted": accepted,
+        "rejected": rejected,
+        "error": None if accepted > 0 else "All scene-generation jobs failed to enqueue.",
     }

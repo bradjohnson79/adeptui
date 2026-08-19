@@ -174,11 +174,29 @@ def get_execution(db: Session, execution_id: str) -> ExecutionPlan | None:
 
 
 def get_active_execution_for_project(db: Session, project_id: str) -> ExecutionPlan | None:
-    """Return the most recent non-terminal execution pack for a project."""
+    """Return the most recent non-terminal execution pack for a project.
+
+    ZERO-JOBS LAW: a non-terminal pack with zero child jobs is a phantom
+    generation (0/0 surface). It is healed to FAILED here so a page reload
+    can never rehydrate an empty queued pack as an active execution.
+    """
     packs = list_packs(db, project_id, active_only=True)
     if not packs:
         return None
-    # Return the most recently updated.
+    # Heal EVERY zero-child non-terminal pack (pre-fix strays) so a reload
+    # can never surface a phantom 0/0 generation, and so the most recent
+    # genuinely-active execution (if any) is what gets returned.
+    try:
+        from .advance import heal_zero_job_plan
+
+        for pack in packs:
+            if not pack.child_jobs:
+                heal_zero_job_plan(db, project_id, pack.execution_id, reason="active_latest_heal")
+        packs = list_packs(db, project_id, active_only=True)
+    except Exception:
+        pass
+    if not packs:
+        return None
     return max(packs, key=lambda p: p.updated_at or p.created_at or "")
 
 

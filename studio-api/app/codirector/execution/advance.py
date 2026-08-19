@@ -119,6 +119,41 @@ def _build_collection(
         return None
 
 
+ZERO_JOB_ERROR_MESSAGE = "Scene generation could not start. No valid shots were queued."
+
+
+def heal_zero_job_plan(
+    db: Session,
+    project_id: str,
+    execution_id: str,
+    *,
+    reason: str = "advance",
+) -> ExecutionPlan | None:
+    """Terminally fail a non-terminal plan that has zero child jobs.
+
+    Shared by the advance endpoint, active-latest hydration, and Cancel
+    callers so the zero-job phantom state is healed identically everywhere.
+    """
+    plan = load_pack(db, project_id, execution_id)
+    if not plan or plan.is_terminal or plan.child_jobs:
+        return plan
+    plan.status = ExecutionStatus.FAILED
+    plan.error = ZERO_JOB_ERROR_MESSAGE
+    plan.progress = 0.0
+    save_pack(db, project_id, plan)
+    _publish_event(ExecutionEvent(
+        event_type=ExecutionEventType.EXECUTION_FAILED,
+        project_id=project_id,
+        execution_id=execution_id,
+        status="failed",
+        error=plan.error,
+        surface_type=plan.surface_type,
+        total=0,
+        timestamp=_now(),
+    ))
+    return plan
+
+
 def advance_execution_pack(db: Session, project_id: str, execution_id: str) -> ExecutionPlan | None:
     """Poll real job state and update the execution pack."""
     plan = load_pack(db, project_id, execution_id)
@@ -127,6 +162,14 @@ def advance_execution_pack(db: Session, project_id: str, execution_id: str) -> E
 
     if plan.is_terminal:
         return plan
+
+    # ZERO-JOBS LAW: a non-terminal plan with no child jobs is a stuck
+    # phantom generation (0/0 surface). There is no async job
+    # materialization contract, so zero jobs means the generation never
+    # started — transition to a terminal failure immediately. This also
+    # self-heals any packs stranded before this fix.
+    if not plan.child_jobs:
+        return heal_zero_job_plan(db, project_id, execution_id, reason="advance")
 
     any_changed = False
 

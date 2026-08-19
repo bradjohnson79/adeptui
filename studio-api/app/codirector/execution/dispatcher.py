@@ -205,6 +205,79 @@ async def dispatch(
         return plan
 
 
+ZERO_JOBS_ERROR = "No valid scene-generation jobs were created."
+
+
+def _apply_handler_result(
+    plan: ExecutionPlan,
+    result: dict[str, Any],
+    *,
+    context: dict[str, Any] | None = None,
+) -> ExecutionPlan:
+    """Populate a plan from a capability-handler result with the
+    ZERO-JOBS LAW enforced.
+
+    A handler result with no child jobs is TERMINAL (failed with a clear
+    error) — never QUEUED/RUNNING. This makes an infinite 0/0 work surface
+    impossible at the source: no EXECUTION_STARTED event is published for
+    a zero-job result, and no poller can ever hang on an empty pack.
+    """
+    plan.child_jobs = [
+        ChildJobView(
+            job_id=cj["job_id"],
+            label=cj.get("label", ""),
+            status=ChildJobStatus(cj.get("status", "queued")),
+            child_index=cj.get("child_index", i),
+            metadata=cj.get("metadata", {}),
+            asset_id=cj.get("asset_id"),
+            error=cj.get("error"),
+        )
+        for i, cj in enumerate(result.get("child_jobs", []))
+    ]
+    plan.planned_steps = result.get("planned_steps", [])
+    plan.surface_type = result.get("surface_type", plan.surface_type)
+    if result.get("character_id"):
+        plan.character_id = result.get("character_id", plan.character_id)
+    if result.get("spatial_map_id"):
+        plan.plan_data = {**dict(plan.plan_data or {}), "spatial_map_id": result.get("spatial_map_id")}
+    # Retry context snapshot (scene generation): keep the inputs so a
+    # frontend Retry can start a FRESH transaction with the same intent.
+    if context and isinstance(context, dict):
+        retry_ctx = {
+            "shot_requests_raw": context.get("shot_requests_raw"),
+            "ers_package_id": context.get("ers_package_id"),
+        }
+        retry_ctx = {k: v for k, v in retry_ctx.items() if v is not None}
+        if retry_ctx:
+            plan.plan_data = {**dict(plan.plan_data or {}), "retryContext": retry_ctx}
+
+    first_meta = ((result.get("child_jobs") or [{}])[0] or {}).get("metadata") or {}
+    if first_meta.get("resolvedProvider") and not plan.provider:
+        plan.provider = first_meta.get("resolvedProvider")
+    if first_meta.get("resolvedWorkflowKey") and not plan.model:
+        plan.model = first_meta.get("resolvedWorkflowKey")
+
+    # Phase 6 contract: expose accepted/rejected/jobIds on the plan.
+    if "accepted" in result or "rejected" in result or "job_ids" in result:
+        plan.plan_data = {
+            **dict(plan.plan_data or {}),
+            "accepted": int(result.get("accepted") or len(plan.child_jobs)),
+            "rejected": int(result.get("rejected") or 0),
+            "jobIds": list(result.get("job_ids") or [c.job_id for c in plan.child_jobs]),
+        }
+
+    if not plan.child_jobs:
+        # ZERO-JOBS LAW: zero accepted jobs is a terminal failure state.
+        plan.status = ExecutionStatus.FAILED
+        plan.error = str(result.get("error") or ZERO_JOBS_ERROR)
+        plan.progress = 0.0
+        return plan
+
+    plan.status = ExecutionStatus.QUEUED
+    plan.recompute_progress()
+    return plan
+
+
 def _dispatch_capability_handler(
     db: Session,
     project_id: str,
@@ -278,35 +351,27 @@ def _dispatch_capability_handler(
 
         result = handle(**handler_kwargs)
 
-        # Populate the plan from the handler result.
-        plan.child_jobs = [
-            ChildJobView(
-                job_id=cj["job_id"],
-                label=cj.get("label", ""),
-                status=ChildJobStatus(cj.get("status", "queued")),
-                child_index=cj.get("child_index", i),
-                metadata=cj.get("metadata", {}),
-                asset_id=cj.get("asset_id"),
-                error=cj.get("error"),
-            )
-            for i, cj in enumerate(result.get("child_jobs", []))
-        ]
-        plan.planned_steps = result.get("planned_steps", [])
-        plan.surface_type = result.get("surface_type", plan.surface_type)
-        plan.character_id = result.get("character_id", plan.character_id)
-        if result.get("spatial_map_id"):
-            plan.plan_data = {**dict(plan.plan_data or {}), "spatial_map_id": result.get("spatial_map_id")}
-        first_meta = ((result.get("child_jobs") or [{}])[0] or {}).get("metadata") or {}
-        if first_meta.get("resolvedProvider") and not plan.provider:
-            plan.provider = first_meta.get("resolvedProvider")
-        if first_meta.get("resolvedWorkflowKey") and not plan.model:
-            plan.model = first_meta.get("resolvedWorkflowKey")
-        plan.status = ExecutionStatus.QUEUED
-        plan.recompute_progress()
+        # Populate the plan from the handler result (zero-job results are
+        # terminal — never QUEUED with an empty work surface).
+        plan = _apply_handler_result(plan, result, context=ctx)
 
         save_pack(db, project_id, plan)
 
-        # Publish execution.started event.
+        if plan.is_terminal:
+            # ZERO-JOBS LAW: publish failure, never a started-with-zero event.
+            _publish_event(ExecutionEvent(
+                event_type=ExecutionEventType.EXECUTION_FAILED,
+                project_id=project_id,
+                execution_id=plan.execution_id,
+                status="failed",
+                error=plan.error,
+                surface_type=plan.surface_type,
+                total=0,
+                timestamp=_now(),
+            ))
+            return plan
+
+        # Publish execution.started event (only when real jobs exist).
         _publish_event(ExecutionEvent(
             event_type=ExecutionEventType.EXECUTION_STARTED,
             project_id=project_id,
@@ -452,24 +517,22 @@ async def approve_and_execute(
         handler_kwargs = {k: v for k, v in all_kwargs.items() if k in accepted}
         result = handle(**handler_kwargs)
 
-        plan.child_jobs = [
-            ChildJobView(
-                job_id=cj["job_id"],
-                label=cj.get("label", ""),
-                status=ChildJobStatus(cj.get("status", "queued")),
-                child_index=cj.get("child_index", i),
-                metadata=cj.get("metadata", {}),
-                asset_id=cj.get("asset_id"),
-                error=cj.get("error"),
-            )
-            for i, cj in enumerate(result.get("child_jobs", []))
-        ]
-        plan.planned_steps = result.get("planned_steps", [])
-        plan.surface_type = result.get("surface_type", plan.surface_type)
-        plan.status = ExecutionStatus.QUEUED
-        plan.recompute_progress()
+        plan = _apply_handler_result(plan, result, context=plan.plan_data)
 
         save_pack(db, project_id, plan)
+
+        if plan.is_terminal:
+            _publish_event(ExecutionEvent(
+                event_type=ExecutionEventType.EXECUTION_FAILED,
+                project_id=project_id,
+                execution_id=plan.execution_id,
+                status="failed",
+                error=plan.error,
+                surface_type=plan.surface_type,
+                total=0,
+                timestamp=_now(),
+            ))
+            return plan
 
         _publish_event(ExecutionEvent(
             event_type=ExecutionEventType.EXECUTION_STARTED,

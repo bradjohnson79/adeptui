@@ -17,7 +17,13 @@ vi.mock("../SceneCreator/persistThenOpenSceneCreator", () => ({
   persistThenOpenSceneCreator: vi.fn(),
 }));
 
-import { REGENERATE_FAILED_MESSAGE, pollPausedFor } from "./AgentWorkSurface";
+import {
+  REGENERATE_FAILED_MESSAGE,
+  pollPausedFor,
+  pollerShouldRun,
+  sceneGenerationPhase,
+  sceneGenerationProgressText,
+} from "./AgentWorkSurface";
 import { NORMAL_WORK_SURFACE, isAgentWork } from "./types";
 import type { WorkSurfaceState } from "./types";
 
@@ -92,3 +98,75 @@ describe("CDX-092 focused_artifact_ids contract truth", () => {
     expect(NORMAL_WORK_SURFACE.result_asset_ids).toEqual([]);
   });
 });
+
+describe("ZERO-JOBS LAW — scene generation 0/0 loop (Phase 21)", () => {
+  const base = {
+    mode: "agent_work" as const,
+    execution_id: "e",
+    capability: "scene.generate",
+    surface_type: "scene_generation" as const,
+    progress: 0,
+    child_jobs: [] as WorkSurfaceState["child_jobs"],
+    result_asset_ids: [] as string[],
+    error: null,
+  };
+
+  it("A: PLANNING (preparing) with zero jobs is allowed temporarily", () => {
+    expect(sceneGenerationPhase({ ...base, status: "preparing" })).toBe("preparing");
+  });
+
+  it("B: RUNNING with zero jobs is a phantom — rejected/converted to terminal", () => {
+    expect(sceneGenerationPhase({ ...base, status: "queued" })).toBe("phantom");
+    expect(sceneGenerationPhase({ ...base, status: "running" })).toBe("phantom");
+    expect(sceneGenerationPhase({ ...base, status: "failed" })).toBe("terminal");
+    expect(sceneGenerationPhase({ ...base, status: "completed" })).toBe("terminal");
+    expect(sceneGenerationPhase({ ...base, status: "cancelled" })).toBe("terminal");
+    expect(sceneGenerationPhase(null)).toBe("terminal");
+  });
+
+  it("C: the poller must never start against zero jobs", () => {
+    expect(pollerShouldRun({ ...base, status: "queued" })).toBe(false);
+    expect(pollerShouldRun({ ...base, status: "preparing" })).toBe(false);
+    expect(pollerShouldRun({ ...base, status: "failed" })).toBe(false);
+    expect(pollerShouldRun(null)).toBe(false);
+    expect(
+      pollerShouldRun({
+        ...base,
+        status: "queued",
+        child_jobs: [{ job_id: "j", label: "Shot 1", status: "queued", progress: 0, stage: "queued", child_index: 0, metadata: {} }],
+      }),
+    ).toBe(true);
+  });
+
+  it("D: one job shows 0 / 1 then 1 / 1 (no phantom copy)", () => {
+    const oneJob: WorkSurfaceState["child_jobs"] = [
+      { job_id: "j", label: "Shot 1", status: "queued", progress: 0, stage: "queued", child_index: 0, metadata: {} },
+    ];
+    expect(sceneGenerationProgressText("scene_generation", "queuing", 0, 1)).toBe("Queuing 1 shot…");
+    expect(sceneGenerationProgressText("scene_generation", "running", 0, 1)).toBe("0 / 1");
+    expect(sceneGenerationProgressText("scene_generation", "running", 1, 1)).toBe("1 / 1");
+    expect(sceneGenerationPhase({ ...base, status: "queued", child_jobs: oneJob })).toBe("queuing");
+    expect(sceneGenerationPhase({ ...base, status: "running", child_jobs: oneJob })).toBe("running");
+  });
+
+  it("E: eight jobs count up to 8 / 8", () => {
+    const eight = Array.from({ length: 8 }, (_, i) => ({
+      job_id: `j${i}`,
+      label: `Shot ${i + 1}`,
+      status: "queued" as const,
+      progress: 0,
+      stage: "queued",
+      child_index: i,
+      metadata: {},
+    }));
+    expect(sceneGenerationProgressText("scene_generation", "queuing", 0, 8)).toBe("Queuing 8 shots…");
+    expect(sceneGenerationProgressText("scene_generation", "running", 0, 8)).toBe("0 / 8 Complete");
+    expect(sceneGenerationProgressText("scene_generation", "running", 8, 8)).toBe("8 / 8 Complete");
+  });
+
+  it("F: phantom copy is the terminal-empty message, never 0 / 0", () => {
+    expect(sceneGenerationProgressText("scene_generation", "phantom", 0, 0)).toBe("Scene generation could not start.");
+    expect(sceneGenerationProgressText("scene_generation", "phantom", 0, 0)).not.toContain("0 / 0");
+  });
+});
+

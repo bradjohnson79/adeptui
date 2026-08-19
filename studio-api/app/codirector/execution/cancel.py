@@ -40,6 +40,23 @@ def cancel_execution(db: Session, project_id: str, execution_id: str) -> Executi
     if plan.is_terminal:
         return plan
 
+    # ZERO-JOBS LAW: a phantom generation (no children) cancels cleanly —
+    # Cancel must never leave a queued 0/0 surface.
+    if not plan.child_jobs:
+        plan.status = ExecutionStatus.CANCELLED
+        plan.progress = 0.0
+        save_pack(db, project_id, plan)
+        _publish_event(ExecutionEvent(
+            event_type=ExecutionEventType.EXECUTION_FAILED,
+            project_id=project_id,
+            execution_id=execution_id,
+            status="cancelled",
+            surface_type=plan.surface_type,
+            total=0,
+            timestamp=_now(),
+        ))
+        return plan
+
     any_cancelled = False
 
     for child in plan.child_jobs:
