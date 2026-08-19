@@ -53,6 +53,15 @@ Secondary: `scene_generate.handle` referenced an undefined `scene_id` in its pro
 - Frontend: `AgentWorkSurface.test.ts` — 13 tests incl. new ZERO-JOBS LAW block (PLANNING allowed, RUNNING+[] → phantom, poller never runs with zero jobs, 0/1 → 1/1, 0/8 → 8/8, phantom copy never 0/0). All pass (282 CoDirector tests pass).
 - Playwright (live Beta, actual Co-Director route): `tests/e2e/codirector/scene-generation-zero-job.spec.ts` — 4/4 pass (zero-shot terminal; valid shots → real jobs; reload no-phantom; live UI no 0/0 spinner).
 
+## 4b. Chat vs Scene Generation separation (Phase 25)
+
+A chat request pending is a separate state machine from scene generation pending.
+The Co-Director chat (Kie Gemini, degraded in this environment) timing out produces a
+chat error/fallback — it never publishes `EXECUTION_STARTED`, so it never opens the
+Scene Generation surface. The only surface trigger is a real execution event, and a
+zero-job execution is now terminal before any event is published. Verified: the CD
+chat call times out with no execution pack created.
+
 ## 5. Multi-reviewer matrix (Phase 28/29)
 
 See .runtime/zero_job/REVIEWER_[A-D].md (attached).
