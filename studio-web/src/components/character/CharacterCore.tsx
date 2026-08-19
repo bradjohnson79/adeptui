@@ -6,7 +6,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { useOpenCoDirector } from "../CoDirector";
+import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "../library/LibraryQuickPreviewModal";
 import { CharacterActions } from "./CharacterActions";
+import { CharacterActiveCrsCard } from "./CharacterActiveCrsCard";
 import { CharacterCandidateGrid } from "./CharacterCandidateGrid";
 import { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 import { CharacterProfileForm } from "./CharacterProfileForm";
@@ -32,8 +35,13 @@ type Props = {
   autoFocusName?: boolean;
 };
 
+function candidateAssetId(c: CharacterCandidate | null | undefined): string {
+  return String(c?.sheetAssetId || c?.assetId || "").trim();
+}
+
 export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, autoFocusName }: Props) {
   const { t } = useTranslation("characterCreator");
+  const openCoDirector = useOpenCoDirector();
   const cp = useCharacterProfile(projectId, characterId);
   const { profile, references } = cp;
 
@@ -42,11 +50,14 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [notice, setNotice] = useState("");
-  // CDX-006: explicit "Promote to Production" affordance after a look approval.
+  const [crsRevision, setCrsRevision] = useState<number | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<LibraryQuickPreviewAsset | null>(null);
+  // Advanced Continuity/Bible sync — not the creator Approve path.
   const [promoting, setPromoting] = useState(false);
   const [promoted, setPromoted] = useState(false);
   const prevHeroAssetRef = useRef<string | null>(null);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
+  const generateHandlerRef = useRef<(() => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
   const rawPrefsRef = useRef<unknown>(null);
@@ -57,6 +68,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
   const hasReference = !!referenceImage?.asset_id;
   const selectedAssetId = hero?.asset_id ?? null;
+  const productionReady = (profile?.approval_status || "").toLowerCase() === "approved";
 
   const saved = !!profile?.id;
   const canSave = !!profile?.name?.trim();
@@ -87,7 +99,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       inventoryRef.current = inv;
       setLocalOptions(inv.localOptions);
       setApiOptions(inv.apiOptions);
-      if (packLoadedRef.current && rawPrefsRef.current) applyHydration(rawPrefsRef.current, inv);
+      if (packLoadedRef.current) applyHydration(rawPrefsRef.current, inv);
       if (packLoadedRef.current) prefsHydratedRef.current = true;
     },
     [applyHydration],
@@ -106,8 +118,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         if (cancelled) return;
         rawPrefsRef.current = prefs || null;
         packLoadedRef.current = true;
-        if (prefs && inventoryRef.current) applyHydration(prefs, inventoryRef.current);
-        else setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
+        if (inventoryRef.current) applyHydration(prefs || null, inventoryRef.current);
+        else if (!prefs) setPlan(DEFAULT_CHARACTER_GENERATOR_PLAN);
         prefsHydratedRef.current = true;
       } catch {
         if (!cancelled) {
@@ -121,6 +133,24 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       cancelled = true;
     };
   }, [projectId, characterId, applyHydration]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .getCharacterCrs(projectId, characterId)
+      .then((res) => {
+        if (cancelled) return;
+        const rev = (res as { crs_revision?: number; crsRevision?: number })?.crs_revision
+          ?? (res as { crsRevision?: number })?.crsRevision;
+        if (typeof rev === "number" && rev > 0) setCrsRevision(rev);
+      })
+      .catch(() => {
+        /* CRS endpoint may be empty before first Approve */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, characterId, profile?.approval_status, hero?.asset_id]);
 
   useEffect(() => {
     if (!prefsHydratedRef.current) return;
@@ -143,27 +173,32 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         setNotice("That look is still generating. Wait for it to finish.");
         return;
       }
-      if (hero?.asset_id) {
+      if (hero?.asset_id && hero.asset_id !== assetId) {
         const confirmed = window.confirm(
-          `Replace ${profile?.name || "this character"}'s look with this one?`,
+          `Replace ${profile?.name || "this character"}'s approved Character Reference Sheet with this one?`,
         );
         if (!confirmed) return;
       }
       setNotice("");
       try {
-        await api.approveCharacterCandidate(projectId, characterId, {
+        const result = await api.approveCharacterCandidate(projectId, characterId, {
           assetId,
           referenceRole: "hero_identity",
           sourceType: candidate.generator || candidate.provider ? "generation" : "generation",
           notes: `Approved character sheet ${candidate.label || ""}`.trim(),
         });
+        const rev =
+          (result as { crsRevision?: number; crs_revision?: number })?.crsRevision
+          ?? (result as { crs_revision?: number })?.crs_revision;
+        if (typeof rev === "number") setCrsRevision(rev);
         try {
           await api.ownerApproveCharacterVisualSheet(projectId, characterId);
         } catch {
           // gate approval optional in embedded flow
         }
         await cp.refresh();
-        setNotice("Character look saved.");
+        const at = profile?.name?.trim() ? `@${profile.name.trim()}` : "@Character";
+        setNotice(`Character Approved / Production Ready / Universal Reference: ${at}`);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : "Approve failed");
       }
@@ -202,9 +237,9 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     try {
       await api.promoteCharacterIdentity(projectId, characterId);
       setPromoted(true);
-      setNotice("Character promoted to Production — continuity, VisualIdentity, and the Production Bible updated.");
+      setNotice("Character identity updated — continuity, VisualIdentity, and the Production Bible synced.");
     } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Promote failed");
+      setNotice(e instanceof Error ? e.message : "Update Character Identity failed");
     } finally {
       setPromoting(false);
     }
@@ -229,9 +264,65 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     if (ok) onDeleted?.();
   }, [cp, profile, onDeleted]);
 
+  const activeSheet = useMemo((): CharacterCandidate | null => {
+    if (hero?.asset_id) {
+      const match = candidates.find((c) => candidateAssetId(c) === hero.asset_id);
+      if (match) return { ...match, assetId: hero.asset_id, sheetAssetId: match.sheetAssetId || hero.asset_id };
+      return {
+        assetId: hero.asset_id,
+        sheetAssetId: hero.asset_id,
+        label: profile?.name || "Character Reference Sheet",
+        status: "done",
+        qualityTier: "2K",
+      };
+    }
+    return (
+      candidates.find((c) => {
+        const id = candidateAssetId(c);
+        const st = String(c.status || "").toLowerCase();
+        return !!id && (st === "done" || st === "complete" || st === "");
+      }) || null
+    );
+  }, [hero, candidates, profile?.name]);
+
+  const activeStatus = hero?.asset_id ? "approved" : activeSheet ? "candidate" : "none";
+  const generatorLabel =
+    activeSheet?.provenance ||
+    activeSheet?.generator ||
+    (activeSheet?.model ? String(activeSheet.model) : null);
+  const conditioningLabel =
+    activeSheet?.conditioningMode === "REFERENCE_CONDITIONED"
+      ? "Reference Conditioned"
+      : activeSheet?.conditioningMode === "PROFILE_GUIDED"
+        ? "Profile Guided"
+        : null;
+
+  const openPreview = useCallback(
+    (assetId: string) => {
+      if (!assetId) return;
+      const match = candidates.find((c) => candidateAssetId(c) === assetId);
+      const bits = [
+        profile?.name || "Character Reference Sheet",
+        match?.provenance || match?.generator || "",
+        match?.width && match?.height ? `${match.width}×${match.height}` : "",
+        crsRevision != null ? `Revision ${crsRevision}` : "",
+        productionReady ? "Approved" : "Candidate",
+      ].filter(Boolean);
+      setPreviewAsset({
+        id: assetId,
+        kind: "image",
+        name: bits.join(" — "),
+        filename: match?.label || undefined,
+      });
+    },
+    [candidates, profile?.name, crsRevision, productionReady],
+  );
+
   if (cp.loading && !profile) {
     return <p className="character-core__hint">Loading character…</p>;
   }
+
+  const atName = profile?.name?.trim() ? `@${profile.name.trim()}` : null;
 
   return (
     <div className="character-core" data-testid="character-core">
@@ -249,9 +340,11 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <CharacterReferenceControl
           projectId={projectId}
           characterId={characterId}
+          characterName={profile?.name}
           references={references}
           onChanged={cp.refresh}
           onUseAsIdentity={handleUseAsIdentity}
+          onAskCoDirector={(prompt) => openCoDirector(prompt, { autoSend: false })}
         />
       </div>
 
@@ -275,7 +368,28 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           hasReference={hasReference}
           onCandidates={setCandidates}
           retryHandlerRef={retryHandlerRef}
+          generateHandlerRef={generateHandlerRef}
         />
+        <CharacterActiveCrsCard
+          hero={activeSheet}
+          characterName={profile?.name || ""}
+          status={activeStatus}
+          revision={crsRevision}
+          generatorLabel={generatorLabel}
+          conditioningLabel={conditioningLabel}
+          onPreview={openPreview}
+          onRegenerate={() => generateHandlerRef.current?.()}
+          onApprove={(c) => void handleApprove(c)}
+          onUpdateIdentity={productionReady ? () => void handlePromote() : undefined}
+        />
+        {productionReady && atName ? (
+          <p className="character-core__hint" data-testid="character-approved-banner">
+            Character Approved / Production Ready / Universal Reference: {atName}
+          </p>
+        ) : null}
+        <h4 className="character-core__section-title" data-testid="character-previous-generations">
+          Previous Generations / Candidates
+        </h4>
         <CharacterCandidateGrid
           candidates={candidates}
           selectedAssetId={selectedAssetId}
@@ -295,10 +409,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         </p>
       ) : null}
 
-      {hero && !promoted ? (
+      {hero && productionReady && !promoted ? (
         <div className="character-core__promote" data-testid="character-core-promote">
           <span>
-            Look approved{profile?.name ? ` for ${profile.name}` : ""}. Promote to Production to sync continuity, VisualIdentity, and the Production Bible.
+            Character approved{profile?.name ? ` — ${atName}` : ""}. Update Character Identity to sync continuity, VisualIdentity, and the Production Bible.
           </span>
           <button
             type="button"
@@ -307,7 +421,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
             disabled={promoting}
             data-testid="character-core-promote-button"
           >
-            {promoting ? "Promoting…" : "Promote to Production"}
+            {promoting ? "Updating…" : "Update Character Identity"}
           </button>
         </div>
       ) : null}
@@ -327,6 +441,8 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           <div className="character-core__advanced-grid">{renderAdvanced({ characterId, saved })}</div>
         </div>
       ) : null}
+
+      <LibraryQuickPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} />
     </div>
   );
 }

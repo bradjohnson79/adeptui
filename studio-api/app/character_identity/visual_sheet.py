@@ -228,9 +228,12 @@ PROFILE_GUIDED_VIEW_INSTRUCTIONS: dict[str, str] = {
 }
 
 # 2x2 grid layout (row-major): front, side / back, front-close-up.
+# CRS 2K is a native square four-view: 1280 tiles compose to 2560×2560.
+# This is not ERS 2560×1440 (environment plate) and not an upscale.
 CHARACTER_SHEET_GRID_COLS = 2
 CHARACTER_SHEET_GRID_ROWS = 2
-CHARACTER_SHEET_TILE_SIZE = 1024
+CHARACTER_SHEET_TILE_SIZE = 1280
+CRS_2K_COMPOSE = 2560
 
 COMPOSITION_INTENT_CHARACTER_SHEET = "character_sheet_composed"
 
@@ -241,9 +244,11 @@ CONDITIONING_PROFILE_GUIDED = "PROFILE_GUIDED"
 CONDITIONING_REFERENCE_CONDITIONED = "REFERENCE_CONDITIONED"
 
 # Certified families that are text-only (cannot consume reference pixels).
-# These remain selectable when a reference is attached; they run as
-# PROFILE_GUIDED. Never silently redirected to zimage.ref_edit.
-TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious", "qwen2512", "qwen"})
+# Illustrious stays PROFILE_GUIDED. Qwen Image 2512 uses qwen2512.ref when a
+# Character Reference is attached (REFERENCE_CONDITIONED) — never silent T2I.
+TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious"})
+QWEN_FAMILIES: frozenset[str] = frozenset({"qwen2512", "qwen", "qwen-image-2512", "qwen_image_2512"})
+QWEN_REF_WORKFLOW_KEY = "qwen2512.ref"
 
 # Local Krea 2 inference target. RAW is reachable only via an explicit raw id.
 KREA_LOCAL_TXT2IMG_KEY = "krea2.turbo_txt2img"
@@ -254,6 +259,38 @@ KREA_HOSTED_MODEL_LABELS: dict[str, str] = {
     "krea2-turbo-local": "Krea 2 Turbo",
     "krea2-raw-local": "Krea 2 RAW",
 }
+
+
+def crs_2k_pixels() -> tuple[int, int]:
+    """Native CRS 2K composed square (four-view single output).
+
+    Tile is 1280×1280 (same 2K square class as Atlas ``_atlas_pixels("1:1")``).
+    The product path enqueues one four-panel job at 2560×2560 — not an upscale,
+    and not ERS 2560×1440.
+    """
+    return CRS_2K_COMPOSE, CRS_2K_COMPOSE
+
+
+def crs_2k_tile_size() -> int:
+    return CHARACTER_SHEET_TILE_SIZE
+
+
+def _qwen_ref_workflow_ready() -> bool:
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        wf = get_workflow(QWEN_REF_WORKFLOW_KEY)
+        return bool(
+            wf
+            and wf.status == "Certified"
+            and bool((wf.capabilities or {}).get("supportsReferences", False))
+        )
+    except Exception:
+        return False
+
+
+def _is_qwen_family(family: str) -> bool:
+    return (family or "").strip().lower() in QWEN_FAMILIES
 
 
 def _resolve_style_profile(visual_style: str | None) -> dict[str, Any]:
@@ -510,19 +547,27 @@ def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
 def _family_supports_references(family: str) -> bool:
     """True when the family has a Certified workflow that can consume reference pixels.
 
-    Consults the Certified registry's ``supportsReferences`` capability.
-    Reference-capable families with an attached reference run REFERENCE_CONDITIONED.
-    Txt2img-only families (Illustrious / Qwen) stay PROFILE_GUIDED — they are
-    never silently dropped or redirected to Z-Image.
+    Qwen Image 2512 registry family is ``qwen-image-2512``; Character routing uses
+    ``qwen2512``. Look up ``qwen2512.ref`` by key so CRS can be Reference Conditioned.
+    Illustrious stays text-only.
     """
+    fam = (family or "").strip().lower()
+    if fam in TEXT_ONLY_FAMILIES:
+        return False
+    if _is_qwen_family(fam):
+        return _qwen_ref_workflow_ready()
     try:
         from ..image_runtime.certified_registry import list_workflows
 
-        for wf in list_workflows(model_family=family):
-            if wf.status != "Certified":
-                continue
-            if bool((wf.capabilities or {}).get("supportsReferences", False)):
-                return True
+        families = [fam]
+        if _is_qwen_family(fam):
+            families = list(QWEN_FAMILIES)
+        for key in families:
+            for wf in list_workflows(model_family=key):
+                if wf.status != "Certified":
+                    continue
+                if bool((wf.capabilities or {}).get("supportsReferences", False)):
+                    return True
     except Exception:
         return False
     return False
@@ -944,12 +989,14 @@ def _reference_workflow_key(family: str) -> str | None:
     """Certified workflow that consumes reference pixels for this family, if any."""
     if not family:
         return None
+    if _is_qwen_family(family):
+        return QWEN_REF_WORKFLOW_KEY if _qwen_ref_workflow_ready() else None
     if family == REFERENCE_LOCKED_FAMILY:
         return REFERENCE_LOCKED_WORKFLOW_KEY
     try:
         from ..image_runtime.certified_registry import get_workflow, list_workflows
 
-        for key in (f"{family}.ref_edit", f"{family}.edit", f"{family}.img2img"):
+        for key in (f"{family}.ref_edit", f"{family}.edit", f"{family}.img2img", f"{family}.ref"):
             wf = get_workflow(key)
             if wf and wf.status == "Certified" and bool((wf.capabilities or {}).get("supportsReferences")):
                 return key
@@ -972,9 +1019,29 @@ def _build_stage1_route(
     selected_source: str = "",
 ) -> dict[str, Any]:
     """Build one candidate Stage 1 route. Selected family is authoritative."""
-    supports_ref = bool(family and _family_supports_references(family))
-    ref_key = _reference_workflow_key(family) if supports_ref else None
+    fam = (family or "").strip().lower()
+    supports_ref = bool(fam and _family_supports_references(fam))
+    ref_key = _reference_workflow_key(fam) if supports_ref else None
     selected = selected_source or hosted_model_id or family
+    if reference_asset_id and _is_qwen_family(fam) and provider_kind != "api":
+        if not (supports_ref and ref_key):
+            raise ValueError(
+                "Qwen Image 2512 reference-conditioned generation is not ready on this runtime. "
+                "Choose another eligible generator — Adept will not switch automatically."
+            )
+        return {
+            "modelFamilyPreference": "qwen2512" if _is_qwen_family(fam) else family,
+            "workflowKey": QWEN_REF_WORKFLOW_KEY,
+            "referenceAssetId": reference_asset_id,
+            "referenceLocked": True,
+            "referenceFidelityMode": REFERENCE_FIDELITY_MODE_FULL,
+            "source_asset_id": reference_asset_id,
+            "denoise": None,
+            "conditioningMode": CONDITIONING_REFERENCE_CONDITIONED,
+            "providerKind": provider_kind,
+            "hostedModelId": hosted_model_id,
+            "selectedSource": selected,
+        }
     if reference_asset_id and supports_ref and ref_key and provider_kind != "api":
         return {
             "modelFamilyPreference": family,
@@ -1191,7 +1258,8 @@ def _build_candidate_routing_plan(
     * List-shaped generatorSources expand enabled batchCounts; Auto Select is
       ignored when any explicit local family is enabled.
     * Reference + reference-capable family → REFERENCE_CONDITIONED (pixels).
-    * Reference + txt2img-only (Illustrious / Qwen) → PROFILE_GUIDED (no pixels).
+    * Reference + Qwen Image 2512 → qwen2512.ref (no silent T2I).
+    * Reference + txt2img-only (Illustrious) → PROFILE_GUIDED (no pixels).
     """
     parsed = _parse_generator_sources(generator_sources)
     if parsed["explicit"] and not parsed["local_enabled"] and not parsed["api_enabled"]:
@@ -1827,6 +1895,29 @@ def start_visual_sheet_generation(
     role_assets: dict[str, str] = {}
     candidates: list[dict[str, Any]] = []
 
+    prev_pack = _load_pack_raw(db, character_id) or {}
+    approved_hero = service.resolve_approved_reference(db, character_id, "hero_identity")
+    if approved_hero:
+        role_assets["hero_identity"] = approved_hero
+
+    def _pack_history(pack: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for c in list(pack.get("previousCandidates") or []) + list(pack.get("candidates") or []):
+            if not isinstance(c, dict):
+                continue
+            aid = str(c.get("sheetAssetId") or c.get("assetId") or "").strip()
+            if not aid or aid in seen:
+                continue
+            if c.get("sheetAssetId") or str(c.get("status") or "").lower() in {"done", "complete"}:
+                seen.add(aid)
+                items.append(c)
+        return items
+
+    previous_candidates = _pack_history(prev_pack)
+    next_revision = int(prev_pack.get("nextCandidateRevision") or 1)
+    parent_sheet_id = approved_hero
+
     # Optional: use existing uploaded canonical sheet as hero baseline (authority), still generate pack from it
     reference_asset_id: str | None = None
     reference_locked = False
@@ -1868,8 +1959,8 @@ def start_visual_sheet_generation(
         #
         # Amendment 3 — Candidate Diversity + Reference Fidelity:
         # * Reference-capable family + attached reference → REFERENCE_CONDITIONED
-        #   (pixels participate).
-        # * Txt2img-only family (Illustrious / Qwen) + attached reference →
+        #   (pixels participate). Qwen Image 2512 uses qwen2512.ref.
+        # * Txt2img-only family (Illustrious) + attached reference →
         #   PROFILE_GUIDED (profile + style prompt, no pixels). Never forced
         #   onto zimage.ref_edit.
         # * Candidate variety comes from different Certified generators / seeds
@@ -2136,6 +2227,15 @@ def start_visual_sheet_generation(
                 "layout_noncompliant": False,
                 "layoutVerified": None,
                 "layoutNote": None,
+                "width": CRS_2K_COMPOSE,
+                "height": CRS_2K_COMPOSE,
+                "qualityTier": "2K",
+                "resolutionOrigin": "native",
+                "revision": next_revision,
+                "parentSheetId": parent_sheet_id,
+                "parent_sheet_id": parent_sheet_id,
+                "referenceAssetId": reference_asset_id,
+                "createdAt": _now(),
             })
         jobs["hero"] = hero_candidate_jobs[0]
         jobs["hero_candidates"] = hero_candidate_jobs
@@ -2169,6 +2269,10 @@ def start_visual_sheet_generation(
         "createdAt": _now(),
         "phase": "hero" if "hero" in jobs else "sheet_ready",
         "mock": False,
+        "previousCandidates": previous_candidates,
+        "nextCandidateRevision": next_revision + 1,
+        "approvedHeroIdentity": approved_hero,
+        "crsRevision": next_revision,
     }
     return _save_pack(db, project_id, character_id, pack)
 
@@ -2403,6 +2507,15 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "referenceMode": item.get("referenceMode") or "identity_preservation",
             "layoutVerified": item.get("layoutVerified"),
             "layoutNote": item.get("layoutNote"),
+            "width": item.get("width"),
+            "height": item.get("height"),
+            "qualityTier": item.get("qualityTier") or "2K",
+            "resolutionOrigin": item.get("resolutionOrigin") or "native",
+            "revision": item.get("revision"),
+            "parentSheetId": item.get("parentSheetId") or item.get("parent_sheet_id"),
+            "parent_sheet_id": item.get("parent_sheet_id") or item.get("parentSheetId"),
+            "referenceAssetId": item.get("referenceAssetId") or (item.get("referenceAssetIds") or [None])[0],
+            "createdAt": item.get("createdAt") or item.get("created_at"),
         }
 
     if isinstance(jobs.get("hero_candidates"), list):
@@ -3041,10 +3154,17 @@ def _enqueue_txt2img(
         body["prompt"] = strengthen_four_view_prompt(prompt)
         body["role"] = role
         body["viewRole"] = "four_view_sheet"
+        crs_w, crs_h = crs_2k_pixels()
+        body["width"] = crs_w
+        body["height"] = crs_h
+        body["quality"] = "2K"
+        body["resolutionOrigin"] = "native"
         creative_context.update(body.get("characterSheetIntent") or {})
         creative_context["layout"] = "four_view"
         creative_context["fourViewSingleOutput"] = True
         creative_context["viewRole"] = "four_view_sheet"
+        creative_context["qualityTier"] = "2K"
+        creative_context["resolutionOrigin"] = "native"
         body["creativeContext"] = creative_context
     # Reference-locked candidates route to a reference-capable edit workflow
     # (zimage.ref_edit) by supplying the reference asset as the source image so

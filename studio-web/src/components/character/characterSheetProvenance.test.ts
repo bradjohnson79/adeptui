@@ -15,6 +15,19 @@ describe("characterSheetProvenanceLabel", () => {
     ).toBe("LOCAL — Illustrious XL — Profile Guided");
   });
 
+  it("renders Qwen Image 2512 Reference Conditioned", () => {
+    expect(
+      characterSheetProvenanceLabel({
+        selectedSource: "qwen2512",
+        model: "qwen2512",
+        providerKind: "local",
+        provider: "comfyui",
+        conditioningMode: "REFERENCE_CONDITIONED",
+        workflowKey: "qwen2512.ref",
+      }),
+    ).toBe("LOCAL — Qwen Image 2512 — Reference Conditioned");
+  });
+
   it("renders Z-Image Reference Conditioned", () => {
     expect(
       characterSheetProvenanceLabel({

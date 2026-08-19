@@ -52,6 +52,21 @@ describe("Character Sheet generate request", () => {
     expect(body.generatorSources.api).toBeNull();
   });
 
+  it("sends reference_conditioned for Qwen when the family reports reference support", () => {
+    const qwenRef = [
+      { id: "qwen2512", label: "Qwen Image 2512", executable: true, supportsReferences: true },
+    ];
+    const body = buildCharacterSheetStartBody({
+      plan: plan({
+        autoSelect: { enabled: false, batchCount: 1 },
+        localFamilies: [{ family: "qwen2512", enabled: true, batchCount: 1 }],
+      }),
+      hasReference: true,
+      localOptions: qwenRef,
+    });
+    expect(body.generationMode).toBe("reference_conditioned");
+  });
+
   it("sends reference_conditioned for Z-Image with a reference attached", () => {
     const body = buildCharacterSheetStartBody({
       plan: plan({
@@ -120,7 +135,7 @@ describe("Character Sheet generate request", () => {
   it("does not block Auto Select when an executable local family exists", () => {
     const reason = characterGenerateBlockReason({
       name: "Korri",
-      plan: plan(),
+      plan: plan({ autoSelect: { enabled: true, batchCount: 1 } }),
       localOptions,
     });
     expect(reason).toBeNull();

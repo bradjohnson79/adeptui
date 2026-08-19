@@ -1,0 +1,23 @@
+{
+  "character_id": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+  "name": "Korri",
+  "tag": "@Korri",
+  "crs_revision": 2,
+  "canon_status": {
+    "status": "approved",
+    "crs_revision": 2,
+    "reference_coverage": "multi_view",
+    "visual_canon_ready": true,
+    "confidence_summary": "Multi-view reference established"
+  },
+  "reference_coverage": "multi_view",
+  "render_domain": {
+    "character_style": "cinematic_anime",
+    "environment_style": "unknown",
+    "allow_photoreal_character": false,
+    "allow_photoreal_environment": true,
+    "notes": ""
+  },
+  "has_approved_reference": true,
+  "approved_reference_asset_id": "067453ce-6204-434a-bfed-e6d0333e0e67"
+}

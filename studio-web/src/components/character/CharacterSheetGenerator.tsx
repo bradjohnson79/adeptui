@@ -30,12 +30,27 @@ type Props = {
   disabled?: boolean;
   onCandidates: (candidates: CharacterCandidate[]) => void;
   retryHandlerRef?: { current: ((candidate: CharacterCandidate) => void) | null };
+  generateHandlerRef?: { current: (() => void) | null };
 };
 
 function readCandidates(pack: unknown): CharacterCandidate[] {
-  const p = pack as { pack?: { candidates?: unknown[] }; candidates?: unknown[] } | undefined;
-  const raw = p?.pack?.candidates || p?.candidates || [];
-  return raw.map(normalizeCharacterCandidate);
+  const p = pack as {
+    pack?: { candidates?: unknown[]; previousCandidates?: unknown[] };
+    candidates?: unknown[];
+    previousCandidates?: unknown[];
+  } | undefined;
+  const current = p?.pack?.candidates || p?.candidates || [];
+  const previous = p?.pack?.previousCandidates || p?.previousCandidates || [];
+  const seen = new Set<string>();
+  const out: CharacterCandidate[] = [];
+  for (const raw of [...current, ...previous]) {
+    const c = normalizeCharacterCandidate(raw);
+    const key = String(c.sheetAssetId || c.assetId || c.jobId || "");
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    out.push(c);
+  }
+  return out;
 }
 
 function viewsTerminal(c: CharacterCandidate): boolean {
@@ -58,6 +73,7 @@ export function CharacterSheetGenerator({
   disabled,
   onCandidates,
   retryHandlerRef,
+  generateHandlerRef,
 }: Props) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState("");
@@ -160,8 +176,6 @@ export function CharacterSheetGenerator({
     inFlightRef.current = true;
     setPhase("starting");
     setMessage("Starting…");
-    onCandidates([]);
-    setCandidates([]);
     try {
       const body = buildCharacterSheetStartBody({
         profileVisualStyle: profile?.visual_style,
@@ -213,13 +227,18 @@ export function CharacterSheetGenerator({
       void retryCandidate(c);
     };
   }
+  if (generateHandlerRef) {
+    generateHandlerRef.current = () => {
+      void generate();
+    };
+  }
 
   const buttonLabel =
-    phase === "starting" ? "Starting…" : phase === "generating" ? "Generating…" : "Generate Character Sheet";
+    phase === "starting" ? "Starting…" : phase === "generating" ? "Generating…" : "Generate Character Reference Sheet";
 
   return (
     <div className="character-core__generate">
-      {generating || candidates.length > 0 ? (
+      {generating ? (
         <GenerationProgressBar candidates={candidates} active={generating} />
       ) : null}
       <button

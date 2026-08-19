@@ -160,3 +160,17 @@ describe("character sheet layout-noncompliant hook", () => {
     expect(canUseCharacterLook(c)).toBe(true);
   });
 });
+
+describe("Character Reference Sheet progress honesty", () => {
+  it("never reports 100% while generation is still active", () => {
+    const src = readFileSync(new URL("./GenerationProgressBar.tsx", import.meta.url), "utf8");
+    expect(src).toContain("Generating Character Reference Sheet");
+    expect(src).toContain("Math.min(percent, 99)");
+  });
+
+  it("does not clear the candidate grid when a new generate starts", () => {
+    const src = readFileSync(new URL("./CharacterSheetGenerator.tsx", import.meta.url), "utf8");
+    expect(src).toContain("Generate Character Reference Sheet");
+    expect(src).not.toContain("onCandidates([])");
+  });
+});

@@ -16,20 +16,24 @@ import { getReferenceImage } from "./useCharacterProfile";
 type Props = {
   projectId: string;
   characterId: string;
+  characterName?: string;
   references: CharacterReference[];
   disabled?: boolean;
   onChanged: () => void | Promise<void>;
   /** Called when user chooses to use the reference as the identity candidate. */
   onUseAsIdentity?: (assetId: string, sourceType: "upload" | "library") => void | Promise<void>;
+  onAskCoDirector?: (prompt: string) => void;
 };
 
 export function CharacterReferenceControl({
   projectId,
   characterId,
+  characterName,
   references,
   disabled,
   onChanged,
   onUseAsIdentity,
+  onAskCoDirector,
 }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -95,7 +99,18 @@ export function CharacterReferenceControl({
   return (
     <div className="character-core__reference">
       <span className="character-core__label">
-        Character Reference <span className="character-core__optional">(optional)</span>
+        Character Reference{" "}
+        <span
+          className="character-core__tip"
+          data-testid="character-reference-tip"
+          title="Upload either a clear single-view image of your character or a multi-view Character Reference Sheet showing multiple angles. A multi-view sheet can improve identity consistency across generations. If you do not already have one, you can ask Co-Director to create a multi-view Character Reference Sheet for your character."
+          role="tooltip"
+          tabIndex={0}
+          aria-label="Help: Character Reference"
+        >
+          (?)
+        </span>
+        <span className="character-core__optional">(optional)</span>
       </span>
 
       {previewSrc ? (
@@ -107,6 +122,12 @@ export function CharacterReferenceControl({
           No reference yet. Add one to guide the character's look.
         </p>
       )}
+      {references.length > 0 ? (
+        <p className="character-core__hint" data-testid="character-reference-status">
+          Reference: {references.length === 1 ? "Single View" : "Multi-View"}
+          {references.some(r => r.approval_status === "approved") ? " · Visual Canon: Ready" : ""}
+        </p>
+      ) : null}
 
       <div className="character-core__reference-actions">
         <button
@@ -136,6 +157,21 @@ export function CharacterReferenceControl({
             onClick={() => void handleRemove()}
           >
             Remove
+          </button>
+        ) : null}
+        {onAskCoDirector ? (
+          <button
+            type="button"
+            className="character-core__button"
+            data-testid="character-ask-codirector-crs"
+            disabled={disabled || busy}
+            onClick={() =>
+              onAskCoDirector(
+                `Please create a multi-view Character Reference Sheet for ${characterName || "this character"}. Use the current Character Profile and any uploaded reference as identity.`,
+              )
+            }
+          >
+            Ask Co-Director to create a Character Reference Sheet
           </button>
         ) : null}
       </div>

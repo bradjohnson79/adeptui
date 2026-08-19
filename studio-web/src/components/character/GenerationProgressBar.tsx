@@ -20,6 +20,11 @@ export function GenerationProgressBar({ candidates, active }: Props) {
 
   const { doneViews, totalViews, doneSheets, totalSheets, percent } =
     batchProgress(candidates);
+  const allComplete =
+    totalSheets > 0 &&
+    doneSheets >= totalSheets &&
+    (totalViews <= 0 || doneViews >= totalViews);
+  const displayPercent = active && !allComplete ? Math.min(percent, 99) : percent;
 
   // Choose the most truthful label available. When per-view counts exist,
   // report true totals (e.g. "11 of 16 views complete"); otherwise fall back
@@ -36,22 +41,22 @@ export function GenerationProgressBar({ candidates, active }: Props) {
   return (
     <div className="character-core__progress" data-testid="generation-progress">
       <div className="character-core__progress-head">
-        <span className="character-core__progress-title">Generating Character Sheets</span>
+        <span className="character-core__progress-title">Generating Character Reference Sheet</span>
         <span className="character-core__progress-pct" data-testid="generation-progress-pct">
-          {percent}%
+          {displayPercent}%
         </span>
       </div>
       <div
         className="character-core__progress-track"
         role="progressbar"
-        aria-valuenow={percent}
+        aria-valuenow={displayPercent}
         aria-valuemin={0}
         aria-valuemax={100}
       >
         <div
           className="character-core__progress-fill"
           data-testid="generation-progress-fill"
-          style={{ width: `${percent}%` }}
+          style={{ width: `${displayPercent}%` }}
         />
       </div>
       <p className="character-core__progress-label" data-testid="generation-progress-label">

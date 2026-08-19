@@ -381,7 +381,7 @@ def test_illustrious_with_reference_is_profile_guided_no_source_pixels():
         assert stage1["providerKind"] == "local"
 
 
-def test_qwen_with_reference_is_profile_guided_no_source_pixels():
+def test_qwen_with_reference_is_reference_conditioned_no_silent_t2i():
     plan = _build_candidate_routing_plan(
         candidate_count=2,
         reference_asset_id="sheet-1",
@@ -391,9 +391,9 @@ def test_qwen_with_reference_is_profile_guided_no_source_pixels():
     for route in plan:
         stage1 = route["stage1"]
         assert stage1["modelFamilyPreference"] == "qwen2512"
-        assert stage1["workflowKey"] == "qwen2512.txt2img"
-        assert stage1["source_asset_id"] is None
-        assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+        assert stage1["workflowKey"] == "qwen2512.ref"
+        assert stage1["source_asset_id"] == "sheet-1"
+        assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
 
 
 def test_api_only_does_not_plan_comfy_or_zimage_jobs():
@@ -441,9 +441,12 @@ def test_auto_select_with_reference_may_mix_conditioning_modes():
     # Auto may mix; at least one planned family must be honest about its mode.
     for route in plan:
         stage1 = route["stage1"]
-        if stage1["modelFamilyPreference"] in {"illustrious", "qwen2512", "qwen"}:
+        if stage1["modelFamilyPreference"] in {"illustrious"}:
             assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
             assert stage1["source_asset_id"] is None
+        if stage1["modelFamilyPreference"] in {"qwen2512", "qwen"}:
+            assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
+            assert stage1["source_asset_id"] == "sheet-1"
         if stage1["modelFamilyPreference"] == "zimage":
             assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
             assert stage1["source_asset_id"] == "sheet-1"

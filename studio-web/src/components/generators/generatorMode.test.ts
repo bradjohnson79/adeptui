@@ -35,13 +35,22 @@ describe("resolveCharacterGenerationMode", () => {
     supportsReferences: false,
   });
 
-  it("keeps Illustrious and Qwen Profile Guided when a reference is attached", () => {
+  it("keeps Illustrious Profile Guided when a reference is attached", () => {
     expect(resolveCharacterGenerationMode(illustrious, true)).toBe("PROFILE_GUIDED");
-    expect(resolveCharacterGenerationMode(qwen, true)).toBe("PROFILE_GUIDED");
     expect(isIdentityEligible(illustrious)).toBe(true);
-    expect(isIdentityEligible(qwen)).toBe(true);
     expect(identityDisabledReason(illustrious)).toBeNull();
     expect(generationModeWireValue("PROFILE_GUIDED")).toBe("profile_guided");
+  });
+
+  it("uses Reference Conditioned for Qwen when the family can consume reference pixels", () => {
+    const qwenRef = opt({
+      id: "qwen2512",
+      label: "Qwen Image 2512",
+      supportsReferences: true,
+    });
+    expect(resolveCharacterGenerationMode(qwenRef, true)).toBe("REFERENCE_CONDITIONED");
+    expect(resolveCharacterGenerationMode(qwen, true)).toBe("PROFILE_GUIDED");
+    expect(isIdentityEligible(qwen)).toBe(true);
   });
 
   it("keeps Z-Image Reference Conditioned when a reference is attached", () => {

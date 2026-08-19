@@ -152,6 +152,22 @@ def approve_candidate(
     )
 
 
+@router.get("/projects/{project_id}/characters/{character_id}/crs")
+def get_character_crs(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    """Persisted Character Reference System summary for @Character resolution."""
+    _require_flag()
+    _project(db, project_id)
+    from .crs_service import get_crs_summary
+
+    summary = get_crs_summary(db, project_id, character_id)
+    if summary is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Character Profile not found."},
+        )
+    return summary.model_dump()
+
+
 @router.get("/projects/{project_id}/characters/{character_id}/coverage")
 def coverage(project_id: str, character_id: str, db: Session = Depends(get_db)):
     _require_flag()

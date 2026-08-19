@@ -618,19 +618,10 @@ def approve_character_candidate(
     source_type: str = "generation",
     notes: str = "Approved casting candidate",
 ) -> dict[str, Any]:
-    """Mark a generated candidate as the canonical approved casting image.
+    """Mark a generated candidate as the canonical approved Character Reference Sheet.
 
-    Demotes any existing canonical reference for the same role, then attaches
-    the chosen asset as canonical + approval_status=approved. Does not touch
-    other roles or the visual-sheet pack status (owner-approve handles gates).
-    Safe to call repeatedly; idempotent if the same asset is already canonical.
-
-    Use-as-Character-Identity (Phase 5): when ``source_type`` is ``upload`` or
-    ``library`` the candidate is a user-provided reference that becomes a
-    candidate WITHOUT generation. Provenance records ``generationUsed=false``
-    and the ORIGINAL Library asset id is preserved (no binary duplication) —
-    the same asset row is simply attached as canonical. It becomes
-    ``hero_identity`` only via this explicit approval action.
+    One transaction: exact selected sheet → canonical hero → persist CRS revision →
+    production-ready. Previous canon stays authoritative if commit fails.
     """
     profile = db.get(CharacterProfileRow, character_id)
     if not profile or profile.project_id != project_id:
@@ -639,12 +630,8 @@ def approve_character_candidate(
         raise _err("LOCKED_VERSION", "Cannot approve references for a locked profile.", 409)
     if reference_role not in ALL_REFERENCE_ROLES:
         raise _err("INVALID_REFERENCE_ROLE", f"Unknown reference role: {reference_role}")
-    # CDX-007: the canonical approved identity must point at a real project image asset.
     _validate_project_image_asset(db, project_id, asset_id)
 
-    # Phase 5: record generationUsed provenance. upload/library candidates did
-    # NOT use generation; generation candidates did. The original asset id is
-    # preserved (we attach the existing Library asset, never duplicating bytes).
     generation_used = source_type not in ("upload", "library")
     lineage = json.dumps(
         {
@@ -655,7 +642,6 @@ def approve_character_candidate(
         }
     )
 
-    # Demote any existing canonical reference for this role.
     existing = (
         db.query(CharacterReferenceAssetRow)
         .filter(
@@ -673,46 +659,54 @@ def approve_character_candidate(
             row.canonical = False
             row.approval_status = "review"
 
+    rid = None
     if already_canonical:
-        # Ensure the existing row is marked approved + provenance refreshed.
         for row in existing:
             if row.asset_id == asset_id:
                 row.approval_status = "approved"
                 row.canonical = True
                 row.source_type = source_type
                 row.generation_lineage_json = lineage
-        profile.updated_at = _now()
-        db.commit()
-        _sync_pack_role_asset(db, project_id, character_id, asset_id)
-        return {
-            "characterId": character_id,
-            "assetId": asset_id,
-            "referenceRole": reference_role,
-            "canonical": True,
-            "approvalStatus": "approved",
-            "replaced": False,
-            "generationUsed": generation_used,
-            "sourceType": source_type,
-        }
+                rid = row.id
+    else:
+        rid = str(uuid.uuid4())
+        db.add(
+            CharacterReferenceAssetRow(
+                id=rid,
+                character_profile_id=character_id,
+                character_version_id=profile.active_version_id,
+                asset_id=asset_id,
+                reference_role=reference_role,
+                approval_status="approved",
+                canonical=True,
+                source_type=source_type,
+                generation_lineage_json=lineage,
+                notes=notes,
+                created_at=_now(),
+            )
+        )
 
-    rid = str(uuid.uuid4())
-    row = CharacterReferenceAssetRow(
-        id=rid,
-        character_profile_id=character_id,
-        character_version_id=profile.active_version_id,
-        asset_id=asset_id,
-        reference_role=reference_role,
-        approval_status="approved",
-        canonical=True,
-        source_type=source_type,
-        generation_lineage_json=lineage,
-        notes=notes,
-        created_at=_now(),
-    )
-    db.add(row)
     profile.updated_at = _now()
-    db.commit()
-    _sync_pack_role_asset(db, project_id, character_id, asset_id)
+    profile.approval_status = "approved"
+    profile.status = "APPROVED"
+
+    from .crs_service import persist_crs_in_session
+
+    try:
+        crs_payload = persist_crs_in_session(db, profile, asset_id=asset_id)
+        _set_pack_hero_no_commit(db, project_id, character_id, asset_id, crs_payload)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    try:
+        from ..codirector.conversation.project_cache import invalidate_cache_sections
+
+        invalidate_cache_sections(db, project_id, ["characters"])
+    except Exception:
+        pass
+
     return {
         "characterId": character_id,
         "referenceId": rid,
@@ -720,10 +714,55 @@ def approve_character_candidate(
         "referenceRole": reference_role,
         "canonical": True,
         "approvalStatus": "approved",
-        "replaced": bool(existing),
+        "replaced": bool(existing) and not already_canonical,
         "generationUsed": generation_used,
         "sourceType": source_type,
+        "productionReady": True,
+        "crsRevision": int(crs_payload.get("crs_revision") or 0),
+        "approvedSheetAssetId": asset_id,
+        "atTag": f"@{profile.name}" if profile.name else None,
     }
+
+
+def _set_pack_hero_no_commit(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    asset_id: str,
+    crs_payload: dict[str, Any] | None = None,
+) -> None:
+    """Align visual-sheet pack hero with the approved sheet without committing."""
+    from .visual_sheet import PACK_TRAIT_KEY, _dumps, _load_pack_raw
+
+    pack = _load_pack_raw(db, character_id)
+    if not pack:
+        return
+    pack.setdefault("roleAssets", {})["hero_identity"] = asset_id
+    pack["approvedHeroIdentity"] = asset_id
+    if crs_payload:
+        pack["crsRevision"] = crs_payload.get("crs_revision")
+    existing = (
+        db.query(CharacterTraitRow)
+        .filter(
+            CharacterTraitRow.character_profile_id == character_id,
+            CharacterTraitRow.key == PACK_TRAIT_KEY,
+        )
+        .all()
+    )
+    profile = db.get(CharacterProfileRow, character_id)
+    for row in existing:
+        db.delete(row)
+    db.add(
+        CharacterTraitRow(
+            id=str(uuid.uuid4()),
+            character_profile_id=character_id,
+            character_version_id=profile.active_version_id if profile else None,
+            category="visual_sheet",
+            key=PACK_TRAIT_KEY,
+            value=_dumps(pack),
+            provenance="PROPOSED_BY_CHARACTER_CREATOR",
+        )
+    )
 
 
 def _sync_pack_role_asset(db: Session, project_id: str, character_id: str, asset_id: str) -> None:
@@ -1671,7 +1710,47 @@ def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str,
     if not row or row.project_id != project_id:
         raise _err("NOT_FOUND", "Character Profile not found.", 404)
 
+    slug = (row.slug or "").strip().lower()
+    name_key = (row.name or "").strip().lower()
+    if slug == "korri" or name_key == "korri":
+        raise _err("PROTECTED_CHARACTER", "Korri cannot be deleted.", 409)
+
     name = row.name
+
+    try:
+        from ..continuity.models import VisualIdentityRow
+
+        for ident in (
+            db.query(VisualIdentityRow)
+            .filter(VisualIdentityRow.character_profile_id == character_id)
+            .all()
+        ):
+            ident.character_profile_id = None
+            ident.archived = True
+            ident.status = "archived"
+            ident.updated_at = _now()
+    except Exception:
+        pass
+
+    try:
+        from ..scene_references.models import SceneReferenceBinding
+
+        now_dt = datetime.now(timezone.utc)
+        for binding in (
+            db.query(SceneReferenceBinding)
+            .filter(
+                SceneReferenceBinding.project_id == project_id,
+                SceneReferenceBinding.identity_id == character_id,
+            )
+            .all()
+        ):
+            binding.identity_id = None
+            binding.enabled = False
+            if getattr(binding, "deleted_at", None) is None:
+                binding.deleted_at = now_dt
+            binding.updated_by = "character-delete"
+    except Exception:
+        pass
 
     voice_ids = [
         vp[0]
@@ -1711,4 +1790,12 @@ def delete_profile(db: Session, project_id: str, character_id: str) -> dict[str,
 
     db.delete(row)
     db.commit()
+
+    try:
+        from ..codirector.conversation.project_cache import invalidate_cache_sections
+
+        invalidate_cache_sections(db, project_id, ["characters"])
+    except Exception:
+        pass
+
     return {"deleted": True, "name": name}

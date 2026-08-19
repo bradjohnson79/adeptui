@@ -11,18 +11,23 @@ import {
   conditioningModeLabel,
   identityDisabledReason,
   isIdentityEligible,
+  resolveCharacterGenerationMode,
   type GeneratorOption,
 } from "../generators/types";
 import {
   CHARACTER_SHEET_BATCH_MAX,
   CHARACTER_SHEET_BATCH_MIN,
+  DEFAULT_GENERATOR_FAMILY,
   clampBatchCount,
   cloudModelStatusLabel,
   groupDiscoveredImageModelsByProvider,
   isAutoSelectActive,
   mergePlanWithInventory,
   normalizeDiscoveredImageModel,
+  primaryGeneratorValue,
+  primaryLocalBatchCount,
   returnToAutoSelectOnly,
+  setPrimaryLocalGenerator,
   summarizeGenerationPlan,
   type CharacterGeneratorPlan,
   type NormalizedDiscoveredImageModel,
@@ -199,10 +204,65 @@ export function CharacterGeneratorPanel({
 
   const patch = (next: CharacterGeneratorPlan) => onChange(next);
   const headingId = useId();
+  const compactValue = primaryGeneratorValue(value);
+  const compactBatch = primaryLocalBatchCount(value);
+  const qwenOpt = localOptions.find((o) => o.id === DEFAULT_GENERATOR_FAMILY || o.family === DEFAULT_GENERATOR_FAMILY);
+  const qwenUnavailable = !!qwenOpt && qwenOpt.executable === false;
+
+  const compactLabel = (opt: GeneratorOption) => {
+    if (opt.executable === false) return `${opt.label} — Unavailable`;
+    const mode = resolveCharacterGenerationMode(opt, hasReference);
+    if (mode === "UNSUPPORTED") return `${opt.label} — Unavailable`;
+    if (mode === "REFERENCE_CONDITIONED") return `${opt.label} — Reference Conditioned`;
+    const label = conditioningModeLabel(opt, hasReference, "Profile Guided");
+    return label ? `${opt.label} — ${label}` : opt.label;
+  };
+  const qwenMissing = !identityList.some((o) => o.id === DEFAULT_GENERATOR_FAMILY || o.family === DEFAULT_GENERATOR_FAMILY);
 
   return (
     <section className="character-core__generators" data-testid="character-generator-panel" aria-labelledby={headingId}>
-      <span className="character-core__label" id={headingId}>Image Generator</span>
+      <span className="character-core__label" id={headingId}>Character Reference Sheet</span>
+      <div className="character-core__generator-compact" data-testid="character-generator-compact">
+        <label className="character-core__field">
+          <span className="character-core__label">Generator</span>
+          <select
+            data-testid="character-generator-select"
+            aria-label="Character Reference Sheet generator"
+            value={compactValue}
+            disabled={disabled || !value.localEnabled}
+            onChange={(e) => patch(setPrimaryLocalGenerator(value, e.target.value, compactBatch))}
+          >
+            {identityList.map((opt) => (
+              <option key={opt.id} value={opt.id} disabled={opt.executable === false || !isIdentityEligible(opt)}>
+                {compactLabel(opt)}
+              </option>
+            ))}
+            {qwenMissing ? (
+              <option value={DEFAULT_GENERATOR_FAMILY} disabled>
+                Qwen Image 2512 — Unavailable
+              </option>
+            ) : null}
+            <option value="auto">Auto Select</option>
+          </select>
+        </label>
+        <BatchSelect
+          value={compactBatch}
+          disabled={disabled || !value.localEnabled}
+          testId="character-generator-batch"
+          label="Character Reference Sheet"
+          onChange={(n) => patch(setPrimaryLocalGenerator(value, compactValue === "auto" ? "auto" : compactValue, n))}
+        />
+      </div>
+      {(qwenUnavailable || qwenMissing) && compactValue === DEFAULT_GENERATOR_FAMILY ? (
+        <p className="character-core__hint" data-testid="character-qwen-unavailable">
+          Qwen Image 2512 is unavailable on this runtime. Choose another eligible generator — Adept will not switch automatically.
+        </p>
+      ) : null}
+
+      <details className="character-core__more-generators" data-testid="character-more-generators">
+        <summary data-testid="character-more-generators-toggle">More Generators</summary>
+
+      <span className="character-core__label">Image Generator</span>
 
       <div className="character-core__generator-row">
         <label className="character-core__checkbox">
@@ -477,6 +537,7 @@ export function CharacterGeneratorPanel({
           </div>
         ) : null}
       </div>
+      </details>
     </section>
   );
 }

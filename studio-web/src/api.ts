@@ -7924,6 +7924,10 @@ export const api = {
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/visual-sheet`,
     ),
+  getCharacterCrs: (projectId: string, characterId: string) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/crs`,
+    ),
   approveCharacterCandidate: (
     projectId: string,
     characterId: string,

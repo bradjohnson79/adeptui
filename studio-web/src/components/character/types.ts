@@ -95,6 +95,13 @@ export type CharacterCandidate = {
   batchOf?: number | null;
   providerId?: string | null;
   modelId?: string | null;
+  width?: number | null;
+  height?: number | null;
+  qualityTier?: string | null;
+  resolutionOrigin?: string | null;
+  revision?: number | null;
+  parentSheetId?: string | null;
+  createdAt?: string | null;
 };
 
 /** True when the API stamps this result as not a four-view Character Sheet. */
@@ -124,6 +131,20 @@ export function normalizeCharacterCandidate(raw: unknown): CharacterCandidate {
   const rec = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const c = { ...rec } as CharacterCandidate;
   if (isLayoutNoncompliant(rec)) c.layoutNoncompliant = true;
+  const width = rec.width ?? rec.Width;
+  const height = rec.height ?? rec.Height;
+  if (typeof width === "number" && width > 0) c.width = width;
+  if (typeof height === "number" && height > 0) c.height = height;
+  const quality = rec.qualityTier ?? rec.quality_tier;
+  if (typeof quality === "string" && quality.trim()) c.qualityTier = quality.trim();
+  const origin = rec.resolutionOrigin ?? rec.resolution_origin;
+  if (typeof origin === "string" && origin.trim()) c.resolutionOrigin = origin.trim();
+  const revision = rec.revision ?? rec.crsRevision ?? rec.crs_revision;
+  if (typeof revision === "number" && Number.isFinite(revision)) c.revision = revision;
+  const parent = rec.parentSheetId ?? rec.parent_sheet_id;
+  if (typeof parent === "string" && parent.trim()) c.parentSheetId = parent.trim();
+  const created = rec.createdAt ?? rec.created_at;
+  if (typeof created === "string" && created.trim()) c.createdAt = created.trim();
   return c;
 }
 

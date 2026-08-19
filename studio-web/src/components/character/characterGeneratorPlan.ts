@@ -16,6 +16,8 @@ export const CHARACTER_SHEET_DEFAULT_BATCH_COUNT = 1;
 export const CHARACTER_SHEET_VIEWS_PER_SHEET = 4;
 
 export const AUTO_SELECT_FAMILY = "auto";
+/** Canonical Character Creator default generator (plan/state, not a checkbox). */
+export const DEFAULT_GENERATOR_FAMILY = "qwen2512";
 
 export type CharacterLocalFamilyPlan = {
   family: string;
@@ -43,16 +45,19 @@ export type CharacterGeneratorPlan = {
   apiModels: CharacterApiModelPlan[];
   stage2Enabled: boolean;
   stage2Family?: string;
+  /** Explicit default when no stored prefs / idle plan. Never silently substitute. */
+  defaultGenerator: string;
 };
 
 export const DEFAULT_CHARACTER_GENERATOR_PLAN: CharacterGeneratorPlan = {
   localEnabled: true,
   apiEnabled: false,
-  autoSelect: { enabled: true, batchCount: CHARACTER_SHEET_DEFAULT_BATCH_COUNT },
+  autoSelect: { enabled: false, batchCount: CHARACTER_SHEET_DEFAULT_BATCH_COUNT },
   localFamilies: [],
   apiModels: [],
   stage2Enabled: false,
   stage2Family: "",
+  defaultGenerator: DEFAULT_GENERATOR_FAMILY,
 };
 
 export function clampBatchCount(value: unknown): number {
@@ -77,6 +82,79 @@ export function returnToAutoSelectOnly(plan: CharacterGeneratorPlan): CharacterG
     autoSelect: { ...plan.autoSelect, enabled: true },
     localFamilies: plan.localFamilies.map((row) => ({ ...row, enabled: false })),
   };
+}
+
+/** Auto Select alone is the old product default — treat as unspecified. */
+export function planIsIdleForDefault(plan: CharacterGeneratorPlan): boolean {
+  if (anyExplicitLocalFamilyEnabled(plan)) return false;
+  if (plan.apiEnabled && plan.apiModels.some((row) => row.enabled)) return false;
+  return true;
+}
+
+/** Enable Qwen as the explicit default when the plan has no executable work. */
+export function applyDefaultGeneratorIfIdle(
+  plan: CharacterGeneratorPlan,
+  localOptions?: GeneratorOption[],
+): CharacterGeneratorPlan {
+  const next: CharacterGeneratorPlan = {
+    ...plan,
+    defaultGenerator: plan.defaultGenerator || DEFAULT_GENERATOR_FAMILY,
+  };
+  if (!planIsIdleForDefault(next)) return next;
+  const family = next.defaultGenerator || DEFAULT_GENERATOR_FAMILY;
+  if (!next.localFamilies.some((row) => row.family === family)) return next;
+  if (!localFamilyIsExecutable(family, localOptions)) return next;
+  return {
+    ...next,
+    localEnabled: true,
+    autoSelect: { ...next.autoSelect, enabled: false },
+    localFamilies: next.localFamilies.map((row) => ({
+      ...row,
+      enabled: row.family === family,
+    })),
+  };
+}
+
+export function primaryGeneratorValue(plan: CharacterGeneratorPlan): string {
+  if (isAutoSelectActive(plan)) return AUTO_SELECT_FAMILY;
+  const local = plan.localFamilies.find((row) => row.enabled);
+  if (local) return local.family;
+  const api = plan.apiEnabled ? plan.apiModels.find((row) => row.enabled) : undefined;
+  if (api) return `api:${api.providerId}:${api.modelId}`;
+  return plan.defaultGenerator || DEFAULT_GENERATOR_FAMILY;
+}
+
+export function setPrimaryLocalGenerator(
+  plan: CharacterGeneratorPlan,
+  family: string,
+  batchCount?: number,
+): CharacterGeneratorPlan {
+  const count = clampBatchCount(batchCount ?? CHARACTER_SHEET_DEFAULT_BATCH_COUNT);
+  if (family === AUTO_SELECT_FAMILY) {
+    return {
+      ...returnToAutoSelectOnly(plan),
+      autoSelect: { enabled: true, batchCount: count },
+    };
+  }
+  return {
+    ...plan,
+    localEnabled: true,
+    apiEnabled: false,
+    autoSelect: { ...plan.autoSelect, enabled: false },
+    apiModels: plan.apiModels.map((row) => ({ ...row, enabled: false })),
+    localFamilies: plan.localFamilies.map((row) => ({
+      ...row,
+      enabled: row.family === family,
+      batchCount: row.family === family ? count : row.batchCount,
+    })),
+  };
+}
+
+export function primaryLocalBatchCount(plan: CharacterGeneratorPlan): number {
+  if (isAutoSelectActive(plan)) return clampBatchCount(plan.autoSelect.batchCount);
+  const local = plan.localFamilies.find((row) => row.enabled);
+  if (local) return clampBatchCount(local.batchCount);
+  return CHARACTER_SHEET_DEFAULT_BATCH_COUNT;
 }
 
 export type PlannedSheet = {
@@ -403,7 +481,7 @@ export function normalizeDiscoveredImageModel(
   };
 }
 
-export function mergePlanWithInventory(
+function alignPlanWithInventory(
   plan: CharacterGeneratorPlan,
   localOptions: GeneratorOption[],
   apiModels: NormalizedDiscoveredImageModel[],
@@ -432,13 +510,25 @@ export function mergePlanWithInventory(
   return { ...plan, localFamilies, apiModels: nextApi };
 }
 
+export function mergePlanWithInventory(
+  plan: CharacterGeneratorPlan,
+  localOptions: GeneratorOption[],
+  apiModels: NormalizedDiscoveredImageModel[],
+): CharacterGeneratorPlan {
+  return alignPlanWithInventory(plan, localOptions, apiModels);
+}
+
 export function hydratePlanFromPreferences(
   raw: unknown,
   localOptions: GeneratorOption[],
   apiModels: NormalizedDiscoveredImageModel[],
 ): CharacterGeneratorPlan {
-  const base = mergePlanWithInventory(DEFAULT_CHARACTER_GENERATOR_PLAN, localOptions, apiModels);
-  if (!raw || typeof raw !== "object") return base;
+  // Overlay prefs onto an idle inventory-aligned plan. Do not start from the
+  // Qwen default or a saved Illustrious/Auto/Cloud choice is clobbered.
+  const base = alignPlanWithInventory(DEFAULT_CHARACTER_GENERATOR_PLAN, localOptions, apiModels);
+  if (!raw || typeof raw !== "object") {
+    return applyDefaultGeneratorIfIdle(base, localOptions);
+  }
   const src = raw as Record<string, unknown>;
   const local = src.local;
   const api = src.api;
@@ -498,16 +588,20 @@ export function hydratePlanFromPreferences(
     }
   }
 
-  return {
-    ...base,
-    localEnabled,
-    apiEnabled,
-    autoSelect,
-    localFamilies,
-    apiModels: apiRows,
-    stage2Enabled: Boolean(src.stage2Enabled),
-    stage2Family: String(src.stage2Family || "") || "",
-  };
+  return applyDefaultGeneratorIfIdle(
+    {
+      ...base,
+      localEnabled,
+      apiEnabled,
+      autoSelect,
+      localFamilies,
+      apiModels: apiRows,
+      stage2Enabled: Boolean(src.stage2Enabled),
+      stage2Family: String(src.stage2Family || "") || "",
+      defaultGenerator: DEFAULT_GENERATOR_FAMILY,
+    },
+    localOptions,
+  );
 }
 
 export function planHasExecutableWork(plan: CharacterGeneratorPlan): boolean {

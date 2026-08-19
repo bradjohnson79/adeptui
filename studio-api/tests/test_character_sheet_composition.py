@@ -35,6 +35,7 @@ from app.character_identity.visual_sheet import (
     CANDIDATE_SHEET_VIEW_ROLES,
     CHARACTER_SHEET_GRID_COLS,
     CHARACTER_SHEET_GRID_ROWS,
+    CHARACTER_SHEET_TILE_SIZE,
     COMPOSITION_INTENT_CHARACTER_SHEET,
     REFERENCE_LOCKED_FAMILY,
     REFERENCE_LOCKED_WORKFLOW_KEY,
@@ -171,7 +172,7 @@ def test_compose_character_sheet_grid_produces_2x2_png(tmp_path):
     assert result == str(out)
     assert out.is_file()
     im = Image.open(out)
-    tile = 1024
+    tile = CHARACTER_SHEET_TILE_SIZE
     assert im.size == (tile * CHARACTER_SHEET_GRID_COLS, tile * CHARACTER_SHEET_GRID_ROWS)
 
 
@@ -344,9 +345,9 @@ def test_explicit_auto_select_falls_back_to_style_routing():
     assert (plan[0].get("stage1") or plan[0])["modelFamilyPreference"] == distinct[0]
 
 
-def test_explicit_text_only_family_rejected_when_reference_attached():
-    """Qwen + reference is PROFILE_GUIDED (no pixels), not rejected or forced to Z-Image."""
-    from app.character_identity.visual_sheet import CONDITIONING_PROFILE_GUIDED
+def test_qwen_with_reference_is_reference_conditioned():
+    """Qwen + reference pins qwen2512.ref — pixels participate, no silent T2I."""
+    from app.character_identity.visual_sheet import CONDITIONING_REFERENCE_CONDITIONED, QWEN_REF_WORKFLOW_KEY
 
     plan = _build_candidate_routing_plan(
         candidate_count=1,
@@ -355,9 +356,9 @@ def test_explicit_text_only_family_rejected_when_reference_attached():
     )
     stage1 = plan[0].get("stage1") or plan[0]
     assert stage1["modelFamilyPreference"] == "qwen2512"
-    assert stage1["workflowKey"] == "qwen2512.txt2img"
-    assert stage1["source_asset_id"] is None
-    assert stage1["conditioningMode"] == CONDITIONING_PROFILE_GUIDED
+    assert stage1["workflowKey"] == QWEN_REF_WORKFLOW_KEY
+    assert stage1["source_asset_id"] == "sheet-1"
+    assert stage1["conditioningMode"] == CONDITIONING_REFERENCE_CONDITIONED
 
 
 def test_explicit_reference_capable_family_allowed_when_reference_attached():

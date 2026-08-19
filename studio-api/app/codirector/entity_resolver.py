@@ -119,11 +119,35 @@ def resolve_character(
     if profile is None:
         return None
     casting_asset_id = resolve_approved_reference(db, profile.id, "hero_identity")
-    return {
+    persisted: dict[str, Any] = {}
+    try:
+        from ..character_identity.crs_service import load_persisted_crs
+
+        persisted = load_persisted_crs(db, profile.id)
+    except Exception:
+        persisted = {}
+    sheet_id = persisted.get("approved_sheet_asset_id") or casting_asset_id
+    result: dict[str, Any] = {
         "character_id": profile.id,
         "name": profile.name,
-        "approved_casting_asset_id": casting_asset_id,
+        "approved_casting_asset_id": sheet_id,
+        "crs_revision": int(persisted.get("crs_revision") or 0),
+        "approved_sheet_asset_id": sheet_id,
+        "production_ready": (profile.approval_status or "").lower() == "approved",
     }
+    try:
+        from ..character_identity.crs_service import get_crs_summary
+        summary = get_crs_summary(db, project_id, profile.id)
+        if summary:
+            result["crs_revision"] = summary.crs_revision
+            result["has_approved_reference"] = summary.has_approved_reference
+            result["approved_reference_asset_id"] = summary.approved_reference_asset_id
+            result["reference_coverage"] = summary.reference_coverage
+            result["visual_canon_ready"] = summary.canon_status.visual_canon_ready if summary.canon_status else False
+            result["render_domain"] = summary.render_domain.model_dump() if summary.render_domain else {}
+    except Exception:
+        pass
+    return result
 
 
 def resolve_prop(

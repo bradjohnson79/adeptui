@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   AUTO_SELECT_FAMILY,
+  DEFAULT_GENERATOR_FAMILY,
   anyExplicitLocalFamilyEnabled,
+  applyDefaultGeneratorIfIdle,
   buildGeneratorSourcesPayload,
   clampBatchCount,
   cloudModelStatusLabel,
@@ -13,7 +15,9 @@ import {
   isAutoSelectActive,
   mergePlanWithInventory,
   normalizeDiscoveredImageModel,
+  primaryGeneratorValue,
   returnToAutoSelectOnly,
+  setPrimaryLocalGenerator,
   summarizeGenerationPlan,
   type CharacterGeneratorPlan,
   type NormalizedDiscoveredImageModel,
@@ -32,6 +36,97 @@ function plan(partial: Partial<CharacterGeneratorPlan> = {}): CharacterGenerator
 }
 
 describe("Character generator plan", () => {
+  it("defaults to Qwen Image 2512 with Auto Select off", () => {
+    expect(DEFAULT_CHARACTER_GENERATOR_PLAN.defaultGenerator).toBe(DEFAULT_GENERATOR_FAMILY);
+    expect(DEFAULT_CHARACTER_GENERATOR_PLAN.autoSelect.enabled).toBe(false);
+  });
+
+  it("enables Qwen on empty prefs when the family is executable", () => {
+    const hydrated = hydratePlanFromPreferences(null, [
+      { id: "illustrious", label: "Illustrious XL", executable: true },
+      { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+    ], []);
+    expect(hydrated.autoSelect.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+    expect(primaryGeneratorValue(hydrated)).toBe("qwen2512");
+  });
+
+  it("does not silently enable Auto Select or Illustrious when Qwen is unavailable", () => {
+    const hydrated = hydratePlanFromPreferences(null, [
+      { id: "illustrious", label: "Illustrious XL", executable: true },
+      { id: "qwen2512", label: "Qwen Image 2512", executable: false },
+    ], []);
+    expect(hydrated.autoSelect.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+    expect(applyDefaultGeneratorIfIdle(hydrated, [
+      { id: "qwen2512", label: "Qwen", executable: false },
+    ]).localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBeFalsy();
+  });
+
+  it("keeps a saved Illustrious preference over the Qwen default", () => {
+    const hydrated = hydratePlanFromPreferences(
+      {
+        local: [
+          { family: "auto", enabled: false, batchCount: 1 },
+          { family: "illustrious", enabled: true, batchCount: 2 },
+        ],
+        api: null,
+      },
+      [
+        { id: "illustrious", label: "Illustrious XL", executable: true },
+        { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+      ],
+      [],
+    );
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(true);
+    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(false);
+    expect(hydrated.autoSelect.enabled).toBe(false);
+  });
+
+  it("migrates Auto-Select-only saved prefs to the Qwen default", () => {
+    const hydrated = hydratePlanFromPreferences(
+      {
+        local: [
+          { family: "auto", enabled: true, batchCount: 1 },
+          { family: "illustrious", enabled: false, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+        ],
+        api: null,
+      },
+      [
+        { id: "illustrious", label: "Illustrious XL", executable: true },
+        { id: "qwen2512", label: "Qwen Image 2512", executable: true },
+      ],
+      [],
+    );
+    expect(hydrated.autoSelect.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+  });
+
+  it("compact generator pick enables only that local family and clears Cloud", () => {
+    const next = setPrimaryLocalGenerator(
+      plan({
+        apiEnabled: true,
+        apiModels: [
+          { providerId: "kie", modelId: "nano-banana-pro", model: "nano-banana-kie", enabled: true, batchCount: 1 },
+        ],
+        localFamilies: [
+          { family: "illustrious", enabled: true, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+        ],
+      }),
+      "qwen2512",
+      1,
+    );
+    expect(next.autoSelect.enabled).toBe(false);
+    expect(next.apiEnabled).toBe(false);
+    expect(next.apiModels.every((row) => !row.enabled)).toBe(true);
+    expect(next.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
+    expect(next.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+  });
+
   it("clamps batch counts to 1–4 and defaults to 1", () => {
     expect(clampBatchCount(undefined)).toBe(1);
     expect(clampBatchCount(0)).toBe(1);
@@ -267,9 +362,10 @@ describe("Character generator plan", () => {
   });
 
   it("counts Auto Select sheets when an executable local family exists", () => {
-    const summary = summarizeGenerationPlan(plan(), [
-      { id: "qwen2512", label: "Qwen Image 2512", executable: true },
-    ]);
+    const summary = summarizeGenerationPlan(
+      plan({ autoSelect: { enabled: true, batchCount: 1 } }),
+      [{ id: "qwen2512", label: "Qwen Image 2512", executable: true }],
+    );
     expect(summary.totalSheets).toBe(1);
     expect(summary.localLines).toEqual([{ label: "Auto Select", count: 1 }]);
     expect(summary.sheets[0].family).toBe(AUTO_SELECT_FAMILY);
@@ -294,8 +390,9 @@ describe("Character generator plan", () => {
 
   it("hasExecutableSource reflects inventory truth for Auto Select and Cloud", () => {
     expect(hasExecutableSource(plan(), [])).toBe(false);
-    expect(hasExecutableSource(plan(), undefined)).toBe(true);
-    expect(hasExecutableSource(plan(), [{ id: "qwen2512", label: "Qwen", executable: true }])).toBe(true);
+    const autoOn = plan({ autoSelect: { enabled: true, batchCount: 1 } });
+    expect(hasExecutableSource(autoOn, undefined)).toBe(true);
+    expect(hasExecutableSource(autoOn, [{ id: "qwen2512", label: "Qwen", executable: true }])).toBe(true);
     const cloudOn = plan({
       apiEnabled: true,
       apiModels: [
@@ -309,6 +406,9 @@ describe("Character generator plan", () => {
 describe("Character Creator generator UI contract", () => {
   it("CharacterGeneratorPanel has batch count controls and per-model checkboxes", () => {
     const panel = readFileSync(new URL("./CharacterGeneratorPanel.tsx", import.meta.url), "utf8");
+    expect(panel).toContain('data-testid="character-generator-compact"');
+    expect(panel).toContain('data-testid="character-more-generators"');
+    expect(panel).toContain("More Generators");
     expect(panel).toContain("function BatchSelect");
     expect(panel).toContain("<span>Batches</span>");
     expect(panel).toContain('testId="generator-auto-batch"');
@@ -340,6 +440,13 @@ describe("Character Creator generator UI contract", () => {
     expect(plan).toContain("adapterAvailable");
     const core = readFileSync(new URL("./CharacterCore.tsx", import.meta.url), "utf8");
     expect(core).toContain("CharacterGeneratorPanel");
+    expect(core).toContain("CharacterActiveCrsCard");
+    expect(core).toContain("LibraryQuickPreviewModal");
+    const refCtrl = readFileSync(new URL("./CharacterReferenceControl.tsx", import.meta.url), "utf8");
+    expect(refCtrl).toContain("Ask Co-Director to create a Character Reference Sheet");
+    expect(refCtrl).toContain('data-testid="character-reference-tip"');
+    expect(refCtrl).toContain("single-view image");
+    expect(refCtrl).toContain("multi-view Character Reference Sheet");
   });
 
   it("plan contract: every local family and API model has enabled checkbox plus batchCount", () => {
