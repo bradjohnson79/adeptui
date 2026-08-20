@@ -142,8 +142,8 @@ def _parse_resolution(resolution_str: str) -> tuple[int, int]:
     }
     if resolution_str in preset:
         return preset[resolution_str]
-    if "x" in resolution_str:
-        parts = resolution_str.split("x")
+    if "x" in resolution_str.lower():
+        parts = resolution_str.lower().split("x")
         try:
             return int(parts[0]), int(parts[1])
         except (ValueError, IndexError):
