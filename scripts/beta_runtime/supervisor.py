@@ -310,6 +310,7 @@ class Supervisor:
         self.web_port = int(os.environ.get("STUDIO_WEB_PORT", "8760"))
         self.comfy_url = os.environ.get("STUDIO_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
         self._api_health_fail_streak = 0
+        self._api_started_mono = 0.0
         self._last_api_health_ms: float | None = None
 
     def log(self, msg: str) -> None:
@@ -603,6 +604,8 @@ class Supervisor:
         if leftover:
             self.log(f"clearing leftover API listeners before spawn: {leftover}")
             _recycle_api_listeners(leftover)
+        self._api_started_mono = time.monotonic()
+        self._api_health_fail_streak = 0
         self.log(f"starting API: {' '.join(cmd)}")
         popen = subprocess.Popen(
             cmd,
@@ -789,13 +792,16 @@ class Supervisor:
                             self.adopt_api = False
                             self.start_api()
                     # Process alive but health dead for several ticks → restart (not adopted).
+                    # Uvicorn import on this machine can exceed 30s; do not kill a booting API.
                     svc = self.services.get("api")
+                    api_age = time.monotonic() - float(getattr(self, "_api_started_mono", 0) or 0)
                     if (
                         not getattr(self, "adopt_api", False)
                         and svc
                         and svc.popen
                         and svc.popen.poll() is None
                         and self._api_health_fail_streak >= 5
+                        and api_age >= 120
                     ):
                         self.log(
                             f"api health fail streak={self._api_health_fail_streak} "
