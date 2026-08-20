@@ -5531,6 +5531,40 @@ export const api = {
           body: JSON.stringify(body),
         }
       ),
+    colorPresets: () =>
+      req<{ presets: Record<string, unknown>[] }>("/api/magi/color/presets"),
+    previewColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/color/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params }),
+      }),
+    applyColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/color/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params }),
+      }),
+    upscaleCapabilities: () =>
+      req<Record<string, unknown>>("/api/magi/upscale/capabilities"),
+    previewUpscale: (projectId: string, assetId: string, engine: string, model: string, targetResolution: string) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/upscale/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: assetId, engine, model, target_resolution: targetResolution }),
+      }),
+    applyUpscale: (projectId: string, assetId: string, engine: string, model: string, targetResolution: string) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/upscale/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: assetId, engine, model, target_resolution: targetResolution }),
+      }),
+    generateAudio: (projectId: string, kind: string, prompt: string) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/audio/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, prompt }),
+      }),
   },
   library: (projectId: string, opts?: { q?: string; scope?: string; folder?: string; system_key?: string }) => {
     const q = new URLSearchParams();

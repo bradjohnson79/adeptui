@@ -1608,8 +1608,59 @@ function MagiEditorInner({
       </MagiAccordion>
       <MagiAccordion id="color" title="Color" open={Boolean(layout.accordionState.color)} onToggle={(next) => setAccordion("color", next)}>
         <div className="magi-field">
-          <label>Look note</label>
-          <input type="text" placeholder="Soft contrast, warm skin tones" />
+          <label>Preset</label>
+          <select
+            value=""
+            onChange={(e) => {
+              if (!currentAsset) return;
+              const presetId = e.target.value;
+              if (presetId) {
+                api.magi.previewColorGrade(project.id, currentAsset.id, presetId, {}).then(() => {});
+              }
+            }}
+          >
+            <option value="">None</option>
+            <option value="cinematic_neutral">Cinematic Neutral</option>
+            <option value="cinematic_warm">Warm Cinematic</option>
+            <option value="cinematic_cool">Cool Cinematic</option>
+            <option value="golden_hour">Golden Hour</option>
+            <option value="teal_orange">Teal &amp; Orange</option>
+            <option value="film_print">Film Print</option>
+            <option value="vintage">Vintage</option>
+            <option value="high_contrast">High Contrast</option>
+            <option value="low_contrast">Low Contrast</option>
+            <option value="bleach_bypass">Bleach Bypass</option>
+            <option value="dreamy">Dreamy</option>
+            <option value="noir">Noir</option>
+            <option value="anime_vibrant">Anime Vibrant</option>
+            <option value="muted_drama">Muted Drama</option>
+            <option value="night_moonlight">Night / Moonlight</option>
+          </select>
+        </div>
+        <div className="magi-field">
+          <label>Exposure</label>
+          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+        </div>
+        <div className="magi-field">
+          <label>Contrast</label>
+          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+        </div>
+        <div className="magi-field">
+          <label>Saturation</label>
+          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+        </div>
+        <div className="magi-actions">
+          <button type="button" className="magi-primary" onClick={async () => {
+            if (!currentAsset) return;
+            await api.magi.applyColorGrade(project.id, currentAsset.id, "", {});
+            setMessage("Color grade applied.");
+            await onChange();
+          }}>
+            Apply Grade
+          </button>
+          <button type="button" className="magi-chip" onClick={() => setMessage("Color graded reset.")}>
+            Reset
+          </button>
         </div>
       </MagiAccordion>
       <MagiAccordion id="prompt" title="Prompt" open={Boolean(layout.accordionState.prompt)} onToggle={(next) => setAccordion("prompt", next)}>
@@ -1634,6 +1685,103 @@ function MagiEditorInner({
         <div className="magi-actions">
           <button type="button" className="magi-chip" onClick={() => queueProposal("remove_silence")}>Remove Silence</button>
           <button type="button" className="magi-chip" onClick={() => queueProposal("add_ambience")}>Add Ambience</button>
+        </div>
+        <p className="magi-group-label">AI Music &amp; SFX</p>
+        <div className="magi-field">
+          <label>Prompt</label>
+          <textarea
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            placeholder="Give this scene an intimate mysterious score with subtle café ambience..."
+            rows={2}
+          />
+        </div>
+        <div className="magi-actions">
+          <button type="button" className="magi-chip" onClick={async () => {
+            try {
+              await api.magi.generateAudio(project.id, "music", command || "ambient background");
+              setMessage("Music generation queued.");
+              await onChange();
+            } catch (err: any) {
+              setMessage(err?.message || "Music generation failed");
+            }
+          }}>
+            Music
+          </button>
+          <button type="button" className="magi-chip" onClick={async () => {
+            try {
+              await api.magi.generateAudio(project.id, "sfx", command || "ambient sfx");
+              setMessage("SFX generation queued.");
+              await onChange();
+            } catch (err: any) {
+              setMessage(err?.message || "SFX generation failed");
+            }
+          }}>
+            SFX
+          </button>
+          <button type="button" className="magi-chip" onClick={async () => {
+            try {
+              await api.magi.generateAudio(project.id, "all", command || "music and ambience");
+              setMessage("Audio generation queued.");
+              await onChange();
+            } catch (err: any) {
+              setMessage(err?.message || "Audio generation failed");
+            }
+          }}>
+            Music + SFX
+          </button>
+        </div>
+        <div className="magi-field">
+          <label>Range</label>
+          <select defaultValue="all">
+            <option value="all">Entire Edit</option>
+            <option value="clip">Selected Clip</option>
+          </select>
+        </div>
+      </MagiAccordion>
+      <MagiAccordion id="upscale" title="Upscale" open={Boolean(layout.accordionState.upscale)} onToggle={(next) => setAccordion("upscale", next)}>
+        <div className="magi-field">
+          <label>Target</label>
+          <select defaultValue="1920x1080">
+            <option value="1280x720">720p</option>
+            <option value="1920x1080">1080p</option>
+            <option value="2560x1440">1440p</option>
+            <option value="3840x2160">4K</option>
+            <option value="7680x4320">8K</option>
+          </select>
+        </div>
+        <div className="magi-field">
+          <label>Engine</label>
+          <select defaultValue="ffmpeg-scale">
+            <option value="ffmpeg-scale">FFmpeg (fast)</option>
+            <option value="realesrgan-ncnn-vulkan">Real-ESRGAN (GPU)</option>
+          </select>
+        </div>
+        <div className="magi-field">
+          <label>Model</label>
+          <select defaultValue="lanczos">
+            <option value="lanczos">Lanczos (general)</option>
+            <option value="bicubic">Bicubic (soft)</option>
+            <option value="realesrgan-x4plus">Real-ESRGAN 4x+</option>
+            <option value="realesr-animevideov3">Anime Video 4x</option>
+          </select>
+        </div>
+        <div className="magi-actions">
+          <button type="button" className="magi-primary" onClick={async () => {
+            if (!currentAsset) return;
+            await api.magi.previewUpscale(project.id, currentAsset.id, "ffmpeg-scale", "lanczos", "1920x1080");
+            setMessage("Upscale preview queued.");
+          }}>
+            Preview
+          </button>
+          <button type="button" className="magi-chip" onClick={async () => {
+            if (!currentAsset) return;
+            await api.magi.applyUpscale(project.id, currentAsset.id, "ffmpeg-scale", "lanczos", "1920x1080");
+            setMessage("Upscale applied.");
+            await onChange();
+          }}>
+            Apply Upscale
+          </button>
         </div>
       </MagiAccordion>
       <MagiAccordion id="clipProperties" title="Clip Properties" open={Boolean(layout.accordionState.clipProperties)} onToggle={(next) => setAccordion("clipProperties", next)}>

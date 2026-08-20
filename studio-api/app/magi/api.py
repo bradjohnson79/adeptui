@@ -306,3 +306,163 @@ def export_timeline_endpoint(
             fields={"error": result.get("error")},
         )
     return result
+
+
+@router.get("/color/presets")
+def list_color_grading_presets() -> dict[str, Any]:
+    """List all available color grading presets."""
+    from .color_grading import list_color_presets
+
+    return {"presets": list_color_presets()}
+
+
+@router.post("/projects/{project_id}/color/preview")
+def preview_color_grade(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Preview a color grade on a clip (first 3 seconds)."""
+    from .color_grading import preview_color_grade as _preview
+
+    asset_id = body.get("asset_id") or body.get("assetId")
+    preset_id = body.get("preset_id") or body.get("presetId")
+    params = body.get("params") or {}
+    if not asset_id:
+        raise magi_error(
+            "ASSET_REQUIRED",
+            "Color grade preview requires an asset_id.",
+            fields={"body": body},
+        )
+    return _preview(db, project_id, asset_id, preset_id, params)
+
+
+@router.post("/projects/{project_id}/color/apply")
+def apply_color_grade(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Apply a color grade to an asset. Creates a new graded Library asset."""
+    from .color_grading import apply_color_grade_to_asset
+
+    asset_id = body.get("asset_id") or body.get("assetId")
+    preset_id = body.get("preset_id") or body.get("presetId")
+    params = body.get("params") or {}
+    if not asset_id:
+        raise magi_error(
+            "ASSET_REQUIRED",
+            "Color grade apply requires an asset_id.",
+            fields={"body": body},
+        )
+    return apply_color_grade_to_asset(db, project_id, asset_id, preset_id, params)
+
+
+@router.get("/upscale/capabilities")
+def upscale_capabilities() -> dict[str, Any]:
+    """List available upscaling engines and models."""
+    return {
+        "engines": [
+            {
+                "id": "realesrgan-ncnn-vulkan",
+                "label": "Real-ESRGAN (ncnn Vulkan)",
+                "available": True,
+                "models": [
+                    {"id": "realesrgan-x4plus", "label": "Real-ESRGAN 4x+", "scale": 4},
+                    {"id": "realesrgan-x2plus", "label": "Real-ESRGAN 2x+", "scale": 2},
+                    {"id": "realesr-animevideov3", "label": "Anime Video 4x", "scale": 4},
+                    {"id": "realesrgan-x4plus-anime", "label": "Anime 4x", "scale": 4},
+                ],
+            },
+            {
+                "id": "ffmpeg-scale",
+                "label": "FFmpeg (fast software scale)",
+                "available": True,
+                "models": [
+                    {"id": "lanczos", "label": "Lanczos", "scale": 0},
+                    {"id": "bicubic", "label": "Bicubic", "scale": 0},
+                ],
+            },
+        ]
+    }
+
+
+@router.post("/projects/{project_id}/upscale/preview")
+def preview_upscale(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Preview upscale on a short segment."""
+    from .upscaling import preview_upscale as _preview_upscale
+
+    asset_id = body.get("asset_id") or body.get("assetId")
+    engine = body.get("engine") or "ffmpeg-scale"
+    model = body.get("model") or "lanczos"
+    target_resolution = body.get("target_resolution") or "1920x1080"
+    if not asset_id:
+        raise magi_error(
+            "ASSET_REQUIRED",
+            "Upscale preview requires an asset_id.",
+            fields={"body": body},
+        )
+    return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution)
+
+
+@router.post("/projects/{project_id}/upscale/apply")
+def apply_upscale(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Apply upscaling to an asset. Creates a new upscaled Library asset."""
+    from .upscaling import apply_upscale as _apply_upscale
+
+    asset_id = body.get("asset_id") or body.get("assetId")
+    engine = body.get("engine") or "ffmpeg-scale"
+    model = body.get("model") or "lanczos"
+    target_resolution = body.get("target_resolution") or "1920x1080"
+    if not asset_id:
+        raise magi_error(
+            "ASSET_REQUIRED",
+            "Upscale apply requires an asset_id.",
+            fields={"body": body},
+        )
+    return _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
+
+
+@router.post("/projects/{project_id}/audio/generate")
+def generate_audio(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Generate AI music or SFX for a project."""
+    kind = body.get("kind") or "music"
+    prompt = body.get("prompt") or ""
+    try:
+        from ..generation_tools import ops
+
+        if kind in ("music", "all"):
+            ops.run_audio_generate(
+                db,
+                project_id=project_id,
+                kind="music",
+                prompt=prompt or "ambient background music",
+                duration_sec=float(body.get("duration") or 30),
+            )
+        if kind in ("sfx", "all"):
+            ops.run_audio_generate(
+                db,
+                project_id=project_id,
+                kind="sfx",
+                prompt=prompt or "ambient sound effects",
+                duration_sec=float(body.get("duration") or 15),
+            )
+        return {"ok": True, "kind": kind, "prompt": prompt, "message": f"Audio generation queued for {kind}."}
+    except Exception as exc:
+        raise magi_error(
+            "AUDIO_GENERATION_FAILED",
+            f"Audio generation failed: {exc}",
+            fields={"kind": kind, "prompt": prompt},
+        ) from exc
