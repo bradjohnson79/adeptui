@@ -269,6 +269,14 @@ class TestI2VTopology:
         assert n["inputs"]["height"] == SNAPPED_HEIGHT
         assert n["inputs"]["strength"] == pytest.approx(0.95)
 
+    def test_base_sampler_receives_last_frame_images(self):
+        wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT, start_image_path=self.START_IMAGE)
+        sampler = _node(wf, "LTXVBaseSampler")
+        img_id = [nid for nid, n in wf.items() if n["class_type"] == "LoadImage"][0]
+        assert sampler["inputs"]["optional_cond_images"] == [img_id, 0]
+        assert sampler["inputs"]["optional_cond_indices"] == "0"
+        assert sampler["inputs"]["strength"] == pytest.approx(0.95)
+
     def test_i2v_stg_guider_wired_from_ltxv_img_to_video(self):
         wf = build_ltx_25_i2v(SETTINGS, EXEC_ID, PROMPT, start_image_path=self.START_IMAGE)
         guider = _node(wf, "STGGuiderNode")

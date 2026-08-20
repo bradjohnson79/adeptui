@@ -55,11 +55,15 @@ def compare_intent_vs_actual(
         if json_at > 0:
             prose = prose[:json_at]
         last_seen = ""
-        for part in reversed(prose.replace("\n", ". ").split(".")):
-            text = part.strip()
-            if text:
+        motion = ("turn", "look", "walk", "dolly", "camera", "head", "gaze", "step", "facing")
+        sentences = [part.strip() for part in prose.replace("\n", ". ").split(".") if part.strip()]
+        for text in reversed(sentences):
+            low = text.lower()
+            if any(token in low for token in motion):
                 last_seen = text
                 break
+        if not last_seen and sentences:
+            last_seen = sentences[-1]
         continue_items = [
             f"Continue: {last_seen}." if last_seen else "Continue the same beat without resetting the shot."
         ]

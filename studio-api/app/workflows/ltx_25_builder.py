@@ -413,6 +413,10 @@ def build_ltx_25_i2v(
             "sampler": [n_sampler, 0],
             "sigmas": [n_sched, 0],
             "noise": [n_noise, 0],
+            "optional_cond_images": [n_img, 0],
+            "optional_cond_indices": "0",
+            "strength": 0.95,
+            "crop": "center",
         },
     }
 
