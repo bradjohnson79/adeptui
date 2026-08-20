@@ -69,6 +69,18 @@ def _parse_json_tail(raw: str) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _vram_used_gb() -> float | None:
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            return None
+        free, total = torch.cuda.mem_get_info(0)
+        return round((total - free) / (1024**3), 3)
+    except Exception:
+        return None
+
+
 def _health_payload() -> dict:
     try:
         import torch
@@ -97,7 +109,15 @@ def _live_infer(video: str, question: str, model_path: str, model_id: str) -> di
         torch_dtype=torch.float16,
         device_map={"": 0},
         trust_remote_code=True,
+        attn_implementation="sdpa",
     )
+    # Vision tower defaults to flash_attention_2 in config.json. Flash-attn is
+    # optional; SDPA is the documented fallback. Do not rewrite pinned weights.
+    def _force_sdpa(module) -> None:
+        if getattr(module, "attn_impl", None) == "flash_attention_2":
+            module.attn_impl = "sdpa"
+
+    model.apply(_force_sdpa)
     model.eval()
     processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
     messages = [
@@ -126,6 +146,8 @@ def _live_infer(video: str, question: str, model_path: str, model_id: str) -> di
             messages, tokenize=True, add_generation_prompt=True, return_dict=True, return_tensors="pt"
         )
     inputs = inputs.to(model.device)
+    vram_during = _vram_used_gb()
+    _emit({"phase": "infer", "vramUsedGb": vram_during, "device": str(torch.cuda.get_device_name(0))})
     output = model.generate(**inputs, max_new_tokens=512, use_cache=True)
     generated = [o[len(i) :] for i, o in zip(inputs.input_ids, output)]
     raw = processor.batch_decode(generated, skip_special_tokens=True)[0]
@@ -133,8 +155,16 @@ def _live_infer(video: str, question: str, model_path: str, model_id: str) -> di
     del model
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    unfinished = [str(x) for x in (parsed.get("unfinishedActions") or []) if str(x).strip()]
-    completed = [str(x) for x in (parsed.get("completedActions") or []) if str(x).strip()]
+    def _as_str_list(value):
+        if isinstance(value, str):
+            text = value.strip()
+            return [text] if text else []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
+    unfinished = _as_str_list(parsed.get("unfinishedActions"))
+    completed = _as_str_list(parsed.get("completedActions"))
     confidence = parsed.get("confidence")
     try:
         confidence = float(confidence) if confidence is not None else None
@@ -154,6 +184,9 @@ def _live_infer(video: str, question: str, model_path: str, model_id: str) -> di
         "confidence": confidence,
         "loadToInferSec": round(time.time() - t0, 3),
         "device": str(torch.cuda.get_device_name(0)),
+        "vramUsedGb": vram_during,
+        "vramDuringGb": vram_during,
+        "attnImplementation": "sdpa",
     }
 
 
@@ -180,6 +213,13 @@ def main() -> int:
         if mode in ("fail", "error"):
             raise RuntimeError("PERCEPTION_FORCED_FAILURE")
         if mode in ("stub", "1", "true", "yes"):
+            allow = (os.environ.get("ADEPT_ALLOW_PERCEPTION_STUB") or "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            ) or bool((os.environ.get("PYTEST_CURRENT_TEST") or "").strip())
+            if not allow:
+                raise RuntimeError("STUB_FORBIDDEN")
             payload = _stub_observation(args.video, args.question, args.model_id)
         else:
             if not args.model_path or not Path(args.model_path).exists():
@@ -189,7 +229,15 @@ def main() -> int:
         _emit({"phase": "done", "out": str(out)})
         return 0
     except Exception as exc:
-        payload = {"ok": False, "error": str(exc)[:500], "modelId": args.model_id, "mode": mode}
+        import traceback
+
+        payload = {
+            "ok": False,
+            "error": str(exc)[:500],
+            "traceback": traceback.format_exc()[-2000:],
+            "modelId": args.model_id,
+            "mode": mode,
+        }
         _write(out, payload)
         _emit({"phase": "failed", "error": payload["error"]})
         return 2

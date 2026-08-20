@@ -1,12 +1,12 @@
 # InternVideo3-8B-Instruct License Clearance
 
-Reviewed on `2026-08-20`.
+Reviewed on `2026-08-20`. Live reconfirm `2026-08-20` (closure stage).
 
 This document is a technical compliance audit for Adept UI implementation gating. It is **not** professional legal advice.
 
 ## Verdict
 
-**CLEARED for optional / hardware-gated install** under Apache License 2.0, subject to the pinned sources below.
+**CLEARED for optional / hardware-gated install** under Apache License 2.0, subject to the pinned sources below. The DeepSeek audit’s CC-BY-NC weight claim does **not** match the live pinned card (`apache-2.0`, `gated=false`, revision `c4602918b65225650d152db2850fe34e01d21fcd`). Not required for VideoChat3 GO.
 
 Not a required Adept UI boot component. Absence on low-VRAM machines is honest “Deep sequence reasoning unavailable,” not a program failure.
 

@@ -179,13 +179,47 @@ def test_video_understanding_revisions_are_pinned():
         INTERNVIDEO3_HF_ID,
         INTERNVIDEO3_REVISION,
         VIDEOCHAT3_HF_ID,
+        VIDEOCHAT3_POLL_SHA256,
         VIDEOCHAT3_REVISION,
+        VIDEOCHAT3_WEIGHT_BYTES,
+        VIDEOCHAT3_WEIGHT_SHA256,
     )
 
     assert VIDEOCHAT3_HF_ID == "MCG-NJU/VideoChat3-4B"
     assert VIDEOCHAT3_REVISION == "37fa901ec5913f84bc31108ebc1e60ad1903634c"
     assert INTERNVIDEO3_HF_ID == "yanziang/InternVideo3-8B-Instruct"
     assert INTERNVIDEO3_REVISION == "c4602918b65225650d152db2850fe34e01d21fcd"
+    assert VIDEOCHAT3_POLL_SHA256["config.json"].startswith("d855aa0d")
+    assert VIDEOCHAT3_WEIGHT_BYTES["model-0001-others-save_rank0.safetensors"] == 4252181336
+    assert len(VIDEOCHAT3_WEIGHT_SHA256) == 3
+
+
+def test_poll_safe_integrity_rejects_filename_only(tmp_path):
+    from app.codirector.video_intelligence.paths import poll_safe_integrity
+
+    dest = tmp_path / "videochat3-4b"
+    dest.mkdir()
+    (dest / "config.json").write_text("{}", encoding="utf-8")
+    (dest / "model.safetensors.index.json").write_text("{}", encoding="utf-8")
+    (dest / "model-0001-others-save_rank0.safetensors").write_bytes(b"not-weights")
+    result = poll_safe_integrity(dest)
+    assert result["ok"] is False
+    assert result["reason"] in ("SHA_MISMATCH:config.json", "MISSING:model-0001-others-save_rank0.safetensors") or str(
+        result["reason"]
+    ).startswith("SHA_MISMATCH") or str(result["reason"]).startswith("SIZE_MISMATCH")
+
+
+def test_certify_receipt_is_required_for_ready(tmp_path, monkeypatch):
+    from app.codirector.video_intelligence import certify
+
+    monkeypatch.setattr(certify, "load_receipt", lambda: None)
+    assert certify.receipt_is_ready() is False
+    monkeypatch.setattr(
+        certify,
+        "load_receipt",
+        lambda: {"ok": True, "liveInfer": True, "revision": "37fa901ec5913f84bc31108ebc1e60ad1903634c"},
+    )
+    assert certify.receipt_is_ready() is True
 
 
 def test_stub_perception_is_used_by_compare_and_adapter_compile(tmp_path, monkeypatch):
@@ -286,6 +320,37 @@ def test_continuity_on_forces_sequential_scene_generation():
     assert sequential is False
 
 
+def test_worker_python_prefers_override(monkeypatch, tmp_path):
+    from app.codirector.video_intelligence.paths import worker_python
+
+    fake = tmp_path / "gpu-python.exe"
+    fake.write_text("", encoding="utf-8")
+    monkeypatch.setenv("ADEPT_VIDEO_INTELLIGENCE_PYTHON", str(fake))
+    assert worker_python() == fake
+
+
+def test_health_probe_skips_spawn_when_requested(monkeypatch, tmp_path):
+    from app.codirector.video_intelligence import health
+
+    dest = tmp_path / "videochat3-4b"
+    dest.mkdir()
+    monkeypatch.setattr(health, "videochat3_dir", lambda: dest)
+    monkeypatch.setattr(health, "model_present", lambda *args, **kwargs: True)
+    monkeypatch.setattr(health, "_config_ok", lambda *args, **kwargs: (True, "ok"))
+    monkeypatch.setattr(health, "poll_safe_integrity", lambda *args, **kwargs: {"ok": True})
+    spawned: list[bool] = []
+
+    def fake_run(*args, **kwargs):
+        spawned.append(True)
+        raise AssertionError("worker --health must not spawn on poll-safe verify")
+
+    monkeypatch.setattr(health.subprocess, "run", fake_run)
+    result = health.probe_component("videochat3_4b", spawn_worker=False)
+    assert spawned == []
+    assert result["ok"] is True
+    assert result["workerHealth"]["skipped"] is True
+
+
 def test_prepare_plan_routes_videochat3_away_from_hunyuan():
     from app.setup.orchestrator import _checkpoint_for
 
@@ -294,3 +359,130 @@ def test_prepare_plan_routes_videochat3_away_from_hunyuan():
     assert "Tencent" not in action["summary"]
     hunyuan = _checkpoint_for("hunyuan_video_15", "install")
     assert hunyuan["type"] == "hunyuan_hf_install"
+
+
+def test_production_forbids_stub_and_missing_model_is_unavailable(tmp_path, monkeypatch):
+    from app.codirector.video_intelligence.worker_client import (
+        normalize_perception_reason,
+        run_perception,
+        stub_allowed,
+    )
+
+    monkeypatch.setenv("ADEPT_TEMPORAL_PERCEPTION_MODE", "stub")
+    monkeypatch.delenv("ADEPT_ALLOW_PERCEPTION_STUB", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    assert stub_allowed() is False
+    with pytest.raises(RuntimeError, match="STUB_FORBIDDEN"):
+        run_perception(str(tmp_path / "clip.mp4"))
+
+    monkeypatch.setenv("ADEPT_TEMPORAL_PERCEPTION_MODE", "live")
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.worker_client.videochat3_dir",
+        lambda: tmp_path / "missing-videochat3",
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.worker_client.model_present",
+        lambda *args, **kwargs: False,
+    )
+    with pytest.raises(RuntimeError, match="MODEL_NOT_INSTALLED"):
+        run_perception(str(tmp_path / "clip.mp4"))
+    assert normalize_perception_reason("VIDEOCHAT3_NOT_INSTALLED") == "MODEL_NOT_INSTALLED"
+
+
+def test_review_maps_missing_model_to_unavailable_without_stub_directives(tmp_path, monkeypatch):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"not-a-real-mp4")
+    master = _master_two_batches()
+    monkeypatch.delenv("ADEPT_TEMPORAL_PERCEPTION_MODE", raising=False)
+    monkeypatch.delenv("ADEPT_ALLOW_PERCEPTION_STUB", raising=False)
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service._asset_path",
+        lambda *args, **kwargs: str(video),
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service.best_effort_free_generator",
+        lambda: {"comfyFreeRequested": True, "comfyFreeStatus": 200, "vramAfterFreeGb": 20.0},
+    )
+    monkeypatch.setattr(
+        "app.codirector.video_intelligence.service.preflight_for_review",
+        lambda: {"ok": True, "freeVramGb": 20.0, "unknownVram": False},
+    )
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("MODEL_NOT_INSTALLED")
+
+    monkeypatch.setattr("app.codirector.video_intelligence.service.run_perception", boom)
+    packet = review_completed_batch(None, "p1", "s1", master, master.batchBlocks[0], target_batch_id="bb_b")
+    assert packet.availability == "unavailable"
+    assert packet.reason == "MODEL_NOT_INSTALLED"
+    assert packet.continuation.preserve == []
+    assert packet.continuation.nextBatchDirectives == []
+    assert packet_blocks_submit(master, "bb_b") is False
+
+
+def test_extracted_review_clip_is_removed(tmp_path):
+    from app.codirector.video_intelligence.clip_extract import cleanup_extracted_clip
+
+    source = tmp_path / "approved.mp4"
+    source.write_bytes(b"source")
+    review = tmp_path / "approved.review512.mp4"
+    review.write_bytes(b"extract")
+    assert cleanup_extracted_clip(str(review), source_path=str(source)) is True
+    assert not review.exists()
+    assert source.exists()
+    assert cleanup_extracted_clip(str(source), source_path=str(source)) is False
+
+
+def test_gpu_lease_records_vram_after_free(monkeypatch):
+    from app.codirector.video_intelligence import gpu_lease
+
+    class FakeResp:
+        status_code = 200
+
+    monkeypatch.setattr(gpu_lease, "query_free_vram_gb", lambda: 12.5)
+
+    class FakeHttpx:
+        @staticmethod
+        def post(*args, **kwargs):
+            assert kwargs.get("timeout") == 30.0
+            return FakeResp()
+
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "httpx", FakeHttpx)
+    evidence = gpu_lease.best_effort_free_generator()
+    assert evidence["comfyFreeRequested"] is True
+    assert evidence["comfyFreeStatus"] == 200
+    assert evidence["vramAfterFreeGb"] == 12.5
+    assert evidence["vramFullyReleased"] is True
+
+
+def test_unfinished_string_does_not_split_into_characters():
+    from app.codirector.video_intelligence.worker_client import _as_str_list
+
+    assert _as_str_list("The turn is unfinished.") == ["The turn is unfinished."]
+    assert _as_str_list(["a", "b"]) == ["a", "b"]
+    assert _as_str_list(None) == []
+
+
+def test_unfinished_string_compare_is_one_directive():
+    from app.codirector.video_intelligence.worker_client import _as_str_list
+
+    packet = TemporalContinuityPacket()
+    observation = VideoPerceptionObservation(
+        modelId="videochat3-4b",
+        rawText="Korri begins turning toward Anadriya.",
+        unfinishedActions=_as_str_list("turn toward the other character"),
+        parseOk=True,
+    )
+    filled = compare_intent_vs_actual(packet, observation, protection="strong")
+    continue_items = filled.continuation.continue_
+    assert continue_items == ["Finish: turn toward the other character"]
+    assert len(continue_items) == 1
+
+
+def test_continuity_off_does_not_block_submit():
+    master = _master_two_batches()
+    master.coDirectorContinuityPolicy.enabled = False
+    assert packet_blocks_submit(master, "bb_b") is False

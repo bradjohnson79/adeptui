@@ -65,11 +65,49 @@ def _concurrency(wf: CertifiedWorkflow) -> ConcurrencyClass:
     return ConcurrencyClass.LIGHT_LOCAL
 
 
+LTX_25_GENERATOR_IDS = frozenset({
+    "ltx-2.5-full",
+    "ltx-2.5-distilled",
+    "ltx-2.5-comfy",
+})
+
+
+def is_ltx_25_generator(generator_id: str | None) -> bool:
+    return (generator_id or "").strip().lower() in LTX_25_GENERATOR_IDS
+
+
+def local_video_identity(
+    *,
+    requested_model: str | None,
+    leaf_workflow_key: str,
+    ltx_23_checkpoint: str,
+    ltx_25_checkpoint: str,
+) -> dict[str, str]:
+    """Requested Timeline id vs the checkpoint that will actually load.
+
+    Never copies scene.engine (which defaults to minimax-h3) onto LTX jobs.
+    """
+    requested = (requested_model or "").strip()
+    leaf = (leaf_workflow_key or "").strip()
+    if is_ltx_25_generator(requested) or leaf.startswith("ltx_25"):
+        resolved = ltx_25_checkpoint
+    elif requested.startswith("ltx") or leaf.startswith("ltx"):
+        resolved = ltx_23_checkpoint
+    else:
+        resolved = requested
+    return {
+        "requestedModel": requested or resolved,
+        "resolvedRuntimeModel": resolved,
+        "videoModel": resolved,
+        "workflowKey": leaf,
+    }
+
+
 def _require(key: str) -> CertifiedWorkflow:
-    """Resolve Certified workflows; Hunyuan Built leaves allowed until per-provider cert."""
+    """Resolve Certified workflows; Hunyuan/LTX 2.5 Built leaves allowed until cert."""
     from .certified_registry import assert_executable
 
-    allow = str(key).startswith("hunyuan")
+    allow = str(key).startswith("hunyuan") or str(key).startswith("ltx_25")
     return assert_executable(key, allow_non_certified=allow)
 
 
@@ -83,9 +121,11 @@ def _leaf_for_scene(
     wants_ingredients: bool,
     paid_fal: bool,
     fal_engine: str | None,
+    generator_id: str | None = None,
 ) -> tuple[str, list[str]]:
     disclosures: list[str] = []
     eng = (engine or "minimax-h3").lower().strip()
+    gen = (generator_id or "").strip().lower()
 
     if eng.startswith("fal") or paid_fal:
         key = {
@@ -117,7 +157,13 @@ def _leaf_for_scene(
             return f"{prefix}.i2v", disclosures
         return f"{prefix}.t2v", disclosures
 
-    # LTX
+    # LTX 2.5 — Timeline ids must not silently resolve to the 2.3 leaf.
+    if is_ltx_25_generator(gen) or eng in {"ltx-2.5", "ltx-2.5-distilled", "ltx-2.5-full", "ltx-2.5-comfy"}:
+        if has_start:
+            return "ltx_25.i2v", disclosures
+        return "ltx_25.t2v", disclosures
+
+    # LTX 2.3
     if has_start and not has_middle and not has_end and not has_audio:
         return "ltx.simple_i2v", disclosures
     return "ltx.scene", disclosures
@@ -132,6 +178,7 @@ def resolve_workflow(
     fal_engine: str | None = None,
     wants_ingredients: bool = False,
     force_workflow_key: str | None = None,
+    generator_id: str | None = None,
 ) -> CanonicalWorkflowContract:
     """
     Resolve a product intent into a canonical execute contract.
@@ -170,8 +217,13 @@ def resolve_workflow(
         orch_key = leaf_key
     elif intent_n == "extend":
         orch_key = "video.extend"
-        # Leaf is local I2V — prefer LTX simple unless engine=wan
-        leaf_key = "wan.first_last_frame" if engine == "wan" else "ltx.simple_i2v"
+        # Leaf is local I2V — prefer LTX simple unless engine=wan or Timeline 2.5
+        if engine == "wan":
+            leaf_key = "wan.first_last_frame"
+        elif is_ltx_25_generator(generator_id):
+            leaf_key = "ltx_25.i2v"
+        else:
+            leaf_key = "ltx.simple_i2v"
         disclosures.append("video.extend: last-frame → certified local I2V")
     elif intent_n == "timeline_render":
         orch_key = "director.timeline_render"
@@ -191,6 +243,7 @@ def resolve_workflow(
                 wants_ingredients=False,
                 paid_fal=True,
                 fal_engine=fal_engine or engine,
+                generator_id=generator_id,
             )
             disclosures.extend(more)
         elif intent_n in {"txt2vid", "txt2vid_local"} and not has_start and not paid_fal_approved:
@@ -210,6 +263,7 @@ def resolve_workflow(
                 wants_ingredients=False,
                 paid_fal=False,
                 fal_engine=fal_engine,
+                generator_id=generator_id,
             )
             disclosures.extend(more)
             disclosures.append(f"true_local_t2v:{engine}")
@@ -223,6 +277,7 @@ def resolve_workflow(
                 wants_ingredients=wants_ingredients,
                 paid_fal=paid_fal_approved and engine.startswith("fal"),
                 fal_engine=fal_engine,
+                generator_id=generator_id,
             )
             disclosures.extend(more)
     else:
@@ -277,6 +332,7 @@ def resolve_from_scene_params(
     wants_ingredients: bool = False,
     paid_fal_approved: bool = False,
     intent: str = "scene_render",
+    generator_id: Optional[str] = None,
 ) -> CanonicalWorkflowContract:
     return resolve_workflow(
         intent,
@@ -289,4 +345,5 @@ def resolve_from_scene_params(
         },
         paid_fal_approved=paid_fal_approved,
         wants_ingredients=wants_ingredients,
+        generator_id=generator_id,
     )

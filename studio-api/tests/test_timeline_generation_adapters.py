@@ -269,6 +269,69 @@ def test_ltx_collects_output_asset_ids_from_job_params(db_scene):
     assert result.outputAssetIds == ["asset-ltx-draft"]
 
 
+def test_ltx_submit_queued_does_not_imply_provider_accepted(db_scene):
+    from app.db import Job
+    from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter
+
+    db, pid, sid = db_scene
+    adapter = LtxLocalAdapter()
+    req = TimelineGenerationRequest(
+        projectId=pid,
+        sceneId=sid,
+        batchBlockId="bb_test",
+        executionSnapshotId="snap_test",
+        generatorId="ltx-2.5-distilled",
+        generationMode="image_to_video",
+        prompt="continue the turn",
+        duration=5.0,
+        startImageAssetId="asset_last",
+    )
+    with patch(
+        "app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue",
+        MagicMock(),
+    ):
+        sub = adapter.submit(req)
+    assert sub.status == "queued"
+    assert sub.queueJobId
+    assert sub.providerJobId is None
+    assert sub.providerMetadata.get("providerAccepted") is False
+    row = db.get(Job, sub.queueJobId)
+    assert row is not None
+    assert row.status == "queued"
+    assert not row.comfy_prompt_id
+    st = adapter.get_status(sub)
+    assert st.status == "queued"
+    assert st.providerJobId is None
+    assert st.providerMetadata.get("providerAccepted") is False
+
+
+def test_ltx_enqueue_failure_fails_job_instead_of_eternal_queued(db_scene):
+    from app.db import Job
+    from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter
+
+    db, pid, sid = db_scene
+    adapter = LtxLocalAdapter()
+    req = TimelineGenerationRequest(
+        projectId=pid,
+        sceneId=sid,
+        batchBlockId="bb_fail",
+        executionSnapshotId="snap_fail",
+        generatorId="ltx-local",
+        generationMode="image_to_video",
+        prompt="fail enqueue",
+        duration=5.0,
+    )
+    with patch(
+        "app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue",
+        side_effect=RuntimeError("queue worker loop is not running"),
+    ):
+        with pytest.raises(RuntimeError, match="queue worker loop"):
+            adapter.submit(req)
+    rows = db.query(Job).filter(Job.project_id == pid).all()
+    assert rows
+    assert any(r.status == "failed" and "enqueue" in (r.message or "").lower() for r in rows)
+
+
 def test_ltx_submit_enqueues_job_queue_not_missing_worker_alias(db_scene):
     db, pid, sid = db_scene
     ws = service.workspace(db, pid, sid)
@@ -295,21 +358,15 @@ def test_ltx_submit_enqueues_job_queue_not_missing_worker_alias(db_scene):
             ],
         },
     )
-    fake_loop = MagicMock()
-    fake_loop.is_running.return_value = True
-    fake_task = MagicMock()
-    fake_task.get_loop.return_value = fake_loop
-    fake_queue = MagicMock()
-    fake_queue._task = fake_task
-    fake_queue.enqueue = MagicMock(return_value=MagicMock())
+    enqueue = MagicMock()
     with (
         patch("app.director_timeline_w46.generation.watcher.start_completion_watcher", MagicMock()),
-        patch("asyncio.run_coroutine_threadsafe") as hop,
-        patch("app.queue_worker.job_queue", fake_queue),
+        patch("app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue", enqueue),
     ):
         gen = orchestrator.submit_batch_generation(db, pid, sid, batch_id)
     assert gen["ok"] is True
-    assert hop.called
+    assert enqueue.called
+    assert gen.get("providerJobId") in (None, "")
 
 
 def test_hosted_adapter_returns_provider_job_id():

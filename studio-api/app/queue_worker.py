@@ -458,6 +458,22 @@ class JobQueue:
             job.progress = 0.05
             job.message = "Starting"
             job.updated_at = datetime.utcnow()
+            try:
+                from .video_runtime.job_model import merge_video_runtime_history
+
+                hops = {}
+                try:
+                    hist = json.loads(job.history_json or "{}")
+                    if isinstance(hist, dict):
+                        hops = dict((hist.get("videoRuntime") or {}).get("queueHops") or {})
+                except Exception:
+                    hops = {}
+                hops["claimedAt"] = datetime.utcnow().isoformat()
+                job.history_json = merge_video_runtime_history(
+                    job.history_json, {"queueHops": hops}
+                )
+            except Exception:
+                pass
             db.commit()
 
             if job.id in self._cancel:
@@ -575,6 +591,31 @@ class JobQueue:
                 from .magi.composition.service import run_overlay_compose_job
 
                 run_overlay_compose_job(db, job)
+            elif job.kind in ("magi_upscale", "magi_audio_generate", "magi_final_render"):
+                from .magi.jobs import claim_job, finish_job
+
+                if job.status in {"done", "failed", "cancelled", "canceled", "timed_out", "running"}:
+                    return
+                claim_job(db, job)
+                if job.kind == "magi_upscale":
+                    from .magi.upscaling import run_upscale_job
+
+                    result = run_upscale_job(db, job)
+                elif job.kind == "magi_audio_generate":
+                    from .magi.audio_generate import run_audio_job
+
+                    result = run_audio_job(db, job)
+                else:
+                    from .magi.final_render import run_final_render_job
+
+                    result = run_final_render_job(db, job)
+                finish_job(
+                    db,
+                    job,
+                    ok=bool(result.get("ok")),
+                    message=str(result.get("message") or ("Ready" if result.get("ok") else "Failed")),
+                    result=result,
+                )
             else:
                 raise RuntimeError(f"Unknown job kind {job.kind}")
         finally:
@@ -709,8 +750,15 @@ class JobQueue:
 
         from .engine_recommend import resolve_engine_id
 
-        resolved_engine = resolve_engine_id(scene.engine, project, scene)
         original_engine = scene.engine
+        # Timeline LTX jobs store engine=ltx in params. Scene.engine often
+        # remains the DB default (minimax-h3) and must not win the resolver.
+        _tl_params = self._job_params(job)
+        if bool(_tl_params.get("timelineGeneration")):
+            pref = str(_tl_params.get("engine") or "").strip().lower()
+            if pref in {"ltx", "wan"}:
+                scene.engine = pref
+        resolved_engine = resolve_engine_id(scene.engine, project, scene)
         scene.engine = resolved_engine
         job.stage = "preparing"
         job.message = f"Preparing {scene.name} · {resolved_engine}"
@@ -849,19 +897,30 @@ class JobQueue:
             intent = "shot_render" if job.kind == "render_shot" else "scene_render"
             contract = resolve_from_scene_params(
                 engine=scene.engine,
-                start_asset_id=scene.start_asset_id,
+                start_asset_id=scene.start_asset_id or params.get("startImageAssetId"),
                 middle_asset_id=scene.middle_asset_id,
                 end_asset_id=scene.end_asset_id,
                 audio_asset_id=scene.audio_asset_id,
                 wants_ingredients=use_ingredients,
                 paid_fal_approved=bool(params.get("paidFallbackApproved")),
                 intent=intent,
+                generator_id=str(params.get("generatorId") or params.get("variant") or ""),
             )
+            from .video_runtime.workflow_resolver import local_video_identity
+
+            identity = local_video_identity(
+                requested_model=str(params.get("generatorId") or params.get("variant") or ""),
+                leaf_workflow_key=str(contract.leaf_workflow_key or ""),
+                ltx_23_checkpoint=settings.ltx_checkpoint,
+                ltx_25_checkpoint=settings.ltx_2_5_checkpoint,
+            )
+            params = {**params, **identity}
+            job.params_json = json.dumps(params)
             for d in contract.disclosures:
                 job.message = d
             job.history_json = merge_video_runtime_history(
                 job.history_json,
-                {"workflowContract": contract.to_dict()},
+                {"workflowContract": contract.to_dict(), "modelIdentity": identity},
             )
             db.commit()
 
@@ -907,7 +966,7 @@ class JobQueue:
                 except Exception:
                     logging.getLogger(__name__).warning("Comfy free_memory before WAN failed", exc_info=True)
 
-            if contract.leaf_workflow_key in {"ltx.simple_i2v", "ltx.scene"} and not start:
+            if contract.leaf_workflow_key in {"ltx.simple_i2v", "ltx.scene", "ltx_25.i2v"} and not start:
                 raise RuntimeError(
                     "Local LTX requires a start frame (I2V only). True local T2V is deferred."
                 )
@@ -928,6 +987,24 @@ class JobQueue:
                 prompt_id = await comfy.queue_prompt(wf, workflow_key=workflow_key)
                 job.comfy_prompt_id = prompt_id
                 self.bind_prompt(job.id, prompt_id)
+                try:
+                    from .video_runtime.job_model import merge_video_runtime_history
+
+                    hops = {}
+                    try:
+                        hist = json.loads(job.history_json or "{}")
+                        if isinstance(hist, dict):
+                            hops = dict((hist.get("videoRuntime") or {}).get("queueHops") or {})
+                    except Exception:
+                        hops = {}
+                    hops["providerSubmittedAt"] = datetime.utcnow().isoformat()
+                    hops["providerPromptId"] = prompt_id
+                    hops["providerAccepted"] = True
+                    job.history_json = merge_video_runtime_history(
+                        job.history_json, {"queueHops": hops}
+                    )
+                except Exception:
+                    pass
                 db.commit()
                 return await self._wait_comfy(job, prompt_id, on_progress=on_progress)
 
@@ -1116,9 +1193,11 @@ class JobQueue:
                         prompt_meta_json=json.dumps(
                             {
                                 "lora": params.get("lora_provenance"),
-                                "engine": str(scene.engine or ""),
+                                "engine": "ltx" if str(scene.engine or "").startswith("ltx") or str(params.get("engine") or "") == "ltx" else str(scene.engine or ""),
                                 "workflowKey": getattr(contract, "leaf_workflow_key", "") or "",
                                 "comfyPromptId": job.comfy_prompt_id or "",
+                                "requestedModel": params.get("requestedModel") or params.get("generatorId"),
+                                "resolvedRuntimeModel": params.get("resolvedRuntimeModel"),
                             }
                         ),
                     )
@@ -1143,9 +1222,11 @@ class JobQueue:
                         "comfyImageName": start,
                         "role": "start_frame",
                     },
-                    "engine": scene.engine,
+                    "engine": "ltx" if str(params.get("engine") or scene.engine or "").startswith("ltx") else scene.engine,
                     "comfyPromptId": job.comfy_prompt_id,
                     "outputPath": str(dest),
+                    "requestedModel": params.get("requestedModel") or params.get("generatorId"),
+                    "resolvedRuntimeModel": params.get("resolvedRuntimeModel"),
                 }
                 start_hash = None
                 start_asset = self._get_asset(db, scene.start_asset_id)
@@ -1158,14 +1239,30 @@ class JobQueue:
                             h.update(chunk)
                     start_hash = h.hexdigest()
                     bind["startFrameFileHash"] = start_hash
+                from .video_runtime.workflow_resolver import local_video_identity
+
+                identity = local_video_identity(
+                    requested_model=str(params.get("generatorId") or params.get("variant") or ""),
+                    leaf_workflow_key=str(getattr(contract, "leaf_workflow_key", "") or ""),
+                    ltx_23_checkpoint=settings.ltx_checkpoint,
+                    ltx_25_checkpoint=settings.ltx_2_5_checkpoint,
+                )
+                params = {
+                    **params,
+                    "requestedModel": identity["requestedModel"],
+                    "resolvedRuntimeModel": identity["resolvedRuntimeModel"],
+                }
                 provenance = local_first_provenance(
                     start_frame_provider="comfyui" if scene.start_asset_id else None,
                     start_frame_model=str((params.get("startFrameModel") or params.get("still_model") or "")),
                     video_provider="comfyui",
-                    video_model="ltx-2.3" if scene.engine == "ltx" else scene.engine,
+                    video_model=identity["videoModel"],
                     paid_provider_used=False,
                     current_job_fal_submission_count=0,
                 )
+                provenance["requestedModel"] = identity["requestedModel"]
+                provenance["resolvedRuntimeModel"] = identity["resolvedRuntimeModel"]
+                provenance["workflowKey"] = identity["workflowKey"]
                 job.params_json = json.dumps(
                     {
                         **params,

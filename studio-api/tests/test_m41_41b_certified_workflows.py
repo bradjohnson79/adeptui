@@ -104,6 +104,47 @@ def test_resolver_ltx_simple_i2v():
     assert c.leaf_workflow_key == "ltx.simple_i2v"
 
 
+def test_resolver_ltx_25_distilled_selects_ltx_25_i2v():
+    c = resolve_from_scene_params(
+        engine="ltx",
+        start_asset_id="a",
+        intent="scene_render",
+        generator_id="ltx-2.5-distilled",
+    )
+    assert c.leaf_workflow_key == "ltx_25.i2v"
+
+
+def test_resolver_ltx_25_without_start_selects_t2v():
+    from app.video_runtime.workflow_resolver import _leaf_for_scene
+
+    key, _ = _leaf_for_scene(
+        engine="ltx",
+        has_start=False,
+        has_middle=False,
+        has_end=False,
+        has_audio=False,
+        wants_ingredients=False,
+        paid_fal=False,
+        fal_engine=None,
+        generator_id="ltx-2.5-full",
+    )
+    assert key == "ltx_25.t2v"
+
+
+def test_local_video_identity_never_uses_minimax_for_ltx():
+    from app.video_runtime.workflow_resolver import local_video_identity
+
+    ident = local_video_identity(
+        requested_model="ltx-2.5-distilled",
+        leaf_workflow_key="ltx_25.i2v",
+        ltx_23_checkpoint="ltx-2.3-22b-distilled-fp8.safetensors",
+        ltx_25_checkpoint="ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+    )
+    assert ident["requestedModel"] == "ltx-2.5-distilled"
+    assert ident["resolvedRuntimeModel"].startswith("ltx-2.5-")
+    assert "minimax" not in ident["videoModel"].lower()
+
+
 def test_resolver_extend_local_i2v():
     c = resolve_workflow("extend", engine="ltx", present_inputs={"start_frame": True})
     assert c.workflow_key == "video.extend"

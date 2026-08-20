@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .cadence import intended_text_from_batch, resolve_cadence, window_seconds
-from .clip_extract import extract_window
+from .clip_extract import cleanup_extracted_clip, extract_window
 from .compare import compare_intent_vs_actual
 from .contracts import (
     CoDirectorContinuityPolicy,
@@ -16,7 +16,7 @@ from .contracts import (
 )
 from .gpu_lease import best_effort_free_generator, preflight_for_review
 from .observability import emit
-from .worker_client import perception_mode, run_perception
+from .worker_client import normalize_perception_reason, perception_mode, run_perception
 
 logger = logging.getLogger(__name__)
 
@@ -277,8 +277,10 @@ def review_completed_batch(
     mode = perception_mode()
     if mode not in ("stub", "1", "true", "yes", "fail", "error"):
         extras["gpuLease"] = best_effort_free_generator()
+        lease = extras["gpuLease"]
         preflight = preflight_for_review()
         extras["gpuPreflight"] = preflight
+        free_failed = (not lease.get("comfyFreeRequested")) or bool(lease.get("comfyFreeError"))
         if not preflight.get("ok"):
             packet = _degraded(
                 project_id=project_id,
@@ -286,6 +288,17 @@ def review_completed_batch(
                 source_batch=source_batch,
                 target_batch_id=target_batch_id,
                 reason=str(preflight.get("reason") or "INSUFFICIENT_VRAM"),
+                extras=extras,
+            )
+            _persist(master, packet, source_batch, target_batch_id)
+            return packet
+        if free_failed and preflight.get("unknownVram"):
+            packet = _degraded(
+                project_id=project_id,
+                scene_id=scene_id,
+                source_batch=source_batch,
+                target_batch_id=target_batch_id,
+                reason="COMFY_FREE_FAILED",
                 extras=extras,
             )
             _persist(master, packet, source_batch, target_batch_id)
@@ -360,9 +373,11 @@ def review_completed_batch(
             scene_id=scene_id,
             source_batch=source_batch,
             target_batch_id=target_batch_id,
-            reason=str(exc)[:80],
+            reason=normalize_perception_reason(exc),
             extras=extras,
         )
+    finally:
+        cleanup_extracted_clip(str(extras.get("extractedClip") or ""), source_path=video_path)
     _persist(master, packet, source_batch, target_batch_id)
     return packet
 

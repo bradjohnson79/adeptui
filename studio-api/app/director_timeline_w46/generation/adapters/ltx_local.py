@@ -162,34 +162,59 @@ class LtxLocalAdapter:
         finally:
             db.close()
 
-        # Enqueue into the in-process JobQueue. The Timeline generate route is
-        # sync (threadpool), so hop onto the worker event loop — never silently
-        # skip because `worker` is not an exported alias.
+        # Reuse the shared JobQueue hop (same helper CRS already repaired).
+        # job exists != provider accepted: do not swallow enqueue failure.
+        from datetime import datetime, timezone
+
+        from ....codirector.executive.imagegen_adapter import schedule_job_queue_enqueue
+        from ....video_runtime.job_model import merge_video_runtime_history
+
+        enqueue_at = datetime.now(timezone.utc).isoformat()
         try:
-            import asyncio
+            schedule_job_queue_enqueue(job_id)
+        except Exception as exc:
+            db = SessionLocal()
+            try:
+                row = db.get(Job, job_id)
+                if row:
+                    row.status = "failed"
+                    row.stage = "failed"
+                    row.message = (
+                        "Failed to enqueue Timeline LTX job onto the studio queue: "
+                        f"{exc}"
+                    )[:4000]
+                    row.history_json = merge_video_runtime_history(
+                        row.history_json,
+                        {
+                            "queueHops": {
+                                "enqueueAt": enqueue_at,
+                                "enqueueOk": False,
+                                "enqueueError": str(exc)[:400],
+                            }
+                        },
+                    )
+                    db.add(row)
+                    db.commit()
+            finally:
+                db.close()
+            raise
 
-            from ....queue_worker import job_queue
-
-            if job_queue is not None and hasattr(job_queue, "enqueue"):
-                task = getattr(job_queue, "_task", None)
-                worker_loop = task.get_loop() if task is not None else None
-                if worker_loop is not None and worker_loop.is_running():
-                    asyncio.run_coroutine_threadsafe(job_queue.enqueue(job_id), worker_loop)
-                else:
-                    try:
-                        loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        loop = None
-                    if loop and loop.is_running():
-                        loop.create_task(job_queue.enqueue(job_id))
-                    else:
-                        asyncio.run(job_queue.enqueue(job_id))
-        except Exception:
-            pass
+        db = SessionLocal()
+        try:
+            row = db.get(Job, job_id)
+            if row:
+                row.history_json = merge_video_runtime_history(
+                    row.history_json,
+                    {"queueHops": {"enqueueAt": enqueue_at, "enqueueOk": True}},
+                )
+                db.add(row)
+                db.commit()
+        finally:
+            db.close()
 
         return NormalizedJobSubmission(
             internalJobId=job_id,
-            providerJobId=job_id,
+            providerJobId=None,
             queueJobId=job_id,
             generatorId=gen_id,
             status="queued",
@@ -199,10 +224,12 @@ class LtxLocalAdapter:
                 "sceneId": request.sceneId,
                 "engine": "ltx",
                 "generatorId": gen_id,
+                "requestedModel": gen_id,
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
                 "continuityStrategy": params.get("continuityStrategy") or "none",
                 "lastFrameAssetId": request.lastFrameAssetId,
+                "providerAccepted": False,
             },
         )
 
@@ -229,9 +256,10 @@ class LtxLocalAdapter:
             output_ids = [str(x) for x in (params.get("outputAssetIds") or []) if x]
             if mapped == "completed" and not output_ids:
                 output_ids = _ensure_output_asset_ids(db, row, params)
+            prompt_id = row.comfy_prompt_id or None
             return NormalizedJobStatus(
                 internalJobId=job.internalJobId,
-                providerJobId=row.comfy_prompt_id or job.providerJobId,
+                providerJobId=prompt_id,
                 queueJobId=row.id,
                 generatorId=job.generatorId,
                 status=mapped,
@@ -246,6 +274,9 @@ class LtxLocalAdapter:
                     "draftMode": bool(params.get("draftMode")),
                     "aspectRatio": params.get("aspectRatio"),
                     "resolution": params.get("resolution"),
+                    "providerAccepted": bool(prompt_id),
+                    "requestedModel": params.get("generatorId") or job.generatorId,
+                    "resolvedRuntimeModel": params.get("resolvedRuntimeModel"),
                     # REAL_MEDIA_DURATION: the output gate measured the actual
                     # rendered duration (ffprobe) — surface it so completion
                     # records honest generatedDuration/timelineVisibleDuration

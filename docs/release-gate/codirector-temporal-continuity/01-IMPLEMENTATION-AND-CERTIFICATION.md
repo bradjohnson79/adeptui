@@ -1,10 +1,12 @@
 # Co-Director Temporal Video Intelligence — Implementation and Certification
 
+**SUPERSEDED / HISTORICAL (Law 30).** Do not cite this file as current truth. Live evidence and the current binary verdict are in [02-LIVE-CERTIFICATION.md](./02-LIVE-CERTIFICATION.md). Governing doc remains [00-GOVERNING.md](./00-GOVERNING.md).
+
 **Governing doc:** [00-GOVERNING.md](./00-GOVERNING.md)  
 **Branch:** `feat/codirector-temporal-continuity`  
 **HEAD:** `1e4f10c25ddde5bb8ed1f7cf715557cbc7db789c`  
 **Remote:** `origin/feat/codirector-temporal-continuity` (`1e4f10c`)  
-**Status:** Implementation complete. Live VideoChat3 inference and two-batch visual inspect are **not** certified. Hosted Vercel deploy was not promoted from this branch.
+**Status:** HISTORICAL. Live VideoChat3 inference and two-batch visual inspect were **not** certified in this report. Hosted Vercel deploy was not promoted from this branch.
 
 ## Verdict
 

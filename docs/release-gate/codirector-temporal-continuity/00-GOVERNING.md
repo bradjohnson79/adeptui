@@ -2,7 +2,8 @@
 
 **Status:** GOVERNING for Revision A  
 **Branch:** `feat/codirector-temporal-continuity`  
-**Law 30:** This is the single governing document for this milestone. Older Timeline and Co-Director reports remain historical.
+**Law 30:** This is the single governing document for this milestone. Older Timeline and Co-Director reports remain historical.  
+**Live evidence / unified completion report:** [REVISION-A-UNIFIED-COMPLETION.md](./REVISION-A-UNIFIED-COMPLETION.md). [03-LIVE-CLOSURE.md](./03-LIVE-CLOSURE.md), [02-LIVE-CERTIFICATION.md](./02-LIVE-CERTIFICATION.md), and [01-IMPLEMENTATION-AND-CERTIFICATION.md](./01-IMPLEMENTATION-AND-CERTIFICATION.md) are historical.
 
 ## Product law
 
