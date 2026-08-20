@@ -15,9 +15,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const env = {
   ...process.env,
   ADEPT_BETA_TARGET: "1",
-  PLAYWRIGHT_BASE_URL: process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760",
-  STUDIO_API_BASE: process.env.STUDIO_API_BASE || "http://127.0.0.1:8758",
-  STUDIO_API_PORT: process.env.STUDIO_API_PORT || "8758",
+  PLAYWRIGHT_BASE_URL: "http://127.0.0.1:8760",
+  STUDIO_API_BASE: "http://127.0.0.1:8758",
+  STUDIO_API_PORT: "8758",
 };
 
 // Avoid accidentally reusing a leftover Vite/harness server on 5173.
