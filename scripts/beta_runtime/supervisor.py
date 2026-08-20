@@ -780,6 +780,14 @@ class Supervisor:
                     pass
                 elif not api_ok:
                     self.state = "OFFLINE"
+                    if getattr(self, "adopt_api", False) and self._api_health_fail_streak >= 2:
+                        leftover = _port_pids(self.api_port)
+                        if leftover:
+                            _recycle_api_listeners(leftover)
+                        if not _port_pids(self.api_port):
+                            self.log("adopted Studio API is gone — spawning owned API")
+                            self.adopt_api = False
+                            self.start_api()
                     # Process alive but health dead for several ticks → restart (not adopted).
                     svc = self.services.get("api")
                     if (
