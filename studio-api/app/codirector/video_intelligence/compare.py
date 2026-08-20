@@ -44,9 +44,17 @@ def compare_intent_vs_actual(
         "Keep successful motion, screen geography, lighting, and wardrobe.",
         "Do not restart a walk cycle or recenter characters if they were already placed.",
     ]
-    continue_items = [f"Finish: {item}" for item in unfinished] or [
-        "Continue the same beat without resetting the shot."
-    ]
+    continue_items = [f"Finish: {item}" for item in unfinished]
+    if not continue_items:
+        last_seen = ""
+        for part in reversed((observed or "").replace("\n", ". ").split(".")):
+            text = part.strip()
+            if text:
+                last_seen = text
+                break
+        continue_items = [
+            f"Continue: {last_seen}." if last_seen else "Continue the same beat without resetting the shot."
+        ]
     avoid = [
         "Do not regenerate the whole previous batch.",
         "Do not restart the turn, walk, or camera move from the beginning.",

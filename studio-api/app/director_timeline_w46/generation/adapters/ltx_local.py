@@ -79,7 +79,11 @@ class LtxLocalAdapter:
         result = validate_against_capabilities(self.capabilities, request)
         if not result.ok:
             return result
-        gen_id = request.generatorId or ""
+        gen_id = str(
+            request.providerOptions.get("originalGeneratorId")
+            or request.generatorId
+            or ""
+        )
         if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
             errors: list[str] = []
             from ....setup.diagnostics import verify_component
@@ -96,9 +100,16 @@ class LtxLocalAdapter:
     def submit(self, request: TimelineGenerationRequest) -> NormalizedJobSubmission:
         job_id = str(uuid4())
         gen_id = request.generatorId or GENERATOR_ID
+        timeline_model = str(
+            request.providerOptions.get("originalGeneratorId")
+            or request.providerOptions.get("selectedGenerator")
+            or request.generatorId
+            or GENERATOR_ID
+        )
         params = {
             "engine": "ltx",
-            "generatorId": gen_id,
+            "generatorId": timeline_model,
+            "adapterId": gen_id,
             "prompt": request.prompt,
             "negativePrompt": request.negativePrompt,
             "startImageAssetId": request.startImageAssetId,
@@ -124,10 +135,10 @@ class LtxLocalAdapter:
             "temporalContinuation": request.providerOptions.get("temporalContinuation"),
         }
 
-        if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
+        if timeline_model in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
             params["fast_mode"] = bool(request.providerOptions.get("fast_generation", True))
             params["generate_audio"] = bool(request.providerOptions.get("audio_generation", True))
-            params["variant"] = gen_id
+            params["variant"] = timeline_model
         elif request.providerOptions.get("fast_generation"):
             params["fast_mode"] = True
 
@@ -223,8 +234,8 @@ class LtxLocalAdapter:
                 "projectId": request.projectId,
                 "sceneId": request.sceneId,
                 "engine": "ltx",
-                "generatorId": gen_id,
-                "requestedModel": gen_id,
+                "generatorId": timeline_model,
+                "requestedModel": timeline_model,
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
                 "continuityStrategy": params.get("continuityStrategy") or "none",

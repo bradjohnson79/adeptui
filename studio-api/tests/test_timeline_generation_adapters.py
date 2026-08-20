@@ -269,6 +269,37 @@ def test_ltx_collects_output_asset_ids_from_job_params(db_scene):
     assert result.outputAssetIds == ["asset-ltx-draft"]
 
 
+def test_ltx_submit_preserves_timeline_2_5_identity(db_scene):
+    from app.db import Job
+    from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter
+
+    db, pid, sid = db_scene
+    adapter = LtxLocalAdapter()
+    req = TimelineGenerationRequest(
+        projectId=pid,
+        sceneId=sid,
+        batchBlockId="bb_25",
+        executionSnapshotId="snap_25",
+        generatorId="ltx-local",
+        generationMode="image_to_video",
+        prompt="continue the turn",
+        duration=5.0,
+        startImageAssetId="asset_last",
+        providerOptions={"originalGeneratorId": "ltx-2.5-distilled", "selectedGenerator": "ltx-2.5-distilled"},
+    )
+    with patch(
+        "app.codirector.executive.imagegen_adapter.schedule_job_queue_enqueue",
+        MagicMock(),
+    ):
+        sub = adapter.submit(req)
+    row = db.get(Job, sub.queueJobId)
+    params = json.loads(row.params_json)
+    assert params["generatorId"] == "ltx-2.5-distilled"
+    assert params["variant"] == "ltx-2.5-distilled"
+    assert params["adapterId"] == "ltx-local"
+    assert sub.providerMetadata.get("requestedModel") == "ltx-2.5-distilled"
+
+
 def test_ltx_submit_queued_does_not_imply_provider_accepted(db_scene):
     from app.db import Job
     from app.director_timeline_w46.generation.adapters.ltx_local import LtxLocalAdapter

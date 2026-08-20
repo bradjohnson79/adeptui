@@ -482,6 +482,19 @@ def test_unfinished_string_compare_is_one_directive():
     assert len(continue_items) == 1
 
 
+def test_compare_uses_observed_ending_when_unfinished_empty():
+    packet = TemporalContinuityPacket()
+    observation = VideoPerceptionObservation(
+        modelId="videochat3-4b",
+        rawText="The character on the left turns her head to look at the character on the right. The character on the right looks at the front.",
+        unfinishedActions=[],
+        parseOk=False,
+    )
+    filled = compare_intent_vs_actual(packet, observation, protection="strong")
+    assert filled.continuation.continue_ == ["Continue: The character on the right looks at the front."]
+    assert "Finish: T" not in filled.continuation.continue_
+
+
 def test_continuity_off_does_not_block_submit():
     master = _master_two_batches()
     master.coDirectorContinuityPolicy.enabled = False
