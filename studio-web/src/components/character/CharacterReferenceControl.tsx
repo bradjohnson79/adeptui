@@ -22,7 +22,7 @@ type Props = {
   onChanged: () => void | Promise<void>;
   /** Called when user chooses to use the reference as the identity candidate. */
   onUseAsIdentity?: (assetId: string, sourceType: "upload" | "library") => void | Promise<void>;
-  onAskCoDirector?: (prompt: string) => void;
+  onAskCoDirector?: (prompt: string, opts?: { autoSend?: boolean }) => void;
 };
 
 export function CharacterReferenceControl({
@@ -125,7 +125,7 @@ export function CharacterReferenceControl({
       {references.length > 0 ? (
         <p className="character-core__hint" data-testid="character-reference-status">
           Reference: {references.length === 1 ? "Single View" : "Multi-View"}
-          {references.some(r => r.approval_status === "approved") ? " · Visual Canon: Ready" : ""}
+          {references.some(r => r.approval_status === "approved") ? " · Look locked" : ""}
         </p>
       ) : null}
 
@@ -167,7 +167,7 @@ export function CharacterReferenceControl({
             disabled={disabled || busy}
             onClick={() =>
               onAskCoDirector(
-                `Please create a multi-view Character Reference Sheet for ${characterName || "this character"}. Use the current Character Profile and any uploaded reference as identity.`,
+                `Please create a multi-view Character Reference Sheet for ${characterName || "this character"} using the Character Creator tool. Use the current Character Profile and any uploaded reference as identity.`,
               )
             }
           >

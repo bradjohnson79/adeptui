@@ -72,6 +72,11 @@ export type PromptSegment = {
   negative_prompt?: string | null;
   bound_image_clip_id?: string | null;
   reference_binding_ids?: string[];
+  user_direction?: string | null;
+  production_prompt?: string | null;
+  dialogue?: string | null;
+  movement_segment_ref?: { id: string; segmentNumber: number; alias: string } | null;
+  movement_segment_revision?: number | null;
 };
 export type CameraClip = {
   id: string;
@@ -1943,6 +1948,11 @@ export function DirectorTracks({
                       >
                         ×
                       </button>
+                      {seg.movement_segment_ref?.alias ? (
+                        <span className="timeline-v2__movement-chip" data-testid={`prompt-movement-${seg.id}`}>
+                          ~{seg.movement_segment_ref.alias}
+                        </span>
+                      ) : null}
                       <span className="timeline-v2__clip-tokens" data-testid={`prompt-token-summary-${seg.id}`}>
                         {tokenSummary(seg.reference_binding_ids, bindings) ||
                           (seg.region ? t("timedPromptRegion") : null) ||

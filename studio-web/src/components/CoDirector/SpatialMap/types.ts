@@ -158,6 +158,71 @@ export type SceneIntent = {
   sourceReferenceAssetIds?: string[];
 };
 
+export type MovementDialogue = {
+  speaker: string;
+  text: string;
+};
+
+export type MovementAction = {
+  actor?: string;
+  verb?: string;
+  target?: string;
+  hand?: string;
+  emotion?: string;
+};
+
+export type MovementContinuity = {
+  requiredUnchanged?: string[];
+  requiredChanged?: string[];
+  notes?: string;
+};
+
+export type MovementSegment = {
+  id: string;
+  segmentNumber: number;
+  beatName?: string;
+  characterStates: SpatialCharacterPlacement[];
+  propStates: SpatialPropPlacement[];
+  cameraStateRefs?: string[];
+  userDirection?: string;
+  productionPrompt?: string;
+  actions?: MovementAction[];
+  dialogue?: MovementDialogue[];
+  continuity?: MovementContinuity;
+  timingHintSeconds?: number | null;
+  revision?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type MovementCreateBody = {
+  beatName?: string;
+  userDirection?: string;
+  productionPrompt?: string;
+  dialogue?: MovementDialogue[];
+  actions?: MovementAction[];
+  inheritFromId?: string | null;
+};
+
+export type MovementUpdateBody = {
+  beatName?: string | null;
+  userDirection?: string | null;
+  productionPrompt?: string | null;
+  dialogue?: MovementDialogue[] | null;
+  actions?: MovementAction[] | null;
+  continuity?: MovementContinuity | null;
+  timingHintSeconds?: number | null;
+};
+
+export type MovementArrow = {
+  characterId: string;
+  label: string;
+  fromAlias: string;
+  toAlias: string;
+  from: { normalizedX?: number | null; normalizedY?: number | null; gridRow?: number; gridColumn?: number };
+  to: { normalizedX?: number | null; normalizedY?: number | null; gridRow?: number; gridColumn?: number };
+};
+
 export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras"> & {
   characters: SpatialCharacterPlacement[];
   props: SpatialPropPlacement[];
@@ -172,6 +237,9 @@ export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props
   /** Explicit Save commit marker (Spatial Map Save Gate). Dirty = savedVersion !== version. */
   savedAt?: string | null;
   savedVersion?: string | null;
+  movementSegments?: MovementSegment[];
+  activeMovementSegmentId?: string | null;
+  movementSegmentRevision?: number;
 };
 
 /** Body types extended with V1 Cartesian grid fields. */

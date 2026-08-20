@@ -6,12 +6,13 @@ type Props = {
   isSaved: boolean;
   canSave: boolean;
   saving?: boolean;
+  dirty?: boolean;
   onSave: () => void;
   onReset: () => void;
   onDelete: () => void;
 };
 
-export function CharacterActions({ isSaved, canSave, saving, onSave, onReset, onDelete }: Props) {
+export function CharacterActions({ isSaved, canSave, saving, dirty, onSave, onReset, onDelete }: Props) {
   return (
     <div className="character-core__actions">
       <button
@@ -27,7 +28,7 @@ export function CharacterActions({ isSaved, canSave, saving, onSave, onReset, on
         type="button"
         className="character-core__button"
         data-testid="character-reset"
-        disabled={saving}
+        disabled={saving || !dirty}
         onClick={onReset}
       >
         Reset
