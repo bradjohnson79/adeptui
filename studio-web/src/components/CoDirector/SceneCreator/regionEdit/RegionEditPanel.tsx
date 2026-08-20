@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../../api";
+import { creatorPerceptionMessage, SMART_SELECT_PAINT } from "../../../../codirector/perception/requestPolicy";
 import type { SceneCinematographerPack } from "../cinematographer/cameraCommandEngine";
 import type { SceneShot } from "../types";
 import { useInpaintSession } from "./inpaintSession";
@@ -36,6 +37,7 @@ export type RegionEditRequest = {
 
 export function RegionEditPanel({
   projectId,
+  spatialMapId,
   shot,
   cinematographer,
   selectedCameraId,
@@ -46,6 +48,7 @@ export function RegionEditPanel({
   onSwitchFamily,
 }: {
   projectId: string;
+  spatialMapId?: string;
   shot: SceneShot | null;
   cinematographer?: SceneCinematographerPack | null;
   selectedCameraId?: string;
@@ -57,6 +60,9 @@ export function RegionEditPanel({
 }) {
   const session = useInpaintSession();
   const [saving, setSaving] = useState(false);
+  const [smartSelectMessage, setSmartSelectMessage] = useState("");
+  const [selectBusy, setSelectBusy] = useState(false);
+  const selectInFlight = useRef(false);
   const [coreRecommend, setCoreRecommend] = useState<{
     message: string;
     recommendedFamily: string;
@@ -214,10 +220,39 @@ export function RegionEditPanel({
           >
             Erase
           </button>
-          <button type="button" disabled data-testid="scene-creator-inpaint-smart-select">
-            Smart Select (Not available)
+          <button
+            type="button"
+            data-testid="scene-creator-inpaint-smart-select"
+            disabled={busy || saving || selectBusy}
+            onClick={() => {
+              if (selectInFlight.current) return;
+              void (async () => {
+                if (!spatialMapId) {
+                  setSmartSelectMessage("Paint the region. Automatic select needs a Spatial Map.");
+                  return;
+                }
+                selectInFlight.current = true;
+                setSelectBusy(true);
+                try {
+                  const res = await api.perception.autoMask(projectId, spatialMapId, session.prompt);
+                  setSmartSelectMessage(res.message || SMART_SELECT_PAINT);
+                } catch (err) {
+                  setSmartSelectMessage(creatorPerceptionMessage(err, SMART_SELECT_PAINT));
+                } finally {
+                  selectInFlight.current = false;
+                  setSelectBusy(false);
+                }
+              })();
+            }}
+          >
+            {selectBusy ? "Selecting…" : "Select from the scene"}
           </button>
         </div>
+        {smartSelectMessage ? (
+          <p className="muted" data-testid="scene-creator-smart-select-message">
+            {smartSelectMessage}
+          </p>
+        ) : null}
         <label className="scene-creator-core__label">
           Brush Size
           <input

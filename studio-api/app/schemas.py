@@ -530,6 +530,12 @@ class HealthOut(BaseModel):
     message: str = ""
     #: Operator visibility for M2.4.1 (no secrets).
     operator: dict[str, Any] = Field(default_factory=dict)
+    #: Short git SHA of the API process at start. Missing on stale pre-guard processes.
+    apiRevision: Optional[str] = None
+    #: UTC timestamp when this API process started.
+    apiStartedAt: Optional[str] = None
+    #: Routes this process must expose. SHA-alone is not currency.
+    routeContract: list[str] = Field(default_factory=list)
 
 
 class TagResolveOut(BaseModel):

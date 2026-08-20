@@ -31,6 +31,7 @@ from .capabilities.api import router as capabilities_router
 from .codirector.routers.knowledge import router as knowledge_cards_router
 from .codirector.routers.diagnostics import router as diagnostics_router
 from .codirector.vision.router import router as vision_router
+from .codirector.perception.router import router as perception_router
 from .codirector.vision.engine import set_engine_enabled
 from .posecraft.router import router as posecraft_router
 from .runtime_manager.router import router as runtime_manager_router
@@ -385,6 +386,7 @@ app.include_router(capabilities_router, prefix="/api")
 app.include_router(knowledge_cards_router, prefix="/api")
 app.include_router(diagnostics_router, prefix="/api")
 app.include_router(vision_router, prefix="/api")
+app.include_router(perception_router, prefix="/api")
 # PoseCraft production persistence router (already carries /api/posecraft prefix).
 app.include_router(posecraft_router)
 # Runtime Manager (already carries /api/runtime-manager prefix).

@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import subprocess
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -80,6 +82,29 @@ from ..spatial import auto_tags_from_spatial, parse_spatial_map
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _read_api_revision() -> str:
+    env = (os.environ.get("ADEPT_API_REVISION") or "").strip()
+    if env:
+        return env
+    try:
+        root = Path(__file__).resolve().parents[3]
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(root),
+            text=True,
+            timeout=2,
+            stderr=subprocess.DEVNULL,
+        )
+        return (out or "").strip()
+    except Exception:
+        return ""
+
+
+_API_STARTED_AT = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+_API_REVISION = _read_api_revision()
+_ROUTE_CONTRACT = ["perception.capability"]
 
 
 def _project_out(db: Session, project: Project) -> ProjectOut:
@@ -290,6 +315,9 @@ async def health():
         recommended_action=None,
         message="ok",
         operator=operator,
+        apiRevision=_API_REVISION or None,
+        apiStartedAt=_API_STARTED_AT,
+        routeContract=list(_ROUTE_CONTRACT),
     )
 
 

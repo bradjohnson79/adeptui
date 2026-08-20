@@ -7,6 +7,7 @@ Generated views prove Character Creator can produce visual coverage via certifie
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from ..image_prompting.qwen_2512 import compile_character_image_prompt
 from . import service
 from .roles import REQUIRED_COVERAGE_ROLES
 from .schemas import ReferenceAttach, TraitUpsert
+
+logger = logging.getLogger(__name__)
 from .visual_gates import (
     list_gates,
     propose_visual_directions,
@@ -708,6 +711,39 @@ def _parse_api_source_entries(api: Any) -> tuple[bool, list[dict[str, Any]]]:
     return False, []
 
 
+def _is_gpt_image_2_model(value: str) -> bool:
+    blob = (value or "").strip().lower()
+    return "gpt-image-2" in blob or "gpt_image_2" in blob
+
+
+def _coerce_single_crs_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
+    """Character Creator produces one CRS: Qwen default or explicit GPT Image 2."""
+    parsed = _parse_generator_sources(generator_sources)
+    for entry in parsed.get("api_entries") or []:
+        if not entry.get("enabled"):
+            continue
+        blob = f"{entry.get('model') or ''} {entry.get('modelId') or ''}"
+        if _is_gpt_image_2_model(blob):
+            return {
+                "local": None,
+                "api": [
+                    {
+                        "model": entry.get("model") or "gpt-image-2-kie",
+                        "providerId": entry.get("providerId") or "kie",
+                        "modelId": entry.get("modelId") or "gpt-image-2",
+                        "enabled": True,
+                        "batchCount": 1,
+                    }
+                ],
+                "stage2Enabled": False,
+            }
+    return {
+        "local": [{"family": "qwen2512", "enabled": True, "batchCount": 1}],
+        "api": None,
+        "stage2Enabled": False,
+    }
+
+
 def _parse_generator_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize creator source toggles. Omitted sources keep legacy local-auto routing."""
     if generator_sources is None:
@@ -1320,6 +1356,12 @@ def _build_candidate_routing_plan(
             **stage1,
         }
         plan.append(entry)
+    # Single canonical CRS: exactly one routing slot, never a candidate batch.
+    if plan:
+        first = plan[0]
+        first["batchIndex"] = 1
+        first["batchOf"] = 1
+        return [first]
     return plan
 
 
@@ -1890,7 +1932,8 @@ def start_visual_sheet_generation(
 
     from ..storyboard_jobs import enqueue_imagegen_job
 
-    candidate_count = max(1, int(candidate_count or 1))
+    candidate_count = 1
+    generator_sources = _coerce_single_crs_sources(generator_sources)
     jobs: dict[str, Any] = {}
     role_assets: dict[str, str] = {}
     candidates: list[dict[str, Any]] = []
@@ -3097,8 +3140,11 @@ def _enqueue_character_sheet(
         from ..codirector.executive.imagegen_adapter import schedule_job_queue_enqueue
 
         schedule_job_queue_enqueue(job.id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("_enqueue_character_sheet queue enqueue failed for job %s: %s", job.id, exc)
+        job.status = "failed"
+        job.message = f"Queue enqueue failed: {exc}"
+        db.commit()
     db.refresh(job)
     return job
 

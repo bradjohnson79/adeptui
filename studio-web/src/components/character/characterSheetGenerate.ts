@@ -67,7 +67,6 @@ export function buildCharacterSheetStartBody(input: {
   generatorSources: CharacterSheetGeneratorSourcesPayload;
   candidateCount: number;
 } {
-  const summary = summarizeGenerationPlan(input.plan, input.localOptions);
   const generationMode = firstPlannedGenerationMode(
     input.plan,
     input.hasReference,
@@ -80,7 +79,7 @@ export function buildCharacterSheetStartBody(input: {
     includePerformance: false,
     generationMode,
     generatorSources: buildGeneratorSourcesPayload(input.plan),
-    candidateCount: summary.totalSheets,
+    candidateCount: 1,
   };
 }
 

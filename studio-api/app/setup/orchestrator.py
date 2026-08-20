@@ -203,6 +203,20 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
             "may_require_elevation": False,
             "pinned_revision": "13495845e3028f0bb6ca1462ad22aa0e76349e40",
         }
+    elif component.installer == "stills_perception_hf":
+        kind = "stills_perception_hf_install"
+        summary = (
+            f"Install {component.name} from the pinned Hugging Face snapshot "
+            "(isolated stills-perception directory). Optional Testing component — "
+            "Prepare My Studio will not force this download."
+        )
+        fields = []
+        extra = {
+            "estimated_download_bytes": component.download_bytes,
+            "official_source_only": True,
+            "may_require_elevation": False,
+            "independent_install": True,
+        }
     elif component.installer == "huggingface_snapshot":
         if component.id in ("videochat3_4b", "internvideo3_8b"):
             kind = "video_understanding_hf_install"
@@ -1021,6 +1035,58 @@ def _enqueue_video_understanding_install(component_id: str) -> dict[str, Any]:
     )
 
 
+def _enqueue_stills_perception_install(component_id: str) -> dict[str, Any]:
+    from ..codirector.perception.paths import COMPONENT_SPECS, model_present
+    from ..source_manager.downloads.models import create_install_plan
+    from ..source_manager.downloads.queue import get_queue_manager
+
+    spec = COMPONENT_SPECS[component_id]
+    dest_fn = spec["dest"]
+    dest = dest_fn() if callable(dest_fn) else dest_fn
+    markers = tuple(spec["markers"])
+    if model_present(dest, markers):
+        operation = registry.create("component_action", [component_id])
+        return registry.finish(
+            operation["operation_id"],
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "reused": True,
+                "message": "Existing stills-perception weights reused.",
+                "localDir": str(dest),
+            },
+        )
+    repo = str(spec["repo"])
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=repo,
+        provider_id="stills_perception_hf",
+        artifacts=[
+            {
+                "remotePath": repo,
+                "destinationRelativePath": ".",
+                "downloadUrl": f"https://huggingface.co/{repo}",
+            }
+        ],
+        destination_root=str(dest),
+        estimated_download_bytes=get_component(component_id).download_bytes,
+        estimated_extracted_bytes=get_component(component_id).installed_bytes,
+        metadata={"componentId": component_id, "officialOnly": True, "stillsPerception": True},
+    )
+    op = get_queue_manager().enqueue(plan, priority=55)
+    operation = registry.create("component_action", [component_id])
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": True,
+            "downloadOperationId": op.get("id"),
+            "message": f"{component_id} install queued into the isolated stills-perception directory.",
+            "operation": op,
+        },
+    )
+
+
 def _enqueue_hunyuan_install(component_id: str) -> dict[str, Any]:
     from ..video_runtime.hunyuan_install import enqueue_install
 
@@ -1084,6 +1150,14 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
         "update",
     ):
         return _enqueue_qwen_voice_install(component_id)
+
+    if component.installer == "stills_perception_hf" and action in (
+        "install",
+        "repair",
+        "reinstall",
+        "update",
+    ):
+        return _enqueue_stills_perception_install(component_id)
 
     if component.installer == "huggingface_snapshot" and action in (
         "install",

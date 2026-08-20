@@ -18,6 +18,71 @@ export const CHARACTER_SHEET_VIEWS_PER_SHEET = 4;
 export const AUTO_SELECT_FAMILY = "auto";
 /** Canonical Character Creator default generator (plan/state, not a checkbox). */
 export const DEFAULT_GENERATOR_FAMILY = "qwen2512";
+export const CRS_QWEN_FAMILY = "qwen2512";
+export const CRS_GPT_IMAGE_2 = "gpt-image-2";
+export type CrsGeneratorId = typeof CRS_QWEN_FAMILY | typeof CRS_GPT_IMAGE_2;
+
+export function isGptImage2Row(row: { modelId?: string; model?: string; displayName?: string }): boolean {
+  const blob = `${row.modelId || ""} ${row.model || ""} ${row.displayName || ""}`.toLowerCase();
+  return blob.includes("gpt-image-2") || blob.includes("gpt_image_2");
+}
+
+export function selectedCrsGenerator(plan: CharacterGeneratorPlan): CrsGeneratorId {
+  if (plan.apiEnabled && plan.apiModels.some((row) => row.enabled && isGptImage2Row(row))) {
+    return CRS_GPT_IMAGE_2;
+  }
+  return CRS_QWEN_FAMILY;
+}
+
+export function setCrsGenerator(
+  plan: CharacterGeneratorPlan,
+  generator: CrsGeneratorId,
+): CharacterGeneratorPlan {
+  if (generator === CRS_GPT_IMAGE_2) {
+    const hasGpt = plan.apiModels.some((row) => isGptImage2Row(row));
+    const apiModels = hasGpt
+      ? plan.apiModels.map((row) => ({
+          ...row,
+          enabled: isGptImage2Row(row),
+          batchCount: 1,
+        }))
+      : [
+          ...plan.apiModels.map((row) => ({ ...row, enabled: false, batchCount: 1 })),
+          {
+            providerId: "kie",
+            modelId: "gpt-image-2",
+            model: "gpt-image-2-kie",
+            displayName: "GPT Image 2",
+            enabled: true,
+            batchCount: 1,
+          },
+        ];
+    return {
+      ...plan,
+      localEnabled: false,
+      apiEnabled: true,
+      autoSelect: { ...plan.autoSelect, enabled: false, batchCount: 1 },
+      localFamilies: plan.localFamilies.map((row) => ({ ...row, enabled: false, batchCount: 1 })),
+      apiModels,
+      stage2Enabled: false,
+      defaultGenerator: CRS_QWEN_FAMILY,
+    };
+  }
+  return {
+    ...plan,
+    localEnabled: true,
+    apiEnabled: false,
+    autoSelect: { ...plan.autoSelect, enabled: false, batchCount: 1 },
+    localFamilies: plan.localFamilies.map((row) => ({
+      ...row,
+      enabled: row.family === CRS_QWEN_FAMILY || row.family === "qwen",
+      batchCount: 1,
+    })),
+    apiModels: plan.apiModels.map((row) => ({ ...row, enabled: false, batchCount: 1 })),
+    stage2Enabled: false,
+    defaultGenerator: CRS_QWEN_FAMILY,
+  };
+}
 
 export type CharacterLocalFamilyPlan = {
   family: string;
@@ -588,7 +653,7 @@ export function hydratePlanFromPreferences(
     }
   }
 
-  return applyDefaultGeneratorIfIdle(
+  const hydrated = applyDefaultGeneratorIfIdle(
     {
       ...base,
       localEnabled,
@@ -602,6 +667,7 @@ export function hydratePlanFromPreferences(
     },
     localOptions,
   );
+  return setCrsGenerator(hydrated, selectedCrsGenerator(hydrated));
 }
 
 export function planHasExecutableWork(plan: CharacterGeneratorPlan): boolean {

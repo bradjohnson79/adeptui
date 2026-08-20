@@ -36,6 +36,53 @@
   gap: 0.6rem;
 }
 
+.cd-scene-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #2dd4bf) 28%, transparent);
+  border-radius: 0.6rem;
+}
+
+.cd-scene-review__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.cd-scene-review__head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.cd-scene-review__hint,
+.cd-scene-review__warn,
+.cd-scene-review__message,
+.cd-scene-review__meta,
+.cd-scene-review__group {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.cd-scene-review__warn {
+  color: #b45309;
+}
+
+.cd-scene-review__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+}
+
+.cd-scene-review__row span {
+  flex: 1;
+}
+
 /* —— Map view —— */
 .spatial-map__grid-wrap {
   position: relative;

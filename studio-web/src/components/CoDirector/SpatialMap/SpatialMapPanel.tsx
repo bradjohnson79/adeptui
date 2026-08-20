@@ -44,6 +44,7 @@ import { PlacementSlot } from "./PlacementSlot";
 import { PropAttachmentEditor, type PropAttachmentApply } from "./PropAttachmentEditor";
 import { SpatialGrid, toGridPlacements } from "./SpatialGrid";
 import { spatialMapApi } from "./spatialMapApi";
+import { CdSceneReview } from "./CdSceneReview";
 import { CameraInspector } from "./CameraInspector";
 import {
   assignedSpatialMapCharacters,
@@ -1492,6 +1493,17 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
               />
             </div>
           </div>
+
+          {document?.id ? (
+            <CdSceneReview
+              projectId={projectId}
+              mapId={document.id}
+              onAccepted={() => {
+                void loadMap();
+                void loadMaps();
+              }}
+            />
+          ) : null}
 
           {maps.length > 1 ? (
             <div className="spatial-map__selector" data-testid="spatial-map-selector">

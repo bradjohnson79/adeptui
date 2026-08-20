@@ -1,7 +1,7 @@
 import { api } from "../../api";
 import type { CharacterCandidate } from "./types";
 
-export type ActiveCrsStatus = "approved" | "candidate" | "none";
+export type ActiveCrsStatus = "approved" | "draft" | "none";
 
 export function CharacterActiveCrsCard({
   hero,
@@ -69,13 +69,13 @@ export function CharacterActiveCrsCard({
               <div data-testid="character-active-crs-conditioning">{conditioningLabel}</div>
             ) : null}
             <div data-testid="character-active-crs-status">
-              {status === "approved" ? "Approved / Production Ready" : "Candidate — not approved"}
+              {status === "approved" ? "Approved / Production Ready" : "Draft"}
             </div>
             {revision != null ? (
               <div data-testid="character-active-crs-revision">Revision {revision}</div>
             ) : null}
             {status === "approved" && atName ? (
-              <div data-testid="character-active-crs-at">Universal Reference: {atName}</div>
+              <div data-testid="character-active-crs-at">{atName} is ready everywhere</div>
             ) : null}
           </div>
         </div>

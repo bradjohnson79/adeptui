@@ -540,6 +540,35 @@ def _enqueue_qwen(component_id: str) -> dict[str, Any]:
     return get_queue_manager().enqueue(plan, priority=50)
 
 
+def _enqueue_stills_perception(component_id: str) -> dict[str, Any]:
+    from ...codirector.perception.paths import COMPONENT_SPECS, STILLS_COMPONENT_IDS
+
+    if component_id not in STILLS_COMPONENT_IDS:
+        raise ValueError(f"unsupported stills perception component: {component_id}")
+    spec = COMPONENT_SPECS[component_id]
+    dest_fn = spec["dest"]
+    dest = dest_fn() if callable(dest_fn) else dest_fn
+    repo = str(spec["repo"])
+    component = get_component(component_id)
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=repo,
+        provider_id="stills_perception_hf",
+        artifacts=[
+            {
+                "remotePath": repo,
+                "destinationRelativePath": ".",
+                "downloadUrl": f"https://huggingface.co/{repo}",
+            }
+        ],
+        destination_root=str(dest),
+        estimated_download_bytes=component.download_bytes,
+        estimated_extracted_bytes=component.installed_bytes,
+        metadata={"componentId": component_id, "officialOnly": True, "stillsPerception": True},
+    )
+    return get_queue_manager().enqueue(plan, priority=55)
+
+
 def _enqueue_video_understanding(component_id: str) -> dict[str, Any]:
     from ...codirector.video_intelligence.paths import (
         INTERNVIDEO3_HF_ID,
@@ -1058,6 +1087,8 @@ def create_or_resume_install(
         )
     if component.installer == "m210b_qwen_voice":
         return _serialize(download_operation_to_install_job(_enqueue_qwen(component_id)))
+    if component.installer == "stills_perception_hf":
+        return _serialize(download_operation_to_install_job(_enqueue_stills_perception(component_id)))
     if component.installer == "huggingface_snapshot":
         if component_id in ("videochat3_4b", "internvideo3_8b"):
             return _serialize(download_operation_to_install_job(_enqueue_video_understanding(component_id)))

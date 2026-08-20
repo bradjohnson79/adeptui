@@ -21,6 +21,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(_ROOT / "scripts"))
 
+from beta_runtime.api_identity import perception_contract_ok, should_adopt_studio_api  # noqa: E402
 from beta_runtime.envutil import RUNTIME_TAG, load_beta_env, repo_root, runtime_dirs  # noqa: E402
 
 # Canonical supervisor states. READY maps to HEALTHY for operator diagnostics;
@@ -50,6 +51,28 @@ def _http_ok(url: str, timeout: float = 2.0) -> bool:
             return 200 <= int(resp.status) < 500
     except Exception:
         return False
+
+
+def _http_json(url: str, timeout: float = 2.0) -> dict:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+
+def _repo_revision(root: Path) -> str:
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(root),
+            text=True,
+            timeout=2,
+            stderr=subprocess.DEVNULL,
+        )
+        return (out or "").strip()
+    except Exception:
+        return ""
 
 
 def _port_pids(port: int) -> list[int]:
@@ -166,6 +189,36 @@ def _live_beta_pids(root: Path, *, api_port: int, web_port: int) -> list[int]:
 
 def _candidate_beta_pids(root: Path, *, api_port: int, web_port: int, dirs: dict[str, Path]) -> list[int]:
     return sorted(set(_pid_files(dirs) + _live_beta_pids(root, api_port=api_port, web_port=web_port)))
+
+
+def _orphan_worker_pids(port_pids: list[int]) -> list[int]:
+    """Multiprocessing children that outlive a vanished listener PID."""
+    seeds = {int(pid) for pid in port_pids if int(pid) > 0}
+    if not seeds:
+        return []
+    extra: list[int] = []
+    for row in _win_process_rows():
+        try:
+            pid = int(row.get("ProcessId") or 0)
+            parent = int(row.get("ParentProcessId") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0:
+            continue
+        cmd = str(row.get("CommandLine") or "")
+        compact = cmd.replace(" ", "").lower()
+        if parent in seeds:
+            extra.append(pid)
+            continue
+        if any(f"parent_pid={seed}" in compact for seed in seeds):
+            extra.append(pid)
+    return sorted(set(extra))
+
+
+def _recycle_api_listeners(api_pids: list[int]) -> None:
+    targets = sorted(set(api_pids + _orphan_worker_pids(api_pids)))
+    for pid in targets:
+        _taskkill(pid)
 
 
 def _taskkill(pid: int) -> None:
@@ -364,17 +417,40 @@ class Supervisor:
         self.adopt_api = False
         api_pids = _port_pids(self.api_port)
         if api_pids:
-            if self._is_our_listener(self.api_port) or _http_ok(
-                f"http://{self.api_host}:{self.api_port}/api/health"
+            healthy = _http_ok(f"http://{self.api_host}:{self.api_port}/api/health")
+            current = self._health_revision_current() if healthy else False
+            perception_ok = self._perception_contract_current() if healthy else False
+            identity = self._is_studio_api_identity() or self._is_our_listener(self.api_port)
+            if should_adopt_studio_api(
+                healthy=healthy,
+                revision_current=current,
+                perception_ok=perception_ok,
             ):
                 self.adopt_api = True
                 self.log(
-                    f"preflight: adopting healthy Studio API already on :{self.api_port} (pids={api_pids})"
+                    f"preflight: adopting current Studio API already on :{self.api_port} (pids={api_pids})"
                 )
+            elif identity or (healthy and current and not perception_ok):
+                self.log(
+                    f"preflight: recycling Studio API on :{self.api_port} "
+                    f"(healthy={healthy} current={current} perception={perception_ok} pids={api_pids})"
+                )
+                _recycle_api_listeners(api_pids)
+                deadline = time.time() + 20
+                while time.time() < deadline and _port_pids(self.api_port):
+                    leftover_now = _port_pids(self.api_port)
+                    _recycle_api_listeners(leftover_now)
+                    time.sleep(0.5)
+                leftover = _port_pids(self.api_port)
+                if leftover:
+                    raise SystemExit(
+                        f"Port {self.api_port} still held by {leftover} after stale-API recycle."
+                    )
+                self.adopt_api = False
             else:
                 raise SystemExit(
                     f"Port {self.api_port} (API) is occupied by unmanaged process(es) {api_pids} "
-                    f"that do not answer /api/health. Stop them; Beta does not pick random ports."
+                    f"that do not answer current /api/health. Stop them; Beta does not pick random ports."
                 )
         web_pids = _port_pids(self.web_port)
         if web_pids:
@@ -385,6 +461,47 @@ class Supervisor:
                     f"Port {self.web_port} (Web) is occupied by unmanaged process(es) {web_pids}. "
                     f"Stop them; Beta does not pick random ports."
                 )
+
+    def _health_revision_current(self) -> bool:
+        payload = _http_json(f"http://{self.api_host}:{self.api_port}/api/health")
+        remote = str(payload.get("apiRevision") or "").strip()
+        if not remote:
+            return False
+        local = _repo_revision(self.root)
+        if not local:
+            return True
+        return remote == local
+
+    def _perception_contract_current(self) -> bool:
+        payload = _http_json(f"http://{self.api_host}:{self.api_port}/api/perception/capability")
+        return perception_contract_ok(payload)
+
+    def _is_studio_api_identity(self) -> bool:
+        root = str(self.root).replace("/", "\\").lower()
+        port = str(self.api_port)
+        for pid in _port_pids(self.api_port):
+            try:
+                out = subprocess.check_output(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine",
+                    ],
+                    text=True,
+                    errors="ignore",
+                )
+            except Exception:
+                continue
+            normalized = (out or "").replace("/", "\\").lower()
+            if "comfyui" in normalized and "main.py" in normalized:
+                continue
+            if "app.main" in normalized or "start_api.py" in normalized:
+                if (not root) or root in normalized or "uvicorn" in normalized:
+                    return True
+            if "uvicorn" in normalized and port in normalized:
+                return True
+        return False
 
     def _is_our_listener(self, port: int) -> bool:
         for pid in _port_pids(port):

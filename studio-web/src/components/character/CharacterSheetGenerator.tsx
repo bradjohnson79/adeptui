@@ -29,28 +29,22 @@ type Props = {
   hasReference?: boolean;
   disabled?: boolean;
   onCandidates: (candidates: CharacterCandidate[]) => void;
+  onHistory?: (history: CharacterCandidate[]) => void;
   retryHandlerRef?: { current: ((candidate: CharacterCandidate) => void) | null };
   generateHandlerRef?: { current: (() => void) | null };
 };
 
-function readCandidates(pack: unknown): CharacterCandidate[] {
+function readPackLists(pack: unknown): { current: CharacterCandidate[]; history: CharacterCandidate[] } {
   const p = pack as {
-    pack?: { candidates?: unknown[]; previousCandidates?: unknown[] };
+    pack?: { candidates?: unknown[]; previousCandidates?: unknown[]; status?: string };
     candidates?: unknown[];
     previousCandidates?: unknown[];
   } | undefined;
-  const current = p?.pack?.candidates || p?.candidates || [];
-  const previous = p?.pack?.previousCandidates || p?.previousCandidates || [];
-  const seen = new Set<string>();
-  const out: CharacterCandidate[] = [];
-  for (const raw of [...current, ...previous]) {
-    const c = normalizeCharacterCandidate(raw);
-    const key = String(c.sheetAssetId || c.assetId || c.jobId || "");
-    if (key && seen.has(key)) continue;
-    if (key) seen.add(key);
-    out.push(c);
-  }
-  return out;
+  const currentRaw = p?.pack?.candidates || p?.candidates || [];
+  const previousRaw = p?.pack?.previousCandidates || p?.previousCandidates || [];
+  const current = currentRaw.map((raw) => normalizeCharacterCandidate(raw));
+  const history = previousRaw.map((raw) => normalizeCharacterCandidate(raw));
+  return { current, history };
 }
 
 function viewsTerminal(c: CharacterCandidate): boolean {
@@ -72,6 +66,7 @@ export function CharacterSheetGenerator({
   hasReference = false,
   disabled,
   onCandidates,
+  onHistory,
   retryHandlerRef,
   generateHandlerRef,
 }: Props) {
@@ -105,13 +100,14 @@ export function CharacterSheetGenerator({
         const adv = await api.advanceCharacterVisualSheet(projectId, characterId);
         const pack = (adv as { pack?: { candidates?: CharacterCandidate[]; status?: string }; status?: string }).pack
           || (adv as { candidates?: CharacterCandidate[]; status?: string });
-        const cands = readCandidates(adv);
-        if (cands.length) {
-          setCandidates(cands);
-          onCandidates(cands);
+        const lists = readPackLists(adv);
+        if (lists.current.length) {
+          setCandidates(lists.current);
+          onCandidates(lists.current);
         }
+        onHistory?.(lists.history);
         const packStatus = String(pack?.status || "").toUpperCase();
-        const allDone = cands.length > 0 && cands.every(viewsTerminal);
+        const allDone = lists.current.length > 0 && lists.current.every(viewsTerminal);
         if (
           allDone ||
           packStatus === "FAILED" ||
@@ -129,7 +125,7 @@ export function CharacterSheetGenerator({
       }
       setTimeout(() => void poll(attemptsLeft - 1), 2000);
     },
-    [projectId, characterId, onCandidates],
+    [projectId, characterId, onCandidates, onHistory],
   );
 
   useEffect(() => {
@@ -137,14 +133,15 @@ export function CharacterSheetGenerator({
     void (async () => {
       try {
         const res = await api.getCharacterVisualSheet(projectId, characterId);
-        const cands = readCandidates(res);
+        const lists = readPackLists(res);
         if (!cancelled) {
-          setCandidates(cands);
-          onCandidates(cands);
+          setCandidates(lists.current);
+          onCandidates(lists.current);
+          onHistory?.(lists.history);
           // GET returns the last saved pack and does not hydrate live job
           // status. Resume the existing advance poller so failed imagegen
           // jobs leave "Generating..." without a second poller.
-          if (cands.length && !cands.every(viewsTerminal) && !inFlightRef.current) {
+          if (lists.current.length && !lists.current.every(viewsTerminal) && !inFlightRef.current) {
             inFlightRef.current = true;
             setPhase("generating");
             setMessage("Generating…");
@@ -158,7 +155,41 @@ export function CharacterSheetGenerator({
     return () => {
       cancelled = true;
     };
-  }, [projectId, characterId, onCandidates, poll]);
+  }, [projectId, characterId, onCandidates, onHistory, poll]);
+
+  useEffect(() => {
+    const onPackChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ characterId?: string }>).detail;
+      if (detail?.characterId && detail.characterId !== characterId) return;
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      setPhase("generating");
+      setMessage("Generating…");
+      void poll(180);
+    };
+    window.addEventListener("adept:character-crs-pack-changed", onPackChanged);
+    const tick = window.setInterval(() => {
+      if (inFlightRef.current) return;
+      void api
+        .getCharacterVisualSheet(projectId, characterId)
+        .then((res) => {
+          const lists = readPackLists(res);
+          const pack = (res as { pack?: { status?: string }; status?: string }).pack || res;
+          const status = String((pack as { status?: string })?.status || "").toUpperCase();
+          if (status === "GENERATING" && lists.current.length && !lists.current.every(viewsTerminal)) {
+            inFlightRef.current = true;
+            setPhase("generating");
+            setMessage("Generating…");
+            void poll(180);
+          }
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => {
+      window.removeEventListener("adept:character-crs-pack-changed", onPackChanged);
+      window.clearInterval(tick);
+    };
+  }, [projectId, characterId, poll]);
 
   const generate = useCallback(async () => {
     if (inFlightRef.current) return;
@@ -187,16 +218,17 @@ export function CharacterSheetGenerator({
       setPhase("generating");
       setMessage("Generating…");
       const res = await api.startCharacterVisualSheet(projectId, characterId, body);
-      const initial = readCandidates((res as { pack?: unknown }).pack);
-      setCandidates(initial);
-      onCandidates(initial);
+      const lists = readPackLists((res as { pack?: unknown }).pack);
+      setCandidates(lists.current);
+      onCandidates(lists.current);
+      onHistory?.(lists.history);
       void poll(180);
     } catch (e) {
       inFlightRef.current = false;
       setPhase("idle");
       setMessage(formatCharacterSheetStartError(e));
     }
-  }, [disabled, projectId, characterId, profile, plan, hasReference, localOptions, apiOptions, onCandidates, poll]);
+  }, [disabled, projectId, characterId, profile, plan, hasReference, localOptions, apiOptions, onCandidates, onHistory, poll]);
 
   const retryCandidate = useCallback(
     async (candidate: CharacterCandidate) => {
@@ -207,11 +239,12 @@ export function CharacterSheetGenerator({
       setMessage("Retrying failed candidate…");
       try {
         const res = await api.retryCharacterVisualSheetCandidate(projectId, characterId, idx);
-        const next = readCandidates((res as { pack?: unknown }).pack);
-        if (next.length) {
-          setCandidates(next);
-          onCandidates(next);
+        const lists = readPackLists((res as { pack?: unknown }).pack);
+        if (lists.current.length) {
+          setCandidates(lists.current);
+          onCandidates(lists.current);
         }
+        onHistory?.(lists.history);
         void poll(180);
       } catch (e) {
         inFlightRef.current = false;
@@ -219,7 +252,7 @@ export function CharacterSheetGenerator({
         setMessage(formatCharacterSheetStartError(e));
       }
     },
-    [projectId, characterId, onCandidates, poll],
+    [projectId, characterId, onCandidates, onHistory, poll],
   );
 
   if (retryHandlerRef) {
@@ -234,7 +267,7 @@ export function CharacterSheetGenerator({
   }
 
   const buttonLabel =
-    phase === "starting" ? "Starting…" : phase === "generating" ? "Generating…" : "Generate Character Reference Sheet";
+    phase === "starting" ? "Starting…" : phase === "generating" ? "Generating…" : "Generate";
 
   return (
     <div className="character-core__generate">

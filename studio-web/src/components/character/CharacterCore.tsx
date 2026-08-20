@@ -10,7 +10,6 @@ import { useOpenCoDirector } from "../CoDirector";
 import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "../library/LibraryQuickPreviewModal";
 import { CharacterActions } from "./CharacterActions";
 import { CharacterActiveCrsCard } from "./CharacterActiveCrsCard";
-import { CharacterCandidateGrid } from "./CharacterCandidateGrid";
 import { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 import { CharacterProfileForm } from "./CharacterProfileForm";
 import { CharacterReferenceControl } from "./CharacterReferenceControl";
@@ -49,13 +48,11 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [localOptions, setLocalOptions] = useState<GeneratorOption[]>([]);
   const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
+  const [history, setHistory] = useState<CharacterCandidate[]>([]);
+  const [profileDirty, setProfileDirty] = useState(false);
   const [notice, setNotice] = useState("");
   const [crsRevision, setCrsRevision] = useState<number | null>(null);
   const [previewAsset, setPreviewAsset] = useState<LibraryQuickPreviewAsset | null>(null);
-  // Advanced Continuity/Bible sync — not the creator Approve path.
-  const [promoting, setPromoting] = useState(false);
-  const [promoted, setPromoted] = useState(false);
-  const prevHeroAssetRef = useRef<string | null>(null);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const generateHandlerRef = useRef<(() => void) | null>(null);
   const prefsHydratedRef = useRef(false);
@@ -67,7 +64,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const hero = useMemo(() => getHeroIdentity(references), [references]);
   const referenceImage = useMemo(() => getReferenceImage(references), [references]);
   const hasReference = !!referenceImage?.asset_id;
-  const selectedAssetId = hero?.asset_id ?? null;
   const productionReady = (profile?.approval_status || "").toLowerCase() === "approved";
 
   const saved = !!profile?.id;
@@ -197,8 +193,13 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           // gate approval optional in embedded flow
         }
         await cp.refresh();
+        try {
+          await api.promoteCharacterIdentity(projectId, characterId);
+        } catch {
+          // Bible sync is best-effort; Approve already registered the look.
+        }
         const at = profile?.name?.trim() ? `@${profile.name.trim()}` : "@Character";
-        setNotice(`Character Approved / Production Ready / Universal Reference: ${at}`);
+        setNotice(`${profile?.name || "Character"} is ready. ${at}`);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : "Approve failed");
       }
@@ -225,26 +226,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     [projectId, characterId, cp],
   );
 
-  useEffect(() => {
-    const id = hero?.asset_id ?? null;
-    if (prevHeroAssetRef.current && prevHeroAssetRef.current !== id) setPromoted(false);
-    prevHeroAssetRef.current = id;
-  }, [hero?.asset_id]);
-
-  const handlePromote = useCallback(async () => {
-    setPromoting(true);
-    setNotice("");
-    try {
-      await api.promoteCharacterIdentity(projectId, characterId);
-      setPromoted(true);
-      setNotice("Character identity updated — continuity, VisualIdentity, and the Production Bible synced.");
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "Update Character Identity failed");
-    } finally {
-      setPromoting(false);
-    }
-  }, [projectId, characterId]);
-
   const handleSave = useCallback(async () => {
     const ok = await cp.save({
       name: profile?.name,
@@ -252,8 +233,18 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       visual_style: profile?.visual_style,
       description: profile?.description,
     });
-    if (ok) setNotice("Character profile saved");
+    if (ok) {
+      setProfileDirty(false);
+      setNotice("Character profile saved");
+    }
   }, [cp, profile]);
+
+  const handleReset = useCallback(() => {
+    if (!profileDirty) return;
+    cp.reset();
+    setProfileDirty(false);
+    setNotice("Character profile restored");
+  }, [cp, profileDirty]);
 
   const handleDelete = useCallback(async () => {
     const confirmed = window.confirm(
@@ -264,37 +255,40 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     if (ok) onDeleted?.();
   }, [cp, profile, onDeleted]);
 
-  const activeSheet = useMemo((): CharacterCandidate | null => {
-    if (hero?.asset_id) {
-      const match = candidates.find((c) => candidateAssetId(c) === hero.asset_id);
-      if (match) return { ...match, assetId: hero.asset_id, sheetAssetId: match.sheetAssetId || hero.asset_id };
-      return {
-        assetId: hero.asset_id,
-        sheetAssetId: hero.asset_id,
-        label: profile?.name || "Character Reference Sheet",
-        status: "done",
-        qualityTier: "2K",
-      };
-    }
-    return (
-      candidates.find((c) => {
-        const id = candidateAssetId(c);
-        const st = String(c.status || "").toLowerCase();
-        return !!id && (st === "done" || st === "complete" || st === "");
-      }) || null
-    );
-  }, [hero, candidates, profile?.name]);
+  const approvedSheet = useMemo((): CharacterCandidate | null => {
+    if (!hero?.asset_id) return null;
+    const match = candidates.find((c) => candidateAssetId(c) === hero.asset_id)
+      || history.find((c) => candidateAssetId(c) === hero.asset_id);
+    if (match) return { ...match, assetId: hero.asset_id, sheetAssetId: match.sheetAssetId || hero.asset_id };
+    return {
+      assetId: hero.asset_id,
+      sheetAssetId: hero.asset_id,
+      label: profile?.name || "Character Reference Sheet",
+      status: "done",
+      qualityTier: "2K",
+    };
+  }, [hero, candidates, history, profile?.name]);
 
-  const activeStatus = hero?.asset_id ? "approved" : activeSheet ? "candidate" : "none";
+  const draftSheet = useMemo((): CharacterCandidate | null => {
+    const current = candidates[0];
+    if (!current) return null;
+    const id = candidateAssetId(current);
+    if (hero?.asset_id && id === hero.asset_id) return null;
+    return current;
+  }, [candidates, hero]);
+
+  const activeSheet = draftSheet || approvedSheet;
+  const displayRevision = (activeSheet?.revision as number | undefined) ?? crsRevision;
+  const activeStatus = draftSheet ? "draft" : approvedSheet ? "approved" : "none";
   const generatorLabel =
     activeSheet?.provenance ||
     activeSheet?.generator ||
     (activeSheet?.model ? String(activeSheet.model) : null);
   const conditioningLabel =
     activeSheet?.conditioningMode === "REFERENCE_CONDITIONED"
-      ? "Reference Conditioned"
+      ? "Uses your photo"
       : activeSheet?.conditioningMode === "PROFILE_GUIDED"
-        ? "Profile Guided"
+        ? "From the profile"
         : null;
 
   const openPreview = useCallback(
@@ -306,7 +300,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         match?.provenance || match?.generator || "",
         match?.width && match?.height ? `${match.width}×${match.height}` : "",
         crsRevision != null ? `Revision ${crsRevision}` : "",
-        productionReady ? "Approved" : "Candidate",
+        productionReady && !draftSheet ? "Approved" : "Draft",
       ].filter(Boolean);
       setPreviewAsset({
         id: assetId,
@@ -331,7 +325,10 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         <CharacterProfileForm
           profile={profile}
           autoFocusName={autoFocusName}
-          onChange={(fields) => cp.patchDebounced(fields)}
+          onChange={(fields) => {
+            setProfileDirty(true);
+            cp.setLocal(fields);
+          }}
         />
       </div>
 
@@ -344,7 +341,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           references={references}
           onChanged={cp.refresh}
           onUseAsIdentity={handleUseAsIdentity}
-          onAskCoDirector={(prompt) => openCoDirector(prompt, { autoSend: false })}
+          onAskCoDirector={(prompt, opts) => openCoDirector(prompt, { autoSend: opts?.autoSend ?? false })}
         />
       </div>
 
@@ -367,6 +364,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           apiOptions={apiOptions}
           hasReference={hasReference}
           onCandidates={setCandidates}
+          onHistory={setHistory}
           retryHandlerRef={retryHandlerRef}
           generateHandlerRef={generateHandlerRef}
         />
@@ -374,28 +372,41 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           hero={activeSheet}
           characterName={profile?.name || ""}
           status={activeStatus}
-          revision={crsRevision}
+          revision={typeof displayRevision === "number" ? displayRevision : crsRevision}
           generatorLabel={generatorLabel}
           conditioningLabel={conditioningLabel}
           onPreview={openPreview}
           onRegenerate={() => generateHandlerRef.current?.()}
           onApprove={(c) => void handleApprove(c)}
-          onUpdateIdentity={productionReady ? () => void handlePromote() : undefined}
         />
         {productionReady && atName ? (
           <p className="character-core__hint" data-testid="character-approved-banner">
-            Character Approved / Production Ready / Universal Reference: {atName}
+            {profile?.name || "Character"} is ready. {atName}
           </p>
         ) : null}
-        <h4 className="character-core__section-title" data-testid="character-previous-generations">
-          Previous Generations / Candidates
-        </h4>
-        <CharacterCandidateGrid
-          candidates={candidates}
-          selectedAssetId={selectedAssetId}
-          onApprove={(c) => void handleApprove(c)}
-          onRetry={(c) => retryHandlerRef.current?.(c)}
-        />
+        {history.length ? (
+          <details className="character-core__history" data-testid="character-crs-history">
+            <summary>Advanced — Previous versions</summary>
+            <ul className="character-core__history-list">
+              {history.slice(0, 8).map((item, i) => {
+                const id = candidateAssetId(item);
+                return (
+                  <li key={id || `hist-${i}`}>
+                    <button
+                      type="button"
+                      className="character-core__button"
+                      disabled={!id}
+                      onClick={() => id && openPreview(id)}
+                    >
+                      Revision {item.revision ?? i + 1}
+                      {item.provenance || item.generator ? ` — ${item.provenance || item.generator}` : ""}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        ) : null}
       </div>
 
       {notice ? (
@@ -409,29 +420,13 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         </p>
       ) : null}
 
-      {hero && productionReady && !promoted ? (
-        <div className="character-core__promote" data-testid="character-core-promote">
-          <span>
-            Character approved{profile?.name ? ` — ${atName}` : ""}. Update Character Identity to sync continuity, VisualIdentity, and the Production Bible.
-          </span>
-          <button
-            type="button"
-            className="character-core__button"
-            onClick={() => void handlePromote()}
-            disabled={promoting}
-            data-testid="character-core-promote-button"
-          >
-            {promoting ? "Updating…" : "Update Character Identity"}
-          </button>
-        </div>
-      ) : null}
-
       <CharacterActions
         isSaved={saved}
         canSave={canSave}
         saving={cp.saving}
+        dirty={profileDirty}
         onSave={() => void handleSave()}
-        onReset={() => cp.reset()}
+        onReset={handleReset}
         onDelete={() => void handleDelete()}
       />
 

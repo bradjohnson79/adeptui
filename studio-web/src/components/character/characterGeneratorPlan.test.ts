@@ -17,6 +17,8 @@ import {
   normalizeDiscoveredImageModel,
   primaryGeneratorValue,
   returnToAutoSelectOnly,
+  selectedCrsGenerator,
+  setCrsGenerator,
   setPrimaryLocalGenerator,
   summarizeGenerationPlan,
   type CharacterGeneratorPlan,
@@ -36,6 +38,25 @@ function plan(partial: Partial<CharacterGeneratorPlan> = {}): CharacterGenerator
 }
 
 describe("Character generator plan", () => {
+  it("setCrsGenerator enables exactly one Qwen or GPT Image 2 source", () => {
+    const qwen = setCrsGenerator(plan({
+      localFamilies: [
+        { family: "illustrious", enabled: true, batchCount: 3 },
+        { family: "qwen2512", enabled: false, batchCount: 2 },
+      ],
+    }), "qwen2512");
+    expect(selectedCrsGenerator(qwen)).toBe("qwen2512");
+    expect(qwen.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
+    expect(qwen.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+    expect(summarizeGenerationPlan(qwen).totalSheets).toBe(1);
+
+    const gpt = setCrsGenerator(qwen, "gpt-image-2");
+    expect(selectedCrsGenerator(gpt)).toBe("gpt-image-2");
+    expect(gpt.apiEnabled).toBe(true);
+    expect(gpt.localEnabled).toBe(false);
+    expect(gpt.apiModels.some((row) => row.enabled && row.modelId === "gpt-image-2")).toBe(true);
+  });
+
   it("defaults to Qwen Image 2512 with Auto Select off", () => {
     expect(DEFAULT_CHARACTER_GENERATOR_PLAN.defaultGenerator).toBe(DEFAULT_GENERATOR_FAMILY);
     expect(DEFAULT_CHARACTER_GENERATOR_PLAN.autoSelect.enabled).toBe(false);
@@ -64,7 +85,7 @@ describe("Character generator plan", () => {
     ]).localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBeFalsy();
   });
 
-  it("keeps a saved Illustrious preference over the Qwen default", () => {
+  it("coerces a saved Illustrious preference to the Qwen CRS default", () => {
     const hydrated = hydratePlanFromPreferences(
       {
         local: [
@@ -79,8 +100,8 @@ describe("Character generator plan", () => {
       ],
       [],
     );
-    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(true);
-    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
     expect(hydrated.autoSelect.enabled).toBe(false);
   });
 
@@ -327,7 +348,8 @@ describe("Character generator plan", () => {
     );
     expect(hydrated.localEnabled).toBe(true);
     expect(hydrated.apiEnabled).toBe(false);
-    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.batchCount).toBe(2);
+    expect(hydrated.localFamilies.find((r) => r.family === "illustrious")?.enabled).toBe(false);
+    expect(hydrated.localFamilies.find((r) => r.family === "qwen2512")?.enabled).toBe(true);
     expect(hydrated.apiModels[0].enabled).toBe(false);
   });
 
@@ -404,37 +426,26 @@ describe("Character generator plan", () => {
 });
 
 describe("Character Creator generator UI contract", () => {
-  it("CharacterGeneratorPanel has batch count controls and per-model checkboxes", () => {
+  it("CharacterGeneratorPanel exposes only Qwen and GPT Image 2", () => {
     const panel = readFileSync(new URL("./CharacterGeneratorPanel.tsx", import.meta.url), "utf8");
     expect(panel).toContain('data-testid="character-generator-compact"');
-    expect(panel).toContain('data-testid="character-more-generators"');
-    expect(panel).toContain("More Generators");
-    expect(panel).toContain("function BatchSelect");
-    expect(panel).toContain("<span>Batches</span>");
-    expect(panel).toContain('testId="generator-auto-batch"');
-    expect(panel).toContain("generator-local-batch-");
-    expect(panel).toContain("generator-api-batch-");
-    expect(panel).toContain("generator-local-enable-");
-    expect(panel).toContain("generator-api-enable-");
-    expect(panel).toContain('type="checkbox"');
-    expect(panel).toContain("CHARACTER_SHEET_BATCH_MIN");
-    expect(panel).toContain("CHARACTER_SHEET_BATCH_MAX");
-    const checkboxes = [...panel.matchAll(/type="checkbox"/g)];
-    expect(checkboxes.length).toBeGreaterThanOrEqual(4);
+    expect(panel).toContain('data-testid="character-generator-select"');
+    expect(panel).toContain("CRS_QWEN_FAMILY");
+    expect(panel).toContain("CRS_GPT_IMAGE_2");
+    expect(panel).not.toContain("character-more-generators");
+    expect(panel).not.toContain("More Generators");
+    expect(panel).not.toContain("function BatchSelect");
   });
 
-  it("Character Creator loads hosted image catalog into per-model API checkboxes", () => {
+  it("Character Creator still discovers GPT Image 2 without exposing a cloud checkbox grid", () => {
     const panel = readFileSync(new URL("./CharacterGeneratorPanel.tsx", import.meta.url), "utf8");
     expect(panel).toContain('fetchDiscoveredHostedModelRows("image")');
     expect(panel).toContain("normalizeDiscoveredImageModel");
     expect(panel).toContain("mergePlanWithInventory");
-    expect(panel).toContain("groupDiscoveredImageModelsByProvider");
-    expect(panel).toContain("character-core__api-group");
-    expect(panel).toContain("character-core__api-group-label");
-    expect(panel).toContain("data-testid={`generator-api-provider-${group.providerId}`}");
-    expect(panel).toContain("cloudModelStatusLabel");
-    expect(panel).toContain("CHARACTER_SHEET_BATCH_MIN");
-    expect(panel).toContain("CHARACTER_SHEET_BATCH_MAX");
+    expect(panel).not.toContain("character-core__api-group");
+    expect(panel).not.toContain("character-core__api-group-label");
+    expect(panel).not.toContain("CHARACTER_SHEET_BATCH_MIN");
+    expect(panel).not.toContain("CHARACTER_SHEET_BATCH_MAX");
     const plan = readFileSync(new URL("./characterGeneratorPlan.ts", import.meta.url), "utf8");
     expect(plan).toContain("listed, adapter not ready");
     expect(plan).toContain("adapterAvailable");

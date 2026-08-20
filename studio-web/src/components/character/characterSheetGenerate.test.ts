@@ -83,7 +83,7 @@ describe("Character Sheet generate request", () => {
     expect(body.candidateCount).toBe(1);
   });
 
-  it("expands mixed local batches and keeps Cloud off at zero API jobs", () => {
+  it("always requests one Character Reference Sheet even if leftover plan rows have batches", () => {
     const body = buildCharacterSheetStartBody({
       plan: plan({
         localFamilies: [
@@ -96,10 +96,8 @@ describe("Character Sheet generate request", () => {
       hasReference: false,
       localOptions,
     });
-    expect(body.candidateCount).toBe(3);
+    expect(body.candidateCount).toBe(1);
     expect(body.generatorSources.api).toBeNull();
-    expect(body.generatorSources.local?.find((r) => r.family === "illustrious")?.batchCount).toBe(2);
-    expect(body.generatorSources.local?.find((r) => r.family === "qwen2512")?.batchCount).toBe(1);
   });
 
   it("blocks Generate when no source is enabled with a visible error", () => {

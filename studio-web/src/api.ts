@@ -65,6 +65,7 @@ import type {
 } from "./contracts/spatialMapM411";
 import type { AvatarProjectJob } from "./avatar/types";
 import type { StatusRegistryCheck, StatusRun } from "./codirector/status/types";
+import { perceptionAbortSignal } from "./codirector/perception/requestPolicy";
 
 /**
  * Central API origin abstraction.
@@ -5904,6 +5905,52 @@ export const api = {
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/movement-arrows?${query.toString()}`,
       );
     },
+  },
+  perception: {
+    capability: () =>
+      req<{ capability: Record<string, unknown> }>("/api/perception/capability", {
+        signal: perceptionAbortSignal(),
+      }),
+    getDraft: (projectId: string, mapId: string) =>
+      req<{ draft: Record<string, unknown> | null; capability: Record<string, unknown> }>(
+        `/api/perception/projects/${projectId}/maps/${mapId}/draft`,
+        { signal: perceptionAbortSignal() },
+      ),
+    review: (projectId: string, mapId: string) =>
+      req<{ draft: Record<string, unknown>; capability: Record<string, unknown> }>(
+        `/api/perception/projects/${projectId}/maps/${mapId}/review`,
+        { method: "POST", signal: perceptionAbortSignal() },
+      ),
+    accept: (projectId: string, mapId: string, items: Array<{ fillId: string; overwrite?: boolean }>) =>
+      req<{
+        ok: boolean;
+        documentWritten: boolean;
+        acceptedFillIds: string[];
+        failures: Array<{ fillId: string; code: string; message: string }>;
+        draft: Record<string, unknown> | null;
+      }>(`/api/perception/projects/${projectId}/maps/${mapId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+        signal: perceptionAbortSignal(),
+      }),
+    correct: (projectId: string, mapId: string, corrections: Array<Record<string, unknown>>) =>
+      req<{ draft: Record<string, unknown> }>(`/api/perception/projects/${projectId}/maps/${mapId}/corrections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ corrections }),
+        signal: perceptionAbortSignal(),
+      }),
+    autoMask: (projectId: string, mapId: string, label: string) =>
+      req<{ ok: boolean; maskAssetId: string; status: string; message: string }>(
+        `/api/perception/projects/${projectId}/auto-mask`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mapId, label }),
+          signal: perceptionAbortSignal(),
+        },
+      ),
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>
     req<{ id: string; project_id: string; scene_id: string; guidance: string; doc: any }>(

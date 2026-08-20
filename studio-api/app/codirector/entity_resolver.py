@@ -256,6 +256,12 @@ def parse_shot_requests(raw_text: str) -> list[ShotRequest]:
         cleaned = _CHARACTER_TAG_RE.sub("", piece)
         cleaned = _PROP_TAG_RE.sub("", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,;:-")
+        from .perception.spatial_language import extract_spatial_lines
+
+        spatial_lines = extract_spatial_lines(piece)
+        if spatial_lines:
+            extra = " ".join(spatial_lines)
+            cleaned = f"{cleaned} {extra}".strip() if cleaned else extra
         shots.append(
             ShotRequest(
                 index=index,
@@ -284,13 +290,46 @@ def resolve_shot_request_entities(
     the prop semantically.
     """
     resolved_chars: list[str] = []
-    for name in shot.characters:
+    names = list(shot.characters)
+    try:
+        from ..character_identity.service import list_profiles
+        from .perception.spatial_language import match_known_names
+
+        known = [profile.name for profile in list_profiles(db, project_id) if profile.name]
+        for name in match_known_names(shot.raw_text, known):
+            if name not in names:
+                names.append(name)
+    except Exception:
+        pass
+    for name in names:
         ref = resolve_character(db, project_id, name)
         if ref and ref.get("character_id"):
             resolved_chars.append(ref["character_id"])
 
     resolved_props: list[str] = []
-    for tag in shot.prop_entities:
+    tags = list(shot.prop_entities)
+    try:
+        from ..spatial_map.ers_persistence import list_prop_entities
+        from .perception.spatial_language import match_known_names
+        from .perception.spatial_draft import load_spatial_draft
+
+        known_props = [prop.display_label or prop.tag for prop in list_prop_entities(db, project_id)]
+        for label in match_known_names(shot.raw_text, known_props):
+            if label not in tags:
+                tags.append(label)
+        map_id = str(getattr(shot, "scene_layout_id", "") or "")
+        if not map_id:
+            draft = None
+        else:
+            draft = load_spatial_draft(db, project_id, map_id)
+        if draft:
+            for fill in draft.proposedFills:
+                if fill.kind == "prop" and fill.label and fill.label.lower() in shot.raw_text.lower():
+                    if fill.tag and fill.tag not in tags:
+                        tags.append(fill.tag.lstrip("#"))
+    except Exception:
+        pass
+    for tag in tags:
         prop = resolve_prop(db, project_id, tag)
         if prop:
             resolved_props.append(prop.id)
@@ -544,6 +583,23 @@ def compile_shot_prompt(
         prompt_parts.append(f"View direction: {shot.orientation} (scene-relative)")
     if shot.additional_instructions:
         prompt_parts.append(shot.additional_instructions)
+    try:
+        from .perception.spatial_draft import load_spatial_draft
+        from .perception.spatial_language import compile_spatial_glossary, extract_spatial_lines
+
+        draft = None
+        ers_map_id = str(getattr(ers_package, "scene_layout_id", "") or "") if ers_package else ""
+        if ers_map_id:
+            draft = load_spatial_draft(db, project_id, ers_map_id)
+        for line in extract_spatial_lines(shot.raw_text, compile_spatial_glossary(draft)):
+            if line not in prompt_parts:
+                prompt_parts.append(line)
+        if draft:
+            creative_context_spatial = compile_spatial_glossary(draft)
+        else:
+            creative_context_spatial = extract_spatial_lines(shot.raw_text)
+    except Exception:
+        creative_context_spatial = []
     prompt = ". ".join(part for part in prompt_parts if part).strip()
 
     # Style-aware model selection for scene shots. Scene shots frequently carry
@@ -584,6 +640,7 @@ def compile_shot_prompt(
         "ers_composite_asset_id": composite_id or None,
         "ers_directional_ref": directional_ref,
         "structured_blocking": structured_blocking,
+        "spatial_language": creative_context_spatial,
         # Layered styles — NOT flattened.
         "style_layers": {
             "project": project_style,

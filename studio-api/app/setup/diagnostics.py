@@ -709,6 +709,41 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    if component.verifier == "stills_perception_files":
+        from ..codirector.perception.paths import COMPONENT_SPECS, model_present
+
+        spec = COMPONENT_SPECS.get(component_id)
+        if not spec:
+            return Verification(
+                False,
+                True,
+                "unknown_component",
+                f"{component.name} is not a stills-perception component.",
+                "",
+                recommendation="manual_help",
+            )
+        dest_fn = spec["dest"]
+        dest = dest_fn() if callable(dest_fn) else dest_fn
+        markers = tuple(spec["markers"])
+        if model_present(dest, markers):
+            return Verification(
+                True,
+                False,
+                None,
+                f"{component.name} weights are installed (Testing).",
+                str(dest),
+                details=("stills perception", "optional"),
+            )
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            f"{component.name} is not installed. Optional — generation still works.",
+            str(dest),
+            recommendation="install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "avatar_runtime":
         runtime = verify_avatar_runtime(component_id)
         inspection = runtime.get("inspection") or {}

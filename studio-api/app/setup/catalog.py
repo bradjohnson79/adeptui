@@ -58,6 +58,7 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "kie_key": DEPENDENCY_TYPE_CREDENTIAL,
     "wavespeed_key": DEPENDENCY_TYPE_CREDENTIAL,
     "video_understanding_files": DEPENDENCY_TYPE_MODEL,
+    "stills_perception_files": DEPENDENCY_TYPE_MODEL,
 }
 
 
@@ -538,6 +539,42 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "video_understanding_files",
         "huggingface_snapshot",
         category="Video Understanding",
+    ),
+    ComponentDefinition(
+        "grounding_dino_tiny",
+        "Grounding DINO Tiny",
+        "Optional Co-Director scene boxes. Testing. Not required to generate.",
+        False,
+        1500 * MB,
+        1600 * MB,
+        ("python",),
+        "stills_perception_files",
+        "stills_perception_hf",
+        category="Co-Director Scene Perception",
+    ),
+    ComponentDefinition(
+        "sam21_hiera_tiny",
+        "SAM 2.1 Tiny",
+        "Optional Co-Director masks. Testing. Not required to generate.",
+        False,
+        400 * MB,
+        450 * MB,
+        ("python",),
+        "stills_perception_files",
+        "stills_perception_hf",
+        category="Co-Director Scene Perception",
+    ),
+    ComponentDefinition(
+        "depth_anything_v2_small",
+        "Depth Anything V2 Small",
+        "Optional Co-Director near/far help. Testing. Apache-2.0 Small only.",
+        False,
+        200 * MB,
+        250 * MB,
+        ("python",),
+        "stills_perception_files",
+        "stills_perception_hf",
+        category="Co-Director Scene Perception",
     ),
 )
 
