@@ -597,8 +597,12 @@ class Supervisor:
             "--port",
             str(self.api_port),
             "--workers",
-            "2",
+            "1" if os.name == "nt" else "2",
         ]
+        leftover = _port_pids(self.api_port)
+        if leftover:
+            self.log(f"clearing leftover API listeners before spawn: {leftover}")
+            _recycle_api_listeners(leftover)
         self.log(f"starting API: {' '.join(cmd)}")
         popen = subprocess.Popen(
             cmd,
