@@ -1,0 +1,28 @@
+{
+  "observedAt": "2026-08-20T16:58:00Z",
+  "topology": "8760→8758",
+  "apiRevision": "f51838a",
+  "apiStartedAt": "2026-08-20T16:27:33Z",
+  "comfyQueue": { "queue_running": [], "queue_pending": [] },
+  "vramFreeMbObserved": 30842,
+  "zombieCancelled": {
+    "id": "657d1665-059f-4138-b281-f4a513d9d342",
+    "tag": "korri_four_view",
+    "reason": "status=running sampling for ~20m while Comfy queue empty and GPU idle"
+  },
+  "disposableCrsJobsStillQueued": [
+    "d1abe4af-0a7c-4b8d-b2cc-7dfe5768d6b8",
+    "3dde1cb7-7b60-4eab-a075-d7702fe6fb7b"
+  ],
+  "leftoverKorriJobsQueued": [
+    "1f37721d",
+    "11d17e2d",
+    "9cc051e6",
+    "00ba9f40",
+    "cc69550d",
+    "50f2dafe",
+    "bbbdd3d1"
+  ],
+  "diagnosis": "Studio JobQueue consumer did not start the next ImageProduct job after the zombie was cancelled. Official visual-sheet retry created 3dde1cb7 and left it queued. In-memory asyncio queue is not draining DB queued rows. Recycle of :8758 would recover_interrupted and resume leftover Korri CRS jobs from abandoned Character Creator tabs — refused to protect production Korri.",
+  "gpuGates": "NOT STARTED"
+}

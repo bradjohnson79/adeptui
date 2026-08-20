@@ -1,0 +1,49 @@
+{
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "mapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+  "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+  "topology": "8760→8758",
+  "apiRevision": "8c28eaa",
+  "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+  "korriUntouched": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+  "gates": {
+    "review_ok": true,
+    "accept_occupied_refused": true,
+    "crs_ok": true,
+    "char_still_ok": true,
+    "schnick_ok": true,
+    "facts_ok": true,
+    "leak_ok": true,
+    "jepa_live_ok": true
+  },
+  "pixels": {
+    "character-crs.png": 8387681,
+    "character-still.png": 1260665,
+    "schnick-still.png": 1377184,
+    "edit-inpaint.png": 1313155
+  },
+  "ids": {
+    "crsAssetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+    "characterStillAssetId": "4c5a9cba-9d67-415c-b2c0-7b5a0239fd39",
+    "schnickAssetId": "17b1e69e-8e40-47fc-ac51-263484b8da00",
+    "editAssetId": "11ba25e1-7aad-4837-99c4-768021c45550"
+  },
+  "leak": {
+    "unmasked_mean_delta": 0.24615783989429474,
+    "threshold": 2.0
+  },
+  "spatialLanguage": [
+    "Zone: employee side",
+    "Zone: customer side",
+    "Zone: behind the counter",
+    "Korri behind service counter",
+    "CRS Single 1787198703328 facing Korri"
+  ],
+  "worldEvaluate": {
+    "availability": "available",
+    "modelId": "vjepa2-vitl-fpc64-256",
+    "advisoryText": "The scene remains in the established world with minor changes.",
+    "similarityToReference": 0.7623,
+    "queueHook": "World consistency looks strong."
+  }
+}

@@ -44,6 +44,8 @@ _VOLATILE_INPUT_KEYS = frozenset(
 # runtime parameter (ERS sheets, Scene Creator Mini 16:9), not topology.
 _RUNTIME_VOLATILE_BY_WORKFLOW = {
     "qwen2512.ref": frozenset({"width", "height"}),
+    "zimage.ref_edit": frozenset({"width", "height"}),
+    "zimage.inpaint": frozenset({"width", "height"}),
 }
 
 

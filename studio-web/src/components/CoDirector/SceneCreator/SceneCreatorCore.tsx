@@ -9,6 +9,7 @@ import { CoDirectorEmptyState } from "../cards";
 import { candidateProgress } from "./types";
 import type { SceneShotCandidate } from "./types";
 import { useSceneCreator } from "./useSceneCreator";
+import { WorldConsistencyNote } from "./WorldConsistencyNote";
 import { LoRASelector } from "../../lora/LoRASelector";
 import { deriveIntegrityCaption, tickMark } from "./productionContextStatus";
 import { CinematographerPanel } from "./cinematographer/CinematographerPanel";
@@ -208,6 +209,7 @@ function StandardLayout({ sc, onGoTab }: LayoutProps) {
         </button>
         <SpatialProfileBlock sc={sc} />
         <EnvironmentBlock sc={sc} onGoTab={onGoTab} />
+        <MovementBlock sc={sc} />
         <CharactersPropsBlock sc={sc} />
         <CinematographerPanel sc={sc} />
         <ShotPromptBlock sc={sc} />
@@ -518,6 +520,34 @@ function SpatialProfileBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> })
   );
 }
 
+function MovementBlock({ sc }: LayoutProps) {
+  const movement = sc.selectedMovement;
+  return (
+    <div data-testid="scene-creator-movement">
+      <p className="scene-creator-core__label">Movement</p>
+      <select
+        data-testid="scene-creator-movement-select"
+        value={sc.movementSegmentId}
+        onChange={(e) => sc.setMovementSegmentId(e.target.value)}
+      >
+        {(sc.movementOptions || []).map((opt) => (
+          <option key={opt.id} value={opt.id}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      {movement ? (
+        <p className="muted" data-testid="scene-creator-movement-context">
+          Starting beat: {movement.beatName || `Movement ${movement.segmentNumber}`}.
+          Shot changes stay on this shot and do not rewrite the Spatial Map.
+        </p>
+      ) : (
+        <p className="muted">Save a Spatial Map with movements to start from a beat.</p>
+      )}
+    </div>
+  );
+}
+
 function EnvironmentBlock({ sc, onGoTab }: LayoutProps) {
   const sheets = sc.workspace?.sheets || [];
   return (
@@ -752,6 +782,7 @@ function RegionEditBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
   return (
     <RegionEditPanel
       projectId={sc.projectId}
+      spatialMapId={sc.spatialMapId}
       shot={sc.shot}
       cinematographer={sc.cinematographer}
       selectedCameraId={sc.selectedCameraId}
@@ -789,6 +820,7 @@ function RetakeBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
 }
 
 function StatusBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
+  const previewAsset = sc.approved?.asset_id || sc.shot?.candidates.find((c) => c.asset_id)?.asset_id || "";
   return (
     <>
       {sc.error ? (
@@ -801,6 +833,7 @@ function StatusBlock({ sc }: { sc: ReturnType<typeof useSceneCreator> }) {
           {sc.notice}
         </p>
       ) : null}
+      <WorldConsistencyNote projectId={sc.projectId} sceneId={sc.sceneId} assetId={previewAsset} />
     </>
   );
 }

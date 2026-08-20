@@ -2924,6 +2924,20 @@ def owner_approve_visual_sheet_gates(
     pack["ownerApprovedBy"] = approved_by
     pack["ownerApprovedAt"] = _now()
     _save_pack(db, project_id, character_id, pack)
+    hero = str(role_assets.get("hero_identity") or "").strip()
+    if hero and pack.get("status") in {"OWNER_APPROVED", "OWNER_APPROVED_WITH_PENDING"}:
+        try:
+            service.approve_character_candidate(
+                db,
+                project_id,
+                character_id,
+                asset_id=hero,
+                reference_role="hero_identity",
+                source_type="generation",
+                notes=f"Owner approved visual sheet ({approved_by})",
+            )
+        except Exception:
+            logger.exception("Visual sheet owner-approve did not persist canonical hero %s", character_id)
     return {
         "ok": True,
         "characterId": character_id,

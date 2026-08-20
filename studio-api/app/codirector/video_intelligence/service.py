@@ -378,6 +378,57 @@ def review_completed_batch(
         )
     finally:
         cleanup_extracted_clip(str(extras.get("extractedClip") or ""), source_path=video_path)
+
+    # ── Revision C — JEPA world-state augmentation ──────────────────────
+    # VideoChat3 observes; V-JEPA adds complementary world-state signal.
+    # Non-blocking — failure does NOT degrade the temporal packet.
+    if packet.is_gate_ready() and review_path:
+        try:
+            from ..world_intelligence.temporal_world_review import augment_temporal_packet
+
+            policy_raw = getattr(master, "coDirectorWorldIntelligencePolicy", None)
+            world_policy = None
+            if policy_raw is not None:
+                from ..world_intelligence.contracts import CoDirectorWorldIntelligencePolicy
+
+                if isinstance(policy_raw, CoDirectorWorldIntelligencePolicy):
+                    world_policy = policy_raw
+                elif isinstance(policy_raw, dict):
+                    try:
+                        world_policy = CoDirectorWorldIntelligencePolicy.model_validate(policy_raw)
+                    except Exception:
+                        pass
+
+            # Attempt to find an approved world reference from the project
+            ref_path = None
+            ref_id = None
+            try:
+                from ..world_intelligence.service import _get_index
+
+                index = _get_index()
+                anchors = index.get_anchors(project_id=project_id, scene_id=scene_id)
+                if anchors:
+                    ref_id = anchors[0].assetId
+                    from ...db import Asset
+
+                    if db is not None:
+                        asset = db.get(Asset, ref_id)
+                        if asset and asset.path:
+                            ref_path = str(asset.path)
+            except Exception:
+                pass
+
+            packet = augment_temporal_packet(
+                packet,
+                clip_path=review_path,
+                reference_image_path=ref_path,
+                reference_asset_id=ref_id,
+                world_policy=world_policy,
+            )
+        except Exception as exc:
+            logger.debug("JEPA world review skipped: %s", exc)
+            packet.extras["worldReview"] = {"availability": "skipped", "reason": str(exc)[:120]}
+
     _persist(master, packet, source_batch, target_batch_id)
     return packet
 

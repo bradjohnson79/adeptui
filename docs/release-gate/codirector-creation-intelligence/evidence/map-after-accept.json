@@ -1,0 +1,10 @@
+{
+  "observedAt": "2026-08-20T17:05:00Z",
+  "source": "GET /api/spatial-map/projects/2347bf46-3762-4763-86c5-4a6032522278/maps/6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+  "slots": { "characters": 2, "props": 2, "cameras": 4, "zones": null },
+  "characters": [
+    { "id": "c49371ed-ba6b-4c16-ba98-a8b28b72118b", "label": "Korri" },
+    { "id": "284411ea-596f-4b8d-9a0e-8da81a67edbf", "label": "CRS Single 1787198703328" }
+  ],
+  "note": "live-gates.json first Accept is FILL_NOT_FOUND. A later Accept on current-draft fill_46484b9f3077 returned documentWritten=true. This GET is the surviving slot state. Korri remains slot 0. No zones[]."
+}

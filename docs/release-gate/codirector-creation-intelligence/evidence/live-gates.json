@@ -1,0 +1,2454 @@
+{
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "mapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+  "topology": "8760\u21928758",
+  "startedAt": "2026-08-20T20:22:38Z",
+  "gates": {},
+  "health": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "comfy_reachable": true,
+      "comfy": {
+        "status": "unknown",
+        "reachable": false,
+        "message": "liveness only; use /api/comfy/health for Comfy and /api/capabilities for catalog"
+      },
+      "missing_models": [],
+      "missing_model_component_ids": [],
+      "missing_optional_models": [],
+      "missing_optional_model_component_ids": [],
+      "comfy_status": "unknown",
+      "comfy_version": null,
+      "node_catalog_available": false,
+      "reason_code": null,
+      "recommended_action": null,
+      "message": "ok",
+      "operator": {
+        "api": "ok",
+        "comfy": "unknown",
+        "provider": {
+          "id": null,
+          "status": "skipped",
+          "reachable": false,
+          "modelAvailable": false,
+          "selectedModel": null
+        },
+        "bibleStorage": "skipped",
+        "intelligenceEnabled": true,
+        "visionValidationEnabled": true,
+        "timelineReferencesEnabled": true,
+        "productionExecutiveEnabled": true,
+        "modelRadarEnabled": false,
+        "sandboxRuntimeEnabled": false,
+        "virtualStageEnabled": false,
+        "shotProfilesEnabled": false,
+        "productionRecipeEnabled": false,
+        "locationSpinEnabled": false,
+        "imageProductionEnabled": true,
+        "frameProductionEnabled": true,
+        "videoProductionEnabled": true,
+        "directorTimelineEnabled": true,
+        "lipsyncProductionEnabled": true,
+        "audioProductionEnabled": true,
+        "editingProductionEnabled": true,
+        "renderProductionEnabled": true,
+        "codirectorProductionControlEnabled": true,
+        "productionIntelligenceEnabled": true,
+        "adaptiveLearningEnabled": true,
+        "virtualEnvironmentStudioEnabled": false,
+        "unifiedExperienceEnabled": false,
+        "templatesPresetsEnabled": false,
+        "specialistCount": 40,
+        "registry": {
+          "callable": 0,
+          "blocked": 0,
+          "total": 0,
+          "deferred": 0,
+          "counts": {}
+        },
+        "packBlockers": [],
+        "visualValidationPendingNote": "M2.5 vision validation enabled \u2014 review pending assets in Validation Workspace.",
+        "partialErrors": []
+      },
+      "apiRevision": "8c28eaa",
+      "apiStartedAt": "2026-08-20T20:20:12Z",
+      "routeContract": [
+        "perception.capability"
+      ]
+    }
+  },
+  "capability": {
+    "capability": {
+      "sceneReview": "available",
+      "sceneReviewReason": "CD Scene Review uses the existing environment look. Chat is not required.",
+      "geometry": "unavailable",
+      "geometryReason": "Automatic placement boxes are not installed. You can still review the scene and place people yourself.",
+      "autoMask": "unavailable",
+      "autoMaskReason": "Auto-select needs scene geometry. Paint the region if it is unavailable.",
+      "chatRequired": false
+    }
+  },
+  "mapBefore": {
+    "status": 200,
+    "characters": 2,
+    "props": 2,
+    "cameras": 4,
+    "zones": null,
+    "characterIds": [
+      "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+    ]
+  },
+  "review": {
+    "status": 200,
+    "reviewLabel": "CD Scene Review",
+    "geometryStatus": "unavailable",
+    "fills": [
+      {
+        "id": "fill_bd30a0fed0a3",
+        "kind": "character",
+        "label": "Service counter side",
+        "slotIndex": 0
+      },
+      {
+        "id": "fill_46484b9f3077",
+        "kind": "character",
+        "label": "CRS Single 1787198703328",
+        "slotIndex": 1
+      },
+      {
+        "id": "fill_961a1fb8dbdf",
+        "kind": "prop",
+        "label": "Service counter side",
+        "slotIndex": 0
+      },
+      {
+        "id": "fill_9eafeac2eaeb",
+        "kind": "camera",
+        "label": "Conversation camera",
+        "slotIndex": 0
+      }
+    ],
+    "slotsUnchanged": true,
+    "before": {
+      "characters": 2,
+      "props": 2,
+      "cameras": 4,
+      "zones": null,
+      "characterIds": [
+        "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+        "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+      ]
+    },
+    "after": {
+      "characters": 2,
+      "props": 2,
+      "cameras": 4,
+      "zones": null,
+      "characterIds": [
+        "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+        "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+      ]
+    },
+    "zones": null
+  },
+  "correction": {
+    "factKey": "fill:service counter side",
+    "survivedReview": true,
+    "userCorrections": [
+      {
+        "id": "corr_dc485d10e539",
+        "factKey": "fill:korri",
+        "action": "rename",
+        "value": {
+          "label": "Service counter side"
+        },
+        "createdAt": "2026-08-20T16:36:14.188843+00:00",
+        "authority": "filmmaker"
+      },
+      {
+        "id": "corr_5cef35c75e20",
+        "factKey": "fill:coffee cup",
+        "action": "rename",
+        "value": {
+          "label": "Service counter side"
+        },
+        "createdAt": "2026-08-20T16:46:44.022060+00:00",
+        "authority": "filmmaker"
+      },
+      {
+        "id": "corr_ab43e4524340",
+        "factKey": "fill:service counter side",
+        "action": "rename",
+        "value": {
+          "label": "Service counter side"
+        },
+        "createdAt": "2026-08-20T20:22:38.784602+00:00",
+        "authority": "filmmaker"
+      }
+    ]
+  },
+  "accept": {
+    "status": 200,
+    "items": [
+      {
+        "fillId": "fill_bd30a0fed0a3",
+        "label": "Service counter side"
+      }
+    ],
+    "body": {
+      "ok": false,
+      "documentWritten": false,
+      "acceptedFillIds": [],
+      "failures": [
+        {
+          "fillId": "fill_bd30a0fed0a3",
+          "code": "SLOT_OCCUPIED",
+          "message": "That slot already has a placement. Accept will not overwrite it."
+        }
+      ],
+      "draft": {
+        "schemaVersion": "spatial-draft-v1",
+        "draftId": "draft_aec83c7fcae8",
+        "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+        "mapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+        "sourceAssetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735",
+        "reviewLabel": "CD Scene Review",
+        "sceneReviewAvailable": true,
+        "geometryStatus": "unavailable",
+        "geometryReason": "Automatic placement boxes are not installed. You can still review the scene and place people yourself.",
+        "canonAvailability": "unavailable",
+        "canonUnavailableReason": "HTTP 200",
+        "proposedFills": [
+          {
+            "id": "fill_bd30a0fed0a3",
+            "kind": "character",
+            "slotIndex": 0,
+            "colorKey": "red",
+            "label": "Service counter side",
+            "tag": "@Korri",
+            "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+            "propId": "",
+            "characterApproved": true,
+            "normalizedX": -0.18,
+            "normalizedY": -0.32,
+            "miniPrompt": "@Korri behind the service counter",
+            "orientation": "",
+            "shotSize": "auto",
+            "primarySubject": "auto",
+            "perceptionEntityId": "",
+            "authority": "filmmaker",
+            "factStatus": "corrected",
+            "notes": ""
+          },
+          {
+            "id": "fill_46484b9f3077",
+            "kind": "character",
+            "slotIndex": 1,
+            "colorKey": "blue",
+            "label": "CRS Single 1787198703328",
+            "tag": "@CRS Single 1787198703328",
+            "characterId": "284411ea-596f-4b8d-9a0e-8da81a67edbf",
+            "propId": "",
+            "characterApproved": true,
+            "normalizedX": 0.18,
+            "normalizedY": 0.34,
+            "miniPrompt": "@CRS Single 1787198703328 on the customer side",
+            "orientation": "",
+            "shotSize": "auto",
+            "primarySubject": "auto",
+            "perceptionEntityId": "",
+            "authority": "inference",
+            "factStatus": "inferred",
+            "notes": ""
+          },
+          {
+            "id": "fill_bee8325d8135",
+            "kind": "prop",
+            "slotIndex": 0,
+            "colorKey": "purple",
+            "label": "Service counter side",
+            "tag": "#coffee-cup",
+            "characterId": "",
+            "propId": "",
+            "characterApproved": false,
+            "normalizedX": 0.0,
+            "normalizedY": 0.12,
+            "miniPrompt": "coffee cup in the scene",
+            "orientation": "",
+            "shotSize": "auto",
+            "primarySubject": "auto",
+            "perceptionEntityId": "",
+            "authority": "filmmaker",
+            "factStatus": "corrected",
+            "notes": ""
+          },
+          {
+            "id": "fill_9eafeac2eaeb",
+            "kind": "camera",
+            "slotIndex": 0,
+            "colorKey": "",
+            "label": "Conversation camera",
+            "tag": "",
+            "characterId": "",
+            "propId": "",
+            "characterApproved": false,
+            "normalizedX": 0.08,
+            "normalizedY": 0.62,
+            "miniPrompt": "Look at the conversation at the counter",
+            "orientation": "N",
+            "shotSize": "medium",
+            "primarySubject": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+            "perceptionEntityId": "",
+            "authority": "inference",
+            "factStatus": "inferred",
+            "notes": ""
+          }
+        ],
+        "unusedDetections": [],
+        "zonePhrases": [
+          {
+            "id": "zone_f32b7c1a48d3",
+            "phrase": "employee side",
+            "notes": "",
+            "factStatus": "inferred"
+          },
+          {
+            "id": "zone_a38bc6affdbc",
+            "phrase": "customer side",
+            "notes": "",
+            "factStatus": "inferred"
+          },
+          {
+            "id": "zone_4e024daa1909",
+            "phrase": "behind the counter",
+            "notes": "",
+            "factStatus": "inferred"
+          },
+          {
+            "id": "zone_7ab4f5876fae",
+            "phrase": "on the counter",
+            "notes": "",
+            "factStatus": "inferred"
+          }
+        ],
+        "relationships": [
+          {
+            "id": "rel_56bd1f2e5416",
+            "subjectLabel": "Korri",
+            "relation": "BEHIND",
+            "objectLabel": "service counter",
+            "factStatus": "inferred",
+            "authority": "inference"
+          },
+          {
+            "id": "rel_b67b49ff9ea3",
+            "subjectLabel": "CRS Single 1787198703328",
+            "relation": "IN_FRONT_OF",
+            "objectLabel": "service counter",
+            "factStatus": "inferred",
+            "authority": "inference"
+          },
+          {
+            "id": "rel_4b0f181812a3",
+            "subjectLabel": "CRS Single 1787198703328",
+            "relation": "FACING",
+            "objectLabel": "Korri",
+            "factStatus": "inferred",
+            "authority": "inference"
+          },
+          {
+            "id": "rel_9698d7895f5f",
+            "subjectLabel": "employee side",
+            "relation": "BEHIND",
+            "objectLabel": "service counter",
+            "factStatus": "inferred",
+            "authority": "inference"
+          },
+          {
+            "id": "rel_65e67783d421",
+            "subjectLabel": "customer side",
+            "relation": "IN_FRONT_OF",
+            "objectLabel": "service counter",
+            "factStatus": "inferred",
+            "authority": "inference"
+          }
+        ],
+        "userCorrections": [
+          {
+            "id": "corr_dc485d10e539",
+            "factKey": "fill:korri",
+            "action": "rename",
+            "value": {
+              "label": "Service counter side"
+            },
+            "createdAt": "2026-08-20T16:36:14.188843+00:00",
+            "authority": "filmmaker"
+          },
+          {
+            "id": "corr_5cef35c75e20",
+            "factKey": "fill:coffee cup",
+            "action": "rename",
+            "value": {
+              "label": "Service counter side"
+            },
+            "createdAt": "2026-08-20T16:46:44.022060+00:00",
+            "authority": "filmmaker"
+          },
+          {
+            "id": "corr_ab43e4524340",
+            "factKey": "fill:service counter side",
+            "action": "rename",
+            "value": {
+              "label": "Service counter side"
+            },
+            "createdAt": "2026-08-20T20:22:38.784602+00:00",
+            "authority": "filmmaker"
+          }
+        ],
+        "perceptionPacketId": "cp_a7a7e5d1549f",
+        "createdAt": "2026-08-20T16:36:14.146336+00:00",
+        "updatedAt": "2026-08-20T20:22:38.906718+00:00"
+      }
+    },
+    "characters": 2,
+    "props": 2,
+    "cameras": 4,
+    "zones": null,
+    "characterIds": [
+      "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+    ]
+  },
+  "nlParse": {
+    "status": 200,
+    "facts": {
+      "behind": true,
+      "beside": true,
+      "facing": true,
+      "customer": true,
+      "employee": true,
+      "spatial_language": true,
+      "korri": true,
+      "anadriya": true
+    },
+    "body": {
+      "shots": [
+        {
+          "index": 0,
+          "raw_text": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+          "characters": [
+            "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+            "b7086f85-3ee3-44db-a395-ae1a94e37fe1"
+          ],
+          "prop_entities": [],
+          "framing": "",
+          "angle": "",
+          "orientation": "",
+          "additional_instructions": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri. Zone: customer side Zone: behind the service counter Spatial relation: behind Spatial relation: beside Spatial relation: on Spatial relation: facing"
+        }
+      ]
+    }
+  },
+  "character": {
+    "createStatus": 200,
+    "id": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+    "name": "RevB Live 1787257358",
+    "body": {
+      "id": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+      "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+      "name": "RevB Live 1787257358",
+      "slug": "revb-live-1787257358",
+      "role": "Disposable live gate",
+      "description": "Disposable Revision B live-gate character. Not Korri.",
+      "apparent_age": "",
+      "species_or_type": "human",
+      "gender_presentation": "",
+      "cultural_background": "",
+      "height_description": "",
+      "body_type": "",
+      "visual_description": "A young barista with short copper hair, green apron, and a warm smile.",
+      "visual_style": "realistic_anime",
+      "status": "DRAFT",
+      "approval_status": "draft",
+      "active_version_id": "a7cd7560-f752-43fa-bf69-81ad81070bbe",
+      "active_voice_profile_id": null,
+      "active_wardrobe_id": null,
+      "skin": {},
+      "hair": {},
+      "personality": {},
+      "performance": {},
+      "continuity": {},
+      "motion": {},
+      "emotion": {},
+      "relationships": [],
+      "prompt_package": {},
+      "coverage": {
+        "status": "DRAFT",
+        "score": 0.0,
+        "required_roles": [
+          "full_body_front",
+          "full_body_side_left",
+          "full_body_back",
+          "closeup_front",
+          "closeup_side_left",
+          "closeup_back"
+        ],
+        "present_roles": [],
+        "missing_roles": [
+          "full_body_front",
+          "full_body_side_left",
+          "full_body_back",
+          "closeup_front",
+          "closeup_side_left",
+          "closeup_back"
+        ],
+        "guidance": [
+          "Add a full-body front reference before generating full-body walking or establishing shots.",
+          "Side identity is not yet defined. Generate or upload a full-body side view before profile-angle generations.",
+          "Rear body identity is not yet defined. Generate or upload a full-body back view before rear-angle shots.",
+          "Add a close-up front reference before portrait or dialogue close-ups.",
+          "Side facial identity is not yet defined. Generate or upload a close-up side view before side-profile shots.",
+          "Rear hair identity is not yet defined. Generate or upload a close-up back view before creating rear-angle portrait shots."
+        ],
+        "has_physical_details": false,
+        "has_personality": false,
+        "has_performance": false,
+        "has_wardrobe": false,
+        "voice_state": "UNASSIGNED",
+        "ready_for_generation": false,
+        "category_readiness": [
+          {
+            "category": "VisualIdentity",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "full_body_front",
+              "full_body_side_left",
+              "full_body_back",
+              "closeup_front",
+              "closeup_side_left",
+              "closeup_back",
+              "Physical details (skin/hair/body) not defined"
+            ],
+            "next_action": "Generate or attach required reference roles",
+            "critical": true
+          },
+          {
+            "category": "Personality",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Core personality not defined"
+            ],
+            "next_action": "Define core personality and motivations",
+            "critical": false
+          },
+          {
+            "category": "Performance",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Performance profile not defined"
+            ],
+            "next_action": "Define posture, gait, and mannerisms",
+            "critical": false
+          },
+          {
+            "category": "Wardrobe",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "No canonical wardrobe assigned"
+            ],
+            "next_action": "Create canonical wardrobe look",
+            "critical": false
+          },
+          {
+            "category": "Props",
+            "score": 0.5,
+            "ready": false,
+            "blockers": [
+              "No signature props defined (optional)"
+            ],
+            "next_action": "Add signature props if story-relevant",
+            "critical": false
+          },
+          {
+            "category": "Voice",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Voice profile not assigned"
+            ],
+            "next_action": "Design or assign voice; obtain consent before cloning",
+            "critical": false
+          },
+          {
+            "category": "Continuity",
+            "score": 0.3,
+            "ready": false,
+            "blockers": [
+              "Continuity rules not documented"
+            ],
+            "next_action": "Document locked features and continuity restrictions",
+            "critical": false
+          },
+          {
+            "category": "ProductionReadiness",
+            "score": 0.0,
+            "ready": false,
+            "blockers": [
+              "Generate or attach required reference roles",
+              "Define core personality and motivations",
+              "Define posture, gait, and mannerisms",
+              "Create canonical wardrobe look"
+            ],
+            "next_action": "Generate or attach required reference roles",
+            "critical": true
+          }
+        ],
+        "critical_blockers": [
+          "Missing visual references: full_body_front, full_body_side_left, full_body_back"
+        ],
+        "next_action": "Generate or attach required reference roles"
+      },
+      "created_at": "2026-08-20T20:22:38.988018Z",
+      "updated_at": "2026-08-20T20:22:38.988018Z"
+    }
+  },
+  "crsStart": {
+    "status": 200,
+    "pack": {
+      "ok": true,
+      "pack": {
+        "schema_version": 2,
+        "status": "GENERATING",
+        "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+        "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+        "engine": "multi_model",
+        "workflows": [
+          "character_sheet",
+          "sequential_identity_prompts",
+          "multi_model_routing"
+        ],
+        "identityLock": "",
+        "referenceEditReplaced": true,
+        "referenceLocked": false,
+        "generationMode": "PROFILE_GUIDED",
+        "jobs": {
+          "hero": {
+            "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+            "role": "hero_identity",
+            "status": "running",
+            "candidateIndex": 0,
+            "label": "Hero",
+            "assetId": null,
+            "generator": "qwen2512",
+            "provider": "comfyui",
+            "model": "qwen-image-2512",
+            "modelVariant": "base",
+            "workflowKey": "qwen2512.txt2img",
+            "seed": 470538848,
+            "referenceAssetIds": [],
+            "compositionIntent": "full_body_casting",
+            "referenceFidelityMode": null,
+            "referenceLocked": false,
+            "conditioningMode": null,
+            "providerKind": "local",
+            "selectedSource": "qwen2512",
+            "hostedModelId": null,
+            "providerId": "",
+            "modelId": "qwen2512",
+            "batchIndex": 1,
+            "batchOf": 1,
+            "autoSelect": false,
+            "provenance": "LOCAL \u2014 Qwen Image 2512",
+            "error": null,
+            "lowReferenceFidelity": false,
+            "stage2Enabled": false,
+            "stage2Generator": null,
+            "stage2Provider": null,
+            "stage2Model": null,
+            "stage2ModelVariant": null,
+            "stage2WorkflowKey": null,
+            "viewJobs": [
+              {
+                "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+                "role": "hero_identity",
+                "viewRole": "four_view_sheet",
+                "viewIndex": 0,
+                "status": "running",
+                "assetId": null,
+                "seed": 470538848,
+                "modelFamily": "qwen2512",
+                "workflowKey": "qwen2512.txt2img",
+                "referenceLocked": false,
+                "error": null,
+                "stage2Enabled": false,
+                "stage2Route": null,
+                "stage2JobId": null,
+                "stage2AssetId": null,
+                "stage2Status": null,
+                "stage2Prompt": null,
+                "stage2Negative": null,
+                "stage2PromptMetadata": null,
+                "fourViewSingleOutput": true
+              }
+            ],
+            "sheetAssetId": null,
+            "sourceAssetIds": [],
+            "stage2SourceAssetIds": [],
+            "layout": "four_view",
+            "fourViewSingleOutput": true,
+            "requiredViews": [
+              "full_body_front",
+              "full_body_side",
+              "full_body_back",
+              "head_shoulders_closeup"
+            ],
+            "referenceMode": "identity_preservation",
+            "characterSheetIntent": {
+              "purpose": "character_sheet",
+              "layout": "four_view",
+              "requiredViews": [
+                "full_body_front",
+                "full_body_side",
+                "full_body_back",
+                "head_shoulders_closeup"
+              ],
+              "referenceMode": "identity_preservation"
+            },
+            "layoutNoncompliant": false,
+            "layout_noncompliant": false,
+            "layoutVerified": null,
+            "layoutNote": null
+          },
+          "hero_candidates": [
+            {
+              "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+              "role": "hero_identity",
+              "status": "running",
+              "candidateIndex": 0,
+              "label": "Hero",
+              "assetId": null,
+              "generator": "qwen2512",
+              "provider": "comfyui",
+              "model": "qwen-image-2512",
+              "modelVariant": "base",
+              "workflowKey": "qwen2512.txt2img",
+              "seed": 470538848,
+              "referenceAssetIds": [],
+              "compositionIntent": "full_body_casting",
+              "referenceFidelityMode": null,
+              "referenceLocked": false,
+              "conditioningMode": null,
+              "providerKind": "local",
+              "selectedSource": "qwen2512",
+              "hostedModelId": null,
+              "providerId": "",
+              "modelId": "qwen2512",
+              "batchIndex": 1,
+              "batchOf": 1,
+              "autoSelect": false,
+              "provenance": "LOCAL \u2014 Qwen Image 2512",
+              "error": null,
+              "lowReferenceFidelity": false,
+              "stage2Enabled": false,
+              "stage2Generator": null,
+              "stage2Provider": null,
+              "stage2Model": null,
+              "stage2ModelVariant": null,
+              "stage2WorkflowKey": null,
+              "viewJobs": [
+                {
+                  "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+                  "role": "hero_identity",
+                  "viewRole": "four_view_sheet",
+                  "viewIndex": 0,
+                  "status": "running",
+                  "assetId": null,
+                  "seed": 470538848,
+                  "modelFamily": "qwen2512",
+                  "workflowKey": "qwen2512.txt2img",
+                  "referenceLocked": false,
+                  "error": null,
+                  "stage2Enabled": false,
+                  "stage2Route": null,
+                  "stage2JobId": null,
+                  "stage2AssetId": null,
+                  "stage2Status": null,
+                  "stage2Prompt": null,
+                  "stage2Negative": null,
+                  "stage2PromptMetadata": null,
+                  "fourViewSingleOutput": true
+                }
+              ],
+              "sheetAssetId": null,
+              "sourceAssetIds": [],
+              "stage2SourceAssetIds": [],
+              "layout": "four_view",
+              "fourViewSingleOutput": true,
+              "requiredViews": [
+                "full_body_front",
+                "full_body_side",
+                "full_body_back",
+                "head_shoulders_closeup"
+              ],
+              "referenceMode": "identity_preservation",
+              "characterSheetIntent": {
+                "purpose": "character_sheet",
+                "layout": "four_view",
+                "requiredViews": [
+                  "full_body_front",
+                  "full_body_side",
+                  "full_body_back",
+                  "head_shoulders_closeup"
+                ],
+                "referenceMode": "identity_preservation"
+              },
+              "layoutNoncompliant": false,
+              "layout_noncompliant": false,
+              "layoutVerified": null,
+              "layoutNote": null
+            }
+          ]
+        },
+        "roleAssets": {},
+        "candidates": [
+          {
+            "assetId": null,
+            "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+            "url": null,
+            "label": "Hero",
+            "status": "running",
+            "candidateIndex": 0,
+            "generator": "qwen2512",
+            "provider": "comfyui",
+            "model": "qwen-image-2512",
+            "modelVariant": "base",
+            "workflowKey": "qwen2512.txt2img",
+            "seed": 470538848,
+            "referenceAssetIds": [],
+            "compositionIntent": "full_body_casting",
+            "referenceFidelityMode": null,
+            "referenceLocked": false,
+            "conditioningMode": null,
+            "providerKind": "local",
+            "selectedSource": "qwen2512",
+            "hostedModelId": null,
+            "providerId": "",
+            "modelId": "qwen2512",
+            "batchIndex": 1,
+            "batchOf": 1,
+            "autoSelect": false,
+            "provenance": "LOCAL \u2014 Qwen Image 2512",
+            "error": null,
+            "lowReferenceFidelity": false,
+            "stage2Enabled": false,
+            "stage2Generator": null,
+            "stage2Provider": null,
+            "stage2Model": null,
+            "stage2ModelVariant": null,
+            "stage2WorkflowKey": null,
+            "viewJobs": [
+              {
+                "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+                "role": "hero_identity",
+                "viewRole": "four_view_sheet",
+                "viewIndex": 0,
+                "status": "running",
+                "assetId": null,
+                "seed": 470538848,
+                "modelFamily": "qwen2512",
+                "workflowKey": "qwen2512.txt2img",
+                "referenceLocked": false,
+                "error": null,
+                "stage2Enabled": false,
+                "stage2Route": null,
+                "stage2JobId": null,
+                "stage2AssetId": null,
+                "stage2Status": null,
+                "stage2Prompt": null,
+                "stage2Negative": null,
+                "stage2PromptMetadata": null,
+                "fourViewSingleOutput": true
+              }
+            ],
+            "sheetAssetId": null,
+            "sourceAssetIds": [],
+            "stage2SourceAssetIds": [],
+            "layout": "four_view",
+            "fourViewSingleOutput": true,
+            "requiredViews": [
+              "full_body_front",
+              "full_body_side",
+              "full_body_back",
+              "head_shoulders_closeup"
+            ],
+            "referenceMode": "identity_preservation",
+            "characterSheetIntent": {
+              "purpose": "character_sheet",
+              "layout": "four_view",
+              "requiredViews": [
+                "full_body_front",
+                "full_body_side",
+                "full_body_back",
+                "head_shoulders_closeup"
+              ],
+              "referenceMode": "identity_preservation"
+            },
+            "layoutNoncompliant": false,
+            "layout_noncompliant": false,
+            "layoutVerified": null,
+            "layoutNote": null,
+            "width": 2560,
+            "height": 2560,
+            "qualityTier": "2K",
+            "resolutionOrigin": "native",
+            "revision": 1,
+            "parentSheetId": null,
+            "parent_sheet_id": null,
+            "referenceAssetId": null,
+            "createdAt": "2026-08-20T20:22:43.364342+00:00"
+          }
+        ],
+        "candidateCount": 1,
+        "generatorSources": {
+          "local": [
+            {
+              "family": "qwen2512",
+              "enabled": true,
+              "batchCount": 1
+            }
+          ],
+          "api": null,
+          "stage2Enabled": false
+        },
+        "generatorPreferences": {
+          "local": [
+            {
+              "family": "qwen2512",
+              "enabled": true,
+              "batchCount": 1
+            }
+          ],
+          "api": null,
+          "stage2Enabled": false
+        },
+        "includeDetails": false,
+        "includePerformance": false,
+        "characterName": "RevB Live 1787257358",
+        "characterSlug": "revb-live-1787257358",
+        "createdAt": "2026-08-20T20:22:43.364342+00:00",
+        "phase": "hero",
+        "mock": false,
+        "previousCandidates": [],
+        "nextCandidateRevision": 2,
+        "approvedHeroIdentity": null,
+        "crsRevision": 1,
+        "updatedAt": "2026-08-20T20:22:43.364342+00:00"
+      }
+    }
+  },
+  "crsPoll": {
+    "schema_version": 2,
+    "status": "READY_FOR_OWNER",
+    "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+    "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+    "engine": "multi_model",
+    "workflows": [
+      "character_sheet",
+      "sequential_identity_prompts",
+      "multi_model_routing",
+      "qwen2512.txt2img",
+      "coverage_pack"
+    ],
+    "identityLock": "",
+    "referenceEditReplaced": true,
+    "referenceLocked": false,
+    "generationMode": "PROFILE_GUIDED",
+    "jobs": {
+      "hero": {
+        "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+        "role": "hero_identity",
+        "status": "done",
+        "candidateIndex": 0,
+        "label": "Hero",
+        "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+        "generator": "qwen2512",
+        "provider": "comfyui",
+        "model": "qwen-image-2512",
+        "modelVariant": "base",
+        "workflowKey": "qwen2512.txt2img",
+        "seed": 470538848,
+        "referenceAssetIds": [],
+        "compositionIntent": "full_body_casting",
+        "referenceFidelityMode": null,
+        "referenceLocked": false,
+        "conditioningMode": null,
+        "providerKind": "local",
+        "selectedSource": "qwen2512",
+        "hostedModelId": null,
+        "providerId": "",
+        "modelId": "qwen2512",
+        "batchIndex": 1,
+        "batchOf": 1,
+        "autoSelect": false,
+        "provenance": "LOCAL \u2014 Qwen Image 2512",
+        "error": null,
+        "lowReferenceFidelity": false,
+        "stage2Enabled": false,
+        "stage2Generator": null,
+        "stage2Provider": null,
+        "stage2Model": null,
+        "stage2ModelVariant": null,
+        "stage2WorkflowKey": null,
+        "viewJobs": [
+          {
+            "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+            "role": "hero_identity",
+            "viewRole": "four_view_sheet",
+            "viewIndex": 0,
+            "status": "running",
+            "assetId": null,
+            "seed": 470538848,
+            "modelFamily": "qwen2512",
+            "workflowKey": "qwen2512.txt2img",
+            "referenceLocked": false,
+            "error": null,
+            "stage2Enabled": false,
+            "stage2Route": null,
+            "stage2JobId": null,
+            "stage2AssetId": null,
+            "stage2Status": null,
+            "stage2Prompt": null,
+            "stage2Negative": null,
+            "stage2PromptMetadata": null,
+            "fourViewSingleOutput": true
+          }
+        ],
+        "sheetAssetId": null,
+        "sourceAssetIds": [],
+        "stage2SourceAssetIds": [],
+        "layout": "four_view",
+        "fourViewSingleOutput": true,
+        "requiredViews": [
+          "full_body_front",
+          "full_body_side",
+          "full_body_back",
+          "head_shoulders_closeup"
+        ],
+        "referenceMode": "identity_preservation",
+        "characterSheetIntent": {
+          "purpose": "character_sheet",
+          "layout": "four_view",
+          "requiredViews": [
+            "full_body_front",
+            "full_body_side",
+            "full_body_back",
+            "head_shoulders_closeup"
+          ],
+          "referenceMode": "identity_preservation"
+        },
+        "layoutNoncompliant": false,
+        "layout_noncompliant": false,
+        "layoutVerified": false,
+        "layoutNote": "layout not verified / does not look like a four-view sheet",
+        "layoutAssessment": {
+          "ok": true,
+          "compliant": null,
+          "verified": false,
+          "layoutNoncompliant": false,
+          "note": "layout not verified / does not look like a four-view sheet",
+          "width": 2560,
+          "height": 2560,
+          "aspect": 1.0,
+          "viewCount": null,
+          "composed": false
+        },
+        "characterSheetLayout": {
+          "ok": true,
+          "compliant": null,
+          "verified": false,
+          "layoutNoncompliant": false,
+          "note": "layout not verified / does not look like a four-view sheet",
+          "width": 2560,
+          "height": 2560,
+          "aspect": 1.0,
+          "viewCount": null,
+          "composed": false
+        },
+        "width": 2560,
+        "height": 2560,
+        "aspect": 1.0
+      },
+      "hero_candidates": [
+        {
+          "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+          "role": "hero_identity",
+          "status": "done",
+          "candidateIndex": 0,
+          "label": "Hero",
+          "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+          "generator": "qwen2512",
+          "provider": "comfyui",
+          "model": "qwen-image-2512",
+          "modelVariant": "base",
+          "workflowKey": "qwen2512.txt2img",
+          "seed": 470538848,
+          "referenceAssetIds": [],
+          "compositionIntent": "full_body_casting",
+          "referenceFidelityMode": null,
+          "referenceLocked": false,
+          "conditioningMode": null,
+          "providerKind": "local",
+          "selectedSource": "qwen2512",
+          "hostedModelId": null,
+          "providerId": "",
+          "modelId": "qwen2512",
+          "batchIndex": 1,
+          "batchOf": 1,
+          "autoSelect": false,
+          "provenance": "LOCAL \u2014 Qwen Image 2512",
+          "error": null,
+          "lowReferenceFidelity": false,
+          "stage2Enabled": false,
+          "stage2Generator": null,
+          "stage2Provider": null,
+          "stage2Model": null,
+          "stage2ModelVariant": null,
+          "stage2WorkflowKey": null,
+          "viewJobs": [
+            {
+              "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+              "role": "hero_identity",
+              "viewRole": "four_view_sheet",
+              "viewIndex": 0,
+              "status": "done",
+              "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+              "seed": 470538848,
+              "modelFamily": "qwen2512",
+              "workflowKey": "qwen2512.txt2img",
+              "referenceLocked": false,
+              "error": null,
+              "stage2Enabled": false,
+              "stage2Route": null,
+              "stage2JobId": null,
+              "stage2AssetId": null,
+              "stage2Status": null,
+              "stage2Prompt": null,
+              "stage2Negative": null,
+              "stage2PromptMetadata": null,
+              "fourViewSingleOutput": true
+            }
+          ],
+          "sheetAssetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+          "sourceAssetIds": [
+            "52e371d0-8678-48ea-8333-67f0c01772ec"
+          ],
+          "stage2SourceAssetIds": [],
+          "layout": "four_view",
+          "fourViewSingleOutput": true,
+          "requiredViews": [
+            "full_body_front",
+            "full_body_side",
+            "full_body_back",
+            "head_shoulders_closeup"
+          ],
+          "referenceMode": "identity_preservation",
+          "characterSheetIntent": {
+            "purpose": "character_sheet",
+            "layout": "four_view",
+            "requiredViews": [
+              "full_body_front",
+              "full_body_side",
+              "full_body_back",
+              "head_shoulders_closeup"
+            ],
+            "referenceMode": "identity_preservation"
+          },
+          "layoutNoncompliant": false,
+          "layout_noncompliant": false,
+          "layoutVerified": false,
+          "layoutNote": "layout not verified / does not look like a four-view sheet",
+          "layoutAssessment": {
+            "ok": true,
+            "compliant": null,
+            "verified": false,
+            "layoutNoncompliant": false,
+            "note": "layout not verified / does not look like a four-view sheet",
+            "width": 2560,
+            "height": 2560,
+            "aspect": 1.0,
+            "viewCount": null,
+            "composed": false
+          },
+          "characterSheetLayout": {
+            "ok": true,
+            "compliant": null,
+            "verified": false,
+            "layoutNoncompliant": false,
+            "note": "layout not verified / does not look like a four-view sheet",
+            "width": 2560,
+            "height": 2560,
+            "aspect": 1.0,
+            "viewCount": null,
+            "composed": false
+          },
+          "width": 2560,
+          "height": 2560,
+          "aspect": 1.0
+        }
+      ],
+      "coverage": [
+        {
+          "jobId": "7b2f4d0a-4423-4176-8c6c-ecc6cce4e70a",
+          "role": "full_body_front",
+          "status": "done",
+          "assetId": "1f00ad26-ec21-4ea6-9954-4ba474671424"
+        },
+        {
+          "jobId": "40897c75-0320-46a8-89f2-4b7cdd177454",
+          "role": "full_body_side_left",
+          "status": "done",
+          "assetId": "ea04df58-8ee4-4330-849a-243d33ae0f5d"
+        },
+        {
+          "jobId": "3aac5d49-48f3-4c19-9675-cd6035816d0c",
+          "role": "full_body_back",
+          "status": "done",
+          "assetId": "c6a562a4-4000-480e-8a48-1e39a22e5f7a"
+        },
+        {
+          "jobId": "e273ab05-fe09-4404-b899-1ee2260187e3",
+          "role": "closeup_front",
+          "status": "done",
+          "assetId": "9a5fd116-4aac-4b0b-b1e8-50cf6b216887"
+        },
+        {
+          "jobId": "1056b0af-f000-4a39-b585-417e4065ed4c",
+          "role": "closeup_side_left",
+          "status": "done",
+          "assetId": "8bd894f9-b24f-4e2c-bb17-4b0a878c0cee"
+        },
+        {
+          "jobId": "b36e0d09-20e9-4aa3-b604-5238d08b8ac9",
+          "role": "closeup_back",
+          "status": "done",
+          "assetId": "b7be4398-ceae-4d61-a96f-50220def40c5"
+        }
+      ]
+    },
+    "roleAssets": {
+      "hero_identity": "52e371d0-8678-48ea-8333-67f0c01772ec",
+      "full_body_front": "1f00ad26-ec21-4ea6-9954-4ba474671424",
+      "full_body_side_left": "ea04df58-8ee4-4330-849a-243d33ae0f5d",
+      "full_body_back": "c6a562a4-4000-480e-8a48-1e39a22e5f7a",
+      "closeup_front": "9a5fd116-4aac-4b0b-b1e8-50cf6b216887",
+      "closeup_side_left": "8bd894f9-b24f-4e2c-bb17-4b0a878c0cee",
+      "closeup_back": "b7be4398-ceae-4d61-a96f-50220def40c5"
+    },
+    "candidates": [
+      {
+        "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+        "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+        "url": null,
+        "label": "Hero",
+        "status": "done",
+        "candidateIndex": 0,
+        "generator": "qwen2512",
+        "provider": "comfyui",
+        "model": "qwen-image-2512",
+        "modelVariant": "base",
+        "workflowKey": "qwen2512.txt2img",
+        "seed": 470538848,
+        "referenceAssetIds": [],
+        "compositionIntent": "full_body_casting",
+        "referenceFidelityMode": null,
+        "referenceLocked": false,
+        "conditioningMode": null,
+        "providerKind": "local",
+        "selectedSource": "qwen2512",
+        "hostedModelId": null,
+        "providerId": "",
+        "modelId": "qwen2512",
+        "characterSheetIntent": {
+          "purpose": "character_sheet",
+          "layout": "four_view",
+          "requiredViews": [
+            "full_body_front",
+            "full_body_side",
+            "full_body_back",
+            "head_shoulders_closeup"
+          ],
+          "referenceMode": "identity_preservation"
+        },
+        "characterSheetLayout": {
+          "ok": true,
+          "compliant": null,
+          "verified": false,
+          "layoutNoncompliant": false,
+          "note": "layout not verified / does not look like a four-view sheet",
+          "width": 2560,
+          "height": 2560,
+          "aspect": 1.0,
+          "viewCount": null,
+          "composed": false
+        },
+        "layoutNoncompliant": false,
+        "layout_noncompliant": false,
+        "batchIndex": 1,
+        "batchOf": 1,
+        "autoSelect": false,
+        "provenance": "LOCAL \u2014 Qwen Image 2512",
+        "lowReferenceFidelity": false,
+        "stage2Enabled": false,
+        "stage2Generator": null,
+        "stage2Provider": null,
+        "stage2Model": null,
+        "stage2ModelVariant": null,
+        "stage2WorkflowKey": null,
+        "stage2Failed": false,
+        "stage2SourceAssetIds": [],
+        "sheetAssetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+        "sourceAssetIds": [
+          "52e371d0-8678-48ea-8333-67f0c01772ec"
+        ],
+        "viewJobs": [
+          {
+            "jobId": "94c111b8-ce79-4e34-a7eb-40680e03260a",
+            "role": "hero_identity",
+            "viewRole": "four_view_sheet",
+            "viewIndex": 0,
+            "status": "done",
+            "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+            "seed": 470538848,
+            "modelFamily": "qwen2512",
+            "workflowKey": "qwen2512.txt2img",
+            "referenceLocked": false,
+            "error": null,
+            "stage2Enabled": false,
+            "stage2Route": null,
+            "stage2JobId": null,
+            "stage2AssetId": null,
+            "stage2Status": null,
+            "stage2Prompt": null,
+            "stage2Negative": null,
+            "stage2PromptMetadata": null,
+            "fourViewSingleOutput": true
+          }
+        ],
+        "error": null,
+        "layout": "four_view",
+        "fourViewSingleOutput": true,
+        "requiredViews": [
+          "full_body_front",
+          "full_body_side",
+          "full_body_back",
+          "head_shoulders_closeup"
+        ],
+        "referenceMode": "identity_preservation",
+        "layoutVerified": false,
+        "layoutNote": "layout not verified / does not look like a four-view sheet",
+        "width": 2560,
+        "height": 2560,
+        "qualityTier": "2K",
+        "resolutionOrigin": "native",
+        "revision": null,
+        "parentSheetId": null,
+        "parent_sheet_id": null,
+        "referenceAssetId": null,
+        "createdAt": null,
+        "layoutAssessment": {
+          "ok": true,
+          "compliant": null,
+          "verified": false,
+          "layoutNoncompliant": false,
+          "note": "layout not verified / does not look like a four-view sheet",
+          "width": 2560,
+          "height": 2560,
+          "aspect": 1.0,
+          "viewCount": null,
+          "composed": false
+        },
+        "aspect": 1.0
+      }
+    ],
+    "candidateCount": 1,
+    "generatorSources": {
+      "local": [
+        {
+          "family": "qwen2512",
+          "enabled": true,
+          "batchCount": 1
+        }
+      ],
+      "api": null,
+      "stage2Enabled": false
+    },
+    "generatorPreferences": {
+      "local": [
+        {
+          "family": "qwen2512",
+          "enabled": true,
+          "batchCount": 1
+        }
+      ],
+      "api": null,
+      "stage2Enabled": false
+    },
+    "includeDetails": false,
+    "includePerformance": false,
+    "characterName": "RevB Live 1787257358",
+    "characterSlug": "revb-live-1787257358",
+    "createdAt": "2026-08-20T20:22:43.364342+00:00",
+    "phase": "awaiting_owner_approval",
+    "mock": false,
+    "previousCandidates": [],
+    "nextCandidateRevision": 2,
+    "approvedHeroIdentity": null,
+    "crsRevision": 1,
+    "updatedAt": "2026-08-20T20:28:02.212059+00:00",
+    "requiredCoverageMissing": [],
+    "requiredCoverageComplete": true
+  },
+  "crsAssetId": "52e371d0-8678-48ea-8333-67f0c01772ec",
+  "visualGates": {
+    "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+    "gates": {
+      "concept": {
+        "gate": "concept",
+        "status": "AWAITING_OWNER",
+        "provenance": "PROPOSED_BY_CHARACTER_CREATOR",
+        "directions": [
+          {
+            "id": "revb-live-1787257358-grounded",
+            "name": "Grounded Classic",
+            "emphasis": [
+              "faithful, believable everyday presence",
+              "natural pose and soft studio lighting",
+              "identity readable at a glance",
+              "minimal styling interference"
+            ],
+            "hairstyleProposal": "Retain the profile's hair with simple, consistent styling.",
+            "wardrobeProposal": "Wardrobe consistent with the character's role and story; no fabric/era drift.",
+            "heritageTraits": [
+              "human"
+            ],
+            "distinguishingFeatures": [
+              "A young barista with short copper hair, green apron, and a warm smile.",
+              "consistent facial features, no invented identity traits"
+            ],
+            "strengths": "Communicates the profile faithfully and grounds the character.",
+            "continuityRisks": "Must not drift from the appearance described in the Character Profile.",
+            "reason": "Balanced concept for RevB Live 1787257358 derived from the Character Profile.",
+            "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+          },
+          {
+            "id": "revb-live-1787257358-cinematic",
+            "name": "Cinematic Presence",
+            "emphasis": [
+              "stronger contrast and directed lighting",
+              "slightly elevated dramatic staging",
+              "profile-faithful identity",
+              "hero-like framing"
+            ],
+            "hairstyleProposal": "Keep the profile's hair; style with controlled volume and motion.",
+            "wardrobeProposal": "Same wardrobe silhouette, presented with more contrast and texture detail.",
+            "heritageTraits": [
+              "human"
+            ],
+            "distinguishingFeatures": [
+              "A young barista with short copper hair, green apron, and a warm smile.",
+              "consistent facial features, no invented identity traits"
+            ],
+            "strengths": "Best for key-art and hero-frame continuity.",
+            "continuityRisks": "Lighting must not obscure identity-critical features.",
+            "reason": "Dramatic-but-faithful concept for RevB Live 1787257358.",
+            "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+          },
+          {
+            "id": "revb-live-1787257358-editorial",
+            "name": "Editorial Styling",
+            "emphasis": [
+              "stronger wardrobe/styling read",
+              "fashion-presentation energy",
+              "identity traits unchanged",
+              "clean background for silhouette"
+            ],
+            "hairstyleProposal": "Keep the profile's hair; arranged with an intentional editorial finish.",
+            "wardrobeProposal": "Refined styling of the profile wardrobe; no new identity elements.",
+            "heritageTraits": [
+              "human"
+            ],
+            "distinguishingFeatures": [
+              "A young barista with short copper hair, green apron, and a warm smile.",
+              "consistent facial features, no invented identity traits"
+            ],
+            "strengths": "Useful for poster/merchandising continuity.",
+            "continuityRisks": "Styling must not change hair color, eye color, or signature traits.",
+            "reason": "Editorial concept for RevB Live 1787257358 derived from the profile.",
+            "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+          }
+        ],
+        "selectedDirectionId": null,
+        "createdAt": "2026-08-20T20:22:39.026019+00:00"
+      },
+      "hero_identity": {
+        "gate": "hero_identity",
+        "status": "AWAITING_OWNER",
+        "assetIds": [
+          "52e371d0-8678-48ea-8333-67f0c01772ec"
+        ],
+        "updatedAt": "2026-08-20T20:28:02.204058+00:00",
+        "notes": "Generated Character Image Profile ready for owner review",
+        "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+      },
+      "turnaround": {
+        "gate": "turnaround",
+        "status": "AWAITING_OWNER",
+        "assetIds": [
+          "1f00ad26-ec21-4ea6-9954-4ba474671424",
+          "ea04df58-8ee4-4330-849a-243d33ae0f5d",
+          "c6a562a4-4000-480e-8a48-1e39a22e5f7a"
+        ],
+        "updatedAt": "2026-08-20T20:28:02.207059+00:00",
+        "notes": "Generated Character Image Profile ready for owner review",
+        "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+      },
+      "facial": {
+        "gate": "facial",
+        "status": "AWAITING_OWNER",
+        "assetIds": [
+          "9a5fd116-4aac-4b0b-b1e8-50cf6b216887",
+          "8bd894f9-b24f-4e2c-bb17-4b0a878c0cee",
+          "b7be4398-ceae-4d61-a96f-50220def40c5"
+        ],
+        "updatedAt": "2026-08-20T20:28:02.210061+00:00",
+        "notes": "Generated Character Image Profile ready for owner review",
+        "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+      },
+      "detail": {
+        "gate": "detail",
+        "status": "NOT_STARTED"
+      },
+      "performance": {
+        "gate": "performance",
+        "status": "NOT_STARTED"
+      }
+    }
+  },
+  "conceptSelect": {
+    "status": 200,
+    "body": {
+      "gate": "concept",
+      "status": "OWNER_APPROVED",
+      "provenance": "USER_CONFIRMED",
+      "directions": [
+        {
+          "id": "revb-live-1787257358-grounded",
+          "name": "Grounded Classic",
+          "emphasis": [
+            "faithful, believable everyday presence",
+            "natural pose and soft studio lighting",
+            "identity readable at a glance",
+            "minimal styling interference"
+          ],
+          "hairstyleProposal": "Retain the profile's hair with simple, consistent styling.",
+          "wardrobeProposal": "Wardrobe consistent with the character's role and story; no fabric/era drift.",
+          "heritageTraits": [
+            "human"
+          ],
+          "distinguishingFeatures": [
+            "A young barista with short copper hair, green apron, and a warm smile.",
+            "consistent facial features, no invented identity traits"
+          ],
+          "strengths": "Communicates the profile faithfully and grounds the character.",
+          "continuityRisks": "Must not drift from the appearance described in the Character Profile.",
+          "reason": "Balanced concept for RevB Live 1787257358 derived from the Character Profile.",
+          "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+        },
+        {
+          "id": "revb-live-1787257358-cinematic",
+          "name": "Cinematic Presence",
+          "emphasis": [
+            "stronger contrast and directed lighting",
+            "slightly elevated dramatic staging",
+            "profile-faithful identity",
+            "hero-like framing"
+          ],
+          "hairstyleProposal": "Keep the profile's hair; style with controlled volume and motion.",
+          "wardrobeProposal": "Same wardrobe silhouette, presented with more contrast and texture detail.",
+          "heritageTraits": [
+            "human"
+          ],
+          "distinguishingFeatures": [
+            "A young barista with short copper hair, green apron, and a warm smile.",
+            "consistent facial features, no invented identity traits"
+          ],
+          "strengths": "Best for key-art and hero-frame continuity.",
+          "continuityRisks": "Lighting must not obscure identity-critical features.",
+          "reason": "Dramatic-but-faithful concept for RevB Live 1787257358.",
+          "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+        },
+        {
+          "id": "revb-live-1787257358-editorial",
+          "name": "Editorial Styling",
+          "emphasis": [
+            "stronger wardrobe/styling read",
+            "fashion-presentation energy",
+            "identity traits unchanged",
+            "clean background for silhouette"
+          ],
+          "hairstyleProposal": "Keep the profile's hair; arranged with an intentional editorial finish.",
+          "wardrobeProposal": "Refined styling of the profile wardrobe; no new identity elements.",
+          "heritageTraits": [
+            "human"
+          ],
+          "distinguishingFeatures": [
+            "A young barista with short copper hair, green apron, and a warm smile.",
+            "consistent facial features, no invented identity traits"
+          ],
+          "strengths": "Useful for poster/merchandising continuity.",
+          "continuityRisks": "Styling must not change hair color, eye color, or signature traits.",
+          "reason": "Editorial concept for RevB Live 1787257358 derived from the profile.",
+          "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+        }
+      ],
+      "selectedDirectionId": "revb-live-1787257358-grounded",
+      "createdAt": "2026-08-20T20:22:39.026019+00:00",
+      "approvedBy": "revision-b-live-closure",
+      "approvedAt": "2026-08-20T20:28:02.313479+00:00",
+      "notes": ""
+    },
+    "directionId": "revb-live-1787257358-grounded"
+  },
+  "crsApprove": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+      "approvedGates": [
+        "hero_identity",
+        "turnaround",
+        "facial"
+      ],
+      "roleAssets": {
+        "hero_identity": "52e371d0-8678-48ea-8333-67f0c01772ec",
+        "full_body_front": "1f00ad26-ec21-4ea6-9954-4ba474671424",
+        "full_body_side_left": "ea04df58-8ee4-4330-849a-243d33ae0f5d",
+        "full_body_back": "c6a562a4-4000-480e-8a48-1e39a22e5f7a",
+        "closeup_front": "9a5fd116-4aac-4b0b-b1e8-50cf6b216887",
+        "closeup_side_left": "8bd894f9-b24f-4e2c-bb17-4b0a878c0cee",
+        "closeup_back": "b7be4398-ceae-4d61-a96f-50220def40c5"
+      },
+      "status": "OWNER_APPROVED_WITH_PENDING",
+      "pendingGates": [
+        "detail",
+        "performance"
+      ],
+      "gates": {
+        "characterId": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+        "gates": {
+          "concept": {
+            "gate": "concept",
+            "status": "OWNER_APPROVED",
+            "provenance": "USER_CONFIRMED",
+            "directions": [
+              {
+                "id": "revb-live-1787257358-grounded",
+                "name": "Grounded Classic",
+                "emphasis": [
+                  "faithful, believable everyday presence",
+                  "natural pose and soft studio lighting",
+                  "identity readable at a glance",
+                  "minimal styling interference"
+                ],
+                "hairstyleProposal": "Retain the profile's hair with simple, consistent styling.",
+                "wardrobeProposal": "Wardrobe consistent with the character's role and story; no fabric/era drift.",
+                "heritageTraits": [
+                  "human"
+                ],
+                "distinguishingFeatures": [
+                  "A young barista with short copper hair, green apron, and a warm smile.",
+                  "consistent facial features, no invented identity traits"
+                ],
+                "strengths": "Communicates the profile faithfully and grounds the character.",
+                "continuityRisks": "Must not drift from the appearance described in the Character Profile.",
+                "reason": "Balanced concept for RevB Live 1787257358 derived from the Character Profile.",
+                "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+              },
+              {
+                "id": "revb-live-1787257358-cinematic",
+                "name": "Cinematic Presence",
+                "emphasis": [
+                  "stronger contrast and directed lighting",
+                  "slightly elevated dramatic staging",
+                  "profile-faithful identity",
+                  "hero-like framing"
+                ],
+                "hairstyleProposal": "Keep the profile's hair; style with controlled volume and motion.",
+                "wardrobeProposal": "Same wardrobe silhouette, presented with more contrast and texture detail.",
+                "heritageTraits": [
+                  "human"
+                ],
+                "distinguishingFeatures": [
+                  "A young barista with short copper hair, green apron, and a warm smile.",
+                  "consistent facial features, no invented identity traits"
+                ],
+                "strengths": "Best for key-art and hero-frame continuity.",
+                "continuityRisks": "Lighting must not obscure identity-critical features.",
+                "reason": "Dramatic-but-faithful concept for RevB Live 1787257358.",
+                "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+              },
+              {
+                "id": "revb-live-1787257358-editorial",
+                "name": "Editorial Styling",
+                "emphasis": [
+                  "stronger wardrobe/styling read",
+                  "fashion-presentation energy",
+                  "identity traits unchanged",
+                  "clean background for silhouette"
+                ],
+                "hairstyleProposal": "Keep the profile's hair; arranged with an intentional editorial finish.",
+                "wardrobeProposal": "Refined styling of the profile wardrobe; no new identity elements.",
+                "heritageTraits": [
+                  "human"
+                ],
+                "distinguishingFeatures": [
+                  "A young barista with short copper hair, green apron, and a warm smile.",
+                  "consistent facial features, no invented identity traits"
+                ],
+                "strengths": "Useful for poster/merchandising continuity.",
+                "continuityRisks": "Styling must not change hair color, eye color, or signature traits.",
+                "reason": "Editorial concept for RevB Live 1787257358 derived from the profile.",
+                "provenance": "PROPOSED_BY_CHARACTER_CREATOR"
+              }
+            ],
+            "selectedDirectionId": "revb-live-1787257358-grounded",
+            "createdAt": "2026-08-20T20:22:39.026019+00:00",
+            "approvedBy": "revision-b-live-closure",
+            "approvedAt": "2026-08-20T20:28:02.313479+00:00",
+            "notes": ""
+          },
+          "hero_identity": {
+            "gate": "hero_identity",
+            "status": "OWNER_APPROVED",
+            "assetIds": [
+              "52e371d0-8678-48ea-8333-67f0c01772ec"
+            ],
+            "updatedAt": "2026-08-20T20:28:02.352479+00:00",
+            "notes": "Owner approved generated visual pack assets for hero_identity",
+            "provenance": "USER_CONFIRMED",
+            "approvedBy": "revision-b-live-closure",
+            "approvedAt": "2026-08-20T20:28:02.352479+00:00"
+          },
+          "turnaround": {
+            "gate": "turnaround",
+            "status": "OWNER_APPROVED",
+            "assetIds": [
+              "1f00ad26-ec21-4ea6-9954-4ba474671424",
+              "ea04df58-8ee4-4330-849a-243d33ae0f5d",
+              "c6a562a4-4000-480e-8a48-1e39a22e5f7a"
+            ],
+            "updatedAt": "2026-08-20T20:28:02.355478+00:00",
+            "notes": "Owner approved generated visual pack assets for turnaround",
+            "provenance": "USER_CONFIRMED",
+            "approvedBy": "revision-b-live-closure",
+            "approvedAt": "2026-08-20T20:28:02.355478+00:00"
+          },
+          "facial": {
+            "gate": "facial",
+            "status": "OWNER_APPROVED",
+            "assetIds": [
+              "9a5fd116-4aac-4b0b-b1e8-50cf6b216887",
+              "8bd894f9-b24f-4e2c-bb17-4b0a878c0cee",
+              "b7be4398-ceae-4d61-a96f-50220def40c5"
+            ],
+            "updatedAt": "2026-08-20T20:28:02.358478+00:00",
+            "notes": "Owner approved generated visual pack assets for facial",
+            "provenance": "USER_CONFIRMED",
+            "approvedBy": "revision-b-live-closure",
+            "approvedAt": "2026-08-20T20:28:02.358478+00:00"
+          },
+          "detail": {
+            "gate": "detail",
+            "status": "NOT_STARTED"
+          },
+          "performance": {
+            "gate": "performance",
+            "status": "NOT_STARTED"
+          }
+        }
+      }
+    },
+    "assetId": "52e371d0-8678-48ea-8333-67f0c01772ec"
+  },
+  "characterReload": {
+    "id": "dea6b660-c728-4969-9d2c-38c2b69f631b",
+    "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+    "name": "RevB Live 1787257358",
+    "slug": "revb-live-1787257358",
+    "role": "Disposable live gate",
+    "description": "Disposable Revision B live-gate character. Not Korri.",
+    "apparent_age": "",
+    "species_or_type": "human",
+    "gender_presentation": "",
+    "cultural_background": "",
+    "height_description": "",
+    "body_type": "",
+    "visual_description": "A young barista with short copper hair, green apron, and a warm smile.",
+    "visual_style": "realistic_anime",
+    "status": "DRAFT",
+    "approval_status": "draft",
+    "active_version_id": "a7cd7560-f752-43fa-bf69-81ad81070bbe",
+    "active_voice_profile_id": null,
+    "active_wardrobe_id": null,
+    "skin": {},
+    "hair": {},
+    "personality": {},
+    "performance": {},
+    "continuity": {},
+    "motion": {},
+    "emotion": {},
+    "relationships": [],
+    "prompt_package": {},
+    "coverage": {
+      "status": "INCOMPLETE",
+      "score": 0.7,
+      "required_roles": [
+        "full_body_front",
+        "full_body_side_left",
+        "full_body_back",
+        "closeup_front",
+        "closeup_side_left",
+        "closeup_back"
+      ],
+      "present_roles": [
+        "closeup_back",
+        "closeup_front",
+        "closeup_side_left",
+        "full_body_back",
+        "full_body_front",
+        "full_body_side_left",
+        "hero_identity"
+      ],
+      "missing_roles": [],
+      "guidance": [],
+      "has_physical_details": false,
+      "has_personality": false,
+      "has_performance": false,
+      "has_wardrobe": false,
+      "voice_state": "UNASSIGNED",
+      "ready_for_generation": false,
+      "category_readiness": [
+        {
+          "category": "VisualIdentity",
+          "score": 0.857,
+          "ready": false,
+          "blockers": [
+            "Physical details (skin/hair/body) not defined"
+          ],
+          "next_action": "Generate or attach required reference roles",
+          "critical": false
+        },
+        {
+          "category": "Personality",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Core personality not defined"
+          ],
+          "next_action": "Define core personality and motivations",
+          "critical": false
+        },
+        {
+          "category": "Performance",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Performance profile not defined"
+          ],
+          "next_action": "Define posture, gait, and mannerisms",
+          "critical": false
+        },
+        {
+          "category": "Wardrobe",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "No canonical wardrobe assigned"
+          ],
+          "next_action": "Create canonical wardrobe look",
+          "critical": false
+        },
+        {
+          "category": "Props",
+          "score": 0.5,
+          "ready": false,
+          "blockers": [
+            "No signature props defined (optional)"
+          ],
+          "next_action": "Add signature props if story-relevant",
+          "critical": false
+        },
+        {
+          "category": "Voice",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Voice profile not assigned"
+          ],
+          "next_action": "Design or assign voice; obtain consent before cloning",
+          "critical": false
+        },
+        {
+          "category": "Continuity",
+          "score": 0.3,
+          "ready": false,
+          "blockers": [
+            "Continuity rules not documented"
+          ],
+          "next_action": "Document locked features and continuity restrictions",
+          "critical": false
+        },
+        {
+          "category": "ProductionReadiness",
+          "score": 0.0,
+          "ready": false,
+          "blockers": [
+            "Generate or attach required reference roles",
+            "Define core personality and motivations",
+            "Define posture, gait, and mannerisms",
+            "Create canonical wardrobe look"
+          ],
+          "next_action": "Generate or attach required reference roles",
+          "critical": false
+        }
+      ],
+      "critical_blockers": [],
+      "next_action": "Generate or attach required reference roles"
+    },
+    "created_at": "2026-08-20T20:22:38.988018Z",
+    "updated_at": "2026-08-20T20:28:02.361480Z"
+  },
+  "characterTag": "revb-live-1787257358",
+  "workspace": {
+    "status": 200,
+    "sheetId": "db095959-5678-4f11-98d1-e93e0810d119"
+  },
+  "characterStill": {
+    "sheetId": "db095959-5678-4f11-98d1-e93e0810d119",
+    "intent": "@RevB Live 1787257358 behind the service counter beside the espresso machine, customer side empty, Schnick Coffee shop recognizable",
+    "family": "qwen2512",
+    "characterIds": [
+      "dea6b660-c728-4969-9d2c-38c2b69f631b"
+    ],
+    "createStatus": 200,
+    "shotId": "2993b5ac-173a-4a53-a5a1-326dfb337863",
+    "createBody": {
+      "shot": {
+        "id": "2993b5ac-173a-4a53-a5a1-326dfb337863",
+        "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+        "scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+        "sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+        "ers_package_id": "b738536e-bd02-40ea-929a-8e8453d5d315",
+        "ers_runtime": false,
+        "intent": "@RevB Live 1787257358 behind the service counter beside the espresso machine, customer side empty, Schnick Coffee shop recognizable",
+        "prompt": "@RevB Live 1787257358 behind the service counter beside the espresso machine, customer side empty, Schnick Coffee shop recognizable",
+        "character_ids": [
+          "dea6b660-c728-4969-9d2c-38c2b69f631b"
+        ],
+        "prop_entity_ids": [
+          "78c5be96-cd03-4969-9f8b-655fcefd28ea",
+          "8d59f076-e297-42ca-a439-b0eb5da9d9f9"
+        ],
+        "camera": {
+          "camera_id": "",
+          "camera_slot": null,
+          "label": "Default Camera",
+          "orientation": "",
+          "fov_preset": "",
+          "yaw_degrees": null,
+          "lens_mm": null,
+          "cinematic": {
+            "shot_size": "medium_wide",
+            "motion": "static",
+            "framing": "two_shot"
+          }
+        },
+        "generator": {
+          "local_enabled": true,
+          "api_enabled": false,
+          "local_family": "qwen2512",
+          "api_provider": "",
+          "api_model": "",
+          "local_models": [],
+          "api_models": [],
+          "style_engine_enabled": false,
+          "style_engine_model_id": "",
+          "generator_sources": null
+        },
+        "lora": null,
+        "candidates": [],
+        "approved_candidate_id": null,
+        "take_memory": {
+          "originalTakeIntent": {},
+          "sceneErsState": {},
+          "characterIdentity": {},
+          "blocking": {},
+          "camera": {},
+          "takeState": {},
+          "userCorrection": {}
+        },
+        "generation_batch_id": null,
+        "created_at": "2026-08-20T20:28:02.461599+00:00",
+        "updated_at": "2026-08-20T20:28:02.461599+00:00"
+      }
+    },
+    "generateStatus": 500,
+    "generateBody": {
+      "detail": "Internal Server Error"
+    },
+    "jobIds": [],
+    "compileFacts": {
+      "behind": false,
+      "beside": false,
+      "facing": false,
+      "customer": false,
+      "employee": false,
+      "spatial_language": false,
+      "korri": false,
+      "anadriya": false
+    },
+    "stillAssetId": "",
+    "stillPoll": {
+      "shot": {
+        "id": "2993b5ac-173a-4a53-a5a1-326dfb337863",
+        "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+        "scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+        "sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+        "ers_package_id": "b738536e-bd02-40ea-929a-8e8453d5d315",
+        "ers_runtime": false,
+        "intent": "@RevB Live 1787257358 behind the service counter beside the espresso machine, customer side empty, Schnick Coffee shop recognizable",
+        "prompt": "@RevB Live 1787257358 behind the service counter beside the espresso machine, customer side empty, Schnick Coffee shop recognizable",
+        "character_ids": [
+          "dea6b660-c728-4969-9d2c-38c2b69f631b",
+          "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+          "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+        ],
+        "prop_entity_ids": [
+          "78c5be96-cd03-4969-9f8b-655fcefd28ea",
+          "8d59f076-e297-42ca-a439-b0eb5da9d9f9"
+        ],
+        "camera": {
+          "camera_id": "",
+          "camera_slot": null,
+          "label": "Default Camera",
+          "orientation": "",
+          "fov_preset": "",
+          "yaw_degrees": null,
+          "lens_mm": null,
+          "cinematic": {
+            "shot_size": "medium_wide",
+            "motion": "static",
+            "framing": "two_shot"
+          }
+        },
+        "generator": {
+          "local_enabled": true,
+          "api_enabled": false,
+          "local_family": "qwen2512",
+          "api_provider": "",
+          "api_model": "",
+          "local_models": [],
+          "api_models": [],
+          "style_engine_enabled": false,
+          "style_engine_model_id": "",
+          "generator_sources": null
+        },
+        "lora": null,
+        "candidates": [],
+        "approved_candidate_id": null,
+        "take_memory": {
+          "originalTakeIntent": {},
+          "sceneErsState": {},
+          "characterIdentity": {},
+          "blocking": {},
+          "camera": {},
+          "takeState": {},
+          "userCorrection": {}
+        },
+        "generation_batch_id": null,
+        "created_at": "2026-08-20T20:28:02.461599+00:00",
+        "updated_at": "2026-08-20T20:48:14.645249+00:00"
+      }
+    }
+  },
+  "schnickStill": {
+    "sheetId": "db095959-5678-4f11-98d1-e93e0810d119",
+    "intent": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+    "family": "qwen2512",
+    "characterIds": [
+      "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+      "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+    ],
+    "createStatus": 200,
+    "shotId": "38146179-4a3e-4055-8136-ff407bddf789",
+    "createBody": {
+      "shot": {
+        "id": "38146179-4a3e-4055-8136-ff407bddf789",
+        "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+        "scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+        "sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+        "ers_package_id": "b738536e-bd02-40ea-929a-8e8453d5d315",
+        "ers_runtime": false,
+        "intent": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+        "prompt": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+        "character_ids": [
+          "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+          "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+        ],
+        "prop_entity_ids": [
+          "78c5be96-cd03-4969-9f8b-655fcefd28ea",
+          "8d59f076-e297-42ca-a439-b0eb5da9d9f9"
+        ],
+        "camera": {
+          "camera_id": "",
+          "camera_slot": null,
+          "label": "Default Camera",
+          "orientation": "",
+          "fov_preset": "",
+          "yaw_degrees": null,
+          "lens_mm": null,
+          "cinematic": {
+            "shot_size": "medium_wide",
+            "motion": "static",
+            "framing": "two_shot"
+          }
+        },
+        "generator": {
+          "local_enabled": true,
+          "api_enabled": false,
+          "local_family": "qwen2512",
+          "api_provider": "",
+          "api_model": "",
+          "local_models": [],
+          "api_models": [],
+          "style_engine_enabled": false,
+          "style_engine_model_id": "",
+          "generator_sources": null
+        },
+        "lora": null,
+        "candidates": [],
+        "approved_candidate_id": null,
+        "take_memory": {
+          "originalTakeIntent": {},
+          "sceneErsState": {},
+          "characterIdentity": {},
+          "blocking": {},
+          "camera": {},
+          "takeState": {},
+          "userCorrection": {}
+        },
+        "generation_batch_id": null,
+        "created_at": "2026-08-20T20:48:22.697522+00:00",
+        "updated_at": "2026-08-20T20:48:22.697522+00:00"
+      }
+    },
+    "generateStatus": 400,
+    "generateBody": {
+      "detail": "This generator cannot use reference images (characters/props/environment). Choose Z-Image or FLUX, or clear placed references."
+    },
+    "jobIds": [],
+    "compileFacts": {
+      "behind": false,
+      "beside": false,
+      "facing": false,
+      "customer": false,
+      "employee": false,
+      "spatial_language": false,
+      "korri": false,
+      "anadriya": false
+    },
+    "stillAssetId": "",
+    "stillPoll": {
+      "shot": {
+        "id": "38146179-4a3e-4055-8136-ff407bddf789",
+        "project_id": "2347bf46-3762-4763-86c5-4a6032522278",
+        "scene_id": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+        "sheet_id": "db095959-5678-4f11-98d1-e93e0810d119",
+        "ers_package_id": "b738536e-bd02-40ea-929a-8e8453d5d315",
+        "ers_runtime": false,
+        "intent": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+        "prompt": "Put Korri behind the service counter beside the espresso machine while Anadriya stands on the customer side facing Korri.",
+        "character_ids": [
+          "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+          "284411ea-596f-4b8d-9a0e-8da81a67edbf"
+        ],
+        "prop_entity_ids": [
+          "78c5be96-cd03-4969-9f8b-655fcefd28ea",
+          "8d59f076-e297-42ca-a439-b0eb5da9d9f9"
+        ],
+        "camera": {
+          "camera_id": "",
+          "camera_slot": null,
+          "label": "Default Camera",
+          "orientation": "",
+          "fov_preset": "",
+          "yaw_degrees": null,
+          "lens_mm": null,
+          "cinematic": {
+            "shot_size": "medium_wide",
+            "motion": "static",
+            "framing": "two_shot"
+          }
+        },
+        "generator": {
+          "local_enabled": true,
+          "api_enabled": false,
+          "local_family": "qwen2512",
+          "api_provider": "",
+          "api_model": "",
+          "local_models": [],
+          "api_models": [],
+          "style_engine_enabled": false,
+          "style_engine_model_id": "",
+          "generator_sources": null
+        },
+        "lora": null,
+        "candidates": [],
+        "approved_candidate_id": null,
+        "take_memory": {
+          "originalTakeIntent": {},
+          "sceneErsState": {},
+          "characterIdentity": {},
+          "blocking": {},
+          "camera": {},
+          "takeState": {},
+          "userCorrection": {}
+        },
+        "generation_batch_id": null,
+        "created_at": "2026-08-20T20:48:22.697522+00:00",
+        "updated_at": "2026-08-20T21:09:14.309963+00:00"
+      }
+    }
+  },
+  "draftReload": {
+    "draft": {
+      "schemaVersion": "spatial-draft-v1",
+      "draftId": "draft_aec83c7fcae8",
+      "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+      "mapId": "6bc36d92-d21a-4c2f-b85f-71d1f6aa9081",
+      "sourceAssetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735",
+      "reviewLabel": "CD Scene Review",
+      "sceneReviewAvailable": true,
+      "geometryStatus": "unavailable",
+      "geometryReason": "Automatic placement boxes are not installed. You can still review the scene and place people yourself.",
+      "canonAvailability": "unavailable",
+      "canonUnavailableReason": "HTTP 200",
+      "proposedFills": [
+        {
+          "id": "fill_bd30a0fed0a3",
+          "kind": "character",
+          "slotIndex": 0,
+          "colorKey": "red",
+          "label": "Service counter side",
+          "tag": "@Korri",
+          "characterId": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+          "propId": "",
+          "characterApproved": true,
+          "normalizedX": -0.18,
+          "normalizedY": -0.32,
+          "miniPrompt": "@Korri behind the service counter",
+          "orientation": "",
+          "shotSize": "auto",
+          "primarySubject": "auto",
+          "perceptionEntityId": "",
+          "authority": "filmmaker",
+          "factStatus": "corrected",
+          "notes": ""
+        },
+        {
+          "id": "fill_46484b9f3077",
+          "kind": "character",
+          "slotIndex": 1,
+          "colorKey": "blue",
+          "label": "CRS Single 1787198703328",
+          "tag": "@CRS Single 1787198703328",
+          "characterId": "284411ea-596f-4b8d-9a0e-8da81a67edbf",
+          "propId": "",
+          "characterApproved": true,
+          "normalizedX": 0.18,
+          "normalizedY": 0.34,
+          "miniPrompt": "@CRS Single 1787198703328 on the customer side",
+          "orientation": "",
+          "shotSize": "auto",
+          "primarySubject": "auto",
+          "perceptionEntityId": "",
+          "authority": "inference",
+          "factStatus": "inferred",
+          "notes": ""
+        },
+        {
+          "id": "fill_bee8325d8135",
+          "kind": "prop",
+          "slotIndex": 0,
+          "colorKey": "purple",
+          "label": "Service counter side",
+          "tag": "#coffee-cup",
+          "characterId": "",
+          "propId": "",
+          "characterApproved": false,
+          "normalizedX": 0.0,
+          "normalizedY": 0.12,
+          "miniPrompt": "coffee cup in the scene",
+          "orientation": "",
+          "shotSize": "auto",
+          "primarySubject": "auto",
+          "perceptionEntityId": "",
+          "authority": "filmmaker",
+          "factStatus": "corrected",
+          "notes": ""
+        },
+        {
+          "id": "fill_9eafeac2eaeb",
+          "kind": "camera",
+          "slotIndex": 0,
+          "colorKey": "",
+          "label": "Conversation camera",
+          "tag": "",
+          "characterId": "",
+          "propId": "",
+          "characterApproved": false,
+          "normalizedX": 0.08,
+          "normalizedY": 0.62,
+          "miniPrompt": "Look at the conversation at the counter",
+          "orientation": "N",
+          "shotSize": "medium",
+          "primarySubject": "c49371ed-ba6b-4c16-ba98-a8b28b72118b",
+          "perceptionEntityId": "",
+          "authority": "inference",
+          "factStatus": "inferred",
+          "notes": ""
+        }
+      ],
+      "unusedDetections": [],
+      "zonePhrases": [
+        {
+          "id": "zone_f32b7c1a48d3",
+          "phrase": "employee side",
+          "notes": "",
+          "factStatus": "inferred"
+        },
+        {
+          "id": "zone_a38bc6affdbc",
+          "phrase": "customer side",
+          "notes": "",
+          "factStatus": "inferred"
+        },
+        {
+          "id": "zone_4e024daa1909",
+          "phrase": "behind the counter",
+          "notes": "",
+          "factStatus": "inferred"
+        },
+        {
+          "id": "zone_7ab4f5876fae",
+          "phrase": "on the counter",
+          "notes": "",
+          "factStatus": "inferred"
+        }
+      ],
+      "relationships": [
+        {
+          "id": "rel_56bd1f2e5416",
+          "subjectLabel": "Korri",
+          "relation": "BEHIND",
+          "objectLabel": "service counter",
+          "factStatus": "inferred",
+          "authority": "inference"
+        },
+        {
+          "id": "rel_b67b49ff9ea3",
+          "subjectLabel": "CRS Single 1787198703328",
+          "relation": "IN_FRONT_OF",
+          "objectLabel": "service counter",
+          "factStatus": "inferred",
+          "authority": "inference"
+        },
+        {
+          "id": "rel_4b0f181812a3",
+          "subjectLabel": "CRS Single 1787198703328",
+          "relation": "FACING",
+          "objectLabel": "Korri",
+          "factStatus": "inferred",
+          "authority": "inference"
+        },
+        {
+          "id": "rel_9698d7895f5f",
+          "subjectLabel": "employee side",
+          "relation": "BEHIND",
+          "objectLabel": "service counter",
+          "factStatus": "inferred",
+          "authority": "inference"
+        },
+        {
+          "id": "rel_65e67783d421",
+          "subjectLabel": "customer side",
+          "relation": "IN_FRONT_OF",
+          "objectLabel": "service counter",
+          "factStatus": "inferred",
+          "authority": "inference"
+        }
+      ],
+      "userCorrections": [
+        {
+          "id": "corr_dc485d10e539",
+          "factKey": "fill:korri",
+          "action": "rename",
+          "value": {
+            "label": "Service counter side"
+          },
+          "createdAt": "2026-08-20T16:36:14.188843+00:00",
+          "authority": "filmmaker"
+        },
+        {
+          "id": "corr_5cef35c75e20",
+          "factKey": "fill:coffee cup",
+          "action": "rename",
+          "value": {
+            "label": "Service counter side"
+          },
+          "createdAt": "2026-08-20T16:46:44.022060+00:00",
+          "authority": "filmmaker"
+        },
+        {
+          "id": "corr_ab43e4524340",
+          "factKey": "fill:service counter side",
+          "action": "rename",
+          "value": {
+            "label": "Service counter side"
+          },
+          "createdAt": "2026-08-20T20:22:38.784602+00:00",
+          "authority": "filmmaker"
+        }
+      ],
+      "perceptionPacketId": "cp_a7a7e5d1549f",
+      "createdAt": "2026-08-20T16:36:14.146336+00:00",
+      "updatedAt": "2026-08-20T20:22:38.906718+00:00"
+    },
+    "capability": {
+      "sceneReview": "available",
+      "sceneReviewReason": "CD Scene Review uses the existing environment look. Chat is not required.",
+      "geometry": "unavailable",
+      "geometryReason": "Automatic placement boxes are not installed. You can still review the scene and place people yourself.",
+      "autoMask": "unavailable",
+      "autoMaskReason": "Auto-select needs scene geometry. Paint the region if it is unavailable.",
+      "chatRequired": false
+    }
+  },
+  "finishedAt": "2026-08-20T21:09:22Z"
+}

@@ -732,6 +732,14 @@
   color: var(--danger, #e08a8a);
 }
 
+.world-consistency-note {
+  margin-top: 0.5rem;
+}
+
+.world-consistency-note .ghost {
+  margin-top: 0.25rem;
+}
+
 .scene-creator-profile__integrity {
   display: block;
   width: 100%;

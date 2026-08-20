@@ -358,6 +358,14 @@ def _character_metadata(db: Session, project_id: str, character_ids: list[str]) 
         except Exception:
             continue
         casting = resolve_approved_reference(db, character_id, "hero_identity")
+        if not casting:
+            try:
+                from ..character_identity.crs_service import load_persisted_crs
+
+                persisted = load_persisted_crs(db, character_id)
+                casting = persisted.get("approved_sheet_asset_id") or casting
+            except Exception:
+                pass
         refs = list_references(db, project_id, character_id)
         out.append(
             {

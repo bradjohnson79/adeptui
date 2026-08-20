@@ -32,6 +32,7 @@ from ..codirector.model_intelligence.api import router as model_intelligence_rou
 from ..codirector.language_intelligence.api import router as language_intelligence_router
 from ..codirector.prompt_intelligence.api import router as prompt_intelligence_router
 from ..codirector.prompt_intelligence.benchmark_api import router as prompt_intelligence_v2_router
+from ..codirector.world_intelligence.router import router as world_intelligence_router
 from ..codirector.status.router import router as status_router
 from ..codirector.bible.schemas import (
     ApprovalDecisionRequest,
@@ -61,6 +62,7 @@ router.include_router(model_intelligence_router)
 router.include_router(language_intelligence_router)
 router.include_router(prompt_intelligence_router)
 router.include_router(prompt_intelligence_v2_router)
+router.include_router(world_intelligence_router)
 router.include_router(status_router)
 
 

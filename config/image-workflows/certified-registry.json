@@ -213,7 +213,7 @@
         "state": "UNKNOWN"
       },
       "fingerprints": {
-        "graphHash": "sha256:da4fa8d4b69a6e23ddf593a9f7ca040419a1c1d56fed6c1cc947c798c8ea6bb0",
+        "graphHash": "sha256:20b39e414e699dd59e9d93ea77bfff4e968bb39e613eca32f8fd121344c6801b",
         "builderHash": "sha256:aa9634a1bd895224a9952fe5acc3e69dd78dc3709fac5b64cf1af42c8eb33430",
         "nodeInventoryHash": "sha256:534482a83cad566272ad342d0c80caf5df5d0ee8f505e9f59482f48554e1e5ad",
         "modelInventoryHash": "sha256:d1423bc0aefc88090e23098100b0c3c4d9b48458a9c4462abf3830b394dfb98f"

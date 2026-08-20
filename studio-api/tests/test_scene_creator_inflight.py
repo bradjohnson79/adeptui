@@ -45,3 +45,16 @@ def test_in_flight_skips_interrupted_candidate() -> None:
         db=db,
     )
     assert reuse is None
+
+
+def test_generate_shot_body_is_fully_defined() -> None:
+    """POST /shots/{id}/generate must validate without a Pydantic rebuild error."""
+    from app.scene_creator.router import GenerateShotBody, RetakeShotBody
+
+    body = GenerateShotBody.model_validate(
+        {"local_enabled": True, "api_enabled": False, "local_family": "qwen2512", "candidate_count": 1}
+    )
+    assert body.local_family == "qwen2512"
+    assert body.lora is None
+    retake = RetakeShotBody.model_validate({"correction": "move left"})
+    assert retake.correction == "move left"

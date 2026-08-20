@@ -4,6 +4,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../api";
+import { spatialMapApi } from "../SpatialMap/spatialMapApi";
+import { activeMovement, listMovements, movementLabel } from "../SpatialMap/movementSegments";
+import type { MovementSegment, SpatialMapDocument } from "../SpatialMap/types";
 import { sceneCreatorApi } from "./sceneCreatorApi";
 import type { LoraSelection } from "../../lora/LoRASelector";
 import { normalizeProductionAspect, type ProductionAspectRatio } from "../../../workspacePrefs";
@@ -80,6 +83,8 @@ export function useSceneCreator(projectId: string) {
   const [cineCharacterId, setCineCharacterId] = useState("");
   const [cinePropId, setCinePropId] = useState("");
   const [cineInstruction, setCineInstruction] = useState("");
+  const [spatialMap, setSpatialMap] = useState<SpatialMapDocument | null>(null);
+  const [movementSegmentId, setMovementSegmentId] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [productionContextStatus, setProductionContextStatus] = useState<ProductionContextStatus>("idle");
@@ -92,6 +97,29 @@ export function useSceneCreator(projectId: string) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const orientGenRef = useRef(0);
   const inFlightRef = useRef(false);
+
+  const mapId = workspace?.production_context?.spatialMapId
+    || workspace?.spatial_profiles?.find((p) => p.handoffId === selectedProfileId)?.spatialMapId
+    || "";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mapId) {
+      setSpatialMap(null);
+      return;
+    }
+    void spatialMapApi.getMap(projectId, mapId).then((doc) => {
+      if (cancelled) return;
+      setSpatialMap(doc);
+      const active = activeMovement(doc);
+      setMovementSegmentId((prev) => prev || active?.id || "");
+    }).catch(() => {
+      if (!cancelled) setSpatialMap(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapId, projectId]);
 
   const beginSubmit = () => {
     if (inFlightRef.current) return false;
@@ -836,6 +864,7 @@ export function useSceneCreator(projectId: string) {
     projectId,
     workspace,
     shot,
+    spatialMapId: mapId,
     sheetId,
     sceneId,
     intent,
@@ -895,6 +924,11 @@ export function useSceneCreator(projectId: string) {
     selectSpatialProfile,
     confirmResetWorkspace,
     selectedProfileId,
+    movements: listMovements(spatialMap),
+    movementSegmentId,
+    setMovementSegmentId,
+    movementOptions: listMovements(spatialMap).map((row) => ({ id: row.id, label: movementLabel(row) })),
+    selectedMovement: (listMovements(spatialMap).find((row) => row.id === movementSegmentId) || null) as MovementSegment | null,
     productionContextStatus,
     resetConfirmOpen,
     setResetConfirmOpen,

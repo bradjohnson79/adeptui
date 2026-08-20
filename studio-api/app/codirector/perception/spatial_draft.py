@@ -149,6 +149,21 @@ def _character_is_approved(db: Session, project_id: str, character_id: str) -> b
     return bool(result.get("ok"))
 
 
+def _resolve_accept_fill(draft: SpatialDraft, item) -> ProposedSlotFill | None:
+    """Resolve Accept by current fill id, then unique label. Re-review must not strand Accept."""
+    fills = {row.id: row for row in draft.proposedFills}
+    found = fills.get(item.fillId)
+    if found is not None:
+        return found
+    label = str(getattr(item, "label", "") or "").strip().lower()
+    if not label:
+        return None
+    matches = [row for row in draft.proposedFills if row.label.lower() == label and row.factStatus != "rejected"]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def accept_into_slots(
     db: Session,
     project_id: str,
@@ -170,7 +185,6 @@ def accept_into_slots(
                 AcceptFailure(code="DRAFT_NOT_FOUND", message="CD Scene Review has not run for this map.")
             ],
         )
-    fills = {item.id: item for item in draft.proposedFills}
     result = AcceptResult(draft=draft)
     try:
         document = get_document(db, project_id, map_id)
@@ -182,7 +196,7 @@ def accept_into_slots(
         )
 
     for item in request.items:
-        fill = fills.get(item.fillId)
+        fill = _resolve_accept_fill(draft, item)
         if fill is None:
             result.failures.append(AcceptFailure(fillId=item.fillId, code="FILL_NOT_FOUND", message="That suggestion is gone."))
             continue

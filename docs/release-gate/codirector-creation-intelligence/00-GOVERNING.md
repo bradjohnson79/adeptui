@@ -72,10 +72,8 @@ or
 NO-GO — FULL-STACK E2E NOT VERIFIED
 ```
 
-or
+Revision B Live Closure does **not** use `E2E BLOCKED` as a final program result. Use only the two-way GO / NO-GO above.
 
-```text
-E2E BLOCKED — <blocker>
-```
-
-Current certification report: [01-CERTIFICATION.md](./01-CERTIFICATION.md)
+Current program completion report: [../REVISION-ABC-FINAL-CLOSURE.md](../REVISION-ABC-FINAL-CLOSURE.md)  
+Historical NO-GO snapshot: [REVISION-B-UNIFIED-REVIEW.md](./REVISION-B-UNIFIED-REVIEW.md)  
+Historical: [01-CERTIFICATION.md](./01-CERTIFICATION.md), [02-LIVE-CLOSURE.md](./02-LIVE-CLOSURE.md)

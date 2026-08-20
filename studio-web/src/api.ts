@@ -5963,7 +5963,7 @@ export const api = {
         `/api/perception/projects/${projectId}/maps/${mapId}/review`,
         { method: "POST", signal: perceptionAbortSignal() },
       ),
-    accept: (projectId: string, mapId: string, items: Array<{ fillId: string; overwrite?: boolean }>) =>
+    accept: (projectId: string, mapId: string, items: Array<{ fillId: string; overwrite?: boolean; label?: string }>) =>
       req<{
         ok: boolean;
         documentWritten: boolean;
@@ -5993,6 +5993,38 @@ export const api = {
           signal: perceptionAbortSignal(),
         },
       ),
+  },
+  worldIntelligence: {
+    status: () =>
+      req<{ ok: boolean; available: boolean; installed: boolean; advisoryOnly: boolean }>(
+        "/api/codirector/world-intelligence/status",
+      ),
+    advisory: (projectId: string, sceneId?: string, assetId?: string) => {
+      const query = new URLSearchParams({ projectId });
+      if (sceneId) query.set("sceneId", sceneId);
+      if (assetId) query.set("assetId", assetId);
+      return req<{
+        available: boolean;
+        installed: boolean;
+        advisoryText: string | null;
+        canMarkIntentional: boolean;
+        packet: Record<string, unknown> | null;
+      }>(`/api/codirector/world-intelligence/advisory?${query.toString()}`);
+    },
+    policy: (projectId: string) =>
+      req<Record<string, unknown>>(`/api/codirector/world-intelligence/policy?projectId=${encodeURIComponent(projectId)}`),
+    setPolicy: (projectId: string, body: { enabled?: boolean; policy?: string }) =>
+      req<{ ok: boolean; policy: Record<string, unknown> }>("/api/codirector/world-intelligence/policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, ...body }),
+      }),
+    markIntentional: (projectId: string, fromAssetId: string, toAssetId: string, sceneId?: string) =>
+      req<{ ok: boolean }>("/api/codirector/world-intelligence/mark-intentional", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, fromAssetId, toAssetId, sceneId: sceneId || "" }),
+      }),
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>
     req<{ id: string; project_id: string; scene_id: string; guidance: string; doc: any }>(

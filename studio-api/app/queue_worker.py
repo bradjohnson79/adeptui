@@ -73,6 +73,11 @@ STALE_MESSAGE = (
     "generated. Start it again when you are ready."
 )
 
+STALE_APPROVED_CRS_MESSAGE = (
+    "Left queued by an abandoned Character Creator tab. The approved look was not "
+    "changed. Start a new sheet if you want a replacement."
+)
+
 _DEFAULT_RECOVERY_MAX_AGE_HOURS = 24.0
 
 
@@ -86,10 +91,59 @@ def _recovery_max_age_hours() -> float:
     return value if value > 0 else _DEFAULT_RECOVERY_MAX_AGE_HOURS
 
 
+def _job_params(job: Job) -> dict:
+    try:
+        raw = json.loads(job.params_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def queued_job_is_stale_approved_crs(job: Job, db: Session | None = None) -> bool:
+    """True when auto-starting this queued row would overwrite an approved look.
+
+    Abandoned Character Creator tabs leave `korri_*` / visual-sheet rows queued.
+    Recycle/drain must not resume those. An explicit new Generate still enqueues
+    onto the live asyncio queue and is not classified here.
+    """
+    params = _job_params(job)
+    ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+    purpose = str(params.get("purpose") or ctx.get("objective") or "")
+    tag = str(params.get("tag") or "")
+    character_id = str(ctx.get("characterId") or params.get("characterId") or "")
+    is_crs = job.kind in {"character_sheet", "imagegen"} and (
+        purpose == "character_sheet"
+        or tag.startswith("korri_")
+        or "four_view" in tag
+        or "visual-sheet" in tag
+        or job.kind == "character_sheet"
+    )
+    if not is_crs:
+        return False
+    if tag.startswith("korri_") and not character_id:
+        return True
+    if not character_id:
+        return False
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        from .codirector.perception.character_canon import register_character_canon
+
+        result = register_character_canon(session, job.project_id, character_id)
+        return bool(result.get("ok") and result.get("approvedSheetAssetId"))
+    except Exception:
+        return tag.startswith("korri_")
+    finally:
+        if own_session:
+            session.close()
+
+
 class JobQueue:
     def __init__(self) -> None:
         self._q: asyncio.Queue[str] = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
+        self._drain_task: Optional[asyncio.Task] = None
+        self._enqueued: set[str] = set()
         self._cancel: set[str] = set()
         self._active_prompt: dict[str, str] = {}
         self._heavy_local_active: Optional[str] = None
@@ -97,6 +151,8 @@ class JobQueue:
     def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
+        if self._drain_task is None:
+            self._drain_task = asyncio.create_task(self._drain_watchdog())
 
     def is_cancelled(self, job_id: str) -> bool:
         return job_id in self._cancel
@@ -177,6 +233,14 @@ class JobQueue:
             )
             for job in rows:
                 created = job.created_at or datetime.utcnow()
+                if job.status == "queued" and queued_job_is_stale_approved_crs(job, db):
+                    self._note_recovery(job, action="interrupted", previous="queued", stale=True)
+                    job.status = "failed"
+                    job.stage = "interrupted"
+                    job.message = STALE_APPROVED_CRS_MESSAGE[:4000]
+                    job.updated_at = datetime.utcnow()
+                    interrupted.append(job.id)
+                    continue
                 if job.status == "queued" and created >= cutoff:
                     self._note_recovery(job, action="resumed", previous="queued")
                     resumed.append(job.id)
@@ -233,7 +297,61 @@ class JobQueue:
         job.history_json = json.dumps(history)
 
     async def enqueue(self, job_id: str) -> None:
+        self._enqueued.add(job_id)
         await self._q.put(job_id)
+
+    async def drain_orphaned_queued(self) -> dict[str, list[str]]:
+        """Start DB-queued jobs that never made it onto the in-memory asyncio queue.
+
+        After a cancelled/zombie job the consumer can continue while newer ImageProduct
+        rows remain `queued` only in SQLite. Periodic drain closes that hole without
+        recycling the API process (which would also resume leftover approved CRS).
+        """
+        started: list[str] = []
+        abandoned: list[str] = []
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Job)
+                .filter(Job.status == "queued")
+                .order_by(Job.created_at.asc())
+                .all()
+            )
+            to_start: list[str] = []
+            for job in rows:
+                if job.id in self._enqueued:
+                    continue
+                if queued_job_is_stale_approved_crs(job, db):
+                    self._note_recovery(job, action="interrupted", previous="queued", stale=True)
+                    job.status = "failed"
+                    job.stage = "interrupted"
+                    job.message = STALE_APPROVED_CRS_MESSAGE[:4000]
+                    job.updated_at = datetime.utcnow()
+                    abandoned.append(job.id)
+                    continue
+                to_start.append(job.id)
+            if abandoned:
+                db.commit()
+        finally:
+            db.close()
+        for job_id in to_start:
+            await self.enqueue(job_id)
+            started.append(job_id)
+        if started or abandoned:
+            logger.warning(
+                "Studio job queue drain: started=%s abandoned_approved_crs=%s",
+                len(started),
+                len(abandoned),
+            )
+        return {"started": started, "abandoned": abandoned}
+
+    async def _drain_watchdog(self) -> None:
+        while True:
+            await asyncio.sleep(15)
+            try:
+                await self.drain_orphaned_queued()
+            except Exception:
+                logger.exception("Studio job queue drain watchdog failed")
 
     def cancel(self, job_id: str) -> None:
         self._cancel.add(job_id)
@@ -336,6 +454,7 @@ class JobQueue:
     async def _loop(self) -> None:
         while True:
             job_id = await self._q.get()
+            self._enqueued.discard(job_id)
             try:
                 if job_id in self._cancel:
                     self._cancel.discard(job_id)
@@ -387,6 +506,10 @@ class JobQueue:
                 if self._heavy_local_active == job_id:
                     self._heavy_local_active = None
                 self._q.task_done()
+                try:
+                    await self.drain_orphaned_queued()
+                except Exception:
+                    logger.exception("Studio job queue drain after job %s failed", job_id)
 
     def _set_status(
         self,
@@ -3085,6 +3208,8 @@ class JobQueue:
                     if mpath and Path(mpath).is_file():
                         mask_image = await comfy.upload_image(Path(mpath))
                 except Exception:
+                    logger.debug("Mask store miss for %s; trying project asset", mid)
+                if not mask_image:
                     mask_asset = self._get_asset(db, str(mid))
                     if mask_asset:
                         mask_image = await self._ensure_comfy_image(mask_asset)
@@ -3228,18 +3353,21 @@ class JobQueue:
                 mid = m0.get("maskAssetId") or m0.get("assetId")
                 if mid:
                     mask_path_for_gate = get_mask_path(project.id, str(mid))
+                    if not mask_path_for_gate:
+                        mask_asset = self._get_asset(db, str(mid))
+                        if mask_asset and mask_asset.path:
+                            mask_path_for_gate = mask_asset.path
         except Exception:
             pass
         # Region-edit contract: unmasked pixels must remain the source.
-        # Certified FLUX img2img does not consume a mask; composite after
-        # download so identity/camera survive without graph drift.
+        # Apply after download so leak cannot pass through zimage.inpaint or
+        # FLUX img2img without changing certified Comfy fingerprints.
         if (
             source_path_for_gate
             and mask_path_for_gate
             and Path(source_path_for_gate).is_file()
             and Path(str(mask_path_for_gate)).is_file()
             and "outpaint" not in contract.workflow_key
-            and "inpaint" not in contract.workflow_key
             and contract.workflow_key != "image.upscale"
         ):
             from .image_runtime.output_gate import composite_generated_into_source
@@ -3942,6 +4070,13 @@ class JobQueue:
         except Exception:
             logger.exception("ERS composite persist failed for job %s", job.id)
         db.commit()
+        try:
+            from .codirector.world_intelligence.scene_review import review_committed_image
+
+            review_committed_image(db, project, job, asset, dest, params)
+            db.commit()
+        except Exception:
+            logger.exception("World intelligence review skipped for job %s", job.id)
         done_message = f"ImageGen ({edit_op}) complete"
         if note:
             # Visible disclosure of a designed legacy auto-fallback (CDX-076):

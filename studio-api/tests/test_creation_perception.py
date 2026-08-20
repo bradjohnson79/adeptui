@@ -19,6 +19,7 @@ from app.codirector.perception.contracts import (
 from app.codirector.perception.importance import filter_entities, is_wall_lint
 from app.codirector.perception.contracts import PerceptionEntity
 from app.codirector.perception.inpaint_leak import LEAK_THRESHOLD, unmasked_mean_delta
+from app.image_runtime.output_gate import composite_generated_into_source
 from app.codirector.perception.spatial_draft import apply_user_corrections
 from app.codirector.perception.spatial_language import (
     detect_relation_tokens,
@@ -219,6 +220,43 @@ def test_accept_caps_and_refuses_occupied(monkeypatch):
     assert result.failures[0].code == "SLOT_OCCUPIED"
 
 
+def test_accept_resolves_stale_fill_id_by_label(monkeypatch):
+    from app.codirector.perception.contracts import AcceptItem, AcceptRequest
+    from app.codirector.perception.spatial_draft import accept_into_slots
+
+    class _Doc:
+        characters = []
+        props = []
+        cameras = []
+
+    draft = SpatialDraft(
+        projectId="p1",
+        mapId="m1",
+        proposedFills=[
+            ProposedSlotFill(id="fill_new", kind="camera", label="Conversation camera", slotIndex=0),
+        ],
+    )
+    placed = []
+
+    def _create_camera(*_a, **_k):
+        placed.append("camera")
+        return _Doc()
+
+    monkeypatch.setattr("app.codirector.perception.spatial_draft.load_spatial_draft", lambda *_a, **_k: draft)
+    monkeypatch.setattr("app.codirector.perception.spatial_draft.save_spatial_draft", lambda *_a, **_k: draft)
+    monkeypatch.setattr("app.spatial_map.service.get_document", lambda *_a, **_k: _Doc())
+    monkeypatch.setattr("app.spatial_map.service.create_camera", _create_camera)
+    result = accept_into_slots(
+        object(),
+        "p1",
+        "m1",
+        AcceptRequest(items=[AcceptItem(fillId="fill_stale", label="Conversation camera")]),
+    )
+    assert result.documentWritten is True
+    assert placed == ["camera"]
+    assert result.acceptedFillIds == ["fill_new"]
+
+
 def test_pixel_boxes_are_normalized():
     from app.codirector.perception.boxes import normalize_box
 
@@ -248,11 +286,6 @@ def test_license_memos_exist_for_geometry_pins():
         text = (root / rel).read_text(encoding="utf-8")
         assert "Apache" in text
         assert "required=False" in text or "`required=False`" in text
-
-
-def test_queue_worker_does_not_composite_native_inpaint():
-    src = (Path(__file__).resolve().parents[1] / "app" / "queue_worker.py").read_text(encoding="utf-8")
-    assert '"inpaint" not in contract.workflow_key' in src
 
 
 def test_auto_mask_never_returns_a_box_as_mask():
@@ -313,3 +346,28 @@ def test_camera_shot_packet_absorbs_accepted_draft_notes():
         sd.load_spatial_draft = original
     assert any("Korri behind service counter" in item for item in locked)
     assert any("customer side" in item for item in flexible)
+
+
+def test_region_composite_brings_inpaint_leak_under_threshold(tmp_path: Path):
+    src = Image.new("RGB", (64, 64), (10, 20, 30))
+    leaked = Image.new("RGB", (64, 64), (200, 10, 10))
+    mask = Image.new("L", (64, 64), 0)
+    for x in range(20, 44):
+        for y in range(20, 44):
+            mask.putpixel((x, y), 255)
+    src_p = tmp_path / "src.png"
+    gen_p = tmp_path / "gen.png"
+    mask_p = tmp_path / "mask.png"
+    out_p = tmp_path / "out.png"
+    src.save(src_p)
+    leaked.save(gen_p)
+    mask.save(mask_p)
+    assert unmasked_mean_delta(gen_p, src_p, mask_p) > LEAK_THRESHOLD
+    composite_generated_into_source(gen_p, src_p, mask_p, out_p, feather_px=0)
+    assert unmasked_mean_delta(out_p, src_p, mask_p) <= LEAK_THRESHOLD
+
+
+def test_queue_worker_composites_inpaint_outputs():
+    text = Path(__file__).resolve().parents[1].joinpath("app", "queue_worker.py").read_text(encoding="utf-8")
+    assert "composite_generated_into_source" in text
+    assert 'and "inpaint" not in contract.workflow_key' not in text

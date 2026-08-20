@@ -246,6 +246,7 @@ class SpatialDraft(BaseModel):
 class AcceptItem(BaseModel):
     fillId: str
     overwrite: bool = False
+    label: str = ""
 
 
 class AcceptRequest(BaseModel):

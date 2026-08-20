@@ -139,7 +139,7 @@ class GenerateShotBody(BaseModel):
     api_model: str = ""
     candidate_count: int = 4
     # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
-    lora: Optional[dict[str, Any]] = None
+    lora: dict[str, Any] | None = None
 
 
 class RetakeShotBody(BaseModel):
@@ -148,7 +148,7 @@ class RetakeShotBody(BaseModel):
     api_enabled: bool = False
     local_family: str = ""
     api_model: str = ""
-    lora: Optional[dict[str, Any]] = None
+    lora: dict[str, Any] | None = None
 
 
 class ApproveCandidateBody(BaseModel):

@@ -163,7 +163,7 @@ def test_zimage_ref_edit_matches_certified_graph_after_latent_path():
     assert "EmptyLatentImage" not in types
     certified = get_workflow("zimage.ref_edit").fingerprints.get("graphHash")
     assert certified
-    assert graph_hash(g) == certified
+    assert graph_hash(g, workflow_key="zimage.ref_edit") == certified
 
 
 def test_modern_foundation_ready():

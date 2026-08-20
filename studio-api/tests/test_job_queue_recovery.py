@@ -174,6 +174,45 @@ def test_recovery_max_age_is_configurable(db_session, project, monkeypatch):
     assert db_session.get(Job, job.id).status == "failed"
 
 
+def test_drain_starts_orphaned_queued_jobs(db_session, project):
+    from app.db import Job
+    from app.queue_worker import JobQueue
+
+    orphan = _make_job(db_session, project.id, status="queued", kind="imagegen")
+    queue = _fresh_queue()
+    assert queue._q.empty()
+
+    result = asyncio.run(queue.drain_orphaned_queued())
+
+    assert orphan.id in result["started"]
+    drained = [queue._q.get_nowait() for _ in range(queue._q.qsize())]
+    assert orphan.id in drained
+    db_session.expire_all()
+    assert db_session.get(Job, orphan.id).status == "queued"
+
+
+def test_recover_skips_approved_character_sheet(db_session, project, monkeypatch):
+    from app.db import Job
+    from app.queue_worker import STALE_APPROVED_CRS_MESSAGE, JobQueue
+
+    job = _make_job(db_session, project.id, status="queued", kind="imagegen")
+    job.params_json = json.dumps(
+        {"purpose": "character_sheet", "tag": "korri_four_view", "creativeContext": {"characterId": "char-korri"}}
+    )
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "app.queue_worker.queued_job_is_stale_approved_crs",
+        lambda row, db=None: row.id == job.id,
+    )
+    result = _run_recovery(_fresh_queue())
+    assert job.id in result["interrupted"]
+    db_session.expire_all()
+    row = db_session.get(Job, job.id)
+    assert row.status == "failed"
+    assert row.message == STALE_APPROVED_CRS_MESSAGE
+
+
 def test_recovery_runs_on_api_startup(db_session, project, monkeypatch):
     """Booting the real app through its lifespan closes the row a dead process left."""
     from unittest.mock import AsyncMock

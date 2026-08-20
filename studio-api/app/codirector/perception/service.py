@@ -240,13 +240,27 @@ def review_scene(db: Session, project_id: str, map_id: str) -> SpatialDraft:
         if row not in named:
             named.append(row)
 
+    def _reuse_fill_id(*, kind: str, character_id: str = "", label: str = "") -> str:
+        if not previous:
+            return ""
+        for fill in previous.proposedFills:
+            if fill.kind != kind:
+                continue
+            if character_id and fill.characterId == character_id:
+                return fill.id
+            if label and fill.label.lower() == label.lower():
+                return fill.id
+        return ""
+
     char_fills: list[ProposedSlotFill] = []
     for index, row in enumerate(named[:4]):
         role = "employee" if index == 0 else "customer"
         nx, ny = _guess_coords(row["name"], role)
         side = "behind the service counter" if role == "employee" else "on the customer side"
+        reused = _reuse_fill_id(kind="character", character_id=row["characterId"], label=row["name"])
         char_fills.append(
             ProposedSlotFill(
+                **({"id": reused} if reused else {}),
                 kind="character",
                 slotIndex=index,
                 colorKey=CHARACTER_COLORS[index],
@@ -280,8 +294,10 @@ def review_scene(db: Session, project_id: str, map_id: str) -> SpatialDraft:
     rest = [label for label in unique_labels if label not in priority]
     for index, label in enumerate((priority + rest)[:8]):
         nx, ny = _guess_coords(label, "prop")
+        reused = _reuse_fill_id(kind="prop", label=label)
         prop_fills.append(
             ProposedSlotFill(
+                **({"id": reused} if reused else {}),
                 kind="prop",
                 slotIndex=index,
                 colorKey=PROP_COLORS[index % 4],
@@ -294,8 +310,10 @@ def review_scene(db: Session, project_id: str, map_id: str) -> SpatialDraft:
             )
         )
 
+    camera_reused = _reuse_fill_id(kind="camera", label="Conversation camera")
     camera_fills = [
         ProposedSlotFill(
+            **({"id": camera_reused} if camera_reused else {}),
             kind="camera",
             slotIndex=0,
             label="Conversation camera",
