@@ -540,3 +540,20 @@ def test_continuity_off_does_not_block_submit():
     master = _master_two_batches()
     master.coDirectorContinuityPolicy.enabled = False
     assert packet_blocks_submit(master, "bb_b") is False
+
+
+def test_queue_hops_merge_keeps_claim_timestamp():
+    from app.video_runtime.job_model import merge_video_runtime_history
+
+    first = merge_video_runtime_history(None, {"queueHops": {"claimedAt": "t0", "enqueueOk": True}})
+    second = merge_video_runtime_history(
+        first,
+        {"queueHops": {"providerPromptId": "p1", "providerAccepted": True}},
+    )
+    import json
+
+    hops = json.loads(second)["videoRuntime"]["queueHops"]
+    assert hops["claimedAt"] == "t0"
+    assert hops["enqueueOk"] is True
+    assert hops["providerPromptId"] == "p1"
+    assert hops["providerAccepted"] is True

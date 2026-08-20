@@ -1,7 +1,9 @@
 # Revision A — Unified Completion Report
 
+> **HISTORICAL.** Law 30 live evidence for the polish closure is [05-FINAL-POLISH.md](./05-FINAL-POLISH.md). This file remains the prior program GO report. Do not cite it as current polish truth.
+
 **Governing doc:** [00-GOVERNING.md](./00-GOVERNING.md)  
-**This file** is the single Law 30 live completion report for Co-Director Temporal Video Intelligence & Continuity (Revision A).  
+**This file** recorded the program GO for Co-Director Temporal Video Intelligence & Continuity (Revision A).  
 **Absorbed / historical:** [01-IMPLEMENTATION-AND-CERTIFICATION.md](./01-IMPLEMENTATION-AND-CERTIFICATION.md), [02-LIVE-CERTIFICATION.md](./02-LIVE-CERTIFICATION.md), [03-LIVE-CLOSURE.md](./03-LIVE-CLOSURE.md). Do not cite those as current truth.
 
 **Branch:** `feat/codirector-temporal-continuity`  

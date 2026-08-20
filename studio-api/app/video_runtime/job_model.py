@@ -197,7 +197,14 @@ def merge_video_runtime_history(history_json: str | None, patch: Mapping[str, An
     vr = history.get("videoRuntime")
     if not isinstance(vr, dict):
         vr = {}
-    vr.update(dict(patch))
+    incoming = dict(patch)
+    hops = incoming.get("queueHops")
+    if isinstance(hops, dict):
+        prev = vr.get("queueHops") if isinstance(vr.get("queueHops"), dict) else {}
+        merged = dict(prev)
+        merged.update(hops)
+        incoming["queueHops"] = merged
+    vr.update(incoming)
     history["videoRuntime"] = vr
     return json.dumps(history)
 
