@@ -2,7 +2,9 @@
 
 **Governing doc:** [00-GOVERNING.md](./00-GOVERNING.md)  
 **Branch:** `feat/codirector-temporal-continuity`  
-**Status:** Implementation complete. Live VideoChat3 inference and two-batch visual inspect are **not** certified.
+**HEAD:** `1e4f10c25ddde5bb8ed1f7cf715557cbc7db789c`  
+**Remote:** `origin/feat/codirector-temporal-continuity` (`1e4f10c`)  
+**Status:** Implementation complete. Live VideoChat3 inference and two-batch visual inspect are **not** certified. Hosted Vercel deploy was not promoted from this branch.
 
 ## Verdict
 
