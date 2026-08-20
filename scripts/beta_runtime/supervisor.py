@@ -420,7 +420,11 @@ class Supervisor:
             healthy = _http_ok(f"http://{self.api_host}:{self.api_port}/api/health")
             current = self._health_revision_current() if healthy else False
             perception_ok = self._perception_contract_current() if healthy else False
-            identity = self._is_studio_api_identity() or self._is_our_listener(self.api_port)
+            identity = (
+                self._is_studio_api_identity()
+                or self._is_our_listener(self.api_port)
+                or self._adept_health_identity()
+            )
             if should_adopt_studio_api(
                 healthy=healthy,
                 revision_current=current,
@@ -430,7 +434,7 @@ class Supervisor:
                 self.log(
                     f"preflight: adopting current Studio API already on :{self.api_port} (pids={api_pids})"
                 )
-            elif identity or (healthy and current and not perception_ok):
+            elif identity or (healthy and not (current and perception_ok)):
                 self.log(
                     f"preflight: recycling Studio API on :{self.api_port} "
                     f"(healthy={healthy} current={current} perception={perception_ok} pids={api_pids})"
@@ -475,6 +479,13 @@ class Supervisor:
     def _perception_contract_current(self) -> bool:
         payload = _http_json(f"http://{self.api_host}:{self.api_port}/api/perception/capability")
         return perception_contract_ok(payload)
+
+    def _adept_health_identity(self) -> bool:
+        """HTTP HealthOut is enough to recycle when the listen PID is already gone."""
+        payload = _http_json(f"http://{self.api_host}:{self.api_port}/api/health")
+        if not payload.get("ok"):
+            return False
+        return bool(payload.get("apiRevision") or payload.get("routeContract") or payload.get("apiStartedAt"))
 
     def _is_studio_api_identity(self) -> bool:
         root = str(self.root).replace("/", "\\").lower()
@@ -970,12 +981,14 @@ def main() -> int:
         remaining = _candidate_beta_pids(root, api_port=api_port, web_port=web_port, dirs=dirs)
         for pid in sorted(remaining, reverse=True):
             _taskkill(pid)
+        _recycle_api_listeners(_port_pids(api_port))
         forced_deadline = time.time() + 20
         while time.time() < forced_deadline:
             remaining = _live_beta_pids(root, api_port=api_port, web_port=web_port)
-            if not remaining:
+            leftover = _port_pids(api_port)
+            if not remaining and not leftover:
                 break
-            for pid in sorted(remaining, reverse=True):
+            for pid in sorted(set(remaining + leftover + _orphan_worker_pids(leftover)), reverse=True):
                 _taskkill(pid)
             time.sleep(1.5)
         _clear_pid_files(dirs)

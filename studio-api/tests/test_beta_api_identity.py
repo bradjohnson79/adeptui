@@ -23,6 +23,17 @@ def test_healthy_sha_without_perception_is_not_adopted() -> None:
     )
 
 
+def test_stale_sha_is_not_adopted_even_if_perception_answers() -> None:
+    assert (
+        should_adopt_studio_api(
+            healthy=True,
+            revision_current=False,
+            perception_ok=True,
+        )
+        is False
+    )
+
+
 def test_healthy_sha_with_perception_is_adopted() -> None:
     assert (
         should_adopt_studio_api(
