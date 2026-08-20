@@ -17,16 +17,15 @@
 
 ```text
 Branch:              feat/codirector-temporal-continuity
-Local HEAD:          8c28eaaf45ad232572f071589dd6b0e3ce5b9955
-Working tree:        B/C closure is dirty (not yet committed). Do not treat 2k-line
-                     unrelated Co-Director conversation/tool diffs as this mission.
-Final commit:        PENDING (deploy gate)
-Vercel deployed SHA: PENDING (deploy gate)
-Vercel URL:          PENDING (deploy gate)
-Frontend:            http://127.0.0.1:8760/
+Local HEAD:          7964efd8b64bd2da64561c0a3103a196a74d3582
+B/C implementation:  32c24d37513e4a5e2a1942ea40a3d221b66983f1
+Vercel compile fix:  7964efd8b64bd2da64561c0a3103a196a74d3582
+Final commit:        7964efd8b64bd2da64561c0a3103a196a74d3582
+Vercel production:   https://adeptui.vercel.app
+                     https://adeptui-mu9s5rpri-anoint.vercel.app  READY
+Vercel preview:      https://adeptui-mtsn3v0zq-anoint.vercel.app  READY
+Frontend (local):    http://127.0.0.1:8760/
 Studio API:          http://127.0.0.1:8758/
-apiRevision:         8c28eaa
-apiStartedAt:        2026-08-20T20:57:17Z (API-only recycle after status non-block fix)
 Relevant AI workers: ComfyUI :8188 (RTX 5090)
                      videochat3-worker Python (CUDA torch 2.10.0+cu130) used for V-JEPA
                      V-JEPA weights: data/models/world_intelligence/vjepa2-vitl-fpc64-256
@@ -55,7 +54,7 @@ Revision A:  GO — REVISION A REGRESSION PASS
 Revision B:  GO — REVISION B CERTIFIED
 Revision C:  GO — REVISION C CERTIFIED
 Program:     GO — ADEPT UI REVISION A+B+C INTEGRATION CERTIFIED
-Deploy:      in progress (commit + Vercel after this report)
+Deploy:      GO — Vercel production READY (adeptui.vercel.app)
 ```
 
 ---
@@ -249,7 +248,9 @@ Neighboring systems: Comfy left running; Korri not overwritten; no `zones[]` add
 - Dedicated `world-intelligence-worker` venv does not exist; CUDA path reuses `videochat3-worker`. Documented fallback, not a silent CPU fallback.
 - V-JEPA 2.1 and SceneCraft v1.2 remain out of scope.
 - First GET `/status` after a cold API start may report `NOT_PROBED` for a few seconds while the background CUDA probe finishes. Disk cache then keeps later reads ≤20ms.
-- Unrelated dirty Co-Director conversation/tool files on this branch remain **out of this commit**.
+- Unrelated dirty Co-Director conversation/tool files remain **out of the certified commits**.
+- Public unauthenticated hits to `*.vercel.app` receive Vercel Authentication. Hosted verification used `vercel curl` (CLI identity). Do not treat the login wall as an application crash.
+- First Git preview of `32c24d3` failed `tsc` because Spatial Map save/movement modules and Timeline/Character contracts were untracked. Closed by `7964efd`.
 
 ---
 
@@ -274,5 +275,10 @@ GO — REVISION A REMAINS CERTIFIED
 GO — REVISION B CERTIFIED
 GO — REVISION C CERTIFIED
 GO — ADEPT UI REVISION A+B+C INTEGRATION CERTIFIED
-VERCEL DEPLOYMENT — PENDING HOSTED VERIFY
+GO — VERCEL DEPLOYMENT CERTIFIED
+
+FINAL PROGRAM VERDICT:
+GO — ADEPT UI REVISIONS A, B & C FULLY GREEN-LIT AND DEPLOYED
 ```
+
+Hosted `vercel curl` of `https://adeptui.vercel.app/` returned Adept UI Studio HTML (`id="root"`, production JS). The production bundle contains `cd-scene-review`, `Review this scene`, `world-consistency-note`, and `worldIntelligence`, and does not contain `JEPA`.
