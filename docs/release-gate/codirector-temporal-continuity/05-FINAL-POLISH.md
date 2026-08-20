@@ -1,5 +1,6 @@
 # Revision A Final Polish
 
+**Status:** POLISH COMPLETE  
 **Law 30 live evidence for this polish pass.** [REVISION-A-UNIFIED-COMPLETION.md](./REVISION-A-UNIFIED-COMPLETION.md) is the prior program GO report and is **historical** for this closure. Do not cite UNIFIED as current polish truth.
 
 **Branch:** `feat/codirector-temporal-continuity`  
@@ -237,6 +238,7 @@ Revision A-only commits on this polish (MAGI commits on the same branch were not
 | `894c864` | Keep Timeline 2.5 id through `ltx-local` |
 | `a38dcc8` | Patch-safe 704p; empty JSON unfinished |
 | `b45d2ef` | Wire last-frame into `LTXVBaseSampler` |
+| `ff3cabf` | Hop deep-merge + this report (live generate was on `b45d2ef`) |
 
 Concurrent MAGI / Timeline store-reconcile / `workflow_execute.py` diffs were left unstaged. No secrets. No `data/venvs/videochat3-worker`.
 
@@ -246,13 +248,31 @@ Live generate ran on `apiRevision=b45d2ef` after official Stop/Start.
 
 ## GLM 5.2
 
-Pending peer review.
+Reviewer: [GLM 5.2](72af11c1-3a2e-436c-b86c-13adac48b442) (requirements, architecture, routing, provenance, lifecycle, frozen integrity). Review-only.
+
+Coverage A–F **PASS**. Frozen architecture **not reopened**. Named project reused. Perception does not submit generation. Live `apiRevision=ff3cabf` matches HEAD. Independent visual: same corridor two-shot (not the locker-hallway reset).
+
+`claimedAt` deep-merge is unit-verified on `ff3cabf` and **not** re-proven on a new generate (certified row `f3b1b291` predates that hop). GLM rated that MEDIUM and explicitly **not omitted required work**.
+
+```text
+PEER REVIEW CLEAR — NO REQUIRED GAPS FOUND
+```
 
 ---
 
 ## Kimi K3
 
-Pending peer review.
+Reviewer: [Kimi K3](5e13898d-db07-4132-ab43-86de745893dd) (runtime E2E, hops, media, visual, tests, persistence). Review-only.
+
+Independent live checks: `apiRevision=ff3cabf` == HEAD; packet `tcp_90a37106360b` ready; job `f3b1b291-…` done with `prompt_id=34c9879f-…`; 2.5 provenance not MiniMax; media `scene_0_9c641887.mp4` 1,505,941 bytes; reload after the 19:22 restart still holds packet/bridge/B2/media.
+
+Independent visual: **YES** — same corridor two-shot; failed reset frame correctly excluded.
+
+No BLOCKER / HIGH / MEDIUM. LOW items (params `512x288` vs graph `1280x704`; VideoChat3 prose loop) are disclosed usefulness/documentation notes, not required gaps.
+
+```text
+PEER REVIEW CLEAR — NO REQUIRED GAPS FOUND
+```
 
 ---
 
@@ -269,12 +289,26 @@ Pending peer review.
 | 2.5 I2V ignored last-frame pixels | **FIXED + VERIFIED** — visual YES on wired B2 |
 | `claimedAt` missing on live hops | **FIXED** in hop deep-merge; **not re-proven** on a new generate |
 | Continue is not “finish the turn” | **OUT OF SCOPE BY EXPLICIT GOVERNING LAW** as a new perception model; disclosed usefulness limitation. Parser no longer mangles. |
+| Kimi L1 — params 512x288 vs graph 1280x704 | **REJECTED WITH EVIDENCE** as a required gap. Draft/fast_mode params vs builder snap; live Comfy graph and media are 1280x704. Disclosed. |
+| Kimi L2 — VideoChat3 still-image repetition in one observation | **REJECTED WITH EVIDENCE** as a required gap. `parseOk=false` and usefulness limitation already disclosed; not a split and not a missing generate. |
+| GLM MEDIUM — `claimedAt` not live-reproven | **REJECTED WITH EVIDENCE** as a required gap. Hop fields that certify provider accept (`prompt_id`, enqueueOk, providerSubmittedAt) are on the live row. Deep-merge has a passing unit test. Disclosed remaining limitation. |
+| GLM LOW — small white artifact on B2 first frame | **REJECTED WITH EVIDENCE** as a required gap. Cosmetic; continuity holds. |
+| GLM LOW — polish commit table omitted `ff3cabf` | **FIXED** in this report’s git table. |
 
 ---
 
 ## Final verifier
 
-Pending after both peers return `PEER REVIEW CLEAR — NO REQUIRED GAPS FOUND`.
+Independent read-only verifier: [Verifier](9747aa07-54e1-4206-99e2-e26602d59828).
+
+```text
+VERIFIED — FULL-STACK E2E PASSED
+NO — ALL REQUIRED WORK IS COMPLETE
+```
+
+E2E TRACE: User action PASS · Frontend PASS · API PASS · Backend PASS · Persistence PASS · Runtime PASS · Result PASS · Reload PASS · Downstream PASS.
+
+Completeness answer required by the governing prompt: **NO — ALL REQUIRED WORK IS COMPLETE**.
 
 ---
 
@@ -293,10 +327,14 @@ Pending after both peers return `PEER REVIEW CLEAR — NO REQUIRED GAPS FOUND`.
 
 ## Polish verdict
 
-Not issued until both peers and the independent verifier clear.
-
-Required language when clear:
-
 ```text
 REVISION A FINAL POLISH COMPLETE — NO REQUIRED GAPS REMAIN
 ```
+
+Program GO is unchanged:
+
+```text
+GO — CO-DIRECTOR TEMPORAL VIDEO INTELLIGENCE & CONTINUITY CERTIFIED
+```
+
+The program GO is not reopened. This polish verdict is separate.
