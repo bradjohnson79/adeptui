@@ -136,6 +136,9 @@ def run_perception(
         cleanup_extracted_clip(created_review, source_path=source_path)
 
 
+_JSON_JUNK = frozenset({"[]", "[],", "{}", "null", "none", "none."})
+
+
 def _observation_from_payload(data: dict[str, Any]) -> VideoPerceptionObservation:
     chars = []
     for item in data.get("characters") or []:
@@ -144,16 +147,17 @@ def _observation_from_payload(data: dict[str, Any]) -> VideoPerceptionObservatio
     cam = data.get("camera") if isinstance(data.get("camera"), dict) else {}
     scene = data.get("scene") if isinstance(data.get("scene"), dict) else {}
     raw = str(data.get("rawText") or "")
+    parsed = _parse_json_tail(raw)
     unfinished = _as_str_list(data.get("unfinishedActions"))
     completed = _as_str_list(data.get("completedActions"))
-    if not unfinished:
-        parsed = _parse_json_tail(raw)
+    json_unfinished_present = isinstance(parsed, dict) and "unfinishedActions" in parsed
+    if not unfinished and parsed:
         unfinished = _as_str_list(parsed.get("unfinishedActions"))
         if not completed:
             completed = _as_str_list(parsed.get("completedActions"))
         if data.get("confidence") is None and parsed.get("confidence") is not None:
             data["confidence"] = parsed.get("confidence")
-    if not unfinished:
+    if not unfinished and not json_unfinished_present:
         unfinished = _extract_listed(raw, "unfinished")
     return VideoPerceptionObservation(
         modelId=str(data.get("modelId") or ""),
@@ -171,9 +175,16 @@ def _observation_from_payload(data: dict[str, Any]) -> VideoPerceptionObservatio
 def _as_str_list(value: Any) -> list[str]:
     if isinstance(value, str):
         text = value.strip()
-        return [text] if text else []
+        if not text or text.lower().rstrip(",") in _JSON_JUNK:
+            return []
+        return [text]
     if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
+        out: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text and text.lower().rstrip(",") not in _JSON_JUNK:
+                out.append(text)
+        return out
     return []
 
 
@@ -195,6 +206,6 @@ def _extract_listed(raw: str, needle: str) -> list[str]:
     for line in (raw or "").splitlines():
         if needle in line.lower() and ":" in line:
             rest = line.split(":", 1)[1].strip()
-            if rest:
+            if rest and rest.lower().rstrip(",") not in _JSON_JUNK:
                 lines.append(rest)
     return lines

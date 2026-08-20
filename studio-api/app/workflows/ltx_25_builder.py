@@ -39,6 +39,19 @@ def _compute_frame_count(length_seconds: float, fps: int) -> int:
     return count
 
 
+def _snap_ltx_25_spatial(width: int, height: int, *, multiple: int = 32) -> tuple[int, int]:
+    """LTX 2.5 patchify requires latent H/W even after /16, so pixels must be /32.
+
+    1280x720 encodes to latent height 45, which cannot divide by patch 2.
+    """
+
+    def _one(value: int) -> int:
+        value = max(multiple, int(value or multiple))
+        return max(multiple, int(round(value / multiple) * multiple))
+
+    return _one(width), _one(height)
+
+
 def build_ltx_25_t2v(
     settings: Any,
     execution_id: str,
@@ -60,6 +73,7 @@ def build_ltx_25_t2v(
     """
     steps = _resolve_steps(fast_mode)
     total_frames = _compute_frame_count(length_seconds, fps)
+    width, height = _snap_ltx_25_spatial(width, height)
 
     n_unet = _nid()
     n_vae = _nid()
@@ -251,6 +265,7 @@ def build_ltx_25_i2v(
     """
     steps = _resolve_steps(fast_mode)
     total_frames = _compute_frame_count(length_seconds, fps)
+    width, height = _snap_ltx_25_spatial(width, height)
 
     n_unet = _nid()
     n_vae = _nid()

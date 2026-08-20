@@ -329,6 +329,12 @@ def main() -> int:
     if degrade.get("availability") != "unavailable" or degrade.get("directives"):
         print("DEGRADE_UNEXPECTED", degrade, flush=True)
         return 2
+    if evidence.get("jobStatus") != "done":
+        print("JOB_NOT_DONE", evidence.get("jobStatus"), evidence.get("comfyPromptId"), flush=True)
+        return 2
+    if not evidence.get("comfyPromptId"):
+        print("NO_PROVIDER_PROMPT", flush=True)
+        return 2
     print("AUTOMATIC_CLOSURE_OK", packet.get("packetId"), flush=True)
     return 0
 

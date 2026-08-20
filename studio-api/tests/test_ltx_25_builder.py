@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.workflows.ltx_25_builder import build_ltx_25_i2v, build_ltx_25_t2v
+from app.workflows.ltx_25_builder import _snap_ltx_25_spatial, build_ltx_25_i2v, build_ltx_25_t2v
 
 
 class FakeSettings:
@@ -27,6 +27,7 @@ PROMPT = "a cinematic scene of a forest at sunset"
 NEGATIVE = "blurry, low quality"
 WIDTH = 1280
 HEIGHT = 720
+SNAPPED_HEIGHT = 704
 DURATION = 5.0
 FPS = 24
 SEED = 42
@@ -46,6 +47,11 @@ def _node(wf: dict[str, Any], class_type: str) -> dict[str, Any] | None:
 def _assert_node_count(wf: dict[str, Any], class_type: str, expected: int) -> None:
     count = sum(1 for node in wf.values() if node["class_type"] == class_type)
     assert count == expected, f"Expected {expected} {class_type} nodes, got {count}"
+
+
+def test_snap_720p_to_patch_aligned():
+    assert _snap_ltx_25_spatial(1280, 720) == (1280, 704)
+    assert _snap_ltx_25_spatial(1280, 704) == (1280, 704)
 
 
 class TestNoInventedNodes:
@@ -131,7 +137,7 @@ class TestT2VTopology:
         n = _node(wf, "LTXVBaseSampler")
         assert n is not None
         assert n["inputs"]["width"] == WIDTH
-        assert n["inputs"]["height"] == HEIGHT
+        assert n["inputs"]["height"] == SNAPPED_HEIGHT
 
     def test_uses_model_sampling_ltxv(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT)
@@ -171,7 +177,7 @@ class TestT2VTopology:
         n = _node(wf, "LTXVBaseSampler")
         assert n is not None
         assert n["inputs"]["width"] == WIDTH
-        assert n["inputs"]["height"] == HEIGHT
+        assert n["inputs"]["height"] == SNAPPED_HEIGHT
 
     def test_uses_ltxv_tiled_vae_decode(self):
         wf = build_ltx_25_t2v(SETTINGS, EXEC_ID, PROMPT)
@@ -260,7 +266,7 @@ class TestI2VTopology:
         n = _node(wf, "LTXVImgToVideo")
         assert n is not None
         assert n["inputs"]["width"] == WIDTH
-        assert n["inputs"]["height"] == HEIGHT
+        assert n["inputs"]["height"] == SNAPPED_HEIGHT
         assert n["inputs"]["strength"] == pytest.approx(0.95)
 
     def test_i2v_stg_guider_wired_from_ltxv_img_to_video(self):

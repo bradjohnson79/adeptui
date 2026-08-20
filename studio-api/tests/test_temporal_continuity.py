@@ -464,6 +464,32 @@ def test_unfinished_string_does_not_split_into_characters():
     assert _as_str_list("The turn is unfinished.") == ["The turn is unfinished."]
     assert _as_str_list(["a", "b"]) == ["a", "b"]
     assert _as_str_list(None) == []
+    assert _as_str_list("[]") == []
+    assert _as_str_list(["[],"]) == []
+
+
+def test_empty_json_unfinished_does_not_become_brackets():
+    from app.codirector.video_intelligence.worker_client import _observation_from_payload
+
+    raw = (
+        "The girls still standing in the same positions, facing each other.\n\n"
+        '{\n  "unfinishedActions": [],\n  "completedActions": ["left looks right"],\n  "confidence": 1.0\n}'
+    )
+    obs = _observation_from_payload(
+        {
+            "ok": True,
+            "modelId": "videochat3-4b",
+            "rawText": raw,
+            "unfinishedActions": [],
+            "completedActions": [],
+            "parseOk": True,
+        }
+    )
+    assert obs.unfinishedActions == []
+    filled = compare_intent_vs_actual(TemporalContinuityPacket(), obs, protection="strong")
+    assert filled.continuation.continue_ != ["Finish: [],"]
+    assert "Finish: []," not in filled.continuation.continue_
+    assert filled.continuation.continue_[0].startswith("Continue:")
 
 
 def test_unfinished_string_compare_is_one_directive():

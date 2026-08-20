@@ -32,7 +32,11 @@ def compare_intent_vs_actual(
     ctx = context or {}
     intended = _intended_from_context(ctx)
     observed = (observation.rawText or "").strip() or "Visual review produced no description."
-    unfinished = list(observation.unfinishedActions or [])
+    unfinished = [
+        item
+        for item in list(observation.unfinishedActions or [])
+        if str(item).strip().lower().rstrip(",") not in {"[]", "{}", "null", "none"}
+    ]
     completed = list(observation.completedActions or [])
     differences: list[str] = []
     if unfinished:
@@ -46,8 +50,12 @@ def compare_intent_vs_actual(
     ]
     continue_items = [f"Finish: {item}" for item in unfinished]
     if not continue_items:
+        prose = observed or ""
+        json_at = prose.rfind("{")
+        if json_at > 0:
+            prose = prose[:json_at]
         last_seen = ""
-        for part in reversed((observed or "").replace("\n", ". ").split(".")):
+        for part in reversed(prose.replace("\n", ". ").split(".")):
             text = part.strip()
             if text:
                 last_seen = text
