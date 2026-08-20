@@ -5,7 +5,8 @@
 Date: 2026-08-20  
 Branch: `feat/codirector-temporal-continuity`  
 Starting SHA (this closure): `d376fee`  
-HEAD at certification write: `894c864`  
+MAGI closure commit: `f472aa8`  
+HEAD at certification write: `894c864` (later `a38dcc8` LTX 2.5; MAGI commit is `f472aa8`)  
 Live cert project: **MAGI Finishing Certification** (`61fe0ac2-4cc4-4855-8219-5600aef4057b`)  
 Local product frontend: `http://127.0.0.1:5173/` (Vite; :8760 not used)  
 Studio API: `http://127.0.0.1:8758/` (`apiStartedAt=2026-08-20T19:04:19Z` after recycle that loaded the 1800s GPU timeout and picture-track render filter)
