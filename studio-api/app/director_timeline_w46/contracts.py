@@ -11,6 +11,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from ..codirector.video_intelligence.contracts import (
+    CoDirectorContinuityPolicy,
+    TemporalContinuityPacket,
+)
+
 
 def _nid(prefix: str = "") -> str:
     raw = uuid4().hex[:12]
@@ -125,6 +130,8 @@ class TimelinePromptSegment(BaseModel):
     userDirection: Optional[str] = None
     productionPrompt: Optional[str] = None
     dialogue: Optional[str] = None
+    movementSegmentRef: Optional[dict[str, Any]] = None
+    movementSegmentRevision: Optional[int] = None
 
 
 class ExecutionSnapshot(BaseModel):
@@ -342,6 +349,8 @@ class SceneTimelineMaster(BaseModel):
     dismissedFailureJobIds: list[str] = Field(default_factory=list)
     continuityPolicy: ContinuityPolicy = Field(default_factory=ContinuityPolicy)
     continuityBridges: list[ContinuityBridge] = Field(default_factory=list)
+    coDirectorContinuityPolicy: CoDirectorContinuityPolicy = Field(default_factory=CoDirectorContinuityPolicy)
+    temporalPackets: list[TemporalContinuityPacket] = Field(default_factory=list)
     migratedFromDirectorJson: bool = False
     migrationNote: Optional[str] = None
 

@@ -243,6 +243,7 @@ def prepare_outgoing_bridge(
     ready = next((b for b in existing if b.status in ("Ready", "Applied")), None)
     if ready:
         nxt.incomingBridgeId = ready.bridgeId
+        _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
         return ready
     pending = next((b for b in existing if b.status in ("Waiting", "Analyzing")), None)
     if pending:
@@ -263,7 +264,50 @@ def prepare_outgoing_bridge(
     analyze_bridge(db, project_id, master, bridge)
     master.continuityBridges.append(bridge)
     nxt.incomingBridgeId = bridge.bridgeId
+    _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
     return bridge
+
+
+def _run_temporal_review(
+    db: Any,
+    project_id: str,
+    scene_id: str,
+    master: SceneTimelineMaster,
+    source,
+    target_batch_id: str,
+) -> None:
+    """Sibling of last-frame extract. Failure must not fail the pixel bridge."""
+    try:
+        from ..codirector.video_intelligence.contracts import CoDirectorContinuityPolicy
+        from ..codirector.video_intelligence.service import review_completed_batch
+
+        policy = master.coDirectorContinuityPolicy
+        if isinstance(policy, dict):
+            policy = CoDirectorContinuityPolicy.model_validate(policy)
+        if not policy.enabled:
+            return
+        review_completed_batch(
+            db,
+            project_id,
+            scene_id,
+            master,
+            source,
+            target_batch_id=target_batch_id,
+        )
+    except Exception as exc:
+        try:
+            from ..codirector.video_intelligence.service import persist_unavailable_packet
+
+            persist_unavailable_packet(
+                master,
+                project_id=project_id,
+                scene_id=scene_id,
+                source_batch=source,
+                target_batch_id=target_batch_id,
+                reason=str(exc)[:80] or "REVIEW_FAILED",
+            )
+        except Exception:
+            return
 
 
 def bridge_blocks_submit(master: SceneTimelineMaster, target_batch_id: str) -> ContinuityBridge | None:

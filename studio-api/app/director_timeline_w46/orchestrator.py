@@ -243,6 +243,24 @@ def submit_batch_generation(
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
 
+    # IDEMPOTENT_SUBMISSION (mission Part 42): never double-submit a batch.
+    # The sequential chain (submit_next_queued_batch) passes its staged
+    # snapshot id for Queued batches; a direct user retry never does.
+    if batch.status == "Generating":
+        return {
+            "ok": False,
+            "error": "BATCH_ALREADY_IN_FLIGHT",
+            "message": "This batch is already generating — wait for it to finish or cancel it first.",
+            "mock": False,
+        }
+    if batch.status == "Queued" and not precreated_snapshot_id:
+        return {
+            "ok": False,
+            "error": "BATCH_ALREADY_IN_FLIGHT",
+            "message": "This batch is already queued in the scene generation chain.",
+            "mock": False,
+        }
+
     if not batch.generatorId:
         return {
             "ok": False,
@@ -319,8 +337,23 @@ def submit_batch_generation(
 
     try:
         from .continuity import active_bridge_for_target
+        from ..codirector.video_intelligence.service import (
+            ensure_temporal_packet_before_submit,
+            packet_blocks_submit,
+        )
 
         incoming = active_bridge_for_target(master, batch.id)
+        temporal_packet = ensure_temporal_packet_before_submit(
+            db, project_id, scene_id, master, batch.id
+        )
+        store.save_master(db, project_id, scene_id, master, touch_batches=False)
+        if packet_blocks_submit(master, batch.id):
+            return {
+                "ok": False,
+                "error": "TEMPORAL_REVIEW_PENDING",
+                "message": "Co-Director is still reviewing the previous shot. The next generation has not been sent.",
+                "mock": False,
+            }
         request = build_timeline_generation_request(
             project_id=project_id,
             scene_id=scene_id,
@@ -330,6 +363,7 @@ def submit_batch_generation(
             incoming_bridge=incoming if incoming and incoming.status in ("Ready", "Applied") else None,
             aspect_ratio=aspect_ratio,
             draft_mode=draft_mode,
+            temporal_packet=temporal_packet,
         )
         if incoming and incoming.status == "Ready" and request.continuityStrategy:
             incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
@@ -366,6 +400,9 @@ def submit_batch_generation(
 
     draft_used = bool(request.providerOptions.get("draftMode"))
     st = dict(snap.continuityState or {})
+    if request.temporalContinuityPacketId:
+        st["temporalContinuityPacketId"] = request.temporalContinuityPacketId
+        st["temporalContinuation"] = request.providerOptions.get("temporalContinuation")
     st["takeState"] = {
         "quality": "draft" if draft_used else "final",
         "draftPathway": request.providerOptions.get("draftPathway"),
@@ -741,6 +778,57 @@ def touch_batch_config(
                 [BatchClip.model_validate(c) for c in patch[_field]],
             )
 
+    # PROMPT_PROJECTION_BACK_TO_LEGACY (single canonical truth): when the
+    # master prompt side is edited (Batch Inspector), flatten the batch
+    # promptSegments back onto the legacy TIMED PROMPT lane so the visible
+    # track and the generation input never diverge.
+    if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
+        try:
+            from ..director_timeline import parse_director_timeline
+            from ..director_timeline_w46.reconcile import project_prompts_to_legacy
+
+            from .store import get_scene
+
+            scene_row = get_scene(db, project_id, scene_id)
+            if scene_row is not None:
+                tl = parse_director_timeline(
+                    scene_row.director_json,
+                    fallback_duration=float(scene_row.duration_sec or 5.0),
+                    fallback_prompt=scene_row.prompt or "",
+                )
+                # Keep non-prompt legacy fields untouched; replace only the
+                # prompt_segments projection.
+                from ..director_timeline import dumps_director_timeline_preserving_embedded
+
+                projected = project_prompts_to_legacy(master)
+                tl.prompt_segments = [type(tl.prompt_segments[0])(**s) for s in projected] if projected else []
+                scene_row.director_json = dumps_director_timeline_preserving_embedded(tl, scene_row.director_json)
+                db.add(scene_row)
+        except Exception:
+            # Projection is best-effort; the master is already saved by the
+            # caller and generation reads the master.
+            pass
+
+    # RECONCILE_ON_CONFIG_CHANGE: plannedDuration edits shift the batch time
+    # windows, so legacy lane prompts/image clips are re-distributed before
+    # the master is persisted (value-stable when already consistent).
+    try:
+        from ..director_timeline import parse_director_timeline
+        from ..director_timeline_w46.reconcile import reconcile_legacy_to_master
+
+        from .store import get_scene
+
+        scene_row = get_scene(db, project_id, scene_id)
+        if scene_row is not None:
+            _tl = parse_director_timeline(
+                scene_row.director_json,
+                fallback_duration=float(scene_row.duration_sec or 5.0),
+                fallback_prompt=scene_row.prompt or "",
+            )
+            reconcile_legacy_to_master(master, _tl)
+    except Exception:
+        pass
+
     new_fp = compute_config_fingerprint(batch)
     batch.configFingerprint = new_fp
     invalidated = False
@@ -977,6 +1065,16 @@ def run_preflight(
 
     findings: list[PreflightFinding] = []
     for batch in master.batchBlocks:
+        if not batch.generatorId:
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="missing_generator",
+                    message=f"{batch.label} has no generator selected — generation would be refused.",
+                    batchBlockId=batch.id,
+                    fixProposal="Select a generator for this Batch in the Batch Inspector.",
+                )
+            )
         if not batch.promptSegments or not any(p.text.strip() for p in batch.promptSegments):
             findings.append(
                 PreflightFinding(
@@ -1179,6 +1277,10 @@ def submit_next_queued_batch(
         return {"ok": True, "submitted": False, "reason": "no_queued_batches", "mock": False}
     nxt = sorted(queued, key=lambda b: b.order)[0]
     from .continuity import analyze_bridge, bridge_blocks_submit
+    from ..codirector.video_intelligence.service import (
+        ensure_temporal_packet_before_submit,
+        packet_blocks_submit,
+    )
 
     blocker = bridge_blocks_submit(master, nxt.id)
     if blocker is not None:
@@ -1221,6 +1323,15 @@ def submit_next_queued_batch(
                 "status": blocker.status,
                 "mock": False,
             }
+    ensure_temporal_packet_before_submit(db, project_id, scene_id, master, nxt.id)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    if packet_blocks_submit(master, nxt.id):
+        return {
+            "ok": True,
+            "submitted": False,
+            "reason": "temporal_review_pending",
+            "mock": False,
+        }
     result = submit_batch_generation(
         db,
         project_id,
@@ -1273,7 +1384,16 @@ def generate_scene(
     # submits one immutable request per batch in order immediately (each
     # batch = its own request/snapshot — GENERATION_ISOLATION).
     mode = getattr(master, "orchestratorMode", "sequential_continuity") or "sequential_continuity"
-    sequential = mode != "parallel"
+    # MULTI-BATCH GOVERNANCE LAW: Continuity ON forbids submitting N+1 before
+    # Batch N has been reviewed. Parallel enqueue is staged instead.
+    cd_policy = getattr(master, "coDirectorContinuityPolicy", None)
+    if isinstance(cd_policy, dict):
+        cd_enabled = bool(cd_policy.get("enabled", True))
+    elif cd_policy is None:
+        cd_enabled = True
+    else:
+        cd_enabled = bool(getattr(cd_policy, "enabled", True))
+    sequential = mode != "parallel" or cd_enabled
 
     eligible: list[BatchBlock] = []
     for batch in sorted(master.batchBlocks, key=lambda b: b.order):
@@ -1344,6 +1464,59 @@ def set_scene_continuity_policy(
         return {"ok": False, "error": "INVALID_CONTINUITY_WINDOW", "message": str(exc), "mock": False}
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     return {"ok": True, "continuityPolicy": policy.model_dump(), "master": master.model_dump(), "mock": False}
+
+
+def set_scene_codirector_continuity_policy(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    from ..codirector.video_intelligence.service import set_codirector_continuity_policy
+
+    policy = set_codirector_continuity_policy(master, updates)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    return {
+        "ok": True,
+        "coDirectorContinuityPolicy": policy.model_dump(),
+        "master": master.model_dump(),
+        "mock": False,
+    }
+
+
+def reject_temporal_continuation(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    packet_id: str,
+    *,
+    manual_note: str | None = None,
+) -> dict[str, Any]:
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    found = None
+    for packet in master.temporalPackets:
+        if packet.packetId == packet_id:
+            packet.continuation.creatorRejected = True
+            packet.decision = "creator_override"
+            if manual_note:
+                packet.continuation.nextBatchDirectives = [manual_note]
+            found = packet
+            break
+    if found is None:
+        return {"ok": False, "error": "PACKET_NOT_FOUND", "mock": False}
+    rejected = list(master.coDirectorContinuityPolicy.rejectedPacketIds or [])
+    if packet_id not in rejected:
+        rejected.append(packet_id)
+    master.coDirectorContinuityPolicy.rejectedPacketIds = rejected
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    return {"ok": True, "packet": found.model_dump(by_alias=True), "master": master.model_dump(), "mock": False}
 
 
 def retake_batch(

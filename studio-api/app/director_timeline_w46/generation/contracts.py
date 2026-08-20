@@ -61,6 +61,8 @@ class VideoGeneratorCapabilities(BaseModel):
     draftResolution: Optional[str] = None
     finalResolution: Optional[str] = None
     supportsImageAndVideoTogether: bool = False
+    supportsPromptContinuation: bool = True
+    supportsTemporalConditioning: bool = False
 
 
 class TimelineGenerationRequest(BaseModel):
@@ -90,6 +92,7 @@ class TimelineGenerationRequest(BaseModel):
     lastFrameAssetId: Optional[str] = None
     tailAssetId: Optional[str] = None
     continuityStrategy: Optional[str] = None
+    temporalContinuityPacketId: Optional[str] = None
 
 
 class ValidationResult(BaseModel):

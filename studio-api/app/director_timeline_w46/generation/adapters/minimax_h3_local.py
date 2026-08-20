@@ -144,6 +144,10 @@ class MiniMaxH3LocalAdapter:
                 "continuityStrategy": strategy,
                 "continuityBridgeId": request.continuityBridgeId,
                 "lastFrameAssetId": request.lastFrameAssetId,
+                "temporalContinuityPacketId": request.temporalContinuityPacketId,
+                "temporalContinuationApplied": bool(
+                    (request.providerOptions or {}).get("temporalContinuation", {}).get("applied")
+                ),
             },
         )
 

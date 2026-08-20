@@ -120,6 +120,8 @@ class LtxLocalAdapter:
             "continuityStrategy": request.continuityStrategy
             if request.continuityStrategy not in ("native_tail", "native_extend")
             else "last_frame_i2v",
+            "temporalContinuityPacketId": request.temporalContinuityPacketId,
+            "temporalContinuation": request.providerOptions.get("temporalContinuation"),
         }
 
         if gen_id in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
@@ -244,6 +246,12 @@ class LtxLocalAdapter:
                     "draftMode": bool(params.get("draftMode")),
                     "aspectRatio": params.get("aspectRatio"),
                     "resolution": params.get("resolution"),
+                    # REAL_MEDIA_DURATION: the output gate measured the actual
+                    # rendered duration (ffprobe) — surface it so completion
+                    # records honest generatedDuration/timelineVisibleDuration
+                    # instead of the requested duration or a 5.0 default.
+                    "generatedDuration": _extract_gate_duration(row),
+                    "startImageAssetId": params.get("startImageAssetId"),
                 },
             )
         finally:
@@ -297,11 +305,34 @@ class LtxLocalAdapter:
             outputAssetIds=list(status.providerMetadata.get("outputAssetIds") or []),
             apiUsed=False,
             providerMetadata=status.providerMetadata,
+            duration=(
+                float(status.providerMetadata["generatedDuration"])
+                if status.providerMetadata.get("generatedDuration")
+                else None
+            ),
             errorCode=None
             if status.providerMetadata.get("outputPath") or status.providerMetadata.get("outputAssetIds")
             else "LTX_OUTPUT_PENDING",
             errorMessage=None,
         )
+
+
+def _extract_gate_duration(row: Job) -> float | None:
+    """Read the output-gate measured duration (ffprobe) from job history.
+
+    The queue worker records validate_video_output results (durationSec,
+    width, height) into history_json under outputGate. Returns None when
+    the job is not done or no measurement exists yet.
+    """
+    if row.status != "done":
+        return None
+    try:
+        history = json.loads(row.history_json or "{}")
+        gate = history.get("outputGate") or {}
+        dur = float(gate.get("durationSec") or 0)
+        return dur if dur > 0 else None
+    except Exception:
+        return None
 
 
 def _ensure_output_asset_ids(db: Session, row: Job, params: dict[str, Any]) -> list[str]:

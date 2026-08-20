@@ -6,7 +6,7 @@ import {
   type DirectorTimelineCameraCatalogEntry,
 } from "../../api";
 import type { Project, Scene } from "../../types";
-import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import type { BatchBlock, ReviewCadence, SceneTimelineMaster, TemporalContinuityPacket } from "../../timelineMaster/contracts";
 import { formatBatchStatus } from "../../timelineMaster/contracts";
 import { formatDurationSeconds } from "../../lib/formatDuration";
 import { useDirectorSelection } from "../DirectorSelectionContext";
@@ -44,6 +44,7 @@ import {
   type TimelineGeneratorOption,
 } from "../../timelineMaster/draftCapabilities";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
+import { timelineActionError } from "../../timelineMaster/timelineErrors";
 import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
 
 function executionLabel(engine: string) {
@@ -161,6 +162,7 @@ export function TimelineInspector({
   focusFinding = null,
   onRefresh,
   mutateTimeline,
+  onActionError,
 }: {
   project: Project;
   scene: Scene;
@@ -173,6 +175,7 @@ export function TimelineInspector({
     mutator: (timeline: DirectorTimeline) => DirectorTimeline,
     opts?: { refresh?: boolean },
   ) => Promise<void>;
+  onActionError?: (message: string) => void;
 }) {
   const { selection } = useDirectorSelection();
   const { t } = useTranslation("timeline");
@@ -280,6 +283,32 @@ export function TimelineInspector({
     };
   }, []);
 
+  const [movementChoices, setMovementChoices] = useState<Array<{ id: string; label: string; segmentNumber: number }>>([]);
+  useEffect(() => {
+    let alive = true;
+    void api.spatialMap.listMaps(project.id).then((res) => {
+      if (!alive) return;
+      const docs = (res.documents || []) as Array<{
+        movementSegments?: Array<{ id: string; segmentNumber: number; beatName?: string }>;
+      }>;
+      const rows = docs[0]?.movementSegments || [];
+      setMovementChoices(
+        [...rows]
+          .sort((a, b) => a.segmentNumber - b.segmentNumber)
+          .map((row) => ({
+            id: row.id,
+            segmentNumber: row.segmentNumber,
+            label: row.beatName ? `M${row.segmentNumber} — ${row.beatName}` : `Movement ${row.segmentNumber}`,
+          })),
+      );
+    }).catch(() => {
+      if (alive) setMovementChoices([]);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [project.id]);
+
   const selectedPrompt = useMemo(
     () => timeline?.prompt_segments.find((segment) => segment.id === selection.id),
     [timeline, selection.id],
@@ -349,6 +378,16 @@ export function TimelineInspector({
   }, [draftAvailable, selectedBatch?.id, selectedBatch?.generatorId]);
   const continuityPolicy = master?.continuityPolicy;
   const isApiContinuity = continuityPolicy?.locality === "api";
+  const cdPolicy = master?.coDirectorContinuityPolicy;
+  const [cdAdvancedOpen, setCdAdvancedOpen] = useState(false);
+  const latestPacket = useMemo<TemporalContinuityPacket | undefined>(() => {
+    const packets = master?.temporalPackets || [];
+    if (!selectedBatch) return packets[packets.length - 1];
+    return (
+      [...packets].reverse().find((packet) => packet.source?.batchId === selectedBatch.id) ||
+      packets[packets.length - 1]
+    );
+  }, [master?.temporalPackets, selectedBatch]);
   const staleDownstream = useMemo(
     () => (master?.batchBlocks || []).filter((batch) => batch.downstreamStale),
     [master],
@@ -833,9 +872,174 @@ export function TimelineInspector({
           </InspectorAccordion>
 
           <InspectorAccordion title="Extend & Continuity" testId="timeline-inspector-continuity">
+            <div className="field" data-testid="timeline-cd-continuity">
+              <span>
+                Co-Director Continuity
+                <HelpTip text="When this is on, Adept looks at the finished shot and helps the next generation continue instead of starting over. You do not need to open Co-Director." />
+              </span>
+              <label className="scene-meta">
+                <input
+                  type="checkbox"
+                  data-testid="timeline-cd-continuity-enabled"
+                  checked={cdPolicy?.enabled !== false}
+                  onChange={(e) => {
+                    void api
+                      .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, { enabled: e.target.checked })
+                      .then(onRefresh);
+                  }}
+                />{" "}
+                {cdPolicy?.enabled === false ? "Off" : "On"}
+              </label>
+              <fieldset className="field" data-testid="timeline-cd-review-cadence">
+                <legend>
+                  Review
+                  <HelpTip text="Automatic picks a review pace from the scene. 3 seconds is for fast action. 5 seconds is for slower shots. Every batch reviews once the shot finishes." />
+                </legend>
+                {(
+                  [
+                    ["automatic", "Automatic"],
+                    ["interval_3", "3 sec"],
+                    ["interval_5", "5 sec"],
+                    ["every_batch", "Every batch"],
+                  ] as Array<[ReviewCadence, string]>
+                ).map(([value, label]) => (
+                  <label key={value} className="scene-meta">
+                    <input
+                      type="radio"
+                      name="timeline-cd-review"
+                      data-testid={`timeline-cd-cadence-${value}`}
+                      checked={(cdPolicy?.reviewCadence || "automatic") === value}
+                      onChange={() => {
+                        void api
+                          .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, { reviewCadence: value })
+                          .then(onRefresh);
+                      }}
+                    />{" "}
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+              <label className="field">
+                <span>
+                  Continuity Protection
+                  <HelpTip text="Strong keeps successful motion and screen geography and finishes unfinished action. Standard is a lighter touch." />
+                </span>
+                <select
+                  data-testid="timeline-cd-protection"
+                  value={cdPolicy?.protection || "strong"}
+                  onChange={(e) => {
+                    void api
+                      .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, { protection: e.target.value })
+                      .then(onRefresh);
+                  }}
+                >
+                  <option value="strong">Strong</option>
+                  <option value="standard">Standard</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="ghost"
+                data-testid="timeline-cd-advanced-toggle"
+                onClick={() => setCdAdvancedOpen((open) => !open)}
+              >
+                {cdAdvancedOpen ? "Hide advanced" : "Advanced"}
+              </button>
+              {cdAdvancedOpen ? (
+                <div data-testid="timeline-cd-advanced">
+                  <label className="field">
+                    <span>Fast Vision</span>
+                    <input value={cdPolicy?.fastVisionModel || "VideoChat3"} readOnly />
+                  </label>
+                  <label className="field">
+                    <span>Deep Review</span>
+                    <select
+                      data-testid="timeline-cd-deep-review"
+                      value={cdPolicy?.deepReview || "auto"}
+                      onChange={(e) => {
+                        void api
+                          .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, { deepReview: e.target.value })
+                          .then(onRefresh);
+                      }}
+                    >
+                      <option value="auto">Automatic</option>
+                      <option value="off">Off</option>
+                      <option value="on">On</option>
+                    </select>
+                  </label>
+                  <label className="scene-meta">
+                    <input
+                      type="checkbox"
+                      data-testid="timeline-cd-show-debug"
+                      checked={Boolean(cdPolicy?.showDebugState)}
+                      onChange={(e) => {
+                        void api
+                          .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, {
+                            showDebugState: e.target.checked,
+                          })
+                          .then(onRefresh);
+                      }}
+                    />{" "}
+                    Show review details
+                  </label>
+                </div>
+              ) : null}
+              {latestPacket?.availability === "unavailable" ? (
+                <p className="scene-meta" data-testid="timeline-cd-unavailable">
+                  Co-Director visual continuity unavailable. Timeline generation may continue without visual review.
+                </p>
+              ) : null}
+              {latestPacket?.creatorMarker ? (
+                <p className="scene-meta" data-testid="timeline-cd-marker">
+                  {latestPacket.creatorMarker}
+                </p>
+              ) : null}
+              {latestPacket && latestPacket.availability !== "unavailable" ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid="timeline-cd-reject"
+                  onClick={() => {
+                    void api
+                      .directorTimelineRejectTemporalContinuation(project.id, scene.id, {
+                        packetId: latestPacket.packetId,
+                        manualNote: cdPolicy?.creatorNextBatchNote || undefined,
+                      })
+                      .then(onRefresh);
+                  }}
+                >
+                  Don’t use this continuation
+                </button>
+              ) : null}
+              <label className="field">
+                <span>
+                  Note for the next shot
+                  <HelpTip text="Optional. Tell Adept what the next generation should finish or avoid." />
+                </span>
+                <textarea
+                  data-testid="timeline-cd-next-note"
+                  rows={2}
+                  defaultValue={cdPolicy?.creatorNextBatchNote || ""}
+                  onBlur={(e) => {
+                    const value = e.target.value;
+                    if (value === (cdPolicy?.creatorNextBatchNote || "")) return;
+                    void api
+                      .directorTimelineSetCoDirectorContinuityPolicy(project.id, scene.id, {
+                        creatorNextBatchNote: value,
+                      })
+                      .then(onRefresh);
+                  }}
+                />
+              </label>
+              {cdPolicy?.showDebugState && latestPacket ? (
+                <p className="scene-meta" data-testid="timeline-cd-debug">
+                  Review {latestPacket.availability}
+                  {latestPacket.reason ? ` · ${latestPacket.reason}` : ""}
+                </p>
+              ) : null}
+            </div>
             <p className="scene-meta">
-              Later shots can start from the last moments of the previous shot so the scene feels continuous.
-              This is not a separate track.
+              Shot matching uses the last moments of the previous shot so the next generation can start from the same picture.
             </p>
             {isApiContinuity ? (
               <label className="field">
@@ -920,6 +1124,31 @@ export function TimelineInspector({
             <span>Weight</span>
             <input type="number" value={selectedPrompt.weight ?? 1} step={0.1} min={0.1} max={2} onChange={(e) => void updatePrompt(selectedPrompt, { weight: Number(e.target.value) || 1 })} />
           </label>
+          {movementChoices.length ? (
+            <label className="field">
+              <span>Movement</span>
+              <select
+                data-testid="timeline-prompt-movement"
+                value={selectedPrompt.movement_segment_ref?.id || ""}
+                onChange={(e) => {
+                  const chosen = movementChoices.find((row) => row.id === e.target.value);
+                  void updatePrompt(selectedPrompt, {
+                    movement_segment_ref: chosen
+                      ? { id: chosen.id, segmentNumber: chosen.segmentNumber, alias: `M${chosen.segmentNumber}` }
+                      : null,
+                    movement_segment_revision: chosen ? 1 : null,
+                  });
+                }}
+              >
+                <option value="">None</option>
+                {movementChoices.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field">
             <span>Instruction</span>
             <PromptReferenceField
@@ -1147,6 +1376,7 @@ export function TimelineInspector({
             <span>Planned Duration</span>
             <input
               type="number"
+              data-testid="timeline-batch-duration"
               value={Number(selectedBatch.duration.plannedDuration.toFixed(2))}
               step={0.1}
               onChange={(e) =>
@@ -1274,7 +1504,11 @@ export function TimelineInspector({
                   .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, {
                     draftMode: draftAvailable ? draftMode : false,
                   })
-                  .then(onRefresh)
+                  .then((result) => {
+                    const err = timelineActionError(result);
+                    if (err) onActionError?.(err);
+                    void onRefresh();
+                  })
               }
             >
               {draftAvailable ? "Generate Draft" : "Generate Final"}
@@ -1286,7 +1520,11 @@ export function TimelineInspector({
                 onClick={() =>
                   void api
                     .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
-                    .then(onRefresh)
+                    .then((result) => {
+                      const err = timelineActionError(result);
+                      if (err) onActionError?.(err);
+                      void onRefresh();
+                    })
                 }
               >
                 Generate Final
@@ -1331,7 +1569,11 @@ export function TimelineInspector({
                       onClick={() =>
                         void api
                           .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
-                          .then(onRefresh)
+                          .then((result) => {
+                            const err = timelineActionError(result);
+                            if (err) onActionError?.(err);
+                            void onRefresh();
+                          })
                       }
                     >
                       Promote to Final

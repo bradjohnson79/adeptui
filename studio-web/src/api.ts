@@ -374,6 +374,9 @@ function presentCoDirectorError(err: ApiError): string {
   if (code === "TOOL_EXECUTION_FAILED") {
     return "That change was not saved. You can retry the same action.";
   }
+  if (code === "VISION_UNAVAILABLE") {
+    return err.message || "Vision input failed: Co-Director could not use the picture.";
+  }
   return err.message || "The Co-Director backend returned an unexpected error.";
 }
 
@@ -573,6 +576,18 @@ export interface CoDirectorBible {
 export type CoDirectorStreamEvent =
   | { type: "request_started"; requestId: string }
   | { type: "provider_connected"; requestId: string; providerId: string }
+  | {
+      type: "vision_trace";
+      requestId: string;
+      assetIds?: string[];
+      sources?: string[];
+      mimeType?: string;
+      imageCount?: number;
+      dimensions?: Array<{ width?: number; height?: number }>;
+      firstImageLength?: number;
+      modelId?: string;
+      hasImages?: boolean;
+    }
   | { type: "token"; requestId: string; content: string; replace?: boolean }
   | {
       type: "inference_trace";
@@ -643,6 +658,36 @@ export type CoDirectorStreamEvent =
       verification?: Record<string, unknown>;
       prematureClaim?: boolean;
       message?: string | null;
+    }
+  | { type: "speech_act"; requestId: string; speech_act?: string }
+  | {
+      type: "runtime_capabilities";
+      requestId: string;
+      vision_active?: boolean;
+      vision_supported?: boolean;
+      vision_state?: string;
+      provider?: string;
+      model?: string;
+      degraded?: boolean;
+      degraded_reason?: string;
+    }
+  | {
+      type: "context_sufficient";
+      requestId: string;
+      context_sufficient?: boolean;
+      clarification_required?: boolean;
+      missing_required_fields?: string[];
+      resolved_action?: string;
+      speech_act?: string;
+    }
+  | { type: "vision_active"; requestId: string; vision_active?: boolean; vision_state?: string }
+  | {
+      type: "action_state";
+      requestId: string;
+      action_state?: string;
+      current_goal?: string;
+      evidence_tags?: string[];
+      production_state?: string;
     }
   | {
       type: "next_step_options";
@@ -2075,12 +2120,15 @@ export const api = {
       honesty?: string | null;
       ok: boolean;
     }>(`/api/codirector/providers/${encodeURIComponent(providerId)}/health`),
-  codirectorSessionContext: (opts?: { projectId?: string; sceneId?: string; workspace?: string; contentTab?: string }) => {
+  codirectorSessionContext: (opts?: { projectId?: string; sceneId?: string; workspace?: string; contentTab?: string; characterId?: string; characterName?: string; characterTab?: string }) => {
     const params = new URLSearchParams();
     if (opts?.projectId) params.set("project_id", opts.projectId);
     if (opts?.sceneId) params.set("scene_id", opts.sceneId);
     if (opts?.workspace) params.set("workspace", opts.workspace);
     if (opts?.contentTab) params.set("content_tab", opts.contentTab);
+    if (opts?.characterId) params.set("character_id", opts.characterId);
+    if (opts?.characterName) params.set("character_name", opts.characterName);
+    if (opts?.characterTab) params.set("character_tab", opts.characterTab);
     const q = params.toString();
     return req<{
       projectId?: string | null;
@@ -2089,6 +2137,9 @@ export const api = {
       activeSceneId?: string | null;
       activeWorkspace?: string | null;
       activeContentTab?: string | null;
+      characterId?: string | null;
+      characterName?: string | null;
+      characterTab?: string | null;
       selectedAssets: string[];
       provider?: string | null;
       model?: string | null;
@@ -2175,6 +2226,10 @@ export const api = {
       conversationLocale?: string;
       attachment_ids?: string[];
       active_content_tab?: string;
+      workspace_tab?: string;
+      workspaceTab?: string;
+      character_id?: string;
+      characterId?: string;
     },
     opts?: { signal?: AbortSignal },
   ) =>
@@ -2205,6 +2260,10 @@ export const api = {
       origin_session_id?: string;
       attachment_ids?: string[];
       active_content_tab?: string;
+      workspace_tab?: string;
+      workspaceTab?: string;
+      character_id?: string;
+      characterId?: string;
     },
     opts: { signal?: AbortSignal; onEvent: (event: CoDirectorStreamEvent) => void },
   ): Promise<void> => {
@@ -3751,6 +3810,26 @@ export const api = {
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/continuity-policy`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
     ),
+  directorTimelineSetCoDirectorContinuityPolicy: (
+    projectId: string,
+    sceneId: string,
+    body: Record<string, unknown>,
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/codirector-continuity-policy`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  directorTimelineRejectTemporalContinuation: (
+    projectId: string,
+    sceneId: string,
+    body: { packetId: string; manualNote?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/temporal-continuity/reject`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  setupVideoIntelligenceProfile: () =>
+    req<Record<string, unknown>>("/api/setup/lifecycle/video-intelligence"),
   directorTimelineRetakeBatch: (
     projectId: string,
     sceneId: string,
@@ -5798,6 +5877,33 @@ export const api = {
         `/api/spatial-map/projects/${projectId}/maps/${documentId}/camera-references/${cameraId}`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
       ),
+    createMovement: (projectId: string, documentId: string, body: Record<string, unknown> | undefined) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/movements`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+      ),
+    updateMovement: (projectId: string, documentId: string, segmentId: string, body: Record<string, unknown>) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/movements/${segmentId}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      ),
+    activateMovement: (projectId: string, documentId: string, segmentId: string) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/movements/${segmentId}/activate`,
+        { method: "POST" },
+      ),
+    removeMovement: (projectId: string, documentId: string, segmentId: string) =>
+      req<SpatialMapDocumentResponse>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/movements/${segmentId}`,
+        { method: "DELETE" },
+      ),
+    movementArrows: (projectId: string, documentId: string, characterId?: string) => {
+      const query = new URLSearchParams();
+      if (characterId) query.set("characterId", characterId);
+      return req<{ arrows: Record<string, unknown>[] }>(
+        `/api/spatial-map/projects/${projectId}/maps/${documentId}/movement-arrows?${query.toString()}`,
+      );
+    },
   },
   getSceneSpatial: (projectId: string, sceneId: string) =>
     req<{ id: string; project_id: string; scene_id: string; guidance: string; doc: any }>(

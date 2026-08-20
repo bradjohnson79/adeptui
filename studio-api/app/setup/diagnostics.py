@@ -662,6 +662,53 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    if component.verifier == "video_understanding_files":
+        from ..codirector.video_intelligence.paths import (
+            INTERNVIDEO3_MARKERS,
+            VIDEOCHAT3_MARKERS,
+            internvideo3_dir,
+            model_present,
+            videochat3_dir,
+        )
+
+        dest = videochat3_dir() if component_id == "videochat3_4b" else internvideo3_dir()
+        configured = _configured_location(component_id, state)
+        if configured:
+            dest = Path(configured)
+        markers = VIDEOCHAT3_MARKERS if component_id == "videochat3_4b" else INTERNVIDEO3_MARKERS
+        if model_present(dest, markers):
+            from ..codirector.video_intelligence.health import probe_component
+
+            health = probe_component(component_id)
+            if not health.get("ok"):
+                return Verification(
+                    False,
+                    False,
+                    health.get("reason") or "worker_unhealthy",
+                    f"{component.name} files are present but the worker is not ready.",
+                    str(dest),
+                    details=("local video understanding", f"health={health.get('reason')}"),
+                    recommendation="repair",
+                    requires_user_interaction=True,
+                )
+            return Verification(
+                True,
+                False,
+                None,
+                f"{component.name} weights are installed.",
+                str(dest),
+                details=("local video understanding", "config verified"),
+            )
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            f"{component.name} is not installed.",
+            str(dest),
+            recommendation="install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "avatar_runtime":
         runtime = verify_avatar_runtime(component_id)
         inspection = runtime.get("inspection") or {}

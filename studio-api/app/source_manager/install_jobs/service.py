@@ -540,6 +540,36 @@ def _enqueue_qwen(component_id: str) -> dict[str, Any]:
     return get_queue_manager().enqueue(plan, priority=50)
 
 
+def _enqueue_video_understanding(component_id: str) -> dict[str, Any]:
+    from ...codirector.video_intelligence.paths import (
+        INTERNVIDEO3_HF_ID,
+        VIDEOCHAT3_HF_ID,
+        internvideo3_dir,
+        videochat3_dir,
+    )
+
+    component = get_component(component_id)
+    repo = VIDEOCHAT3_HF_ID if component_id == "videochat3_4b" else INTERNVIDEO3_HF_ID
+    dest = videochat3_dir() if component_id == "videochat3_4b" else internvideo3_dir()
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=repo,
+        provider_id="huggingface_snapshot",
+        artifacts=[
+            {
+                "remotePath": repo,
+                "destinationRelativePath": ".",
+                "downloadUrl": f"https://huggingface.co/{repo}",
+            }
+        ],
+        destination_root=str(dest),
+        estimated_download_bytes=component.download_bytes,
+        estimated_extracted_bytes=component.installed_bytes,
+        metadata={"componentId": component_id, "officialOnly": True, "videoUnderstanding": True},
+    )
+    return get_queue_manager().enqueue(plan, priority=45)
+
+
 def _enqueue_hunyuan(component_id: str) -> dict[str, Any]:
     provider_id = PROVIDER_BY_COMPONENT[component_id]
     meta = OFFICIAL_SOURCES[provider_id]
@@ -1029,6 +1059,8 @@ def create_or_resume_install(
     if component.installer == "m210b_qwen_voice":
         return _serialize(download_operation_to_install_job(_enqueue_qwen(component_id)))
     if component.installer == "huggingface_snapshot":
+        if component_id in ("videochat3_4b", "internvideo3_8b"):
+            return _serialize(download_operation_to_install_job(_enqueue_video_understanding(component_id)))
         return _serialize(download_operation_to_install_job(_enqueue_hunyuan(component_id)))
     if component.installer == "asset_pack":
         try:

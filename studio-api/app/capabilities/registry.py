@@ -674,6 +674,15 @@ CAPABILITIES: tuple[CapabilityDefinition, ...] = (
         ),
     ),
     _d(
+        id="codirector.video_intelligence.ready",
+        display_name="Co-Director Temporal Continuity",
+        subsystem="codirector",
+        baseline_status=S.PARTIALLY_WIRED,
+        summary="VideoChat3 is installed so Co-Director can review generated Timeline batches.",
+        component_ids=("videochat3_4b",),
+        baseline_reason="Required Setup essential for Co-Director Continuity; independent of models.video.ready.",
+    ),
+    _d(
         id="models.video.ready",
         display_name="Video model installed",
         subsystem="models",

@@ -3,6 +3,7 @@ import { api } from "../../api";
 import { formatDurationSeconds } from "../../lib/formatDuration";
 import type { BatchBlock, BatchStatus, ModalityMode, SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { formatBatchStatus } from "../../timelineMaster/contracts";
+import { timelineActionError } from "../../timelineMaster/timelineErrors";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
 import { HelpTip } from "../HelpTip";
 import { MiniMaxH3PlanPanel } from "../minimax-h3/MiniMaxH3PlanPanel";
@@ -151,6 +152,11 @@ export function TimelineMasterPanel({
                 selection?.kind === "batch" && selection.id ? selection.id : null;
               if (!selectedBatchId) return;
               const result = await api.directorTimelineGenerateBatch(projectId, sceneId, selectedBatchId);
+              const err = timelineActionError(result);
+              if (err) {
+                setMessage(err);
+                return;
+              }
               setMessage(`Generate Current → snapshot ${String(result.executionSnapshotId || "")}`);
             })
           }
@@ -178,6 +184,11 @@ export function TimelineMasterPanel({
                 scope: "selected",
                 batchBlockIds: [selectedBatchId],
               });
+              const err = timelineActionError(result);
+              if (err) {
+                setMessage(err);
+                return;
+              }
               setMessage(String(result.message || "Generate Selected submitted."));
             })
           }
@@ -193,6 +204,11 @@ export function TimelineMasterPanel({
           onClick={() =>
             void run(async () => {
               const result = await api.directorTimelineGenerateScene(projectId, sceneId, { scope: "full" });
+              const err = timelineActionError(result);
+              if (err) {
+                setMessage(err);
+                return;
+              }
               setMessage(String(result.message || "Generate submitted."));
               setFindings((result.findings as Array<{ severity: string; message: string }>) || []);
             })
@@ -260,6 +276,9 @@ export function TimelineMasterPanel({
         {batches.map((batch: BatchBlock) => {
           const open = expanded[batch.id] ?? false;
           const promptMissing = !batch.promptSegments.some((p) => p.text.trim());
+          const marker = [...(master?.temporalPackets || [])]
+            .reverse()
+            .find((packet) => packet.source?.batchId === batch.id)?.creatorMarker;
           return (
             <li key={batch.id} className="timeline-master-batch" data-testid={`timeline-master-batch-${batch.id}`}>
               <button
@@ -275,6 +294,9 @@ export function TimelineMasterPanel({
                   {formatDurationSeconds(batch.duration.plannedDuration)} · {batch.generatorId || "No generator"} ·{" "}
                   {batch.references?.length || 0} refs
                   {promptMissing ? " · Prompt missing ⚠" : ""}
+                  {marker ? (
+                    <span data-testid={`timeline-cd-batch-marker-${batch.id}`}> · {marker}</span>
+                  ) : null}
                 </div>
               </button>
               {open ? (
@@ -302,6 +324,11 @@ export function TimelineMasterPanel({
                       onClick={() =>
                         void run(async () => {
                           const result = await api.directorTimelineGenerateBatch(projectId, sceneId, batch.id);
+                          const err = timelineActionError(result);
+                          if (err) {
+                            setMessage(err);
+                            return;
+                          }
                           setMessage(
                             `Submitted ${batch.label} → snapshot ${String(result.executionSnapshotId || "")}`,
                           );

@@ -78,6 +78,11 @@ export interface TimelinePromptSegment {
   versionId: string;
   legacyPromptSegmentId?: string | null;
   referenceBindingIds?: string[];
+  userDirection?: string | null;
+  productionPrompt?: string | null;
+  dialogue?: string | null;
+  movementSegmentRef?: { id: string; segmentNumber: number; alias: string } | null;
+  movementSegmentRevision?: number | null;
 }
 
 export interface ExecutionSnapshot {
@@ -219,6 +224,43 @@ export interface ContinuityPolicy {
   continuityAwareRetake: boolean;
 }
 
+export type ReviewCadence = "automatic" | "interval_3" | "interval_5" | "every_batch";
+export type ProtectionLevel = "standard" | "strong";
+export type PacketAvailability = "ready" | "unavailable" | "low_confidence";
+
+export interface CoDirectorContinuityPolicy {
+  enabled: boolean;
+  reviewCadence: ReviewCadence;
+  protection: ProtectionLevel;
+  fastVisionModel?: string;
+  deepReview?: "auto" | "off" | "on";
+  showDebugState?: boolean;
+  rejectedPacketIds?: string[];
+  creatorNextBatchNote?: string;
+}
+
+export interface TemporalContinuityPacket {
+  schemaVersion?: string;
+  packetId: string;
+  availability: PacketAvailability;
+  reason?: string | null;
+  source?: {
+    batchId?: string;
+    targetBatchId?: string | null;
+    reviewCadence?: ReviewCadence;
+    perceptionModelId?: string | null;
+  };
+  creatorMarker?: string | null;
+  decision?: string;
+  continuation?: {
+    preserve?: string[];
+    continue?: string[];
+    avoid?: string[];
+    nextBatchDirectives?: string[];
+    creatorRejected?: boolean;
+  };
+}
+
 export interface ContinuityBridge {
   bridgeId: string;
   sceneId: string;
@@ -251,6 +293,8 @@ export interface SceneTimelineMaster {
   dismissedFailureJobIds?: string[];
   continuityPolicy?: ContinuityPolicy;
   continuityBridges?: ContinuityBridge[];
+  coDirectorContinuityPolicy?: CoDirectorContinuityPolicy;
+  temporalPackets?: TemporalContinuityPacket[];
   migratedFromDirectorJson: boolean;
   migrationNote?: string | null;
 }

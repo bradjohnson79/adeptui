@@ -103,6 +103,7 @@ the Playwright fixture HTTP provider, and no test performs a real multi-GB downl
 | `codirector.bible.approve` | codirector | `locally_verified` | write | yes | - | `POST /api/codirector/proposals/{proposalId}/approval` |
 | `codirector.vision.validate` | codirector | `locally_verified` | write | no | - | `POST /api/codirector/vision/validate` |
 | `codirector.vision.review` | codirector | `locally_verified` | write | yes | `codirector.vision.validate` | `POST /api/codirector/vision/approve` |
+| `codirector.video_intelligence.ready` | codirector | `partially_wired` | read | no | - | `GET /api/setup/lifecycle/video-intelligence` |
 | `codirector.tools` | codirector | `not_implemented` | write | no | - | `-` |
 | `comfyui.health` | comfyui | `backend_only` | read | no | - | `GET /api/comfy/health` |
 | `comfyui.queue` | comfyui | `backend_only` | write | yes | `comfyui.health`, `workflows.validate` | `-` |

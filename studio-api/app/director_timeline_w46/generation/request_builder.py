@@ -57,6 +57,7 @@ def build_timeline_generation_request(
     incoming_bridge: object | None = None,
     aspect_ratio: str | None = None,
     draft_mode: bool | None = None,
+    temporal_packet: object | None = None,
 ) -> TimelineGenerationRequest:
     registry = get_registry()
     generator_id = batch.generatorId
@@ -66,9 +67,38 @@ def build_timeline_generation_request(
     canonical = registry.resolve_id(generator_id)
     caps = registry.capabilities(canonical)
 
-    prompt_parts = [p.text.strip() for p in (batch.promptSegments or []) if (p.text or "").strip()]
+    # PRODUCTION_PROMPT_PREFERENCE (mission Part 6): Co-Director refinement may
+    # compile a more detailed production prompt; it is preferred for the
+    # request while the authored text stays preserved as userDirection/text.
+    # Dialogue is NOT injected here — speech compilation handles it verbatim.
+    prompt_parts = [
+        (str(p.productionPrompt or "").strip() or (p.text or "").strip())
+        for p in (batch.promptSegments or [])
+        if (str(p.productionPrompt or "").strip() or (p.text or "").strip())
+    ]
     prompt = "\n".join(prompt_parts)
     negative = next((p.negativePrompt for p in batch.promptSegments if p.negativePrompt), None)
+    temporal_compile: dict[str, Any] = {}
+    temporal_packet_id = None
+    if temporal_packet is not None:
+        from ...codirector.video_intelligence.compile import compile_temporal_continuation
+
+        rejected = bool(getattr(getattr(temporal_packet, "continuation", None), "creatorRejected", False))
+        temporal_compile = compile_temporal_continuation(
+            temporal_packet,
+            supports_prompt_continuation=bool(getattr(caps, "supportsPromptContinuation", True)),
+            creator_rejected=rejected,
+        )
+        temporal_packet_id = getattr(temporal_packet, "packetId", None)
+        prefix = str(temporal_compile.get("promptPrefix") or "").strip()
+        if temporal_compile.get("applied") and prefix:
+            prompt = "\n".join(part for part in (prefix, prompt) if part)
+    movement_layers = _compile_movement_layers(project_id, batch)
+    if movement_layers.get("providerText"):
+        # Keep structured layers distinct from free-text Timed Prompt.
+        prompt = "\n".join(
+            part for part in (movement_layers["providerText"], prompt) if part and not _is_alias_only(part)
+        )
 
     start_image = None
     end_image = None
@@ -229,6 +259,9 @@ def build_timeline_generation_request(
                 ),
                 None,
             ),
+            "movementLayers": movement_layers.get("layers"),
+            "temporalContinuation": temporal_compile,
+            "temporalContinuityPacketId": temporal_packet_id,
             "motionReferenceBindingId": next(
                 (
                     str(ref.get("bindingId"))
@@ -246,4 +279,39 @@ def build_timeline_generation_request(
         lastFrameAssetId=last_frame,
         tailAssetId=tail_asset,
         continuityStrategy=strategy,
+        temporalContinuityPacketId=temporal_packet_id,
     )
+
+
+def _is_alias_only(text: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"\s*~?M\s*[1-5]\s*", text or "", re.I))
+
+
+def _compile_movement_layers(project_id: str, batch: BatchBlock) -> dict[str, Any]:
+    try:
+        from ...spatial_map.movement_compile import (
+            compile_generation_layers,
+            layers_as_provider_text,
+            resolve_segment_for_ref,
+        )
+        from ...spatial_map.service import list_documents
+        from ...db import SessionLocal
+
+        db = SessionLocal()
+        try:
+            docs = list_documents(db, project_id) or []
+            if not docs:
+                return {}
+            document = docs[0]
+            first = (batch.promptSegments or [None])[0]
+            ref = getattr(first, "movementSegmentRef", None) if first is not None else None
+            text = getattr(first, "text", "") if first is not None else ""
+            segment = resolve_segment_for_ref(document, ref, text)
+            layers = compile_generation_layers(document, segment, timed_prompt=str(text or ""))
+            return {"layers": layers, "providerText": layers_as_provider_text(layers)}
+        finally:
+            db.close()
+    except Exception:
+        return {}

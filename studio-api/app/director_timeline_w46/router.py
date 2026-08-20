@@ -397,6 +397,21 @@ class ContinuityPolicyBody(BaseModel):
     configuredTailDuration: float = 0.0
 
 
+class CoDirectorContinuityPolicyBody(BaseModel):
+    enabled: bool | None = None
+    reviewCadence: str | None = None
+    protection: str | None = None
+    fastVisionModel: str | None = None
+    deepReview: str | None = None
+    showDebugState: bool | None = None
+    creatorNextBatchNote: str | None = None
+
+
+class RejectTemporalBody(BaseModel):
+    packetId: str
+    manualNote: str | None = None
+
+
 @router.post("/projects/{project_id}/scenes/{scene_id}/continuity-policy")
 def set_continuity_policy(
     project_id: str,
@@ -410,6 +425,51 @@ def set_continuity_policy(
     if not result.get("ok"):
         raise HTTPException(400, result.get("message") or result.get("error") or "Policy update failed")
     return result
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/codirector-continuity-policy")
+def set_codirector_continuity_policy(
+    project_id: str,
+    scene_id: str,
+    body: CoDirectorContinuityPolicyBody,
+    db: Session = Depends(get_db),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = orchestrator.set_scene_codirector_continuity_policy(db, project_id, scene_id, updates)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("message") or result.get("error") or "Policy update failed")
+    return result
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/temporal-continuity/reject")
+def reject_temporal_continuation(
+    project_id: str,
+    scene_id: str,
+    body: RejectTemporalBody,
+    db: Session = Depends(get_db),
+):
+    result = orchestrator.reject_temporal_continuation(
+        db, project_id, scene_id, body.packetId, manual_note=body.manualNote
+    )
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Reject failed")
+    return result
+
+
+@router.get("/projects/{project_id}/scenes/{scene_id}/temporal-continuity")
+def get_temporal_continuity(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    from .store import load_master
+
+    result = load_master(db, project_id, scene_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "Scene not found")
+    master = result.get("master") or {}
+    return {
+        "ok": True,
+        "coDirectorContinuityPolicy": master.get("coDirectorContinuityPolicy"),
+        "temporalPackets": master.get("temporalPackets") or [],
+        "mock": False,
+    }
 
 
 class ActivateTakeBody(BaseModel):

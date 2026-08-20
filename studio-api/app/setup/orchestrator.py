@@ -204,12 +204,20 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
             "pinned_revision": "13495845e3028f0bb6ca1462ad22aa0e76349e40",
         }
     elif component.installer == "huggingface_snapshot":
-        kind = "hunyuan_hf_install"
-        summary = (
-            f"Install {component.name} from the official Tencent Hugging Face repository "
-            "(isolated model directory, resume-safe). Each Hunyuan model installs independently — "
-            "this never overwrites the other. Progress appears in Source Manager Active Downloads."
-        )
+        if component.id in ("videochat3_4b", "internvideo3_8b"):
+            kind = "video_understanding_hf_install"
+            summary = (
+                f"Install {component.name} from the pinned Hugging Face snapshot "
+                "(isolated video-understanding directory, reused if already present). "
+                "Progress appears in Source Manager Active Downloads."
+            )
+        else:
+            kind = "hunyuan_hf_install"
+            summary = (
+                f"Install {component.name} from the official Tencent Hugging Face repository "
+                "(isolated model directory, resume-safe). Each Hunyuan model installs independently — "
+                "this never overwrites the other. Progress appears in Source Manager Active Downloads."
+            )
         fields = []
         extra = {
             "estimated_download_bytes": component.download_bytes,
@@ -951,6 +959,68 @@ def _enqueue_qwen_voice_install(component_id: str) -> dict[str, Any]:
     )
 
 
+def _enqueue_video_understanding_install(component_id: str) -> dict[str, Any]:
+    from ..codirector.video_intelligence.paths import (
+        INTERNVIDEO3_HF_ID,
+        INTERNVIDEO3_MARKERS,
+        VIDEOCHAT3_HF_ID,
+        VIDEOCHAT3_MARKERS,
+        internvideo3_dir,
+        model_present,
+        videochat3_dir,
+    )
+    from ..source_manager.downloads.models import create_install_plan
+    from ..source_manager.downloads.queue import get_queue_manager
+
+    dest = videochat3_dir() if component_id == "videochat3_4b" else internvideo3_dir()
+    markers = VIDEOCHAT3_MARKERS if component_id == "videochat3_4b" else INTERNVIDEO3_MARKERS
+    if model_present(dest, markers):
+        operation = registry.create("component_action", [component_id])
+        return registry.finish(
+            operation["operation_id"],
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "reused": True,
+                "message": "Existing video-understanding weights reused.",
+                "localDir": str(dest),
+            },
+        )
+
+    repo = VIDEOCHAT3_HF_ID if component_id == "videochat3_4b" else INTERNVIDEO3_HF_ID
+    plan = create_install_plan(
+        component_id=component_id,
+        source_id=repo,
+        provider_id="huggingface_snapshot",
+        artifacts=[
+            {
+                "remotePath": repo,
+                "destinationRelativePath": ".",
+                "downloadUrl": f"https://huggingface.co/{repo}",
+            }
+        ],
+        destination_root=str(dest),
+        estimated_download_bytes=get_component(component_id).download_bytes,
+        estimated_extracted_bytes=get_component(component_id).installed_bytes,
+        metadata={"componentId": component_id, "officialOnly": True, "videoUnderstanding": True},
+    )
+    op = get_queue_manager().enqueue(plan, priority=45)
+    operation = registry.create("component_action", [component_id])
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": True,
+            "downloadOperationId": op.get("id"),
+            "message": (
+                f"{component_id} install queued from the pinned Hugging Face snapshot. "
+                "Track progress in Source Manager Active Downloads."
+            ),
+            "operation": op,
+        },
+    )
+
+
 def _enqueue_hunyuan_install(component_id: str) -> dict[str, Any]:
     from ..video_runtime.hunyuan_install import enqueue_install
 
@@ -1021,6 +1091,8 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
         "reinstall",
         "update",
     ):
+        if component_id in ("videochat3_4b", "internvideo3_8b"):
+            return _enqueue_video_understanding_install(component_id)
         return _enqueue_hunyuan_install(component_id)
 
     if component.installer == "index_tts2" and action in (

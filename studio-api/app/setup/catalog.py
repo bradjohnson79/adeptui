@@ -57,6 +57,7 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "fal_key": DEPENDENCY_TYPE_CREDENTIAL,
     "kie_key": DEPENDENCY_TYPE_CREDENTIAL,
     "wavespeed_key": DEPENDENCY_TYPE_CREDENTIAL,
+    "video_understanding_files": DEPENDENCY_TYPE_MODEL,
 }
 
 
@@ -513,6 +514,30 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "avatar_runtime",
         "avatar_runtime",
         category="Avatar Runtimes",
+    ),
+    ComponentDefinition(
+        "videochat3_4b",
+        "VideoChat3 4B",
+        "Co-Director Timeline visual review. Required for temporal continuity.",
+        True,
+        8500 * MB,
+        9000 * MB,
+        ("python", "ffmpeg"),
+        "video_understanding_files",
+        "huggingface_snapshot",
+        category="Video Understanding",
+    ),
+    ComponentDefinition(
+        "internvideo3_8b",
+        "InternVideo3 8B",
+        "Optional deep sequence review for Co-Director. Hardware-gated.",
+        False,
+        17500 * MB,
+        19000 * MB,
+        ("python", "ffmpeg"),
+        "video_understanding_files",
+        "huggingface_snapshot",
+        category="Video Understanding",
     ),
 )
 

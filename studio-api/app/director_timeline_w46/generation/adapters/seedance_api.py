@@ -242,6 +242,10 @@ class SeedanceApiAdapter:
                 "aspectRatio": request.aspectRatio,
                 "resolution": request.resolution,
                 "videoReferenceAssetId": request.videoReferenceAssetId,
+                "temporalContinuityPacketId": request.temporalContinuityPacketId,
+                "temporalContinuationApplied": bool(
+                    (request.providerOptions or {}).get("temporalContinuation", {}).get("applied")
+                ),
             },
         )
 

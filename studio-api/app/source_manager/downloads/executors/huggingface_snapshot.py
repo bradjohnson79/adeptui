@@ -8,6 +8,7 @@ from .base import DownloadCapabilities, DownloadExecutionContext, DownloadExecut
 
 _HUNYUAN_COMPONENTS = frozenset({"hunyuan_video_15", "hunyuan_video_13b"})
 _VOICE_COMPONENTS = frozenset({"qwen_voice_design_17b", "qwen_voice_clone_17b"})
+_VIDEO_UNDERSTANDING_COMPONENTS = frozenset({"videochat3_4b", "internvideo3_8b"})
 
 
 class HuggingFaceSnapshotExecutor:
@@ -41,6 +42,8 @@ class HuggingFaceSnapshotExecutor:
             return self._execute_voice(component_id, plan, context)
         if component_id in _HUNYUAN_COMPONENTS:
             return self._execute_hunyuan(component_id, plan, context)
+        if component_id in _VIDEO_UNDERSTANDING_COMPONENTS:
+            return self._execute_video_understanding(component_id, plan, context)
         return DownloadExecutionResult(
             ok=False,
             phase="failed",
@@ -132,4 +135,42 @@ class HuggingFaceSnapshotExecutor:
             message=result.message,
             bytes_downloaded=bytes_dl,
             files=[{"path": (result.evidence.get("status") or {}).get("localDir"), "role": "weights"}],
+        )
+
+    def _execute_video_understanding(
+        self, component_id: str, plan: dict[str, Any], context: DownloadExecutionContext
+    ) -> DownloadExecutionResult:
+        from ....codirector.video_intelligence.install import install_component
+
+        def on_progress(phase: str, frac: float, message: str) -> None:
+            if context.on_progress:
+                total = int((plan.get("estimatedDownloadBytes") or 9_000_000_000))
+                downloaded = int(max(0.0, min(1.0, frac)) * total)
+                context.on_progress(downloaded, total)
+
+        result = install_component(
+            component_id,
+            on_progress=on_progress,
+            cancel_check=lambda: context.cancel_event.is_set(),
+        )
+        if context.cancel_event.is_set() and not result.ok:
+            return DownloadExecutionResult(
+                ok=False,
+                phase="cancelled",
+                message="Cancelled",
+                error_category="cancelled",
+            )
+        if not result.ok:
+            return DownloadExecutionResult(
+                ok=False,
+                phase="failed",
+                message=result.message[:800],
+                error_category="provider_error",
+                error={"evidence": result.evidence},
+            )
+        return DownloadExecutionResult(
+            ok=True,
+            phase="completed",
+            message=result.message,
+            files=[{"path": result.evidence.get("localDir"), "role": "weights"}],
         )

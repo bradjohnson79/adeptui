@@ -87,6 +87,13 @@ def lifecycle_hardware():
     return service.inspect_hardware()
 
 
+@router.get("/video-intelligence")
+def lifecycle_video_intelligence():
+    from ...codirector.video_intelligence.hardware_profile import hardware_profile
+
+    return hardware_profile()
+
+
 @router.get("/components/{component_id}/dependencies")
 def lifecycle_dependencies(component_id: str):
     try:

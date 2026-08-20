@@ -88,6 +88,10 @@ class KlingApiAdapter:
                 "executionSnapshotId": request.executionSnapshotId,
                 "batchBlockId": request.batchBlockId,
                 "hosted": True,
+                "temporalContinuityPacketId": request.temporalContinuityPacketId,
+                "temporalContinuationApplied": bool(
+                    (request.providerOptions or {}).get("temporalContinuation", {}).get("applied")
+                ),
             },
         )
 

@@ -412,6 +412,28 @@ function SetupComponentCard({
   );
 }
 
+function VideoIntelligenceStatus() {
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    void api.setupVideoIntelligenceProfile().then((row) => setProfile(row)).catch(() => setProfile(null));
+  }, []);
+  const caps = (profile?.capabilities || {}) as Record<string, boolean>;
+  const ready = Boolean(caps.timelineVisualReview);
+  return (
+    <div className="setup-capability-blockers" data-testid="setup-video-intelligence">
+      <p className="setup-issue">Co-Director Video Intelligence</p>
+      <ul>
+        <li data-testid="setup-vi-adept">{ready ? "✓ Ready" : "○ VideoChat3 required"} — Adept UI</li>
+        <li data-testid="setup-vi-continuity">{ready ? "✓" : "○"} Co-Director Temporal Continuity{ready ? " Ready" : " — VideoChat3 required"}</li>
+        <li>{ready ? "✓" : "○"} Automatic Review</li>
+        <li>{ready ? "✓" : "○"} 3-second Review</li>
+        <li>{ready ? "✓" : "○"} 5-second Review</li>
+        <li>{caps.deepSequenceReasoning ? "✓" : "○"} Deep sequence reasoning{caps.deepSequenceReasoning ? "" : " — Additional GPU memory recommended"}</li>
+      </ul>
+    </div>
+  );
+}
+
 function SetupSummary({
   status,
   preparing,
@@ -483,6 +505,7 @@ function SetupSummary({
           </Link>
         </div>
       )}
+      <VideoIntelligenceStatus />
       {needsPreparation && (
         <button type="button" className="primary setup-prepare-button" disabled={preparing} onClick={onPrepare}>
           {preparing ? "Preparing Studio…" : "Prepare My Studio"}

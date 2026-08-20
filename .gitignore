@@ -56,6 +56,9 @@ backup/
 # Agent temporary workspace (never commit)
 .adept-tmp/
 
+# License-audit scratch downloads (never commit)
+docs/models/_license_scratch/
+
 # Cloudflare Tunnel credentials (never commit)
 .cloudflared/
 *.cloudflared.json

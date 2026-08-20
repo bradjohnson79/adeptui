@@ -202,6 +202,10 @@ class StubCertAdapter:
                 "projectId": request.projectId,
                 "batchBlockId": request.batchBlockId,
                 "executionSnapshotId": request.executionSnapshotId,
+                "temporalContinuityPacketId": request.temporalContinuityPacketId,
+                "temporalContinuationApplied": bool(
+                    (request.providerOptions or {}).get("temporalContinuation", {}).get("applied")
+                ),
             },
         )
 

@@ -381,6 +381,10 @@ def _eval_models_image(definition: CapabilityDefinition, snapshot: ProbeSnapshot
     return _model_component_eval(definition, snapshot, required=("zimage_models",))
 
 
+def _eval_video_intelligence(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
+    return _model_component_eval(definition, snapshot, required=("videochat3_4b",), optional=("internvideo3_8b",))
+
+
 def _eval_models_image_krea2(definition: CapabilityDefinition, snapshot: ProbeSnapshot) -> CapabilityEvaluation:
     # Krea 2 readiness is its own component — never inferred from other still packs.
     return _model_component_eval(definition, snapshot, required=("krea2_models",))
@@ -812,6 +816,7 @@ EVALUATORS: dict[str, Evaluator] = {
     "models.image.ready": _eval_models_image,
     "models.image.krea2.ready": _eval_models_image_krea2,
     "models.video.ready": _eval_models_video,
+    "codirector.video_intelligence.ready": _eval_video_intelligence,
     "workflows.discover": _eval_workflow_discovery,
     "workflows.validate": _eval_workflow_discovery,
     "workflows.ready": _eval_workflows_ready,
