@@ -148,6 +148,7 @@ Order used: picture edit → overlay skip (honest, no black canvas) → color fr
 - ACE-Step music cold-start is minutes, not seconds.
 - Playwright E/F assert job enqueue, not full ACE-Step wait (live music/SFX certified via API + decode).
 - Hosted Vercel UI is only current after the MAGI commit is pushed and that SHA is deployed. Local certification used Vite 5173 + API 8758.
+- Push `ade5535` triggered preview `https://adeptui-ey1iuhyxm-anoint.vercel.app` which **Error**’d in ~50s with Builds `[0ms]` (same pattern as other recent branch previews). Production Ready remains older SHA `https://adeptui-c49vsaeu9-anoint.vercel.app`. Hosted Product SHA is **not** this MAGI commit. Local full-stack E2E is the certified path.
 
 ---
 
