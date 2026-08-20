@@ -134,6 +134,27 @@ MAGI_ERROR_TAXONOMY: dict[str, dict[str, Any]] = {
         "message": "This MAGI surface is not executable yet.",
         "recovery": "Use the certified image MAGI Actions path instead.",
     },
+    "ASSET_REQUIRED": {
+        "status_code": 400,
+        "kind": "validation",
+        "message": "An asset is required.",
+    },
+    "GPU_UPSCALE_UNAVAILABLE": {
+        "status_code": 409,
+        "kind": "runtime",
+        "message": "GPU Upscaling unavailable. FFmpeg upscale remains available.",
+        "recovery": "Install MAGI GPU Upscaling in Setup, or use FFmpeg upscale.",
+    },
+    "AUDIO_GENERATION_FAILED": {
+        "status_code": 400,
+        "kind": "runtime",
+        "message": "Audio generation failed.",
+    },
+    "JOB_NOT_FOUND": {
+        "status_code": 404,
+        "kind": "not_found",
+        "message": "MAGI job not found.",
+    },
 }
 
 MAGI_ERROR_LEGACY_ALIASES: dict[str, str] = {

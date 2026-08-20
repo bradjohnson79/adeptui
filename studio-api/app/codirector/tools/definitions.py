@@ -6518,6 +6518,62 @@ READ_TOOLS = READ_TOOLS + (
     ),
 )
 
+MUTATING_TOOLS = MUTATING_TOOLS + (
+    ToolDefinition(
+        tool_id="magi.color.apply",
+        kind="mutating",
+        title="MAGI: apply color look",
+        description="Save a MAGI color look onto finishing state and optionally preview a derived grade. Source media is preserved.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("assetId", "string", required=True, max_length=64),
+            ToolParameter("clipId", "string", required=False, max_length=64),
+            ToolParameter("presetId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.upscale",
+        kind="mutating",
+        title="MAGI: upscale",
+        description="Queue MAGI upscale. GPU uses Real-ESRGAN when Ready; otherwise the request fails honestly.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("assetId", "string", required=True, max_length=64),
+            ToolParameter("engine", "string", required=False, max_length=64),
+            ToolParameter("model", "string", required=False, max_length=64),
+            ToolParameter("target", "string", required=False, max_length=32),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.audio.generate",
+        kind="mutating",
+        title="MAGI: generate music or SFX",
+        description="Queue Audio Studio music or SFX for the MAGI sequence. The creator prompt is preserved.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("kind", "string", required=True, max_length=16, choices=("music", "sfx", "all")),
+            ToolParameter("prompt", "string", required=True, max_length=2000),
+            ToolParameter("range", "string", required=False, max_length=16, choices=("entire", "clip")),
+            ToolParameter("clipId", "string", required=False, max_length=64),
+        ),
+    ),
+    ToolDefinition(
+        tool_id="magi.render",
+        kind="mutating",
+        title="MAGI: final render",
+        description="Queue the MAGI finishing render (color, audio, late upscale, encode). Non-destructive.",
+        capability="project",
+        pinned_resources=("project",),
+        parameters=(
+            ToolParameter("profile", "string", required=False, max_length=16, choices=("preview", "final")),
+            ToolParameter("range", "string", required=False, max_length=16),
+        ),
+    ),
+)
+
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = READ_TOOLS + MUTATING_TOOLS
 
 TOOL_IDS: tuple[str, ...] = tuple(t.tool_id for t in TOOL_DEFINITIONS)

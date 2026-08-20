@@ -512,6 +512,16 @@ _COMPONENT_METADATA_OVERRIDES: dict[str, dict[str, Any]] = {
         "badges": ["Avatar"],
         "bestFor": ["talking presenter", "talking avatars", "create a talking presenter"],
     },
+    "magi_gpu_upscale": {
+        "group": "MAGI",
+        "subgroup": "Finishing",
+        "surfaceGroups": ["MAGI", "Finishing"],
+        "capabilityTags": ["upscale", "finishing", "delivery"],
+        "badges": ["MAGI", "GPU"],
+        "bestFor": ["final delivery", "mastering", "upscale"],
+        "lifecycleActions": {"install": True, "repair": True, "calibrate": False, "certify": False},
+        "surfaceEntryPoints": {"dock": True, "coDirector": False},
+    },
     "index_tts2": {
         "group": "Voice",
         "subgroup": "Local Models",

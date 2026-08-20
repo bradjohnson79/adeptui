@@ -355,36 +355,27 @@ def apply_color_grade(
             "Color grade apply requires an asset_id.",
             fields={"body": body},
         )
-    return apply_color_grade_to_asset(db, project_id, asset_id, preset_id, params)
+    result = apply_color_grade_to_asset(db, project_id, asset_id, preset_id, params)
+    clip_id = body.get("clipId") or body.get("clip_id")
+    if not clip_id:
+        from .sequence.store import get_sequence
+
+        seq = get_sequence(project_id)
+        match = next((c for c in (seq.get("clips") or []) if c.get("assetId") == asset_id), None)
+        clip_id = (match or {}).get("id")
+    if clip_id:
+        from .finishing import set_clip_grade
+
+        set_clip_grade(project_id, str(clip_id), preset_id, params)
+    return result
 
 
 @router.get("/upscale/capabilities")
 def upscale_capabilities() -> dict[str, Any]:
-    """List available upscaling engines and models."""
-    return {
-        "engines": [
-            {
-                "id": "realesrgan-ncnn-vulkan",
-                "label": "Real-ESRGAN (ncnn Vulkan)",
-                "available": True,
-                "models": [
-                    {"id": "realesrgan-x4plus", "label": "Real-ESRGAN 4x+", "scale": 4},
-                    {"id": "realesrgan-x2plus", "label": "Real-ESRGAN 2x+", "scale": 2},
-                    {"id": "realesr-animevideov3", "label": "Anime Video 4x", "scale": 4},
-                    {"id": "realesrgan-x4plus-anime", "label": "Anime 4x", "scale": 4},
-                ],
-            },
-            {
-                "id": "ffmpeg-scale",
-                "label": "FFmpeg (fast software scale)",
-                "available": True,
-                "models": [
-                    {"id": "lanczos", "label": "Lanczos", "scale": 0},
-                    {"id": "bicubic", "label": "Bicubic", "scale": 0},
-                ],
-            },
-        ]
-    }
+    """SUPPORTED IN CODE vs READY ON THIS MACHINE."""
+    from .upscaling import capabilities
+
+    return capabilities()
 
 
 @router.post("/projects/{project_id}/upscale/preview")
@@ -406,7 +397,11 @@ def preview_upscale(
             "Upscale preview requires an asset_id.",
             fields={"body": body},
         )
-    return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution)
+    try:
+        return _preview_upscale(db, project_id, asset_id, engine, model, target_resolution)
+    except RuntimeError as exc:
+        code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
+        raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
 
 
 @router.post("/projects/{project_id}/upscale/apply")
@@ -428,7 +423,11 @@ def apply_upscale(
             "Upscale apply requires an asset_id.",
             fields={"body": body},
         )
-    return _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
+    try:
+        return _apply_upscale(db, project_id, asset_id, engine, model, target_resolution)
+    except RuntimeError as exc:
+        code = "GPU_UPSCALE_UNAVAILABLE" if "unavailable" in str(exc).lower() else "RENDER_FAILED"
+        raise magi_error(code, str(exc), fields={"engine": engine, "model": model}) from exc
 
 
 @router.post("/projects/{project_id}/audio/generate")
@@ -437,32 +436,53 @@ def generate_audio(
     body: dict[str, Any],
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Generate AI music or SFX for a project."""
-    kind = body.get("kind") or "music"
-    prompt = body.get("prompt") or ""
+    """Queue MAGI Audio Studio music/SFX. Returns job ids — never optimistic ready."""
     try:
-        from ..generation_tools import ops
+        from .audio_generate import enqueue_audio
 
-        if kind in ("music", "all"):
-            ops.run_audio_generate(
-                db,
-                project_id=project_id,
-                kind="music",
-                prompt=prompt or "ambient background music",
-                duration_sec=float(body.get("duration") or 30),
-            )
-        if kind in ("sfx", "all"):
-            ops.run_audio_generate(
-                db,
-                project_id=project_id,
-                kind="sfx",
-                prompt=prompt or "ambient sound effects",
-                duration_sec=float(body.get("duration") or 15),
-            )
-        return {"ok": True, "kind": kind, "prompt": prompt, "message": f"Audio generation queued for {kind}."}
+        return enqueue_audio(db, project_id, body or {})
     except Exception as exc:
         raise magi_error(
             "AUDIO_GENERATION_FAILED",
             f"Audio generation failed: {exc}",
-            fields={"kind": kind, "prompt": prompt},
+            fields={"kind": (body or {}).get("kind"), "prompt": (body or {}).get("prompt")},
         ) from exc
+
+
+@router.post("/projects/{project_id}/renders")
+def create_render(
+    project_id: str,
+    body: dict[str, Any],
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    from .final_render import enqueue_final_render
+
+    try:
+        return enqueue_final_render(db, project_id, body or {})
+    except Exception as exc:
+        raise magi_error(
+            "RENDER_FAILED",
+            f"MAGI render could not be queued: {exc}",
+            fields={"body": body},
+        ) from exc
+
+
+@router.get("/projects/{project_id}/jobs/{job_id}")
+def get_magi_job(project_id: str, job_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    from ..db import Job
+    from ..codirector.unified_jobs import to_unified_dto
+
+    job = db.get(Job, job_id)
+    if not job or job.project_id != project_id:
+        raise magi_error("JOB_NOT_FOUND", "MAGI job not found.", status_code=404, fields={"jobId": job_id})
+    unified = to_unified_dto("studio", job)
+    return {
+        "jobId": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "unifiedStatus": unified.get("status") or job.status,
+        "stage": job.stage,
+        "progress": job.progress,
+        "message": job.message,
+        "history": job.history_json,
+    }

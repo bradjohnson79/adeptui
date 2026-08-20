@@ -5533,17 +5533,17 @@ export const api = {
       ),
     colorPresets: () =>
       req<{ presets: Record<string, unknown>[] }>("/api/magi/color/presets"),
-    previewColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>) =>
+    previewColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>, clipId?: string) =>
       req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/color/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params }),
+        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params, clipId }),
       }),
-    applyColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>) =>
+    applyColorGrade: (projectId: string, assetId: string, presetId: string, params: Record<string, number>, clipId?: string) =>
       req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/color/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params }),
+        body: JSON.stringify({ asset_id: assetId, preset_id: presetId, params, clipId }),
       }),
     upscaleCapabilities: () =>
       req<Record<string, unknown>>("/api/magi/upscale/capabilities"),
@@ -5559,12 +5559,20 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ asset_id: assetId, engine, model, target_resolution: targetResolution }),
       }),
-    generateAudio: (projectId: string, kind: string, prompt: string) =>
+    generateAudio: (projectId: string, kind: string, prompt: string, extra?: Record<string, unknown>) =>
       req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/audio/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, prompt }),
+        body: JSON.stringify({ kind, prompt, ...(extra || {}) }),
       }),
+    createRender: (projectId: string, body: Record<string, unknown>) =>
+      req<Record<string, unknown>>("/api/magi/projects/" + projectId + "/renders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    getFinishingJob: (projectId: string, jobId: string) =>
+      req<Record<string, unknown>>(`/api/magi/projects/${projectId}/jobs/${jobId}`),
   },
   library: (projectId: string, opts?: { q?: string; scope?: string; folder?: string; system_key?: string }) => {
     const q = new URLSearchParams();

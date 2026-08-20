@@ -73,6 +73,34 @@ export type MagiSequenceDocument = {
   /** m5: MAGI-side export lineage ledger keyed by W46 batchBlockId. Server
    * bookkeeping; survives reload through normal sequence persistence. */
   exportLedger?: Record<string, unknown>;
+  finishing?: MagiFinishingState;
+};
+
+export type MagiClipGrade = {
+  presetId?: string;
+  params?: Record<string, number>;
+};
+
+export type MagiFinishingState = {
+  clipGrades?: Record<string, MagiClipGrade>;
+  upscale?: {
+    enabled?: boolean;
+    engine?: string;
+    model?: string;
+    target?: string;
+    preview?: boolean;
+  };
+  audio?: {
+    range?: "entire" | "clip";
+    musicAssetId?: string;
+    sfxAssetId?: string;
+    lastJobIds?: string[];
+    prompt?: string;
+  };
+  render?: {
+    lastJobId?: string;
+    profile?: "preview" | "final";
+  };
 };
 
 export type MagiTimelineExportClip = {

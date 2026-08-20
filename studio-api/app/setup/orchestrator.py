@@ -203,6 +203,19 @@ def _checkpoint_for(component_id: str, recommendation: str) -> dict[str, Any]:
             "may_require_elevation": False,
             "pinned_revision": "13495845e3028f0bb6ca1462ad22aa0e76349e40",
         }
+    elif component.installer == "realesrgan_ncnn":
+        kind = "realesrgan_ncnn_install"
+        summary = (
+            "Install MAGI GPU Upscaling (Real-ESRGAN) from the pinned official Windows portable package. "
+            "Reuses an existing valid install on the second click."
+        )
+        fields = []
+        extra = {
+            "estimated_download_bytes": component.download_bytes,
+            "official_source_only": True,
+            "may_require_elevation": False,
+            "pinned_version": "v0.2.5.0-20220424",
+        }
     elif component.installer == "stills_perception_hf":
         kind = "stills_perception_hf_install"
         summary = (
@@ -1110,6 +1123,35 @@ def _enqueue_hunyuan_install(component_id: str) -> dict[str, Any]:
     )
 
 
+def _install_realesrgan_ncnn(component_id: str, *, force: bool = False) -> dict[str, Any]:
+    from ..magi.realesrgan_runtime import install as install_realesrgan
+    from ..magi.realesrgan_runtime import verify as verify_realesrgan
+
+    result = verify_realesrgan(repair=force) if force else install_realesrgan(force=force)
+    operation = registry.create("component_action", [component_id])
+    if not result.get("ok") and not result.get("realesrganReady"):
+        return registry.finish(
+            operation["operation_id"],
+            error=(result.get("error") or {}).get("code") or "realesrgan_install_failed",
+            result={
+                "component_id": component_id,
+                "queued": False,
+                "message": result.get("message") or "MAGI GPU Upscaling install failed.",
+                "runtime": result,
+            },
+        )
+    return registry.finish(
+        operation["operation_id"],
+        result={
+            "component_id": component_id,
+            "queued": False,
+            "reused": bool(result.get("reused")),
+            "message": result.get("message") or "MAGI GPU Upscaling ready.",
+            "runtime": result,
+        },
+    )
+
+
 def _install_index_tts2(component_id: str, *, force: bool = False) -> dict[str, Any]:
     from ..voice_performance.runtime import get_index_tts2_runtime
 
@@ -1176,6 +1218,14 @@ def execute_recommended_action(component_id: str) -> dict[str, Any]:
         "update",
     ):
         return _install_index_tts2(component_id, force=action in ("repair", "reinstall", "update"))
+
+    if component.installer == "realesrgan_ncnn" and action in (
+        "install",
+        "repair",
+        "reinstall",
+        "update",
+    ):
+        return _install_realesrgan_ncnn(component_id, force=action in ("repair", "reinstall", "update"))
 
     if component.installer == "asset_pack":
         from .pack_manifests import get_pack_manifest

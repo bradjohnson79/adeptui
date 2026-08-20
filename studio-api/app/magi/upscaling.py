@@ -1,137 +1,50 @@
-"""MAGI Video Upscaling — Real-ESRGAN-ncnn-Vulkan + FFmpeg fallback.
+"""MAGI Video Upscaling — Real-ESRGAN-ncnn-Vulkan + honest FFmpeg fallback.
 
-Primary engine: Real-ESRGAN-ncnn-Vulkan (MIT license).
-Fallback engine: FFmpeg software scaling (lanczos/bicubic).
-
-Frame-by-frame upscaling with audio preservation.
+GPU engine is never silently relabeled as FFmpeg. Video GPU path is
+extract frames → Real-ESRGAN directory → remux + optional audio.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import shutil
 import subprocess
-import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
-from ..db import Asset, Project
 from sqlalchemy.orm import Session
+
+from ..db import Asset, Job
+from ..editor_mix import probe_has_audio
+from ..generation_tools.lineage import register_derived_asset
+from . import jobs as magi_jobs
+from . import realesrgan_runtime
+from .media import (
+    cleanup_dir,
+    disk_preflight,
+    estimate_frame_tree_bytes,
+    new_temp_dir,
+    probe_media,
+    run_ffmpeg,
+)
 
 logger = logging.getLogger(__name__)
 
+ENGINE_GPU = "realesrgan-ncnn-vulkan"
+ENGINE_FFMPEG = "ffmpeg-scale"
+CREATOR_GPU_UNAVAILABLE = realesrgan_runtime.CREATOR_UNAVAILABLE
+
 
 def _realesrgan_bin() -> str | None:
-    """Find the realesrgan-ncnn-vulkan binary."""
-    # Check common locations
-    candidates = [
-        shutil.which("realesrgan-ncnn-vulkan"),
-        shutil.which("realesrgan"),
-        str(Path.home() / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan"),
-        str(Path.home() / ".local" / "bin" / "realesrgan-ncnn-vulkan"),
-    ]
-    # Check in Adept runtime directories
-    runtime_base = os.environ.get("ADEPT_RUNTIME_DIR", "")
-    if runtime_base:
-        candidates.extend([
-            str(Path(runtime_base) / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan"),
-            str(Path(runtime_base) / "bin" / "realesrgan-ncnn-vulkan"),
-        ])
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return None
+    path = realesrgan_runtime.binary_path()
+    return str(path) if path.is_file() else None
 
 
 def _realesrgan_models_dir() -> Path:
-    """Directory containing Real-ESRGAN model files."""
-    runtime_base = os.environ.get("ADEPT_RUNTIME_DIR", "")
-    if runtime_base:
-        models = Path(runtime_base) / "realesrgan-ncnn-vulkan" / "models"
-        if models.is_dir():
-            return models
-    home_models = Path.home() / "realesrgan-ncnn-vulkan" / "models"
-    if home_models.is_dir():
-        return home_models
-    # Fallback: look adjacent to binary
-    bin_path = _realesrgan_bin()
-    if bin_path:
-        adj = Path(bin_path).parent / "models"
-        if adj.is_dir():
-            return adj
-    return Path("./models")
-
-
-def upscale_frame(
-    input_path: str,
-    output_path: str,
-    engine: str = "ffmpeg-scale",
-    model: str = "lanczos",
-    target_width: int = 1920,
-    target_height: int = 1080,
-) -> str:
-    """Upscale a single video or image to the target resolution.
-
-    Args:
-        input_path: Source file path.
-        output_path: Destination file path.
-        engine: Upscaling engine ('realesrgan-ncnn-vulkan' or 'ffmpeg-scale').
-        model: Model name for the engine.
-        target_width: Target width in pixels.
-        target_height: Target height in pixels.
-
-    Returns:
-        The output file path.
-    """
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    if engine == "realesrgan-ncnn-vulkan":
-        bin_path = _realesrgan_bin()
-        if not bin_path:
-            logger.warning("realesrgan-ncnn-vulkan binary not found, falling back to ffmpeg-scale")
-            engine = "ffmpeg-scale"
-
-    if engine == "realesrgan-ncnn-vulkan":
-        models_dir = _realesrgan_models_dir()
-        cmd = [
-            str(bin_path),
-            "-i", str(input_path),
-            "-o", str(output_path),
-            "-s", "4" if "4x" in model else "2",
-            "-m", str(models_dir),
-        ]
-        if "anime" in model:
-            cmd.extend(["-n", model])
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if proc.returncode != 0 or not out.is_file():
-            raise RuntimeError(f"Real-ESRGAN upscale failed: {(proc.stderr or proc.stdout)[:1000]}")
-    else:
-        # FFmpeg software scaling
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(input_path),
-            "-vf", f"scale={target_width}:{target_height}:flags={model}",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-c:a", "copy",
-            "-pix_fmt", "yuv420p",
-            str(output_path),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if proc.returncode != 0 or not out.is_file():
-            raise RuntimeError(f"FFmpeg scale failed: {(proc.stderr or proc.stdout)[:1000]}")
-
-    return str(out)
+    return realesrgan_runtime.models_dir()
 
 
 def _parse_resolution(resolution_str: str) -> tuple[int, int]:
-    """Parse a resolution string like '1920x1080' or '4K' into (width, height)."""
-    resolution_str = resolution_str.strip().upper()
+    resolution_str = (resolution_str or "").strip().upper()
     preset = {
         "480P": (854, 480),
         "720P": (1280, 720),
@@ -142,13 +55,226 @@ def _parse_resolution(resolution_str: str) -> tuple[int, int]:
     }
     if resolution_str in preset:
         return preset[resolution_str]
-    if "x" in resolution_str.lower():
-        parts = resolution_str.lower().split("x")
+    if "X" in resolution_str:
+        parts = resolution_str.split("X")
         try:
             return int(parts[0]), int(parts[1])
         except (ValueError, IndexError):
             pass
-    return (1920, 1080)  # default
+    return (1920, 1080)
+
+
+def capabilities() -> dict[str, Any]:
+    ready = realesrgan_runtime.readiness()
+    gpu_ready = bool(ready.get("realesrganReady"))
+    return {
+        "supportedInCode": True,
+        "realesrganReady": gpu_ready,
+        "creatorMessage": None if gpu_ready else CREATOR_GPU_UNAVAILABLE,
+        "engines": [
+            {
+                "id": ENGINE_GPU,
+                "label": "Real-ESRGAN (GPU)",
+                "available": gpu_ready,
+                "readyOnThisMachine": gpu_ready,
+                "models": [
+                    {"id": "realesrgan-x4plus", "label": "General 4x", "scale": 4, "content": "general"},
+                    {"id": "realesr-animevideov3", "label": "Anime Video", "scale": 4, "content": "anime"},
+                    {"id": "realesrgan-x4plus-anime", "label": "Anime 4x", "scale": 4, "content": "anime"},
+                ],
+            },
+            {
+                "id": ENGINE_FFMPEG,
+                "label": "FFmpeg (fast)",
+                "available": True,
+                "readyOnThisMachine": True,
+                "models": [
+                    {"id": "lanczos", "label": "Lanczos", "scale": 0, "content": "general"},
+                    {"id": "bicubic", "label": "Bicubic", "scale": 0, "content": "general"},
+                ],
+            },
+        ],
+        "autoRouting": False,
+        "device": ready.get("device"),
+        "version": ready.get("version"),
+    }
+
+
+def _require_gpu_ready() -> dict[str, Any]:
+    ready = realesrgan_runtime.readiness()
+    if not ready.get("realesrganReady"):
+        raise RuntimeError(CREATOR_GPU_UNAVAILABLE)
+    return ready
+
+
+def upscale_frame(
+    input_path: str,
+    output_path: str,
+    engine: str = ENGINE_FFMPEG,
+    model: str = "lanczos",
+    target_width: int = 1920,
+    target_height: int = 1080,
+) -> str:
+    """Upscale a single image or video. GPU requests never silently become FFmpeg."""
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if engine == ENGINE_GPU:
+        _require_gpu_ready()
+        src = Path(input_path)
+        if src.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".avi"}:
+            _upscale_video_realesrgan(src, out, model, target_width, target_height)
+            return str(out)
+        _upscale_image_realesrgan(src, out, model)
+        return str(out)
+
+    audio_args = ["-c:a", "copy"] if probe_has_audio(Path(input_path)) else ["-an"]
+    run_ffmpeg(
+        [
+            "-i",
+            str(input_path),
+            "-vf",
+            f"scale={target_width}:{target_height}:flags={model or 'lanczos'}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "23",
+            *audio_args,
+            "-pix_fmt",
+            "yuv420p",
+            str(out),
+        ]
+    )
+    return str(out)
+
+
+def _upscale_image_realesrgan(src: Path, dest: Path, model: str) -> None:
+    name, scale = realesrgan_runtime.resolve_model(model)
+    cmd = [
+        str(realesrgan_runtime.binary_path()),
+        "-i",
+        str(src),
+        "-o",
+        str(dest),
+        "-n",
+        name,
+        "-s",
+        str(scale),
+        "-m",
+        str(realesrgan_runtime.models_dir()),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600, check=False)
+    if proc.returncode != 0 or not dest.is_file():
+        raise RuntimeError(f"Real-ESRGAN upscale failed: {(proc.stderr or proc.stdout)[:1000]}")
+
+
+def _upscale_video_realesrgan(
+    src: Path,
+    dest: Path,
+    model: str,
+    target_width: int,
+    target_height: int,
+    *,
+    preview_seconds: float | None = None,
+    cancel_check: Any | None = None,
+) -> dict[str, Any]:
+    probe = probe_media(src)
+    frames = max(int(probe.get("frames") or 1), 1)
+    if preview_seconds:
+        frames = max(1, int(round(float(preview_seconds) * float(probe.get("fps") or 24))))
+    need = estimate_frame_tree_bytes(int(probe.get("width") or 1280), int(probe.get("height") or 720), frames)
+    disk_preflight(need_bytes=need + 200_000_000, label="GPU upscaling")
+    work = new_temp_dir("upscale")
+    frames_in = work / "in"
+    frames_out = work / "out"
+    frames_in.mkdir()
+    frames_out.mkdir()
+    name, scale = realesrgan_runtime.resolve_model(model)
+    try:
+        extract = ["-i", str(src)]
+        if preview_seconds:
+            extract = ["-t", f"{preview_seconds:.2f}", "-i", str(src)]
+        run_ffmpeg([*extract, "-vsync", "0", str(frames_in / "frame_%06d.png")], timeout=300)
+        if cancel_check and cancel_check():
+            raise RuntimeError("Upscale cancelled.")
+        cmd = [
+            str(realesrgan_runtime.binary_path()),
+            "-i",
+            str(frames_in),
+            "-o",
+            str(frames_out),
+            "-n",
+            name,
+            "-s",
+            str(scale),
+            "-m",
+            str(realesrgan_runtime.models_dir()),
+            "-f",
+            "png",
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=max(1800, frames * 25), check=False)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Real-ESRGAN upscale failed: {(proc.stderr or proc.stdout)[:1000]}")
+        if cancel_check and cancel_check():
+            raise RuntimeError("Upscale cancelled.")
+        fps = max(float(probe.get("fps") or 24), 1.0)
+        assembled = work / "assembled.mp4"
+        run_ffmpeg(
+            [
+                "-framerate",
+                f"{fps:.3f}",
+                "-i",
+                str(frames_out / "frame_%06d.png"),
+                "-vf",
+                f"scale={target_width}:{target_height}:flags=lanczos",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                str(assembled),
+            ]
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if probe.get("hasAudio") and not preview_seconds:
+            audio_src = src
+            run_ffmpeg(
+                [
+                    "-i",
+                    str(assembled),
+                    "-i",
+                    str(audio_src),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    "1:a:0",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-shortest",
+                    str(dest),
+                ]
+            )
+        else:
+            dest.write_bytes(assembled.read_bytes()) if assembled != dest else None
+            if assembled != dest:
+                import shutil
+
+                shutil.copy2(assembled, dest)
+        return {
+            "engine": ENGINE_GPU,
+            "model": name,
+            "scale": scale,
+            "frames": frames,
+            "source": probe,
+        }
+    finally:
+        cleanup_dir(work)
 
 
 def upscale_asset(
@@ -161,92 +287,204 @@ def upscale_asset(
     *,
     preview: bool = False,
 ) -> dict[str, Any]:
-    """Upscale a Library asset to the target resolution.
-
-    Creates a new upscaled asset in the Library. Does not modify the original.
-
-    Args:
-        db: Database session.
-        project_id: Project ID.
-        asset_id: Source asset ID.
-        engine: Upscaling engine.
-        model: Model name.
-        target_resolution: Target resolution string.
-        preview: If True, only upscale a short segment.
-
-    Returns:
-        Dict with output_asset_id, engine, model, input_size, output_size.
-    """
     source = db.get(Asset, asset_id)
     if not source:
         raise ValueError(f"Asset {asset_id} not found")
-
-    source_path = str(source.path) if source.path else None
+    if source.project_id != project_id:
+        raise ValueError("Asset is not in this project.")
+    source_path = str(source.path) if source.path else ""
     if not source_path or not Path(source_path).is_file():
         raise ValueError(f"Asset {asset_id} has no valid file path")
 
+    chosen_engine = engine or ENGINE_FFMPEG
+    if chosen_engine == ENGINE_GPU:
+        _require_gpu_ready()
+
     target_w, target_h = _parse_resolution(target_resolution)
-
-    # For preview, extract a short segment and upscale that
-    if preview:
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-            preview_path = tmp.name
-        # Extract first 3 seconds
-        extract_cmd = [
-            "ffmpeg", "-y",
-            "-t", "3",
-            "-i", source_path,
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-pix_fmt", "yuv420p",
-            preview_path,
-        ]
-        subprocess.run(extract_cmd, capture_output=True, text=True, timeout=60)
-        input_for_upscale = preview_path
-    else:
-        input_for_upscale = source_path
-
-    dest_name = f"upscaled_{uuid.uuid4().hex[:12]}_{Path(source_path).name}"
-    project = db.get(Project, project_id)
-    base_dir = Path(project.directory) if project and project.directory else Path(source_path).parent
-    dest_path = base_dir / "upscaled" / dest_name
-
+    probe = probe_media(source_path)
+    work = new_temp_dir("upscale_asset")
+    dest = work / f"upscaled_{target_w}x{target_h}.mp4"
     try:
-        upscale_frame(input_for_upscale, str(dest_path), engine, model, target_w, target_h)
-
-        # Get original file info
-        input_ext = Path(source_path).suffix.lower()
-        kind = "image" if input_ext in (".png", ".jpg", ".jpeg", ".webp") else "video"
-
-        # Register as a Library asset
-        upscaled_asset = Asset(
-            id=str(uuid.uuid4()),
+        if chosen_engine == ENGINE_GPU:
+            meta = _upscale_video_realesrgan(
+                Path(source_path),
+                dest,
+                model,
+                target_w,
+                target_h,
+                preview_seconds=3.0 if preview else None,
+            )
+        else:
+            args = ["-i", source_path]
+            if preview:
+                args = ["-t", "3", "-i", source_path]
+            audio_args = ["-c:a", "copy"] if probe.get("hasAudio") and not preview else ["-an"]
+            run_ffmpeg(
+                [
+                    *args,
+                    "-vf",
+                    f"scale={target_w}:{target_h}:flags={model or 'lanczos'}",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "fast",
+                    "-crf",
+                    "23",
+                    *audio_args,
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(dest),
+                ]
+            )
+            meta = {"engine": ENGINE_FFMPEG, "model": model or "lanczos"}
+        out_probe = probe_media(dest)
+        asset = register_derived_asset(
+            db,
             project_id=project_id,
-            kind=kind,
-            name=f"{Path(source_path).stem} ({target_resolution})",
-            path=str(dest_path),
-            mime_type="video/mp4",
-            size=dest_path.stat().st_size if dest_path.is_file() else 0,
+            source_path=dest,
+            kind="video" if Path(source_path).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"} else "image",
+            tag="magi_upscale",
+            parent_asset_id=source.id,
+            op="upscale",
+            model=str(meta.get("model") or model),
+            prompt_meta={
+                "operation": "upscale",
+                "engine": chosen_engine,
+                "model": meta.get("model") or model,
+                "target": f"{target_w}x{target_h}",
+                "preview": preview,
+                "sourceAssetId": source.id,
+                "sourceProbe": probe,
+                "outputProbe": out_probe,
+                "device": realesrgan_runtime.readiness().get("device") if chosen_engine == ENGINE_GPU else "cpu",
+            },
+            library_key="video.generated",
         )
-        db.add(upscaled_asset)
         db.commit()
-        db.refresh(upscaled_asset)
+        return {
+            "ok": True,
+            "output_asset_id": asset.id,
+            "assetId": asset.id,
+            "engine": chosen_engine,
+            "model": meta.get("model") or model,
+            "input_resolution": f"{probe.get('width')}x{probe.get('height')}",
+            "output_resolution": f"{out_probe.get('width')}x{out_probe.get('height')}",
+            "preview": preview,
+            "sourcePreserved": True,
+        }
     finally:
-        if preview and Path(preview_path).is_file():
-            Path(preview_path).unlink(missing_ok=True)
+        cleanup_dir(work)
 
-    return {
-        "ok": True,
-        "output_asset_id": upscaled_asset.id,
+
+def preview_upscale(
+    db: Session,
+    project_id: str,
+    asset_id: str,
+    engine: str,
+    model: str,
+    target_resolution: str,
+) -> dict[str, Any]:
+    return upscale_asset(db, project_id, asset_id, engine, model, target_resolution, preview=True)
+
+
+def apply_upscale(
+    db: Session,
+    project_id: str,
+    asset_id: str,
+    engine: str,
+    model: str,
+    target_resolution: str,
+) -> dict[str, Any]:
+    return enqueue_upscale(
+        db,
+        project_id=project_id,
+        asset_id=asset_id,
+        engine=engine,
+        model=model,
+        target_resolution=target_resolution,
+        preview=False,
+    )
+
+
+def enqueue_upscale(
+    db: Session,
+    *,
+    project_id: str,
+    asset_id: str,
+    engine: str,
+    model: str,
+    target_resolution: str,
+    preview: bool,
+) -> dict[str, Any]:
+    fingerprint = f"{asset_id}|{engine}|{model}|{target_resolution}|{int(preview)}"
+    if engine == ENGINE_GPU:
+        _require_gpu_ready()
+    existing = magi_jobs.find_active_duplicate(db, project_id, "magi_upscale", fingerprint)
+    if existing is not None:
+        return {
+            "ok": True,
+            "queued": existing.status in magi_jobs.ACTIVE,
+            "duplicate": True,
+            "jobId": existing.id,
+            "status": existing.status,
+            "stage": existing.stage,
+            "engine": engine,
+            "preview": preview,
+            "message": "An equivalent upscale is already in progress.",
+        }
+    params = {
+        "assetId": asset_id,
         "engine": engine,
         "model": model,
-        "input_resolution": "source",
-        "output_resolution": f"{target_w}x{target_h}",
-        "upscaled_name": f"{Path(source_path).stem} ({target_resolution})",
+        "targetResolution": target_resolution,
+        "preview": preview,
+        "fingerprint": fingerprint,
+    }
+    job = magi_jobs.enqueue_job(
+        db,
+        project_id=project_id,
+        kind="magi_upscale",
+        params=params,
+        message="Queued MAGI upscale",
+    )
+    if job.status == "queued":
+        magi_jobs.start_background(job.id, lambda jid: magi_jobs.run_with_session(jid, run_upscale_job))
+    return {
+        "ok": True,
+        "queued": job.status == "queued",
+        "duplicate": False,
+        "jobId": job.id,
+        "status": job.status,
+        "stage": job.stage,
+        "engine": engine,
         "preview": preview,
     }
 
 
-preview_upscale = lambda db, pid, aid, engine, model, resolution: upscale_asset(
-    db, pid, aid, engine, model, resolution, preview=True
-)
+def run_upscale_job(db: Session, job: Job) -> dict[str, Any]:
+    params = {}
+    try:
+        import json
+
+        params = json.loads(job.params_json or "{}")
+    except Exception:
+        params = {}
+    if magi_jobs.job_cancelled(db, job.id):
+        return {"ok": False, "message": "Cancelled"}
+    job.stage = "Rendering"
+    job.message = "Upscaling"
+    db.commit()
+    result = upscale_asset(
+        db,
+        job.project_id,
+        str(params.get("assetId")),
+        str(params.get("engine") or ENGINE_FFMPEG),
+        str(params.get("model") or "lanczos"),
+        str(params.get("targetResolution") or "1920x1080"),
+        preview=bool(params.get("preview")),
+    )
+    return {
+        **result,
+        "message": "Upscale ready" if result.get("ok") else "Upscale failed",
+        "outputPath": result.get("assetId"),
+    }

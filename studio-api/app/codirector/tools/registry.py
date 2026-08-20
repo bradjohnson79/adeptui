@@ -788,6 +788,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "propose_video_upscale": MutationHandler(
         generation_tools.preview_propose_video_upscale, generation_tools.apply_propose_video_upscale
     ),
+    "magi.color.apply": MutationHandler(magi.preview_color_apply, magi.apply_color_apply),
+    "magi.upscale": MutationHandler(magi.preview_upscale, magi.apply_upscale),
+    "magi.audio.generate": MutationHandler(magi.preview_audio_generate, magi.apply_audio_generate),
+    "magi.render": MutationHandler(magi.preview_render, magi.apply_render),
     "propose_video_extend": MutationHandler(
         media_execution.preview_propose_video_extend_w6p,
         media_execution.apply_propose_video_extend_w6p,

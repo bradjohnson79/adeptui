@@ -1,12 +1,7 @@
-"""MAGI Co-Director READ-only tools (m6).
+"""MAGI Co-Director tools.
 
-Capability-scoped, project-ownership-isolated reads. Every call requires an
-authoritative ``project_id`` from ``ToolContext``; clips are addressed by their
-immutable ``clipId``. No writes or proposals exist in this milestone — MAGI
-mutations stay inside the Adept UI editor.
-
-Tool Law contract: READ -> authoritative state; immutable IDs only; no fake
-execution; no fabricated sequence content.
+Read tools inspect authoritative sequence state. Mutation tools write finishing
+state or queue jobs and never overwrite source media.
 """
 
 from __future__ import annotations
@@ -133,3 +128,67 @@ async def readiness(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "honestNonExecutableCount": payload.get("honestNonExecutableCount"),
         "_evidence": {"source": "magi.readiness"},
     }
+
+
+def _preview(summary: str, *lines: str):
+    from ..definitions import ToolPreview
+
+    return ToolPreview(
+        summary=summary,
+        lines=list(lines) + ["Source media stays intact. Approval required."],
+        warnings=["This writes MAGI finishing state or queues a job."],
+    )
+
+
+def preview_color_apply(ctx: ToolContext, args: dict[str, Any]):
+    return _preview("Apply MAGI color look", f"preset={args.get('presetId') or 'custom'}", f"asset={args.get('assetId')}")
+
+
+def apply_color_apply(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.color_grading import apply_color_grade_to_asset
+    from ....magi.finishing import set_clip_grade
+
+    asset_id = str(args.get("assetId") or "")
+    preset_id = str(args.get("presetId") or "")
+    result = apply_color_grade_to_asset(ctx.db, ctx.project_id, asset_id, preset_id, {})
+    if args.get("clipId"):
+        set_clip_grade(ctx.project_id, str(args["clipId"]), preset_id, {})
+    return result
+
+
+def preview_upscale(ctx: ToolContext, args: dict[str, Any]):
+    return _preview("Queue MAGI upscale", f"engine={args.get('engine') or 'ffmpeg-scale'}", f"asset={args.get('assetId')}")
+
+
+def apply_upscale(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.upscaling import enqueue_upscale
+
+    return enqueue_upscale(
+        ctx.db,
+        project_id=ctx.project_id,
+        asset_id=str(args.get("assetId") or ""),
+        engine=str(args.get("engine") or "ffmpeg-scale"),
+        model=str(args.get("model") or "lanczos"),
+        target_resolution=str(args.get("target") or "1920x1080"),
+        preview=False,
+    )
+
+
+def preview_audio_generate(ctx: ToolContext, args: dict[str, Any]):
+    return _preview("Generate MAGI music or SFX", str(args.get("prompt") or "")[:180], f"kind={args.get('kind')}")
+
+
+def apply_audio_generate(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.audio_generate import enqueue_audio
+
+    return enqueue_audio(ctx.db, ctx.project_id, dict(args))
+
+
+def preview_render(ctx: ToolContext, args: dict[str, Any]):
+    return _preview("Queue MAGI finishing render", f"profile={args.get('profile') or 'final'}")
+
+
+def apply_render(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....magi.final_render import enqueue_final_render
+
+    return enqueue_final_render(ctx.db, ctx.project_id, dict(args) or {"profile": "final"})

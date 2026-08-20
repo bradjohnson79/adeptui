@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from ..db import Asset, Job, Project
+from ..db import Asset, Job
 from ..media_ops import run_ffmpeg
 from sqlalchemy.orm import Session
 
@@ -176,7 +176,7 @@ COLOR_PRESETS: dict[str, dict[str, Any]] = {
         "label": "Noir",
         "params": {
             "contrast": 0.3,
-            "saturation": 0.0,
+            "saturation": -1.0,
             "gamma": 0.85,
             "shadows": -0.15,
             "highlights": 0.1,
@@ -223,6 +223,14 @@ COLOR_PRESETS: dict[str, dict[str, Any]] = {
 }
 
 ALL_PRESET_IDS: list[str] = list(COLOR_PRESETS.keys())
+
+
+def describe_grade(params: ColorPresetParams, preset_id: str | None) -> str:
+    if preset_id and preset_id in COLOR_PRESETS:
+        return str(COLOR_PRESETS[preset_id]["label"])
+    if params:
+        return "Custom look"
+    return "None"
 
 
 def list_color_presets() -> list[dict[str, Any]]:
@@ -353,12 +361,20 @@ def apply_color_grade(
     if filter_str:
         cmd_parts.extend(["-vf", filter_str])
 
+    from .media import probe_media
+
+    has_audio = False
+    try:
+        has_audio = bool(probe_media(input_path).get("hasAudio")) and not preview_seconds
+    except Exception:
+        has_audio = False
     cmd_parts.extend([
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
         "-pix_fmt", "yuv420p",
-        "-an",
+        "-c:a" if has_audio else "-an",
+        *(["aac"] if has_audio else []),
         "-y",
         str(out),
     ])
@@ -414,35 +430,54 @@ def apply_color_grade_to_asset(
     duration = 3.0 if preview else None
 
     dest_name = f"graded_{uuid.uuid4().hex[:12]}_{Path(source_path).name}"
-    project = db.get(Project, project_id)
-    base_dir = Path(project.directory) if project and project.directory else Path(source_path).parent
-    dest_path = base_dir / "color_grades" / dest_name
+    from .media import cleanup_dir, new_temp_dir
+
+    work = new_temp_dir("color")
+    dest_path = work / dest_name
 
     filter_str = compile_filter_string(resolved)
-    apply_color_grade(source_path, str(dest_path), resolved, preview_seconds=duration)
+    try:
+        apply_color_grade(source_path, str(dest_path), resolved, preview_seconds=duration)
+    except Exception:
+        cleanup_dir(work)
+        raise
 
-    # Register as a Library asset
-    graded_asset = Asset(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        kind="image" if Path(source_path).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else "video",
-        name=f"Graded - {describe_grade(resolved, preset_id)}",
-        path=str(dest_path),
-        mime_type="video/mp4",
-        size=dest_path.stat().st_size if dest_path.is_file() else 0,
-    )
-    db.add(graded_asset)
-    db.commit()
-    db.refresh(graded_asset)
+    from ..generation_tools.lineage import register_derived_asset
+
+    try:
+        graded_asset = register_derived_asset(
+            db,
+            project_id=project_id,
+            source_path=dest_path,
+            kind="image" if Path(source_path).suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") else "video",
+            tag="magi_color",
+            parent_asset_id=source.id,
+            op="color_grade",
+            model=preset_id or "custom",
+            prompt_meta={
+                "operation": "color_grade",
+                "preset": preset_id or "custom",
+                "parameters": resolved,
+                "filterString": filter_str,
+                "sourceAssetId": source.id,
+                "preview": preview,
+            },
+            library_key="video.generated",
+        )
+        db.commit()
+    finally:
+        cleanup_dir(work)
 
     return {
         "ok": True,
         "output_asset_id": graded_asset.id,
+        "assetId": graded_asset.id,
         "preset_id": preset_id or "custom",
         "params": resolved,
         "filter_string": filter_str,
         "graded_name": describe_grade(resolved, preset_id),
         "preview": preview,
+        "sourcePreserved": True,
     }
 
 

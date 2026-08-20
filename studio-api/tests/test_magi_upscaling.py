@@ -70,29 +70,29 @@ class TestRealesrganBinary:
 class TestUpscaleFrame:
     """Verify upscale_frame function dispatch."""
 
-    def test_ffmpeg_engine_accepts_valid_params(self):
-        """FFmpeg engine should accept valid parameters without crashing."""
-        # This is a smoke test - we can't actually run ffmpeg in unit tests
-        # without a real video file, but we can verify the function signature
-        # and parameter handling
-        pass
+    def test_gpu_request_does_not_silently_become_ffmpeg(self, tmp_path, monkeypatch):
+        from app.magi import realesrgan_runtime
+        from app.magi.upscaling import ENGINE_GPU, CREATOR_GPU_UNAVAILABLE
 
-    def test_realesrgan_engine_fallback_on_missing_binary(self):
-        """When Real-ESRGAN binary is missing, engine should fall back or raise."""
-        # This is tested through the function logic - if binary is None,
-        # it falls back to ffmpeg-scale
-        pass
+        monkeypatch.setattr(realesrgan_runtime, "readiness", lambda: {"realesrganReady": False})
+        dest = tmp_path / "out.mp4"
+        with pytest.raises(RuntimeError, match="unavailable"):
+            upscale_frame(str(tmp_path / "missing.mp4"), str(dest), engine=ENGINE_GPU)
+        assert not dest.exists()
+        assert "unavailable" in CREATOR_GPU_UNAVAILABLE.lower()
 
 
 class TestUpscaleAsset:
     """Verify upscale_asset function."""
 
     def test_requires_valid_asset(self):
-        """upgrade_asset should raise ValueError for missing asset."""
-        # This requires a database session, tested in integration tests
-        pass
+        from app.db import SessionLocal, init_db
+        from app.magi.upscaling import upscale_asset
 
-    def test_preview_creates_temp_file(self):
-        """Preview mode should create and clean up temp files."""
-        # Integration test
-        pass
+        init_db()
+        db = SessionLocal()
+        try:
+            with pytest.raises(ValueError, match="not found"):
+                upscale_asset(db, "no-project", "missing-asset", "ffmpeg-scale", "lanczos", "1920x1080")
+        finally:
+            db.close()

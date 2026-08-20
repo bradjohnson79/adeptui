@@ -81,6 +81,7 @@ export const DEFAULT_LAYOUT: MagiWorkspaceLayoutV1 = {
     lighting: false,
     effects: false,
     audio: false,
+    upscale: false,
     clipProperties: false,
     export: false,
     compare: false,

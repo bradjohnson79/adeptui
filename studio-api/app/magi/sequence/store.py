@@ -61,6 +61,7 @@ def empty_sequence(project_id: str, frame_rate: int = 24) -> dict[str, Any]:
         "updatedAt": _now(),
         "recipeId": None,
         "exportLedger": {},
+        "finishing": {},
     }
 
 
@@ -176,6 +177,7 @@ def save_sequence(project_id: str, body: dict[str, Any]) -> dict[str, Any]:
     payload.setdefault("markers", [])
     payload.setdefault("recipeId", None)
     payload.setdefault("exportLedger", current.get("exportLedger") or {})
+    payload.setdefault("finishing", current.get("finishing") or {})
 
     # Strict schema + reference validation (rejects cross-track and malformed
     # payloads instead of persisting them).

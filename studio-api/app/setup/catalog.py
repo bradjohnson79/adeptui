@@ -59,6 +59,8 @@ _VERIFIER_TO_DEP_TYPE: dict[str, str] = {
     "wavespeed_key": DEPENDENCY_TYPE_CREDENTIAL,
     "video_understanding_files": DEPENDENCY_TYPE_MODEL,
     "stills_perception_files": DEPENDENCY_TYPE_MODEL,
+    "world_intelligence_files": DEPENDENCY_TYPE_MODEL,
+    "realesrgan_ncnn": DEPENDENCY_TYPE_RUNTIME,
 }
 
 
@@ -372,6 +374,18 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         category="API Providers",
     ),
     ComponentDefinition(
+        "magi_gpu_upscale",
+        "MAGI GPU Upscaling",
+        "High-quality GPU video upscaling for final delivery and mastering. Real-ESRGAN.",
+        False,
+        45 * MB,
+        60 * MB,
+        ("ffmpeg",),
+        "realesrgan_ncnn",
+        "realesrgan_ncnn",
+        category="MAGI Finishing",
+    ),
+    ComponentDefinition(
         "ace_step_local",
         "ACE-Step Music Runtime",
         "Local ACE-Step music generation sandbox tracked by Setup for creator-facing readiness and repair visibility.",
@@ -575,6 +589,18 @@ COMPONENTS: tuple[ComponentDefinition, ...] = (
         "stills_perception_files",
         "stills_perception_hf",
         category="Co-Director Scene Perception",
+    ),
+    ComponentDefinition(
+        "vjepa2_world_intelligence",
+        "Co-Director World Intelligence",
+        "Advanced Co-Director world-state comparison. Helps preserve visual world consistency across scenes.",
+        False,
+        2800 * MB,
+        3000 * MB,
+        ("python",),
+        "world_intelligence_files",
+        "huggingface_snapshot",
+        category="Co-Director World Intelligence",
     ),
 )
 

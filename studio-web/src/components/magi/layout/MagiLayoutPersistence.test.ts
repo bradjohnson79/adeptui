@@ -11,6 +11,7 @@ describe("MagiLayoutPersistence", () => {
     const state = DEFAULT_LAYOUT.accordionState;
     expect(state.clipProperties).toBe(false);
     expect(state.export).toBe(false);
+    expect(state.upscale).toBe(false);
     expect(state).not.toHaveProperty("metadata");
   });
 

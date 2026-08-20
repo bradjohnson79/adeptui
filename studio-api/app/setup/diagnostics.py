@@ -556,6 +556,59 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             details=tuple(f"{k}={v}" for k, v in detail.items() if k != "error"),
         )
 
+    if component.verifier == "realesrgan_ncnn":
+        from ..magi.realesrgan_runtime import inspect_installation, verify as verify_realesrgan
+
+        inspection = inspect_installation()
+        root = str((inspection.get("paths") or {}).get("installPath") or "")
+        if inspection.get("realesrganReady"):
+            return Verification(
+                True,
+                False,
+                None,
+                "MAGI GPU Upscaling is installed, verified, and Ready.",
+                root,
+                version=str(inspection.get("version") or ""),
+                details=(
+                    f"binary={inspection.get('binaryExists')}",
+                    f"models={inspection.get('modelsExist')}",
+                    f"vulkan={inspection.get('vulkanDeviceAvailable')}",
+                    f"probe={inspection.get('inferenceProbePassed')}",
+                ),
+            )
+        if inspection.get("filesPresent"):
+            # Re-probe once so Setup reload can become Ready without a reinstall.
+            probed = verify_realesrgan(repair=False)
+            if probed.get("realesrganReady"):
+                return Verification(
+                    True,
+                    False,
+                    None,
+                    "MAGI GPU Upscaling is installed, verified, and Ready.",
+                    root,
+                    version=str(inspection.get("version") or ""),
+                    recommendation="none",
+                )
+            return Verification(
+                False,
+                False,
+                "runtime_not_ready",
+                inspection.get("creatorMessage") or "GPU Upscaling unavailable. FFmpeg upscale remains available.",
+                root,
+                recommendation="repair",
+                requires_user_interaction=False,
+                details=(f"binaryLaunches={inspection.get('binaryLaunches')}",),
+            )
+        return Verification(
+            False,
+            True,
+            "not_installed",
+            "MAGI GPU Upscaling is not installed. FFmpeg upscale remains available.",
+            root,
+            recommendation="install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "index_tts2":
         from ..voice_performance.runtime import get_index_tts2_runtime
 

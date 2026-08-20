@@ -41,6 +41,7 @@ export function createEmptySequence(projectId: string, frameRate = 24): MagiSequ
     updatedAt: nowIso(),
     recipeId: null,
     exportLedger: {},
+    finishing: {},
   };
 }
 

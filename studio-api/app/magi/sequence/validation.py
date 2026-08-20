@@ -106,6 +106,7 @@ class MagiSequenceModel(BaseModel):
     # separate from clip documents so the frozen W46 BatchClip contract stays
     # untouched; provenance is preserved here instead.
     exportLedger: dict[str, Any] = Field(default_factory=dict)
+    finishing: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_references(self) -> "MagiSequenceModel":

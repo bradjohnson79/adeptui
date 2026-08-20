@@ -12,6 +12,7 @@ import {
   recomputeDuration,
   type MagiClip,
   type MagiEditCommand,
+  type MagiFinishingState,
   type MagiSequenceDocument,
   type MagiTrack,
 } from "../../magiSequence";
@@ -697,6 +698,99 @@ function MagiEditorInner({
   // m5 B5: send MAGI timeline clips to the W46 Timeline (first scene) as a
   // batch-owned export. No regeneration — provenance is recorded server-side.
   const [timelineExportBusy, setTimelineExportBusy] = useState(false);
+  const [finishingJobId, setFinishingJobId] = useState<string | null>(null);
+  const [finishingJob, setFinishingJob] = useState<{ status: string; stage: string; message: string; kind: string } | null>(null);
+  const [gpuReady, setGpuReady] = useState(false);
+  const [gpuMessage, setGpuMessage] = useState("GPU Upscaling unavailable. FFmpeg upscale remains available.");
+
+  const finishing: MagiFinishingState = sequence?.finishing || {};
+  const activeClipId = selectedClip?.id || playheadClip?.id || "";
+  const activeGrade = (activeClipId && finishing.clipGrades?.[activeClipId]) || {};
+  const gradePreset = activeGrade.presetId || "";
+  const gradeParams = activeGrade.params || {};
+  const sliderValue = (key: string) => Math.round(((gradeParams[key] || 0) * 100));
+  const audioRange = finishing.audio?.range || "entire";
+  const upscaleEngine = finishing.upscale?.engine || "ffmpeg-scale";
+  const upscaleModel = finishing.upscale?.model || (upscaleEngine === "ffmpeg-scale" ? "lanczos" : "realesrgan-x4plus");
+  const upscaleTarget = finishing.upscale?.target || "1920x1080";
+
+  const patchFinishing = useCallback(
+    (patch: MagiFinishingState) => {
+      mutateSequence("finishing", "Update finishing", (current) => ({
+        doc: {
+          ...current,
+          finishing: {
+            ...(current.finishing || {}),
+            ...patch,
+            clipGrades: { ...(current.finishing?.clipGrades || {}), ...(patch.clipGrades || {}) },
+            upscale: { ...(current.finishing?.upscale || {}), ...(patch.upscale || {}) },
+            audio: { ...(current.finishing?.audio || {}), ...(patch.audio || {}) },
+            render: { ...(current.finishing?.render || {}), ...(patch.render || {}) },
+          },
+        },
+      }));
+    },
+    [mutateSequence],
+  );
+
+  const setGradeParam = useCallback(
+    (key: string, slider: number) => {
+      if (!activeClipId) return;
+      const next = { ...gradeParams, [key]: slider / 100 };
+      patchFinishing({ clipGrades: { [activeClipId]: { presetId: gradePreset, params: next } } });
+    },
+    [activeClipId, gradeParams, gradePreset, patchFinishing],
+  );
+
+  useEffect(() => {
+    void api.magi.upscaleCapabilities().then((caps) => {
+      setGpuReady(Boolean(caps.realesrganReady));
+      if (typeof caps.creatorMessage === "string" && caps.creatorMessage) {
+        setGpuMessage(caps.creatorMessage);
+      }
+    }).catch(() => setGpuReady(false));
+  }, []);
+
+  useEffect(() => {
+    if (!finishingJobId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const job = await api.magi.getFinishingJob(project.id, finishingJobId);
+        if (cancelled) return;
+        setFinishingJob({
+          status: String(job.status || ""),
+          stage: String(job.stage || ""),
+          message: String(job.message || ""),
+          kind: String(job.kind || ""),
+        });
+        const status = String(job.status || "");
+        if (["done", "failed", "cancelled", "canceled", "timed_out"].includes(status)) {
+          setFinishingJobId(null);
+          await onChange();
+        }
+      } catch {
+        /* keep polling */
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [finishingJobId, onChange, project.id]);
+
+  const waitAccepted = (result: Record<string, unknown>, kind: string) => {
+    const jobId = String(result.jobId || (Array.isArray(result.jobIds) ? result.jobIds[0] : "") || "");
+    if (!jobId) {
+      setMessage(String(result.message || "The studio did not accept this job."));
+      return;
+    }
+    setFinishingJob({ status: String(result.status || "queued"), stage: String(result.stage || "Queued"), message: String(result.message || "Queued"), kind });
+    setFinishingJobId(jobId);
+    setMessage(String(result.message || "Queued."));
+  };
   const handleExportToTimeline = useCallback(async () => {
     const current = sequenceRef.current;
     const scene = project.scenes[0];
@@ -1610,13 +1704,11 @@ function MagiEditorInner({
         <div className="magi-field">
           <label>Preset</label>
           <select
-            value=""
+            data-testid="magi-color-preset"
+            value={gradePreset}
             onChange={(e) => {
-              if (!currentAsset) return;
-              const presetId = e.target.value;
-              if (presetId) {
-                api.magi.previewColorGrade(project.id, currentAsset.id, presetId, {}).then(() => {});
-              }
+              if (!activeClipId) return;
+              patchFinishing({ clipGrades: { [activeClipId]: { presetId: e.target.value, params: gradeParams } } });
             }}
           >
             <option value="">None</option>
@@ -1639,26 +1731,65 @@ function MagiEditorInner({
         </div>
         <div className="magi-field">
           <label>Exposure</label>
-          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+          <input data-testid="magi-color-exposure" type="range" min="-50" max="50" value={sliderValue("brightness")} onChange={(e) => setGradeParam("brightness", Number(e.target.value))} />
         </div>
         <div className="magi-field">
           <label>Contrast</label>
-          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+          <input data-testid="magi-color-contrast" type="range" min="-50" max="50" value={sliderValue("contrast")} onChange={(e) => setGradeParam("contrast", Number(e.target.value))} />
         </div>
         <div className="magi-field">
           <label>Saturation</label>
-          <input type="range" min="-50" max="50" value="0" onChange={() => {}} />
+          <input data-testid="magi-color-saturation" type="range" min="-50" max="50" value={sliderValue("saturation")} onChange={(e) => setGradeParam("saturation", Number(e.target.value))} />
         </div>
         <div className="magi-actions">
-          <button type="button" className="magi-primary" onClick={async () => {
-            if (!currentAsset) return;
-            await api.magi.applyColorGrade(project.id, currentAsset.id, "", {});
-            setMessage("Color grade applied.");
-            await onChange();
-          }}>
+          <button
+            type="button"
+            className="magi-chip"
+            data-testid="magi-color-preview"
+            disabled={!currentAsset}
+            onClick={async () => {
+              if (!currentAsset) return;
+              const result = await api.magi.previewColorGrade(project.id, currentAsset.id, gradePreset, gradeParams, activeClipId);
+              const previewId = String(result.output_asset_id || result.assetId || "");
+              if (previewId) {
+                setCompareAssetId(previewId);
+                setViewerMode("compare");
+              }
+              setMessage("Color preview ready. Source clip is unchanged.");
+              await onChange();
+            }}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            className="magi-primary"
+            data-testid="magi-color-apply"
+            disabled={!currentAsset}
+            onClick={async () => {
+              if (!currentAsset) return;
+              try {
+                const result = await api.magi.applyColorGrade(project.id, currentAsset.id, gradePreset, gradeParams, activeClipId);
+                const gradedId = String(result.output_asset_id || result.assetId || "");
+                if (gradedId) setCompareAssetId(gradedId);
+                setMessage("Color look saved. Final render will apply it.");
+                await onChange();
+              } catch (err: any) {
+                setMessage(err?.message || "Color look could not be saved.");
+              }
+            }}
+          >
             Apply Grade
           </button>
-          <button type="button" className="magi-chip" onClick={() => setMessage("Color graded reset.")}>
+          <button
+            type="button"
+            className="magi-chip"
+            onClick={() => {
+              if (!activeClipId) return;
+              patchFinishing({ clipGrades: { [activeClipId]: { presetId: "", params: {} } } });
+              setMessage("Color look cleared.");
+            }}
+          >
             Reset
           </button>
         </div>
@@ -1690,40 +1821,39 @@ function MagiEditorInner({
         <div className="magi-field">
           <label>Prompt</label>
           <textarea
+            data-testid="magi-audio-prompt"
             value={command}
             onChange={(e) => setCommand(e.target.value)}
             placeholder="Give this scene an intimate mysterious score with subtle café ambience..."
             rows={2}
           />
         </div>
+        <p className="magi-empty">Music + SFX creates two separate audio clips, not a mixed stem.</p>
         <div className="magi-actions">
-          <button type="button" className="magi-chip" onClick={async () => {
+          <button type="button" className="magi-chip" data-testid="magi-audio-music" disabled={Boolean(finishingJobId)} onClick={async () => {
             try {
-              await api.magi.generateAudio(project.id, "music", command || "ambient background");
-              setMessage("Music generation queued.");
-              await onChange();
+              const result = await api.magi.generateAudio(project.id, "music", command || "ambient background", { range: audioRange, clipId: selectedClip?.id });
+              waitAccepted(result, "magi_audio_generate");
             } catch (err: any) {
               setMessage(err?.message || "Music generation failed");
             }
           }}>
             Music
           </button>
-          <button type="button" className="magi-chip" onClick={async () => {
+          <button type="button" className="magi-chip" data-testid="magi-audio-sfx" disabled={Boolean(finishingJobId)} onClick={async () => {
             try {
-              await api.magi.generateAudio(project.id, "sfx", command || "ambient sfx");
-              setMessage("SFX generation queued.");
-              await onChange();
+              const result = await api.magi.generateAudio(project.id, "sfx", command || "ambient sfx", { range: audioRange, clipId: selectedClip?.id });
+              waitAccepted(result, "magi_audio_generate");
             } catch (err: any) {
               setMessage(err?.message || "SFX generation failed");
             }
           }}>
             SFX
           </button>
-          <button type="button" className="magi-chip" onClick={async () => {
+          <button type="button" className="magi-chip" data-testid="magi-audio-both" disabled={Boolean(finishingJobId)} onClick={async () => {
             try {
-              await api.magi.generateAudio(project.id, "all", command || "music and ambience");
-              setMessage("Audio generation queued.");
-              await onChange();
+              const result = await api.magi.generateAudio(project.id, "all", command || "music and ambience", { range: audioRange, clipId: selectedClip?.id });
+              waitAccepted(result, "magi_audio_generate");
             } catch (err: any) {
               setMessage(err?.message || "Audio generation failed");
             }
@@ -1733,16 +1863,17 @@ function MagiEditorInner({
         </div>
         <div className="magi-field">
           <label>Range</label>
-          <select defaultValue="all">
-            <option value="all">Entire Edit</option>
+          <select data-testid="magi-audio-range" value={audioRange} onChange={(e) => patchFinishing({ audio: { range: e.target.value as "entire" | "clip" } })}>
+            <option value="entire">Entire Edit</option>
             <option value="clip">Selected Clip</option>
           </select>
         </div>
       </MagiAccordion>
       <MagiAccordion id="upscale" title="Upscale" open={Boolean(layout.accordionState.upscale)} onToggle={(next) => setAccordion("upscale", next)}>
+        {!gpuReady ? <p className="magi-empty">{gpuMessage}</p> : null}
         <div className="magi-field">
           <label>Target</label>
-          <select defaultValue="1920x1080">
+          <select data-testid="magi-upscale-target" value={upscaleTarget} onChange={(e) => patchFinishing({ upscale: { target: e.target.value, engine: upscaleEngine, model: upscaleModel, enabled: true } })}>
             <option value="1280x720">720p</option>
             <option value="1920x1080">1080p</option>
             <option value="2560x1440">1440p</option>
@@ -1752,33 +1883,46 @@ function MagiEditorInner({
         </div>
         <div className="magi-field">
           <label>Engine</label>
-          <select defaultValue="ffmpeg-scale">
+          <select data-testid="magi-upscale-engine" value={upscaleEngine} onChange={(e) => patchFinishing({ upscale: { engine: e.target.value, target: upscaleTarget, model: e.target.value === "ffmpeg-scale" ? "lanczos" : "realesrgan-x4plus", enabled: true } })}>
             <option value="ffmpeg-scale">FFmpeg (fast)</option>
-            <option value="realesrgan-ncnn-vulkan">Real-ESRGAN (GPU)</option>
+            <option value="realesrgan-ncnn-vulkan" disabled={!gpuReady}>Real-ESRGAN (GPU)</option>
           </select>
         </div>
         <div className="magi-field">
           <label>Model</label>
-          <select defaultValue="lanczos">
+          <select data-testid="magi-upscale-model" value={upscaleModel} onChange={(e) => patchFinishing({ upscale: { model: e.target.value, engine: upscaleEngine, target: upscaleTarget, enabled: true } })}>
             <option value="lanczos">Lanczos (general)</option>
             <option value="bicubic">Bicubic (soft)</option>
-            <option value="realesrgan-x4plus">Real-ESRGAN 4x+</option>
-            <option value="realesr-animevideov3">Anime Video 4x</option>
+            <option value="realesrgan-x4plus">General 4x</option>
+            <option value="realesr-animevideov3">Anime Video</option>
+            <option value="realesrgan-x4plus-anime">Anime 4x</option>
           </select>
         </div>
         <div className="magi-actions">
-          <button type="button" className="magi-primary" onClick={async () => {
+          <button type="button" className="magi-primary" data-testid="magi-upscale-preview" disabled={!currentAsset || Boolean(finishingJobId)} onClick={async () => {
             if (!currentAsset) return;
-            await api.magi.previewUpscale(project.id, currentAsset.id, "ffmpeg-scale", "lanczos", "1920x1080");
-            setMessage("Upscale preview queued.");
+            try {
+              const result = await api.magi.previewUpscale(project.id, currentAsset.id, "ffmpeg-scale", upscaleEngine === "ffmpeg-scale" ? upscaleModel : "lanczos", upscaleTarget);
+              if (result.output_asset_id) {
+                setCompareAssetId(String(result.output_asset_id));
+                setViewerMode("compare");
+              }
+              setMessage("Upscale preview ready. Source clip is unchanged.");
+              await onChange();
+            } catch (err: any) {
+              setMessage(err?.message || "Upscale preview failed");
+            }
           }}>
             Preview
           </button>
-          <button type="button" className="magi-chip" onClick={async () => {
+          <button type="button" className="magi-chip" data-testid="magi-upscale-apply" disabled={!currentAsset || Boolean(finishingJobId) || (upscaleEngine === "realesrgan-ncnn-vulkan" && !gpuReady)} onClick={async () => {
             if (!currentAsset) return;
-            await api.magi.applyUpscale(project.id, currentAsset.id, "ffmpeg-scale", "lanczos", "1920x1080");
-            setMessage("Upscale applied.");
-            await onChange();
+            try {
+              const result = await api.magi.applyUpscale(project.id, currentAsset.id, upscaleEngine, upscaleModel, upscaleTarget);
+              waitAccepted(result, "magi_upscale");
+            } catch (err: any) {
+              setMessage(err?.message || gpuMessage);
+            }
           }}>
             Apply Upscale
           </button>
@@ -1811,18 +1955,84 @@ function MagiEditorInner({
         </p>
       </MagiAccordion>
       <MagiAccordion id="export" title="Export" open={Boolean(layout.accordionState.export)} onToggle={(next) => setAccordion("export", next)}>
+        {finishingJob ? (
+          <p className="magi-empty" data-testid="magi-job-status">
+            {finishingJob.kind}: {finishingJob.status} — {finishingJob.stage || finishingJob.message}
+          </p>
+        ) : null}
+        {finishingJob && ["failed", "cancelled", "canceled", "timed_out"].includes(finishingJob.status) ? (
+          <button
+            type="button"
+            className="magi-chip"
+            data-testid="magi-job-retry"
+            onClick={() => {
+              setFinishingJob(null);
+              setFinishingJobId(null);
+              setMessage("Ready to try again.");
+            }}
+          >
+            Retry
+          </button>
+        ) : null}
         <div className="magi-actions">
           <button
             type="button"
+            className="magi-chip"
+            data-testid="magi-preview-render"
+            disabled={!sequence?.clips.length || Boolean(finishingJobId)}
+            onClick={async () => {
+              try {
+                const result = await api.magi.createRender(project.id, {
+                  profile: "preview",
+                  range: audioRange,
+                  clipId: selectedClip?.id,
+                  includeColor: true,
+                  includeAudio: true,
+                  upscale: { enabled: true, engine: "ffmpeg-scale", model: "lanczos", target: "1280x720" },
+                });
+                waitAccepted(result, "magi_final_render");
+              } catch (err: any) {
+                setMessage(err?.message || "Preview render failed");
+              }
+            }}
+          >
+            Preview Render
+          </button>
+          <button
+            type="button"
             className="magi-primary"
+            data-testid="magi-final-render"
+            disabled={!sequence?.clips.length || Boolean(finishingJobId)}
+            onClick={async () => {
+              try {
+                const result = await api.magi.createRender(project.id, {
+                  profile: "final",
+                  range: audioRange,
+                  clipId: selectedClip?.id,
+                  includeColor: true,
+                  includeAudio: true,
+                  includeOverlays: true,
+                  upscale: { enabled: true, engine: upscaleEngine, model: upscaleModel, target: upscaleTarget },
+                });
+                waitAccepted(result, "magi_final_render");
+              } catch (err: any) {
+                setMessage(err?.message || "Final render failed");
+              }
+            }}
+          >
+            Final Render
+          </button>
+          <button
+            type="button"
+            className="magi-chip"
             data-testid="magi-inspector-export"
             disabled={timelineExportBusy || !sequence?.clips.length}
             onClick={() => void handleExportToTimeline()}
           >
             {timelineExportBusy ? "Exporting…" : "Send to Timeline"}
           </button>
-          <p className="magi-empty">Place the MAGI sequence clips onto the W46 Timeline with provenance.</p>
         </div>
+        <p className="magi-empty">Preview is a short look. Final uses your color, audio, and upscale settings.</p>
       </MagiAccordion>
       <MagiAccordion id="compare" title="Compare" open={Boolean(layout.accordionState.compare)} onToggle={(next) => setAccordion("compare", next)}>
         <div className="magi-field">

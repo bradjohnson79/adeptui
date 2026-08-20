@@ -66,6 +66,8 @@ def suggested_install_path(component_id: str) -> str:
     Other path_link components may still ensure folders exist.
     """
     component = get_component(component_id)
+    if component_id == "magi_gpu_upscale" or component.installer == "realesrgan_ncnn":
+        return str(Path(settings.data_dir) / "runtimes" / "realesrgan-ncnn-vulkan")
     if is_avatar_runtime_component(component_id):
         return str(avatar_runtime_root(component_id))
     if component.installer == "asset_pack":
@@ -78,6 +80,10 @@ def ensure_suggested_path(component_id: str) -> Path:
     component = get_component(component_id)
     if is_avatar_runtime_component(component_id):
         root = avatar_runtime_root(component_id)
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+    if component_id == "magi_gpu_upscale" or component.installer == "realesrgan_ncnn":
+        root = Path(settings.data_dir) / "runtimes" / "realesrgan-ncnn-vulkan"
         root.mkdir(parents=True, exist_ok=True)
         return root
     models = default_models_root()
