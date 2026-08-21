@@ -46,6 +46,7 @@ Quiet label: **1 square = 1 meter**. APPROVED / PROPOSED / OBSERVED stay distinc
 |---|---|
 | Unit `studio-api/tests/test_spatial_metric.py` | **10 passed** |
 | Playwright `tests/e2e/codirector/phase-2.1-spatial-metric.spec.ts` | **3 passed (5.2s)** — 20×20 / 12 m / camera lock / persist / isolation / `1 square = 1 meter` |
+| Revision B + C regression | **14 passed (19.9s)** including Playwright H persist |
 | Schnick coords rescale | **PASS** — `x=1.25, z=-0.5` unchanged after migrate |
 | No `zones[]` | **PASS** |
 | Beta | http://127.0.0.1:8760/ and http://127.0.0.1:8758/api/health **200** |
@@ -54,5 +55,7 @@ Quiet label: **1 square = 1 meter**. APPROVED / PROPOSED / OBSERVED stay distinc
 
 | Reviewer | SHA | Verdict |
 |---|---|---|
-| GLM 5.2 | pending | |
-| Kimi K3 | pending | |
+| GLM 5.2 | `11cb0e1` | READY FOR PRIMARY REVIEW |
+| Kimi K3 | `11cb0e1` | READY after primary adjudication |
+
+Kimi flagged committed frontend `movementSegments` on `studio-web` `SpatialMapDocument`. That type is Phase 2 production legacy (`7964efd`), not a Phase 2.1 add. The backend Pydantic `SpatialMapDocument` at `11cb0e1` has no `movementSegments` / `zones`. Primary accepts this as out of Phase 2.1 scope.
