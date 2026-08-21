@@ -16,13 +16,13 @@ PoseCraft remains the pose engine. This phase adds kinematic pose intelligence a
 | Item | Value |
 |---|---|
 | Branch | `feat/codirector-temporal-continuity` |
-| Starting / tracked HEAD | `9b8d5a9cdae8c88266e6fd253551450611c1e4d9` |
+| Starting / tracked HEAD | `773feddc42b819e0d275ce33497409088efd8b4c` (Phase 2 source). Clean-clone repair is the follow-up commit on this tree. |
 | Cert project | Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` |
 | Creator UI | http://127.0.0.1:8760/ |
 | Studio API | http://127.0.0.1:8758/ |
 | Live evidence | [evidence/phase2-live-gates.json](./evidence/phase2-live-gates.json) |
 
-Phase 2 source is implemented on this working tree. It is **not yet in the tracked HEAD**. A clean clone of `9b8d5a9` will not include `pose_intelligence/` until this work is committed.
+Phase 2 source is in `773fedd`. Peer review of that SHA found a clean-clone blocker: `registry.py` / `definitions.py` bound untracked `movement_tools` and uncommitted `avatar.open_studio` / `avatar.detect_speakers`. Those leaked bindings are stripped in the follow-up commit; PoseCraft intelligence tools stay.
 
 ## Product law
 
@@ -118,6 +118,10 @@ World intelligence worker: `available=true`, `workerOk=true`. Pose packets with 
 |---|---|---|
 | GLM 5.2 (`glm-5.2-max`) [Review](61558c0f-f2b7-42b5-a6b5-73db14ef4e8c) | READY FOR PRIMARY REVIEW | Cache tautology, snapshot mislabel, Playwright reload, degraded UI |
 | Kimi K3 (`kimi-k3-max`) [Review](011c62f1-93f1-4587-bb46-588afad418ab) | GAPS FOUND | Persist key collision fixed; seated false-positive fixed; `observedWorld` attached after JEPA augment; JEPA evaluate proven; snapshot-cache fallback fixed |
+
+## Closure diagnosis (clean-clone)
+
+`773fedd` imported `movement_tools` and avatar speaker-studio handlers that were not in that tree. A clean clone failed at `app.codirector.service` → `tools.registry`. Repair: delete those 11 leaked tool definitions and their registry bindings. Keep `posecraft.get_pose_intelligence` and `posecraft.compare_poses`. Do not commit untracked movement/avatar work into the Phase 2 SHA.
 
 ## Closure diagnosis (Playwright H)
 

@@ -1162,15 +1162,6 @@ READ_TOOLS: tuple[ToolDefinition, ...] = (
         parameters=(ToolParameter("jobId", "string", required=True, max_length=36),),
         result_char_budget=12000,
     ),
-    ToolDefinition(
-        tool_id="avatar.open_studio",
-        kind="read",
-        title="Avatar: open studio",
-        description="Open Avatar Studio for the current project so the creator can see the live session.",
-        capability="project",
-        parameters=(ToolParameter("sessionId", "string", required=False, max_length=36),),
-        result_char_budget=4000,
-    ),
     # ---- M4.11 Co-Director Spatial Intelligence (read) ----
     ToolDefinition(
         tool_id="spatial.list_maps",
@@ -3517,16 +3508,6 @@ MUTATING_TOOLS: tuple[ToolDefinition, ...] = (
             ToolParameter("speakerBVoiceMode", "string", required=False, max_length=16),
         ),
         result_char_budget=16000,
-    ),
-    ToolDefinition(
-        tool_id="avatar.detect_speakers",
-        kind="mutating",
-        title="Avatar: detect speakers",
-        description="Find Person 1 and Person 2 in the current Avatar Studio still without guessing character names.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(ToolParameter("sessionId", "string", required=False, max_length=36),),
-        result_char_budget=8000,
     ),
     ToolDefinition(
         tool_id="avatar.adjust_section",
@@ -6609,126 +6590,6 @@ READ_TOOLS = READ_TOOLS + (
             "readiness. READ-only — no writes or proposals."
         ),
         capability="project",
-    ),
-)
-
-READ_TOOLS = READ_TOOLS + (
-    ToolDefinition(
-        tool_id="spatial.plan_movements",
-        kind="read",
-        title="Plan movements",
-        description="Recommend the next Movement Segment without changing the Spatial Map. Mutate only after Build them.",
-        capability="project",
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("beatName", "string", required=False, max_length=120),
-            ToolParameter("userDirection", "string", required=False, max_length=2000),
-        ),
-        result_char_budget=4000,
-    ),
-    ToolDefinition(
-        tool_id="workspace.open_scene_creator",
-        kind="read",
-        title="Open Scene Creator",
-        description="Open Scene Creator Standard or Mini for the current project and optional movement.",
-        capability="project",
-        parameters=(
-            ToolParameter("mode", "string", required=False, choices=("standard", "mini")),
-            ToolParameter("movementSegmentId", "string", required=False, max_length=36),
-        ),
-    ),
-)
-
-MUTATING_TOOLS = MUTATING_TOOLS + (
-    ToolDefinition(
-        tool_id="spatial.save",
-        kind="mutating",
-        title="Save Spatial Map",
-        description="Commit the current Spatial Map revision. Mini Takes stay blocked until this save is approved.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(ToolParameter("documentId", "string", required=False, max_length=36),),
-    ),
-    ToolDefinition(
-        tool_id="spatial.commit_map",
-        kind="mutating",
-        title="Commit Spatial Map",
-        description="Same as spatial.save — explicit Save proposal for the Spatial Map.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(ToolParameter("documentId", "string", required=False, max_length=36),),
-    ),
-    ToolDefinition(
-        tool_id="spatial.create_movement",
-        kind="mutating",
-        title="Create movement",
-        description="Inherit the current movement's placements and open the next blocking state. Direction stays blank unless supplied.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("beatName", "string", required=False, max_length=120),
-            ToolParameter("userDirection", "string", required=False, max_length=2000),
-            ToolParameter("productionPrompt", "string", required=False, max_length=2000),
-            ToolParameter("dialogue", "string", required=False, max_length=2000),
-            ToolParameter("speaker", "string", required=False, max_length=80),
-            ToolParameter("inheritFromId", "string", required=False, max_length=36),
-        ),
-    ),
-    ToolDefinition(
-        tool_id="spatial.update_movement",
-        kind="mutating",
-        title="Update movement",
-        description="Update beat name, direction, or dialogue on one Movement Segment.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("movementId", "string", required=True, max_length=36),
-            ToolParameter("beatName", "string", required=False, max_length=120),
-            ToolParameter("userDirection", "string", required=False, max_length=2000),
-            ToolParameter("productionPrompt", "string", required=False, max_length=2000),
-            ToolParameter("dialogue", "string", required=False, max_length=2000),
-            ToolParameter("speaker", "string", required=False, max_length=80),
-        ),
-    ),
-    ToolDefinition(
-        tool_id="spatial.activate_movement",
-        kind="mutating",
-        title="Activate movement",
-        description="Switch the active Movement Segment and hydrate its placements onto the map.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("movementId", "string", required=True, max_length=36),
-        ),
-    ),
-    ToolDefinition(
-        tool_id="spatial.delete_movement",
-        kind="mutating",
-        title="Delete movement",
-        description="Remove a later movement. Movement 1 cannot be removed.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("movementId", "string", required=True, max_length=36),
-        ),
-    ),
-    ToolDefinition(
-        tool_id="scene_creator_mini.create_take",
-        kind="mutating",
-        title="Create Mini take",
-        description="Generate Scene Creator Mini stills for one saved movement and the saved cameras. Never auto-approved.",
-        capability="project",
-        pinned_resources=("project",),
-        parameters=(
-            ToolParameter("documentId", "string", required=False, max_length=36),
-            ToolParameter("movementSegmentId", "string", required=True, max_length=36),
-            ToolParameter("generator", "string", required=False, choices=("qwen2512", "gpt-image-2")),
-            ToolParameter("aspectRatio", "string", required=False, max_length=12),
-        ),
     ),
 )
 
