@@ -16,6 +16,25 @@ _SELECT_UNAVAILABLE = (
 )
 
 
+def _lookup_cached_selection(*, project_id: str, asset_id: str, label: str) -> dict[str, Any] | None:
+    """Best-effort cache read. Missing cache module is treated as a miss, not a GPU select."""
+
+    try:
+        from .cache import get_cached_selection
+        from .paths import SAM21_REVISION
+    except ImportError:
+        return None
+    return get_cached_selection(
+        project_id=project_id,
+        asset_id=asset_id,
+        frame_time_ms=0,
+        entity=(label or "object").strip(),
+        model_id="sam21-hiera-tiny",
+        model_version=SAM21_REVISION,
+        source="text" if label else "click",
+    )
+
+
 def resolve_auto_mask(
     db: Session,
     project_id: str,
@@ -44,20 +63,14 @@ def resolve_auto_mask(
                 break
     if source_asset_id:
         from ...image_product.masks import get_mask
-        from .cache import get_cached_selection
-        from .paths import SAM21_REVISION
 
         # Never spawn the SAM/Comfy worker on this request. A 30–180s GPU
         # select holds SQLite and restarts Playwright workers, which drops
         # beforeAll state and looks like Accept deleted cameras.
-        cached = get_cached_selection(
+        cached = _lookup_cached_selection(
             project_id=project_id,
             asset_id=source_asset_id,
-            frame_time_ms=0,
-            entity=(label or "object").strip(),
-            model_id="sam21-hiera-tiny",
-            model_version=SAM21_REVISION,
-            source="text" if label else "click",
+            label=label,
         )
         if cached and cached.get("maskAssetId") and get_mask(project_id, str(cached["maskAssetId"])):
             return {

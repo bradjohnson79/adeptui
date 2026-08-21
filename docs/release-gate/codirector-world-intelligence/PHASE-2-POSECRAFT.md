@@ -123,7 +123,7 @@ World intelligence worker: `available=true`, `workerOk=true`. Pose packets with 
 
 `773fedd` imported `movement_tools` and avatar speaker-studio handlers that were not in that tree. A clean clone failed at `app.codirector.service` → `tools.registry`. Repair: delete those 11 leaked tool definitions and their registry bindings. Keep `posecraft.get_pose_intelligence` and `posecraft.compare_poses`. Do not commit untracked movement/avatar work into the Phase 2 SHA.
 
-`auto_mask.py` also imported untracked `perception_router.creator_unavailable_message`. Repair: keep the creator-facing Essentials Pack / paint-the-region message inline so the Phase 2 cache-or-honest-paint path imports on a clean clone. The pre-existing `test_camera_shot_packet_absorbs_accepted_draft_notes` import of uncommitted `_append_spatial_draft_notes` was already failing at `9b8d5a9` and is not a Phase 2 regression.
+`auto_mask.py` also imported untracked `perception_router.creator_unavailable_message`. Repair: keep the creator-facing Essentials Pack / paint-the-region message inline so the Phase 2 cache-or-honest-paint path imports on a clean clone. Cache lookup is optional (`ImportError` → miss); the Phase 2 test no longer monkeypatches untracked `selection_service` / `cache`. The pre-existing `test_camera_shot_packet_absorbs_accepted_draft_notes` import of uncommitted `_append_spatial_draft_notes` was already failing at `9b8d5a9` and is not a Phase 2 regression.
 
 ## Closure diagnosis (Playwright H)
 
