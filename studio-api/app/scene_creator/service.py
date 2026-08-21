@@ -221,7 +221,7 @@ def build_production_context(
     if claimed_map and not (resolved_ok or sheet_ers or actual_ers):
         loaded = False
 
-    return {
+    ctx = {
         "loaded": loaded,
         "handoffId": handoff_id,
         "revision": getattr(selected_profile, "revision", None),
@@ -232,6 +232,41 @@ def build_production_context(
         "ersLibraryAssetId": claimed_ers,
         "aspectRatio": getattr(selected_profile, "aspectRatio", None) or "16:9",
     }
+    return ctx
+
+
+def _attach_pose_intelligence(
+    db: Session,
+    project_id: str,
+    production_context: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Preserve PoseCraft intended state on Scene Creator hydrate. Does not invent spatial truth."""
+    try:
+        from ..codirector.pose_intelligence.persist import load_handoff, load_packet
+
+        handoff = load_handoff(db, project_id, "scene-creator")
+        packet = load_packet(db, project_id)
+    except Exception:
+        return production_context
+    if not handoff and not packet:
+        return production_context
+    ctx = dict(production_context or {})
+    if handoff:
+        ctx["poseWorldStatePacketId"] = handoff.get("poseWorldStatePacketId") or ""
+        ctx["poseSnapshotId"] = handoff.get("poseSnapshotId") or ""
+        ctx["poseInvariants"] = handoff.get("poseInvariants") or {}
+        ctx["poseImageAssetId"] = handoff.get("imageAssetId") or ""
+    if packet is not None:
+        ctx["poseIntelligence"] = {
+            "packetId": packet.packetId,
+            "summary": packet.creatorFacingSummary,
+            "support": packet.character.primarySupport,
+            "stance": packet.character.stance,
+            "contacts": packet.interaction.handContact + packet.interaction.footContact,
+            "stateKind": packet.stateKind,
+            "availability": packet.availability,
+        }
+    return ctx
 
 
 def hydrate_workspace(
@@ -461,6 +496,7 @@ def hydrate_workspace(
         scene_id=scene.id,
         sheet=sheet,
     )
+    production_context = _attach_pose_intelligence(db, project_id, production_context)
     production_readiness = None
     try:
         from .readiness import readiness_from_workspace

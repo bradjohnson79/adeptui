@@ -589,3 +589,26 @@
 .posecraft-viewport-label.selected {
   background: rgba(13, 148, 136, 0.92);
 }
+
+.posecraft-pose-intel-grid {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+}
+.posecraft-pose-intel-grid div {
+  display: grid;
+  gap: 0.15rem;
+}
+.posecraft-pose-intel-grid dt {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #94a3b8);
+}
+.posecraft-pose-intel-grid dd {
+  margin: 0;
+  font-weight: 600;
+}
+.posecraft-pose-intel[data-status="warning"] dd[data-testid="posecraft-pose-intel-risk"] {
+  color: #fbbf24;
+}

@@ -1,22 +1,11 @@
 /**
- * PoseCraft — Low-poly human figure mesh builder (Final Mandatory GO, D1–D4).
+ * PoseCraft — Faceted anatomical low-poly humans (Revision C Phase 2, v3).
  *
- * Procedurally constructs faceted, flat-shaded low-poly humanoid body meshes
- * parented to an existing 17-joint TransformNode rig. The builder does NOT own
- * the rig (the rig is created by `createFigureRig` in engine.ts and preserved
- * for pose catalog / gizmo / API stability); it only owns the body geometry
- * and the region→joint pick mapping.
+ * Region meshes stay parented to the existing 17-joint TransformNode rig.
+ * The builder does not own posing, gizmos, or the pose catalog.
  *
- * Art direction (from docs/release-gate/posecraft/refs/human-figures/):
- *  - Faceted head (low-subdivision icosphere), short neck
- *  - Shaped chest / waist / pelvis (male V-taper, female waist-hip, children
- *    larger head + shorter limbs; boy ≠ girl)
- *  - Tapered limb segments (low-tessellation cylinders, flat-shaded)
- *  - Mitt hands (palm block + thumb block) and wedge feet (triangular prism)
- *  - Flat shading so each polygonal facet reads clearly
- *
- * Metadata exposed per figure: modelId, jointCount, bodyRegions[],
- * legacyBlockModel: false.
+ * Visual target: faceted / diamond-cut anatomy (man, woman, boy, girl),
+ * T-pose, unclothed base mesh, 2,000–5,000 triangles, flat-shaded facets.
  */
 import {
   Mesh,
@@ -26,7 +15,7 @@ import {
   TransformNode,
   VertexData,
 } from "@babylonjs/core";
-import type { ArchetypeSpec, JointName } from "./types";
+import type { ArchetypeId, ArchetypeSpec, JointName } from "./types";
 
 export type BodyRegion =
   | "head" | "neck" | "chest" | "spine" | "pelvis"
@@ -50,25 +39,41 @@ export type HumanMeshMetadata = {
   jointCount: number;
   bodyRegions: BodyRegion[];
   legacyBlockModel: false;
+  triangleCount?: number;
+  gender?: "male" | "female";
+  ageClass?: "adult" | "child";
+  heightM?: number;
+  rig?: string;
 };
 
 export const HUMAN_MODEL_IDS = {
-  "adult-male": "adult-male-lowpoly-v2",
-  "adult-female": "adult-female-lowpoly-v2",
-  "child-boy": "child-boy-lowpoly-v2",
-  "child-girl": "child-girl-lowpoly-v2",
+  "adult-male": "adult-male-lowpoly-v3",
+  "adult-female": "adult-female-lowpoly-v3",
+  "child-boy": "child-boy-lowpoly-v3",
+  "child-girl": "child-girl-lowpoly-v3",
 } as const;
 
 export function getHumanModelId(archetypeId: ArchetypeSpec["id"]): string {
-  return HUMAN_MODEL_IDS[archetypeId] ?? "adult-male-lowpoly-v2";
+  return HUMAN_MODEL_IDS[archetypeId] ?? "adult-male-lowpoly-v3";
 }
 
-export function buildHumanMeshMetadata(archetypeId: ArchetypeSpec["id"]): HumanMeshMetadata {
+export function figureIdentity(archetypeId: ArchetypeId): { gender: "male" | "female"; ageClass: "adult" | "child" } {
+  if (archetypeId === "adult-female" || archetypeId === "child-girl") return { gender: "female", ageClass: archetypeId === "child-girl" ? "child" : "adult" };
+  return { gender: archetypeId === "child-boy" ? "male" : "male", ageClass: archetypeId === "child-boy" ? "child" : "adult" };
+}
+
+export function buildHumanMeshMetadata(archetypeId: ArchetypeSpec["id"], triangleCount = 0, heightM = 0): HumanMeshMetadata {
+  const id = figureIdentity(archetypeId);
   return {
     modelId: getHumanModelId(archetypeId),
     jointCount: 17,
     bodyRegions: [...BODY_REGIONS],
     legacyBlockModel: false as const,
+    triangleCount,
+    gender: id.gender,
+    ageClass: id.ageClass,
+    heightM,
+    rig: "posecraft-v2",
   };
 }
 
@@ -88,44 +93,56 @@ function tagMesh(mesh: Mesh, figureId: string, region: BodyRegion, material: Sta
   return mesh;
 }
 
-function torsoDepth(spec: ArchetypeSpec): number {
-  // Front-back depth of torso segments, derived from archetype proportions.
-  return Math.max(spec.shoulderWidth, spec.hipWidth) * 0.58;
+export function countMeshTriangles(mesh: Mesh): number {
+  const indices = mesh.getIndices();
+  return indices ? Math.floor(indices.length / 3) : 0;
 }
 
-function createTaperedLimb(
-  scene: Scene, parent: TransformNode, figureId: string, region: BodyRegion,
-  options: { length: number; topRadius: number; bottomRadius: number; y: number },
-  material: StandardMaterial,
+function applyCustom(
+  scene: Scene,
+  name: string,
+  positions: number[],
+  indices: number[],
 ): Mesh {
-  const mesh = MeshBuilder.CreateCylinder(`${figureId}-body-${region}`, {
-    height: options.length,
-    diameterTop: options.topRadius * 2,
-    diameterBottom: options.bottomRadius * 2,
-    tessellation: 6,
-  }, scene);
-  mesh.parent = parent;
-  mesh.position.y = options.y;
-  flatShade(mesh);
-  tagMesh(mesh, figureId, region, material);
+  const normals: number[] = [];
+  const vertexData = new VertexData();
+  vertexData.positions = positions;
+  vertexData.indices = indices;
+  VertexData.ComputeNormals(positions, indices, normals);
+  vertexData.normals = normals;
+  const mesh = new Mesh(name, scene);
+  vertexData.applyToMesh(mesh);
   return mesh;
 }
 
-function createTorsoSegment(
-  scene: Scene, parent: TransformNode, figureId: string, region: BodyRegion,
-  options: { topWidth: number; bottomWidth: number; height: number; depth: number; y: number },
+function ringTorso(
+  scene: Scene,
+  parent: TransformNode,
+  figureId: string,
+  region: BodyRegion,
+  rings: Array<{ y: number; rx: number; rz: number }>,
+  sides: number,
   material: StandardMaterial,
 ): Mesh {
-  const mesh = MeshBuilder.CreateCylinder(`${figureId}-body-${region}`, {
-    height: options.height,
-    diameterTop: options.topWidth,
-    diameterBottom: options.bottomWidth,
-    tessellation: 8,
-  }, scene);
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (const ring of rings) {
+    for (let i = 0; i < sides; i += 1) {
+      const a = (i / sides) * Math.PI * 2;
+      positions.push(Math.cos(a) * ring.rx, ring.y, Math.sin(a) * ring.rz);
+    }
+  }
+  for (let r = 0; r < rings.length - 1; r += 1) {
+    for (let i = 0; i < sides; i += 1) {
+      const a = r * sides + i;
+      const b = r * sides + ((i + 1) % sides);
+      const c = (r + 1) * sides + i;
+      const d = (r + 1) * sides + ((i + 1) % sides);
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  const mesh = applyCustom(scene, `${figureId}-body-${region}`, positions, indices);
   mesh.parent = parent;
-  mesh.position.y = options.y;
-  const base = Math.max(options.topWidth, options.bottomWidth);
-  mesh.scaling.z = options.depth / base;
   flatShade(mesh);
   tagMesh(mesh, figureId, region, material);
   return mesh;
@@ -134,9 +151,11 @@ function createTorsoSegment(
 function createFacetedHead(
   scene: Scene, parent: TransformNode, figureId: string, radius: number, material: StandardMaterial,
 ): Mesh {
-  const mesh = MeshBuilder.CreateIcoSphere(`${figureId}-body-head`, { radius, subdivisions: 1 }, scene);
+  const mesh = MeshBuilder.CreateIcoSphere(`${figureId}-body-head`, { radius, subdivisions: 2 }, scene);
   mesh.parent = parent;
-  mesh.position.y = radius * 0.55;
+  mesh.position.y = radius * 0.45;
+  mesh.scaling.z = 0.92;
+  mesh.scaling.x = 0.88;
   flatShade(mesh);
   tagMesh(mesh, figureId, "head", material);
   return mesh;
@@ -147,7 +166,7 @@ function createNeck(
   options: { height: number; radius: number }, material: StandardMaterial,
 ): Mesh {
   const mesh = MeshBuilder.CreateCylinder(`${figureId}-body-neck`, {
-    height: options.height, diameter: options.radius * 2, tessellation: 6,
+    height: options.height, diameter: options.radius * 2, tessellation: 12,
   }, scene);
   mesh.parent = parent;
   mesh.position.y = options.height / 2;
@@ -156,28 +175,59 @@ function createNeck(
   return mesh;
 }
 
-function createMittHand(
+function createAnatomicalLimb(
   scene: Scene, parent: TransformNode, figureId: string, region: BodyRegion,
-  options: { palmWidth: number; palmHeight: number; palmDepth: number; thumbWidth: number; thumbDepth: number; side: 1 | -1 },
+  options: { length: number; top: number; mid: number; bottom: number; y: number },
   material: StandardMaterial,
 ): Mesh {
-  const palm = MeshBuilder.CreateBox(`${figureId}-body-${region}`, {
-    width: options.palmWidth, height: options.palmHeight, depth: options.palmDepth,
-  }, scene);
-  palm.parent = parent;
-  palm.position.y = -options.palmHeight / 2;
-  palm.position.z = options.palmDepth * 0.15;
-  flatShade(palm);
-  tagMesh(palm, figureId, region, material);
+  const rings = [
+    { y: options.y + options.length / 2, rx: options.top, rz: options.top * 0.92 },
+    { y: options.y + options.length * 0.32, rx: options.top * 1.05, rz: options.top * 0.9 },
+    { y: options.y + options.length * 0.12, rx: options.mid * 1.02, rz: options.mid * 0.9 },
+    { y: options.y, rx: options.mid, rz: options.mid * 0.88 },
+    { y: options.y - options.length * 0.16, rx: options.mid * 0.96, rz: options.mid * 0.86 },
+    { y: options.y - options.length * 0.34, rx: options.bottom * 1.04, rz: options.bottom * 0.9 },
+    { y: options.y - options.length / 2, rx: options.bottom, rz: options.bottom * 0.86 },
+  ];
+  return ringTorso(scene, parent, figureId, region, rings, 12, material);
+}
 
-  const thumb = MeshBuilder.CreateBox(`${figureId}-body-${region}-thumb`, {
-    width: options.thumbWidth, height: options.palmHeight * 0.7, depth: options.thumbDepth,
+function createFacetedHand(
+  scene: Scene, parent: TransformNode, figureId: string, region: BodyRegion,
+  options: { palmW: number; palmH: number; palmD: number; side: 1 | -1 },
+  material: StandardMaterial,
+): Mesh {
+  const palm = ringTorso(scene, parent, figureId, region, [
+    { y: 0, rx: options.palmW * 0.48, rz: options.palmD * 0.38 },
+    { y: -options.palmH * 0.45, rx: options.palmW * 0.5, rz: options.palmD * 0.42 },
+    { y: -options.palmH, rx: options.palmW * 0.46, rz: options.palmD * 0.36 },
+  ], 8, material);
+  palm.position.z = options.palmD * 0.12;
+
+  const fingerW = options.palmW * 0.2;
+  const fingerH = options.palmH * 0.72;
+  for (let i = 0; i < 4; i += 1) {
+    const finger = MeshBuilder.CreateCylinder(`${figureId}-body-${region}-f${i}`, {
+      height: fingerH, diameterTop: fingerW * 0.72, diameterBottom: fingerW * 0.95, tessellation: 6,
+    }, scene);
+    finger.parent = palm;
+    finger.position.x = (i - 1.5) * (options.palmW * 0.22);
+    finger.position.y = -options.palmH * 0.55;
+    finger.position.z = options.palmD * 0.18;
+    flatShade(finger);
+    finger.material = material;
+    finger.isPickable = true;
+    finger.metadata = { figureId, region, kind: "body" };
+  }
+  const thumb = MeshBuilder.CreateCylinder(`${figureId}-body-${region}-thumb`, {
+    height: fingerH * 0.7, diameterTop: fingerW * 0.7, diameterBottom: fingerW * 1.05, tessellation: 6,
   }, scene);
-  thumb.parent = parent;
-  thumb.position.x = options.side * (options.palmWidth / 2 + options.thumbWidth / 2 * 0.6);
-  thumb.position.y = -options.palmHeight * 0.1;
-  thumb.position.z = options.palmDepth * 0.55;
-  thumb.rotation.z = options.side * -0.5;
+  thumb.parent = palm;
+  thumb.position.x = options.side * (options.palmW * 0.52);
+  thumb.position.y = -options.palmH * 0.08;
+  thumb.position.z = options.palmD * 0.28;
+  thumb.rotation.z = options.side * -0.7;
+  thumb.rotation.x = 0.35;
   flatShade(thumb);
   thumb.material = material;
   thumb.isPickable = true;
@@ -185,58 +235,61 @@ function createMittHand(
   return palm;
 }
 
-function createWedgeFoot(
+function createFacetedFoot(
   scene: Scene, parent: TransformNode, figureId: string, region: BodyRegion,
-  options: { width: number; length: number; height: number }, material: StandardMaterial,
+  options: { width: number; length: number; height: number },
+  material: StandardMaterial,
 ): Mesh {
   const w = options.width;
   const l = options.length;
   const h = options.height;
   const positions = [
-    -w / 2, 0, -l / 2, // 0 BBL
-    w / 2, 0, -l / 2,  // 1 BBR
-    -w / 2, 0, l / 2,  // 2 FBL
-    w / 2, 0, l / 2,   // 3 FBR
-    -w / 2, h, -l / 2, // 4 BTL
-    w / 2, h, -l / 2,  // 5 BTR
+    -w / 2, 0, -l * 0.35,
+    w / 2, 0, -l * 0.35,
+    -w * 0.42, 0, l * 0.55,
+    w * 0.42, 0, l * 0.55,
+    -w / 2, h, -l * 0.35,
+    w / 2, h, -l * 0.35,
+    -w * 0.38, h * 0.55, l * 0.2,
+    w * 0.38, h * 0.55, l * 0.2,
+    0, h * 0.35, l * 0.58,
   ];
   const indices = [
-    0, 2, 3, 0, 3, 1,         // bottom
-    0, 1, 5, 0, 5, 4,         // back
-    4, 5, 3, 4, 3, 2,         // top slope
-    0, 4, 2,                 // left side
-    1, 3, 5,                 // right side
+    0, 2, 3, 0, 3, 1,
+    4, 5, 7, 4, 7, 6,
+    6, 7, 8,
+    0, 1, 5, 0, 5, 4,
+    2, 8, 3,
+    0, 4, 6, 0, 6, 2,
+    1, 3, 7, 1, 7, 5,
+    2, 6, 8,
+    3, 8, 7,
   ];
-  const normals: number[] = [];
-  const vertexData = new VertexData();
-  vertexData.positions = positions;
-  vertexData.indices = indices;
-  VertexData.ComputeNormals(positions, indices, normals);
-  vertexData.normals = normals;
-  const mesh = new Mesh(`${figureId}-body-${region}`, scene);
-  vertexData.applyToMesh(mesh);
+  const mesh = applyCustom(scene, `${figureId}-body-${region}`, positions, indices);
   mesh.parent = parent;
-  mesh.position.y = -h * 0.1;
-  mesh.position.z = l * 0.25;
+  mesh.position.y = -h * 0.05;
+  mesh.position.z = l * 0.18;
   mesh.material = material;
   mesh.isPickable = true;
   mesh.metadata = { figureId, region, kind: "body" };
-  mesh.receiveShadows = false;
   mesh.convertToFlatShadedMesh();
   return mesh;
 }
 
 type ProportionTuning = {
   headRadius: number; neckRadius: number; neckLength: number;
-  chestTopWidth: number; chestBottomWidth: number; chestHeight: number;
-  waistTopWidth: number; waistBottomWidth: number; waistHeight: number;
-  pelvisTopWidth: number; pelvisBottomWidth: number; pelvisHeight: number;
-  upperArmTopRadius: number; upperArmBottomRadius: number;
-  lowerArmTopRadius: number; lowerArmBottomRadius: number;
-  upperLegTopRadius: number; upperLegBottomRadius: number;
-  lowerLegTopRadius: number; lowerLegBottomRadius: number;
+  chestTop: number; chestMid: number; chestBot: number; chestH: number;
+  waistTop: number; waistMid: number; waistBot: number; waistH: number;
+  pelvisTop: number; pelvisMid: number; pelvisBot: number; pelvisH: number;
+  chestDepth: number; waistDepth: number; pelvisDepth: number;
+  pecBoost: number; hipBoost: number;
+  upperArmTop: number; upperArmMid: number; upperArmBot: number;
+  lowerArmTop: number; lowerArmMid: number; lowerArmBot: number;
+  upperLegTop: number; upperLegMid: number; upperLegBot: number;
+  lowerLegTop: number; lowerLegMid: number; lowerLegBot: number;
   handPalmWidth: number; handPalmHeight: number; handPalmDepth: number;
   footWidth: number; footLength: number; footHeight: number;
+  deltoid: number;
 };
 
 function tuneProportions(spec: ArchetypeSpec): ProportionTuning {
@@ -245,44 +298,64 @@ function tuneProportions(spec: ArchetypeSpec): ProportionTuning {
   const hw = spec.hipWidth;
   const lt = spec.limbThickness;
   const isChild = spec.id === "child-boy" || spec.id === "child-girl";
+  const headRadius = isChild ? h * 0.11 : h * 0.074;
+  const neckRadius = sw * (spec.id === "adult-female" ? 0.14 : 0.16);
+  const neckLength = spec.torsoHeight * (isChild ? 0.11 : 0.12);
 
-  const headRadius = isChild ? h * 0.11 : h * 0.075;
-  const neckRadius = sw * 0.16;
-  const neckLength = spec.torsoHeight * 0.13;
-
-  let chestTopWidth: number; let chestBottomWidth: number;
-  let waistTopWidth: number; let waistBottomWidth: number;
-  let pelvisTopWidth: number; let pelvisBottomWidth: number;
+  let chestTop = sw * 0.52;
+  let chestMid = sw * 0.5;
+  let chestBot = sw * 0.4;
+  let waistTop = sw * 0.36;
+  let waistMid = hw * 0.48;
+  let waistBot = hw * 0.5;
+  let pelvisTop = hw * 0.52;
+  let pelvisMid = hw * 0.54;
+  let pelvisBot = hw * 0.42;
+  let pecBoost = 1;
+  let hipBoost = 1;
+  let chestDepth = sw * 0.32;
+  let waistDepth = sw * 0.28;
+  let pelvisDepth = hw * 0.42;
 
   if (spec.id === "adult-male") {
-    chestTopWidth = sw; chestBottomWidth = sw * 0.74;
-    waistTopWidth = sw * 0.72; waistBottomWidth = hw * 0.96;
-    pelvisTopWidth = hw * 0.98; pelvisBottomWidth = hw;
+    chestTop = sw * 0.55; chestMid = sw * 0.5; chestBot = sw * 0.38;
+    waistTop = sw * 0.34; waistMid = hw * 0.46; waistBot = hw * 0.5;
+    pelvisTop = hw * 0.5; pelvisMid = hw * 0.52; pelvisBot = hw * 0.4;
+    pecBoost = 1.12; hipBoost = 0.96;
+    chestDepth = sw * 0.34; waistDepth = sw * 0.26; pelvisDepth = hw * 0.4;
   } else if (spec.id === "adult-female") {
-    chestTopWidth = sw; chestBottomWidth = sw * 0.78;
-    waistTopWidth = sw * 0.66; waistBottomWidth = sw * 0.7;
-    pelvisTopWidth = hw * 1.04; pelvisBottomWidth = hw;
+    chestTop = sw * 0.5; chestMid = sw * 0.48; chestBot = sw * 0.36;
+    waistTop = sw * 0.28; waistMid = sw * 0.3; waistBot = hw * 0.48;
+    pelvisTop = hw * 0.56; pelvisMid = hw * 0.6; pelvisBot = hw * 0.46;
+    pecBoost = 1.08; hipBoost = 1.12;
+    chestDepth = sw * 0.3; waistDepth = sw * 0.24; pelvisDepth = hw * 0.46;
   } else if (spec.id === "child-boy") {
-    chestTopWidth = sw; chestBottomWidth = sw * 0.82;
-    waistTopWidth = sw * 0.8; waistBottomWidth = sw * 0.82;
-    pelvisTopWidth = hw * 0.92; pelvisBottomWidth = hw;
+    chestTop = sw * 0.48; chestMid = sw * 0.46; chestBot = sw * 0.42;
+    waistTop = sw * 0.4; waistMid = sw * 0.4; waistBot = hw * 0.46;
+    pelvisTop = hw * 0.46; pelvisMid = hw * 0.46; pelvisBot = hw * 0.4;
+    pecBoost = 1.0; hipBoost = 1.0;
+    chestDepth = sw * 0.3; waistDepth = sw * 0.28; pelvisDepth = hw * 0.38;
   } else {
-    chestTopWidth = sw * 0.94; chestBottomWidth = sw * 0.8;
-    waistTopWidth = sw * 0.74; waistBottomWidth = sw * 0.8;
-    pelvisTopWidth = hw * 1.02; pelvisBottomWidth = hw;
+    chestTop = sw * 0.46; chestMid = sw * 0.44; chestBot = sw * 0.38;
+    waistTop = sw * 0.36; waistMid = sw * 0.38; waistBot = hw * 0.48;
+    pelvisTop = hw * 0.5; pelvisMid = hw * 0.52; pelvisBot = hw * 0.42;
+    pecBoost = 1.02; hipBoost = 1.06;
+    chestDepth = sw * 0.28; waistDepth = sw * 0.26; pelvisDepth = hw * 0.4;
   }
 
   return {
     headRadius, neckRadius, neckLength,
-    chestTopWidth, chestBottomWidth, chestHeight: spec.torsoHeight * 0.38,
-    waistTopWidth, waistBottomWidth, waistHeight: spec.torsoHeight * 0.24,
-    pelvisTopWidth, pelvisBottomWidth, pelvisHeight: spec.torsoHeight * 0.16,
-    upperArmTopRadius: lt * 0.56, upperArmBottomRadius: lt * 0.44,
-    lowerArmTopRadius: lt * 0.42, lowerArmBottomRadius: lt * 0.34,
-    upperLegTopRadius: lt * 0.64, upperLegBottomRadius: lt * 0.5,
-    lowerLegTopRadius: lt * 0.48, lowerLegBottomRadius: lt * 0.36,
-    handPalmWidth: lt * 0.95, handPalmHeight: lt * 0.9, handPalmDepth: lt * 1.5,
-    footWidth: lt * 1.15, footLength: lt * 2.1, footHeight: lt * 0.55,
+    chestTop, chestMid, chestBot, chestH: spec.torsoHeight * 0.4,
+    waistTop, waistMid, waistBot, waistH: spec.torsoHeight * 0.24,
+    pelvisTop, pelvisMid, pelvisBot, pelvisH: spec.torsoHeight * 0.18,
+    chestDepth, waistDepth, pelvisDepth, pecBoost, hipBoost,
+    upperArmTop: lt * 0.58, upperArmMid: lt * 0.5, upperArmBot: lt * 0.42,
+    lowerArmTop: lt * 0.4, lowerArmMid: lt * 0.36, lowerArmBot: lt * 0.3,
+    upperLegTop: lt * 0.68, upperLegMid: lt * 0.58, upperLegBot: lt * 0.48,
+    lowerLegTop: lt * 0.46, lowerLegMid: lt * 0.4, lowerLegBot: lt * 0.32,
+    handPalmWidth: lt * 0.92, handPalmHeight: lt * 0.78, handPalmDepth: lt * 1.35,
+    footWidth: lt * 1.12, footLength: lt * 2.25, footHeight: lt * 0.5,
+    deltoid: lt * 0.55,
   };
 }
 
@@ -291,12 +364,6 @@ export type BuiltHumanMesh = {
   meshes: Mesh[];
 };
 
-/**
- * Build the full low-poly human body for a figure, parenting body meshes to
- * the existing 17-joint TransformNode rig. The pelvis joint sits at hipHeight;
- * torso segments stack upward from there, limbs hang downward from shoulder/
- * hip joints. Returns metadata + the list of body meshes (for disposal).
- */
 export function buildHumanBody(
   scene: Scene,
   figureId: string,
@@ -305,88 +372,118 @@ export function buildHumanBody(
   material: StandardMaterial,
 ): BuiltHumanMesh {
   const p = tuneProportions(spec);
-  const depth = torsoDepth(spec);
   const meshes: Mesh[] = [];
 
-  // Pelvis segment hangs just below the pelvis joint.
-  meshes.push(createTorsoSegment(scene, joints.pelvis, figureId, "pelvis", {
-    topWidth: p.pelvisTopWidth, bottomWidth: p.pelvisBottomWidth,
-    height: p.pelvisHeight, depth, y: -p.pelvisHeight / 2,
-  }, material));
-  // Spine/waist hangs below the spine joint.
-  meshes.push(createTorsoSegment(scene, joints.spine, figureId, "spine", {
-    topWidth: p.waistTopWidth, bottomWidth: p.waistBottomWidth,
-    height: p.waistHeight, depth, y: -p.waistHeight / 2,
-  }, material));
-  // Chest hangs below the chest joint.
-  meshes.push(createTorsoSegment(scene, joints.chest, figureId, "chest", {
-    topWidth: p.chestTopWidth, bottomWidth: p.chestBottomWidth,
-    height: p.chestHeight, depth, y: -p.chestHeight / 2,
-  }, material));
-  // Neck + head.
-  meshes.push(createNeck(scene, joints.neck, figureId, {
-    height: p.neckLength, radius: p.neckRadius,
-  }, material));
+  meshes.push(ringTorso(scene, joints.pelvis, figureId, "pelvis", [
+    { y: 0.02, rx: p.pelvisTop * p.hipBoost, rz: p.pelvisDepth },
+    { y: -p.pelvisH * 0.22, rx: p.pelvisMid * p.hipBoost, rz: p.pelvisDepth * 1.04 },
+    { y: -p.pelvisH * 0.48, rx: p.pelvisMid * 0.98, rz: p.pelvisDepth * 1.0 },
+    { y: -p.pelvisH * 0.74, rx: p.pelvisBot, rz: p.pelvisDepth * 0.9 },
+    { y: -p.pelvisH, rx: p.pelvisBot * 0.88, rz: p.pelvisDepth * 0.78 },
+  ], 16, material));
+
+  meshes.push(ringTorso(scene, joints.spine, figureId, "spine", [
+    { y: p.waistH * 0.15, rx: p.waistTop, rz: p.waistDepth },
+    { y: -p.waistH * 0.18, rx: p.waistMid * 0.98, rz: p.waistDepth * 0.94 },
+    { y: -p.waistH * 0.42, rx: p.waistMid, rz: p.waistDepth * 0.96 },
+    { y: -p.waistH * 0.72, rx: p.waistBot, rz: p.waistDepth * 0.98 },
+    { y: -p.waistH, rx: p.pelvisTop * 0.92, rz: p.pelvisDepth * 0.9 },
+  ], 16, material));
+
+  meshes.push(ringTorso(scene, joints.chest, figureId, "chest", [
+    { y: p.chestH * 0.12, rx: p.chestTop, rz: p.chestDepth * 0.86 },
+    { y: -p.chestH * 0.08, rx: p.chestMid * p.pecBoost, rz: p.chestDepth * 1.02 },
+    { y: -p.chestH * 0.28, rx: p.chestMid * p.pecBoost, rz: p.chestDepth },
+    { y: -p.chestH * 0.58, rx: p.chestBot, rz: p.chestDepth * 0.92 },
+    { y: -p.chestH, rx: p.waistTop, rz: p.waistDepth },
+  ], 16, material));
+
+  const leftDelt = MeshBuilder.CreateIcoSphere(`${figureId}-body-leftUpperArm-delt`, { radius: p.deltoid, subdivisions: 2 }, scene);
+  leftDelt.parent = joints.leftShoulder;
+  leftDelt.position.y = -p.deltoid * 0.15;
+  flatShade(leftDelt);
+  leftDelt.material = material;
+  leftDelt.isPickable = true;
+  leftDelt.metadata = { figureId, region: "leftUpperArm", kind: "body" };
+  meshes.push(leftDelt);
+
+  const rightDelt = MeshBuilder.CreateIcoSphere(`${figureId}-body-rightUpperArm-delt`, { radius: p.deltoid, subdivisions: 2 }, scene);
+  rightDelt.parent = joints.rightShoulder;
+  rightDelt.position.y = -p.deltoid * 0.15;
+  flatShade(rightDelt);
+  rightDelt.material = material;
+  rightDelt.isPickable = true;
+  rightDelt.metadata = { figureId, region: "rightUpperArm", kind: "body" };
+  meshes.push(rightDelt);
+
+  meshes.push(createNeck(scene, joints.neck, figureId, { height: p.neckLength, radius: p.neckRadius }, material));
   meshes.push(createFacetedHead(scene, joints.head, figureId, p.headRadius, material));
 
-  // Arms.
-  meshes.push(createTaperedLimb(scene, joints.leftShoulder, figureId, "leftUpperArm", {
-    length: spec.upperArm, topRadius: p.upperArmTopRadius, bottomRadius: p.upperArmBottomRadius,
-    y: -spec.upperArm / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.leftShoulder, figureId, "leftUpperArm", {
+    length: spec.upperArm, top: p.upperArmTop, mid: p.upperArmMid, bottom: p.upperArmBot, y: -spec.upperArm / 2,
   }, material));
-  meshes.push(createTaperedLimb(scene, joints.leftElbow, figureId, "leftLowerArm", {
-    length: spec.lowerArm, topRadius: p.lowerArmTopRadius, bottomRadius: p.lowerArmBottomRadius,
-    y: -spec.lowerArm / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.leftElbow, figureId, "leftLowerArm", {
+    length: spec.lowerArm, top: p.lowerArmTop, mid: p.lowerArmMid, bottom: p.lowerArmBot, y: -spec.lowerArm / 2,
   }, material));
-  meshes.push(createMittHand(scene, joints.leftWrist, figureId, "leftHand", {
-    palmWidth: p.handPalmWidth, palmHeight: p.handPalmHeight, palmDepth: p.handPalmDepth,
-    thumbWidth: p.handPalmWidth * 0.4, thumbDepth: p.handPalmDepth * 0.6, side: -1,
+  meshes.push(createFacetedHand(scene, joints.leftWrist, figureId, "leftHand", {
+    palmW: p.handPalmWidth, palmH: p.handPalmHeight, palmD: p.handPalmDepth, side: -1,
   }, material));
 
-  meshes.push(createTaperedLimb(scene, joints.rightShoulder, figureId, "rightUpperArm", {
-    length: spec.upperArm, topRadius: p.upperArmTopRadius, bottomRadius: p.upperArmBottomRadius,
-    y: -spec.upperArm / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.rightShoulder, figureId, "rightUpperArm", {
+    length: spec.upperArm, top: p.upperArmTop, mid: p.upperArmMid, bottom: p.upperArmBot, y: -spec.upperArm / 2,
   }, material));
-  meshes.push(createTaperedLimb(scene, joints.rightElbow, figureId, "rightLowerArm", {
-    length: spec.lowerArm, topRadius: p.lowerArmTopRadius, bottomRadius: p.lowerArmBottomRadius,
-    y: -spec.lowerArm / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.rightElbow, figureId, "rightLowerArm", {
+    length: spec.lowerArm, top: p.lowerArmTop, mid: p.lowerArmMid, bottom: p.lowerArmBot, y: -spec.lowerArm / 2,
   }, material));
-  meshes.push(createMittHand(scene, joints.rightWrist, figureId, "rightHand", {
-    palmWidth: p.handPalmWidth, palmHeight: p.handPalmHeight, palmDepth: p.handPalmDepth,
-    thumbWidth: p.handPalmWidth * 0.4, thumbDepth: p.handPalmDepth * 0.6, side: 1,
+  meshes.push(createFacetedHand(scene, joints.rightWrist, figureId, "rightHand", {
+    palmW: p.handPalmWidth, palmH: p.handPalmHeight, palmD: p.handPalmDepth, side: 1,
   }, material));
 
-  // Legs.
-  meshes.push(createTaperedLimb(scene, joints.leftHip, figureId, "leftUpperLeg", {
-    length: spec.upperLeg, topRadius: p.upperLegTopRadius, bottomRadius: p.upperLegBottomRadius,
-    y: -spec.upperLeg / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.leftHip, figureId, "leftUpperLeg", {
+    length: spec.upperLeg, top: p.upperLegTop, mid: p.upperLegMid, bottom: p.upperLegBot, y: -spec.upperLeg / 2,
   }, material));
-  meshes.push(createTaperedLimb(scene, joints.leftKnee, figureId, "leftLowerLeg", {
-    length: spec.lowerLeg, topRadius: p.lowerLegTopRadius, bottomRadius: p.lowerLegBottomRadius,
-    y: -spec.lowerLeg / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.leftKnee, figureId, "leftLowerLeg", {
+    length: spec.lowerLeg, top: p.lowerLegTop, mid: p.lowerLegMid, bottom: p.lowerLegBot, y: -spec.lowerLeg / 2,
   }, material));
-  meshes.push(createWedgeFoot(scene, joints.leftAnkle, figureId, "leftFoot", {
+  meshes.push(createFacetedFoot(scene, joints.leftAnkle, figureId, "leftFoot", {
     width: p.footWidth, length: p.footLength, height: p.footHeight,
   }, material));
 
-  meshes.push(createTaperedLimb(scene, joints.rightHip, figureId, "rightUpperLeg", {
-    length: spec.upperLeg, topRadius: p.upperLegTopRadius, bottomRadius: p.upperLegBottomRadius,
-    y: -spec.upperLeg / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.rightHip, figureId, "rightUpperLeg", {
+    length: spec.upperLeg, top: p.upperLegTop, mid: p.upperLegMid, bottom: p.upperLegBot, y: -spec.upperLeg / 2,
   }, material));
-  meshes.push(createTaperedLimb(scene, joints.rightKnee, figureId, "rightLowerLeg", {
-    length: spec.lowerLeg, topRadius: p.lowerLegTopRadius, bottomRadius: p.lowerLegBottomRadius,
-    y: -spec.lowerLeg / 2,
+  meshes.push(createAnatomicalLimb(scene, joints.rightKnee, figureId, "rightLowerLeg", {
+    length: spec.lowerLeg, top: p.lowerLegTop, mid: p.lowerLegMid, bottom: p.lowerLegBot, y: -spec.lowerLeg / 2,
   }, material));
-  meshes.push(createWedgeFoot(scene, joints.rightAnkle, figureId, "rightFoot", {
+  meshes.push(createFacetedFoot(scene, joints.rightAnkle, figureId, "rightFoot", {
     width: p.footWidth, length: p.footLength, height: p.footHeight,
   }, material));
 
-  return { metadata: buildHumanMeshMetadata(spec.id), meshes };
+  const triangleCount = meshes.reduce((sum, mesh) => sum + countMeshTriangles(mesh), 0);
+  return {
+    metadata: buildHumanMeshMetadata(spec.id, triangleCount, spec.height),
+    meshes,
+  };
 }
 
-/** Resolve a picked mesh's region to its pose joint, if it is a body mesh. */
 export function regionFromMeshName(meshName: string): BodyRegion | null {
-  const m = meshName.match(/-body-([a-zA-Z]+)(-thumb)?$/);
+  const m = meshName.match(/-body-([a-zA-Z]+)(-thumb|-f\d|-delt)?$/);
   if (!m) return null;
   return m[1] as BodyRegion;
+}
+
+export function figureExportMetadata(archetypeId: ArchetypeId, heightM: number, triangleCount: number) {
+  const id = figureIdentity(archetypeId);
+  return {
+    gender: id.gender,
+    ageClass: id.ageClass,
+    heightM,
+    triangleCount,
+    jointCount: 17,
+    rig: "posecraft-v2",
+    uv: "generated",
+    modelId: getHumanModelId(archetypeId),
+    shading: "flat-faceted",
+    pose: "T-pose",
+  };
 }

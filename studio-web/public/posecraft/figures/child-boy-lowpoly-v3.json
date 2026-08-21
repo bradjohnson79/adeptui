@@ -1,0 +1,14 @@
+{
+  "gender": "male",
+  "ageClass": "child",
+  "heightM": 1.32,
+  "triangleCount": 2528,
+  "jointCount": 17,
+  "rig": "posecraft-v2",
+  "uv": "generated",
+  "modelId": "child-boy-lowpoly-v3",
+  "shading": "flat-faceted",
+  "pose": "T-pose",
+  "glb": "/posecraft/figures/child-boy-lowpoly-v3.glb",
+  "viewportBuilder": "studio-web/src/posecraft/humanMeshBuilder.ts"
+}

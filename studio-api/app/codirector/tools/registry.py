@@ -47,6 +47,7 @@ from .handlers import (
     setup_guided,
     storyboard,
     spatial_m411,
+    movement_tools,
     system,
     timeline_references,
     vision,
@@ -179,6 +180,7 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "avatar.get_section": avatar_m412.get_section,
     "avatar.compare_sections": avatar_m412.compare_sections,
     "avatar.check_continuity": avatar_m412.check_continuity,
+    "avatar.open_studio": avatar_m412.open_studio,
     "spatial.list_maps": spatial_m411.list_maps,
     "spatial.get_map": spatial_m411.get_map,
     "spatial.inspect_scene": spatial_m411.inspect_scene,
@@ -187,6 +189,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "spatial.check_visibility": spatial_m411.check_visibility,
     "spatial.check_consistency": spatial_m411.check_consistency,
     "spatial.build_reference_bundle": spatial_m411.build_reference_bundle,
+    "spatial.plan_movements": movement_tools.plan_movements,
+    "workspace.open_scene_creator": movement_tools.open_scene_creator,
     "audio.status": audio_studio_tools.status,
     "audio.library": audio_studio_tools.library,
     "audio.scene_status": audio_studio_tools.scene_status,
@@ -329,6 +333,8 @@ _READ_HANDLERS: dict[str, ReadHandler] = {
     "posecraft.export_reference": posecraft.export_reference,
     "posecraft.inspect_scene": posecraft.inspect_scene,
     "posecraft.list_scenes": posecraft.list_scenes,
+    "posecraft.get_pose_intelligence": posecraft.get_pose_intelligence,
+    "posecraft.compare_poses": posecraft.compare_poses,
     "magi.inspect_sequence": magi.inspect_sequence,
     "magi.inspect_clip": magi.inspect_clip,
     "magi.inspect_tracks": magi.inspect_tracks,
@@ -514,6 +520,10 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
         avatar_m412.preview_create_job,
         avatar_m412.apply_create_job,
     ),
+    "avatar.detect_speakers": MutationHandler(
+        avatar_m412.preview_detect_speakers,
+        avatar_m412.apply_detect_speakers,
+    ),
     "avatar.adjust_section": MutationHandler(
         avatar_m412.preview_adjust_section,
         avatar_m412.apply_adjust_section,
@@ -585,6 +595,23 @@ _MUTATION_HANDLERS: dict[str, MutationHandler] = {
     "spatial.prepare_video_generation": MutationHandler(
         spatial_m411.preview_prepare_video_generation,
         spatial_m411.apply_prepare_video_generation,
+    ),
+    "spatial.save": MutationHandler(movement_tools.preview_save, movement_tools.apply_save),
+    "spatial.commit_map": MutationHandler(movement_tools.preview_save, movement_tools.apply_save),
+    "spatial.create_movement": MutationHandler(
+        movement_tools.preview_create_movement, movement_tools.apply_create_movement
+    ),
+    "spatial.update_movement": MutationHandler(
+        movement_tools.preview_update_movement, movement_tools.apply_update_movement
+    ),
+    "spatial.activate_movement": MutationHandler(
+        movement_tools.preview_activate_movement, movement_tools.apply_activate_movement
+    ),
+    "spatial.delete_movement": MutationHandler(
+        movement_tools.preview_delete_movement, movement_tools.apply_delete_movement
+    ),
+    "scene_creator_mini.create_take": MutationHandler(
+        movement_tools.preview_create_mini_take, movement_tools.apply_create_mini_take
     ),
     "create_scene": MutationHandler(scenes.preview_create_scene, scenes.apply_create_scene),
     "update_scene_title": MutationHandler(scenes.preview_update_scene_title, scenes.apply_update_scene_title),

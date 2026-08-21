@@ -176,3 +176,77 @@ export async function getExportPreview(projectId: string, snapshotId?: string): 
     : `/api/posecraft/projects/${projectId}/export-preview`;
   return req(url);
 }
+
+export type PoseIntelligencePacket = {
+  packetId?: string;
+  availability?: string;
+  reason?: string;
+  creatorFacingSummary?: string;
+  creatorFacingDetails?: string;
+  warnings?: string[];
+  character?: {
+    primarySupport?: string;
+    balance?: string;
+    stance?: string;
+    figureName?: string;
+  };
+  interaction?: {
+    handContact?: string[];
+    footContact?: string[];
+  };
+  motion?: {
+    rotationDirection?: string;
+    outgoingMovement?: string;
+    likelyContinuation?: string;
+    transitionState?: string;
+  };
+  constraints?: {
+    preserveSupportFoot?: string;
+    creatorIntentHonored?: boolean;
+  };
+  world?: { availability?: string };
+};
+
+export async function analyzePoseIntelligence(
+  projectId: string,
+  body?: { snapshotId?: string; figureId?: string },
+): Promise<{ packet: PoseIntelligencePacket; worldAvailable: boolean }> {
+  return req(`/api/posecraft/projects/${projectId}/intelligence/analyze`, {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
+
+export async function comparePoseIntelligence(
+  projectId: string,
+  fromSnapshotId: string,
+  toSnapshotId: string,
+): Promise<{ transition?: { plausibilityWarnings?: string[]; actionProgression?: string }; sequence?: unknown; to?: PoseIntelligencePacket }> {
+  return req(`/api/posecraft/projects/${projectId}/intelligence/compare`, {
+    method: "POST",
+    body: JSON.stringify({ fromSnapshotId, toSnapshotId }),
+  });
+}
+
+export async function loadPoseIntelligence(projectId: string, snapshotId?: string): Promise<{
+  available: boolean;
+  worldAvailable: boolean;
+  packet: PoseIntelligencePacket | null;
+}> {
+  const q = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
+  return req(`/api/posecraft/projects/${projectId}/intelligence${q}`);
+}
+
+export async function handoffPoseToSceneCreator(projectId: string, snapshotId?: string) {
+  return req(`/api/posecraft/projects/${projectId}/intelligence/handoff/scene-creator`, {
+    method: "POST",
+    body: JSON.stringify({ snapshotId: snapshotId || "" }),
+  });
+}
+
+export async function handoffPoseToTimeline(projectId: string, snapshotId?: string) {
+  return req(`/api/posecraft/projects/${projectId}/intelligence/handoff/timeline`, {
+    method: "POST",
+    body: JSON.stringify({ snapshotId: snapshotId || "" }),
+  });
+}

@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .contracts import PerceptionCapability
+from .perception_router import creator_unavailable_message
 from .service import get_capability
 from .spatial_draft import load_spatial_draft
 
@@ -16,39 +17,71 @@ def resolve_auto_mask(
     project_id: str,
     map_id: str,
     label: str,
+    asset_id: str = "",
 ) -> dict[str, Any]:
     capability: PerceptionCapability = get_capability()
-    if capability.autoMask == "unavailable":
+    if capability.autoMask == "unavailable" and capability.select == "unavailable":
         return {
             "ok": False,
             "maskAssetId": "",
             "status": "unavailable",
-            "message": "Automatic object select is unavailable. Paint the region instead.",
+            "message": creator_unavailable_message("select"),
         }
-    draft = load_spatial_draft(db, project_id, map_id)
+    draft = load_spatial_draft(db, project_id, map_id) if map_id else None
+    source_asset_id = asset_id or (draft.sourceAssetId if draft else "")
+    entity_id = ""
+    wanted = (label or "").strip().lower()
+    if draft is not None:
+        for fill in draft.proposedFills:
+            if wanted and wanted not in fill.label.lower() and wanted not in fill.tag.lower():
+                continue
+            entity_id = fill.perceptionEntityId
+            if entity_id:
+                break
+    if source_asset_id:
+        from ...image_product.masks import get_mask
+        from .cache import get_cached_selection
+        from .paths import SAM21_REVISION
+
+        # Never spawn the SAM/Comfy worker on this request. A 30–180s GPU
+        # select holds SQLite and restarts Playwright workers, which drops
+        # beforeAll state and looks like Accept deleted cameras.
+        cached = get_cached_selection(
+            project_id=project_id,
+            asset_id=source_asset_id,
+            frame_time_ms=0,
+            entity=(label or "object").strip(),
+            model_id="sam21-hiera-tiny",
+            model_version=SAM21_REVISION,
+            source="text" if label else "click",
+        )
+        if cached and cached.get("maskAssetId") and get_mask(project_id, str(cached["maskAssetId"])):
+            return {
+                "ok": True,
+                "maskAssetId": str(cached["maskAssetId"]),
+                "status": "available",
+                "fillId": entity_id,
+                "label": label,
+                "selection": cached,
+                "cached": True,
+                "message": "Selected.",
+            }
+        return {
+            "ok": False,
+            "maskAssetId": "",
+            "status": capability.autoMask,
+            "message": (
+                creator_unavailable_message("select")
+                if capability.autoMask == "unavailable"
+                else "Could not select automatically. Paint the region."
+            ),
+        }
     if draft is None:
         return {
             "ok": False,
             "maskAssetId": "",
             "status": capability.autoMask,
             "message": "Run CD Scene Review first, then try again — or paint the region.",
-        }
-    wanted = (label or "").strip().lower()
-    for fill in draft.proposedFills:
-        entity_id = fill.perceptionEntityId
-        if not entity_id:
-            continue
-        if wanted and wanted not in fill.label.lower() and wanted not in fill.tag.lower():
-            continue
-        # Geometry worker currently returns boxes, not persisted mask assets.
-        # Do not pretend a box is a mask.
-        return {
-            "ok": False,
-            "maskAssetId": "",
-            "status": "testing",
-            "fillId": fill.id,
-            "label": fill.label,
-            "message": "A box was found, but a paint-ready mask is not ready yet. Paint the region.",
         }
     return {
         "ok": False,

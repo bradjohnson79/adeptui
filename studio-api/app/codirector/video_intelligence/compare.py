@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from .contracts import (
@@ -10,6 +11,8 @@ from .contracts import (
     TemporalContinuityPacket,
     VideoPerceptionObservation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _intended_from_context(context: dict[str, Any]) -> str:
@@ -89,6 +92,7 @@ def compare_intent_vs_actual(
     packet.timing.completedBeats = completed
     packet.timing.activeBeats = []
     packet.timing.unfinishedBeats = unfinished
+    pose_review = _apply_pose_intent(ctx, intended, observed, differences, preserve, continue_items, directives)
     packet.assessment = Assessment(
         intendedState=intended,
         observedState=observed,
@@ -116,4 +120,56 @@ def compare_intent_vs_actual(
     else:
         packet.availability = "ready"
         packet.reason = None
+    if pose_review:
+        packet.extras["poseContinuityReview"] = pose_review
+        packet.extras["poseStateKind"] = {
+            "intended": "PoseCraft starting intent",
+            "observed": "Generated video is new evidence",
+        }
     return packet
+
+
+def _apply_pose_intent(
+    ctx: dict[str, Any],
+    intended: str,
+    observed: str,
+    differences: list[str],
+    preserve: list[str],
+    continue_items: list[str],
+    directives: list[str],
+) -> dict[str, Any] | None:
+    """Consume an intended PoseWorldStatePacket when present. Does not replace Revision A."""
+    raw = ctx.get("poseIntended") or ctx.get("poseWorldState")
+    if raw is None:
+        return None
+    try:
+        from ..pose_intelligence.contracts import PoseWorldStatePacket
+        from ..pose_intelligence.compare import review_intended_vs_observed
+        from ..world_intelligence.contracts import WorldStatePacket
+
+        packet = raw if isinstance(raw, PoseWorldStatePacket) else PoseWorldStatePacket.model_validate(raw)
+        world_raw = ctx.get("observedWorld")
+        world = None
+        if world_raw is not None:
+            world = world_raw if isinstance(world_raw, WorldStatePacket) else WorldStatePacket.model_validate(world_raw)
+        review = review_intended_vs_observed(
+            packet,
+            observed_world=world,
+            observed_text=observed,
+            project_id=str(ctx.get("projectId") or packet.projectId or ""),
+        )
+        for risk in review.continuityRisk:
+            if risk not in differences:
+                differences.append(risk)
+        for item in review.nextBatchGuidance:
+            if item not in directives:
+                directives.append(item)
+        if packet.constraints.preserveSupportFoot:
+            preserve.append(f"Preserve intended support: {packet.constraints.preserveSupportFoot.replace('_', ' ')}.")
+        for contact in packet.interaction.handContact[:2]:
+            preserve.append(f"Preserve intended contact: {contact}.")
+            continue_items.append(f"INTENDED: {contact}")
+        return review.model_dump(mode="json")
+    except Exception as exc:
+        logger.debug("Pose intent review skipped: %s", exc)
+        return None

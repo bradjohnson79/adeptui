@@ -180,12 +180,28 @@ def _intent_context(project_id: str, batch: Any, prior: TemporalContinuityPacket
     prior_text = ""
     if prior is not None:
         prior_text = " ".join(prior.continuation.nextBatchDirectives)
+    pose_intended = None
+    try:
+        from ..pose_intelligence.persist import load_packet
+        from ...db import SessionLocal
+
+        db = SessionLocal()
+        try:
+            packet = load_packet(db, project_id)
+            if packet is not None:
+                pose_intended = packet.model_dump(mode="json")
+        finally:
+            db.close()
+    except Exception:
+        pose_intended = None
     return {
         "prompt": prompt,
         "sceneIntent": scene_intent,
         "cameraIntent": camera_intent,
         "spatialMap": spatial_text,
         "priorContinuation": prior_text,
+        "projectId": project_id,
+        "poseIntended": pose_intended,
     }
 
 
@@ -425,12 +441,45 @@ def review_completed_batch(
                 reference_asset_id=ref_id,
                 world_policy=world_policy,
             )
+            _attach_pose_observed_world(db, project_id, packet)
         except Exception as exc:
             logger.debug("JEPA world review skipped: %s", exc)
             packet.extras["worldReview"] = {"availability": "skipped", "reason": str(exc)[:120]}
 
     _persist(master, packet, source_batch, target_batch_id)
     return packet
+
+
+def _attach_pose_observed_world(db: Any, project_id: str, packet: TemporalContinuityPacket) -> None:
+    """Feed JEPA observed world into pose continuity review after Revision C augment."""
+    world_raw = (packet.extras or {}).get("worldReview")
+    if not isinstance(world_raw, dict) or world_raw.get("schemaVersion") != "world-state-v1":
+        return
+    try:
+        from ..pose_intelligence.compare import review_intended_vs_observed
+        from ..pose_intelligence.persist import load_packet
+        from ..world_intelligence.contracts import WorldStatePacket
+
+        intended = load_packet(db, project_id) if db is not None else None
+        if intended is None:
+            return
+        observed_world = WorldStatePacket.model_validate(world_raw)
+        observed_text = ""
+        if packet.assessment is not None:
+            observed_text = str(packet.assessment.observedState or "")
+        review = review_intended_vs_observed(
+            intended,
+            observed_world=observed_world,
+            observed_text=observed_text,
+            project_id=project_id,
+        )
+        packet.extras["poseContinuityReview"] = review.model_dump(mode="json")
+        packet.extras["poseStateKind"] = {
+            "intended": "PoseCraft starting intent",
+            "observed": "Generated video / world review is new evidence",
+        }
+    except Exception as exc:
+        logger.debug("Pose observed-world review skipped: %s", exc)
 
 
 def _persist(master: Any, packet: TemporalContinuityPacket, source_batch: Any, target_batch_id: str | None) -> None:

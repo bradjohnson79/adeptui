@@ -288,6 +288,28 @@ def test_license_memos_exist_for_geometry_pins():
         assert "required=False" in text or "`required=False`" in text
 
 
+def test_auto_mask_skips_comfy_free_and_keeps_honest(monkeypatch):
+    from app.codirector.perception import auto_mask as am
+    from app.codirector.perception.contracts import PerceptionCapability
+
+    spawned = {"select": 0}
+
+    def _boom(*_a, **_k):
+        spawned["select"] += 1
+        raise AssertionError("auto-mask must not spawn the GPU select worker")
+
+    draft = SpatialDraft(sourceAssetId="asset-1", proposedFills=[])
+    monkeypatch.setattr(am, "get_capability", lambda: PerceptionCapability(autoMask="available", select="available"))
+    monkeypatch.setattr(am, "load_spatial_draft", lambda *_a, **_k: draft)
+    monkeypatch.setattr("app.codirector.perception.selection_service.select", _boom)
+    monkeypatch.setattr("app.codirector.perception.cache.get_cached_selection", lambda **_k: None)
+    payload = am.resolve_auto_mask(object(), "p1", "m1", "lamp", asset_id="asset-1")
+    assert spawned["select"] == 0
+    assert payload["ok"] is False
+    assert payload["maskAssetId"] == ""
+    assert "paint" in payload["message"].lower()
+
+
 def test_auto_mask_never_returns_a_box_as_mask():
     from app.codirector.perception import auto_mask as am
     from app.codirector.perception.contracts import PerceptionCapability

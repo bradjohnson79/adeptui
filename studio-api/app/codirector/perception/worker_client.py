@@ -16,7 +16,7 @@ from .contracts import (
     PerceptionProvenance,
     strip_provider_payload,
 )
-from .paths import worker_python
+from .paths import cuda_worker_python, worker_python
 from .preflight import preflight_for_stills, request_generator_release
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,60 @@ def _asset_path(db: Any, project_id: str, asset_id: str) -> str:
     if asset is None or str(getattr(asset, "project_id", "")) != project_id:
         return ""
     return str(getattr(asset, "path", "") or "")
+
+
+def _run_worker(payload: dict[str, Any], timeout: int = 180) -> dict[str, Any]:
+    python = cuda_worker_python()
+    if not Path(python).is_file():
+        return {"ok": False, "reason": "WORKER_MISSING", "message": "Intelligent selection is not installed. Open Setup and install the Adept UI Essentials Pack."}
+    studio_api_root = Path(__file__).resolve().parents[3]
+    try:
+        completed = subprocess.run(
+            [str(python), "-m", "app.codirector.perception.worker"],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            cwd=str(studio_api_root),
+        )
+    except Exception as exc:
+        return {"ok": False, "reason": f"WORKER_START:{exc}"[:240], "message": "Paint the region."}
+    raw_text = (completed.stdout or "").strip().splitlines()
+    if not raw_text:
+        return {"ok": False, "reason": (completed.stderr or "empty")[:240], "message": "Paint the region."}
+    try:
+        parsed = json.loads(raw_text[-1])
+    except Exception:
+        return {"ok": False, "reason": "WORKER_BAD_JSON", "message": "Paint the region."}
+    return strip_provider_payload(parsed if isinstance(parsed, dict) else {})
+
+
+def run_selection_worker(
+    payload: dict[str, Any],
+    *,
+    timeout: int = 180,
+    release_generator: bool = True,
+) -> dict[str, Any]:
+    lease: dict[str, Any] = {}
+    if release_generator:
+        lease = request_generator_release()
+    preflight = preflight_for_stills()
+    if not preflight.get("ok") and not preflight.get("unknownVram"):
+        return {
+            "ok": False,
+            "reason": "INSUFFICIENT_VRAM",
+            "message": "Not enough GPU memory for intelligent selection. Try again when the studio is idle.",
+            "lease": lease,
+        }
+    return _run_worker(payload, timeout=timeout)
+
+
+def probe_selection_health() -> dict[str, Any]:
+    python = worker_python()
+    if not Path(python).is_file():
+        return {"ok": False, "reason": "WORKER_MISSING"}
+    return _run_worker({"mode": "health"}, timeout=30)
 
 
 def run_stills_perception(
@@ -61,33 +115,7 @@ def run_stills_perception(
         packet.reason = "The scene picture is missing."
         return packet
 
-    python = worker_python()
-    if not Path(python).is_file():
-        packet.reason = "Automatic boxes need their own installed environment. You can place people yourself."
-        return packet
-    studio_api_root = Path(__file__).resolve().parents[3]
-    try:
-        completed = subprocess.run(
-            [str(python), "-m", "app.codirector.perception.worker"],
-            input=json.dumps({"imagePath": image_path}),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-            cwd=str(studio_api_root),
-        )
-    except Exception as exc:
-        packet.reason = f"Geometry worker did not start: {exc}"[:240]
-        return packet
-
-    raw_text = (completed.stdout or "").strip().splitlines()
-    payload: dict[str, Any] = {}
-    if raw_text:
-        try:
-            payload = json.loads(raw_text[-1])
-        except Exception:
-            payload = {}
-    payload = strip_provider_payload(payload if isinstance(payload, dict) else {})
+    payload = _run_worker({"mode": "detect", "imagePath": image_path}, timeout=180)
     if not payload.get("ok"):
         packet.reason = str(payload.get("reason") or "Automatic boxes unavailable.")
         return packet
@@ -100,12 +128,32 @@ def run_stills_perception(
         box = clean.get("box") if isinstance(clean.get("box"), dict) else None
         if box:
             box = normalize_box(box)
+        mask_id = str(clean.get("maskAssetId") or "")
+        png_b64 = str(clean.get("maskPngBase64") or "")
+        if png_b64 and not mask_id:
+            try:
+                from ...image_product.masks import save_mask
+
+                raw = png_b64.split(",", 1)[-1] if "," in png_b64 else png_b64
+                import base64
+
+                record = save_mask(
+                    project_id,
+                    source_asset_id=source_asset_id,
+                    png_bytes=base64.b64decode(raw),
+                    role="include",
+                    creator="perception",
+                    metadata={"label": str(clean.get("label") or ""), "source": "scene-review"},
+                )
+                mask_id = str(record.get("maskId") or "")
+            except Exception:
+                mask_id = ""
         entities.append(
             PerceptionEntity(
                 label=str(clean.get("label") or ""),
                 kindHint=clean.get("kindHint") or "unknown",
                 box=NormalizedBox.model_validate(box) if box else None,
-                maskAssetId=str(clean.get("maskAssetId") or ""),
+                maskAssetId=mask_id,
                 confidence=clean.get("confidence"),
                 ordinalDepth=clean.get("ordinalDepth") or "unknown",
             )

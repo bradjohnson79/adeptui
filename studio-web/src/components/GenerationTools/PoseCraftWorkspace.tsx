@@ -74,12 +74,18 @@ import {
   updateSceneNotes,
 } from "../../posecraft/state";
 import {
+  analyzePoseIntelligence,
+  comparePoseIntelligence,
   createCustomPose,
   deleteCustomPose,
   flushSceneDocument,
+  handoffPoseToSceneCreator,
+  handoffPoseToTimeline,
   listCustomPoses,
+  loadPoseIntelligence,
   loadSceneDocument,
   saveSceneDocument,
+  type PoseIntelligencePacket,
 } from "../../posecraft/posecraftApi";
 import type { ArchetypeId, FigureRole, FurnitureKind, PoseCategoryId, PoseCraftDocument, PoseCraftLayoutPrefs, PoseCraftScene, PoseMap, PosePreset } from "../../posecraft/types";
 import type { Project } from "../../types";
@@ -115,7 +121,7 @@ function Accordion({ id, label, open, onToggle, children }: {
   );
 }
 
-export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
+export function PoseCraftWorkspace({ project, onChange, onGo, onAskCoDirector }: Props) {
   // Master Program: the project API is the source of truth. We seed from a
   // default document synchronously (so the viewport can mount), then hydrate
   // from /api/posecraft/projects/:id/scene on mount. localStorage is no longer
@@ -178,6 +184,12 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   const [previewSnapshotId, setPreviewSnapshotId] = useState<string | null>(null);
   const [sendingImageGen, setSendingImageGen] = useState(false);
   const [sendingStoryboard, setSendingStoryboard] = useState(false);
+  const [sendingSceneCreator, setSendingSceneCreator] = useState(false);
+  const [sendingTimeline, setSendingTimeline] = useState(false);
+  const [poseIntelStatus, setPoseIntelStatus] = useState<"idle" | "analyzing" | "ready" | "warning" | "unavailable" | "degraded">("idle");
+  const [poseIntel, setPoseIntel] = useState<PoseIntelligencePacket | null>(null);
+  const [poseIntelDetail, setPoseIntelDetail] = useState("");
+  const analyzeTimer = useRef<number | null>(null);
   const [viewportLabels, setViewportLabels] = useState<Array<{
     id: string; label: string; x: number; y: number; selected: boolean;
   }>>([]);
@@ -458,6 +470,72 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   //      deep-cloned at capture time), selects it, and flushes again so the
   //      selectedSnapshotId persists across reload.
   // -------------------------------------------------------------------------
+  const applyPosePacket = useCallback((packet: PoseIntelligencePacket | null, fallbackReason = "") => {
+    setPoseIntel(packet);
+    if (!packet) {
+      setPoseIntelStatus("unavailable");
+      setPoseIntelDetail(fallbackReason || "Pose Intelligence is unavailable. Your pose is unchanged.");
+      return;
+    }
+    const avail = packet.availability || "unavailable";
+    if (avail === "unavailable") {
+      setPoseIntelStatus("unavailable");
+      setPoseIntelDetail(packet.reason || "Pose Intelligence is unavailable. Your pose is unchanged.");
+      return;
+    }
+    if (avail === "degraded" || avail === "insufficient_reference") {
+      setPoseIntelStatus((packet.warnings || []).length ? "warning" : "degraded");
+      setPoseIntelDetail(
+        [packet.creatorFacingDetails || packet.creatorFacingSummary, packet.reason].filter(Boolean).join(" "),
+      );
+      return;
+    }
+    setPoseIntelStatus((packet.warnings || []).length ? "warning" : "ready");
+    setPoseIntelDetail(packet.creatorFacingDetails || packet.creatorFacingSummary || "");
+  }, []);
+
+  const runPoseAnalyze = useCallback(async (snapshotId?: string) => {
+    setPoseIntelStatus("analyzing");
+    try {
+      const result = await analyzePoseIntelligence(project.id, {
+        snapshotId: snapshotId || currentDocument.selectedSnapshotId || undefined,
+        figureId: sceneRef.current.selectedFigureId || undefined,
+      });
+      applyPosePacket(result.packet);
+    } catch (error) {
+      console.error(error);
+      applyPosePacket(null);
+    }
+  }, [applyPosePacket, currentDocument.selectedSnapshotId, project.id]);
+
+  const runPoseContinuity = useCallback(async () => {
+    const snaps = currentDocument.snapshots ?? [];
+    if (snaps.length < 2) {
+      setStatusMessage("Capture two Snapshots to check motion continuity.");
+      return;
+    }
+    const selected = currentDocument.selectedSnapshotId || snaps[snaps.length - 1].snapshotId;
+    const prior = snaps.filter((s) => s.snapshotId !== selected).at(-1);
+    if (!prior) {
+      setStatusMessage("Capture two Snapshots to check motion continuity.");
+      return;
+    }
+    setPoseIntelStatus("analyzing");
+    try {
+      const result = await comparePoseIntelligence(project.id, prior.snapshotId, selected);
+      applyPosePacket(result.to || null);
+      const warnings = result.transition?.plausibilityWarnings || [];
+      if (warnings.length) {
+        setPoseIntelStatus("warning");
+        setPoseIntelDetail(warnings[0]);
+      }
+      setStatusMessage(result.transition?.actionProgression || "Compared the two Snapshots.");
+    } catch (error) {
+      console.error(error);
+      applyPosePacket(null);
+    }
+  }, [applyPosePacket, currentDocument.selectedSnapshotId, currentDocument.snapshots, project.id]);
+
   const captureSnapshotNow = useCallback(async () => {
     const controller = controllerRef.current;
     if (!controller) {
@@ -528,8 +606,8 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     }
     setCapturingSnapshot(false);
     setStatusMessage(`Captured Snapshot for handoff (image stored in this project's Library).`);
-    void snapshotId;
-  }, [capturingSnapshot, project.id]);
+    void runPoseAnalyze(snapshotId);
+  }, [capturingSnapshot, project.id, runPoseAnalyze]);
 
   const startRenameSnapshot = useCallback((snapshotId: string, currentName: string) => {
     setRenamingSnapshotId(snapshotId);
@@ -816,6 +894,26 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPoseIntelligence(project.id).then((data) => {
+      if (cancelled) return;
+      if (data.packet) applyPosePacket(data.packet);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [applyPosePacket, project.id]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (analyzeTimer.current) window.clearTimeout(analyzeTimer.current);
+    analyzeTimer.current = window.setTimeout(() => {
+      void runPoseAnalyze(currentDocument.selectedSnapshotId || undefined);
+    }, 900);
+    return () => {
+      if (analyzeTimer.current) window.clearTimeout(analyzeTimer.current);
+    };
+  }, [currentDocument.selectedSnapshotId, hydrated, runPoseAnalyze, scene.revision, scene.selectedFigureId]);
 
   // Debounced save to the project API (SoT). Skips the very first render until
   // hydration completes so we don't overwrite the server document with defaults.
@@ -1113,6 +1211,58 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
     }
   }, [handoffDisabledTip, onGo, project.id, sendingStoryboard]);
 
+  const sendToSceneCreator = useCallback(async () => {
+    const snap = getSelectedSnapshot(documentRef.current);
+    if (!snap) {
+      setStatusMessage(handoffDisabledTip);
+      return;
+    }
+    setSendingSceneCreator(true);
+    try {
+      await flushSceneDocument(project.id, { ...documentRef.current, currentScene: sceneRef.current });
+      await handoffPoseToSceneCreator(project.id, snap.snapshotId);
+      try {
+        window.sessionStorage.setItem(
+          `adept.posecraft.scenecreator.${project.id}`,
+          JSON.stringify({ snapshotId: snap.snapshotId, imageAssetId: snap.imageAssetId, name: snap.name, at: Date.now() }),
+        );
+      } catch { /* ignore */ }
+      onGo?.("scenecreator");
+      setStatusMessage(`Sent Snapshot "${snap.name}" and pose notes to Scene Creator.`);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("Could not send pose notes to Scene Creator. Your pose is unchanged.");
+    } finally {
+      setSendingSceneCreator(false);
+    }
+  }, [handoffDisabledTip, onGo, project.id]);
+
+  const sendToTimeline = useCallback(async () => {
+    const snap = getSelectedSnapshot(documentRef.current);
+    if (!snap) {
+      setStatusMessage(handoffDisabledTip);
+      return;
+    }
+    setSendingTimeline(true);
+    try {
+      await flushSceneDocument(project.id, { ...documentRef.current, currentScene: sceneRef.current });
+      await handoffPoseToTimeline(project.id, snap.snapshotId);
+      try {
+        window.sessionStorage.setItem(
+          `adept.posecraft.timeline.${project.id}`,
+          JSON.stringify({ snapshotId: snap.snapshotId, imageAssetId: snap.imageAssetId, name: snap.name, at: Date.now() }),
+        );
+      } catch { /* ignore */ }
+      onGo?.("timeline");
+      setStatusMessage(`Sent Snapshot "${snap.name}" and motion notes to Timeline.`);
+    } catch (error) {
+      console.error(error);
+      setStatusMessage("Could not send motion notes to Timeline. Your pose is unchanged.");
+    } finally {
+      setSendingTimeline(false);
+    }
+  }, [handoffDisabledTip, onGo, project.id]);
+
   return (
     <div className="page posecraft-workspace" data-testid="posecraft-workspace">
       <header className="posecraft-workspace__header">
@@ -1245,6 +1395,34 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   />
                 </label>
                 <p className="muted">Imported meshes are stored in this project's Library and listed here.</p>
+                <div className="posecraft-field" data-testid="posecraft-extract-subject">
+                  <PanelHeading title="Extract from a picture" tip="Pull the person or object out of a Library picture so you can use it as a stand-in. This does not change PoseCraft itself." />
+                  <select
+                    data-testid="posecraft-extract-source"
+                    defaultValue=""
+                    onChange={(event) => {
+                      const assetId = event.target.value;
+                      if (!assetId) return;
+                      void api.perception.extractSubject(project.id, { assetId, tag: "posecraft-subject" }).then((res) => {
+                        if (!res.ok) {
+                          setStatusMessage(res.message || "Intelligent selection is not installed. Open Setup and install the Adept UI Essentials Pack.");
+                          return;
+                        }
+                        setStatusMessage(res.message || "Subject isolated and saved to this project's Library.");
+                        void onChange?.();
+                      }).catch((error: unknown) => {
+                        setStatusMessage(error instanceof Error ? error.message : "Could not isolate that picture.");
+                      });
+                    }}
+                  >
+                    <option value="">Choose a Library picture…</option>
+                    {project.assets.filter((asset) => asset.kind === "image").map((asset) => (
+                      <option key={asset.id} value={asset.id}>
+                        {asset.tag || asset.filename}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="posecraft-figure-list">
                   {scene.figures.filter((f) => f.kind === "custom").map((figure) => {
                     const colorHex = FIGURE_COLORS.find((entry) => entry.id === figure.colorId)?.hex ?? "#0f766e";
@@ -1687,6 +1865,34 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
               )}
             </Accordion>
 
+            <Accordion id="pose-intelligence" label="Co-Director Pose Intelligence" open={rightOpen.has("pose-intelligence")} onToggle={() => toggleRight("pose-intelligence")}>
+              <PanelHeading title="Pose notes" tip="Co-Director watches balance, support, and contact so later shots can keep the same physical performance. It never changes your pose." />
+              <div className="posecraft-pose-intel" data-testid="posecraft-pose-intelligence" data-status={poseIntelStatus}>
+                {poseIntelStatus === "idle" && <p className="empty">Pose notes appear after you pose a figure or capture a Snapshot.</p>}
+                {poseIntelStatus === "analyzing" && <p className="scene-meta" data-testid="posecraft-pose-intel-loading">Reading the pose…</p>}
+                {poseIntelStatus === "unavailable" && (
+                  <p className="scene-meta" data-testid="posecraft-pose-intel-unavailable">
+                    {poseIntelDetail || "Pose Intelligence is unavailable. Your pose is unchanged."}
+                  </p>
+                )}
+                {(poseIntelStatus === "ready" || poseIntelStatus === "warning" || poseIntelStatus === "degraded") && poseIntel && (
+                  <dl className="posecraft-pose-intel-grid" data-testid="posecraft-pose-intel-ready">
+                    <div><dt>Balance</dt><dd data-testid="posecraft-pose-intel-balance">{poseIntel.character?.balance || "—"}</dd></div>
+                    <div><dt>Primary support</dt><dd data-testid="posecraft-pose-intel-support">{(poseIntel.character?.primarySupport || "—").replace(/_/g, " ")}</dd></div>
+                    <div><dt>Character motion</dt><dd data-testid="posecraft-pose-intel-motion">{poseIntel.motion?.rotationDirection || poseIntel.motion?.transitionState || "static"}</dd></div>
+                    <div><dt>Contact</dt><dd data-testid="posecraft-pose-intel-contact">{poseIntel.interaction?.handContact?.[0] || poseIntel.interaction?.footContact?.[0] || "none"}</dd></div>
+                    <div><dt>Continuity</dt><dd data-testid="posecraft-pose-intel-continuity">Preserve {(poseIntel.constraints?.preserveSupportFoot || "support").replace(/_/g, " ")}</dd></div>
+                    <div><dt>Risk</dt><dd data-testid="posecraft-pose-intel-risk">{poseIntel.warnings?.[0] || "none"}</dd></div>
+                  </dl>
+                )}
+                <p className="scene-meta">{poseIntel?.creatorFacingSummary || poseIntelDetail}</p>
+                <div className="posecraft-export-actions">
+                  <button type="button" className="primary" onClick={() => void runPoseAnalyze()} data-testid="posecraft-analyze-pose">Analyze Pose</button>
+                  <button type="button" onClick={() => void runPoseContinuity()} data-testid="posecraft-check-continuity">Check Motion Continuity</button>
+                </div>
+              </div>
+            </Accordion>
+
             <Accordion id="camera" label="Camera" open={rightOpen.has("camera")} onToggle={() => toggleRight("camera")}>
               <div className="posecraft-lens-row" data-testid="posecraft-lens-row">
             {CAMERA_PRESETS.map((preset) => (
@@ -1864,6 +2070,24 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   title={hasSelectedSnapshot ? "Send the selected Snapshot to Storyboard" : handoffDisabledTip}
                 >
                   {sendingStoryboard ? "Sending…" : "Send to Storyboard"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendToSceneCreator()}
+                  disabled={sendingSceneCreator || !hasSelectedSnapshot}
+                  data-testid="posecraft-send-scenecreator"
+                  title={hasSelectedSnapshot ? "Send the selected Snapshot and pose notes to Scene Creator" : handoffDisabledTip}
+                >
+                  {sendingSceneCreator ? "Sending…" : "Send to Scene Creator"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void sendToTimeline()}
+                  disabled={sendingTimeline || !hasSelectedSnapshot}
+                  data-testid="posecraft-send-timeline"
+                  title={hasSelectedSnapshot ? "Send the selected Snapshot and motion notes to Timeline" : handoffDisabledTip}
+                >
+                  {sendingTimeline ? "Sending…" : "Send to Timeline"}
                 </button>
                 {!hasSelectedSnapshot && (
                   <p className="scene-meta posecraft-handoff-gate" data-testid="posecraft-handoff-gate">{handoffDisabledTip}</p>

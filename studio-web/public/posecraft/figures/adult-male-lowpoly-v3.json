@@ -1,0 +1,14 @@
+{
+  "gender": "male",
+  "ageClass": "adult",
+  "heightM": 1.84,
+  "triangleCount": 2528,
+  "jointCount": 17,
+  "rig": "posecraft-v2",
+  "uv": "generated",
+  "modelId": "adult-male-lowpoly-v3",
+  "shading": "flat-faceted",
+  "pose": "T-pose",
+  "glb": "/posecraft/figures/adult-male-lowpoly-v3.glb",
+  "viewportBuilder": "studio-web/src/posecraft/humanMeshBuilder.ts"
+}

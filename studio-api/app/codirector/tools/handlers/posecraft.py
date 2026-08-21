@@ -182,6 +182,89 @@ async def export_reference(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
     return {"exportPreview": preview.model_dump()}
 
 
+def _packet_tool_view(packet: Any) -> dict[str, Any]:
+    """Compact Co-Director view — no WorldStatePacket dump, no embeddings."""
+    character = getattr(packet, "character", None)
+    interaction = getattr(packet, "interaction", None)
+    world = getattr(packet, "world", None)
+    return {
+        "packetId": getattr(packet, "packetId", ""),
+        "availability": getattr(packet, "availability", "unavailable"),
+        "reason": getattr(packet, "reason", ""),
+        "stateKind": getattr(packet, "stateKind", "intended"),
+        "projectId": getattr(packet, "projectId", ""),
+        "snapshotId": getattr(packet, "snapshotId", ""),
+        "summary": getattr(packet, "creatorFacingSummary", ""),
+        "details": getattr(packet, "creatorFacingDetails", ""),
+        "character": {
+            "figureName": getattr(character, "figureName", ""),
+            "figureId": getattr(character, "figureId", ""),
+            "stance": getattr(character, "stance", "unknown"),
+            "balance": getattr(character, "balance", "uncertain"),
+            "primarySupport": getattr(character, "primarySupport", "uncertain"),
+            "facingDirection": getattr(character, "facingDirection", 0.0),
+        },
+        "interaction": {
+            "groundContact": bool(getattr(interaction, "groundContact", False)),
+            "footContact": list(getattr(interaction, "footContact", []) or []),
+            "handContact": list(getattr(interaction, "handContact", []) or []),
+            "bodyToObject": list(getattr(interaction, "bodyToObject", []) or []),
+        },
+        "warnings": list(getattr(packet, "warnings", []) or []),
+        "honorsCreatorIntent": bool(packet.honors_creator_intent()) if hasattr(packet, "honors_creator_intent") else True,
+        "worldAvailability": getattr(world, "availability", "unavailable") if world is not None else "unavailable",
+    }
+
+
+async def get_pose_intelligence(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....codirector.pose_intelligence.service import analyze_project_scene
+
+    packet = analyze_project_scene(
+        ctx.db,
+        ctx.project_id,
+        snapshot_id=str(args.get("snapshotId") or ""),
+        figure_id=str(args.get("figureId") or ""),
+    )
+    view = _packet_tool_view(packet)
+    return {
+        "_summary": view["summary"] or "Pose Intelligence is ready.",
+        "packet": view,
+        "summary": view["summary"],
+        "warnings": view["warnings"],
+        "honorsCreatorIntent": view["honorsCreatorIntent"],
+    }
+
+
+async def compare_poses(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....codirector.pose_intelligence.service import compare_project_poses
+
+    raw = compare_project_poses(
+        ctx.db,
+        ctx.project_id,
+        from_snapshot_id=str(args.get("fromSnapshotId") or ""),
+        to_snapshot_id=str(args.get("toSnapshotId") or ""),
+    )
+    from ....codirector.pose_intelligence.contracts import PoseWorldStatePacket
+
+    first = PoseWorldStatePacket.model_validate(raw.get("from") or {})
+    second = PoseWorldStatePacket.model_validate(raw.get("to") or {})
+    transition = raw.get("transition") or {}
+    action = str(transition.get("actionProgression") or "")
+    warnings = list(transition.get("plausibilityWarnings") or [])
+    return {
+        "_summary": action or "Pose comparison ready.",
+        "from": _packet_tool_view(first),
+        "to": _packet_tool_view(second),
+        "transition": {
+            "actionProgression": action,
+            "changes": transition.get("changes") or [],
+            "warnings": warnings,
+            "nextStateSuggestion": transition.get("nextStateSuggestion") or "",
+        },
+        "honorsCreatorIntent": True,
+    }
+
+
 # ---- Mutation handlers (approval-gated by the execution layer) ----
 
 

@@ -80,6 +80,7 @@ def build_timeline_generation_request(
     negative = next((p.negativePrompt for p in batch.promptSegments if p.negativePrompt), None)
     temporal_compile: dict[str, Any] = {}
     temporal_packet_id = None
+    pose_compile: dict[str, Any] = {}
     if temporal_packet is not None:
         from ...codirector.video_intelligence.compile import compile_temporal_continuation
 
@@ -93,6 +94,10 @@ def build_timeline_generation_request(
         prefix = str(temporal_compile.get("promptPrefix") or "").strip()
         if temporal_compile.get("applied") and prefix:
             prompt = "\n".join(part for part in (prefix, prompt) if part)
+    pose_compile = _compile_pose_conditioning(project_id, batch, caps)
+    pose_prefix = str(pose_compile.get("promptPrefix") or "").strip()
+    if pose_compile.get("applied") and pose_prefix:
+        prompt = "\n".join(part for part in (pose_prefix, prompt) if part)
     movement_layers = _compile_movement_layers(project_id, batch)
     if movement_layers.get("providerText"):
         # Keep structured layers distinct from free-text Timed Prompt.
@@ -262,6 +267,7 @@ def build_timeline_generation_request(
             "movementLayers": movement_layers.get("layers"),
             "temporalContinuation": temporal_compile,
             "temporalContinuityPacketId": temporal_packet_id,
+            "poseMotionConditioning": pose_compile,
             "motionReferenceBindingId": next(
                 (
                     str(ref.get("bindingId"))
@@ -315,3 +321,31 @@ def _compile_movement_layers(project_id: str, batch: BatchBlock) -> dict[str, An
             db.close()
     except Exception:
         return {}
+
+
+def _compile_pose_conditioning(project_id: str, batch: BatchBlock, caps: Any) -> dict[str, Any]:
+    """Attach persisted PoseCraft intended state. Never overwrites temporal continuation."""
+    try:
+        from ...codirector.pose_intelligence.compile import compile_pose_motion_conditioning
+        from ...codirector.pose_intelligence.persist import load_packet
+        from ...db import SessionLocal
+
+        extra = {}
+        for ref in batch.references or []:
+            if isinstance(ref, dict) and ref.get("poseWorldStatePacketId"):
+                extra = ref
+                break
+        db = SessionLocal()
+        try:
+            packet = load_packet(db, project_id)
+        finally:
+            db.close()
+        compiled = compile_pose_motion_conditioning(
+            packet,
+            supports_prompt_continuation=bool(getattr(caps, "supportsPromptContinuation", True)),
+        )
+        if extra.get("poseWorldStatePacketId"):
+            compiled["sourcePosePacketId"] = extra.get("poseWorldStatePacketId")
+        return compiled
+    except Exception:
+        return {"applied": False, "reason": "POSE_INTELLIGENCE_UNAVAILABLE", "promptPrefix": ""}

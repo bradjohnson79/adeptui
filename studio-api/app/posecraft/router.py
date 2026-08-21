@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from . import service
 from .schemas import PoseCraftCustomPose, PoseCraftDocument, PoseCraftExportPreview, PoseCraftRevision, PoseCraftScene, PoseCraftSnapshot
+from ..codirector.pose_intelligence.router import router as pose_intelligence_router
 
 router = APIRouter(prefix="/api/posecraft", tags=["posecraft"])
+router.include_router(pose_intelligence_router)
 
 
 def _to_http(exc: service.PoseCraftError) -> HTTPException:

@@ -48,6 +48,7 @@ test.describe("Revision B Creation Intelligence 8760→8758", () => {
 
   let projectId = "";
   let mapId = "";
+  let acceptedCameraId = "";
 
   test.beforeAll(async ({ request }) => {
     await waitForAppReady(request);
@@ -104,6 +105,8 @@ test.describe("Revision B Creation Intelligence 8760→8758", () => {
     expect(accepted.acceptedFillIds).toContain(camera.id);
     const document = await readMap(request, projectId, mapId);
     expect((document.document.cameras || []).length).toBeGreaterThan(0);
+    acceptedCameraId = String((document.document.cameras || [])[0]?.id || "");
+    expect(acceptedCameraId).toBeTruthy();
 
     await openSpatial(page, projectId);
     await expect(page.locator("[data-testid=camera-slot-0]")).toBeVisible();
@@ -157,20 +160,25 @@ test.describe("Revision B Creation Intelligence 8760→8758", () => {
   test("E Smart Select does not fake a mask", async ({ request, page }) => {
     const res = await request.post(`${API}/api/perception/projects/${projectId}/auto-mask`, {
       data: { mapId, label: "lamp" },
+      timeout: 20_000,
     });
     expect(res.ok(), await res.text()).toBeTruthy();
     const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.maskAssetId).toBe("");
-    expect(String(body.message).toLowerCase()).toContain("paint");
+    if (body.ok) {
+      expect(body.maskAssetId).toBeTruthy();
+    } else {
+      expect(body.maskAssetId).toBe("");
+      expect(String(body.message).toLowerCase()).toMatch(/paint|not installed|essentials pack|gpu|memory/);
+    }
 
     await page.goto(`/project/${projectId}?workspace=scenecreator`, { waitUntil: "domcontentloaded", timeout: 60_000 });
     const smart = page.locator("[data-testid=scene-creator-inpaint-smart-select]");
     if (await smart.isVisible().catch(() => false)) {
       await smart.click();
-      await expect(page.locator("[data-testid=scene-creator-smart-select-message]")).toContainText(/paint/i, {
-        timeout: 20_000,
-      });
+      await expect(page.locator("[data-testid=scene-creator-smart-select-message]")).toContainText(
+        /paint|not installed|essentials pack/i,
+        { timeout: 20_000 },
+      );
     }
   });
 
@@ -210,17 +218,65 @@ test.describe("Revision B Creation Intelligence 8760→8758", () => {
 
   test("H browser 8760 persists through 8758 after reload", async ({ request, page }) => {
     expect(API).toContain("8758");
-    const persisted = await request.get(`${API}/api/perception/projects/${projectId}/maps/${mapId}/draft`);
-    expect(persisted.ok(), await persisted.text()).toBeTruthy();
-    const document = await readMap(request, projectId, mapId);
-    expect((document.document.cameras || []).length).toBeGreaterThan(0);
+
+    const review = async () => {
+      const res = await request.post(`${API}/api/perception/projects/${projectId}/maps/${mapId}/review`);
+      expect(res.ok(), await res.text()).toBeTruthy();
+      return res.json() as Promise<{ draft: { proposedFills?: Array<{ id: string; kind: string }> } }>;
+    };
+    const acceptCamera = async (fillId: string) => {
+      const res = await request.post(`${API}/api/perception/projects/${projectId}/maps/${mapId}/accept`, {
+        data: { items: [{ fillId }] },
+      });
+      expect(res.ok(), await res.text()).toBeTruthy();
+      return res.json() as Promise<{ acceptedFillIds?: string[]; failures?: Array<{ code?: string }> }>;
+    };
+
+    let before = await readMap(request, projectId, mapId);
+    if ((before.document.cameras || []).length === 0) {
+      const body = await review();
+      const camera = (body.draft.proposedFills || []).find((item) => item.kind === "camera");
+      expect(camera, "review must propose a camera so H can seed persistence").toBeTruthy();
+      const accepted = await acceptCamera(camera!.id);
+      expect(accepted.acceptedFillIds || []).toContain(camera!.id);
+      before = await readMap(request, projectId, mapId);
+    }
+    expect((before.document.cameras || []).length).toBeGreaterThan(0);
+    const cameraId = String((before.document.cameras || [])[0]?.id || "");
+    expect(cameraId).toBeTruthy();
+    if (acceptedCameraId) {
+      expect((before.document.cameras || []).some((item: { id?: string }) => item.id === acceptedCameraId)).toBeTruthy();
+    }
+
+    const reviewed = await review();
+    const midReview = await readMap(request, projectId, mapId);
+    expect((midReview.document.cameras || []).some((item: { id?: string }) => item.id === cameraId)).toBeTruthy();
+
+    const cameraFill = (reviewed.draft.proposedFills || []).find((item) => item.kind === "camera");
+    if (cameraFill) {
+      const accepted = await acceptCamera(cameraFill.id);
+      const occupied = (accepted.failures || []).some((item) => item.code === "SLOT_OCCUPIED");
+      if (!occupied) {
+        expect(accepted.acceptedFillIds || []).toContain(cameraFill.id);
+      }
+    }
+    await request.post(`${API}/api/spatial-map/projects/${projectId}/maps/${mapId}/save`).catch(() => undefined);
+
+    const midAccept = await readMap(request, projectId, mapId);
+    expect((midAccept.document.cameras || []).length).toBeGreaterThan(0);
+    expect((midAccept.document.cameras || []).some((item: { id?: string }) => item.id === cameraId)).toBeTruthy();
+
     await openSpatial(page, projectId);
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator("[data-testid=spatial-map-panel]")).toBeVisible({ timeout: 60_000 });
     await expect(page.locator("[data-testid=cd-scene-review]")).toBeVisible();
     await expect(page.locator("[data-testid=camera-slot-0]")).toBeVisible();
-    const again = await request.get(`${API}/api/perception/projects/${projectId}/maps/${mapId}/draft`);
-    expect(again.ok()).toBeTruthy();
+
+    const again = await readMap(request, projectId, mapId);
+    expect((again.document.cameras || []).length).toBeGreaterThan(0);
+    expect((again.document.cameras || []).some((item: { id?: string }) => item.id === cameraId)).toBeTruthy();
+    const draft = await request.get(`${API}/api/perception/projects/${projectId}/maps/${mapId}/draft`);
+    expect(draft.ok()).toBeTruthy();
   });
 
   test("NL shot parse keeps spatial language", async ({ request }) => {

@@ -1,0 +1,368 @@
+{
+  "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+  "projectName": "Schnick Coffee",
+  "startedAt": "2026-08-21T02:20:22.401936+00:00",
+  "gates": {
+    "A": {
+      "pass": true,
+      "code": 200,
+      "availability": "available",
+      "stance": "standing",
+      "support": "both",
+      "summary": "Balance: Stable. Primary support: both. Contact: left_hand \u2192 service counter. Motion: static.",
+      "worldAvailability": "insufficient_reference"
+    },
+    "JEPA": {
+      "pass": true,
+      "projectCode": 200,
+      "imageCount": 309,
+      "evaluate": {
+        "code": 200,
+        "availability": "available"
+      },
+      "poseWorld": {
+        "code": 200,
+        "availability": "insufficient_reference",
+        "reason": "No approved world references available for comparison.",
+        "imageAssetId": "4d3062e8-8c30-4230-8376-bc25d1d4f735"
+      }
+    },
+    "C": {
+      "pass": true,
+      "code": 200,
+      "edges": [
+        {
+          "bodyPart": "left_foot",
+          "targetId": "floor",
+          "targetKind": "floor",
+          "targetLabel": "floor",
+          "relation": "planted",
+          "confidence": "known",
+          "distanceM": 0.0
+        },
+        {
+          "bodyPart": "right_foot",
+          "targetId": "floor",
+          "targetKind": "floor",
+          "targetLabel": "floor",
+          "relation": "planted",
+          "confidence": "known",
+          "distanceM": 0.0
+        },
+        {
+          "bodyPart": "left_hand",
+          "targetId": "prim-phase2-counter",
+          "targetKind": "table-medium",
+          "targetLabel": "service counter",
+          "relation": "contact",
+          "confidence": "known",
+          "distanceM": 0.0391999999999999
+        },
+        {
+          "bodyPart": "right_hand",
+          "targetId": "prim-phase2-counter",
+          "targetKind": "table-medium",
+          "targetLabel": "service counter",
+          "relation": "contact",
+          "confidence": "known",
+          "distanceM": 0.0419716603854583
+        },
+        {
+          "bodyPart": "pelvis",
+          "targetId": "prim-phase2-counter",
+          "targetKind": "table-medium",
+          "targetLabel": "service counter",
+          "relation": "contact",
+          "confidence": "known",
+          "distanceM": 0.09999999999999998
+        }
+      ],
+      "handContact": [
+        "left_hand \u2192 service counter",
+        "right_hand \u2192 service counter"
+      ],
+      "groundContact": true
+    },
+    "B": {
+      "pass": true,
+      "code": 200,
+      "changes": [
+        {
+          "kind": "foot_released",
+          "summary": "left_foot released",
+          "fromValue": "",
+          "toValue": "",
+          "severity": "minor",
+          "confidence": "known"
+        },
+        {
+          "kind": "foot_released",
+          "summary": "right_foot released",
+          "fromValue": "",
+          "toValue": "",
+          "severity": "minor",
+          "confidence": "known"
+        },
+        {
+          "kind": "support_changed",
+          "summary": "Primary support changed",
+          "fromValue": "both",
+          "toValue": "none",
+          "severity": "moderate",
+          "confidence": "known"
+        },
+        {
+          "kind": "character_translated",
+          "summary": "Character moved 0.15m",
+          "fromValue": "",
+          "toValue": "",
+          "severity": "minor",
+          "confidence": "known"
+        },
+        {
+          "kind": "support_changed",
+          "summary": "Stance changed to sitting",
+          "fromValue": "standing",
+          "toValue": "sitting",
+          "severity": "minor",
+          "confidence": "known"
+        }
+      ],
+      "warnings": [],
+      "actionProgression": "stepping"
+    },
+    "D": {
+      "pass": true,
+      "code": 200,
+      "workspaceCode": 200,
+      "poseWorldStatePacketId": "pws_c2990d8e80ea",
+      "workspaceHasPose": true
+    },
+    "E": {
+      "pass": true,
+      "code": 200,
+      "applied": true,
+      "promptPrefix": "Co-Director pose continuity (intended physical performance):\n- Subject: Korri\n- Pose: standing; support both; balance stable\n- Action: standing\n- Planted: both\n- Planted: left_foot \u2192 floor\n- Planted: right_foot \u2192 floor\n- Contact: left_hand \u2192 service counter\n- Contact: right_hand \u2192 service counter\n- Contact: pelvis \u2192 service counter\n- Preserve: left_hand \u2192 service counter\n- Preserve: right_hand \u2192 service counter\n- Preserve: left_foot \u2192 floor\n- Preserve: right_foot \u2192 floor\n- Preserve: support both\n- Preserve: facing\n- Avoid: support foot teleport\n- Avoid: unexpected hand detach\n- Avoid: orientation jump",
+      "packetId": "pws_c2990d8e80ea"
+    },
+    "F": {
+      "pass": true,
+      "generatorProbe": {
+        "code": 200,
+        "chosen": {
+          "id": "ltx-local",
+          "label": "LTX 2.5 (Local)",
+          "capability": null
+        },
+        "available": [
+          "kling-api",
+          "ltx-local",
+          "minimax-h3-i2v-local",
+          "minimax-h3-t2v-local",
+          "seedance-api"
+        ]
+      },
+      "provider": "LTX 2.5 (Local)",
+      "model": "ltx-local",
+      "sceneId": "e4550745-f0ef-44c8-99a5-ef9e20bd47d2",
+      "scenesCode": 200,
+      "batchCreate": {
+        "code": 200,
+        "batchId": "bb_06cba1a18ebc"
+      },
+      "generateCode": 200,
+      "timelineRequestId": "8366a603-5c45-4f52-b6ad-e512de8e9255",
+      "jobId": "8366a603-5c45-4f52-b6ad-e512de8e9255",
+      "executionSnapshotId": "snap_6dc174298c2d",
+      "poseMotionConditioning": {
+        "applied": true,
+        "reason": null,
+        "promptPrefix": "Co-Director pose continuity (intended physical performance):\n- Subject: Korri\n- Pose: sitting; support none; balance unsupported\n- Action: stepping\n- Contact: left_hand \u2192 service counter\n- Contact: right_hand \u2192 service counter\n- Contact: pelvis \u2192 service counter\n- Preserve: left_hand \u2192 service counter\n- Preserve: right_hand \u2192 service counter\n- Preserve: support none\n- Preserve: facing\n- Avoid: support foot teleport\n- Avoid: unexpected hand detach\n- Avoid: orientation jump\n- Continue: lateral step",
+        "packetId": "pws_215e57f6d768",
+        "conditioningPacketId": "pmc_15a95e4c5625",
+        "conditioning": {
+          "schemaVersion": "pose-motion-conditioning-v1",
+          "packetId": "pmc_15a95e4c5625",
+          "projectId": "2347bf46-3762-4763-86c5-4a6032522278",
+          "sourcePosePacketId": "pws_215e57f6d768",
+          "subjectIdentity": "Korri",
+          "characterId": "char-korri",
+          "poseState": "sitting; support none; balance unsupported",
+          "actionState": "stepping",
+          "bodyOrientation": "facing 18\u00b0, torso y 0\u00b0",
+          "plantedLimbs": [],
+          "movingLimbs": [],
+          "contactPoints": [
+            "left_hand \u2192 service counter",
+            "right_hand \u2192 service counter",
+            "pelvis \u2192 service counter"
+          ],
+          "objectInteractions": [
+            "service counter"
+          ],
+          "expectedNextMotion": "lateral step",
+          "momentum": "lateral step",
+          "cameraRelativeDirection": "",
+          "preserveConstraints": [
+            "left_hand \u2192 service counter",
+            "right_hand \u2192 service counter",
+            "support none",
+            "facing"
+          ],
+          "allowedReleaseConditions": [
+            "Hand may release after the authored turn or step begins."
+          ],
+          "prohibitedDiscontinuities": [
+            "support foot teleport",
+            "unexpected hand detach",
+            "orientation jump"
+          ],
+          "styleOverride": "Honor creator stylization; do not correct an intentional pose.",
+          "confidence": "known",
+          "sourceProvenance": "posecraft-intended",
+          "creatorFacingSummary": "Balance: Unsupported. Primary support: none. Contact: left_hand \u2192 service counter. Motion: lateral step.",
+          "createdAt": "2026-08-21T02:20:23.166713+00:00"
+        },
+        "sourcePosePacketId": "pws_c2990d8e80ea"
+      },
+      "prompt": "UNCHANGED FACTS: Korri position, Clear Glass Cup identity, Coffee Cup (Library) identity, environment, cameras, ERS\nSTARTING STATE (M1): beat Serving Coffee\nENDING STATE (M2): beat \nTIMED PROMPT: Korri at the coffee service counter, short posed hold, then a small natural shift.\nCo-Director pose continuity (intended physical performance):\n- Subject: Korri\n- Pose: sitting; support none; balance unsupported\n- Action: stepping\n- Contact: left_hand \u2192 service counter\n- Contact: right_hand \u2192 service counter\n- Contact: pelvis \u2192 service counter\n- Preserve: left_hand \u2192 service counter\n- Preserve: right_hand \u2192 service counter\n- Preserve: support none\n- Preserve: facing\n- Avoid: support foot teleport\n- Avoid: unexpected hand detach\n- Avoid: orientation jump\n- Continue: lateral step\nKorri at the coffee service counter, short posed hold, then a small natural shift.",
+      "requestGeneratorId": "ltx-local",
+      "jobPoll": {
+        "status": "done"
+      },
+      "batchStatus": "CandidateReady",
+      "candidateId": "cand_425ac64dea9b",
+      "approve": {
+        "code": 200,
+        "ok": true
+      },
+      "generatedVideoAssetId": "84bbbff3-0155-4968-914a-ae6f589ac549",
+      "generatedVideoPath": "C:\\AdeptFilmWorks\\AIVideoStudio\\data\\projects\\2347bf46-3762-4763-86c5-4a6032522278\\renders\\scene_0_6686546d.mp4",
+      "newVideo": true,
+      "temporalCode": 200,
+      "temporalAnalysisId": "tcp_8a346e9dfcf3",
+      "worldIntelligence": {
+        "availability": "available",
+        "summary": null
+      },
+      "poseContinuityReview": {
+        "id": "pcr_014112b150f1",
+        "authorityNote": "Observed video is new evidence. PoseCraft is starting intent. Do not overwrite newer observed state with stale pose assumptions.",
+        "continuityRisk": [],
+        "changes": null,
+        "nextBatchGuidance": [
+          "Continue from the intended PoseCraft performance unless observed video completed the action."
+        ]
+      },
+      "observedState": "A woman stands in a coffee shop, holding a glass of water. She takes a sip from the glass and then turns to her left and walks away from the camera. The camera remains stationary, capturing her movement as she walks away. The coffee shop has a rustic, industrial aesthetic with exposed brick walls, wooden floors, and large windows. There are several tables and chairs in the shop, as well as a counter with a coffee machine and other equipment. The woman is wearing a black shirt and black pants, and she has a black purse slung over her shoulder. She has short, curly hair and is wearing a necklace. The lighting in the shop is warm and inviting, with a mix of natural and artificial light. The video ends with the woman walking away from the camera, her back to the viewer.",
+      "observedProvenance": "temporal-continuity packet from generated media",
+      "note": "Observed media is authoritative for what happened. PoseCraft remains intended starting performance. No hardcoded observed packet."
+    },
+    "restore": {
+      "pass": true,
+      "code": 200
+    }
+  },
+  "health": {
+    "code": 200,
+    "body": {
+      "ok": true,
+      "comfy_reachable": true,
+      "comfy": {
+        "status": "unknown",
+        "reachable": false,
+        "message": "liveness only; use /api/comfy/health for Comfy and /api/capabilities for catalog"
+      },
+      "missing_models": [],
+      "missing_model_component_ids": [],
+      "missing_optional_models": [],
+      "missing_optional_model_component_ids": [],
+      "comfy_status": "unknown",
+      "comfy_version": null,
+      "node_catalog_available": false,
+      "reason_code": null,
+      "recommended_action": null,
+      "message": "ok",
+      "operator": {
+        "api": "ok",
+        "comfy": "unknown",
+        "provider": {
+          "id": null,
+          "status": "skipped",
+          "reachable": false,
+          "modelAvailable": false,
+          "selectedModel": null
+        },
+        "bibleStorage": "skipped",
+        "intelligenceEnabled": true,
+        "visionValidationEnabled": true,
+        "timelineReferencesEnabled": true,
+        "productionExecutiveEnabled": true,
+        "modelRadarEnabled": false,
+        "sandboxRuntimeEnabled": false,
+        "virtualStageEnabled": false,
+        "shotProfilesEnabled": false,
+        "productionRecipeEnabled": false,
+        "locationSpinEnabled": false,
+        "imageProductionEnabled": true,
+        "frameProductionEnabled": true,
+        "videoProductionEnabled": true,
+        "directorTimelineEnabled": true,
+        "lipsyncProductionEnabled": true,
+        "audioProductionEnabled": true,
+        "editingProductionEnabled": true,
+        "renderProductionEnabled": true,
+        "codirectorProductionControlEnabled": true,
+        "productionIntelligenceEnabled": true,
+        "adaptiveLearningEnabled": true,
+        "virtualEnvironmentStudioEnabled": false,
+        "unifiedExperienceEnabled": false,
+        "templatesPresetsEnabled": false,
+        "specialistCount": 40,
+        "registry": {
+          "callable": 0,
+          "blocked": 0,
+          "total": 0,
+          "deferred": 0,
+          "counts": {}
+        },
+        "packBlockers": [],
+        "visualValidationPendingNote": "M2.5 vision validation enabled \u2014 review pending assets in Validation Workspace.",
+        "partialErrors": []
+      },
+      "apiRevision": "9b8d5a9",
+      "apiStartedAt": "2026-08-21T02:15:54Z",
+      "routeContract": [
+        "perception.capability"
+      ]
+    }
+  },
+  "worldIntelligence": {
+    "code": 200,
+    "body": {
+      "ok": true,
+      "available": true,
+      "installed": true,
+      "status": {
+        "available": true,
+        "installed": true,
+        "workerOk": true,
+        "workerError": null,
+        "models": {
+          "vjepa2-vitl-fpc64-256": true,
+          "vjepa2.1-vitl-384": false
+        },
+        "activeModel": null,
+        "policy": "automatic",
+        "advisoryOnly": true
+      },
+      "advisoryOnly": true
+    }
+  },
+  "scenePut": {
+    "code": 200,
+    "ok": true
+  },
+  "finishedAt": "2026-08-21T02:22:42.929740+00:00",
+  "verdict": "PASS"
+}
