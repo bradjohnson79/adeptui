@@ -123,6 +123,8 @@ World intelligence worker: `available=true`, `workerOk=true`. Pose packets with 
 
 `773fedd` imported `movement_tools` and avatar speaker-studio handlers that were not in that tree. A clean clone failed at `app.codirector.service` → `tools.registry`. Repair: delete those 11 leaked tool definitions and their registry bindings. Keep `posecraft.get_pose_intelligence` and `posecraft.compare_poses`. Do not commit untracked movement/avatar work into the Phase 2 SHA.
 
+`auto_mask.py` also imported untracked `perception_router.creator_unavailable_message`. Repair: keep the creator-facing Essentials Pack / paint-the-region message inline so the Phase 2 cache-or-honest-paint path imports on a clean clone. The pre-existing `test_camera_shot_packet_absorbs_accepted_draft_notes` import of uncommitted `_append_spatial_draft_notes` was already failing at `9b8d5a9` and is not a Phase 2 regression.
+
 ## Closure diagnosis (Playwright H)
 
 H was not Accept deleting cameras. Serial Playwright (`workers=1`) plus a 30–180s `/auto-mask` GPU/Comfy `/free` hang in test E restarted the worker. `beforeAll` then created a new empty map and H read `cameras.length === 0`. Repair: auto-mask is cache-or-honest-paint (no GPU spawn on that request). H now proves existing camera → Review → Accept → persist → reload → same camera id from `:8758` and keeps `cameras.length > 0` plus `camera-slot-0`. Isolated H and the full Revision B file both passed.

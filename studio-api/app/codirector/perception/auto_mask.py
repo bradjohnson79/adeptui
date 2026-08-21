@@ -7,9 +7,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .contracts import PerceptionCapability
-from .perception_router import creator_unavailable_message
 from .service import get_capability
 from .spatial_draft import load_spatial_draft
+
+_SELECT_UNAVAILABLE = (
+    "Intelligent selection is not installed. Paint the region, or open Setup "
+    "and install the Adept UI Essentials Pack."
+)
 
 
 def resolve_auto_mask(
@@ -25,7 +29,7 @@ def resolve_auto_mask(
             "ok": False,
             "maskAssetId": "",
             "status": "unavailable",
-            "message": creator_unavailable_message("select"),
+            "message": _SELECT_UNAVAILABLE,
         }
     draft = load_spatial_draft(db, project_id, map_id) if map_id else None
     source_asset_id = asset_id or (draft.sourceAssetId if draft else "")
@@ -71,7 +75,7 @@ def resolve_auto_mask(
             "maskAssetId": "",
             "status": capability.autoMask,
             "message": (
-                creator_unavailable_message("select")
+                _SELECT_UNAVAILABLE
                 if capability.autoMask == "unavailable"
                 else "Could not select automatically. Paint the region."
             ),
