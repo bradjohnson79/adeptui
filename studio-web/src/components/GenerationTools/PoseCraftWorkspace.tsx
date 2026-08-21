@@ -1395,34 +1395,6 @@ export function PoseCraftWorkspace({ project, onChange, onGo, onAskCoDirector }:
                   />
                 </label>
                 <p className="muted">Imported meshes are stored in this project's Library and listed here.</p>
-                <div className="posecraft-field" data-testid="posecraft-extract-subject">
-                  <PanelHeading title="Extract from a picture" tip="Pull the person or object out of a Library picture so you can use it as a stand-in. This does not change PoseCraft itself." />
-                  <select
-                    data-testid="posecraft-extract-source"
-                    defaultValue=""
-                    onChange={(event) => {
-                      const assetId = event.target.value;
-                      if (!assetId) return;
-                      void api.perception.extractSubject(project.id, { assetId, tag: "posecraft-subject" }).then((res) => {
-                        if (!res.ok) {
-                          setStatusMessage(res.message || "Intelligent selection is not installed. Open Setup and install the Adept UI Essentials Pack.");
-                          return;
-                        }
-                        setStatusMessage(res.message || "Subject isolated and saved to this project's Library.");
-                        void onChange?.();
-                      }).catch((error: unknown) => {
-                        setStatusMessage(error instanceof Error ? error.message : "Could not isolate that picture.");
-                      });
-                    }}
-                  >
-                    <option value="">Choose a Library picture…</option>
-                    {project.assets.filter((asset) => asset.kind === "image").map((asset) => (
-                      <option key={asset.id} value={asset.id}>
-                        {asset.tag || asset.filename}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div className="posecraft-figure-list">
                   {scene.figures.filter((f) => f.kind === "custom").map((figure) => {
                     const colorHex = FIGURE_COLORS.find((entry) => entry.id === figure.colorId)?.hex ?? "#0f766e";
