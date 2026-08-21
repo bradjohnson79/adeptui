@@ -16,13 +16,13 @@ PoseCraft remains the pose engine. This phase adds kinematic pose intelligence a
 | Item | Value |
 |---|---|
 | Branch | `feat/codirector-temporal-continuity` |
-| Starting / tracked HEAD | `773feddc42b819e0d275ce33497409088efd8b4c` (Phase 2 source). Clean-clone repair is the follow-up commit on this tree. |
+| Starting / tracked HEAD | `a62d7a1bb4c7c3fa2f2a16cea4ee06428a0e06d6` |
 | Cert project | Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` |
 | Creator UI | http://127.0.0.1:8760/ |
 | Studio API | http://127.0.0.1:8758/ |
 | Live evidence | [evidence/phase2-live-gates.json](./evidence/phase2-live-gates.json) |
 
-Phase 2 source is in `773fedd`. Peer review of that SHA found a clean-clone blocker: `registry.py` / `definitions.py` bound untracked `movement_tools` and uncommitted `avatar.open_studio` / `avatar.detect_speakers`. Those leaked bindings are stripped in the follow-up commit; PoseCraft intelligence tools stay.
+Phase 2 source is `773fedd` plus clean-clone repairs `d737a43` / `b9eda76` / `a62d7a1`. Deploy SHA is `a62d7a1`.
 
 ## Product law
 
@@ -118,6 +118,8 @@ World intelligence worker: `available=true`, `workerOk=true`. Pose packets with 
 |---|---|---|
 | GLM 5.2 (`glm-5.2-max`) [Review](61558c0f-f2b7-42b5-a6b5-73db14ef4e8c) | READY FOR PRIMARY REVIEW | Cache tautology, snapshot mislabel, Playwright reload, degraded UI |
 | Kimi K3 (`kimi-k3-max`) [Review](011c62f1-93f1-4587-bb46-588afad418ab) | GAPS FOUND | Persist key collision fixed; seated false-positive fixed; `observedWorld` attached after JEPA augment; JEPA evaluate proven; snapshot-cache fallback fixed |
+| GLM 5.2 closure (`a62d7a1`) [Review](243fee29-8e3a-44d5-82e8-5b2c13c7e288) | READY FOR PRIMARY REVIEW | Found leaked registry + auto-mask untracked imports; repaired; clean-clone 15 passed |
+| Kimi K3 closure (`a62d7a1`) [Review](73129835-58c1-4eaf-bdf7-6ff0c9b7eb0d) | READY FOR PRIMARY REVIEW | Clean-clone import + auto-mask + pose tests verified |
 
 ## Closure diagnosis (clean-clone)
 
