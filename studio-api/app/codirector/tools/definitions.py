@@ -6376,12 +6376,19 @@ MUTATING_TOOLS = MUTATING_TOOLS + (
         tool_id="posecraft.apply_pose",
         kind="mutating",
         title="PoseCraft: apply pose",
-        description="Apply a named pose preset to a PoseCraft figure.",
+        description=(
+            "Apply a pose to a PoseCraft figure: resolves posePresetId from the "
+            "canonical pose catalog (or project custom poses) and writes real, "
+            "limit-clamped joint rotations into the scene. An explicit joints "
+            "map (from Pose Intelligence) overrides the preset lookup."
+        ),
         capability="project",
         pinned_resources=("project",),
         parameters=(
             ToolParameter("figureId", "string", required=True, max_length=64),
             ToolParameter("posePresetId", "string", required=True, max_length=80),
+            ToolParameter("joints", "object"),
+            ToolParameter("poseLabel", "string", max_length=120),
         ),
     ),
     ToolDefinition(

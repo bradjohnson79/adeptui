@@ -22,7 +22,7 @@ export const FIGURE_ARCHETYPES: ArchetypeSpec[] = [
     upperLeg: 0.46,
     lowerLeg: 0.45,
     limbThickness: 0.12,
-    modelId: "adult-male-lowpoly-v3",
+    modelId: "adult-male-lowpoly-v4",
   },
   {
     id: "adult-female",
@@ -36,7 +36,7 @@ export const FIGURE_ARCHETYPES: ArchetypeSpec[] = [
     upperLeg: 0.43,
     lowerLeg: 0.42,
     limbThickness: 0.09,
-    modelId: "adult-female-lowpoly-v3",
+    modelId: "adult-female-lowpoly-v4",
   },
   {
     id: "child-boy",
@@ -50,7 +50,7 @@ export const FIGURE_ARCHETYPES: ArchetypeSpec[] = [
     upperLeg: 0.3,
     lowerLeg: 0.29,
     limbThickness: 0.08,
-    modelId: "child-boy-lowpoly-v3",
+    modelId: "child-boy-lowpoly-v4",
   },
   {
     id: "child-girl",
@@ -64,7 +64,7 @@ export const FIGURE_ARCHETYPES: ArchetypeSpec[] = [
     upperLeg: 0.29,
     lowerLeg: 0.28,
     limbThickness: 0.08,
-    modelId: "child-girl-lowpoly-v3",
+    modelId: "child-girl-lowpoly-v4",
   },
 ];
 

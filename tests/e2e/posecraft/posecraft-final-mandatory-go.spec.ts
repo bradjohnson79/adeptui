@@ -94,13 +94,19 @@ test.describe("PoseCraft Final Mandatory GO — Figures, Furniture & Custom Char
       fs.writeFileSync(path.join(ARTIFACT_DIR, "D-figures.json"), JSON.stringify({ archetypes, figureCount: figures.length }, null, 2));
       await page.screenshot({ path: path.join(ARTIFACT_DIR, "D1-front.png"), fullPage: true });
 
+      await page.waitForFunction((ids: string[]) => {
+        const ctrl = (window as any).__posecraftController;
+        if (!ctrl) return false;
+        return ids.every((id) => ctrl.getFigureMetadata?.(id)?.visualState === "READY");
+      }, figures.map((f: any) => f.id), { timeout: 30_000 });
+
       // Read per-figure low-poly human metadata from the engine via window global.
       const meta = await page.evaluate((ids: string[]) => {
         const ctrl = (window as any).__posecraftController;
         const out: any[] = [];
         for (const id of ids) {
           const m = ctrl?.getFigureMetadata?.(id);
-          if (m) out.push({ id, modelId: m.modelId, jointCount: m.jointCount, bodyRegions: m.bodyRegions, legacyBlockModel: m.legacyBlockModel });
+          if (m) out.push({ id, modelId: m.modelId, jointCount: m.jointCount, bodyRegions: m.bodyRegions, legacyBlockModel: m.legacyBlockModel, visualState: m.visualState, assetSource: m.assetSource });
         }
         return out;
       }, figures.map((f: any) => f.id));
@@ -109,11 +115,11 @@ test.describe("PoseCraft Final Mandatory GO — Figures, Furniture & Custom Char
       const allLegacyFalse = meta.every((m: any) => m.legacyBlockModel === false);
       const jointCountOk = meta.every((m: any) => m.jointCount === 17);
       const regionsOk = meta.every((m: any) => Array.isArray(m.bodyRegions) && m.bodyRegions.length >= 17);
-      recordVerdict("D1 ADULT MALE MODEL", modelIds.includes("adult-male-lowpoly-v2") && allLegacyFalse, `modelIds=${JSON.stringify(modelIds)}`);
-      recordVerdict("D2 ADULT FEMALE MODEL", modelIds.includes("adult-female-lowpoly-v2") && allLegacyFalse, `modelIds=${JSON.stringify(modelIds)}`);
-      recordVerdict("D3 CHILD MODELS", modelIds.includes("child-boy-lowpoly-v2") && modelIds.includes("child-girl-lowpoly-v2"), `modelIds=${JSON.stringify(modelIds)}`);
+      recordVerdict("D1 ADULT MALE MODEL", modelIds.includes("adult-male-lowpoly-v4") && allLegacyFalse, `modelIds=${JSON.stringify(modelIds)}`);
+      recordVerdict("D2 ADULT FEMALE MODEL", modelIds.includes("adult-female-lowpoly-v4") && allLegacyFalse, `modelIds=${JSON.stringify(modelIds)}`);
+      recordVerdict("D3 CHILD MODELS", modelIds.includes("child-boy-lowpoly-v4") && modelIds.includes("child-girl-lowpoly-v4"), `modelIds=${JSON.stringify(modelIds)}`);
       recordVerdict("D4 SAME-COLOR SILHOUETTE", allLegacyFalse && jointCountOk && regionsOk, `jointCount=${jointCountOk} regions=${regionsOk}`);
-      expect(modelIds, "D1–D3: v2 model ids present").toEqual(expect.arrayContaining(["adult-male-lowpoly-v2", "adult-female-lowpoly-v2", "child-boy-lowpoly-v2", "child-girl-lowpoly-v2"]));
+      expect(modelIds, "D1–D3: v4 model ids present").toEqual(expect.arrayContaining(["adult-male-lowpoly-v4", "adult-female-lowpoly-v4", "child-boy-lowpoly-v4", "child-girl-lowpoly-v4"]));
       expect(allLegacyFalse, "D4: legacyBlockModel === false for all").toBe(true);
 
       // Gate FURN — walls + window walls render as Babylon objects.

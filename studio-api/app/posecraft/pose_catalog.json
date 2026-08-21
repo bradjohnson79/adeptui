@@ -1,0 +1,5509 @@
+{
+ "schema": "posecraft-pose-catalog@1",
+ "jointLimits": {
+  "pelvis": {
+   "x": [
+    -20,
+    20
+   ],
+   "y": [
+    -50,
+    50
+   ],
+   "z": [
+    -15,
+    15
+   ]
+  },
+  "spine": {
+   "x": [
+    -25,
+    25
+   ],
+   "y": [
+    -25,
+    25
+   ],
+   "z": [
+    -20,
+    20
+   ]
+  },
+  "chest": {
+   "x": [
+    -30,
+    30
+   ],
+   "y": [
+    -35,
+    35
+   ],
+   "z": [
+    -25,
+    25
+   ]
+  },
+  "neck": {
+   "x": [
+    -30,
+    30
+   ],
+   "y": [
+    -50,
+    50
+   ],
+   "z": [
+    -30,
+    30
+   ]
+  },
+  "head": {
+   "x": [
+    -35,
+    25
+   ],
+   "y": [
+    -60,
+    60
+   ],
+   "z": [
+    -30,
+    30
+   ]
+  },
+  "leftShoulder": {
+   "x": [
+    -110,
+    110
+   ],
+   "y": [
+    -75,
+    75
+   ],
+   "z": [
+    -90,
+    90
+   ]
+  },
+  "leftElbow": {
+   "x": [
+    -5,
+    145
+   ],
+   "y": [
+    -35,
+    35
+   ],
+   "z": [
+    -25,
+    25
+   ]
+  },
+  "leftWrist": {
+   "x": [
+    -35,
+    35
+   ],
+   "y": [
+    -45,
+    45
+   ],
+   "z": [
+    -35,
+    35
+   ]
+  },
+  "rightShoulder": {
+   "x": [
+    -110,
+    110
+   ],
+   "y": [
+    -75,
+    75
+   ],
+   "z": [
+    -90,
+    90
+   ]
+  },
+  "rightElbow": {
+   "x": [
+    -5,
+    145
+   ],
+   "y": [
+    -35,
+    35
+   ],
+   "z": [
+    -25,
+    25
+   ]
+  },
+  "rightWrist": {
+   "x": [
+    -35,
+    35
+   ],
+   "y": [
+    -45,
+    45
+   ],
+   "z": [
+    -35,
+    35
+   ]
+  },
+  "leftHip": {
+   "x": [
+    -95,
+    60
+   ],
+   "y": [
+    -40,
+    40
+   ],
+   "z": [
+    -35,
+    35
+   ]
+  },
+  "leftKnee": {
+   "x": [
+    -5,
+    145
+   ],
+   "y": [
+    -10,
+    10
+   ],
+   "z": [
+    -10,
+    10
+   ]
+  },
+  "leftAnkle": {
+   "x": [
+    -35,
+    35
+   ],
+   "y": [
+    -20,
+    20
+   ],
+   "z": [
+    -20,
+    20
+   ]
+  },
+  "rightHip": {
+   "x": [
+    -95,
+    60
+   ],
+   "y": [
+    -40,
+    40
+   ],
+   "z": [
+    -35,
+    35
+   ]
+  },
+  "rightKnee": {
+   "x": [
+    -5,
+    145
+   ],
+   "y": [
+    -10,
+    10
+   ],
+   "z": [
+    -10,
+    10
+   ]
+  },
+  "rightAnkle": {
+   "x": [
+    -35,
+    35
+   ],
+   "y": [
+    -20,
+    20
+   ],
+   "z": [
+    -20,
+    20
+   ]
+  }
+ },
+ "poses": [
+  {
+   "id": "neutral-hero",
+   "label": "Hero Stand",
+   "category": "neutral",
+   "description": "Balanced weight, open chest, ready for a poster frame.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 14,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 14,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "neutral-idle",
+   "label": "Idle Rest",
+   "category": "neutral",
+   "description": "A calm standing rest between takes.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 2,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 4,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -2,
+     "y": 4,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "neutral-relaxed",
+   "label": "Relaxed",
+   "category": "neutral",
+   "description": "Shoulders dropped, weight even, breathing room.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -3,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 6,
+     "y": 0,
+     "z": -4
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 6,
+     "y": 0,
+     "z": 4
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "neutral-attention",
+   "label": "Attention",
+   "category": "neutral",
+   "description": "Heads-up formal attention for a reveal beat.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": -4,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "neutral-at-ease",
+   "label": "At Ease",
+   "category": "neutral",
+   "description": "Feet apart, hands loose, parade-ground casual.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 8,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 10,
+     "y": 0,
+     "z": -6
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 10,
+     "y": 0,
+     "z": 6
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "neutral-parade-rest",
+   "label": "Parade Rest",
+   "category": "neutral",
+   "description": "Hands behind back, wide stance, waiting posture.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 10,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": -30,
+     "y": 0,
+     "z": -25
+    },
+    "leftElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": -30,
+     "y": 0,
+     "z": 25
+    },
+    "rightElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-listen",
+   "label": "Listening",
+   "category": "dialogue",
+   "description": "A relaxed conversational stance with a soft lean.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": -4,
+     "y": 8,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 12,
+     "y": -8,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -8,
+     "y": 10,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 18,
+     "y": 12,
+     "z": -6
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 12,
+     "y": -8,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-talk",
+   "label": "Talking",
+   "category": "dialogue",
+   "description": "Open hands mid-sentence, weight forward.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 4,
+     "y": -6,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 10,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 28,
+     "y": -12,
+     "z": 12
+    },
+    "rightElbow": {
+     "x": 38,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-think",
+   "label": "Thinking",
+   "category": "dialogue",
+   "description": "Hand to chin, weighing an idea.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -10,
+     "y": -6,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 60,
+     "y": 20,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 100,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-react",
+   "label": "Reacting",
+   "category": "dialogue",
+   "description": "A small take, hearing surprising news.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -14,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 40,
+     "y": 0,
+     "z": -15
+    },
+    "leftElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 40,
+     "y": 0,
+     "z": 15
+    },
+    "rightElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-agree",
+   "label": "Agreeing",
+   "category": "dialogue",
+   "description": "Nodding openness, palms up.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 4,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 35,
+     "y": 0,
+     "z": -20
+    },
+    "leftElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 35,
+     "y": 0,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-disagree",
+   "label": "Disagreeing",
+   "category": "dialogue",
+   "description": "Arms beginning to cross, leaning away.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -8,
+     "y": -10,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 6,
+     "y": -8,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 45,
+     "y": 0,
+     "z": -35
+    },
+    "leftElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 45,
+     "y": 0,
+     "z": 35
+    },
+    "rightElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-question",
+   "label": "Questioning",
+   "category": "dialogue",
+   "description": "One hand raised, palms out, asking.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 6,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -6,
+     "y": 8,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 70,
+     "y": 10,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 50,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "dialogue-confide",
+   "label": "Confiding",
+   "category": "dialogue",
+   "description": "Leaning in, hand near face, intimate.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -8,
+     "y": -10,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 55,
+     "y": 18,
+     "z": 12
+    },
+    "rightElbow": {
+     "x": 80,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-hips",
+   "label": "Hands on Hips",
+   "category": "power",
+   "description": "Confident stance for a reveal or challenge beat.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 52,
+     "y": 10,
+     "z": -18
+    },
+    "leftElbow": {
+     "x": 84,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 52,
+     "y": -10,
+     "z": 18
+    },
+    "rightElbow": {
+     "x": 84,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-crossed",
+   "label": "Arms Crossed",
+   "category": "power",
+   "description": "Closed authority, evaluating the room.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 40,
+     "y": 0,
+     "z": -45
+    },
+    "leftElbow": {
+     "x": 90,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 40,
+     "y": 0,
+     "z": 45
+    },
+    "rightElbow": {
+     "x": 90,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-authority",
+   "label": "Authority",
+   "category": "power",
+   "description": "Shoulders back, chin level, commanding presence.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": -6,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 12,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 4,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 16,
+     "y": 0,
+     "z": -8
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 16,
+     "y": 0,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-command",
+   "label": "Command",
+   "category": "power",
+   "description": "One arm forward, directing action.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": -8
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 75,
+     "y": 10,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-defiant",
+   "label": "Defiant",
+   "category": "power",
+   "description": "Chest out, jaw set, refusing to move.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": -8,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 16,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": -20
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "power-victory",
+   "label": "Victory",
+   "category": "power",
+   "description": "Arms up, fists clenched in triumph.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -8,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 100,
+     "y": 0,
+     "z": -20
+    },
+    "leftElbow": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 100,
+     "y": 0,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-walk",
+   "label": "Stride Forward",
+   "category": "motion",
+   "description": "A simple walking key pose for blocking entrances.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": -18,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 24,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 22,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -18,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 26,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-walk-cycle",
+   "label": "Walk Cycle",
+   "category": "motion",
+   "description": "Mid-stride contact, weight transfer.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": -28,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -25,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 12,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-run",
+   "label": "Run",
+   "category": "motion",
+   "description": "Leaning forward, drive leg extended.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": -50,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 55,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 75,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 50,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -30,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-turn",
+   "label": "Turn",
+   "category": "motion",
+   "description": "Pivoting on one foot to face a new direction.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 30,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": -20,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": -10,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-step-aside",
+   "label": "Step Aside",
+   "category": "motion",
+   "description": "Shifting out of frame for a partner.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": -15,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 10,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -12,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-lunge",
+   "label": "Lunge",
+   "category": "motion",
+   "description": "Deep forward lunge, action lead-in.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 16,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 12,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 80,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -20,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-kneel",
+   "label": "Kneel Down",
+   "category": "motion",
+   "description": "A low blocking pose for landing, grief, or scale contrast.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 52,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 96,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -8,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "motion-perch-sit",
+   "label": "Perch Sit",
+   "category": "motion",
+   "description": "A perched pose that works with a box or low platform.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": -14,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 62,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 92,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 58,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 88,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-pleading",
+   "label": "Pleading",
+   "category": "emotion",
+   "description": "Raised arms and forward chest for an emotional appeal.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -12,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 72,
+     "y": 0,
+     "z": -25
+    },
+    "leftElbow": {
+     "x": 56,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 72,
+     "y": 0,
+     "z": 25
+    },
+    "rightElbow": {
+     "x": 56,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-despair",
+   "label": "Despair",
+   "category": "emotion",
+   "description": "Caved chest, head down, heavy.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 22,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 24,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 50,
+     "y": 0,
+     "z": -20
+    },
+    "leftElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 50,
+     "y": 0,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-joy",
+   "label": "Joy",
+   "category": "emotion",
+   "description": "Open arms, lifted chest, looking up.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": -8,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -16,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 60,
+     "y": 0,
+     "z": -15
+    },
+    "leftElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 60,
+     "y": 0,
+     "z": 15
+    },
+    "rightElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-surprise",
+   "label": "Surprise",
+   "category": "emotion",
+   "description": "Hands up, shoulders raised, startled.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 80,
+     "y": 10,
+     "z": -20
+    },
+    "leftElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 80,
+     "y": 10,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-fear",
+   "label": "Fear",
+   "category": "emotion",
+   "description": "Cowering back, arms protective.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 16,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 55,
+     "y": 0,
+     "z": -30
+    },
+    "leftElbow": {
+     "x": 80,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 55,
+     "y": 0,
+     "z": 30
+    },
+    "rightElbow": {
+     "x": 80,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-shame",
+   "label": "Shame",
+   "category": "emotion",
+   "description": "Head down, shoulders rolled in, withdrawn.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 22,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 28,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": -25
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 25
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-pride",
+   "label": "Pride",
+   "category": "emotion",
+   "description": "Chest broad, chin up, standing tall.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -8,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -14,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "emotion-grief",
+   "label": "Grief",
+   "category": "emotion",
+   "description": "Folded over, hand to heart, slow.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 24,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 26,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 70,
+     "y": 10,
+     "z": 15
+    },
+    "rightElbow": {
+     "x": 90,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-over-shoulder",
+   "label": "Over Shoulder",
+   "category": "duo",
+   "description": "One shoulder opens toward the camera for a dialogue setup.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 20,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": -16,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": -8,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 18,
+     "y": 14,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 8,
+     "y": -25,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-face-to-face",
+   "label": "Face to Face",
+   "category": "duo",
+   "description": "Squared toward a partner, open posture.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 12,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": -10,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": -6,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 22,
+     "y": 10,
+     "z": -8
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 22,
+     "y": -10,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-back-to-back",
+   "label": "Back to Back",
+   "category": "duo",
+   "description": "Spine turned away, head glancing over shoulder.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": -40,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 30,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -8,
+     "y": -50,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-embrace-prep",
+   "label": "Embrace Prep",
+   "category": "duo",
+   "description": "Arms opening to receive a partner.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 60,
+     "y": 0,
+     "z": -25
+    },
+    "leftElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 60,
+     "y": 0,
+     "z": 25
+    },
+    "rightElbow": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-point-partner",
+   "label": "Pointing at Partner",
+   "category": "duo",
+   "description": "One arm extended toward the other character.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": 6,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": 8,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 90,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "duo-listen-partner",
+   "label": "Listening to Partner",
+   "category": "duo",
+   "description": "Head turned, weight toward the speaker.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": -4,
+     "y": 14,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 10,
+     "y": -12,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -16,
+     "y": -22,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 16,
+     "y": 8,
+     "z": -6
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 14,
+     "y": -8,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-reach-up",
+   "label": "Reach Up",
+   "category": "action",
+   "description": "One arm high, grasping for something above.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -6,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 120,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-reach-out",
+   "label": "Reach Out",
+   "category": "action",
+   "description": "Arm extended forward, leaning into the reach.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 12,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 85,
+     "y": 10,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 15,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-pick-up",
+   "label": "Pick Up",
+   "category": "action",
+   "description": "Bending, hands low to grab an object.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 50,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 50,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 60,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-throw",
+   "label": "Throw",
+   "category": "action",
+   "description": "Wind-up arm back, weight on back leg.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": -40,
+     "y": -20,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 50,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -10,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-block",
+   "label": "Block",
+   "category": "action",
+   "description": "Arms up across, defensive shield.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -4,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 95,
+     "y": 10,
+     "z": -30
+    },
+    "leftElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 95,
+     "y": 10,
+     "z": 30
+    },
+    "rightElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "action-strike",
+   "label": "Strike",
+   "category": "action",
+   "description": "Arm chambered back, ready to punch.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -8,
+     "y": 20,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": -30,
+     "y": -30,
+     "z": 20
+    },
+    "rightElbow": {
+     "x": 80,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 10,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": -16,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "rest-seated",
+   "label": "Seated",
+   "category": "rest",
+   "description": "Sitting upright, hands on knees.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": -20,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 8,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": -8
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 20,
+     "y": 0,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 75,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 95,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 72,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 95,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "rest-leaning",
+   "label": "Leaning",
+   "category": "rest",
+   "description": "Weight against a wall, hip cocked.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": -18,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -6,
+     "y": 10,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 25,
+     "y": 0,
+     "z": -12
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 18,
+     "y": 0,
+     "z": 12
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 14,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "rest-reclined",
+   "label": "Reclined",
+   "category": "rest",
+   "description": "Laid back, limbs loose, resting.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 42,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": -10
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 50,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 30,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 48,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 28,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "rest-slumped",
+   "label": "Slumped",
+   "category": "rest",
+   "description": "Shoulders rolled forward, head down, tired.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 18,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 22,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 22,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 28,
+     "y": 0,
+     "z": -18
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 28,
+     "y": 0,
+     "z": 18
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "gesture-wave",
+   "label": "Wave",
+   "category": "gesture",
+   "description": "One hand up and out, greeting.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 4,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": -6,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 100,
+     "y": 0,
+     "z": -15
+    },
+    "leftElbow": {
+     "x": 20,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "gesture-beckon",
+   "label": "Beckon",
+   "category": "gesture",
+   "description": "Hand drawing someone closer.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 6,
+     "y": 4,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 70,
+     "y": 10,
+     "z": 8
+    },
+    "rightElbow": {
+     "x": 90,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "gesture-salute",
+   "label": "Salute",
+   "category": "gesture",
+   "description": "Hand to brow, formal greeting.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -4,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftElbow": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 95,
+     "y": 10,
+     "z": 10
+    },
+    "rightElbow": {
+     "x": 70,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  },
+  {
+   "id": "gesture-shrug",
+   "label": "Shrug",
+   "category": "gesture",
+   "description": "Shoulders up, palms out, uncertain.",
+   "archetypes": null,
+   "joints": {
+    "pelvis": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "spine": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "chest": {
+     "x": -4,
+     "y": 0,
+     "z": 0
+    },
+    "neck": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "head": {
+     "x": -6,
+     "y": 0,
+     "z": 0
+    },
+    "leftShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": -15
+    },
+    "leftElbow": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "leftWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightShoulder": {
+     "x": 30,
+     "y": 0,
+     "z": 15
+    },
+    "rightElbow": {
+     "x": 40,
+     "y": 0,
+     "z": 0
+    },
+    "rightWrist": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "leftAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightHip": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightKnee": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    },
+    "rightAnkle": {
+     "x": 0,
+     "y": 0,
+     "z": 0
+    }
+   }
+  }
+ ]
+}

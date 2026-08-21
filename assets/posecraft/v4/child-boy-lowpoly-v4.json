@@ -1,0 +1,16 @@
+{
+  "displayName": "Child Boy",
+  "ageClass": "child",
+  "sexClass": "male",
+  "heightMeters": 1.32,
+  "measuredHeightMeters": 1.3254,
+  "measuredYMin": 0.0,
+  "measuredYMax": 1.3254,
+  "triangleCount": 3546,
+  "units": "meters",
+  "upAxis": "+Y",
+  "forwardAxis": "+Z",
+  "pose": "T-pose",
+  "regionNaming": "PoseCraft 17-region",
+  "modelId": "child-boy-lowpoly-v4"
+}

@@ -1,0 +1,16 @@
+{
+  "displayName": "Adult Male",
+  "ageClass": "adult",
+  "sexClass": "male",
+  "heightMeters": 1.84,
+  "measuredHeightMeters": 1.8449,
+  "measuredYMin": 0.0,
+  "measuredYMax": 1.8449,
+  "triangleCount": 3546,
+  "units": "meters",
+  "upAxis": "+Y",
+  "forwardAxis": "+Z",
+  "pose": "T-pose",
+  "regionNaming": "PoseCraft 17-region",
+  "modelId": "adult-male-lowpoly-v4"
+}

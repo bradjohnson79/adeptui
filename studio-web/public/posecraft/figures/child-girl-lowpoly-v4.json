@@ -1,0 +1,16 @@
+{
+  "displayName": "Child Girl",
+  "ageClass": "child",
+  "sexClass": "female",
+  "heightMeters": 1.28,
+  "measuredHeightMeters": 1.2854,
+  "measuredYMin": 0.0,
+  "measuredYMax": 1.2854,
+  "triangleCount": 3546,
+  "units": "meters",
+  "upAxis": "+Y",
+  "forwardAxis": "+Z",
+  "pose": "T-pose",
+  "regionNaming": "PoseCraft 17-region",
+  "modelId": "child-girl-lowpoly-v4"
+}

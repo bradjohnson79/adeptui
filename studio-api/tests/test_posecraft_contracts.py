@@ -227,6 +227,108 @@ def test_posecraft_send_to_storyboard_is_honesty_labelled(client) -> None:
     assert result["exportPreview"]["figureCount"] >= 1
 
 
+def test_posecraft_apply_pose_writes_real_joint_rotations(client) -> None:
+    """PoseCraft Overhaul D9 — posecraft.apply_pose is no longer a no-op.
+
+    An approved CD apply_pose must resolve the preset from the canonical
+    catalog mirror server-side and persist real joint rotations, so the
+    viewport hydrates the applied pose (Visual Truth Law server half).
+    """
+    project_id = _create_project(client)
+    _put_scene(client, project_id, _default_scene())
+
+    proposal = _propose(
+        client, project_id, "posecraft.apply_pose",
+        figureId="fig-female", posePresetId="action-strike",
+    )
+    assert proposal.status_code == 200, proposal.text
+    proposal_id = proposal.json()["id"]
+    approved = _approve(client, project_id, proposal_id)
+    assert approved.status_code == 200, approved.text
+
+    result = _receipt(client, project_id, proposal_id)["toolResult"]
+    assert result["applied"] is True
+    assert result["figureId"] == "fig-female"
+    assert result["posePresetId"] == "action-strike"
+    assert result["poseLabel"] == "Strike"
+    assert "rightElbow" in result["changedJoints"]
+
+    # Persistence: the scene document now carries the real joint rotations.
+    scene = _get_scene(client, project_id)["currentScene"]
+    fig = next(f for f in scene["figures"] if f["id"] == "fig-female")
+    assert fig["poseId"] == "action-strike"
+    assert fig["poseLabel"] == "Strike"
+    assert fig["pose"]["rightElbow"]["x"] == pytest.approx(80.0)
+    assert fig["pose"]["chest"]["y"] == pytest.approx(20.0)
+    # Untouched figure keeps its neutral pose.
+    other = next(f for f in scene["figures"] if f["id"] == "fig-male")
+    assert not other.get("poseId")
+
+
+def test_posecraft_apply_pose_unknown_preset_or_figure_is_hard_error(client) -> None:
+    """Unknown pose or figure must be an explicit error — never a fake success."""
+    project_id = _create_project(client)
+    _put_scene(client, project_id, _default_scene())
+
+    proposal = _propose(
+        client, project_id, "posecraft.apply_pose",
+        figureId="fig-female", posePresetId="not-a-real-pose",
+    )
+    proposal_id = proposal.json()["id"]
+    _approve(client, project_id, proposal_id)
+    result = _receipt(client, project_id, proposal_id)["toolResult"]
+    assert result["applied"] is False
+    assert "not found" in result["error"]
+
+    proposal = _propose(
+        client, project_id, "posecraft.apply_pose",
+        figureId="fig-ghost", posePresetId="action-strike",
+    )
+    proposal_id = proposal.json()["id"]
+    _approve(client, project_id, proposal_id)
+    result = _receipt(client, project_id, proposal_id)["toolResult"]
+    assert result["applied"] is False
+    assert "not found" in result["error"]
+
+    # Neither failed apply may mutate the persisted pose state.
+    scene = _get_scene(client, project_id)["currentScene"]
+    fig = next(f for f in scene["figures"] if f["id"] == "fig-female")
+    assert not fig.get("poseId")
+    assert all(
+        abs(rot.get(axis, 0.0)) < 1e-9
+        for rot in fig["pose"].values()
+        for axis in ("x", "y", "z")
+    )
+
+
+def test_posecraft_apply_pose_explicit_joint_map(client) -> None:
+    """An explicit joints map (Pose Intelligence output) overrides preset lookup
+    and is clamped to the shared joint limits."""
+    project_id = _create_project(client)
+    _put_scene(client, project_id, _default_scene())
+
+    proposal = _propose(
+        client, project_id, "posecraft.apply_pose",
+        figureId="fig-male", posePresetId="pose-intelligence",
+        poseLabel="Solved stance",
+        joints={"leftElbow": {"x": 500.0}, "head": {"y": 15.0}},
+    )
+    assert proposal.status_code == 200, proposal.text
+    proposal_id = proposal.json()["id"]
+    _approve(client, project_id, proposal_id)
+    result = _receipt(client, project_id, proposal_id)["toolResult"]
+    assert result["applied"] is True
+    assert result["poseLabel"] == "Solved stance"
+
+    scene = _get_scene(client, project_id)["currentScene"]
+    fig = next(f for f in scene["figures"] if f["id"] == "fig-male")
+    from app.posecraft.pose_catalog import joint_limits
+
+    hi = joint_limits()["leftElbow"]["x"][1]
+    assert fig["pose"]["leftElbow"]["x"] == pytest.approx(hi)  # clamped, not 500
+    assert fig["pose"]["head"]["y"] == pytest.approx(15.0)
+
+
 def test_posecraft_compat_migration_preserves_protected_fields(client) -> None:
     """Master Program Phase 4.5 — backward-compat gate.
 

@@ -20,26 +20,40 @@ import {
 // will surface a creator-facing error via the SceneLoader onError callback.
 import "@babylonjs/loaders/OBJ";
 import "@babylonjs/loaders/glTF";
-import { getArchetypeSpec, getColorSpec } from "./state";
+import { clampRotation, getArchetypeSpec, getColorSpec } from "./state";
 import { apiUrl } from "../runtime/apiBase";
 import {
   BODY_REGIONS,
   REGION_TO_JOINT,
-  buildHumanBody,
+  buildHumanMeshMetadata,
+  getHumanModelId,
   regionFromMeshName,
+  type BodyRegion,
   type BuiltHumanMesh,
 } from "./humanMeshBuilder";
+import { V4_HANG_REST_LOCAL } from "./v4RestJoints";
+import {
+  attachV4Figure,
+  highlightRegionMeshes,
+  v4AssetSource,
+  type VisualState,
+} from "./v4FigureLoader";
 import type { FigureInstance, JointName, PoseCraftScene } from "./types";
 
 type RendererKind = "webgl" | "webgpu";
 
-export type GizmoMode = "move" | "rotate" | "pose";
+export type GizmoMode = "move" | "rotate" | "pose" | "camera";
 
 export type ManipulationEvent =
-  | { kind: "select"; figureId: string | null }
+  | { kind: "select"; figureId: string | null; joint?: JointName; region?: BodyRegion }
   | { kind: "move"; figureId: string; position: { x: number; z: number } }
   | { kind: "rotate"; figureId: string; rotationY: number }
-  | { kind: "pose"; figureId: string; joint: JointName; rotation: { x: number; y: number; z: number } };
+  | { kind: "pose"; figureId: string; joint: JointName; rotation: { x: number; y: number; z: number } }
+  | { kind: "visual"; figureId: string; visualState: VisualState; error?: string }
+  | {
+      kind: "camera";
+      camera: { alpha: number; beta: number; radius: number; target: { x: number; y: number; z: number } };
+    };
 
 type FigureRig = {
   root: TransformNode;
@@ -49,9 +63,14 @@ type FigureRig = {
   selectionRing: TransformNode;
   handles: Record<JointName, Mesh>;
   handleMaterial: StandardMaterial;
+  passiveHandleMaterial: StandardMaterial;
+  handleBaseDiameter: number;
   /** Final Mandatory GO: low-poly human body meshes + metadata. */
   bodyMeshes: Mesh[];
   metadata: BuiltHumanMesh["metadata"];
+  visualState: VisualState;
+  loadToken: number;
+  selectedRegion: BodyRegion | null;
 };
 
 type PrimitiveRig = {
@@ -91,6 +110,7 @@ function createAxisArrow(scene: Scene, parent: TransformNode, axis: "x" | "y" | 
   }, scene);
   shaft.material = material;
   shaft.isPickable = true;
+  shaft.renderingGroupId = 1;
 
   const tip = MeshBuilder.CreateCylinder(`${name}-tip`, {
     height: length * 0.22,
@@ -100,6 +120,7 @@ function createAxisArrow(scene: Scene, parent: TransformNode, axis: "x" | "y" | 
   }, scene);
   tip.material = material;
   tip.isPickable = true;
+  tip.renderingGroupId = 1;
   tip.parent = shaft;
 
   // Orient along the axis. Babylon cylinders are along Y by default.
@@ -133,6 +154,7 @@ function createRotateRing(scene: Scene, parent: TransformNode, axis: "x" | "y" |
   }, scene);
   ring.material = material;
   ring.isPickable = true;
+  ring.renderingGroupId = 1;
   // Torus is in the XZ plane by default. Orient to the axis plane:
   // X ring → YZ plane (rotate around X by 90°) → rotate.x = π/2
   // Y ring → XZ plane (default) → no rotation
@@ -197,6 +219,7 @@ function createPoseRing(scene: Scene): { root: TransformNode; ring: Mesh; materi
   }, scene);
   ring.material = material;
   ring.isPickable = true;
+  ring.renderingGroupId = 1;
   ring.parent = root;
   root.setEnabled(false);
   return { root, ring, material };
@@ -228,7 +251,11 @@ function createMaterial(scene: Scene, name: string, hex: string) {
   return material;
 }
 
-function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
+function createFigureRig(
+  scene: Scene,
+  figure: FigureInstance,
+  onVisual?: (state: VisualState, error?: string) => void,
+): FigureRig {
   const spec = getArchetypeSpec(figure.archetypeId);
   const material = createMaterial(scene, `${figure.id}-material`, getColorSpec(figure.colorId).hex);
   const ringMaterial = new StandardMaterial(`${figure.id}-ring`, scene);
@@ -263,59 +290,64 @@ function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
   const headRadius = spec.height * 0.07;
   const shoulderHalf = spec.shoulderWidth / 2;
   const hipHalf = spec.hipWidth / 2;
+  const v4Rest = figure.kind === "custom" ? null : V4_HANG_REST_LOCAL[figure.archetypeId];
 
   pelvis.parent = root;
-  pelvis.position.y = hipHeight;
-
   spine.parent = pelvis;
-  spine.position.y = lowerTorso;
-
   chest.parent = spine;
-  chest.position.y = upperTorso;
-
   neck.parent = chest;
-  neck.position.y = neckLength;
-
   head.parent = neck;
-  head.position.y = headRadius * 0.95;
-
   leftShoulder.parent = chest;
-  leftShoulder.position.x = -shoulderHalf;
-  leftShoulder.position.y = spec.torsoHeight * 0.08;
-
   leftElbow.parent = leftShoulder;
-  leftElbow.position.y = -spec.upperArm;
-
   leftWrist.parent = leftElbow;
-  leftWrist.position.y = -spec.lowerArm;
-
   rightShoulder.parent = chest;
-  rightShoulder.position.x = shoulderHalf;
-  rightShoulder.position.y = spec.torsoHeight * 0.08;
-
   rightElbow.parent = rightShoulder;
-  rightElbow.position.y = -spec.upperArm;
-
   rightWrist.parent = rightElbow;
-  rightWrist.position.y = -spec.lowerArm;
-
   leftHip.parent = pelvis;
-  leftHip.position.x = -hipHalf;
-
   leftKnee.parent = leftHip;
-  leftKnee.position.y = -spec.upperLeg;
-
   leftAnkle.parent = leftKnee;
-  leftAnkle.position.y = -spec.lowerLeg;
-
   rightHip.parent = pelvis;
-  rightHip.position.x = hipHalf;
-
   rightKnee.parent = rightHip;
-  rightKnee.position.y = -spec.upperLeg;
-
   rightAnkle.parent = rightKnee;
-  rightAnkle.position.y = -spec.lowerLeg;
+
+  const jointByName: Record<JointName, TransformNode> = {
+    pelvis, spine, chest, neck, head,
+    leftShoulder, leftElbow, leftWrist,
+    rightShoulder, rightElbow, rightWrist,
+    leftHip, leftKnee, leftAnkle,
+    rightHip, rightKnee, rightAnkle,
+  };
+  if (v4Rest) {
+    // V4 PIVOT BINDING LAW: the semantic rig keeps the certified hanging-arm
+    // rest (zero pose = arms at sides, matching the pose catalog and Pose
+    // Intelligence). Torso/head/leg pivots come from the Fable GLB; the arm
+    // chain hangs along −Y with Fable-measured segment lengths, and the
+    // T-pose arm meshes bind onto it via static Z rotations in the loader.
+    for (const [jointName, node] of Object.entries(jointByName) as [JointName, TransformNode][]) {
+      const local = v4Rest[jointName];
+      node.position.set(local.x, local.y, local.z);
+    }
+  } else {
+    pelvis.position.y = hipHeight;
+    spine.position.y = lowerTorso;
+    chest.position.y = upperTorso;
+    neck.position.y = neckLength;
+    head.position.y = headRadius * 0.95;
+    leftShoulder.position.x = -shoulderHalf;
+    leftShoulder.position.y = spec.torsoHeight * 0.08;
+    leftElbow.position.y = -spec.upperArm;
+    leftWrist.position.y = -spec.lowerArm;
+    rightShoulder.position.x = shoulderHalf;
+    rightShoulder.position.y = spec.torsoHeight * 0.08;
+    rightElbow.position.y = -spec.upperArm;
+    rightWrist.position.y = -spec.lowerArm;
+    leftHip.position.x = -hipHalf;
+    leftKnee.position.y = -spec.upperLeg;
+    leftAnkle.position.y = -spec.lowerLeg;
+    rightHip.position.x = hipHalf;
+    rightKnee.position.y = -spec.upperLeg;
+    rightAnkle.position.y = -spec.lowerLeg;
+  }
 
   selectionRing.parent = root;
   const ring = MeshBuilder.CreateTorus(
@@ -328,14 +360,22 @@ function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
   ring.position.y = 0.02;
   ring.material = ringMaterial;
 
-  // Master Program: pickable joint handles for Pose Body mode. Small spheres
-  // parented to each joint; only enabled when the figure is selected and the
-  // gizmo mode is "pose". Named `${figure.id}-handle-${joint}` for picking.
+  // Joint anchors for Pose Body mode: ALL 17 joints show a small passive
+  // marker (so the creator can see where to grab), and the selected joint's
+  // anchor is emphasized. Markers sit EXACTLY at the joint pivots, render
+  // depth-on-top (renderingGroupId 1) so they are never buried inside the
+  // body, and are rescaled per-frame with camera distance. Named
+  // `${figure.id}-handle-${joint}` for picking.
   const handleMaterial = new StandardMaterial(`${figure.id}-handleMat`, scene);
   handleMaterial.diffuseColor = new Color3(1, 0.78, 0.2);
-  handleMaterial.emissiveColor = new Color3(0.55, 0.4, 0.08);
+  handleMaterial.emissiveColor = new Color3(0.72, 0.52, 0.1);
   handleMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
-  const handleDiameter = Math.max(0.22, spec.limbThickness * 1.4);
+  const passiveHandleMaterial = new StandardMaterial(`${figure.id}-handleMatPassive`, scene);
+  passiveHandleMaterial.diffuseColor = new Color3(0.35, 0.62, 0.85);
+  passiveHandleMaterial.emissiveColor = new Color3(0.16, 0.32, 0.48);
+  passiveHandleMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
+  passiveHandleMaterial.alpha = 0.85;
+  const handleDiameter = Math.min(0.11, Math.max(0.055, spec.height * 0.04));
   const handles: Record<JointName, Mesh> = {} as Record<JointName, Mesh>;
   const jointNodes: [JointName, TransformNode][] = [
     ["pelvis", pelvis], ["spine", spine], ["chest", chest], ["neck", neck], ["head", head],
@@ -347,34 +387,27 @@ function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
   for (const [jointName, jointNode] of jointNodes) {
     const handle = MeshBuilder.CreateSphere(
       `${figure.id}-handle-${jointName}`,
-      { diameter: handleDiameter, segments: 6 },
+      { diameter: handleDiameter, segments: 8 },
       scene,
     );
     handle.parent = jointNode;
-    handle.position.y = 0;
-    handle.material = handleMaterial;
+    handle.position.set(0, 0, 0);
+    handle.material = passiveHandleMaterial;
     handle.isPickable = true;
+    handle.renderingGroupId = 1;
     handle.setEnabled(false);
     handles[jointName] = handle;
   }
 
-  // Final Mandatory GO: low-poly human body built by humanMeshBuilder. The
-  // 17-joint TransformNode rig above is preserved; the builder parents faceted
-  // body meshes to those joints and exposes modelId / jointCount / bodyRegions
-  // metadata + a region→joint pick map. Custom figures skip the builder.
-  const built = figure.kind === "custom"
-    ? null
-    : buildHumanBody(scene, figure.id, spec, {
-        pelvis, spine, chest, neck, head,
-        leftShoulder, leftElbow, leftWrist,
-        rightShoulder, rightElbow, rightWrist,
-        leftHip, leftKnee, leftAnkle,
-        rightHip, rightKnee, rightAnkle,
-      }, material);
-  const bodyMeshes = built ? built.meshes : [];
-  const metadata = built
-    ? built.metadata
-    : { modelId: "custom-mesh", jointCount: 17, bodyRegions: BODY_REGIONS, legacyBlockModel: false as const };
+  const bodyMeshes: Mesh[] = [];
+  const modelId = figure.kind === "custom" ? "custom-mesh" : getHumanModelId(figure.archetypeId);
+  const metadata = figure.kind === "custom"
+    ? { modelId: "custom-mesh", jointCount: 17, bodyRegions: BODY_REGIONS, legacyBlockModel: false as const, visualState: "LOADING" as const }
+    : {
+        ...buildHumanMeshMetadata(figure.archetypeId, 0, spec.height),
+        assetSource: v4AssetSource(modelId),
+        visualState: "LOADING" as const,
+      };
 
   // Final Mandatory GO (IMPORT): custom-mesh figures load their geometry from
   // the project Library asset via Babylon SceneLoader. glTF/GLB and OBJ load
@@ -406,35 +439,62 @@ function createFigureRig(scene: Scene, figure: FigureInstance): FigureRig {
     void cancelled;
   }
 
-  return {
+  const rig: FigureRig = {
     root,
-    joints: {
-      pelvis,
-      spine,
-      chest,
-      neck,
-      head,
-      leftShoulder,
-      leftElbow,
-      leftWrist,
-      rightShoulder,
-      rightElbow,
-      rightWrist,
-      leftHip,
-      leftKnee,
-      leftAnkle,
-      rightHip,
-      rightKnee,
-      rightAnkle,
-    },
+    joints: jointByName,
     material,
     ringMaterial,
     selectionRing,
     handles,
     handleMaterial,
+    passiveHandleMaterial,
+    handleBaseDiameter: handleDiameter,
     bodyMeshes,
     metadata,
+    visualState: figure.kind === "custom" ? "READY" : "LOADING",
+    loadToken: 1,
+    selectedRegion: null,
   };
+
+  if (figure.kind !== "custom") {
+    const expectedToken = rig.loadToken;
+    void attachV4Figure({
+      scene,
+      target: {
+        figureId: figure.id,
+        archetypeId: figure.archetypeId,
+        loadToken: expectedToken,
+        visualState: rig.visualState,
+        joints: rig.joints,
+        bodyMeshes: rig.bodyMeshes,
+      },
+      expectedToken,
+      tint: colorFromHex(getColorSpec(figure.colorId).hex),
+      isCurrent: () => rig.loadToken === expectedToken && rig.visualState !== "DISPOSED",
+    }).then((result) => {
+      if (rig.visualState === "DISPOSED" || rig.loadToken !== expectedToken) return;
+      if (!result) return;
+      rig.visualState = "READY";
+      rig.metadata = {
+        ...rig.metadata,
+        modelId: result.modelId,
+        assetSource: result.assetSource,
+        triangleCount: result.triangleCount,
+        visualState: "READY",
+        legacyBlockModel: false,
+      };
+      onVisual?.("READY");
+    }).catch((error: unknown) => {
+      if (rig.visualState === "DISPOSED" || rig.loadToken !== expectedToken) return;
+      const message = error instanceof Error ? error.message : String(error);
+      rig.visualState = "ERROR";
+      rig.metadata = { ...rig.metadata, visualState: "ERROR" };
+      console.error(`PoseCraft v4 figure load failed for ${figure.id}: ${message}`);
+      onVisual?.("ERROR", message);
+    });
+  }
+
+  return rig;
 }
 
 function createPrimitiveRig(scene: Scene, primitive: PoseCraftScene["primitives"][number]): PrimitiveRig {
@@ -611,7 +671,25 @@ export class PoseCraftViewportController {
     startRotation?: { x: number; y: number; z: number };
     startPosition?: { x: number; z: number };
     pointerId: number;
+    /** True once the pointer moved past the click deadzone. */
+    moved?: boolean;
   } | null = null;
+
+  /** True while an unclaimed pointer-down is (potentially) orbiting the camera. */
+  private cameraPointerActive = false;
+
+  /** Camera state at the start of the current camera interaction. */
+  private cameraStateAtPointerDown: { alpha: number; beta: number; radius: number } | null = null;
+
+  /** Debounce timer for committing camera state after wheel zoom. */
+  private wheelCommitTimer: number | null = null;
+
+  /** Last camera state written by sync(), used to avoid stomping live orbits. */
+  private lastSyncedCamera: string | null = null;
+
+  private readonly handlePointerCancelDom = (evt: PointerEvent) => {
+    if (this.drag) this.endDrag(evt);
+  };
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -749,6 +827,11 @@ export class PoseCraftViewportController {
     });
     window.addEventListener("resize", controller.handleResize);
     controller.attachPointerEvents();
+    // Per-frame adaptive sizing: gizmos, pose ring, and joint anchors keep a
+    // roughly constant screen size regardless of camera distance.
+    scene.onBeforeRenderObservable.add(() => {
+      if (!controller.disposed) controller.updateAdaptiveVisuals();
+    });
 
     // Expose for Playwright certification (Final Mandatory GO): allows the
     // test harness to read per-figure low-poly human metadata (modelId,
@@ -759,6 +842,7 @@ export class PoseCraftViewportController {
   }
 
   setGizmoMode(mode: GizmoMode) {
+    if (this.drag) this.cancelDrag();
     this.gizmoMode = mode;
     this.updateHandleVisibility();
     this.updateGizmoPlacement();
@@ -769,9 +853,22 @@ export class PoseCraftViewportController {
   }
 
   setSelectedFigure(figureId: string | null) {
+    if (this.drag && this.drag.figureId !== figureId) this.cancelDrag();
     this.selectedFigureId = figureId;
     this.updateHandleVisibility();
     this.updateGizmoPlacement();
+  }
+
+  /** Drop any in-flight drag WITHOUT committing, and restore camera control.
+   * Guarantees sync() can never stay permanently gated on a stale drag. */
+  private cancelDrag() {
+    this.drag = null;
+    this.reattachCamera();
+  }
+
+  private reattachCamera() {
+    this.camera.detachControl();
+    this.camera.attachControl(this.canvas, true);
   }
 
   /** Final Mandatory GO: expose a figure's low-poly human metadata. */
@@ -785,6 +882,69 @@ export class PoseCraftViewportController {
     return Array.from(this.figureRigs.keys());
   }
 
+  getSelectedJoint(): JointName {
+    return this.selectedJoint;
+  }
+
+  getVisualState(figureId: string): VisualState | null {
+    return this.figureRigs.get(figureId)?.visualState ?? null;
+  }
+
+  getJointEuler(figureId: string, joint: JointName): { x: number; y: number; z: number } | null {
+    const node = this.figureRigs.get(figureId)?.joints[joint];
+    if (!node) return null;
+    return {
+      x: Number((node.rotation.x * (180 / Math.PI)).toFixed(2)),
+      y: Number((node.rotation.y * (180 / Math.PI)).toFixed(2)),
+      z: Number((node.rotation.z * (180 / Math.PI)).toFixed(2)),
+    };
+  }
+
+  getRegionCanvasPoint(figureId: string, region: BodyRegion): { x: number; y: number } | null {
+    return this.projectWorldToCanvas(this.regionWorldPoint(figureId, region, "center"));
+  }
+
+  /**
+   * Visual Truth Law pick target — project a point on the region that sits
+   * away from the body centerline. In hanging-arm rest the hand bbox center
+   * overlaps the hip; the outward point stays on the limb.
+   */
+  getRegionCanvasPickPoint(figureId: string, region: BodyRegion): { x: number; y: number } | null {
+    return this.projectWorldToCanvas(this.regionWorldPoint(figureId, region, "outward"));
+  }
+
+  private regionWorldPoint(figureId: string, region: BodyRegion, mode: "center" | "outward"): Vector3 | null {
+    const rig = this.figureRigs.get(figureId);
+    if (!rig || rig.visualState !== "READY") return null;
+    const mesh = rig.bodyMeshes.find((entry) => entry.metadata?.region === region);
+    if (!mesh) return null;
+    mesh.computeWorldMatrix(true);
+    const box = mesh.getBoundingInfo().boundingBox;
+    if (mode === "center") return box.centerWorld.clone();
+    const rootX = rig.root.getAbsolutePosition().x;
+    let best = box.centerWorld;
+    let bestSep = Math.abs(best.x - rootX);
+    for (const corner of box.vectorsWorld) {
+      const sep = Math.abs(corner.x - rootX);
+      if (sep > bestSep) {
+        best = corner;
+        bestSep = sep;
+      }
+    }
+    return best.clone();
+  }
+
+  private projectWorldToCanvas(world: Vector3 | null): { x: number; y: number } | null {
+    if (!world) return null;
+    const renderW = this.canvas.width || this.scene.getEngine().getRenderWidth();
+    const renderH = this.canvas.height || this.scene.getEngine().getRenderHeight();
+    const cssW = this.canvas.clientWidth || renderW;
+    const cssH = this.canvas.clientHeight || renderH;
+    const viewport = this.camera.viewport.toGlobal(renderW, renderH);
+    const projected = Vector3.Project(world, Matrix.Identity(), this.scene.getTransformMatrix(), viewport);
+    return { x: projected.x * (cssW / renderW), y: projected.y * (cssH / renderH) };
+  }
+
   /**
    * Gate F — place the active gizmo at the selected figure's root (move/
    * rotate) or at the selected joint (pose ring). Gizmos are hidden when no
@@ -795,23 +955,12 @@ export class PoseCraftViewportController {
     const rig = figureId ? this.figureRigs.get(figureId) : null;
     const figure = figureId ? this.currentFigures.get(figureId) : null;
 
-    this.moveGizmo.root.setEnabled(this.gizmoMode === "move" && !!rig && !!figure);
-    this.rotateGizmo.root.setEnabled(this.gizmoMode === "rotate" && !!rig && !!figure);
+    const cameraMode = this.gizmoMode === "camera";
+    const ready = !!rig && rig.visualState === "READY";
+    this.moveGizmo.root.setEnabled(this.gizmoMode === "move" && !!rig && !!figure && !cameraMode);
+    this.rotateGizmo.root.setEnabled(this.gizmoMode === "rotate" && !!rig && !!figure && !cameraMode);
 
-    if (rig && figure) {
-      // Move/Rotate gizmos sit at the camera target height (≈1.2m) so they
-      // project to canvas center, making the axis handles easy to click for
-      // real pointer gestures (Gate F).
-      this.moveGizmo.root.position.x = figure.position.x;
-      this.moveGizmo.root.position.z = figure.position.z;
-      this.moveGizmo.root.position.y = 1.2;
-      this.rotateGizmo.root.position.x = figure.position.x;
-      this.rotateGizmo.root.position.z = figure.position.z;
-      this.rotateGizmo.root.position.y = 1.2;
-    }
-
-    // Pose ring sits at the selected joint of the selected figure.
-    const poseActive = this.gizmoMode === "pose" && !!rig && !!figure;
+    const poseActive = this.gizmoMode === "pose" && ready && !!figure;
     if (poseActive) {
       const jointNode = rig!.joints[this.selectedJoint];
       if (jointNode) {
@@ -825,19 +974,103 @@ export class PoseCraftViewportController {
       this.poseRing.root.setEnabled(false);
       this.poseRing.root.parent = null;
     }
+    this.updateAdaptiveVisuals();
+  }
+
+  /**
+   * Per-frame adaptive sizing + anchoring. World sizes are proportional to
+   * camera distance (clamped), so the gizmos, pose ring, and joint anchors
+   * keep a legible, non-dominating screen size at any zoom. Move/rotate
+   * gizmos track the LIVE rig root (not the persisted state) so they follow
+   * the figure during a drag, anchored at pelvis height.
+   */
+  private updateAdaptiveVisuals() {
+    const dist = this.camera.radius;
+    const rig = this.selectedFigureId ? this.figureRigs.get(this.selectedFigureId) : null;
+    const figure = this.selectedFigureId ? this.currentFigures.get(this.selectedFigureId) : null;
+
+    // Native move-arrow length 1.4 / ring diameter 1.6 → ~8-10% screen height.
+    const gizmoScale = Math.min(0.75, Math.max(0.14, dist * 0.05));
+    this.moveGizmo.root.scaling.setAll(gizmoScale);
+    this.rotateGizmo.root.scaling.setAll(gizmoScale);
+    if (rig && figure) {
+      const pelvisY = rig.joints.pelvis.position.y * (figure.scale || 1);
+      this.moveGizmo.root.position.set(rig.root.position.x, pelvisY, rig.root.position.z);
+      this.rotateGizmo.root.position.set(rig.root.position.x, pelvisY, rig.root.position.z);
+    }
+
+    // Pose ring: native diameter 0.5 → ~5% of screen height.
+    this.poseRing.root.scaling.setAll(Math.min(1.1, Math.max(0.22, dist * 0.075)));
+
+    // Joint anchors: passive markers small, the selected anchor emphasized.
+    const markerWorld = Math.min(0.13, Math.max(0.045, dist * 0.012));
+    for (const [id, figRig] of this.figureRigs.entries()) {
+      if (id !== this.selectedFigureId) continue;
+      const base = figRig.handleBaseDiameter || 0.08;
+      for (const [joint, handle] of Object.entries(figRig.handles) as [JointName, Mesh][]) {
+        const emphasis = joint === this.selectedJoint ? 1.55 : 1;
+        handle.scaling.setAll((markerWorld * emphasis) / base);
+      }
+    }
+  }
+
+  /** Visual Truth Law probe — world-space center of a region's render mesh. */
+  getRegionWorldCenter(figureId: string, region: BodyRegion): { x: number; y: number; z: number } | null {
+    const rig = this.figureRigs.get(figureId);
+    if (!rig || rig.visualState !== "READY") return null;
+    const mesh = rig.bodyMeshes.find((entry) => entry.metadata?.region === region);
+    if (!mesh) return null;
+    mesh.computeWorldMatrix(true);
+    const world = mesh.getBoundingInfo().boundingBox.centerWorld;
+    return { x: Number(world.x.toFixed(4)), y: Number(world.y.toFixed(4)), z: Number(world.z.toFixed(4)) };
+  }
+
+  /** Visual Truth Law probe — world origin of a semantic joint (the handle pivot). */
+  getJointWorldPosition(figureId: string, joint: JointName): { x: number; y: number; z: number } | null {
+    const node = this.figureRigs.get(figureId)?.joints[joint];
+    if (!node) return null;
+    node.computeWorldMatrix(true);
+    const world = node.getAbsolutePosition();
+    return { x: Number(world.x.toFixed(4)), y: Number(world.y.toFixed(4)), z: Number(world.z.toFixed(4)) };
+  }
+
+  /** Visual Truth Law probe — CSS-space projection of a joint pivot. */
+  getJointCanvasPoint(figureId: string, joint: JointName): { x: number; y: number } | null {
+    const node = this.figureRigs.get(figureId)?.joints[joint];
+    if (!node) return null;
+    const renderW = this.canvas.width || this.scene.getEngine().getRenderWidth();
+    const renderH = this.canvas.height || this.scene.getEngine().getRenderHeight();
+    const cssW = this.canvas.clientWidth || renderW;
+    const cssH = this.canvas.clientHeight || renderH;
+    const viewport = this.camera.viewport.toGlobal(renderW, renderH);
+    node.computeWorldMatrix(true);
+    const projected = Vector3.Project(node.getAbsolutePosition(), Matrix.Identity(), this.scene.getTransformMatrix(), viewport);
+    return { x: projected.x * (cssW / renderW), y: projected.y * (cssH / renderH) };
   }
 
   private updateHandleVisibility() {
     const poseMode = this.gizmoMode === "pose";
     for (const [id, rig] of this.figureRigs.entries()) {
       const selected = id === this.selectedFigureId;
-      for (const handle of Object.values(rig.handles)) {
-        handle.setEnabled(poseMode && selected);
+      const ready = rig.visualState === "READY";
+      const showMarkers = poseMode && selected && ready;
+      for (const [joint, handle] of Object.entries(rig.handles) as [JointName, Mesh][]) {
+        handle.setEnabled(showMarkers);
+        handle.material = joint === this.selectedJoint ? rig.handleMaterial : rig.passiveHandleMaterial;
+      }
+      if (selected && ready) {
+        highlightRegionMeshes(rig.bodyMeshes, rig.selectedRegion);
+      } else {
+        highlightRegionMeshes(rig.bodyMeshes, null);
       }
     }
   }
 
   private attachPointerEvents() {
+    // Registered with insertFirst=true so the controller owns pointer events
+    // BEFORE the camera input processes them. When the controller claims a
+    // drag it detaches camera control synchronously, so the camera's own
+    // observer is removed before it can react to this same pointer-down.
     this.scene.onPointerObservable.add((info) => {
       if (this.disposed) return;
       const evt = info.event as PointerEvent;
@@ -847,29 +1080,50 @@ export class PoseCraftViewportController {
         this.handlePointerMove(evt);
       } else if (info.type === PointerEventTypes.POINTERUP) {
         this.handlePointerUp(evt);
+      } else if (info.type === PointerEventTypes.POINTERWHEEL) {
+        this.scheduleCameraCommit();
       }
-    });
+    }, -1, true);
+    // Drag lifecycle safety: a drag must ALWAYS end, even when the pointer
+    // is cancelled or leaves the canvas, so sync() can never stay gated.
+    this.canvas.addEventListener("pointercancel", this.handlePointerCancelDom);
+    this.canvas.addEventListener("pointerleave", this.handlePointerCancelDom);
   }
 
+  /** Babylon's Scene.pick expects CSS-space coordinates (it divides by the
+   * hardware scaling level internally). Pre-scaling to backing-store pixels
+   * made every pick land off by DPR² on scaled displays. */
   private pointerCanvasCoords(evt: PointerEvent): { x: number; y: number } {
     const rect = this.canvas.getBoundingClientRect();
-    const cssX = evt.clientX - rect.left;
-    const cssY = evt.clientY - rect.top;
-    const sx = rect.width > 0 ? cssX * (this.canvas.width / rect.width) : cssX;
-    const sy = rect.height > 0 ? cssY * (this.canvas.height / rect.height) : cssY;
-    return { x: sx, y: sy };
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+  }
+
+  private scheduleCameraCommit() {
+    if (this.wheelCommitTimer !== null) window.clearTimeout(this.wheelCommitTimer);
+    this.wheelCommitTimer = window.setTimeout(() => {
+      this.wheelCommitTimer = null;
+      if (!this.disposed) this.emitCameraCommit();
+    }, 400);
+  }
+
+  private emitCameraCommit() {
+    // The resulting state mutation syncs back values equal to the live
+    // camera, so the guarded sync() write is a no-op visually.
+    this.onManipulate?.({ kind: "camera", camera: this.readCameraState() });
   }
 
   private pickFigureId(px: number, py: number): string | null {
     const pick = this.scene.pick(px, py, (mesh) => {
+      if (!mesh.isEnabled(true) || !mesh.isPickable) return false;
       const name = mesh?.name ?? "";
       return name.startsWith("posecraft-") === false && !name.includes("-handle-") && !name.startsWith("grid-") && !name.startsWith("axis-") && !name.includes("gizmo-");
     });
     if (!pick?.hit || !pick.pickedMesh) return null;
+    const metaFigureId = (pick.pickedMesh.metadata as { figureId?: string } | undefined)?.figureId;
+    if (typeof metaFigureId === "string" && metaFigureId) return metaFigureId;
     const name = pick.pickedMesh.name;
-    // Final Mandatory GO: body meshes are named `${figureId}-body-${region}` (and
-    // thumbs `${figureId}-body-${region}-thumb`). Resolve the figure id from
-    // that prefix; fall back to the legacy mesh-suffix list for older rigs.
+    // Body meshes are named `${figureId}-body-${region}`; fall back to the
+    // legacy mesh-suffix list for older rigs.
     const bodyMatch = name.match(/^(.+)-body-/);
     if (bodyMatch) return bodyMatch[1]!;
     const match = name.match(/^([a-zA-Z0-9_-]+?)-(root|pelvisBox|spineBox|chestBox|neckCyl|headBall|leftUpperArm|leftLowerArm|leftHand|rightUpperArm|rightLowerArm|rightHand|leftUpperLeg|leftLowerLeg|leftFoot|rightUpperLeg|rightLowerLeg|rightFoot|ring|handle-)/);
@@ -878,26 +1132,39 @@ export class PoseCraftViewportController {
   }
 
   /**
-   * Final Mandatory GO: resolve a body-mesh click to the pose joint for the
-   * region that was clicked (chest → chest, leftUpperArm → leftShoulder, …).
-   * Returns null if the picked mesh is not a body-region mesh.
+   * Resolve a body click to the pose joint for the clicked region (chest →
+   * chest, leftUpperArm → leftShoulder, …). Prefers the invisible enlarged
+   * pick colliders (metadata kind "collider") so thin limbs are forgiving to
+   * click; render meshes (kind "body") also qualify. Nearest hit wins.
    */
-  private pickBodyJoint(px: number, py: number): { figureId: string; joint: JointName } | null {
-    const pick = this.scene.pick(px, py, (mesh) => {
-      const name = mesh?.name ?? "";
-      return name.includes("-body-");
-    });
+  private pickBodyJoint(px: number, py: number): { figureId: string; joint: JointName; region: BodyRegion } | null {
+    // Two-pass pick. Pass 1: exact — visible body geometry only. A click that
+    // lands directly ON a limb must select that limb; enlarged colliders of
+    // neighboring regions (e.g. the torso box) must never occlude it.
+    // Pass 2: forgiving — invisible enlarged colliders catch near-misses.
+    const kindPick = (wanted: "body" | "collider") =>
+      this.scene.pick(px, py, (mesh) => {
+        if (!mesh.isEnabled(true) || !mesh.isPickable) return false;
+        const md = mesh.metadata as { kind?: string; figureId?: string } | undefined;
+        return md?.kind === wanted && typeof md?.figureId === "string";
+      });
+    const pick = (() => {
+      const exact = kindPick("body");
+      if (exact?.hit && exact.pickedMesh) return exact;
+      return kindPick("collider");
+    })();
     if (!pick?.hit || !pick.pickedMesh) return null;
-    const name = pick.pickedMesh.name;
-    const figureMatch = name.match(/^(.+)-body-/);
-    const region = regionFromMeshName(name);
-    if (!figureMatch || !region) return null;
+    const md = pick.pickedMesh.metadata as { figureId?: string; region?: BodyRegion } | undefined;
+    const figureId = md?.figureId ?? pick.pickedMesh.name.match(/^(.+)-(?:body|pick)-/)?.[1] ?? null;
+    const region = md?.region ?? regionFromMeshName(pick.pickedMesh.name);
+    if (!figureId || !region) return null;
     const joint = REGION_TO_JOINT[region];
-    return { figureId: figureMatch[1]!, joint };
+    return { figureId, joint, region };
   }
 
   private pickJointHandle(px: number, py: number): { figureId: string; joint: JointName } | null {
     const pick = this.scene.pick(px, py, (mesh) => {
+      if (!mesh.isEnabled(true) || !mesh.isPickable) return false;
       const name = mesh?.name ?? "";
       return name.includes("-handle-");
     });
@@ -935,13 +1202,30 @@ export class PoseCraftViewportController {
     return null;
   }
 
+  /** Claim the current pointer-down for a manipulation drag: detaching the
+   * camera removes its pointer observer before it can react to this event. */
+  private claimPointer(evt: PointerEvent) {
+    this.cameraPointerActive = false;
+    this.camera.detachControl();
+    evt.preventDefault();
+  }
+
   private handlePointerDown(evt: PointerEvent) {
+    // Any pointer-down the controller does not claim belongs to the camera.
+    this.cameraPointerActive = true;
+    this.cameraStateAtPointerDown = {
+      alpha: this.camera.alpha,
+      beta: this.camera.beta,
+      radius: this.camera.radius,
+    };
+    if (this.gizmoMode === "camera") {
+      return;
+    }
     // Gate F — first try a visible gizmo handle (move axis / rotate ring /
     // pose ring). The drag is constrained to the picked handle's axis so
     // "mouse down on X-axis handle → drag → root X changes" is literally true.
     const { x: px, y: py } = this.pointerCanvasCoords(evt);
     const gizmo = this.pickGizmoHandle(px, py);
-    (globalThis as any).__pcDown = { gizmo, mode: this.gizmoMode, moveEnabled: this.moveGizmo.root.isEnabled(), rotateEnabled: this.rotateGizmo.root.isEnabled(), hasSelected: !!this.selectedFigureId, px: Math.round(px), py: Math.round(py), clientX: Math.round(evt.clientX) };
     if (gizmo && this.selectedFigureId) {
       const rig = this.figureRigs.get(this.selectedFigureId);
       const figure = this.currentFigures.get(this.selectedFigureId);
@@ -956,8 +1240,7 @@ export class PoseCraftViewportController {
             startPosition: { x: figure.position.x, z: figure.position.z },
             pointerId: evt.pointerId,
           };
-          this.camera.detachControl();
-          evt.preventDefault();
+          this.claimPointer(evt);
           return;
         }
         if (gizmo.kind === "rotate" && gizmo.axis) {
@@ -970,8 +1253,7 @@ export class PoseCraftViewportController {
             startRotationY: figure.rotationY,
             pointerId: evt.pointerId,
           };
-          this.camera.detachControl();
-          evt.preventDefault();
+          this.claimPointer(evt);
           return;
         }
         if (gizmo.kind === "pose") {
@@ -986,8 +1268,7 @@ export class PoseCraftViewportController {
             startRotation: { x: r.x, y: r.y, z: r.z },
             pointerId: evt.pointerId,
           };
-          this.camera.detachControl();
-          evt.preventDefault();
+          this.claimPointer(evt);
           return;
         }
       }
@@ -1001,7 +1282,9 @@ export class PoseCraftViewportController {
         const figure = this.currentFigures?.get(handle.figureId);
         if (rig && figure) {
           this.selectedJoint = handle.joint;
-          this.onManipulate?.({ kind: "select", figureId: handle.figureId });
+          const region = (BODY_REGIONS.find((entry) => REGION_TO_JOINT[entry] === handle.joint) ?? null);
+          rig.selectedRegion = region;
+          this.onManipulate?.({ kind: "select", figureId: handle.figureId, joint: handle.joint, region: region ?? undefined });
           const r = figure.pose[handle.joint] ?? { x: 0, y: 0, z: 0 };
           this.drag = {
             kind: "pose",
@@ -1013,8 +1296,7 @@ export class PoseCraftViewportController {
             pointerId: evt.pointerId,
           };
           this.updateGizmoPlacement();
-          this.camera.detachControl();
-          evt.preventDefault();
+          this.claimPointer(evt);
         }
         return;
       }
@@ -1026,17 +1308,32 @@ export class PoseCraftViewportController {
     const bodyJoint = (this.gizmoMode === "pose") ? this.pickBodyJoint(px, py) : null;
     const figureId = bodyJoint?.figureId ?? this.pickFigureId(px, py);
     if (figureId) {
+      const pickedRig = this.figureRigs.get(figureId);
+      if (this.gizmoMode === "pose" && pickedRig && pickedRig.visualState !== "READY") {
+        // Non-READY figures cannot pose, but the click must not die silently:
+        // select the figure so the UI surfaces its LOADING/ERROR state.
+        this.selectedFigureId = figureId;
+        this.updateHandleVisibility();
+        this.updateGizmoPlacement();
+        this.onManipulate?.({ kind: "select", figureId });
+        return;
+      }
       this.selectedFigureId = figureId;
       if (bodyJoint && bodyJoint.figureId === figureId) {
         this.selectedJoint = bodyJoint.joint;
+        if (pickedRig) pickedRig.selectedRegion = bodyJoint.region;
       }
       this.updateHandleVisibility();
       this.updateGizmoPlacement();
-      this.onManipulate?.({ kind: "select", figureId });
+      this.onManipulate?.({
+        kind: "select",
+        figureId,
+        joint: bodyJoint?.figureId === figureId ? bodyJoint.joint : undefined,
+        region: bodyJoint?.figureId === figureId ? bodyJoint.region : undefined,
+      });
       const figure = this.currentFigures?.get(figureId);
       if (figure && this.gizmoMode === "pose") {
-        const joint: JointName = (this.selectedJoint && figure.pose[this.selectedJoint] !== undefined) ? this.selectedJoint : "spine";
-        this.selectedJoint = joint;
+        const joint: JointName = this.selectedJoint;
         const r = figure.pose[joint] ?? { x: 0, y: 0, z: 0 };
         this.drag = {
           kind: "pose",
@@ -1048,8 +1345,7 @@ export class PoseCraftViewportController {
           pointerId: evt.pointerId,
         };
         this.updateGizmoPlacement();
-        this.camera.detachControl();
-        evt.preventDefault();
+        this.claimPointer(evt);
       } else if (figure && (this.gizmoMode === "move" || this.gizmoMode === "rotate")) {
         this.drag = {
           kind: this.gizmoMode,
@@ -1061,20 +1357,23 @@ export class PoseCraftViewportController {
           startPosition: { x: figure.position.x, z: figure.position.z },
           pointerId: evt.pointerId,
         };
-        this.camera.detachControl();
-        evt.preventDefault();
+        this.claimPointer(evt);
       }
     }
   }
 
   private handlePointerMove(evt: PointerEvent) {
     if (!this.drag) return;
-    (globalThis as any).__pcMoveCount = ((globalThis as any).__pcMoveCount ?? 0) + 1;
     const rig = this.figureRigs.get(this.drag.figureId);
     const figure = this.currentFigures?.get(this.drag.figureId);
     if (!rig || !figure) return;
     const dx = evt.clientX - this.drag.startX;
     const dy = evt.clientY - this.drag.startY;
+    // Click deadzone: a plain select click must not nudge or rotate anything.
+    if (!this.drag.moved) {
+      if (Math.abs(dx) + Math.abs(dy) < 3) return;
+      this.drag.moved = true;
+    }
     if (this.drag.kind === "move") {
       const scale = 0.012;
       const axis = this.drag.axis ?? "x";
@@ -1101,11 +1400,15 @@ export class PoseCraftViewportController {
         rig.joints.spine.rotation.z = degreesToRadians(deg);
       }
     } else if (this.drag.kind === "pose" && this.drag.joint && this.drag.startRotation) {
+      // Live pose drag is clamped to the same joint limits the canonical
+      // state enforces, so the viewport never shows a pose that persistence
+      // would later snap away from (Visual Truth Law).
+      const joint = this.drag.joint;
       const base = this.drag.startRotation;
-      const x = Math.round(base.x + dy * 0.6);
-      const z = Math.round(base.z + dx * 0.6);
-      const y = evt.shiftKey ? Math.round(base.y + dx * 0.6) : base.y;
-      const jointNode = rig.joints[this.drag.joint];
+      const x = clampRotation(joint, "x", base.x + dy * 0.6);
+      const z = clampRotation(joint, "z", base.z + dx * 0.6);
+      const y = evt.shiftKey ? clampRotation(joint, "y", base.y + dx * 0.6) : base.y;
+      const jointNode = rig.joints[joint];
       jointNode.rotation.x = degreesToRadians(x);
       jointNode.rotation.y = degreesToRadians(y);
       jointNode.rotation.z = degreesToRadians(z);
@@ -1113,11 +1416,33 @@ export class PoseCraftViewportController {
   }
 
   private handlePointerUp(evt: PointerEvent) {
-    if (!this.drag) return;
+    if (this.drag) {
+      this.endDrag(evt);
+    }
+    if (this.cameraPointerActive) {
+      this.cameraPointerActive = false;
+      const start = this.cameraStateAtPointerDown;
+      this.cameraStateAtPointerDown = null;
+      const moved = !start
+        || Math.abs(start.alpha - this.camera.alpha) > 1e-4
+        || Math.abs(start.beta - this.camera.beta) > 1e-4
+        || Math.abs(start.radius - this.camera.radius) > 1e-3;
+      // Commit real orbit/pan/zoom interactions so the camera survives
+      // sync() and reload; plain clicks commit nothing. Debounced so the
+      // camera's post-release inertia settles before the value is captured —
+      // an immediate commit would snap the view back to the release instant.
+      if (moved) this.scheduleCameraCommit();
+    }
+  }
+
+  /** Single exit path for every drag: pointer up, pointer cancel, and
+   * pointer leaving the canvas all commit through here. */
+  private endDrag(evt: PointerEvent) {
     const drag = this.drag;
+    if (!drag) return;
     this.drag = null;
-    (globalThis as any).__pcUp = { kind: drag.kind, axis: drag.axis, rootX: drag.figureId ? this.figureRigs.get(drag.figureId)?.root.position.x : null };
-    this.camera.attachControl(this.canvas, true);
+    this.reattachCamera();
+    if (!drag.moved) return; // pure selection click — nothing to commit
     const figure = this.currentFigures?.get(drag.figureId);
     if (!figure) return;
     const rig = this.figureRigs.get(drag.figureId);
@@ -1136,19 +1461,20 @@ export class PoseCraftViewportController {
       // event so the canonical state stays in sync.
       if (axis !== "y") {
         const base = figure.pose.spine ?? { x: 0, y: 0, z: 0 };
-        const x = axis === "x" ? Math.round(base.x + (evt.clientY - drag.startY) * 0.5) : base.x;
-        const z = axis === "z" ? Math.round(base.z + (evt.clientX - drag.startX) * 0.5) : base.z;
+        const x = axis === "x" ? clampRotation("spine", "x", base.x + (evt.clientY - drag.startY) * 0.5) : base.x;
+        const z = axis === "z" ? clampRotation("spine", "z", base.z + (evt.clientX - drag.startX) * 0.5) : base.z;
         this.onManipulate?.({ kind: "pose", figureId: drag.figureId, joint: "spine", rotation: { x, y: base.y, z } });
       }
     } else if (drag.kind === "pose" && drag.joint && drag.startRotation) {
+      const joint = drag.joint;
       const base = drag.startRotation;
-      const x = Math.round(base.x + (evt.clientY - drag.startY) * 0.6);
-      const z = Math.round(base.z + (evt.clientX - drag.startX) * 0.6);
-      const y = evt.shiftKey ? Math.round(base.y + (evt.clientX - drag.startX) * 0.6) : base.y;
+      const x = clampRotation(joint, "x", base.x + (evt.clientY - drag.startY) * 0.6);
+      const z = clampRotation(joint, "z", base.z + (evt.clientX - drag.startX) * 0.6);
+      const y = evt.shiftKey ? clampRotation(joint, "y", base.y + (evt.clientX - drag.startX) * 0.6) : base.y;
       this.onManipulate?.({
         kind: "pose",
         figureId: drag.figureId,
-        joint: drag.joint,
+        joint,
         rotation: { x, y, z },
       });
     }
@@ -1162,19 +1488,35 @@ export class PoseCraftViewportController {
 
   sync(sceneDoc: PoseCraftScene, selectedFigureId: string | null) {
     this.selectedFigureId = selectedFigureId;
-    this.selectedJoint = sceneDoc.selectedJoint;
     this.currentFigures = new Map(sceneDoc.figures.map((f) => [f.id, f]));
-    this.camera.alpha = sceneDoc.camera.alpha;
-    this.camera.beta = sceneDoc.camera.beta;
-    this.camera.radius = sceneDoc.camera.radius;
-    this.camera.target.copyFrom(
-      new Vector3(sceneDoc.camera.target.x, sceneDoc.camera.target.y, sceneDoc.camera.target.z),
-    );
+    if (!this.drag) {
+      this.selectedJoint = sceneDoc.selectedJoint;
+      const selectedRig = selectedFigureId ? this.figureRigs.get(selectedFigureId) : undefined;
+      if (selectedRig) {
+        selectedRig.selectedRegion = BODY_REGIONS.find((region) => REGION_TO_JOINT[region] === sceneDoc.selectedJoint) ?? selectedRig.selectedRegion;
+      }
+    }
+    // Camera writes are guarded: only apply state that CHANGED since the last
+    // sync (preset click, reload, snapshot restore). Re-applying an unchanged
+    // stored camera on every scene edit used to snap away the creator's live
+    // orbit because interactive orbiting never wrote back to state.
+    const cameraKey = JSON.stringify(sceneDoc.camera);
+    if (this.lastSyncedCamera !== cameraKey) {
+      this.lastSyncedCamera = cameraKey;
+      this.camera.alpha = sceneDoc.camera.alpha;
+      this.camera.beta = sceneDoc.camera.beta;
+      this.camera.radius = sceneDoc.camera.radius;
+      this.camera.target.copyFrom(
+        new Vector3(sceneDoc.camera.target.x, sceneDoc.camera.target.y, sceneDoc.camera.target.z),
+      );
+    }
     this.camera.fov = lensToFov(sceneDoc.camera.lensMm);
 
     const figureIds = new Set(sceneDoc.figures.map((figure) => figure.id));
     for (const [id, rig] of this.figureRigs.entries()) {
       if (!figureIds.has(id)) {
+        rig.visualState = "DISPOSED";
+        rig.loadToken += 1;
         rig.root.dispose(false, true);
         this.figureRigs.delete(id);
       }
@@ -1183,23 +1525,34 @@ export class PoseCraftViewportController {
     for (const figure of sceneDoc.figures) {
       let rig = this.figureRigs.get(figure.id);
       if (!rig) {
-        rig = createFigureRig(this.scene, figure);
+        rig = createFigureRig(this.scene, figure, (state, error) => {
+          this.onManipulate?.({ kind: "visual", figureId: figure.id, visualState: state, error });
+          this.updateHandleVisibility();
+          this.updateGizmoPlacement();
+        });
         this.figureRigs.set(figure.id, rig);
       }
       const color = colorFromHex(getColorSpec(figure.colorId).hex);
       rig.material.diffuseColor = color;
       rig.material.emissiveColor = color.scale(0.08);
-      rig.root.position.x = figure.position.x;
-      rig.root.position.z = figure.position.z;
-      rig.root.scaling.setAll(figure.scale);
-      rig.root.rotation = new Vector3(0, degreesToRadians(figure.rotationY), 0);
-      rig.selectionRing.setEnabled(selectedFigureId === figure.id);
-      for (const [joint, jointNode] of Object.entries(rig.joints) as [JointName, TransformNode][]) {
-        const rotation = figure.pose[joint];
-        jointNode.rotation.x = degreesToRadians(rotation.x);
-        jointNode.rotation.y = degreesToRadians(rotation.y);
-        jointNode.rotation.z = degreesToRadians(rotation.z);
+      // Only the figure being actively dragged is exempt from state writes;
+      // every other figure (and every figure once the drag ends) is driven
+      // by canonical state. Drags always end via endDrag/cancelDrag, so this
+      // gate can never be held permanently.
+      const dragging = this.drag?.figureId === figure.id;
+      if (!dragging) {
+        rig.root.position.x = figure.position.x;
+        rig.root.position.z = figure.position.z;
+        rig.root.rotation = new Vector3(0, degreesToRadians(figure.rotationY), 0);
+        for (const [joint, jointNode] of Object.entries(rig.joints) as [JointName, TransformNode][]) {
+          const rotation = figure.pose[joint];
+          jointNode.rotation.x = degreesToRadians(rotation.x);
+          jointNode.rotation.y = degreesToRadians(rotation.y);
+          jointNode.rotation.z = degreesToRadians(rotation.z);
+        }
       }
+      rig.root.scaling.setAll(figure.scale);
+      rig.selectionRing.setEnabled(selectedFigureId === figure.id);
     }
     this.updateHandleVisibility();
 
@@ -1377,6 +1730,9 @@ export class PoseCraftViewportController {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    if (this.wheelCommitTimer !== null) window.clearTimeout(this.wheelCommitTimer);
+    this.canvas.removeEventListener("pointercancel", this.handlePointerCancelDom);
+    this.canvas.removeEventListener("pointerleave", this.handlePointerCancelDom);
     window.removeEventListener("resize", this.handleResize);
     this.engine.stopRenderLoop();
     this.scene.dispose();

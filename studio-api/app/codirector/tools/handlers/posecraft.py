@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from ....posecraft import pose_catalog
 from ....posecraft import service as posecraft_service
 from ....posecraft.schemas import (
     FigureInstance,
+    JointRotation,
     PoseCraftDocument,
     PoseCraftScene,
 )
@@ -413,20 +415,107 @@ def apply_set_figure_color(ctx: ToolContext, args: dict[str, Any]) -> dict[str, 
     return {"scene": _doc_summary(doc)}
 
 
+def _resolve_pose_figure(scene: PoseCraftScene, args: dict[str, Any]) -> FigureInstance | None:
+    """Resolve the target figure by id first, then by creator-facing name."""
+    fid = str(args.get("figureId") or "")
+    for f in scene.figures:
+        if f.id == fid:
+            return f
+    name = str(args.get("figureName") or args.get("figureId") or "").strip().lower()
+    if name:
+        for f in scene.figures:
+            if f.name.strip().lower() == name:
+                return f
+    return None
+
+
+def _resolve_pose_preset(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any] | None:
+    """Resolve pose joints: explicit joint map > canonical catalog > project custom poses."""
+    explicit = args.get("joints")
+    if isinstance(explicit, dict) and explicit:
+        return {
+            "id": str(args.get("posePresetId") or "custom-joints"),
+            "label": str(args.get("poseLabel") or "Custom pose"),
+            "joints": explicit,
+            "archetypes": None,
+        }
+    pose_id = str(args.get("posePresetId") or "")
+    if not pose_id:
+        return None
+    catalog_pose = pose_catalog.get_catalog_pose(pose_id)
+    if catalog_pose:
+        return catalog_pose
+    for custom in posecraft_service.list_custom_poses(ctx.project_id, ctx.db):
+        if custom.get("poseId") == pose_id or custom.get("id") == pose_id:
+            return {
+                "id": str(custom.get("poseId") or custom.get("id")),
+                "label": str(custom.get("label") or "Custom pose"),
+                "joints": custom.get("joints") or {},
+                "archetypes": custom.get("archetypes") or None,
+            }
+    return None
+
+
 def preview_apply_pose(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
-    return ToolPreview(
-        summary=f"Apply pose {args.get('posePresetId')} to figure {args.get('figureId')}.",
-        lines=["Affects: project"],
-    )
+    scene = _load_scene_for_mutation(ctx)
+    figure = _resolve_pose_figure(scene, args)
+    preset = _resolve_pose_preset(ctx, args)
+    figure_label = figure.name if figure else str(args.get("figureId") or "?")
+    pose_label = preset["label"] if preset else str(args.get("posePresetId") or "?")
+    lines = ["Affects: project"]
+    if preset:
+        changed = [j for j, r in (preset.get("joints") or {}).items() if any(abs(float(r.get(a, 0.0))) > 0.001 for a in ("x", "y", "z"))]
+        if changed:
+            lines.append("Joints: " + ", ".join(sorted(changed)))
+    if not figure:
+        lines.append("WARNING: figure not found in the scene")
+    if not preset:
+        lines.append("WARNING: pose preset not found in the catalog")
+    return ToolPreview(summary=f"Pose {figure_label} as '{pose_label}'.", lines=lines)
 
 
 def apply_apply_pose(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    # Pose preset application is performed client-side by the Babylon viewport
-    # (joint rotations). Co-Director records the intent; the creator approves
-    # and the UI applies the preset. Here we mark the scene modified.
+    """Write real joint rotations into the persisted scene.
+
+    Resolves the preset server-side (canonical catalog mirror or project
+    custom poses) or accepts an explicit ``joints`` map, clamps every
+    rotation to the shared joint limits, and persists the full 17-joint
+    pose so the viewport hydrates the applied pose. Unknown figure or pose
+    is a hard error — never a fake success.
+    """
     scene = _load_scene_for_mutation(ctx)
+    figure = _resolve_pose_figure(scene, args)
+    if figure is None:
+        return {
+            "error": f"Figure {args.get('figureId') or args.get('figureName') or '?'} not found in the PoseCraft scene.",
+            "applied": False,
+        }
+    preset = _resolve_pose_preset(ctx, args)
+    if preset is None:
+        return {
+            "error": f"Pose preset {args.get('posePresetId') or '?'} not found in the pose catalog or project poses.",
+            "applied": False,
+        }
+    if not pose_catalog.is_pose_compatible(preset, figure.archetypeId):
+        return {
+            "error": f"Pose '{preset['label']}' is not compatible with archetype {figure.archetypeId}.",
+            "applied": False,
+        }
+    clamped = pose_catalog.clamped_pose_map(preset.get("joints") or {})
+    figure.pose = {joint: JointRotation(**rot) for joint, rot in clamped.items()}
+    figure.poseId = str(preset["id"])
+    figure.poseLabel = str(preset["label"])
     doc = _persist_scene(ctx, scene)
-    return {"scene": _doc_summary(doc), "posePresetId": args.get("posePresetId")}
+    changed = [j for j, r in clamped.items() if any(abs(r[a]) > 0.001 for a in ("x", "y", "z"))]
+    return {
+        "scene": _doc_summary(doc),
+        "applied": True,
+        "figureId": figure.id,
+        "figureName": figure.name,
+        "posePresetId": figure.poseId,
+        "poseLabel": figure.poseLabel,
+        "changedJoints": sorted(changed),
+    }
 
 
 def preview_update_figure_transform(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:

@@ -41,6 +41,7 @@ import {
   addFurnitureToScene,
   addPrimitiveToScene,
   applyPosePreset,
+  clampRotation,
   createDefaultDocument,
   createDefaultLayoutPrefs,
   createSnapshot,
@@ -140,7 +141,10 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   const [customPoses, setCustomPoses] = useState<PosePreset[]>([]);
   const [viewportStatus, setViewportStatus] = useState<{ renderer: "webgl" | "webgpu"; detail: string } | null>(null);
   const [poseCategory, setPoseCategory] = useState<PoseCategoryId | "all">("all");
-  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("move");
+  // Pose Body is the default manipulation mode — PoseCraft is a posing tool
+  // first, and adding/selecting a figure re-enters Pose Body (see addFigure).
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("pose");
+  const [figureLoadError, setFigureLoadError] = useState<string | null>(null);
   const [poseSearch, setPoseSearch] = useState("");
   const [poseFavoritesOnly, setPoseFavoritesOnly] = useState(false);
   const [poseFavorites, setPoseFavorites] = useState<Set<string>>(() => {
@@ -787,7 +791,20 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   const handleManipulation = useCallback((event: ManipulationEvent) => {
     (globalThis as any).__pcManipulate = { kind: event.kind, figureId: (event as any).figureId, position: (event as any).position, count: ((globalThis as any).__pcManipulate?.count ?? 0) + 1 };
     if (event.kind === "select") {
-      mutateScene((current) => ({ ...current, selectedFigureId: event.figureId }));
+      mutateScene((current) => ({
+        ...current,
+        selectedFigureId: event.figureId,
+        selectedJoint: event.joint ?? current.selectedJoint,
+      }));
+      return;
+    }
+    if (event.kind === "visual") {
+      if (event.visualState === "ERROR") {
+        setFigureLoadError(event.error ?? "The human figure could not be loaded.");
+        setStatusMessage(event.error ?? "Figure could not be loaded.");
+      } else if (event.visualState === "READY") {
+        setFigureLoadError(null);
+      }
       return;
     }
     if (event.kind === "move") {
@@ -815,11 +832,27 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
         ...current,
         figures: current.figures.map((f) =>
           f.id === event.figureId
-            ? { ...f, pose: { ...f.pose, [event.joint]: { x: event.rotation.x, y: event.rotation.y, z: event.rotation.z } } }
+            ? {
+                ...f,
+                pose: {
+                  ...f.pose,
+                  [event.joint]: {
+                    x: clampRotation(event.joint, "x", event.rotation.x),
+                    y: clampRotation(event.joint, "y", event.rotation.y),
+                    z: clampRotation(event.joint, "z", event.rotation.z),
+                  },
+                },
+              }
             : f,
         ),
       }));
       setStatusMessage(`Posed ${event.joint} in viewport.`);
+      return;
+    }
+    if (event.kind === "camera") {
+      // Live orbit/pan/zoom commit — keeps the camera identical after any
+      // scene edit and across save/reload. No status message (too chatty).
+      mutateScene((current) => updateCamera(current, event.camera));
     }
   }, [mutateScene]);
 
@@ -1325,7 +1358,7 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
               <div className="posecraft-archetype-grid">
                 {FIGURE_ARCHETYPES.map((archetype) => (
                   <button key={archetype.id} type="button" data-testid={`posecraft-add-${archetype.id}`}
-                    onClick={() => { mutateScene((current) => addFigure(current, archetype.id)); setStatusMessage(`Added ${archetype.label}.`); }}>
+                    onClick={() => { mutateScene((current) => addFigure(current, archetype.id)); setGizmoMode("pose"); setStatusMessage(`Added ${archetype.label}. Pose Body mode is active — click any body part to pose it.`); }}>
                     <strong>{archetype.label}</strong>
                     <span>{archetype.height.toFixed(2)}m base</span>
                   </button>
@@ -1650,9 +1683,9 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
               <button type="button" className={gizmoMode === "pose" ? "primary" : ""} data-testid="posecraft-gizmo-pose"
                 title="Pose body parts — rotate individual joints (head, arms, spine, legs). To turn the whole character, use Rotate figure."
                 onClick={() => setGizmoMode("pose")}>Pose body</button>
-              <button type="button" data-testid="posecraft-gizmo-camera"
-                title="Camera — orbit, pan, and zoom the view"
-                onClick={() => setGizmoMode("move")}>Camera</button>
+              <button type="button" className={gizmoMode === "camera" ? "primary" : ""} data-testid="posecraft-gizmo-camera"
+                title="Camera — orbit, pan, and zoom the view. Does not move figures."
+                onClick={() => setGizmoMode("camera")}>Camera</button>
             </div>
             <button type="button" data-testid="posecraft-add-primitive" title="Add Blocking Box"
               onClick={() => { mutateScene((current) => addPrimitiveToScene(current)); setStatusMessage("Added a simple blocking box."); }}>Add Box</button>
@@ -1707,6 +1740,9 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                 ))}
               </div>
             )}
+            {figureLoadError && (
+              <p className="muted" data-testid="posecraft-figure-load-error" role="alert">{figureLoadError}</p>
+            )}
             {showIntro && (
               <div className="posecraft-intro-overlay" data-testid="posecraft-intro-overlay">
                 <HelpTip text="PoseCraft blocks people, pose, and camera. Add a figure from the Cast Browser to start." />
@@ -1725,9 +1761,9 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
                   <button type="button" className={gizmoMode === "pose" ? "primary" : ""} data-testid="posecraft-fs-pose"
                     title="Pose body parts — rotate individual joints. To turn the whole character, use Rotate figure."
                     onClick={() => setGizmoMode("pose")}>Pose body</button>
-                  <button type="button" data-testid="posecraft-fs-camera"
-                    title="Camera — orbit, pan, and zoom the view"
-                    onClick={() => setGizmoMode("move")}>Camera</button>
+                  <button type="button" className={gizmoMode === "camera" ? "primary" : ""} data-testid="posecraft-fs-camera"
+                    title="Camera — orbit, pan, and zoom the view. Does not move figures."
+                    onClick={() => setGizmoMode("camera")}>Camera</button>
                 </div>
                 <button
                   type="button"

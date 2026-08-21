@@ -44,17 +44,19 @@ export type HumanMeshMetadata = {
   ageClass?: "adult" | "child";
   heightM?: number;
   rig?: string;
+  assetSource?: string;
+  visualState?: "LOADING" | "READY" | "ERROR" | "DISPOSED";
 };
 
 export const HUMAN_MODEL_IDS = {
-  "adult-male": "adult-male-lowpoly-v3",
-  "adult-female": "adult-female-lowpoly-v3",
-  "child-boy": "child-boy-lowpoly-v3",
-  "child-girl": "child-girl-lowpoly-v3",
+  "adult-male": "adult-male-lowpoly-v4",
+  "adult-female": "adult-female-lowpoly-v4",
+  "child-boy": "child-boy-lowpoly-v4",
+  "child-girl": "child-girl-lowpoly-v4",
 } as const;
 
 export function getHumanModelId(archetypeId: ArchetypeSpec["id"]): string {
-  return HUMAN_MODEL_IDS[archetypeId] ?? "adult-male-lowpoly-v3";
+  return HUMAN_MODEL_IDS[archetypeId] ?? "adult-male-lowpoly-v4";
 }
 
 export function figureIdentity(archetypeId: ArchetypeId): { gender: "male" | "female"; ageClass: "adult" | "child" } {

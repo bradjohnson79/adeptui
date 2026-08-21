@@ -1,0 +1,16 @@
+{
+  "displayName": "Adult Female",
+  "ageClass": "adult",
+  "sexClass": "female",
+  "heightMeters": 1.7,
+  "measuredHeightMeters": 1.7044,
+  "measuredYMin": 0.0,
+  "measuredYMax": 1.7044,
+  "triangleCount": 3546,
+  "units": "meters",
+  "upAxis": "+Y",
+  "forwardAxis": "+Z",
+  "pose": "T-pose",
+  "regionNaming": "PoseCraft 17-region",
+  "modelId": "adult-female-lowpoly-v4"
+}
