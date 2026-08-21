@@ -18,6 +18,7 @@ from app.spatial_map.metric import (
     sync_document,
 )
 from app.spatial_map.schemas import (
+    EnvironmentalAnchor,
     SpatialAnchor,
     SpatialCamera,
     SpatialCharacterPlacement,
@@ -149,3 +150,36 @@ def test_legacy_anchors_do_not_break_metric_sync() -> None:
     migrate_metric_document(doc)
     assert doc.anchors[0].x == 1.0
     assert doc.anchors[0].positionMeters == Vec3Meters(x=1.0, y=0.0, z=-2.0)
+
+
+def test_off_map_mountain_northwest() -> None:
+    doc = _doc()
+    apply_extent(doc, 20.0, 20.0)
+    doc.environmentalAnchors = [
+        EnvironmentalAnchor(label="Mountain", positionMeters=Vec3Meters(x=-18.0, y=40.0, z=-18.0)),
+    ]
+    sync_document(doc)
+    mountain = doc.environmentalAnchors[0]
+    assert mountain.offMap is True
+    assert mountain.bearing == "NW"
+    assert mountain.distanceMeters is not None
+    assert mountain.distanceMeters > 10.0
+    assert mountain.elevationMeters == 40.0
+    lines = compile_metric_lines(doc)
+    assert any("Mountain" in line and "NW" in line for line in lines)
+
+
+def test_move_east_does_not_flip_axes() -> None:
+    from app.spatial_map.metric import entity_meters, set_entity_meters
+
+    doc = _doc()
+    sync_document(doc)
+    red = doc.characters[0]
+    before = entity_meters(red)
+    assert before is not None
+    set_entity_meters(red, before[0] + 2.0, before[1], before[2])
+    sync_document(doc)
+    after = entity_meters(red)
+    assert after is not None
+    assert after[0] == before[0] + 2.0
+    assert after[2] == before[2]

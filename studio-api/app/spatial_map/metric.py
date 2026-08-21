@@ -84,6 +84,12 @@ def bearing_degrees(from_x: float, from_z: float, to_x: float, to_z: float) -> f
     return (math.degrees(math.atan2(dx, -dz)) + 360.0) % 360.0
 
 
+def bearing_label(degrees: float) -> str:
+    labels = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+    idx = int((float(degrees) + 22.5) // 45.0) % 8
+    return labels[idx]
+
+
 def _as_meters(value: Any) -> Vec3Meters | None:
     if value is None:
         return None
@@ -235,6 +241,11 @@ def sync_document(document: Any) -> None:
         half_w = float(document.widthMeters) / 2.0
         half_d = float(document.depthMeters) / 2.0
         anchor.offMap = abs(pos.x) > half_w or abs(pos.z) > half_d
+        origin = _as_meters(getattr(document, "originMeters", None)) or Vec3Meters()
+        deg = bearing_degrees(origin.x, origin.z, pos.x, pos.z)
+        anchor.bearing = bearing_label(deg)
+        anchor.distanceMeters = planar_distance_meters(origin.x, origin.z, pos.x, pos.z)
+        anchor.elevationMeters = float(pos.y)
 
 
 def migrate_metric_document(document: Any) -> bool:
@@ -378,6 +389,14 @@ def compile_metric_lines(document: Any) -> list[str]:
         lines.append(
             f"Camera {getattr(camera, 'label', 'Camera')} at ({meters[0]:+.1f}, {meters[1]:.1f}, {meters[2]:+.1f}) m."
         )
+    for anchor in getattr(document, "environmentalAnchors", None) or []:
+        label = getattr(anchor, "label", None) or "Landmark"
+        bearing = getattr(anchor, "bearing", "") or ""
+        dist = getattr(anchor, "distanceMeters", None)
+        if dist is None:
+            continue
+        off = " off-map" if getattr(anchor, "offMap", False) else ""
+        lines.append(f"{label}{off} {float(dist):.0f} m {bearing or 'away'}.")
     return lines
 
 

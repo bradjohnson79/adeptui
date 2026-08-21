@@ -110,6 +110,9 @@ class EnvironmentalAnchor(BaseModel):
     label: str = "Landmark"
     kind: str = "landmark"
     positionMeters: Vec3Meters = Field(default_factory=Vec3Meters)
+    bearing: str = ""
+    distanceMeters: Optional[float] = None
+    elevationMeters: Optional[float] = None
     notes: str = ""
     offMap: bool = False
 
@@ -149,7 +152,7 @@ class SpatialPlacement(BaseModel):
     slotIndex: int = -1  # 0-3 for V1's 4 slots per type
     colorKey: str = ""  # red|blue|orange|green (characters), purple|brown|aqua|gray (props)
     miniPrompt: str = ""  # e.g. "@Korri is standing behind the barista bar."
-    tag: str = ""  # "@Korri" or "#coffeecup" — friendly reference, not DB identity
+    tag: str = ""  # "@Korri" or "#coffeecup" ΓÇö friendly reference, not DB identity
     visible: bool = True  # false hides marker only; assignment and coords stay
 
 

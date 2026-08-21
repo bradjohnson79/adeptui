@@ -236,6 +236,9 @@ export type EnvironmentalAnchor = {
   label: string;
   kind?: string;
   positionMeters: Vec3Meters;
+  bearing?: string;
+  distanceMeters?: number | null;
+  elevationMeters?: number | null;
   notes?: string;
   offMap?: boolean;
 };
