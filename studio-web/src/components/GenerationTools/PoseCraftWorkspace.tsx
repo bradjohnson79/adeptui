@@ -121,7 +121,7 @@ function Accordion({ id, label, open, onToggle, children }: {
   );
 }
 
-export function PoseCraftWorkspace({ project, onChange, onGo, onAskCoDirector }: Props) {
+export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
   // Master Program: the project API is the source of truth. We seed from a
   // default document synchronously (so the viewport can mount), then hydrate
   // from /api/posecraft/projects/:id/scene on mount. localStorage is no longer
