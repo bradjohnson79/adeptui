@@ -843,6 +843,27 @@ export function PoseCraftWorkspace({ project, onGo, onAskCoDirector }: Props) {
           listCustomPoses(project.id).catch(() => []),
         ]);
         if (cancelled) return;
+        try {
+          const listed = await api.spatialMap.listMaps(project.id);
+          const map = (listed as { documents?: Array<Record<string, unknown>> }).documents?.[0] as
+            | { characters?: Array<{ label?: string; tag?: string; x?: number; y?: number; z?: number; positionMeters?: { x: number; y: number; z: number } }> }
+            | undefined;
+          const chars = map?.characters || [];
+          if (chars.length && !doc.currentScene.worldOriginMeters) {
+            const first = chars[0];
+            const origin = first.positionMeters || { x: first.x || 0, y: first.y || 0, z: first.z || 0 };
+            doc.currentScene.worldOriginMeters = origin;
+            doc.currentScene.figures = doc.currentScene.figures.map((fig) => {
+              const match = chars.find((c) => (c.label || c.tag || "").toLowerCase() === fig.name.toLowerCase());
+              const meters = match?.positionMeters || (match ? { x: match.x || 0, y: match.y || 0, z: match.z || 0 } : null);
+              if (!meters) return fig;
+              if (Math.abs(fig.position.x) > 1e-6 || Math.abs(fig.position.z) > 1e-6) return fig;
+              return { ...fig, position: { x: meters.x, z: meters.z } };
+            });
+          }
+        } catch {
+          /* Spatial Map origin is optional */
+        }
         const prefs = doc.layoutPrefs ?? createDefaultLayoutPrefs();
         setDocumentState((prev) => ({ ...doc, savedVersions: doc.savedVersions ?? prev.savedVersions, layoutPrefs: prefs }));
         // Merge instead of overwrite: if the creator (or automation) added

@@ -97,6 +97,23 @@ class SpatialBounds(BaseModel):
     maxZ: float = 5.0
 
 
+class Vec3Meters(BaseModel):
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+
+class EnvironmentalAnchor(BaseModel):
+    """Named landmark. May sit off the playable map without becoming a zone."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    label: str = "Landmark"
+    kind: str = "landmark"
+    positionMeters: Vec3Meters = Field(default_factory=Vec3Meters)
+    notes: str = ""
+    offMap: bool = False
+
+
 class SpatialAnchor(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     label: str = "Anchor"
@@ -104,6 +121,7 @@ class SpatialAnchor(BaseModel):
     y: float = 0.0
     z: float = 0.0
     notes: str = ""
+    positionMeters: Optional[Vec3Meters] = None
 
 
 class SpatialPlacement(BaseModel):
@@ -119,12 +137,15 @@ class SpatialPlacement(BaseModel):
     pitchDegrees: float = 0.0
     rollDegrees: float = 0.0
     scale: float = 1.0
-    # Cartesian placement. normalizedX/Y are the physical authority [-1, 1].
-    # gridRow/gridColumn are derived at the current Placement Precision density.
+    # Cartesian placement. normalizedX/Y stay in [-1, 1].
+    # positionMeters is machine-truth geography (adept-world-v1, meters).
     normalizedX: Optional[float] = None
     normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
+    positionMeters: Optional[Vec3Meters] = None
+    gridCell: Optional[str] = None
+    footprintMeters: Optional[Vec3Meters] = None
     slotIndex: int = -1  # 0-3 for V1's 4 slots per type
     colorKey: str = ""  # red|blue|orange|green (characters), purple|brown|aqua|gray (props)
     miniPrompt: str = ""  # e.g. "@Korri is standing behind the barista bar."
@@ -158,6 +179,8 @@ class SpatialPropPlacement(SpatialPlacement):
     attachedCharacterId: Optional[str] = None
     relationship: Optional[PropRelationship] = None
     attachmentPoint: Optional[AttachmentPoint] = None
+    dimensionsMeters: Optional[Vec3Meters] = None
+    occupiedCells: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _attachment_law(self) -> "SpatialPropPlacement":
@@ -194,6 +217,9 @@ class SpatialCamera(BaseModel):
     normalizedY: Optional[float] = None
     gridRow: int = -1
     gridColumn: int = -1
+    positionMeters: Optional[Vec3Meters] = None
+    targetMeters: Optional[Vec3Meters] = None
+    gridCell: Optional[str] = None
     visible: bool = True  # false hides marker only; assignment and coords stay
 
 
@@ -295,6 +321,12 @@ class SpatialCapturePlan(BaseModel):
 
 class SpatialMapDocument(BaseModel):
     schemaVersion: int = 1
+    metricSchema: Optional[str] = None
+    metersPerCell: float = 1.0
+    originMeters: Vec3Meters = Field(default_factory=Vec3Meters)
+    widthMeters: float = 10.0
+    depthMeters: float = 10.0
+    environmentalAnchors: list[EnvironmentalAnchor] = Field(default_factory=list)
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     version: str = "1"
     projectId: str
@@ -358,6 +390,10 @@ class SpatialMapCreateBody(BaseModel):
     sceneIntent: Optional[SceneIntent] = None
     originalEnvironmentReferenceAssetId: Optional[str] = None
     originatingUserPrompt: Optional[str] = None
+    widthMeters: Optional[float] = None
+    depthMeters: Optional[float] = None
+    metersPerCell: Optional[float] = None
+    environmentalAnchors: Optional[list[EnvironmentalAnchor]] = None
 
     @model_validator(mode="after")
     def _scene_description_valid(self) -> "SpatialMapCreateBody":
@@ -382,6 +418,10 @@ class SpatialMapUpdateBody(BaseModel):
     sceneIntent: Optional[SceneIntent] = None
     originalEnvironmentReferenceAssetId: Optional[str] = None
     originatingUserPrompt: Optional[str] = None
+    widthMeters: Optional[float] = None
+    depthMeters: Optional[float] = None
+    metersPerCell: Optional[float] = None
+    environmentalAnchors: Optional[list[EnvironmentalAnchor]] = None
 
     @model_validator(mode="after")
     def _scene_description_valid(self) -> "SpatialMapUpdateBody":
@@ -593,6 +633,9 @@ class SpatialCameraUpdateBody(BaseModel):
     gridRow: Optional[int] = None
     gridColumn: Optional[int] = None
     visible: Optional[bool] = None
+    lookAtId: Optional[str] = None
+    raiseMeters: Optional[float] = None
+    orbitDegrees: Optional[float] = None
 
 
 class SpatialMovementPathCreateBody(BaseModel):

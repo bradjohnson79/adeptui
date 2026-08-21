@@ -55,19 +55,34 @@ def _spatial_context(db: Optional[Session], project_id: str) -> dict[str, Any]:
 
         docs = list_documents(db, project_id)
         map_id = str(getattr(docs[0], "id", "") or "") if docs else ""
+        origins: dict[str, dict[str, float]] = {}
+        if docs:
+            from ...spatial_map.metric import compile_metric_lines, entity_meters
+
+            for ch in docs[0].characters:
+                meters = entity_meters(ch)
+                if meters is None:
+                    continue
+                for key in (getattr(ch, "label", ""), getattr(ch, "tag", ""), getattr(ch, "characterId", "")):
+                    name = str(key or "").strip().lower()
+                    if name:
+                        origins[name] = {"x": meters[0], "y": meters[1], "z": meters[2]}
         draft = load_spatial_draft(db, project_id, map_id) if map_id else None
-        if draft is None:
+        if draft is None and not origins:
             return {}
         return {
             "characterLocation": next(
-                (fill.label for fill in draft.proposedFills if fill.kind == "character"),
+                (fill.label for fill in (getattr(draft, "proposedFills", None) or []) if fill.kind == "character"),
                 "",
-            ),
-            "zonePhrases": [item.phrase for item in draft.zonePhrases[:8]],
+            ) if draft is not None else "",
+            "zonePhrases": [item.phrase for item in (getattr(draft, "zonePhrases", None) or [])[:8]] if draft is not None else [],
             "relationships": [
-                f"{rel.subjectLabel} {rel.relation} {rel.objectLabel}" for rel in draft.relationships[:8]
-            ],
-            "fingerprint": f"{map_id}:{len(draft.proposedFills)}:{len(draft.relationships)}",
+                f"{rel.subjectLabel} {rel.relation} {rel.objectLabel}"
+                for rel in (getattr(draft, "relationships", None) or [])[:8]
+            ] if draft is not None else [],
+            "characterOrigins": origins,
+            "metricLines": compile_metric_lines(docs[0]) if docs else [],
+            "fingerprint": f"{map_id}:{len(origins)}:{len(getattr(draft, 'proposedFills', None) or [])}",
         }
     except Exception:
         logger.debug("Spatial extras unavailable for pose intelligence")
@@ -148,6 +163,20 @@ def analyze_figure(
         ):
             return existing
 
+    origins = spatial.get("characterOrigins") or {}
+    fig_name = str(getattr(figure, "name", None) or (figure.get("name") if isinstance(figure, dict) else "") or "").strip().lower()
+    origin = origins.get(fig_name)
+    if origin:
+        ox, oz = float(origin.get("x") or 0.0), float(origin.get("z") or 0.0)
+        if isinstance(figure, dict):
+            pos = dict(figure.get("position") or {})
+            if abs(float(pos.get("x") or 0.0)) < 1e-6 and abs(float(pos.get("z") or 0.0)) < 1e-6:
+                figure = {**figure, "position": {"x": ox, "z": oz}}
+        else:
+            pos = getattr(figure, "position", None)
+            if pos is not None and abs(float(getattr(pos, "x", 0.0) or 0.0)) < 1e-6 and abs(float(getattr(pos, "z", 0.0) or 0.0)) < 1e-6:
+                pos.x = ox
+                pos.z = oz
     world = solve_joints(figure)
     character = build_character_state(figure, world, revision)
     interaction = build_contacts(world, primitives, spatial.get("zonePhrases") or [])

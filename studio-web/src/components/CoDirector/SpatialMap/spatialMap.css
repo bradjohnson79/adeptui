@@ -13,6 +13,12 @@
   font-weight: 600;
 }
 
+.spatial-map__metric-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.72;
+}
+
 .spatial-map__subtitle {
   margin: 0 0 0.4rem;
   color: var(--muted);

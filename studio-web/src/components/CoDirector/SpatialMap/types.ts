@@ -34,6 +34,9 @@ export type SpatialPlacementGridExtension = {
   normalizedY?: number | null;
   gridRow: number;
   gridColumn: number;
+  positionMeters?: Vec3Meters | null;
+  gridCell?: string | null;
+  footprintMeters?: Vec3Meters | null;
   slotIndex: number;
   colorKey: string;
   miniPrompt: string;
@@ -115,6 +118,9 @@ export type SpatialCamera = _SpatialCamera & {
   normalizedY?: number | null;
   gridRow: number;
   gridColumn: number;
+  positionMeters?: Vec3Meters | null;
+  targetMeters?: Vec3Meters | null;
+  gridCell?: string | null;
   visible?: boolean;
 };
 
@@ -223,12 +229,29 @@ export type MovementArrow = {
   to: { normalizedX?: number | null; normalizedY?: number | null; gridRow?: number; gridColumn?: number };
 };
 
+export type Vec3Meters = { x: number; y: number; z: number };
+
+export type EnvironmentalAnchor = {
+  id: string;
+  label: string;
+  kind?: string;
+  positionMeters: Vec3Meters;
+  notes?: string;
+  offMap?: boolean;
+};
+
 export type SpatialMapDocument = Omit<_SpatialMapDocument, "characters" | "props" | "cameras"> & {
   characters: SpatialCharacterPlacement[];
   props: SpatialPropPlacement[];
   cameras: SpatialCamera[];
   gridScale: number;
   placementGrid?: string;
+  metricSchema?: string | null;
+  metersPerCell?: number;
+  originMeters?: Vec3Meters;
+  widthMeters?: number;
+  depthMeters?: number;
+  environmentalAnchors?: EnvironmentalAnchor[];
   sceneIntent?: SceneIntent | null;
   originalEnvironmentReferenceAssetId?: string | null;
   originatingUserPrompt?: string;

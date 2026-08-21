@@ -299,7 +299,10 @@ def _validate_document_attachments(document: SpatialMapDocument) -> None:
 
 
 def _save_document(db: Session, row: SpatialMapDocumentRow, document: SpatialMapDocument) -> SpatialMapDocument:
+    from .metric import sync_document
+
     _validate_document_attachments(document)
+    sync_document(document)
     document.updatedAt = _now()
     if not document.createdAt:
         document.createdAt = document.updatedAt
@@ -366,8 +369,11 @@ def _apply_placement_from_values(
         and int(grid_row) < 0
         and int(grid_column) < 0
     )
+    from .metric import sync_entity
+
     if has_cell:
         apply_cell_placement(entity, int(grid_column), int(grid_row), cell_density, document.bounds)
+        sync_entity(entity, document)
         return
     if wants_clear and (clear_if_negative_cells or not has_norm):
         entity.gridRow = -1
@@ -382,6 +388,7 @@ def _apply_placement_from_values(
         world_x, world_z = normalized_to_world(normalized_x, normalized_y, document.bounds)
         entity.x = world_x
         entity.z = world_z
+    sync_entity(entity, document)
 
 
 def _apply_placement_from_body(entity: Any, body: Any, document: SpatialMapDocument) -> None:
@@ -456,9 +463,17 @@ def create_document(db: Session, project_id: str, body: SpatialMapCreateBody) ->
         assignedSceneIds=[body.sceneId] if body.sceneId else [],
         placementGrid="cartesian-v1",
         gridScale=0,
+        metersPerCell=body.metersPerCell or 1.0,
+        environmentalAnchors=body.environmentalAnchors or [],
         createdAt=now,
         updatedAt=now,
     )
+    from .metric import METRIC_SCHEMA, apply_extent, sync_document
+
+    document.metricSchema = METRIC_SCHEMA
+    if body.widthMeters or body.depthMeters:
+        apply_extent(document, body.widthMeters or 10.0, body.depthMeters or 10.0)
+    sync_document(document)
     row = SpatialMapDocumentRow(
         id=document.id,
         project_id=project_id,
@@ -534,6 +549,21 @@ def update_document(db: Session, project_id: str, document_id: str, body: Spatia
         refresh_derived_cells(document)
     if body.anchors is not None:
         document.anchors = [SpatialAnchor(**a) if not isinstance(a, SpatialAnchor) else a for a in body.anchors]
+    if body.environmentalAnchors is not None:
+        document.environmentalAnchors = body.environmentalAnchors
+    if body.metersPerCell is not None:
+        document.metersPerCell = float(body.metersPerCell)
+    if body.widthMeters is not None or body.depthMeters is not None:
+        from .metric import apply_extent, sync_entity, _is_placed
+
+        apply_extent(
+            document,
+            body.widthMeters if body.widthMeters is not None else document.widthMeters,
+            body.depthMeters if body.depthMeters is not None else document.depthMeters,
+        )
+        for collection in (document.characters, document.props, document.cameras):
+            for entity in collection:
+                sync_entity(entity, document, prefer_meters=_is_placed(entity))
     saved = _save_document(db, row, document)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -568,9 +598,12 @@ def commit_document(
     bumps version and the map becomes dirty again; the map is only committed
     when the user explicitly clicks Save Spatial Map. Never called implicitly.
     """
+    from .metric import sync_document
+
     row = _row_or_404(db, project_id, document_id)
     document = _parse_document(row)
     _validate_document_attachments(document)
+    sync_document(document)
     now = _now()
     document.updatedAt = now
     if not document.createdAt:
@@ -798,6 +831,9 @@ def update_camera(
     document = _parse_document(row)
     camera = _find_item(document.cameras, camera_id, kind="camera")
     updates = body.model_dump(exclude_unset=True)
+    look_id = updates.pop("lookAtId", None)
+    raise_m = updates.pop("raiseMeters", None)
+    orbit = updates.pop("orbitDegrees", None)
     if updates.get("hero"):
         for existing in document.cameras:
             existing.hero = existing.id == camera_id
@@ -807,6 +843,19 @@ def update_camera(
     for key, value in updates.items():
         setattr(camera, key, value)
     _sync_coords_after_update(camera, updates, document)
+    if look_id or raise_m is not None or orbit is not None:
+        from .metric import entity_meters, find_subject, look_at, orbit_camera, raise_camera, sync_entity
+
+        if look_id:
+            target = find_subject(document, str(look_id))
+            meters = entity_meters(target) if target is not None else None
+            if meters:
+                look_at(camera, *meters)
+        if raise_m is not None:
+            raise_camera(camera, float(raise_m))
+        if orbit is not None:
+            orbit_camera(camera, float(orbit))
+        sync_entity(camera, document)
     saved = _save_document(db, row, document)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -1154,4 +1203,8 @@ def document_summary(document: SpatialMapDocument) -> dict[str, Any]:
             for placement in [*document.characters, *document.props]
         },
         "warnings": document.warnings,
+        "metricSchema": document.metricSchema,
+        "metersPerCell": document.metersPerCell,
+        "widthMeters": document.widthMeters,
+        "depthMeters": document.depthMeters,
     }

@@ -14,6 +14,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from .attachment import normalize_prop_attachment
+from .metric import grid_cell_label
 
 _INDEPENDENT_COORD_KEYS = (
     "x",
@@ -60,25 +61,6 @@ def _as_dict(item: Any) -> dict[str, Any]:
         for key in dir(item)
         if not key.startswith("_") and not callable(getattr(item, key, None))
     }
-
-
-def grid_cell_label(column: Any, row: Any) -> str:
-    """Spreadsheet-style cell label. column 5 + row 5 -> F6."""
-    try:
-        col = int(column)
-        r = int(row)
-    except (TypeError, ValueError):
-        return ""
-    if col < 0 or r < 0:
-        return ""
-    letters = ""
-    n = col
-    while True:
-        letters = chr(ord("A") + (n % 26)) + letters
-        n = n // 26 - 1
-        if n < 0:
-            break
-    return f"{letters}{r + 1}"
 
 
 def _title_enum(value: Any) -> str:

@@ -82,6 +82,19 @@ export function cellLabel(column: number, row: number): string {
   return `C${column + 1}R${row + 1}`;
 }
 
+/** Spreadsheet cell matching studio-api metric.grid_cell_label. column 4, row 7 → E8. */
+export function chessCellLabel(column: number, row: number): string {
+  if (column < 0 || row < 0 || !Number.isFinite(column) || !Number.isFinite(row)) return "";
+  let letters = "";
+  let n = Math.floor(column);
+  while (true) {
+    letters = String.fromCharCode(65 + (n % 26)) + letters;
+    n = Math.floor(n / 26) - 1;
+    if (n < 0) break;
+  }
+  return `${letters}${Math.floor(row) + 1}`;
+}
+
 export function pixelToNormalized(px: number, py: number, size: number): NormalizedPoint {
   const half = size / 2;
   return {

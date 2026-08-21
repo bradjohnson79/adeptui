@@ -201,6 +201,10 @@ def migrate_document(document: Any) -> bool:
     if document.placementGrid != PLACEMENT_GRID_CARTESIAN:
         document.placementGrid = PLACEMENT_GRID_CARTESIAN
         changed = True
+    from .metric import migrate_metric_document
+
+    if migrate_metric_document(document):
+        changed = True
     return changed
 
 

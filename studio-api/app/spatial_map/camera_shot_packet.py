@@ -548,6 +548,12 @@ def compile_camera_shot_packet(
         f"Environment: {env_identity}",
         f"North lock: {_north_lock_for(document, ers_sheet_id)}",
     ]
+    try:
+        from .metric import compile_metric_lines
+
+        locked.extend(compile_metric_lines(document))
+    except Exception:
+        pass
     if rec.get("cell"):
         locked.append(f"Camera {rec['label']} is at grid cell {rec['cell']}.")
     if nx is not None and ny is not None:

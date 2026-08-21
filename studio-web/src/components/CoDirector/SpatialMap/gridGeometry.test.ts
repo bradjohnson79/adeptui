@@ -5,6 +5,7 @@ import {
   CARDINAL_LABELS,
   cellCenterNormalized,
   cellLabel,
+  chessCellLabel,
   cellSizeNormalized,
   cellToNormalized,
   clampGridScale,
@@ -315,5 +316,10 @@ describe("Work Order E frontend-testable geometry", () => {
     expect(yawToOrientation(405)).toBe("NE");
     expect(rotateOrientation("NW", 1)).toBe("N");
     expect(rotateOrientation("N", 8)).toBe("N");
+  });
+
+  it("chessCellLabel matches spatial-metric E8", () => {
+    expect(chessCellLabel(4, 7)).toBe("E8");
+    expect(chessCellLabel(5, 5)).toBe("F6");
   });
 });

@@ -106,6 +106,7 @@ class CharacterPoseState(BaseModel):
     tension: str = ""
     directionalMomentum: str = ""
     momentumConfidence: ConfidenceLevel = "insufficient_reference"
+    worldOrigin: Vec3 = Field(default_factory=Vec3)
 
 
 class ContactEdge(BaseModel):

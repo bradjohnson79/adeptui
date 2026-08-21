@@ -1,6 +1,6 @@
 # Revision C Phase 2 — PoseCraft + JEPA Integration
 
-**Status:** GOVERNING for Revision C Phase 2  
+**Status:** HISTORICAL — Phase 2 certified. Successor: [PHASE-2.1-SPATIAL-METRIC.md](./PHASE-2.1-SPATIAL-METRIC.md).  
 **Law 30:** This is the single governing document for PoseCraft + JEPA world-state integration. Phase 1 remains governed by [00-GOVERNING.md](./00-GOVERNING.md). Authoritative A+B+C naming is [REVISION-ABC-FINAL-CLOSURE.md](../REVISION-ABC-FINAL-CLOSURE.md).
 
 ```text
@@ -16,13 +16,13 @@ PoseCraft remains the pose engine. This phase adds kinematic pose intelligence a
 | Item | Value |
 |---|---|
 | Branch | `feat/codirector-temporal-continuity` |
-| Starting / tracked HEAD | `a62d7a1bb4c7c3fa2f2a16cea4ee06428a0e06d6` |
+| Starting / tracked HEAD | `5cbbb41647f13054b6648ad33782c56b1948910d` |
 | Cert project | Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` |
 | Creator UI | http://127.0.0.1:8760/ |
 | Studio API | http://127.0.0.1:8758/ |
 | Live evidence | [evidence/phase2-live-gates.json](./evidence/phase2-live-gates.json) |
 
-Phase 2 source is `773fedd` plus clean-clone repairs `d737a43` / `b9eda76` / `a62d7a1`. Deploy SHA is `a62d7a1`.
+Phase 2 source is `773fedd` plus clean-clone and production-build repairs through `5cbbb41`. Hosted frontend: `https://adeptui.vercel.app` (`dpl_3MRKtGSvK1SfTqvJ2WmT884WV2J7`, `https://adeptui-iytjge73y-anoint.vercel.app`). Hosted v3 figures return HTTP 200. Do not treat hosted Vercel as JEPA proof.
 
 ## Product law
 

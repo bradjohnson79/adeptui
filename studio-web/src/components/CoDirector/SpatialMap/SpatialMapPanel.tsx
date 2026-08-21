@@ -1282,6 +1282,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       {!hasBackground ? (
         <>
           <h3 className="spatial-map__heading">{t("spatialMap:title")}</h3>
+          <p className="spatial-map__metric-hint" data-testid="spatial-metric-scale">1 square = 1 meter</p>
           <p className="spatial-map__subtitle">Start with an environment reference.</p>
           <p className="spatial-map__tip">
             An Atlas Shot is a roofless, top-down reference view designed specifically for Spatial Map.
@@ -1372,6 +1373,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
       ) : (
         <>
           <h3 className="spatial-map__heading">{document?.title || t("spatialMap:title")}</h3>
+          <p className="spatial-map__metric-hint" data-testid="spatial-metric-scale">1 square = 1 meter</p>
 
           <div className="spatial-map__atlas-panel" data-testid="active-atlas-panel">
             <div className="spatial-map__atlas-thumb">
@@ -1572,7 +1574,7 @@ export function SpatialMapPanel({ projectId, onGoTab }: Props) {
             >
               +
             </button>
-            <span className="spatial-map__grid-scale-label" data-testid="cell-size-label">Cell Size</span>
+            <span className="spatial-map__grid-scale-label" data-testid="cell-size-label">1 square = 1 meter</span>
           </div>
 
           <div className="spatial-map__actions" data-testid="map-controls">

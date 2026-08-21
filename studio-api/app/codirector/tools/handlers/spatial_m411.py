@@ -394,6 +394,8 @@ async def get_map(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
 
 async def inspect_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
+    from ....spatial_map.metric import compile_metric_lines, pair_metrics
+
     document = _document(ctx, args)
     hero_camera = _camera_for_document(document, _string(args, "cameraId") or None)
     return {
@@ -419,6 +421,15 @@ async def inspect_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
             for item in document.props
         ],
         "paths": [item.model_dump() for item in document.paths],
+        "metric": {
+            "schema": document.metricSchema,
+            "metersPerCell": document.metersPerCell,
+            "widthMeters": document.widthMeters,
+            "depthMeters": document.depthMeters,
+            "lines": compile_metric_lines(document),
+            "pairs": pair_metrics(document),
+            "environmentalAnchors": [item.model_dump() for item in document.environmentalAnchors],
+        },
         "mock": False,
         "_evidence": {"source": "spatial_map.service.document_summary"},
     }
@@ -734,6 +745,28 @@ def apply_move_placement(ctx: ToolContext, args: dict[str, Any]) -> dict[str, An
             notes = _string(args, "notes")
             if notes:
                 item.notes = notes
+        from ....spatial_map.grid import apply_cell_placement, density_for_scale
+        from ....spatial_map.metric import entity_meters, parse_grid_cell, set_entity_meters, sync_entity
+
+        cell = _string(args, "gridCell")
+        parsed = parse_grid_cell(cell) if cell else None
+        if parsed:
+            apply_cell_placement(item, parsed[0], parsed[1], density_for_scale(document.gridScale), document.bounds)
+        east = _number(args, "metersEast") or 0.0
+        north = _number(args, "metersNorth") or 0.0
+        west = _number(args, "metersWest") or 0.0
+        south = _number(args, "metersSouth") or 0.0
+        if east or north or west or south:
+            meters = entity_meters(item)
+            if meters:
+                set_entity_meters(item, meters[0] + east - west, meters[1], meters[2] - north + south)
+        px = _number(args, "positionMetersX")
+        py = _number(args, "positionMetersY")
+        pz = _number(args, "positionMetersZ")
+        if px is not None or pz is not None:
+            meters = entity_meters(item) or (0.0, 0.0, 0.0)
+            set_entity_meters(item, px if px is not None else meters[0], py if py is not None else meters[1], pz if pz is not None else meters[2])
+        sync_entity(item, document)
 
     document = _persist_document(ctx, document_id, _mutate)
     return {
@@ -831,6 +864,41 @@ def apply_update_camera(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
             camera.lockedFor360 = _bool(args, "lockedFor360", camera.lockedFor360)
         if "targetCharacterIdsCsv" in args:
             camera.targetCharacterIds = _csv_list(args, "targetCharacterIdsCsv")
+        from ....spatial_map.metric import (
+            entity_meters,
+            find_subject,
+            halfway_point,
+            look_at,
+            orbit_camera,
+            raise_camera,
+            set_entity_meters,
+            sync_entity,
+        )
+
+        look_id = _string(args, "lookAtId") or _string(args, "lookAt")
+        if look_id:
+            target = find_subject(document, look_id)
+            meters = entity_meters(target) if target is not None else None
+            if meters:
+                look_at(camera, *meters)
+        raise_m = _number(args, "raiseMeters")
+        if raise_m is not None:
+            raise_camera(camera, raise_m)
+        orbit = _number(args, "orbitDegrees")
+        if orbit is not None:
+            orbit_camera(camera, orbit)
+        half_a = _string(args, "halfwayFromId")
+        half_b = _string(args, "halfwayToId")
+        if half_a and half_b:
+            a = find_subject(document, half_a)
+            b = find_subject(document, half_b)
+            am = entity_meters(a) if a is not None else None
+            bm = entity_meters(b) if b is not None else None
+            if am and bm:
+                mid = halfway_point(am, bm)
+                set_entity_meters(camera, mid[0], float(camera.heightMeters or mid[1]), mid[2])
+                look_at(camera, am[0], am[1], am[2])
+        sync_entity(camera, document)
 
     document = _persist_document(ctx, document_id, _mutate)
     return {

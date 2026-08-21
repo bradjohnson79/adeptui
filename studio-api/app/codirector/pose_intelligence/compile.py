@@ -32,6 +32,9 @@ def compile_pose_motion_conditioning(
     lines = ["Co-Director pose continuity (intended physical performance):"]
     if cond.subjectIdentity:
         lines.append(f"- Subject: {cond.subjectIdentity}")
+    origin = packet.character.worldOrigin
+    if origin and (abs(origin.x) > 1e-6 or abs(origin.z) > 1e-6):
+        lines.append(f"- World origin: {origin.x:+.1f} m east, {origin.z:+.1f} m south.")
     if cond.poseState:
         lines.append(f"- Pose: {cond.poseState}")
     if cond.actionState:

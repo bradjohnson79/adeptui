@@ -218,6 +218,8 @@ export type PoseCraftScene = {
   primitives: BlockingPrimitive[];
   selectedFigureId: string | null;
   selectedJoint: JointName;
+  /** Spatial Map world origin for this scene, in meters (adept-world-v1). */
+  worldOriginMeters?: { x: number; y: number; z: number };
   /** Final Mandatory GO (D6): selected blocking/furniture primitive for
    * keyboard Delete/Backspace. Optional for backward-compat with older scenes. */
   selectedPrimitiveId?: string | null;

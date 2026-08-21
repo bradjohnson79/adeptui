@@ -106,6 +106,15 @@ def _spec(archetype_id: str) -> dict[str, float]:
     return ARCHETYPES.get(archetype_id or "", ARCHETYPES["adult-male"])
 
 
+def _figure_origin(figure: Any) -> tuple[float, float]:
+    pos = getattr(figure, "position", None) if not isinstance(figure, dict) else figure.get("position")
+    if isinstance(pos, dict):
+        return float(pos.get("x") or 0.0), float(pos.get("z") or 0.0)
+    if pos is not None:
+        return float(getattr(pos, "x", 0.0) or 0.0), float(getattr(pos, "z", 0.0) or 0.0)
+    return 0.0, 0.0
+
+
 def solve_joints(figure: Any) -> dict[str, tuple[float, float, float]]:
     """Approximate world joint positions from the 17-joint PoseCraft hierarchy."""
     spec = _spec(getattr(figure, "archetypeId", None) or (figure.get("archetypeId") if isinstance(figure, dict) else "adult-male"))
@@ -453,6 +462,7 @@ def build_character_state(figure: Any, world: dict[str, tuple[float, float, floa
         tension=tension,
         directionalMomentum="",
         momentumConfidence="insufficient_reference",
+        worldOrigin=Vec3(x=_figure_origin(figure)[0], y=0.0, z=_figure_origin(figure)[1]),
     )
 
 
