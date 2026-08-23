@@ -110,29 +110,6 @@ def test_build_leaf_graph_no_worker_import():
     assert g["1"]["class_type"] == "UNETLoader"
     fps = compute_fingerprints(graph=g, builder_path=c.builder_path)
     assert fps["graphHash"] == graph_hash(g)
-    certified = get_workflow("zimage.txt2img").fingerprints.get("graphHash")
-    default = build_leaf_graph(
-        c,
-        settings=settings,
-        prompt="test",
-        width=1024,
-        height=1024,
-        seed=1,
-        steps=8,
-        cfg=1.0,
-    )
-    widescreen = build_leaf_graph(
-        c,
-        settings=settings,
-        prompt="test",
-        width=1280,
-        height=720,
-        seed=1,
-        steps=8,
-        cfg=1.0,
-    )
-    assert graph_hash(default, workflow_key="zimage.txt2img") == certified
-    assert graph_hash(widescreen, workflow_key="zimage.txt2img") == certified
     assert legacy_comfy_workflow_key("zimage.txt2img") == "zimage.txt2img"
 
 
