@@ -92,7 +92,7 @@ export function buildCharacterSheetStartBody(input: {
   generatorSources: CharacterSheetGeneratorSourcesPayload;
   candidateCount: number;
   taskType: "CRS_GENERATION";
-  layout: "four_view";
+  layout: "single_view";
   requiredViews: string[];
   fourViewSingleOutput: false;
 } {
@@ -110,8 +110,8 @@ export function buildCharacterSheetStartBody(input: {
     generatorSources: buildGeneratorSourcesPayload(input.plan),
     candidateCount: 1,
     taskType: "CRS_GENERATION",
-    layout: "four_view",
-    requiredViews: ["front_full", "side_full", "back_full", "face_closeup"],
+    layout: "single_view",
+    requiredViews: ["front_full"],
     fourViewSingleOutput: false,
   };
 }

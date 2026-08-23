@@ -47,8 +47,8 @@ describe("Character Sheet generate request", () => {
     });
     expect(body.candidateCount).toBe(1);
     expect(body.taskType).toBe("CRS_GENERATION");
-    expect(body.layout).toBe("four_view");
-    expect(body.requiredViews).toEqual(["front_full", "side_full", "back_full", "face_closeup"]);
+    expect(body.layout).toBe("single_view");
+    expect(body.requiredViews).toEqual(["front_full"]);
     expect(body.fourViewSingleOutput).toBe(false);
     expect(body.generationMode).toBe("profile_guided");
     expect(body.generatorSources.local?.find((r) => r.family === "illustrious")).toMatchObject({

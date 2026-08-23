@@ -1,6 +1,8 @@
 ﻿import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  batchCoarseLabel,
+  batchCoarseStage,
   batchProgress,
   canUseCharacterLook,
   candidateErrorMessage,
@@ -86,19 +88,14 @@ describe("character sheet failed-job hydration", () => {
     expect(progress.totalViews).toBe(4);
   });
 
-  it("does not treat a front tile as a complete four-view sheet", () => {
+  it("treats a finished Front-only V2 view as a usable identity image", () => {
     const c: CharacterCandidate = {
       status: "done",
       assetId: "front-only",
-      viewJobs: [
-        { role: "hero_identity", status: "done", assetId: "front-only" },
-        { role: "full_body_side_left", status: "queued" },
-        { role: "full_body_back", status: "queued" },
-        { role: "closeup_front", status: "queued" },
-      ],
+      viewJobs: [{ role: "hero_identity", status: "done", assetId: "front-only" }],
     };
-    expect(candidateStage(c)).toBe("generating");
-    expect(canUseCharacterLook(c)).toBe(false);
+    expect(candidateStage(c)).toBe("complete");
+    expect(canUseCharacterLook(c)).toBe(true);
   });
 
   it("does not fall back generatorName to workflowKey", () => {
@@ -194,5 +191,71 @@ describe("Character Reference Sheet progress honesty", () => {
     expect(src).toContain("pollExhaustedRef");
     expect(src).toContain("pollExhaustedRef.current = true");
     expect(src).toContain("pollExhaustedRef.current) return");
+  });
+
+  it("makes the 30s still-queued fast-fail binding (no infinite timeout reset)", () => {
+    const src = readFileSync(new URL("./CharacterSheetGenerator.tsx", import.meta.url), "utf8");
+    // The 30s "Still queued" branch must mark the poll cycle done so the 4s
+    // tick cannot restart it with a fresh budget (the SenseNova stuck-loader
+    // loop). It must set pollExhaustedRef immediately before returning.
+    expect(src).toContain("Still queued with no views after 30 seconds");
+    expect(src).toMatch(/Still queued[\s\S]*pollExhaustedRef\.current = true/);
+  });
+
+  it("does not swallow all poll errors silently (bounded + vanished-job fast-fail)", () => {
+    const src = readFileSync(new URL("./CharacterSheetGenerator.tsx", import.meta.url), "utf8");
+    expect(src).toContain("consecutiveErrorsRef");
+    expect(src).toContain("POLL_ERROR_THRESHOLD");
+    // Vanished job (404/410/gone) must fast-fail, not loop forever.
+    expect(src).toMatch(/gone[\s\S]*The runtime lost this job/);
+  });
+});
+
+describe("Character Reference Sheet coarse stage (no fake 0%)", () => {
+  it("reports loading_model for an active single-node candidate with no view jobs (SenseNova)", () => {
+    // SenseNova CRS is a single SenseNovaU1LocalImageEdit node — no per-view
+    // jobs hydrate while the model loads. This must NOT read as a frozen
+    // "0 of 1 sheets complete"; it is an active model load.
+    const c: CharacterCandidate = { status: "generating" };
+    expect(batchCoarseStage([c], true)).toBe("loading_model");
+    expect(batchCoarseLabel(batchCoarseStage([c], true))).toBe("Loading model…");
+  });
+
+  it("reports generating when a view is running", () => {
+    const c: CharacterCandidate = {
+      status: "generating",
+      viewJobs: [
+        { role: "hero_identity", status: "running" },
+        { role: "full_body_side_left", status: "queued" },
+      ],
+    };
+    expect(batchCoarseStage([c], true)).toBe("generating");
+  });
+
+  it("reports composing when all views are done but no sheet yet", () => {
+    const c: CharacterCandidate = {
+      status: "generating",
+      viewJobs: [
+        { role: "hero_identity", status: "done", assetId: "a1" },
+        { role: "full_body_side_left", status: "done", assetId: "a2" },
+      ],
+    };
+    expect(batchCoarseStage([c], true)).toBe("composing");
+  });
+
+  it("reports complete when the sheet asset is present", () => {
+    const c: CharacterCandidate = { status: "done", sheetAssetId: "sheet-1" };
+    expect(batchCoarseStage([c], false)).toBe("complete");
+  });
+
+  it("reports failed when a candidate failed", () => {
+    const c: CharacterCandidate = { status: "failed", error: "boom" };
+    expect(batchCoarseStage([c], true)).toBe("failed");
+  });
+
+  it("GenerationProgressBar uses the coarse label so a no-views active job is not frozen at 0 of 1", () => {
+    const src = readFileSync(new URL("./GenerationProgressBar.tsx", import.meta.url), "utf8");
+    expect(src).toContain("batchCoarseLabel");
+    expect(src).toContain("hasMeasurableProgress");
   });
 });

@@ -321,6 +321,12 @@ export function candidateStage(c: CharacterCandidate): CandidateStage {
   if (anyFailed) return "failed";
   if (c.sheetAssetId) return "complete";
   if (status === "assembling") return "assembling";
+  const identityOnly =
+    views.length === 1 &&
+    ["hero_identity", "front", "front_full"].includes(String(views[0].role || views[0].viewRole || ""));
+  if (identityOnly && (views[0].assetId || normStatus(views[0].status) === "done")) {
+    return "complete";
+  }
   // All views done but no composed sheet yet → assembling.
   if (views.length && views.every((v) => normStatus(v.status) === "done" || v.assetId) && !c.sheetAssetId) {
     return "assembling";
@@ -337,7 +343,13 @@ export function candidateStage(c: CharacterCandidate): CandidateStage {
 /** Use This Look is only for a complete, layout-compliant sheet. */
 export function canUseCharacterLook(c: CharacterCandidate): boolean {
   if (isLayoutNoncompliant(c)) return false;
-  const assetId = c.sheetAssetId || ((c.viewJobs || []).length ? "" : c.assetId);
+  const views = c.viewJobs || [];
+  const identityOnly =
+    views.length === 1 &&
+    ["hero_identity", "front", "front_full"].includes(String(views[0].role || views[0].viewRole || ""));
+  const assetId =
+    c.sheetAssetId ||
+    (identityOnly ? views[0].assetId || c.assetId : views.length ? "" : c.assetId);
   return candidateStage(c) === "complete" && !!assetId;
 }
 
@@ -370,6 +382,65 @@ export function batchProgress(candidates: CharacterCandidate[]): {
   const done = doneViews + doneSheets;
   const percent = units > 0 ? Math.round((done / units) * 100) : 0;
   return { doneViews, totalViews, doneSheets, totalSheets, percent, activeGenerating };
+}
+
+/**
+ * Truthful coarse stage for the whole batch, derived from real backend state
+ * only. Used for the progress-bar label so a single-node generator (e.g.
+ * SenseNova, which has no per-view jobs) never shows a frozen "0 of 1 sheets
+ * complete" while the model is loading.
+ *
+ * Coarse stages: queued | loading_model | generating | composing | complete | failed
+ */
+export type BatchCoarseStage =
+  | "queued"
+  | "loading_model"
+  | "generating"
+  | "composing"
+  | "complete"
+  | "failed";
+
+export function batchCoarseStage(
+  candidates: CharacterCandidate[],
+  active: boolean,
+): BatchCoarseStage | null {
+  if (!candidates.length) return active ? "loading_model" : null;
+  const stages = candidates.map(candidateStage);
+  if (stages.includes("failed")) return "failed";
+  if (stages.every((s) => s === "complete")) return "complete";
+  if (stages.includes("assembling")) return "composing";
+  // Any candidate with a running view is genuinely generating.
+  const anyViewRunning = candidates.some((c) =>
+    (c.viewJobs || []).some((v) => normStatus(v.status) === "running"),
+  );
+  if (anyViewRunning) return "generating";
+  // Active with candidates but no views hydrated yet (single-node generators,
+  // or a 4-view batch still loading the model) → loading_model, NOT a fake 0%.
+  const anyHasViews = candidates.some((c) => (c.viewJobs || []).length > 0);
+  if (active && !anyHasViews) return "loading_model";
+  if (stages.includes("generating")) return "generating";
+  if (active) return "loading_model";
+  return "queued";
+}
+
+/** Creator-facing label for a coarse batch stage. */
+export function batchCoarseLabel(stage: BatchCoarseStage | null): string {
+  switch (stage) {
+    case "queued":
+      return "Queued…";
+    case "loading_model":
+      return "Loading model…";
+    case "generating":
+      return "Generating Character Reference Sheet…";
+    case "composing":
+      return "Composing Character Reference Sheet…";
+    case "complete":
+      return "Character Reference Sheet complete";
+    case "failed":
+      return "Generation failed";
+    default:
+      return "Preparing generation…";
+  }
 }
 
 export type {

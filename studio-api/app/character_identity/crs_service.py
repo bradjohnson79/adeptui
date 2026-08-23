@@ -22,14 +22,17 @@ from sqlalchemy.orm import Session
 from .crs_schema import (
     CRSStatus,
     CharacterCanon,
+    CharacterIdentityPacket,
     CharacterReferenceSummary,
     CharacterRenderDomain,
     ConfidenceMap,
+    DEFAULT_IDENTITY_INVARIANTS,
     FidelityReport,
     FidelityVerdict,
     GenerationConditioningPacket,
     IdentityLock,
     IdentityLocks,
+    FOUR_VIEW_REQUIRED_VIEWS,
     NegativeIdentityRule,
     ReferenceRole,
     VisualReference,
@@ -71,6 +74,11 @@ def persist_crs_in_session(
 ) -> dict[str, Any]:
     """Write persisted CRS JSON without committing (caller owns the transaction)."""
     existing = load_persisted_crs(db, profile.id)
+    if (
+        str(existing.get("approved_sheet_asset_id") or "") == str(asset_id)
+        and int(existing.get("crs_revision") or 0) > 0
+    ):
+        return existing
     revision = int(existing.get("crs_revision") or 0) + 1
     payload = {
         "schema_version": 1,
@@ -106,6 +114,46 @@ def persist_crs_in_session(
         )
     )
     return payload
+
+
+def merge_persisted_crs(
+    db: Session,
+    profile: CharacterProfileRow,
+    extra: dict[str, Any],
+) -> dict[str, Any]:
+    """Same crs_canon row — add revision/view fields without a second store."""
+    existing = load_persisted_crs(db, profile.id)
+    if not existing:
+        existing = {
+            "schema_version": 1,
+            "character_id": profile.id,
+            "name": profile.name,
+            "tag": f"@{profile.name}" if profile.name else "",
+        }
+    existing.update({key: value for key, value in extra.items() if value is not None})
+    for row in (
+        db.query(CharacterTraitRow)
+        .filter(
+            CharacterTraitRow.character_profile_id == profile.id,
+            CharacterTraitRow.key == CRS_CANON_TRAIT_KEY,
+        )
+        .all()
+    ):
+        db.delete(row)
+    db.add(
+        CharacterTraitRow(
+            id=str(uuid.uuid4()),
+            character_profile_id=profile.id,
+            character_version_id=profile.active_version_id,
+            category="crs",
+            key=CRS_CANON_TRAIT_KEY,
+            value=json.dumps(existing, ensure_ascii=False),
+            importance="canonical",
+            canonical=True,
+            provenance="PROPOSED_BY_CHARACTER_CREATOR",
+        )
+    )
+    return existing
 
 
 def get_crs_summary(
@@ -180,6 +228,74 @@ def get_crs_summary(
         has_approved_reference=has_approved,
         approved_reference_asset_id=approved_asset,
     )
+
+
+CHARACTER_JSON_VIEW_ROLES: tuple[tuple[str, str, str], ...] = (
+    ("front", "full_body_front", "Front"),
+    ("side", "full_body_side_left", "Side"),
+    ("back", "full_body_back", "Back"),
+    ("closeup", "closeup_front", "Head/Neck Close-Up"),
+)
+
+
+def get_character_json(
+    db: Session,
+    project_id: str,
+    character_id: str,
+) -> dict[str, Any] | None:
+    """Owner Character JSON: existing CRS / identity packet + approved sheet + panel roles.
+
+    Fills only from the owner profile and approved sheet. Does not invent traits.
+    """
+    profile = db.get(CharacterProfileRow, character_id)
+    if not profile or profile.project_id != project_id:
+        return None
+    persisted = load_persisted_crs(db, character_id)
+    summary = get_crs_summary(db, project_id, character_id)
+    canon = get_character_canon(db, project_id, character_id)
+    sheet_id = str(persisted.get("approved_sheet_asset_id") or "").strip() or (
+        summary.approved_reference_asset_id if summary else None
+    )
+    crop_by_role: dict[str, str] = {}
+    for row in (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
+        .all()
+    ):
+        role = str(row.reference_role or "").strip()
+        aid = str(row.asset_id or "").strip()
+        if role and aid and str(row.source_type or "") == "crs_derived_crop":
+            crop_by_role[role] = aid
+    views: dict[str, Any] = {}
+    for key, role, label in CHARACTER_JSON_VIEW_ROLES:
+        views[key] = {
+            "role": role,
+            "label": label,
+            "assetId": crop_by_role.get(role) or sheet_id,
+        }
+    packet = None
+    if sheet_id:
+        from .crs_schema import dump_identity_packet
+
+        identity = build_character_identity_packet(
+            db,
+            project_id,
+            character_id,
+            identity_authority_asset_id=str(sheet_id),
+            character_name=profile.name or "",
+        )
+        packet = dump_identity_packet(identity)
+    return {
+        "characterId": character_id,
+        "name": profile.name,
+        "tag": f"@{profile.name}" if profile.name else None,
+        "crsRevision": int(persisted.get("crs_revision") or 0),
+        "approvedSheetAssetId": sheet_id,
+        "views": views,
+        "canon": canon.model_dump() if canon else None,
+        "identityPacket": packet,
+        "summary": summary.model_dump() if summary else None,
+    }
 
 
 def get_character_canon(
@@ -284,6 +400,91 @@ def estimate_crs_revision(profile: CharacterProfileRow) -> int:
     return 0
 
 
+def build_character_identity_packet(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    include_details: bool = False,
+    identity_authority_asset_id: str | None = None,
+    character_name: str = "",
+) -> CharacterIdentityPacket:
+    """Compile a provider-neutral Character Identity Packet.
+
+    Called before any Qwen / Krea adapter. Does not mutate
+    identityAuthorityAssetId. CRS_GENERATION never carries ERS workflow keys.
+    """
+    summary = get_crs_summary(db, project_id, character_id)
+    profile_name = ""
+    try:
+        from .service import get_profile
+
+        profile = get_profile(db, project_id, character_id)
+        profile_name = str(getattr(profile, "name", "") or "")
+    except Exception:
+        profile = None
+
+    name = (character_name or "").strip() or (summary.name if summary else "") or profile_name
+    authority = (
+        str(identity_authority_asset_id or "").strip()
+        or (str(summary.approved_reference_asset_id or "").strip() if summary else "")
+    )
+
+    supporting: list[str] = []
+    detail_ref: str | None = None
+    try:
+        refs = (
+            db.query(CharacterReferenceAssetRow)
+            .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
+            .all()
+        )
+        approved = [r for r in refs if getattr(r, "approval_status", "") == "approved" or getattr(r, "canonical", False)]
+        candidates = approved if approved else list(refs)
+        detail_roles = {
+            "detail",
+            "hands_reference",
+            "feet_reference",
+            "skin_closeup",
+            "hair_front",
+            "hair_side",
+            "hair_back",
+            "accessory_reference",
+            "wardrobe_reference",
+        }
+        for ref in candidates:
+            aid = str(getattr(ref, "asset_id", "") or "").strip()
+            if not aid:
+                continue
+            role = str(getattr(ref, "reference_role", "") or "").strip()
+            if authority and aid == authority:
+                continue
+            if include_details and role in detail_roles and not detail_ref:
+                detail_ref = aid
+                continue
+            if aid not in supporting:
+                supporting.append(aid)
+    except Exception:
+        pass
+
+    detail_views: list[str] = []
+    if include_details:
+        detail_views = ["skin_closeup", "hair_front", "hair_side", "hair_back"]
+
+    return CharacterIdentityPacket(
+        task="CRS_GENERATION",
+        characterId=character_id,
+        characterName=name,
+        identityAuthorityAssetId=authority or None,
+        requiredViews=list(FOUR_VIEW_REQUIRED_VIEWS),
+        detailViews=detail_views,
+        invariants=list(DEFAULT_IDENTITY_INVARIANTS),
+        outputType="character_reference_sheet",
+        identityReference=authority or None,
+        supportingIdentityViews=supporting,
+        detailReference=detail_ref,
+    )
+
+
 def build_conditioning_packet(
     db: Session,
     project_id: str,
@@ -293,12 +494,27 @@ def build_conditioning_packet(
     generator: str = "",
     ers_id: str = "",
     aspect_ratio: str = "16:9",
-) -> GenerationConditioningPacket | None:
-    """Build a shared GenerationConditioningPacket from CRS.
-    
-    Combines CRS + approved references + identity locks + render domain
-    into a single packet consumable by any generator adapter.
+    task: str = "",
+    include_details: bool = False,
+    identity_authority_asset_id: str | None = None,
+    character_name: str = "",
+) -> CharacterIdentityPacket | GenerationConditioningPacket | None:
+    """Build a shared conditioning packet from CRS.
+
+    CRS_GENERATION returns the pre-provider Character Identity Packet
+    (no ERS / generator fields). Other tasks still return
+    GenerationConditioningPacket for generator adapters.
     """
+    if str(task or "").strip().upper() == "CRS_GENERATION":
+        return build_character_identity_packet(
+            db,
+            project_id,
+            character_id,
+            include_details=include_details,
+            identity_authority_asset_id=identity_authority_asset_id,
+            character_name=character_name,
+        )
+
     from datetime import datetime, timezone
     
     summary = get_crs_summary(db, project_id, character_id)

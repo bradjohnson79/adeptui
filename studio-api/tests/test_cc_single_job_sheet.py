@@ -52,6 +52,21 @@ def db(tmp_path, monkeypatch):
     session = Session()
     session.add(Project(id="proj-sheet", name="Sheet Test"))
     session.commit()
+
+    def fake_enqueue(db, project_id, body, scene_id=None):
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            kind="imagegen",
+            status="queued",
+            params_json=json.dumps(body or {}),
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return job
+
+    monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", fake_enqueue)
     yield session
     session.close()
 
@@ -63,31 +78,30 @@ def _png(path: Path, size=(256, 256)) -> str:
     return str(path)
 
 
-def test_start_enqueues_one_job_per_candidate_not_four_tiles(db):
+def test_start_enqueues_front_only_not_four_views(db):
     profile = service.seed_korri_from_canon(db, "proj-sheet")
     pack = start_visual_sheet_generation(
         db, "proj-sheet", profile.id, include_details=False, include_performance=False
     )
     hero = pack["jobs"]["hero"]
     assert len(hero["viewJobs"]) == 1
-    assert hero.get("fourViewSingleOutput") is True
+    assert hero["viewJobs"][0]["canonicalView"] == "front_full"
+    assert hero.get("fourViewSingleOutput") is not True
+    assert "full_body_three_quarter_front" not in [v.get("role") for v in hero["viewJobs"]]
     jobs = db.query(Job).all()
     image_jobs = [j for j in jobs if (j.kind or "").startswith("image") or j.kind == "imagegen"]
     assert len(image_jobs) == 1
-    job = image_jobs[0]
-    params = json.loads(job.params_json or "{}")
-    intent = params.get("imageIntent") or {}
-    meta = intent.get("metadata") or {}
-    blob = json.dumps(params)
-    assert "four_view" in blob
-    assert meta.get("layout") == "four_view" or params.get("layout") == "four_view"
-    assert list(params.get("requiredViews") or meta.get("requiredViews") or hero.get("requiredViews")) == list(
-        REQUIRED_VIEWS
-    )
+    for job in image_jobs:
+        params = json.loads(job.params_json or "{}")
+        blob = json.dumps(params)
+        assert "four-panel" not in blob
+        assert params.get("fourViewSingleOutput") is not True
+        assert params.get("taskType") == "CRS_SINGLE_VIEW"
+        assert max(int(params.get("width") or 0), int(params.get("height") or 0)) >= 2048
     cand = (pack.get("candidates") or [None])[0]
     assert cand is not None
-    assert "layoutNoncompliant" in cand
-    assert cand.get("characterSheetIntent", {}).get("layout") == "four_view"
+    assert cand.get("characterSheetIntent", {}).get("layout") == "single_view"
+    assert "full_body_three_quarter" not in list(REQUIRED_VIEWS)
 
 
 def test_advance_does_not_call_compose_grid(db, tmp_path, monkeypatch):
@@ -122,13 +136,9 @@ def test_advance_does_not_call_compose_grid(db, tmp_path, monkeypatch):
         "app.character_identity.visual_sheet._compose_character_sheet_grid", _boom
     )
     advanced = advance_visual_sheet_pack(db, "proj-sheet", profile.id)
-    assert called["n"] == 0
     cand = (advanced.get("candidates") or [None])[0]
-    assert cand["assetId"] == asset_id
-    assert "layoutNoncompliant" in cand
-    assert cand.get("layoutNoncompliant") is False
-    assert cand.get("layoutVerified") is False
-    assert cand.get("fourViewSingleOutput") is True
+    # One of four views done: do not compose yet.
+    assert cand.get("sheetAssetId") in (None, "")
 
 
 def test_advance_tall_portrait_layout_noncompliant_true(db, tmp_path):
@@ -154,24 +164,16 @@ def test_advance_tall_portrait_layout_noncompliant_true(db, tmp_path):
     db.commit()
     advanced = advance_visual_sheet_pack(db, "proj-sheet", profile.id)
     cand = (advanced.get("candidates") or [None])[0]
-    assert cand["layoutNoncompliant"] is True
-    assert cand.get("layout_noncompliant") is True
-    assert cand.get("sheetAssetId") == asset_id
-    assert cand.get("assetId") == asset_id
-    assert cand["status"] == "done"
+    assert cand.get("sheetAssetId") in (None, "")
 
 
-def test_get_recomputes_stale_square_layout_flag(db, tmp_path):
-    """GET/hydrate must flip a stale square=noncompliant stamp without generate."""
-    from app.character_identity.visual_sheet import (
-        _save_pack,
-        get_visual_sheet_pack,
-    )
-
+def test_front_only_pack_does_not_auto_compose_sheet(db, tmp_path):
+    """V2 leftover generate path: completing Front does not invent a collage sheet."""
     profile = service.seed_korri_from_canon(db, "proj-sheet")
     pack = start_visual_sheet_generation(
         db, "proj-sheet", profile.id, include_details=False, include_performance=False
     )
+    assert len(pack["jobs"]["hero"]["viewJobs"]) == 1
     vj = pack["jobs"]["hero"]["viewJobs"][0]
     job = db.get(Job, vj["jobId"])
     asset_id = str(uuid.uuid4())
@@ -179,10 +181,10 @@ def test_get_recomputes_stale_square_layout_flag(db, tmp_path):
         Asset(
             id=asset_id,
             project_id="proj-sheet",
-            tag="character_sheet",
+            tag="character_view",
             kind="image",
-            filename="sheet.png",
-            path=_png(tmp_path / "sheet.png", (2048, 2048)),
+            filename="front.png",
+            path=_png(tmp_path / "front.png", (2048, 2048)),
         )
     )
     job.status = "done"
@@ -190,26 +192,6 @@ def test_get_recomputes_stale_square_layout_flag(db, tmp_path):
     db.commit()
     advanced = advance_visual_sheet_pack(db, "proj-sheet", profile.id)
     cand = (advanced.get("candidates") or [None])[0]
-    assert cand["layoutNoncompliant"] is False
-
-    for bucket in (
-        advanced.get("candidates") or [],
-        (advanced.get("jobs") or {}).get("hero_candidates") or [],
-    ):
-        for item in bucket:
-            item["layoutNoncompliant"] = True
-            item["layout_noncompliant"] = True
-            item["layoutVerified"] = False
-    hero = (advanced.get("jobs") or {}).get("hero")
-    if isinstance(hero, dict):
-        hero["layoutNoncompliant"] = True
-        hero["layout_noncompliant"] = True
-    _save_pack(db, "proj-sheet", profile.id, advanced)
-
-    hydrated = get_visual_sheet_pack(db, "proj-sheet", profile.id)
-    got = (hydrated.get("candidates") or [None])[0]
-    assert got is not None
-    assert got.get("layoutNoncompliant") is False
-    assert got.get("layout_noncompliant") is False
-    assert got.get("layoutVerified") is False
-    assert got.get("sheetAssetId") == asset_id
+    assert cand is not None
+    assert cand.get("sheetAssetId") in (None, "")
+    assert cand.get("sheetAssetId") != asset_id

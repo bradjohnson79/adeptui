@@ -617,11 +617,16 @@ def approve_character_candidate(
     reference_role: str = "hero_identity",
     source_type: str = "generation",
     notes: str = "Approved casting candidate",
+    owner_confirmed: bool = False,
 ) -> dict[str, Any]:
     """Mark a generated candidate as the canonical approved Character Reference Sheet.
 
     One transaction: exact selected sheet → canonical hero → persist CRS revision →
     production-ready. Previous canon stays authoritative if commit fails.
+
+    Production Canon Approval Law: replacing persist CRS / approved canon requires
+    ownerConfirmed from the live Character Creator Approve control. This is not a
+    character-name special case.
     """
     profile = db.get(CharacterProfileRow, character_id)
     if not profile or profile.project_id != project_id:
@@ -630,6 +635,20 @@ def approve_character_candidate(
         raise _err("LOCKED_VERSION", "Cannot approve references for a locked profile.", 409)
     if reference_role not in ALL_REFERENCE_ROLES:
         raise _err("INVALID_REFERENCE_ROLE", f"Unknown reference role: {reference_role}")
+
+    from .crs_service import load_persisted_crs
+
+    persisted = load_persisted_crs(db, character_id)
+    has_persist_canon = bool(
+        persisted.get("approved_sheet_asset_id") or int(persisted.get("crs_revision") or 0)
+    )
+    if has_persist_canon and not owner_confirmed:
+        raise _err(
+            "PRODUCTION_CANON_PROTECTED",
+            "Approving or replacing this character's look requires the owner Approve button in Character Creator.",
+            403,
+        )
+
     _validate_project_image_asset(db, project_id, asset_id)
 
     generation_used = source_type not in ("upload", "library")
@@ -737,10 +756,57 @@ def _set_pack_hero_no_commit(
     pack = _load_pack_raw(db, character_id)
     if not pack:
         return
+    previous_hero = str(pack.get("approvedHeroIdentity") or "").strip()
     pack.setdefault("roleAssets", {})["hero_identity"] = asset_id
     pack["approvedHeroIdentity"] = asset_id
+    revision = None
     if crs_payload:
         pack["crsRevision"] = crs_payload.get("crs_revision")
+        revision = crs_payload.get("crs_revision")
+
+    def _stamp_approved(items: list) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            keys = {str(item.get("sheetAssetId") or ""), str(item.get("assetId") or "")}
+            if asset_id in keys:
+                item["status"] = "approved"
+                item["approvalStatus"] = "approved"
+                item["approved"] = True
+                if revision is not None:
+                    item["revision"] = revision
+
+    candidates = list(pack.get("candidates") or [])
+    previous = list(pack.get("previousCandidates") or [])
+    _stamp_approved(candidates)
+    _stamp_approved(previous)
+    if previous_hero and previous_hero != asset_id:
+        already = any(
+            isinstance(item, dict)
+            and previous_hero in {str(item.get("sheetAssetId") or ""), str(item.get("assetId") or "")}
+            for item in previous
+        )
+        if not already:
+            previous.append(
+                {
+                    "sheetAssetId": previous_hero,
+                    "assetId": previous_hero,
+                    "status": "approved",
+                    "approvalStatus": "approved",
+                    "approved": True,
+                    "revision": pack.get("crsRevision") if revision is None else max(int(revision or 1) - 1, 1),
+                }
+            )
+        for item in previous:
+            if not isinstance(item, dict):
+                continue
+            keys = {str(item.get("sheetAssetId") or ""), str(item.get("assetId") or "")}
+            if previous_hero in keys and not item.get("approved"):
+                item["status"] = "approved"
+                item["approvalStatus"] = "approved"
+                item["approved"] = True
+    pack["candidates"] = [c for c in candidates if not (isinstance(c, dict) and asset_id in {str(c.get("sheetAssetId") or ""), str(c.get("assetId") or "")})]
+    pack["previousCandidates"] = previous
     existing = (
         db.query(CharacterTraitRow)
         .filter(
@@ -868,6 +934,14 @@ def resolve_character_by_name(
             return r
         if r.slug and r.slug.lower() == lowered:
             return r
+
+    compact = re.sub(r"[^a-z0-9]", "", lowered)
+    if compact:
+        for r in rows:
+            if r.name and re.sub(r"[^a-z0-9]", "", r.name.lower()) == compact:
+                return r
+            if r.slug and re.sub(r"[^a-z0-9]", "", r.slug.lower()) == compact:
+                return r
 
     return None
 

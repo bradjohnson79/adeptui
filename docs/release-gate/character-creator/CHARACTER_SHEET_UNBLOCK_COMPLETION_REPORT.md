@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.**
+
 # Character Creator Generate Hard-Block Repair — Completion Report
 
 **Date:** 2026-08-14  

@@ -120,16 +120,10 @@ export function TimelineCharacterCreatorPanel({
             setMsg(null);
             setError(null);
             void api
-              .startCharacterVisualSheet(project.id, korri.id, {
-                includeDetails: false,
-                includePerformance: false,
-                candidateCount: 1,
-                taskType: "CRS_GENERATION",
-                layout: "four_view",
-              })
+              .generateCharacterViewV2(project.id, korri.id, "front")
               .then((r) => {
                 setMsg(
-                  `Visual sheet started · ${r.pack?.status || "GENERATING"}. Use Continue sheet here, or open Character Profile to finish and approve.`,
+                  `Front view started · ${String((r as { phase?: string }).phase || "FRONT_GENERATING")}. Open Character Creator to approve.`,
                 );
                 onChange();
               })

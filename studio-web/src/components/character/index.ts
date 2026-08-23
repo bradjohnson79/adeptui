@@ -9,7 +9,7 @@ export { CharacterReferenceControl } from "./CharacterReferenceControl";
 export { GeneratorSourceSelector } from "./GeneratorSourceSelector";
 export { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 export { CharacterSheetGenerator } from "./CharacterSheetGenerator";
-export { CharacterCandidateGrid } from "./CharacterCandidateGrid";
 export { GenerationProgressBar } from "./GenerationProgressBar";
 export { CharacterActions } from "./CharacterActions";
 export { CharacterCore } from "./CharacterCore";
+export { CharacterV2Studio } from "./CharacterV2Studio";

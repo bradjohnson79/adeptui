@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.**
+
 # Character Creator CRS Sheet Certification
 
 **Governing report for Character Creator CRS Sheet Closure (Law 30).**  

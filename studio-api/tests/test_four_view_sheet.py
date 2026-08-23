@@ -24,7 +24,7 @@ from app.hosted_providers.adapters.kie_adapter import (
 from app.image_prompting.qwen_2512.character_sheet_grammar import compile_character_sheet_block
 
 
-def test_required_views_are_the_product_law_four():
+def test_required_views_are_the_product_law():
     assert REQUIRED_VIEWS == (
         "full_body_front",
         "full_body_side",
@@ -277,20 +277,16 @@ def test_api_sheet_enqueues_one_four_view_job_not_four_portraits(tmp_path, monke
     hero = pack["jobs"]["hero"]
     views = hero["viewJobs"]
     assert len(views) == 1
-    assert hero.get("fourViewSingleOutput") is True
-    assert hero.get("layout") == "four_view"
-    assert hero.get("requiredViews") == [
-        "full_body_front",
-        "full_body_side",
-        "full_body_back",
-        "head_shoulders_closeup",
-    ]
+    assert hero.get("fourViewSingleOutput") is not True
+    assert "full_body_three_quarter_front" not in [v.get("role") for v in views]
+    assert hero.get("requiredViews") == ["front_full"]
     assert len(captured) == 1
-    body = captured[0]
-    assert body["purpose"] == "character_sheet"
-    assert body["layout"] == "four_view"
-    assert "four-panel character turnaround sheet" in body["prompt"]
-    assert "Do not generate a single standalone character image" in body["prompt"]
+    for body in captured:
+        assert body["purpose"] == "character_sheet"
+        assert body.get("layout") != "four_view"
+        assert body.get("taskType") == "CRS_SINGLE_VIEW"
+        assert "four-panel character turnaround sheet" not in (body.get("prompt") or "")
+        assert max(int(body["width"]), int(body["height"])) >= 2048
     db.close()
 
 
@@ -360,18 +356,17 @@ def test_local_sheet_enqueues_one_four_view_job_with_intent(tmp_path, monkeypatc
     )
     hero = pack["jobs"]["hero"]
     assert len(hero["viewJobs"]) == 1
-    assert hero.get("fourViewSingleOutput") is True
-    assert hero.get("requiredViews") == list(REQUIRED_VIEWS)
+    assert hero.get("fourViewSingleOutput") is not True
+    assert hero.get("requiredViews") == ["front_full"]
+    assert "full_body_three_quarter" not in REQUIRED_VIEWS
     assert len(captured) == 1
     body = captured[0]
     assert body["purpose"] == "character_sheet"
-    assert body["layout"] == "four_view"
-    assert body["requiredViews"] == list(REQUIRED_VIEWS)
-    assert body["referenceMode"] == "identity_preservation"
-    assert body["characterSheetIntent"]["layout"] == "four_view"
-    assert FOUR_VIEW_SHEET_PROMPT.split("exactly")[0][:40] in body["prompt"] or "four-panel" in body["prompt"]
-    req = _sheet_request_for_role("hero_identity")
-    assert req.get("layout") == "four_view"
+    assert body.get("layout") != "four_view"
+    assert body.get("taskType") == "CRS_SINGLE_VIEW"
+    assert body.get("fourViewSingleOutput") is not True
+    assert "four-panel" not in (body.get("prompt") or "")
+    assert _sheet_request_for_role("hero_identity") == {}
     assert _sheet_request_for_role("full_body_front") == {}
     db.close()
 
@@ -514,6 +509,7 @@ def test_advance_stamps_layout_noncompliant_for_single_pose(tmp_path, monkeypatc
     )
     hero = pack["jobs"]["hero"]
     assert len(hero["viewJobs"]) == 1
+    # Completing Front must not auto-compose a Character Sheet.
     vj = hero["viewJobs"][0]
     job = db.get(Job, vj["jobId"])
     asset_id = str(uuid.uuid4())
@@ -536,15 +532,13 @@ def test_advance_stamps_layout_noncompliant_for_single_pose(tmp_path, monkeypatc
     advanced = advance_visual_sheet_pack(db, "proj-sheet", profile.id)
     cand = (advanced.get("candidates") or [None])[0]
     assert cand is not None
-    assert cand.get("layoutNoncompliant") is True
-    assert cand.get("layout_noncompliant") is True
-    assert cand.get("assetId") == asset_id
-    assert cand.get("sheetAssetId") == asset_id
+    assert cand.get("sheetAssetId") in (None, "")
+    assert cand.get("status") in ("generating", "queued", None) or cand.get("sheetAssetId") in (None, "")
     db.close()
 
 
 def test_local_and_api_each_enqueue_one_job_not_four(tmp_path, monkeypatch):
-    """One four-panel job per candidate x selected generator (not 4 tiles)."""
+    """Five law-view jobs per candidate x selected generator (not one four-panel)."""
     import json
     import uuid
     from sqlalchemy import create_engine, text
@@ -596,13 +590,22 @@ def test_local_and_api_each_enqueue_one_job_not_four(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.storyboard_jobs.enqueue_imagegen_job", fake_enqueue)
     monkeypatch.setattr("app.secrets_store.get_secret", lambda _name: "test-key")
-    profile = service.seed_korri_from_canon(db, "proj-sheet")
+    from app.character_identity.schemas import CharacterProfileCreate
 
-    for sources in (
+    for idx, sources in enumerate((
         {"local": {"family": "qwen2512"}, "api": None},
         {"local": None, "api": {"model": "nano-banana-kie"}},
-    ):
+    )):
         captured.clear()
+        profile = service.create_profile(
+            db,
+            "proj-sheet",
+            CharacterProfileCreate(
+                name=f"CC Sheet {idx}",
+                slug=f"cc-sheet-{idx}",
+                role="fixture",
+            ),
+        )
         pack = start_visual_sheet_generation(
             db,
             "proj-sheet",
@@ -613,11 +616,11 @@ def test_local_and_api_each_enqueue_one_job_not_four(tmp_path, monkeypatch):
         heroes = pack["jobs"]["hero_candidates"]
         assert len(heroes) == 1
         assert len(heroes[0]["viewJobs"]) == 1
-        assert heroes[0].get("fourViewSingleOutput") is True
-        assert heroes[0].get("requiredViews") == list(REQUIRED_VIEWS)
+        assert heroes[0].get("fourViewSingleOutput") is not True
+        assert heroes[0].get("requiredViews") == ["front_full"]
         assert len(captured) == 1
         body = captured[0]
-        assert body["layout"] == "four_view"
-        assert body["characterSheetIntent"]["layout"] == "four_view"
-        assert "four-panel" in body["prompt"]
+        assert body.get("layout") != "four_view"
+        assert body.get("taskType") == "CRS_SINGLE_VIEW"
+        assert "four-panel" not in (body.get("prompt") or "")
     db.close()

@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.**
+
 # Character Creator CRS Sheet — Current State Audit
 
 ## Architecture Overview

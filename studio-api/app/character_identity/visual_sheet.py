@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from ..db import Asset, Job, Project
+from ..image_prompting.flux import compile_flux_crs_single_view
 from ..image_prompting.qwen_2512 import compile_character_image_prompt
 from . import service
 from .roles import REQUIRED_COVERAGE_ROLES
@@ -38,6 +40,29 @@ from .four_view_sheet import (
     public_job_error,
     strengthen_four_view_prompt,
 )
+from .character_sheet_compose import (
+    LAW_VIEW_DISPLAY_LABELS,
+    compose_labeled_character_sheet,
+)
+from .crs_law_view_gates import gate_candidate_law_views
+from .crs_view_generation import (
+    CRS_VIEW_DEFAULT_VIEW,
+    CRS_VIEW_GENERATION_TASK,
+    CRS_VIEW_ROLE,
+    extract_crs_view_requested_family,
+    is_crs_view_generation_task,
+    normalize_crs_view_type,
+    resolve_crs_view_generation_workflow,
+    valid_identity_reference_crop,
+)
+from .crs_schema import (
+    CharacterIdentityPacket,
+    FOUR_VIEW_REQUIRED_VIEWS,
+    LAW_REQUIRED_VIEWS,
+    dump_identity_packet,
+)
+from .crs_service import build_conditioning_packet
+from .crs_single_figure import required_views_are_default_four
 
 PACK_TRAIT_KEY = "visual_sheet_pack"
 
@@ -108,18 +133,32 @@ CLOSEUP_FRONT_NEGATIVE_RULES: list[str] = [
     "No hands dominating the frame",
     "No cropped skull",
     "Do not crop the hair silhouette",
-    "No character sheet",
-    "No collage",
-    "No grid",
-    "No multiple panels",
-    "No multiple views in one image",
+    "No extra figures",
+    "No split frames",
 ]
+
+# CRS law views: one figure, one camera. Tokens must appear in the compiled
+# prompt or negatives so Qwen cannot draw a multi-figure collage.
+LAW_VIEW_SINGLE_FIGURE_RULES: list[str] = [
+    "one person only",
+    "one figure",
+    "no other people",
+    "no grid",
+    "no collage",
+    "no turnaround sheet",
+    "no multiple poses in one image",
+]
+LAW_VIEW_SINGLE_FIGURE_DIRECTIVE = (
+    "one person only, one figure, no other people, no grid, no collage, "
+    "no turnaround sheet, no multiple poses in one image"
+)
 
 VIEW_ROLE_CANONICAL: dict[str, str] = {
     "hero_identity": "front_full",
+    "full_body_three_quarter_front": "three_quarter_full",
     "full_body_side_left": "side_full",
     "full_body_back": "back_full",
-    "closeup_front": "front_closeup",
+    "closeup_front": "face_closeup",
 }
 
 # Machine-readable composition intent persisted into prompt_metadata → creative_context
@@ -169,6 +208,15 @@ REFERENCE_FIDELITY_DENOISE = 0.68
 # candidate routing, in preference order. Each is used once before any reuse.
 NO_REFERENCE_TXT2IMG_FAMILIES = ("qwen2512", "zimage", "illustrious")
 
+# CRS AUTO (CRS_GENERATION / CRS_SINGLE_VIEW / law_views / crs_view).
+# CRS_VIEW_GENERATION is a separate explicit single-view task (not a five-view pack).
+# FLUX is the primary advertised canvas. Qwen is the only fallback.
+# Never silent-sub to zimage / illustrious / Krea. Never default qwen2512.ref.
+CRS_AUTO_PRIMARY_FAMILY = "flux"
+CRS_AUTO_FALLBACK_FAMILY = "qwen2512"
+CRS_AUTO_FLUX_TXT2IMG_KEY = "flux.txt2img"
+CRS_AUTO_FLUX_IMG2IMG_KEY = "flux.img2img"
+
 # Reference-capable Certified workflow for reference-locked candidates. This is
 # the only Certified workflow that consumes reference pixels today; until more
 # reference-capable workflows are Certified, all reference-locked candidates use
@@ -205,13 +253,17 @@ STAGE2_STYLE_ONLY_NEGATIVE = (
 # --- Phase 5 — Character Creator Simplification: composed 4-view sheet ---
 #
 # Each casting candidate produces ONE canonical composed Character Sheet asset.
-# The 4 required views (front full body, side full body, back full body, front
-# close-up) are generated per candidate, validated for identity consistency,
-# then composed into a 2x2 grid (PIL) and ingested as a single Library asset.
-# The 4 source view assets are retained as lineage; the creator-facing
-# candidate ``assetId`` is the composed sheet (Amendment 4 / Phase 5).
+# Default Generate: Front, Side, Back, Head/Neck Close-Up (no 3/4).
+# Isolated Advanced / legacy five-view law stays in FIVE_VIEW_LAW_ROLES.
 CANDIDATE_SHEET_VIEW_ROLES: tuple[str, ...] = (
     "hero_identity",
+    "full_body_side_left",
+    "full_body_back",
+    "closeup_front",
+)
+FIVE_VIEW_LAW_ROLES: tuple[str, ...] = (
+    "hero_identity",
+    "full_body_three_quarter_front",
     "full_body_side_left",
     "full_body_back",
     "closeup_front",
@@ -220,13 +272,24 @@ CANDIDATE_SHEET_VIEW_ROLES: tuple[str, ...] = (
 # View-only instructions appended to one shared Character Profile base prompt.
 # Identity facts stay unchanged between views.
 PROFILE_GUIDED_VIEW_INSTRUCTIONS: dict[str, str] = {
-    "hero_identity": "FRONT: front-facing, full-body neutral stance",
-    "full_body_side_left": "SIDE: strict side-profile, full-body neutral stance",
-    "full_body_back": "BACK: back-facing, full-body neutral stance",
+    "hero_identity": (
+        "FRONT: one camera only, this view only, front-facing, full-body neutral stance"
+    ),
+    "full_body_three_quarter_front": (
+        "THREE-QUARTER: one camera only, this view only, 3/4 view, full-body "
+        "neutral stance, camera about 45 degrees"
+    ),
+    "full_body_side_left": (
+        "SIDE: one camera only, this view only, strict side-profile, full-body "
+        "neutral stance"
+    ),
+    "full_body_back": (
+        "BACK: one camera only, this view only, back-facing, full-body neutral stance"
+    ),
     "closeup_front": (
-        "CLOSE-UP: one single front-facing head-and-shoulders identity portrait, "
-        "eye-level, full hair silhouette, ears readable, no hands, no fisheye, "
-        "not a character sheet, not a collage"
+        "CLOSE-UP: one camera only, this view only, one single front-facing "
+        "head-and-shoulders identity portrait, eye-level, full hair silhouette, "
+        "ears readable, no hands, no fisheye"
     ),
 }
 
@@ -237,6 +300,7 @@ CHARACTER_SHEET_GRID_COLS = 2
 CHARACTER_SHEET_GRID_ROWS = 2
 CHARACTER_SHEET_TILE_SIZE = 1280
 CRS_2K_COMPOSE = 2560
+CRS_VIEW_LONG_EDGE = 2048
 
 COMPOSITION_INTENT_CHARACTER_SHEET = "character_sheet_composed"
 
@@ -247,11 +311,40 @@ CONDITIONING_PROFILE_GUIDED = "PROFILE_GUIDED"
 CONDITIONING_REFERENCE_CONDITIONED = "REFERENCE_CONDITIONED"
 
 # Certified families that are text-only (cannot consume reference pixels).
-# Illustrious stays PROFILE_GUIDED. Qwen Image 2512 uses qwen2512.ref when a
-# Character Reference is attached (REFERENCE_CONDITIONED) — never silent T2I.
+# Illustrious stays PROFILE_GUIDED. Qwen Image 2512 Character Sheets are also
+# PROFILE_GUIDED (qwen2512.txt2img). qwen2512.ref is ERS I2I (environment-ref)
+# and must never consume a Character Sheet / CRS reference as identity pixels.
 TEXT_ONLY_FAMILIES: frozenset[str] = frozenset({"illustrious"})
 QWEN_FAMILIES: frozenset[str] = frozenset({"qwen2512", "qwen", "qwen-image-2512", "qwen_image_2512"})
+QWEN_EDIT_2509_FAMILY = "qwen_edit_2509"
+QWEN_EDIT_2509_WORKFLOW_KEY = "qwen_edit_2509.edit"
+QWEN_EDIT_2509_CRS_KEY = "qwen_edit_2509.crs_single_view"
 QWEN_REF_WORKFLOW_KEY = "qwen2512.ref"
+QWEN_EDIT_2509_NOT_READY = (
+    "Qwen Image Edit 2509 is installed but could not start. "
+    "Choose another generator or retry after runtime repair."
+)
+QWEN_EDIT_2509_NEEDS_CROP = (
+    "Qwen Image Edit 2509 needs a single-character identity image. "
+    "A full Character Reference Sheet cannot be used as the edit canvas."
+)
+_HONORED_CRS_LOCAL_FAMILIES: dict[str, str] = {
+    "qwen2512": "qwen2512",
+    "qwen": "qwen2512",
+    "flux": "flux",
+    "qwen_edit_2509": QWEN_EDIT_2509_FAMILY,
+    "qwen-edit-2509": QWEN_EDIT_2509_FAMILY,
+    "qwen-image-edit-2509": QWEN_EDIT_2509_FAMILY,
+    "qwen_image_edit_2509": QWEN_EDIT_2509_FAMILY,
+    "krea2": "krea2",
+    "krea": "krea2",
+    "illustrious": "illustrious",
+    "sensenova": "sensenova",
+    "sensenova_u15": "sensenova",
+    "sensenova-u15": "sensenova",
+    "sensenova-u15-local": "sensenova",
+    "sensenova_u1": "sensenova",
+}
 
 # Local Krea 2 inference target. RAW is reachable only via an explicit raw id.
 KREA_LOCAL_TXT2IMG_KEY = "krea2.turbo_txt2img"
@@ -276,6 +369,11 @@ def crs_2k_pixels() -> tuple[int, int]:
 
 def crs_2k_tile_size() -> int:
     return CHARACTER_SHEET_TILE_SIZE
+
+
+def crs_2k_view_pixels() -> tuple[int, int]:
+    """Per-view CRS pixels. Long edge is native 2K (>=2048), never a 1024 tile."""
+    return CRS_VIEW_LONG_EDGE, CRS_VIEW_LONG_EDGE
 
 
 def _qwen_ref_workflow_ready() -> bool:
@@ -331,6 +429,8 @@ def _resolve_style_profile(visual_style: str | None) -> dict[str, Any]:
 
 ROLE_TO_SHEET_VIEW = {
     "full_body_front": "front",
+    "full_body_three_quarter_front": "three_quarter",
+    "full_body_three_quarter": "three_quarter",
     "full_body_side_left": "side_left",
     "full_body_back": "back",
     "closeup_front": "front_closeup",
@@ -352,15 +452,6 @@ GATE_ROLE_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     "performance": ("expression_sheet", "pose_sheet"),
 }
-
-KORRI_LOCK = (
-    "LOCKED IDENTITY: Korri, 18, Human/Sun Sprite Elf Hybrid, black twin ponytails, purple eyes, "
-    "pale skin, pointed Sun Sprite Elf ears, wooden earrings, circuit/light tattoos, "
-    "handmade black cloth wardrobe, petite slim athletic ~5'1\". "
-    "FORBIDDEN: blonde hair, aqua/blue eyes, metallic futuristic wardrobe, Anadriya face, "
-    "missing pointed ears, missing circuit markings."
-)
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -389,15 +480,12 @@ def _compiler_payload(profile: dict[str, Any]) -> dict[str, Any]:
 
 
 def _sheet_request_for_role(role: str) -> dict[str, Any]:
-    """Enable compiler character-sheet mode for the single four-panel job.
-
-    Coverage/detail single-view jobs use non-sheet roles and still get {}.
-    The Character Sheet candidate job (hero_identity / four_view_sheet) asks
-    the model for Front, Side, Back, and Close-Up in ONE output.
-    """
-    if role in {"hero_identity", "four_view_sheet", "character_sheet"}:
-        return dict(FOUR_VIEW_SHEET_REQUEST)
+    """CRS law views are one camera each. Do not request a four-panel sheet."""
     return {}
+
+
+def _is_flux_family(family: str | None) -> bool:
+    return str(family or "").strip().lower() in {"flux", "flux-schnell", "flux-dev", "flux-kontext"}
 
 
 def _compile_visual_prompt(
@@ -411,6 +499,7 @@ def _compile_visual_prompt(
     style_profile: dict[str, Any] | None = None,
     reference_locked: bool = False,
     sheet_request: dict[str, Any] | None = None,
+    model_family: str | None = None,
 ) -> Any:
     v_instruction = PROFILE_GUIDED_VIEW_INSTRUCTIONS.get(role, "")
     goal = prompt_goal.strip()
@@ -418,6 +507,18 @@ def _compile_visual_prompt(
     four_view = bool(sheet_request and sheet_request.get("layout") == "four_view")
     if v_instruction and not four_view:
         goal = f"{goal}. {v_instruction}"
+        if LAW_VIEW_SINGLE_FIGURE_DIRECTIVE not in goal:
+            goal = f"{goal}. {LAW_VIEW_SINGLE_FIGURE_DIRECTIVE}"
+    if _is_flux_family(model_family) and not four_view:
+        return compile_flux_crs_single_view(
+            _compiler_payload(profile),
+            prompt_goal=goal,
+            view_instruction=v_instruction,
+            extra_negative_constraints=extra_negative_constraints or [],
+            full_body=role != "closeup_front",
+            role=role,
+            view=VIEW_ROLE_CANONICAL.get(role, ""),
+        )
     return compile_character_image_prompt(
         _compiler_payload(profile),
         prompt_goal=goal,
@@ -471,12 +572,18 @@ def _iter_reference_candidate_ids(references: list[dict[str, Any]]) -> list[str]
     return ordered
 
 
-def _asset_image_readable(db: Session, project_id: str, asset_id: str) -> bool:
+def _asset_image_path(db: Session, project_id: str, asset_id: str) -> str | None:
     asset = db.get(Asset, asset_id)
     if not asset or asset.project_id != project_id or str(asset.kind or "") != "image":
-        return False
+        return None
     path = Path(str(asset.path or ""))
-    return path.is_file()
+    if not path.is_file():
+        return None
+    return str(path)
+
+
+def _asset_image_readable(db: Session, project_id: str, asset_id: str) -> bool:
+    return _asset_image_path(db, project_id, asset_id) is not None
 
 
 def _resolve_reference_asset_id(references: list[dict[str, Any]]) -> str | None:
@@ -499,6 +606,61 @@ def _resolve_readable_reference_asset_id(
     return None
 
 
+_SHEET_LAYOUTS = frozenset({"law_views", "four_view", "character_sheet", "collage", "contact_sheet"})
+_SHEET_REF_ROLES = frozenset({"character_sheet", "hero_identity", "hero_portrait", "composed_sheet"})
+
+
+def _resolve_isolated_identity_crop(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    references: list[dict[str, Any]],
+    *,
+    extract_from_sheet: bool,
+) -> str | None:
+    """Return a proven one-figure crop id. Never a composed CRS sheet."""
+    def _readable(aid: str) -> bool:
+        return _asset_image_readable(db, project_id, aid)
+
+    def _image_path(aid: str) -> str | None:
+        return _asset_image_path(db, project_id, aid)
+
+    crop = valid_identity_reference_crop(
+        references, readable=_readable, image_path=_image_path
+    )
+    if crop:
+        return crop
+    if not extract_from_sheet:
+        return None
+    sheet_id = ""
+    for item in references or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("reference_role") or item.get("referenceRole") or item.get("role") or "").strip().lower()
+        layout = str(item.get("layout") or "").strip().lower()
+        aid = str(item.get("asset_id") or item.get("assetId") or "").strip()
+        if not aid or not _readable(aid):
+            continue
+        if layout in _SHEET_LAYOUTS or role in _SHEET_REF_ROLES:
+            sheet_id = aid
+            break
+    if not sheet_id:
+        return None
+    try:
+        from .crs_identity_views import persist_derived_identity_views
+
+        persist_derived_identity_views(
+            db, project_id, character_id, sheet_asset_id=sheet_id
+        )
+    except Exception:
+        logger.exception("CRS identity crop extract failed for sheet %s", sheet_id)
+        return None
+    refreshed = service.list_references(db, project_id, character_id)
+    return valid_identity_reference_crop(
+        refreshed, readable=_readable, image_path=_image_path
+    )
+
+
 def _candidate_seed(character_id: str, index: int) -> int:
     """Deterministic-but-distinct seed per candidate for diversity within a model."""
     import hashlib
@@ -516,6 +678,36 @@ def _candidate_family_executable(family: str) -> bool:
         return bool(wf and wf.status == "Certified")
     except Exception:
         return False
+
+
+def _crs_workflow_certified(workflow_key: str) -> bool:
+    """True when the exact Certified workflow is advertised. No invented keys."""
+    key = (workflow_key or "").strip()
+    if not key:
+        return False
+    try:
+        from ..image_runtime.certified_registry import get_workflow
+
+        wf = get_workflow(key)
+        return bool(wf and wf.status == "Certified")
+    except Exception:
+        return False
+
+
+def _resolve_crs_auto_family(*, has_identity_crop: bool = False) -> str:
+    """AUTO chooser for CRS law-view singles.
+
+    Prefer FLUX when flux.txt2img is Certified, or flux.img2img when a real
+    identity crop is attached. Else Qwen. Never Krea, never a random Certified
+    family, never qwen2512.ref as the default canvas.
+    """
+    if has_identity_crop and _crs_workflow_certified(CRS_AUTO_FLUX_IMG2IMG_KEY):
+        return CRS_AUTO_PRIMARY_FAMILY
+    if _crs_workflow_certified(CRS_AUTO_FLUX_TXT2IMG_KEY) or _candidate_family_executable(
+        CRS_AUTO_PRIMARY_FAMILY
+    ):
+        return CRS_AUTO_PRIMARY_FAMILY
+    return CRS_AUTO_FALLBACK_FAMILY
 
 
 def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
@@ -550,24 +742,27 @@ def _no_reference_families_for_style(visual_style: str | None) -> list[str]:
 def _family_supports_references(family: str) -> bool:
     """True when the family has a Certified workflow that can consume reference pixels.
 
-    Qwen Image 2512 registry family is ``qwen-image-2512``; Character routing uses
-    ``qwen2512``. Look up ``qwen2512.ref`` by key so CRS can be Reference Conditioned.
-    Illustrious stays text-only.
+    qwen2512.ref is ERS I2I (environment-ref), not a Character Sheet consumer.
+    Qwen CRS stays PROFILE_GUIDED. Illustrious stays text-only.
     """
     fam = (family or "").strip().lower()
-    if fam in TEXT_ONLY_FAMILIES:
+    if fam in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
+        return True
+    if fam in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
+        return True
+    if fam in TEXT_ONLY_FAMILIES or _is_qwen_family(fam):
         return False
-    if _is_qwen_family(fam):
-        return _qwen_ref_workflow_ready()
     try:
         from ..image_runtime.certified_registry import list_workflows
 
         families = [fam]
-        if _is_qwen_family(fam):
-            families = list(QWEN_FAMILIES)
         for key in families:
             for wf in list_workflows(model_family=key):
                 if wf.status != "Certified":
+                    continue
+                wf_key = str(getattr(wf, "workflow_key", "") or "")
+                variant = str(getattr(wf, "model_variant", "") or "").strip().lower()
+                if wf_key in {QWEN_REF_WORKFLOW_KEY, "sensenova.ers"} or variant == "environment-ref":
                     continue
                 if bool((wf.capabilities or {}).get("supportsReferences", False)):
                     return True
@@ -622,10 +817,15 @@ def _canonical_view_role(role: str) -> str:
 
 def _negative_rules_for_view(role: str, explicit: list[str] | None) -> list[str]:
     if explicit is not None:
-        return list(explicit)
-    if role == "closeup_front":
-        return list(CLOSEUP_FRONT_NEGATIVE_RULES)
-    return list(FULL_BODY_CASTING_NEGATIVE_RULES)
+        rules = list(explicit)
+    elif role == "closeup_front":
+        rules = list(CLOSEUP_FRONT_NEGATIVE_RULES)
+    else:
+        rules = list(FULL_BODY_CASTING_NEGATIVE_RULES)
+    for rule in LAW_VIEW_SINGLE_FIGURE_RULES:
+        if rule not in rules:
+            rules.append(rule)
+    return rules
 
 
 def _clamp_batch_count(value: Any) -> int:
@@ -648,8 +848,12 @@ def _parse_local_source_entries(local: Any) -> tuple[bool, list[dict[str, Any]]]
         for item in local:
             if not isinstance(item, dict):
                 continue
-            family = _normalize_local_family(str(item.get("family") or item.get("selected") or ""))
-            raw_family = str(item.get("family") or item.get("selected") or "").strip().lower()
+            family = _normalize_local_family(
+                str(item.get("family") or item.get("selected") or item.get("model") or "")
+            )
+            raw_family = str(
+                item.get("family") or item.get("selected") or item.get("model") or ""
+            ).strip().lower()
             if raw_family in {"", "auto"}:
                 family = "auto"
             entries.append(
@@ -661,7 +865,9 @@ def _parse_local_source_entries(local: Any) -> tuple[bool, list[dict[str, Any]]]
             )
         return True, entries
     if isinstance(local, dict):
-        family = _normalize_local_family(str(local.get("family") or local.get("selected") or ""))
+        family = _normalize_local_family(
+            str(local.get("family") or local.get("selected") or local.get("model") or "")
+        )
         return True, [
             {
                 "family": family or "auto",
@@ -716,8 +922,33 @@ def _is_gpt_image_2_model(value: str) -> bool:
     return "gpt-image-2" in blob or "gpt_image_2" in blob
 
 
+def _normalized_crs_local_family(family: str) -> str | None:
+    return _HONORED_CRS_LOCAL_FAMILIES.get((family or "").strip().lower())
+
+
+def _is_qwen_edit_2509_family(family: str) -> bool:
+    return _normalized_crs_local_family(family) == QWEN_EDIT_2509_FAMILY
+
+
+def _is_sensenova_family(family: str) -> bool:
+    return _normalized_crs_local_family(family) == "sensenova"
+
+
+def _chosen_crs_local_family(generator_sources: dict[str, Any] | None) -> str:
+    for entry in (generator_sources or {}).get("local") or []:
+        if isinstance(entry, dict) and entry.get("enabled"):
+            return _normalized_crs_local_family(str(entry.get("family") or entry.get("model") or "")) or ""
+    return ""
+
+
 def _coerce_single_crs_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
-    """Character Creator produces one CRS: Qwen default or explicit GPT Image 2."""
+    """One CRS slot. AUTO chooses among available CRS providers; not a Qwen-only type.
+
+    Explicit GPT Image 2 is honored. Explicit Character Creator local families
+    (qwen_edit_2509, qwen2512, flux, krea2, illustrious) are kept. Omitted /
+    auto / unknown families stay family=auto so enqueue can select FLUX when
+    advertised, else Qwen. AUTO is a chooser, not a Qwen-only type.
+    """
     parsed = _parse_generator_sources(generator_sources)
     for entry in parsed.get("api_entries") or []:
         if not entry.get("enabled"):
@@ -737,11 +968,53 @@ def _coerce_single_crs_sources(generator_sources: dict[str, Any] | None) -> dict
                 ],
                 "stage2Enabled": False,
             }
+    family = "auto"
+    for entry in parsed.get("local_entries") or []:
+        if not entry.get("enabled"):
+            continue
+        fam = str(entry.get("family") or entry.get("model") or "").strip().lower()
+        honored = _normalized_crs_local_family(fam)
+        family = honored or "auto"
+        break
     return {
-        "local": [{"family": "qwen2512", "enabled": True, "batchCount": 1}],
+        "local": [{"family": family, "enabled": True, "batchCount": 1}],
         "api": None,
         "stage2Enabled": False,
     }
+
+
+def resolve_character_creator_generator_sources(
+    *,
+    args: dict[str, Any] | None = None,
+    pack: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Character Creator generator plan: explicit args, else saved prefs, else AUTO."""
+    raw = None
+    if isinstance(args, dict):
+        raw = args.get("generatorSources") or args.get("generator")
+    if isinstance(raw, str) and "gpt-image-2" in raw.lower():
+        return _coerce_single_crs_sources(
+            {
+                "local": None,
+                "api": [
+                    {
+                        "model": "gpt-image-2-kie",
+                        "providerId": "kie",
+                        "modelId": "gpt-image-2",
+                        "enabled": True,
+                        "batchCount": 1,
+                    }
+                ],
+            }
+        )
+    if isinstance(raw, dict):
+        return _coerce_single_crs_sources(raw)
+    prefs = None
+    if isinstance(pack, dict):
+        prefs = pack.get("generatorPreferences") or pack.get("generatorSources")
+    if isinstance(prefs, dict):
+        return _coerce_single_crs_sources(prefs)
+    return _coerce_single_crs_sources(None)
 
 
 def _parse_generator_sources(generator_sources: dict[str, Any] | None) -> dict[str, Any]:
@@ -933,6 +1206,10 @@ def _normalize_local_family(family: str) -> str:
 def _txt2img_workflow_key(family: str, hosted_model_id: str | None = None) -> str:
     fam = (family or "").strip().lower()
     mid = (hosted_model_id or "").lower()
+    if fam in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
+        return QWEN_EDIT_2509_WORKFLOW_KEY
+    if fam in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
+        return "sensenova.crs"
     if fam == "krea2" or "krea" in mid:
         if "raw" in mid:
             return "krea2.raw_txt2img"
@@ -962,11 +1239,13 @@ def _krea_model_display(model_id: str) -> str:
 # Keep these short; never show a raw family id (illustrious, qwen2512).
 _PROVENANCE_FAMILY_NAMES: dict[str, str] = {
     "illustrious": "Illustrious XL",
+    "qwen_edit_2509": "Qwen Image Edit 2509",
     "qwen2512": "Qwen Image 2512",
     "qwen": "Qwen Image 2512",
     "zimage": "Z-Image Turbo",
     "flux": "FLUX.1 Kontext",
     "krea2": "Local Krea 2",
+    "sensenova": "SenseNova U1.5",
 }
 
 
@@ -1026,7 +1305,12 @@ def _reference_workflow_key(family: str) -> str | None:
     if not family:
         return None
     if _is_qwen_family(family):
-        return QWEN_REF_WORKFLOW_KEY if _qwen_ref_workflow_ready() else None
+        # Never steal ERS I2I (qwen2512.ref / environment-ref) for a CRS.
+        return None
+    if family in {QWEN_EDIT_2509_FAMILY, "qwen-edit-2509", "qwen-image-edit-2509"}:
+        return QWEN_EDIT_2509_CRS_KEY
+    if family in {"sensenova", "sensenova_u15", "sensenova-u15", "sensenova-u15-local"}:
+        return "sensenova.crs"
     if family == REFERENCE_LOCKED_FAMILY:
         return REFERENCE_LOCKED_WORKFLOW_KEY
     try:
@@ -1035,9 +1319,13 @@ def _reference_workflow_key(family: str) -> str | None:
         for key in (f"{family}.ref_edit", f"{family}.edit", f"{family}.img2img", f"{family}.ref"):
             wf = get_workflow(key)
             if wf and wf.status == "Certified" and bool((wf.capabilities or {}).get("supportsReferences")):
+                if key == QWEN_REF_WORKFLOW_KEY:
+                    continue
                 return key
         for wf in list_workflows(model_family=family):
             if wf.status != "Certified":
+                continue
+            if str(wf.workflow_key or "") == QWEN_REF_WORKFLOW_KEY:
                 continue
             if bool((wf.capabilities or {}).get("supportsReferences")):
                 return wf.workflow_key
@@ -1056,18 +1344,30 @@ def _build_stage1_route(
 ) -> dict[str, Any]:
     """Build one candidate Stage 1 route. Selected family is authoritative."""
     fam = (family or "").strip().lower()
-    supports_ref = bool(fam and _family_supports_references(fam))
-    ref_key = _reference_workflow_key(fam) if supports_ref else None
-    selected = selected_source or hosted_model_id or family
-    if reference_asset_id and _is_qwen_family(fam) and provider_kind != "api":
-        if not (supports_ref and ref_key):
-            raise ValueError(
-                "Qwen Image 2512 reference-conditioned generation is not ready on this runtime. "
-                "Choose another eligible generator — Adept will not switch automatically."
-            )
+    if _is_sensenova_family(fam):
+        selected = selected_source or hosted_model_id or family
         return {
-            "modelFamilyPreference": "qwen2512" if _is_qwen_family(fam) else family,
-            "workflowKey": QWEN_REF_WORKFLOW_KEY,
+            "modelFamilyPreference": "sensenova",
+            "workflowKey": "sensenova.crs",
+            "referenceAssetId": reference_asset_id,
+            "referenceLocked": bool(reference_asset_id),
+            "referenceFidelityMode": REFERENCE_FIDELITY_MODE_FULL if reference_asset_id else None,
+            "source_asset_id": reference_asset_id,
+            "denoise": None,
+            "conditioningMode": (
+                CONDITIONING_REFERENCE_CONDITIONED if reference_asset_id else CONDITIONING_PROFILE_GUIDED
+            ),
+            "providerKind": provider_kind,
+            "hostedModelId": hosted_model_id,
+            "selectedSource": selected,
+        }
+    if _is_qwen_edit_2509_family(fam):
+        if not reference_asset_id:
+            raise ValueError(QWEN_EDIT_2509_NEEDS_CROP)
+        selected = selected_source or hosted_model_id or family
+        return {
+            "modelFamilyPreference": QWEN_EDIT_2509_FAMILY,
+            "workflowKey": QWEN_EDIT_2509_CRS_KEY,
             "referenceAssetId": reference_asset_id,
             "referenceLocked": True,
             "referenceFidelityMode": REFERENCE_FIDELITY_MODE_FULL,
@@ -1078,6 +1378,15 @@ def _build_stage1_route(
             "hostedModelId": hosted_model_id,
             "selectedSource": selected,
         }
+    supports_ref = bool(fam and _family_supports_references(fam))
+    ref_key = _reference_workflow_key(fam) if supports_ref else None
+    selected = selected_source or hosted_model_id or family
+    if reference_asset_id and supports_ref and ref_key and provider_kind != "api":
+        if ref_key == QWEN_REF_WORKFLOW_KEY:
+            # Fail-close the illegal ERS I2I route. Fall through to
+            # qwen2512.txt2img PROFILE_GUIDED (honest: refs are not pixels).
+            supports_ref = False
+            ref_key = None
     if reference_asset_id and supports_ref and ref_key and provider_kind != "api":
         return {
             "modelFamilyPreference": family,
@@ -1124,9 +1433,8 @@ def _legacy_slots(
         if parsed["chosen_local"]:
             local_families = [parsed["chosen_local"]]
         else:
-            local_families = list(_no_reference_families_for_style(visual_style))
-            if not local_families:
-                local_families = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
+            # CRS AUTO: FLUX primary, Qwen fallback. Not a style-mix of random families.
+            local_families = [_resolve_crs_auto_family()]
 
     api_model = parsed["chosen_api"] if parsed["api_enabled"] else ""
     api_family = _hosted_family_for_model(api_model) if api_model else ""
@@ -1234,11 +1542,9 @@ def _expand_list_slots(
                     )
         elif auto:
             n = _clamp_batch_count(auto[0].get("batchCount") or 1)
-            mix = list(_no_reference_families_for_style(visual_style))
-            if not mix:
-                mix = [f for f in NO_REFERENCE_TXT2IMG_FAMILIES]
+            mix = [_resolve_crs_auto_family()]
             for i in range(n):
-                fam = mix[i % len(mix)] if mix else "zimage"
+                fam = mix[i % len(mix)]
                 slots.append(
                     {
                         "providerKind": "local",
@@ -1293,8 +1599,13 @@ def _build_candidate_routing_plan(
     * Unchecked sources create zero jobs (master and per-row).
     * List-shaped generatorSources expand enabled batchCounts; Auto Select is
       ignored when any explicit local family is enabled.
+    * AUTO CRS law views resolve FLUX (txt2img, or img2img with a real identity
+      crop) when that workflow is Certified; otherwise Qwen. Never Krea, never
+      a silent random-family substitute, never qwen2512.ref as the canvas.
     * Reference + reference-capable family → REFERENCE_CONDITIONED (pixels).
-    * Reference + Qwen Image 2512 → qwen2512.ref (no silent T2I).
+    * Reference + Qwen Image 2512 → PROFILE_GUIDED qwen2512.txt2img (honest:
+      attached picture is not consumed as pixels). Never qwen2512.ref (ERS I2I)
+      and never a silent zimage.ref_edit substitute.
     * Reference + txt2img-only (Illustrious) → PROFILE_GUIDED (no pixels).
     """
     parsed = _parse_generator_sources(generator_sources)
@@ -1336,6 +1647,11 @@ def _build_candidate_routing_plan(
 
     plan: list[dict[str, Any]] = []
     for slot in slots:
+        if slot.get("autoSelect") and str(slot.get("providerKind") or "") == "local":
+            fam = _resolve_crs_auto_family(has_identity_crop=bool(reference_asset_id))
+            slot["family"] = fam
+            slot["selectedSource"] = fam
+            slot["modelId"] = fam
         stage1 = _build_stage1_route(
             family=str(slot["family"] or ""),
             reference_asset_id=reference_asset_id,
@@ -1451,23 +1767,45 @@ def _low_reference_fidelity(*, reference_locked: bool, lineage: dict[str, Any]) 
 # --- Phase 5: composed 4-view Character Sheet helpers ---
 
 
-def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | None]]:
-    """The 4 required views per casting candidate, in 2x2 grid order.
+def _candidate_view_specs(
+    required_views: list[str] | None = None,
+) -> list[tuple[str, str, dict[str, Any], list[str] | None]]:
+    """Default Generate views: front, side, back, head/neck close-up.
 
-    Order is row-major: front, side, back, front-close-up. The front view
-    reuses the full-body casting composition (Amendment 2) so the canonical
-    "full body casting" / "no close-up" framing is preserved on the primary
-    tile; the remaining views use production turnaround/close-up compositions
-    drawn from the coverage pack so all 4 tiles share identity-safe framing.
+    When ``required_views`` is supplied (Character Identity Packet), those
+    views drive order and membership. Accepts internal roles or canonical
+    names (front_full, side_full, ...). Isolated 5-view law still maps if
+    three_quarter_full is explicitly requested.
     """
     coverage = {role: (goal, comp) for role, goal, comp in _coverage_role_specs()}
     side = coverage["full_body_side_left"]
     back = coverage["full_body_back"]
-    return [
+    three_quarter = {
+        "shot_type": "single-camera three-quarter reference",
+        "framing": "full body",
+        "camera_angle": "eye level",
+        "orientation": "three-quarter front view",
+        "environment": "plain gray background",
+        "lighting": "soft studio light",
+        "pose": "standing in a neutral three-quarter pose",
+        "focus": "face, wardrobe silhouette, and body proportions",
+        "full_body": True,
+    }
+    specs = [
         (
             "hero_identity",
-            "a cinematic full-body character casting reference",
-            dict(FULL_BODY_CASTING_COMPOSITION),
+            "a cinematic full-body front reference",
+            {
+                **dict(FULL_BODY_CASTING_COMPOSITION),
+                "camera_angle": "eye level, front-facing",
+                "orientation": "front view",
+            },
+            list(FULL_BODY_CASTING_NEGATIVE_RULES),
+        ),
+        (
+            "full_body_three_quarter_front",
+            "a production full-body three-quarter reference",
+            three_quarter,
             list(FULL_BODY_CASTING_NEGATIVE_RULES),
         ),
         ("full_body_side_left", side[0], dict(side[1]), None),
@@ -1479,6 +1817,22 @@ def _candidate_view_specs() -> list[tuple[str, str, dict[str, Any], list[str] | 
             list(CLOSEUP_FRONT_NEGATIVE_RULES),
         ),
     ]
+    default_four = [item for item in specs if item[0] in CANDIDATE_SHEET_VIEW_ROLES]
+    if not required_views:
+        return default_four
+    by_role = {item[0]: item for item in specs}
+    by_role["full_body_front"] = by_role["hero_identity"]
+    by_canonical = {VIEW_ROLE_CANONICAL.get(item[0], item[0]): item for item in specs}
+    by_canonical["full_body_front"] = by_role["hero_identity"]
+    ordered: list[tuple[str, str, dict[str, Any], list[str] | None]] = []
+    seen: set[str] = set()
+    for view in required_views:
+        key = str(view or "").strip()
+        item = by_role.get(key) or by_canonical.get(key)
+        if item and item[0] not in seen:
+            seen.add(item[0])
+            ordered.append(item)
+    return ordered or default_four
 
 
 def _validate_candidate_view_consistency(view_entries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1540,26 +1894,67 @@ def _validate_candidate_view_consistency(view_entries: list[dict[str, Any]]) -> 
     return {"ok": not reasons, "reasons": reasons, "assetIds": asset_ids}
 
 
-def _compose_character_sheet_grid(
-    view_paths: list[str], out_path: str
-) -> str:
-    """Compose 4 view images into a 2x2 Character Sheet grid (PIL).
+def _sheet_profile_with_wardrobe(db: Session, profile: dict[str, Any] | None) -> dict[str, Any]:
+    """Attach active wardrobe fields so Adept panels can draw them."""
+    blob = dict(profile or {})
+    if blob.get("wardrobe") or blob.get("active_wardrobe"):
+        return blob
+    wid = blob.get("active_wardrobe_id")
+    if not wid:
+        return blob
+    from .models import CharacterWardrobeRow
 
-    Each tile is fitted with a non-distorting contain policy (preserve aspect,
-    never stretch), then centered on a square canvas. Portrait framing must
-    already be correct on the generated close-up; assembly does not stretch
-    it to fill the tile.
+    row = db.get(CharacterWardrobeRow, str(wid))
+    if row:
+        blob["wardrobe"] = {
+            "name": row.name or "",
+            "description": row.description or "",
+            "materials": row.materials or "",
+            "colors": row.colors or "",
+            "footwear": getattr(row, "footwear", "") or "",
+            "accessories": getattr(row, "accessories", "") or "",
+        }
+    return blob
+
+
+def _compose_character_sheet_grid(
+    view_paths: list[str],
+    out_path: str,
+    *,
+    profile: dict[str, Any] | None = None,
+    labels: list[str] | None = None,
+    roles: list[str] | None = None,
+    layout_out: dict[str, Any] | None = None,
+) -> str:
+    """Compose view images into a Character Sheet (PIL).
+
+    Four views stay an unlabeled 2x2 (variant / legacy). Five law views are
+    an Adept-drawn 3x2 production document: view labels, header, and
+    notes/wardrobe/specs panels. Tiles use a non-distorting contain policy.
     """
+    n = len(view_paths)
+    four = CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS
+    if n == 5:
+        result = compose_labeled_character_sheet(
+            view_paths,
+            out_path,
+            profile=profile,
+            labels=labels or list(LAW_VIEW_DISPLAY_LABELS),
+            roles=roles,
+        )
+        if layout_out is not None:
+            layout_out.clear()
+            layout_out.update(result)
+        return str(result["path"])
+    if n != four:
+        raise ValueError(
+            f"character sheet grid requires {four} or 5 view images, got {n}"
+        )
     from PIL import Image, ImageOps
 
-    if len(view_paths) != CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS:
-        raise ValueError(
-            f"character sheet grid requires "
-            f"{CHARACTER_SHEET_GRID_COLS * CHARACTER_SHEET_GRID_ROWS} view images, "
-            f"got {len(view_paths)}"
-        )
+    cols, rows = CHARACTER_SHEET_GRID_COLS, CHARACTER_SHEET_GRID_ROWS
     tile = CHARACTER_SHEET_TILE_SIZE
-    grid = Image.new("RGB", (tile * CHARACTER_SHEET_GRID_COLS, tile * CHARACTER_SHEET_GRID_ROWS), (24, 24, 24))
+    grid = Image.new("RGB", (tile * cols, tile * rows), (24, 24, 24))
     for idx, src in enumerate(view_paths):
         im = Image.open(src).convert("RGB")
         contained = ImageOps.contain(im, (tile, tile), method=getattr(Image, "Resampling", Image).LANCZOS)
@@ -1567,8 +1962,8 @@ def _compose_character_sheet_grid(
         x = (tile - contained.width) // 2
         y = (tile - contained.height) // 2
         canvas.paste(contained, (x, y))
-        col = idx % CHARACTER_SHEET_GRID_COLS
-        row = idx // CHARACTER_SHEET_GRID_COLS
+        col = idx % cols
+        row = idx // cols
         grid.paste(canvas, (col * tile, row * tile))
     out = str(out_path)
     grid.save(out, format="PNG")
@@ -1596,6 +1991,7 @@ def _ingest_composed_sheet_asset(
     source_asset_ids: list[str],
     lineage: dict[str, Any],
     stage1_source_asset_ids: list[str] | None = None,
+    layout: dict[str, Any] | None = None,
 ) -> Asset:
     """Register the composed Character Sheet as a Library asset.
 
@@ -1606,6 +2002,13 @@ def _ingest_composed_sheet_asset(
     """
     import os
 
+    grid = {
+        "cols": CHARACTER_SHEET_GRID_COLS,
+        "rows": CHARACTER_SHEET_GRID_ROWS,
+        "tileSize": CHARACTER_SHEET_TILE_SIZE,
+    }
+    if layout and isinstance(layout.get("grid"), dict):
+        grid = dict(layout["grid"])
     meta = {
         "objective": "character_sheet_composed",
         "characterId": character_id,
@@ -1613,14 +2016,30 @@ def _ingest_composed_sheet_asset(
         "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
         "sourceAssetIds": list(source_asset_ids),
         "stage1SourceAssetIds": list(stage1_source_asset_ids or []),
-        "grid": {
-            "cols": CHARACTER_SHEET_GRID_COLS,
-            "rows": CHARACTER_SHEET_GRID_ROWS,
-            "tileSize": CHARACTER_SHEET_TILE_SIZE,
-        },
+        "grid": grid,
         "lineage": lineage,
         "createdAt": _now(),
+        "composer": (layout or {}).get("composer") or "adept",
     }
+    if layout:
+        meta["layout"] = layout.get("layout") or "law_views_labeled"
+        meta["labels"] = list(layout.get("labels") or [])
+        meta["drawnStrings"] = list(layout.get("drawnStrings") or [])
+        meta["header"] = layout.get("header") or {}
+        meta["panels"] = [
+            {
+                "id": panel.get("id"),
+                "title": panel.get("title"),
+                "text": panel.get("text") or "",
+                "bbox": panel.get("bbox"),
+            }
+            for panel in (layout.get("panels") or [])
+        ]
+        meta["viewCells"] = layout.get("views") or []
+        if layout.get("width"):
+            meta["width"] = layout.get("width")
+        if layout.get("height"):
+            meta["height"] = layout.get("height")
     asset = Asset(
         id=str(uuid.uuid4()),
         project_id=project_id,
@@ -1761,6 +2180,13 @@ def heal_pack_references(db: Session, project_id: str, character_id: str) -> int
     role_assets = pack.get("roleAssets") if isinstance(pack.get("roleAssets"), dict) else {}
     if not role_assets:
         return 0
+    approved_hero = ""
+    try:
+        approved_hero = str(service.resolve_approved_reference(db, character_id, "hero_identity") or "").strip()
+    except Exception:
+        approved_hero = ""
+    pack_approved = str(pack.get("approvedHeroIdentity") or pack.get("approved_hero_identity") or "").strip()
+    persist_hero = {aid for aid in (approved_hero, pack_approved) if aid}
     existing_rows = (
         db.query(CharacterReferenceAssetRow)
         .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
@@ -1770,6 +2196,9 @@ def heal_pack_references(db: Session, project_id: str, character_id: str) -> int
     attached = 0
     for role, aid in role_assets.items():
         if not role or not aid:
+            continue
+        # Draft pack hero is not canon. Approve is the only persist / reference writer.
+        if str(role) == "hero_identity" and str(aid) not in persist_hero:
             continue
         if (str(role), str(aid)) in before:
             continue
@@ -1825,9 +2254,14 @@ def _hydrate_candidate_layout(db: Session, item: dict[str, Any]) -> bool:
     """Recompute layout flags from image dimensions + four_view intent."""
     if not isinstance(item, dict):
         return False
+    views = item.get("viewJobs") if isinstance(item.get("viewJobs"), list) else []
+    sheet_id = item.get("sheetAssetId")
+    # Per-camera tiles are not the sheet. Do not assess a front tile as a 4-view.
+    if views and not sheet_id:
+        return False
     before = item.get("layoutNoncompliant")
     path = None
-    aid = item.get("sheetAssetId") or item.get("assetId")
+    aid = sheet_id or (None if views else item.get("assetId"))
     if aid:
         asset = db.get(Asset, str(aid))
         if asset and getattr(asset, "path", None):
@@ -1835,8 +2269,20 @@ def _hydrate_candidate_layout(db: Session, item: dict[str, Any]) -> bool:
     blob = item.get("layoutAssessment") or item.get("characterSheetLayout") or {}
     w = blob.get("width") if isinstance(blob, dict) else None
     h = blob.get("height") if isinstance(blob, dict) else None
-    if path or (w and h):
-        assessment = assess_four_view_layout(path, width=w, height=h)
+    existing = blob if isinstance(blob, dict) else {}
+    composed = bool(existing.get("composed")) or (
+        str(item.get("layout") or "").strip().lower() in {"four_view", "four_panel_2x2"}
+        and bool(sheet_id)
+        and len(views) == 4
+        and item.get("fourViewSingleOutput") is False
+    )
+    view_count = existing.get("viewCount")
+    if composed:
+        view_count = 4
+    if path or (w and h) or composed:
+        assessment = assess_four_view_layout(
+            path, width=w, height=h, view_count=view_count, composed=composed
+        )
         apply_layout_assessment_to_candidate(item, assessment)
     else:
         flag = candidate_layout_noncompliant(item)
@@ -1871,6 +2317,334 @@ def hydrate_visual_sheet_layout(db: Session, pack: dict[str, Any]) -> bool:
     return changed
 
 
+
+_JOB_TERMINAL = frozenset({"done", "failed", "cancelled", "error"})
+_JOB_COMPLETED = frozenset({"done"})
+_JOB_FAILED = frozenset({"failed", "error"})
+_JOB_CANCELLED = frozenset({"cancelled"})
+
+
+def _iter_pack_job_ids(pack: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for item in list(pack.get("candidates") or []):
+        if not isinstance(item, dict):
+            continue
+        for raw in [item.get("jobId") or item.get("job_id"), *[
+            view.get("jobId") or view.get("job_id")
+            for view in item.get("viewJobs") or []
+            if isinstance(view, dict)
+        ]]:
+            jid = str(raw or "").strip()
+            if jid and jid not in seen:
+                seen.add(jid)
+                ids.append(jid)
+    return ids
+
+
+def _pack_has_live_generation(db: Session, project_id: str, pack: dict[str, Any]) -> bool:
+    if str(pack.get("status") or "").upper() not in {"GENERATING", "QUEUED", "RUNNING"}:
+        return False
+    for jid in _iter_pack_job_ids(pack):
+        job = db.get(Job, jid)
+        if not job or str(job.project_id) != project_id:
+            continue
+        if str(job.status or "").lower() in {"queued", "running", "pending", "starting"}:
+            return True
+    return False
+
+
+def _cancel_replaced_draft_jobs(db: Session, project_id: str, prev_pack: dict[str, Any]) -> list[str]:
+    """Stop in-flight draft tiles when Generate replaces the active draft."""
+    cancelled: list[str] = []
+    for item in list(prev_pack.get("candidates") or []):
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "").strip().lower()
+        approval = str(item.get("approvalStatus") or item.get("approval_status") or "").strip().lower()
+        if status == "approved" or approval == "approved" or item.get("approved") is True:
+            continue
+        job_ids = {str(item.get("jobId") or item.get("job_id") or "").strip()} - {""}
+        for view in item.get("viewJobs") or []:
+            if not isinstance(view, dict):
+                continue
+            jid = str(view.get("jobId") or view.get("job_id") or "").strip()
+            if jid:
+                job_ids.add(jid)
+        for jid in job_ids:
+            job = db.get(Job, jid)
+            if not job or str(job.project_id) != project_id:
+                continue
+            if str(job.status or "").lower() in _JOB_TERMINAL | {"rejected"}:
+                continue
+            job.status = "cancelled"
+            job.message = f"{job.message or ''} REPLACED_BY_REGENERATE".strip()
+            cancelled.append(jid)
+            try:
+                from ..queue_worker import job_queue, schedule_comfy_interrupt_if_owner
+
+                job_queue.cancel(jid)
+                # cancel() only sets a cooperative flag a blocked native call
+                # (SenseNova loader) never checks. Also POST /interrupt to Comfy
+                # when this job owns the active prompt so the in-flight prompt
+                # actually stops instead of running until host-RAM OOM.
+                schedule_comfy_interrupt_if_owner(jid)
+            except Exception:
+                logger.exception("Could not signal queue cancel for replaced draft job %s", jid)
+    return cancelled
+_PACK_OWNER_STATES = frozenset({
+    "READY_FOR_OWNER",
+    "OWNER_APPROVED",
+    "OWNER_APPROVED_WITH_PENDING",
+})
+_PACK_RECOMPUTE_STATES = frozenset({"GENERATING", "queued", "running", "QUEUED", "RUNNING"})
+
+
+def _iter_pack_job_entries(node: Any, *, _seen: set[int] | None = None) -> list[dict[str, Any]]:
+    """Collect mutable pack dicts that carry a child jobId / stage2JobId."""
+    if _seen is None:
+        _seen = set()
+    found: list[dict[str, Any]] = []
+    if isinstance(node, dict):
+        ident = id(node)
+        if ident in _seen:
+            return found
+        _seen.add(ident)
+        if node.get("jobId") or node.get("stage2JobId"):
+            found.append(node)
+        for value in node.values():
+            found.extend(_iter_pack_job_entries(value, _seen=_seen))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_iter_pack_job_entries(item, _seen=_seen))
+    return found
+
+
+def _collect_pack_job_ids(pack: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for entry in _iter_pack_job_entries(pack):
+        for key in ("jobId", "stage2JobId"):
+            jid = str(entry.get(key) or "").strip()
+            if jid and jid not in seen:
+                seen.add(jid)
+                ids.append(jid)
+    return ids
+
+
+def _optional_phase_job_ids(pack: dict[str, Any]) -> set[str]:
+    """Coverage / details / performance job ids. Optional leftover after Adept compose."""
+    jobs = pack.get("jobs") if isinstance(pack.get("jobs"), dict) else {}
+    ids: set[str] = set()
+    for phase in ("coverage", "details", "performance"):
+        items = jobs.get(phase)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            jid = str(item.get("jobId") or "").strip()
+            if jid:
+                ids.add(jid)
+    return ids
+
+
+def _iter_crs_candidate_entries(pack: dict[str, Any]) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    jobs = pack.get("jobs") if isinstance(pack.get("jobs"), dict) else {}
+    if isinstance(jobs.get("hero_candidates"), list):
+        items.extend(c for c in jobs["hero_candidates"] if isinstance(c, dict))
+    if isinstance(jobs.get("hero"), dict):
+        items.append(jobs["hero"])
+    if isinstance(pack.get("candidates"), list):
+        items.extend(c for c in pack["candidates"] if isinstance(c, dict))
+    return items
+
+
+def _labeled_adept_compose_done(
+    pack: dict[str, Any] | None = None,
+    *,
+    candidate_entries: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True after 5-view CRS_GENERATION labeled Adept compose (not four-panel)."""
+    seen: set[int] = set()
+    for item in list(candidate_entries or []) + (
+        _iter_crs_candidate_entries(pack) if isinstance(pack, dict) else []
+    ):
+        ident = id(item)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        sheet = str(item.get("sheetAssetId") or "").strip()
+        views = item.get("viewJobs")
+        if not sheet or not isinstance(views, list) or len(views) < 2:
+            continue
+        if item.get("fourViewSingleOutput") is True:
+            continue
+        return True
+    return False
+
+
+def _want_optional_sheet_phases(pack: dict[str, Any]) -> bool:
+    return bool(pack.get("includeDetails")) or bool(pack.get("includePerformance"))
+
+
+def _skip_optional_sheet_enqueue(pack: dict[str, Any]) -> bool:
+    """CRS_GENERATION with both optional flags off must never plan extras.
+
+    Not gated on compose. Approved leftover hero_identity must not unlock
+    coverage / details / performance / turnaround_facial enqueue.
+    """
+    return not _want_optional_sheet_phases(pack)
+
+
+def recompute_visual_sheet_pack_from_jobs(db: Session, pack: dict[str, Any]) -> bool:
+    """Recompute pack child + parent status from Job rows.
+
+    Jobs table is the canonical lifecycle; the pack JSON is a projection.
+    Mirrors execution ``recompute_progress``:
+    - all done → COMPLETED
+    - any failed/error, rest terminal → FAILED
+    - any cancelled, rest done/cancelled → CANCELLED
+    - any running/queued → GENERATING
+    Does not enqueue, attach Library assets, or rewrite approved identity / CRS.
+    Returns True if the pack dict changed.
+    """
+    if not isinstance(pack, dict):
+        return False
+    job_ids = _collect_pack_job_ids(pack)
+    if not job_ids:
+        return False
+
+    job_status: dict[str, str] = {}
+    missing = False
+    for jid in job_ids:
+        job = db.get(Job, jid)
+        if job is None:
+            missing = True
+            continue
+        job_status[jid] = str(job.status or "")
+
+    changed = False
+    for entry in _iter_pack_job_entries(pack):
+        jid = str(entry.get("jobId") or "").strip()
+        if jid in job_status and entry.get("status") != job_status[jid]:
+            entry["status"] = job_status[jid]
+            changed = True
+        stage2 = str(entry.get("stage2JobId") or "").strip()
+        if stage2 in job_status and entry.get("stage2Status") != job_status[stage2]:
+            entry["stage2Status"] = job_status[stage2]
+            changed = True
+
+    if missing or len(job_status) != len(job_ids):
+        return changed
+
+    current = str(pack.get("status") or "")
+    if current in _PACK_OWNER_STATES or current not in _PACK_RECOMPUTE_STATES:
+        return changed
+
+    statuses = list(job_status.values())
+    optional_ids = _optional_phase_job_ids(pack)
+    required_statuses = [
+        job_status[jid] for jid in job_ids if jid not in optional_ids and jid in job_status
+    ]
+    # Leftover coverage must not flip the parent to CANCELLED while law views
+    # are still running or already done. Required view/hero jobs decide parent.
+    leftover_optional = bool(optional_ids) and (
+        _skip_optional_sheet_enqueue(pack) or _labeled_adept_compose_done(pack)
+    )
+    if leftover_optional and required_statuses:
+        statuses_for_parent = required_statuses
+    else:
+        statuses_for_parent = statuses
+
+    if all(s in _JOB_COMPLETED for s in statuses_for_parent):
+        new_status = "COMPLETED"
+    elif any(s in _JOB_FAILED for s in statuses_for_parent) and all(
+        s in _JOB_TERMINAL for s in statuses_for_parent
+    ):
+        new_status = "FAILED"
+    elif any(s in _JOB_CANCELLED for s in statuses_for_parent) and all(
+        s in (_JOB_COMPLETED | _JOB_CANCELLED) for s in statuses_for_parent
+    ):
+        new_status = "CANCELLED"
+    elif any(s in {"running", "queued"} for s in statuses_for_parent):
+        new_status = "GENERATING"
+    else:
+        return changed
+
+    if pack.get("status") != new_status:
+        pack["status"] = new_status
+        changed = True
+    return changed
+
+
+def cancel_visual_sheet_optional_phase_jobs(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    job_ids: list[str] | set[str],
+) -> dict[str, Any]:
+    """Cancel leftover coverage/details/performance ids only.
+
+    Isolates cancel to those extra job ids. Does not mark law-view / hero jobs
+    cancelled and does not interrupt Comfy. Pack parent is recomputed from
+    required jobs so a finished candidate stays complete.
+    """
+    pack = get_visual_sheet_pack(db, project_id, character_id)
+    optional = _optional_phase_job_ids(pack)
+    requested = {str(jid).strip() for jid in job_ids if str(jid).strip()}
+    isolated = sorted(jid for jid in requested if jid in optional)
+    skipped = sorted(requested - set(isolated))
+    for jid in isolated:
+        job = db.get(Job, jid)
+        if not job:
+            continue
+        if str(job.status or "") in _JOB_TERMINAL:
+            continue
+        job.status = "cancelled"
+        if hasattr(job, "stage"):
+            job.stage = "cancelled"
+        job.message = "Cancelled leftover optional coverage (law views untouched)"
+    if isolated:
+        db.commit()
+    pack = get_visual_sheet_pack(db, project_id, character_id)
+    return {
+        "cancelledJobIds": isolated,
+        "skippedJobIds": skipped,
+        "pack": pack,
+    }
+
+
+def reconcile_generating_visual_sheet_packs(db: Session) -> int:
+    """Startup hydrate: persist terminal pack status when all child jobs are terminal.
+
+    Same class as execution ``reconcile_non_terminal_packs``. No sweeper daemon.
+    Does not invent Library assets or treat pack crsRevision as approved CRS.
+    """
+    from .models import CharacterProfileRow, CharacterTraitRow
+
+    rows = (
+        db.query(CharacterTraitRow)
+        .filter(CharacterTraitRow.key == PACK_TRAIT_KEY)
+        .all()
+    )
+    healed = 0
+    for row in rows:
+        pack = _loads(row.value, {})
+        if not isinstance(pack, dict):
+            continue
+        if str(pack.get("status") or "") not in _PACK_RECOMPUTE_STATES:
+            continue
+        profile = db.get(CharacterProfileRow, row.character_profile_id)
+        if not profile:
+            continue
+        if recompute_visual_sheet_pack_from_jobs(db, pack):
+            _save_pack(db, profile.project_id, profile.id, pack)
+            healed += 1
+    return healed
+
+
 def get_visual_sheet_pack(db: Session, project_id: str, character_id: str) -> dict[str, Any]:
     service.get_profile(db, project_id, character_id)
     data = _load_pack_raw(db, character_id)
@@ -1881,9 +2655,238 @@ def get_visual_sheet_pack(db: Session, project_id: str, character_id: str) -> di
         data = _load_pack_raw(db, character_id) or data
         data["referencesHealed"] = healed
     data["characterId"] = character_id
+    changed = recompute_visual_sheet_pack_from_jobs(db, data)
     if hydrate_visual_sheet_layout(db, data):
+        changed = True
+    if changed:
         _save_pack(db, project_id, character_id, data)
     return data
+
+
+
+def _enqueue_sensenova_crs_job(
+    db: Session,
+    project_id: str,
+    *,
+    character_id: str,
+    profile: dict[str, Any],
+    stage1_route: dict[str, Any],
+    seed: int,
+    char_slug: str,
+    candidate_index: int,
+    candidate_count: int,
+    route: dict[str, Any],
+    identity_packet: CharacterIdentityPacket | None = None,
+    has_character_reference: bool = False,
+) -> list[dict[str, Any]]:
+    """Enqueue one native SenseNova production CRS. Never four Flux/Qwen tiles."""
+    from ..image_prompting.sensenova import compile_sensenova_crs_prompt
+
+    packet_dump = dump_identity_packet(identity_packet) if identity_packet is not None else None
+    compiled = compile_sensenova_crs_prompt(
+        name=str(profile.get("name") or "Character"),
+        description=str(profile.get("description") or ""),
+        visual_description=str(profile.get("visual_description") or profile.get("appearance") or ""),
+        traits=profile.get("traits") if isinstance(profile.get("traits"), dict) else {},
+        has_character_reference=has_character_reference,
+        extra=str(profile.get("notes") or ""),
+    )
+    tag = f"{char_slug}_sensenova_crs" + (
+        f"_c{candidate_index + 1}" if candidate_count > 1 else ""
+    )
+    vjob = _enqueue_txt2img(
+        db,
+        project_id,
+        character_id=character_id,
+        prompt=compiled["prompt"],
+        negative_prompt=compiled["negative"],
+        tag=tag,
+        role="hero_identity",
+        model_family_preference="sensenova",
+        source_asset_id=stage1_route.get("source_asset_id"),
+        seed=seed,
+        force_workflow_key="sensenova.crs",
+        provider_kind="local",
+        sheet_layout="native_production_crs",
+        prompt_metadata={
+            "promptFamily": "sensenova_crs",
+            "promptModel": "sensenova",
+            "sheetMode": True,
+            "candidateIndex": candidate_index,
+            "candidateCount": candidate_count,
+            "viewIndex": 0,
+            "viewRole": "native_production_crs",
+            "batchIndex": int(route.get("batchIndex") or (candidate_index + 1)),
+            "batchOf": int(route.get("batchOf") or candidate_count),
+            "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
+            "workflowKey": "sensenova.crs",
+            "modelFamily": "sensenova",
+            "referenceLocked": bool(stage1_route.get("referenceLocked")),
+            "referenceAssetId": stage1_route.get("referenceAssetId"),
+            "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
+            "conditioningMode": stage1_route.get("conditioningMode"),
+            "providerKind": "local",
+            "autoSelect": bool(route.get("autoSelect")),
+            "seed": seed,
+            "stage": 1,
+            "taskType": "CRS_NATIVE_SHEET",
+            "fourViewSingleOutput": True,
+            "layout": "native_production_crs",
+            "identityPacket": packet_dump,
+        },
+    )
+    return [
+        {
+            "jobId": vjob.id,
+            "role": "hero_identity",
+            "viewRole": "native_production_crs",
+            "canonicalView": "native_production_crs",
+            "viewIndex": 0,
+            "status": vjob.status,
+            "assetId": None,
+            "seed": seed,
+            "modelFamily": "sensenova",
+            "workflowKey": "sensenova.crs",
+            "referenceLocked": bool(stage1_route.get("referenceLocked")),
+            "error": public_job_error(vjob.message)
+            if vjob.status in ("failed", "error")
+            else None,
+            "stage2Enabled": False,
+            "stage2Route": None,
+            "stage2JobId": None,
+            "stage2AssetId": None,
+            "stage2Status": None,
+            "fourViewSingleOutput": True,
+            "layout": "native_production_crs",
+        }
+    ]
+
+
+def _enqueue_law_view_jobs(
+    db: Session,
+    project_id: str,
+    *,
+    character_id: str,
+    profile: dict[str, Any],
+    references: list[dict[str, Any]],
+    style_profile: dict[str, Any] | None,
+    stage1_route: dict[str, Any],
+    seed: int,
+    char_slug: str,
+    candidate_index: int,
+    candidate_count: int,
+    route: dict[str, Any],
+    identity_packet: CharacterIdentityPacket | None = None,
+) -> list[dict[str, Any]]:
+    """Enqueue one camera per required view. Never one four-panel job.
+
+    Default packet is Front / Side / Back / Head-Neck Close-Up.
+    Views come from the Character Identity Packet when provided.
+    """
+    view_jobs: list[dict[str, Any]] = []
+    provider_kind = str(stage1_route.get("providerKind") or "local")
+    packet_views = list(identity_packet.requiredViews) if identity_packet is not None else None
+    packet_dump = dump_identity_packet(identity_packet) if identity_packet is not None else None
+    four_view_pack_tile = required_views_are_default_four(packet_views or FOUR_VIEW_REQUIRED_VIEWS)
+    for vidx, (vrole, vgoal, vcomp, vneg) in enumerate(_candidate_view_specs(packet_views)):
+        composition = {"candidate_index": candidate_index, **dict(vcomp or {})}
+        vprompt = _compile_visual_prompt(
+            profile,
+            prompt_goal=vgoal,
+            composition=composition,
+            references=references,
+            role=vrole,
+            extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
+            style_profile=style_profile,
+            reference_locked=bool(stage1_route.get("referenceLocked")),
+            sheet_request={},
+            model_family=str(stage1_route.get("modelFamilyPreference") or ""),
+        )
+        vtag = f"{char_slug}_{vrole}" + (
+            f"_c{candidate_index + 1}" if candidate_count > 1 else ""
+        )
+        vjob = _enqueue_txt2img(
+            db,
+            project_id,
+            character_id=character_id,
+            prompt=vprompt.prompt,
+            negative_prompt=vprompt.negative_prompt,
+            tag=vtag,
+            role=vrole,
+            model_family_preference=stage1_route["modelFamilyPreference"],
+            source_asset_id=stage1_route.get("source_asset_id"),
+            denoise=stage1_route.get("denoise"),
+            seed=seed,
+            force_workflow_key=(
+                None if provider_kind == "api" else stage1_route.get("workflowKey")
+            ),
+            provider_kind=provider_kind,
+            hosted_model_id=stage1_route.get("hostedModelId"),
+            sheet_layout="crs_view",
+            prompt_metadata={
+                "promptFamily": vprompt.prompt_family,
+                "promptModel": vprompt.model_key,
+                "promptValidationOk": vprompt.validation.get("ok"),
+                "sheetMode": False,
+                "candidateIndex": candidate_index,
+                "candidateCount": candidate_count,
+                "viewIndex": vidx,
+                "viewRole": vrole,
+                "canonicalView": VIEW_ROLE_CANONICAL.get(vrole) or vrole,
+                "batchIndex": int(route.get("batchIndex") or (candidate_index + 1)),
+                "batchOf": int(route.get("batchOf") or candidate_count),
+                "compositionIntent": (
+                    COMPOSITION_INTENT_CHARACTER_SHEET
+                    if vrole != "hero_identity"
+                    else COMPOSITION_INTENT_FULL_BODY_CASTING
+                ),
+                "fullBody": vrole != "closeup_front",
+                "workflowKey": stage1_route["workflowKey"],
+                "modelFamily": stage1_route["modelFamilyPreference"],
+                "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                "referenceAssetId": stage1_route.get("referenceAssetId"),
+                "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
+                "conditioningMode": stage1_route.get("conditioningMode"),
+                "providerKind": provider_kind,
+                "autoSelect": bool(route.get("autoSelect")),
+                "seed": seed,
+                "stage": 1,
+                "taskType": "CRS_SINGLE_VIEW",
+                "fourViewSingleOutput": False,
+                "fourViewPackTile": four_view_pack_tile,
+                "requiredViews": list(packet_views or FOUR_VIEW_REQUIRED_VIEWS),
+                "referenceMode": "identity_preservation",
+                "identityPacket": packet_dump,
+            },
+        )
+        view_jobs.append(
+            {
+                "jobId": vjob.id,
+                "role": vrole,
+                "viewRole": vrole,
+                "canonicalView": VIEW_ROLE_CANONICAL.get(vrole) or vrole,
+                "viewIndex": vidx,
+                "status": vjob.status,
+                "assetId": None,
+                "seed": seed,
+                "modelFamily": stage1_route["modelFamilyPreference"],
+                "workflowKey": stage1_route["workflowKey"],
+                "referenceLocked": bool(stage1_route.get("referenceLocked")),
+                "error": public_job_error(vjob.message)
+                if vjob.status in ("failed", "error")
+                else None,
+                "stage2Enabled": False,
+                "stage2Route": None,
+                "stage2JobId": None,
+                "stage2AssetId": None,
+                "stage2Status": None,
+                "stage2Prompt": None,
+                "stage2Negative": None,
+                "stage2PromptMetadata": None,
+                "fourViewSingleOutput": False,
+            }
+        )
+    return view_jobs
 
 
 def start_visual_sheet_generation(
@@ -1891,13 +2894,20 @@ def start_visual_sheet_generation(
     project_id: str,
     character_id: str,
     *,
-    include_details: bool = True,
-    include_performance: bool = True,
+    include_details: bool = False,
+    include_performance: bool = False,
     hero_asset_id: Optional[str] = None,
     candidate_count: int = 1,
     visual_style: Optional[str] = None,
     generator_sources: Optional[dict[str, Any]] = None,
     generation_mode: Optional[str] = None,
+    task_type: Optional[str] = None,
+    view_type: Optional[str] = None,
+    family: Optional[str] = None,
+    generator_family: Optional[str] = None,
+    required_views: Optional[list[str]] = None,
+    layout: Optional[str] = None,
+    four_view_single_output: Optional[bool] = None,
 ) -> dict[str, Any]:
     """Enqueue real certified image jobs for a Generated Character Image Profile.
 
@@ -1912,6 +2922,18 @@ def start_visual_sheet_generation(
     (Live Action / Anime / 3D / ...) that overrides the default
     QWEN_VISUAL_SHEET_STYLE for all compiled prompts in this pack.
     """
+    if is_crs_view_generation_task(task_type) or is_crs_view_generation_task(generation_mode):
+        return start_crs_view_generation(
+            db,
+            project_id,
+            character_id,
+            view_type=view_type,
+            hero_asset_id=hero_asset_id,
+            visual_style=visual_style,
+            generator_sources=generator_sources,
+            family=family,
+            generator_family=generator_family,
+        )
     project = db.get(Project, project_id)
     if not project:
         raise ValueError("Project not found")
@@ -1939,25 +2961,85 @@ def start_visual_sheet_generation(
     candidates: list[dict[str, Any]] = []
 
     prev_pack = _load_pack_raw(db, character_id) or {}
+    if _pack_has_live_generation(db, project_id, prev_pack):
+        return prev_pack
+    _cancel_replaced_draft_jobs(db, project_id, prev_pack)
     approved_hero = service.resolve_approved_reference(db, character_id, "hero_identity")
     if approved_hero:
         role_assets["hero_identity"] = approved_hero
 
+    # Provider-neutral identity packet BEFORE any Qwen/Krea routing or enqueue.
+    compiled = build_conditioning_packet(
+        db,
+        project_id,
+        character_id,
+        task="CRS_GENERATION",
+        include_details=include_details,
+        identity_authority_asset_id=hero_asset_id or approved_hero,
+        character_name=name,
+    )
+    if isinstance(compiled, CharacterIdentityPacket):
+        identity_packet = compiled
+    else:
+        identity_packet = CharacterIdentityPacket(
+            task="CRS_GENERATION",
+            characterId=character_id,
+            characterName=name,
+            identityAuthorityAssetId=hero_asset_id or approved_hero,
+        )
+    requested = [str(v).strip() for v in (required_views or []) if str(v).strip()]
+    if requested:
+        identity_packet.requiredViews = requested
+    elif str(layout or "").strip().lower() in {"four_view", "four_panel_2x2"}:
+        identity_packet.requiredViews = list(FOUR_VIEW_REQUIRED_VIEWS)
+
+    # Character Creator V2: retired four-view / collage default collapses to Front only.
+    if not os.environ.get("ADEPT_ALLOW_FOUR_VIEW_CRS"):
+        from .cc_v2 import collapse_retired_required_views
+
+        collapsed = collapse_retired_required_views(list(identity_packet.requiredViews or []), layout)
+        if collapsed == ["front_full"] and (
+            str(layout or "").strip().lower() in {"four_view", "four_panel_2x2", "collage", "contact_sheet"}
+            or set(identity_packet.requiredViews or []) == set(FOUR_VIEW_REQUIRED_VIEWS)
+        ):
+            identity_packet.requiredViews = ["front_full"]
+            layout = "single_view"
+
+    def _is_approved_revision(c: dict[str, Any]) -> bool:
+        status = str(c.get("status") or "").strip().lower()
+        approval = str(c.get("approvalStatus") or c.get("approval_status") or "").strip().lower()
+        return status == "approved" or approval == "approved" or c.get("approved") is True
+
     def _pack_history(pack: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         seen: set[str] = set()
+        current_hero = str(pack.get("approvedHeroIdentity") or "").strip()
         for c in list(pack.get("previousCandidates") or []) + list(pack.get("candidates") or []):
-            if not isinstance(c, dict):
+            if not isinstance(c, dict) or not _is_approved_revision(c):
                 continue
             aid = str(c.get("sheetAssetId") or c.get("assetId") or "").strip()
-            if not aid or aid in seen:
+            if not aid or aid in seen or aid == current_hero:
                 continue
-            if c.get("sheetAssetId") or str(c.get("status") or "").lower() in {"done", "complete"}:
-                seen.add(aid)
-                items.append(c)
+            seen.add(aid)
+            items.append(c)
         return items
 
     previous_candidates = _pack_history(prev_pack)
+    if approved_hero and approved_hero not in {
+        str(item.get("sheetAssetId") or item.get("assetId") or "").strip()
+        for item in previous_candidates
+        if isinstance(item, dict)
+    }:
+        previous_candidates.append(
+            {
+                "sheetAssetId": approved_hero,
+                "assetId": approved_hero,
+                "status": "approved",
+                "approvalStatus": "approved",
+                "approved": True,
+                "revision": prev_pack.get("crsRevision"),
+            }
+        )
     next_revision = int(prev_pack.get("nextCandidateRevision") or 1)
     parent_sheet_id = approved_hero
 
@@ -2002,7 +3084,8 @@ def start_visual_sheet_generation(
         #
         # Amendment 3 — Candidate Diversity + Reference Fidelity:
         # * Reference-capable family + attached reference → REFERENCE_CONDITIONED
-        #   (pixels participate). Qwen Image 2512 uses qwen2512.ref.
+        #   (pixels participate). Qwen Image 2512 CRS is PROFILE_GUIDED
+        #   qwen2512.txt2img — never qwen2512.ref (ERS I2I).
         # * Txt2img-only family (Illustrious) + attached reference →
         #   PROFILE_GUIDED (profile + style prompt, no pixels). Never forced
         #   onto zimage.ref_edit.
@@ -2011,7 +3094,34 @@ def start_visual_sheet_generation(
         # * Each distinct Certified generator is used once before reuse; we
         #   never fabricate distinctness.
         references = service.list_references(db, project_id, character_id)
-        reference_asset_id = _resolve_readable_reference_asset_id(db, project_id, references)
+        chosen_family = _chosen_crs_local_family(generator_sources)
+        needs_2509_crop = _is_qwen_edit_2509_family(chosen_family)
+        extract_sheet = needs_2509_crop
+        if needs_2509_crop:
+            reference_asset_id = _resolve_isolated_identity_crop(
+                db,
+                project_id,
+                character_id,
+                references,
+                extract_from_sheet=extract_sheet,
+            )
+        else:
+            # Any single uploaded figure is Character Reference (Flux / profile path).
+            reference_asset_id = _resolve_readable_reference_asset_id(
+                db, project_id, references
+            )
+        if needs_2509_crop:
+            try:
+                from ..workflows.qwen_image_edit_2509 import discover_qwen_edit_2509
+
+                if not discover_qwen_edit_2509().get("runtimeReady"):
+                    raise ValueError(QWEN_EDIT_2509_NOT_READY)
+            except ValueError:
+                raise
+            except Exception:
+                raise ValueError(QWEN_EDIT_2509_NOT_READY)
+            if not reference_asset_id:
+                raise ValueError(QWEN_EDIT_2509_NEEDS_CROP)
         routing_plan = _build_candidate_routing_plan(
             candidate_count=candidate_count,
             reference_asset_id=reference_asset_id,
@@ -2030,100 +3140,44 @@ def start_visual_sheet_generation(
             stage1_route = route["stage1"]
             stage2_route = route.get("stage2")
             seed = _candidate_seed(character_id, _i)
-            # ONE four-panel Character Sheet job per candidate x generator.
-            # role="hero_identity" is kept for legacy + e2e pack keys.
+            # Four views (front, side, back, close-up) per candidate x generator.
+            # jobs["hero"] still points at the front view for legacy + e2e pack keys.
             #
             # Two-stage pipeline: Stage 1 locks identity (reference-capable or
             # txt2img). Stage 2 is an optional real img2img/edit refinement that
             # runs on the Stage 1 output after it completes.
-            view_jobs: list[dict[str, Any]] = []
-            # Product law: ONE four-panel image per candidate x generator.
-            # Do not enqueue four view jobs and PIL-stitch them.
+            if _is_sensenova_family(str(stage1_route.get("modelFamilyPreference") or "")):
+                view_jobs = _enqueue_sensenova_crs_job(
+                    db,
+                    project_id,
+                    character_id=character_id,
+                    profile=profile,
+                    stage1_route=stage1_route,
+                    seed=seed,
+                    char_slug=char_slug,
+                    candidate_index=_i,
+                    candidate_count=candidate_count,
+                    route=route,
+                    identity_packet=identity_packet,
+                    has_character_reference=bool(reference_asset_id),
+                )
+            else:
+                view_jobs = _enqueue_law_view_jobs(
+                    db,
+                    project_id,
+                    character_id=character_id,
+                    profile=profile,
+                    references=references,
+                    style_profile=style_profile,
+                    stage1_route=stage1_route,
+                    seed=seed,
+                    char_slug=char_slug,
+                    candidate_index=_i,
+                    candidate_count=candidate_count,
+                    route=route,
+                    identity_packet=identity_packet,
+                )
             provider_kind = str(stage1_route.get("providerKind") or "local")
-            composition = {"candidate_index": _i, "layout": "four_view"}
-            vprompt = _compile_visual_prompt(
-                profile,
-                prompt_goal="a professional four-panel character turnaround sheet",
-                composition=composition,
-                references=references,
-                role="hero_identity",
-                extra_negative_constraints=[],
-                style_profile=style_profile,
-                reference_locked=bool(stage1_route.get("referenceLocked")),
-                sheet_request=_sheet_request_for_role("hero_identity"),
-            )
-            prompt_text = strengthen_four_view_prompt(vprompt.prompt)
-            vtag = f"{char_slug}_four_view" + (f"_c{_i + 1}" if candidate_count > 1 else "")
-            vjob = _enqueue_txt2img(
-                db,
-                project_id,
-                character_id=character_id,
-                prompt=prompt_text,
-                negative_prompt=vprompt.negative_prompt,
-                tag=vtag,
-                role="hero_identity",
-                model_family_preference=stage1_route["modelFamilyPreference"],
-                source_asset_id=stage1_route.get("source_asset_id"),
-                denoise=stage1_route.get("denoise"),
-                seed=seed,
-                force_workflow_key=(
-                    None if provider_kind == "api" else stage1_route.get("workflowKey")
-                ),
-                provider_kind=provider_kind,
-                hosted_model_id=stage1_route.get("hostedModelId"),
-                sheet_layout="four_view",
-                prompt_metadata={
-                    "promptFamily": vprompt.prompt_family,
-                    "promptModel": vprompt.model_key,
-                    "promptValidationOk": vprompt.validation.get("ok"),
-                    "sheetMode": True,
-                    "candidateIndex": _i,
-                    "candidateCount": candidate_count,
-                    "viewIndex": 0,
-                    "viewRole": "four_view_sheet",
-                    "batchIndex": int(route.get("batchIndex") or (_i + 1)),
-                    "batchOf": int(route.get("batchOf") or candidate_count),
-                    "compositionIntent": COMPOSITION_INTENT_CHARACTER_SHEET,
-                    "fullBody": True,
-                    "workflowKey": stage1_route["workflowKey"],
-                    "modelFamily": stage1_route["modelFamilyPreference"],
-                    "referenceLocked": bool(stage1_route.get("referenceLocked")),
-                    "referenceAssetId": stage1_route.get("referenceAssetId"),
-                    "referenceFidelityMode": stage1_route.get("referenceFidelityMode"),
-                    "conditioningMode": stage1_route.get("conditioningMode"),
-                    "providerKind": provider_kind,
-                    "seed": seed,
-                    "stage": 1,
-                    "layout": "four_view",
-                    "requiredViews": list(REQUIRED_VIEWS),
-                    "referenceMode": "identity_preservation",
-                    "fourViewSingleOutput": True,
-                },
-            )
-            view_jobs.append(
-                {
-                    "jobId": vjob.id,
-                    "role": "hero_identity",
-                    "viewRole": "four_view_sheet",
-                    "viewIndex": 0,
-                    "status": vjob.status,
-                    "assetId": None,
-                    "seed": seed,
-                    "modelFamily": stage1_route["modelFamilyPreference"],
-                    "workflowKey": stage1_route["workflowKey"],
-                    "referenceLocked": bool(stage1_route.get("referenceLocked")),
-                    "error": public_job_error(vjob.message) if vjob.status in ("failed", "error") else None,
-                    "stage2Enabled": False,
-                    "stage2Route": None,
-                    "stage2JobId": None,
-                    "stage2AssetId": None,
-                    "stage2Status": None,
-                    "stage2Prompt": None,
-                    "stage2Negative": None,
-                    "stage2PromptMetadata": None,
-                    "fourViewSingleOutput": True,
-                }
-            )
             is_api_sheet = provider_kind == "api"
             # jobs["hero"] points at the front view job (legacy + e2e compat).
             hero_job = view_jobs[0]
@@ -2159,6 +3213,15 @@ def start_visual_sheet_generation(
             label = "Hero" if candidate_count == 1 else f"Candidate {_i + 1}"
             batch_index = int(route.get("batchIndex") or (_i + 1))
             batch_of = int(route.get("batchOf") or 1)
+            native_crs = _is_sensenova_family(str(stage1_route.get("modelFamilyPreference") or ""))
+            if native_crs:
+                sheet_layout = "native_production_crs"
+            elif str(layout or "").strip().lower() in {"single_view", "crs_view_generation", "v2_21x9"}:
+                sheet_layout = "single_view"
+            elif list(identity_packet.requiredViews or []) == ["front_full"]:
+                sheet_layout = "single_view"
+            else:
+                sheet_layout = "four_view"
             provenance = _candidate_provenance_label(
                 provider_kind=str(stage1_route.get("providerKind") or "local"),
                 provider=stage1_lineage.get("provider"),
@@ -2211,11 +3274,16 @@ def start_visual_sheet_generation(
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
                 "stage2SourceAssetIds": [],
-                "layout": "four_view",
-                "fourViewSingleOutput": True,
-                "requiredViews": list(REQUIRED_VIEWS),
+                "layout": sheet_layout,
+                "fourViewSingleOutput": native_crs,
+                "requiredViews": list(identity_packet.requiredViews or FOUR_VIEW_REQUIRED_VIEWS),
                 "referenceMode": "identity_preservation",
-                "characterSheetIntent": four_view_sheet_intent(),
+                "characterSheetIntent": {
+                    "purpose": "character_sheet",
+                    "layout": sheet_layout,
+                    "requiredViews": list(identity_packet.requiredViews or FOUR_VIEW_REQUIRED_VIEWS),
+                    "referenceMode": "identity_preservation",
+                },
                 "layoutNoncompliant": False,
                 "layout_noncompliant": False,
                 "layoutVerified": None,
@@ -2261,17 +3329,22 @@ def start_visual_sheet_generation(
                 "sheetAssetId": None,
                 "sourceAssetIds": [],
                 "stage2SourceAssetIds": [],
-                "layout": "four_view",
-                "fourViewSingleOutput": True,
-                "requiredViews": list(REQUIRED_VIEWS),
+                "layout": sheet_layout,
+                "fourViewSingleOutput": native_crs,
+                "requiredViews": list(identity_packet.requiredViews or FOUR_VIEW_REQUIRED_VIEWS),
                 "referenceMode": "identity_preservation",
-                "characterSheetIntent": four_view_sheet_intent(),
+                "characterSheetIntent": {
+                    "purpose": "character_sheet",
+                    "layout": sheet_layout,
+                    "requiredViews": list(identity_packet.requiredViews or FOUR_VIEW_REQUIRED_VIEWS),
+                    "referenceMode": "identity_preservation",
+                },
                 "layoutNoncompliant": False,
                 "layout_noncompliant": False,
                 "layoutVerified": None,
                 "layoutNote": None,
-                "width": CRS_2K_COMPOSE,
-                "height": CRS_2K_COMPOSE,
+                "width": 2720 if native_crs else CRS_2K_COMPOSE,
+                "height": 1536 if native_crs else CRS_2K_COMPOSE,
                 "qualityTier": "2K",
                 "resolutionOrigin": "native",
                 "revision": next_revision,
@@ -2290,7 +3363,7 @@ def start_visual_sheet_generation(
         "projectId": project_id,
         "engine": "multi_model",
         "workflows": ["character_sheet", "sequential_identity_prompts", "multi_model_routing"],
-        "identityLock": KORRI_LOCK if char_slug == "korri" else "",
+        "identityLock": "",
         "referenceEditReplaced": True,
         "referenceLocked": any(
             (c.get("conditioningMode") == CONDITIONING_REFERENCE_CONDITIONED) for c in candidates
@@ -2316,8 +3389,283 @@ def start_visual_sheet_generation(
         "nextCandidateRevision": next_revision + 1,
         "approvedHeroIdentity": approved_hero,
         "crsRevision": next_revision,
+        "taskType": "CRS_GENERATION",
+        "identityPacket": dump_identity_packet(identity_packet),
     }
     return _save_pack(db, project_id, character_id, pack)
+
+
+def start_crs_view_generation(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    view_type: Optional[str] = None,
+    hero_asset_id: Optional[str] = None,
+    visual_style: Optional[str] = None,
+    generator_sources: Optional[dict[str, Any]] = None,
+    family: Optional[str] = None,
+    generator_family: Optional[str] = None,
+) -> dict[str, Any]:
+    """Enqueue ONE canonical character view. No five-view pack. No Adept compose."""
+    project = db.get(Project, project_id)
+    if not project:
+        raise ValueError("Project not found")
+    view_type = normalize_crs_view_type(view_type)
+    profile_out = service.get_profile(db, project_id, character_id)
+    profile = profile_out.model_dump()
+    name = profile.get("name") or "Character"
+    char_slug = (profile.get("slug") or name).replace(" ", "_").lower()
+    resolved_style_key = visual_style or profile.get("visual_style") or ""
+    style_profile = _resolve_style_profile(resolved_style_key)
+    gates = list_gates(db, project_id, character_id)
+    concept = (gates.get("gates") or {}).get("concept") or {}
+    if concept.get("status") in (None, "NOT_STARTED") or not concept.get("directions"):
+        propose_visual_directions(db, project_id, character_id)
+
+    prev_pack = _load_pack_raw(db, character_id) or {}
+    approved_hero = service.resolve_approved_reference(db, character_id, "hero_identity")
+    next_revision = int(prev_pack.get("nextCandidateRevision") or 1)
+    previous_candidates = []
+    seen: set[str] = set()
+    for c in list(prev_pack.get("previousCandidates") or []) + list(prev_pack.get("candidates") or []):
+        if not isinstance(c, dict):
+            continue
+        aid = str(c.get("sheetAssetId") or c.get("assetId") or "").strip()
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        previous_candidates.append(c)
+
+    references = service.list_references(db, project_id, character_id)
+    identity_crop_id = valid_identity_reference_crop(
+        references,
+        readable=lambda aid: _asset_image_readable(db, project_id, aid),
+        image_path=lambda aid: _asset_image_path(db, project_id, aid),
+    )
+    requested_family = extract_crs_view_requested_family(
+        generator_sources,
+        family=family,
+        generator_family=generator_family,
+    )
+    resolved = resolve_crs_view_generation_workflow(
+        has_identity_crop=bool(identity_crop_id),
+        requested_family=requested_family or None,
+    )
+    family = str(resolved["family"])
+    workflow_key = str(resolved["workflowKey"])
+    explicit_family = bool(resolved.get("explicit") or requested_family)
+    use_i2i = (
+        (not explicit_family)
+        and resolved.get("mode") == "img2img"
+        and bool(identity_crop_id)
+    )
+    source_asset_id = identity_crop_id if use_i2i else None
+    seed = _candidate_seed(character_id, 0)
+    identity_packet = CharacterIdentityPacket(
+        task=CRS_VIEW_GENERATION_TASK,
+        characterId=character_id,
+        characterName=name,
+        identityAuthorityAssetId=hero_asset_id or approved_hero,
+        requiredViews=[view_type],
+        outputType="character_view",
+    )
+    packet_dump = dump_identity_packet(identity_packet)
+    vprompt = _compile_visual_prompt(
+        profile,
+        prompt_goal="a production character reference, one person, front full-body",
+        composition={"candidate_index": 0, "viewType": view_type, "sheetComposition": False},
+        references=references,
+        role=CRS_VIEW_ROLE,
+        extra_negative_constraints=_negative_rules_for_view(CRS_VIEW_ROLE, None),
+        style_profile=style_profile,
+        reference_locked=bool(use_i2i),
+        sheet_request={},
+        model_family=family,
+    )
+    prompt_l = (vprompt.prompt or "").lower()
+    for banned in ("contact sheet", "four-panel", "character sheet collage"):
+        if banned in prompt_l and f"no {banned}" not in prompt_l:
+            raise ValueError(f"CRS_VIEW_GENERATION prompt must not request {banned}")
+    vjob = _enqueue_txt2img(
+        db,
+        project_id,
+        character_id=character_id,
+        prompt=vprompt.prompt,
+        negative_prompt=vprompt.negative_prompt,
+        tag=f"{char_slug}_{view_type}",
+        role=CRS_VIEW_ROLE,
+        model_family_preference=family,
+        source_asset_id=source_asset_id,
+        denoise=REFERENCE_FIDELITY_DENOISE if use_i2i else None,
+        seed=seed,
+        force_workflow_key=workflow_key,
+        provider_kind="local",
+        sheet_layout="crs_view_generation",
+        prompt_metadata={
+            "promptFamily": getattr(vprompt, "prompt_family", ""),
+            "promptModel": getattr(vprompt, "model_key", ""),
+            "sheetMode": False,
+            "sheetComposition": False,
+            "scene": False,
+            "ers": False,
+            "krea": False,
+            "extras": False,
+            "outputCount": 1,
+            "characterCount": 1,
+            "candidateIndex": 0,
+            "candidateCount": 1,
+            "viewIndex": 0,
+            "viewRole": CRS_VIEW_ROLE,
+            "viewType": view_type,
+            "canonicalView": view_type,
+            "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
+            "fullBody": True,
+            "workflowKey": workflow_key,
+            "modelFamily": family,
+            "referenceLocked": bool(use_i2i),
+            "referenceAssetId": source_asset_id,
+            "referenceKind": "IDENTITY_REFERENCE" if source_asset_id else None,
+            "conditioningMode": (
+                CONDITIONING_REFERENCE_CONDITIONED if use_i2i else CONDITIONING_PROFILE_GUIDED
+            ),
+            "providerKind": "local",
+            "autoSelect": False if explicit_family else True,
+            "seed": seed,
+            "stage": 1,
+            "taskType": CRS_VIEW_GENERATION_TASK,
+            "fourViewSingleOutput": False,
+            "requiredViews": [view_type],
+            "referenceMode": "identity_preservation",
+            "identityPacket": packet_dump,
+        },
+    )
+    lineage = _workflow_lineage(workflow_key)
+    view_job = {
+        "jobId": vjob.id,
+        "role": CRS_VIEW_ROLE,
+        "viewRole": CRS_VIEW_ROLE,
+        "viewType": view_type,
+        "canonicalView": view_type,
+        "viewIndex": 0,
+        "status": vjob.status,
+        "assetId": None,
+        "seed": seed,
+        "modelFamily": family,
+        "workflowKey": workflow_key,
+        "referenceLocked": bool(use_i2i),
+        "error": None,
+        "stage2Enabled": False,
+        "fourViewSingleOutput": False,
+        "sheetComposition": False,
+    }
+    entry = {
+        "jobId": vjob.id,
+        "role": CRS_VIEW_ROLE,
+        "status": vjob.status,
+        "candidateIndex": 0,
+        "label": f"{name} {view_type}",
+        "assetId": None,
+        "generator": lineage.get("generator"),
+        "provider": lineage.get("provider"),
+        "model": lineage.get("model"),
+        "modelVariant": lineage.get("modelVariant"),
+        "workflowKey": workflow_key,
+        "seed": seed,
+        "referenceAssetIds": [source_asset_id] if source_asset_id else [],
+        "compositionIntent": COMPOSITION_INTENT_FULL_BODY_CASTING,
+        "referenceLocked": bool(use_i2i),
+        "conditioningMode": view_job.get("referenceLocked") and CONDITIONING_REFERENCE_CONDITIONED or CONDITIONING_PROFILE_GUIDED,
+        "providerKind": "local",
+        "autoSelect": False if explicit_family else True,
+        "error": None,
+        "stage2Enabled": False,
+        "viewJobs": [view_job],
+        "sheetAssetId": None,
+        "sourceAssetIds": [],
+        "layout": "single_view",
+        "viewType": view_type,
+        "fourViewSingleOutput": False,
+        "sheetComposition": False,
+        "requiredViews": [view_type],
+        "referenceMode": "identity_preservation",
+        "characterSheetIntent": {
+            "purpose": "character_view",
+            "layout": "single_view",
+            "requiredViews": [view_type],
+            "sheetComposition": False,
+        },
+        "revision": next_revision,
+        "parentSheetId": approved_hero,
+        "parent_sheet_id": approved_hero,
+        "autoApproved": False,
+        "createdAt": _now(),
+    }
+    pack = {
+        "schema_version": 2,
+        "status": "GENERATING",
+        "characterId": character_id,
+        "projectId": project_id,
+        "engine": "multi_model",
+        "workflows": ["crs_view_generation"],
+        "identityLock": "",
+        "referenceLocked": bool(use_i2i),
+        "generationMode": CRS_VIEW_GENERATION_TASK,
+        "jobs": {"hero": entry, "hero_candidates": [entry]},
+        "roleAssets": {"hero_identity": approved_hero} if approved_hero else {},
+        "candidates": [
+            {
+                "assetId": None,
+                "jobId": vjob.id,
+                "url": None,
+                "label": entry["label"],
+                "status": vjob.status,
+                "candidateIndex": 0,
+                "workflowKey": workflow_key,
+                "viewType": view_type,
+                "layout": "single_view",
+                "sheetComposition": False,
+                "sheetAssetId": None,
+                "revision": next_revision,
+                "autoApproved": False,
+            }
+        ],
+        "candidateCount": 1,
+        "generatorSources": {
+            "local": [
+                {
+                    "family": requested_family or "auto",
+                    "enabled": True,
+                    "batchCount": 1,
+                }
+            ],
+            "api": None,
+            "stage2Enabled": False,
+        },
+        "includeDetails": False,
+        "includePerformance": False,
+        "characterName": name,
+        "characterSlug": char_slug,
+        "createdAt": _now(),
+        "phase": "hero",
+        "mock": False,
+        "previousCandidates": previous_candidates,
+        "nextCandidateRevision": next_revision + 1,
+        "approvedHeroIdentity": approved_hero,
+        "crsRevision": next_revision,
+        "taskType": CRS_VIEW_GENERATION_TASK,
+        "viewType": view_type,
+        "sheetComposition": False,
+        "outputCount": 1,
+        "characterCount": 1,
+        "krea": False,
+        "identityPacket": packet_dump,
+        "autoApproved": False,
+    }
+    # Persist requested local family; Krea/API extras stay off for this task.
+    return _save_pack(db, project_id, character_id, pack)
+
+
 
 
 def _job_params(job: Job) -> dict[str, Any]:
@@ -2356,10 +3704,17 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                     if not hero_meta.get("viewJobs"):
                         role_assets["hero_identity"] = aid
                         _attach_role(db, project_id, character_id, aid, "hero_identity")
-                    hero_meta["assetId"] = aid
+                        hero_meta["assetId"] = aid
+                    # Four-view compose: front tile is not the draft sheet.
+                hero_meta.pop("error", None)
             elif job.status == "failed":
                 hero_meta["status"] = "failed"
                 hero_meta["error"] = public_job_error(job.message) or "hero generation failed"
+            else:
+                # running / queued / starting — clear any stale error from a
+                # previous failed state so the UI does not show a dead error
+                # while the job is actively generating again.
+                hero_meta.pop("error", None)
         jobs["hero"] = hero_meta
 
     # Poll sibling hero candidates (only present when candidate_count > 1)
@@ -2372,12 +3727,18 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             item["status"] = job.status
             if job.status == "done":
                 aid = _job_params(job).get("output_asset_id")
-                if aid:
+                if aid and not item.get("viewJobs"):
                     item["assetId"] = aid
+                item.pop("error", None)
             elif job.status in ("failed", "error", "cancelled"):
                 item["status"] = "failed"
                 if not item.get("error"):
                     item["error"] = public_job_error(job.message) or job.status
+            else:
+                # running / queued / starting — clear stale error from a prior
+                # failed state so the UI does not show a dead error while the
+                # job is actively generating again.
+                item.pop("error", None)
         # Preserve per-candidate lineage (generator/provider/model/workflowKey/
         # seed/referenceAssetIds/compositionIntent/referenceFidelityMode) recorded
         # at enqueue time — only update the live status/assetId fields above.
@@ -2406,7 +3767,7 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 "error": public_job_error(item.get("error")) or item.get("error"),
                 "layout": item.get("layout"),
                 "fourViewSingleOutput": bool(item.get("fourViewSingleOutput")),
-                "requiredViews": item.get("requiredViews") or list(REQUIRED_VIEWS),
+                "requiredViews": item.get("requiredViews") or list(FOUR_VIEW_REQUIRED_VIEWS),
                 "referenceMode": item.get("referenceMode") or "identity_preservation",
                 "layoutVerified": item.get("layoutVerified"),
                 "layoutNote": item.get("layoutNote"),
@@ -2427,8 +3788,58 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             for item in hero_candidates
         ]
 
-    # Attach the single four-panel output as the creator-facing candidate
-    # asset. Never PIL-stitch four tiles for CC/CD sheets.
+    # Persist law view jobs. When all views are done, Adept labeled compose
+    # (G11) writes view labels + profile text panels onto a 2K sheet.
+    # CRS_VIEW_GENERATION never composes a sheet from this task.
+    if is_crs_view_generation_task(pack.get("taskType") or pack.get("generationMode")):
+        pack["includeDetails"] = False
+        pack["includePerformance"] = False
+        pack["sheetComposition"] = False
+        _hero_candidates = jobs.get("hero_candidates")
+        candidate_entries = list(_hero_candidates) if isinstance(_hero_candidates, list) else ([jobs["hero"]] if jobs.get("hero") else [])
+        for centry in candidate_entries:
+            view_jobs = centry.get("viewJobs") or []
+            all_done, any_failed, final_asset_ids = _poll_candidate_views(db, centry)
+            if any_failed:
+                centry["status"] = "failed"
+                centry["autoApproved"] = False
+                continue
+            if not all_done:
+                centry["status"] = "generating"
+                continue
+            aid = str(final_asset_ids[0]) if final_asset_ids else ""
+            centry["assetId"] = aid or None
+            centry["sheetAssetId"] = None
+            centry["status"] = "done"
+            centry["layout"] = "single_view"
+            centry["sheetComposition"] = False
+            centry["viewType"] = pack.get("viewType") or CRS_VIEW_DEFAULT_VIEW
+            centry["autoApproved"] = False
+            centry["fourViewSingleOutput"] = False
+        pack["candidates"] = [
+            {
+                **(c if isinstance(c, dict) else {}),
+                "sheetAssetId": None,
+                "sheetComposition": False,
+                "layout": "single_view",
+                "viewType": pack.get("viewType") or CRS_VIEW_DEFAULT_VIEW,
+                "autoApproved": False,
+            }
+            for c in candidate_entries
+        ]
+        pack["jobs"]["hero"] = candidate_entries[0] if candidate_entries else pack.get("jobs", {}).get("hero")
+        pack["jobs"]["hero_candidates"] = candidate_entries
+        done = all(str(c.get("status") or "") == "done" for c in candidate_entries) if candidate_entries else False
+        failed = any(str(c.get("status") or "") == "failed" for c in candidate_entries)
+        if failed:
+            pack["status"] = "FAILED"
+            pack["phase"] = "failed"
+        elif done:
+            pack["status"] = "READY_FOR_OWNER"
+            pack["phase"] = "awaiting_owner"
+        pack["autoApproved"] = False
+        return _save_pack(db, project_id, character_id, pack)
+
     _hero_candidates = jobs.get("hero_candidates")
     candidate_entries: list[dict[str, Any]] = []
     if isinstance(_hero_candidates, list):
@@ -2441,19 +3852,15 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
         if not isinstance(view_jobs, list) or not view_jobs:
             continue
         if centry.get("sheetAssetId"):
-            sheet_asset = db.get(Asset, str(centry.get("sheetAssetId")))
-            assessment = assess_four_view_layout(sheet_asset.path if sheet_asset else None)
-            apply_layout_assessment_to_candidate(centry, assessment)
             continue
-        # CC/CD product law: ONE four-panel imagegen job. Never fall through
-        # to CANDIDATE_SHEET_VIEW_ROLES x _enqueue_txt2img x PIL compose.
+        four_panel = bool(centry.get("fourViewSingleOutput")) and len(view_jobs) == 1
         all_done, any_failed, final_asset_ids = _poll_candidate_views(db, centry)
         if any_failed:
             failed_bits: list[str] = []
             for vj in view_jobs:
                 if vj.get("status") not in ("failed", "error", "cancelled", "missing"):
                     continue
-                role = vj.get("role") or "four_view_sheet"
+                role = vj.get("role") or vj.get("viewRole") or "view"
                 msg = public_job_error(vj.get("error"))
                 if not msg and vj.get("jobId"):
                     failed_job = db.get(Job, vj.get("jobId"))
@@ -2462,28 +3869,162 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                         vj["error"] = msg
                 failed_bits.append(f"{role}: {msg}" if msg else str(role))
             centry["status"] = "failed"
-            centry["error"] = "; ".join(failed_bits) or "four-view sheet generation failed"
+            centry["error"] = "; ".join(failed_bits) or "character sheet generation failed"
             continue
         if not all_done:
             centry["status"] = "generating"
             continue
-        aid = str(final_asset_ids[0]) if final_asset_ids else ""
-        if not aid:
-            centry["status"] = "failed"
-            centry["error"] = "four-view sheet job produced no asset"
-            continue
-        sheet_asset = db.get(Asset, aid)
-        assessment = assess_four_view_layout(sheet_asset.path if sheet_asset else None)
-        apply_layout_assessment_to_candidate(centry, assessment)
-        centry["characterSheetIntent"] = four_view_sheet_intent()
-        # Keep the asset visible. Stamp the FE flag; do not fake-pass or hide.
-        centry["sheetAssetId"] = aid
-        centry["assetId"] = aid
-        centry["sourceAssetIds"] = [aid]
-        centry["status"] = "done"
+        if four_panel:
+            aid = str(final_asset_ids[0]) if final_asset_ids else ""
+            if not aid:
+                centry["status"] = "failed"
+                centry["error"] = "four-view sheet job produced no asset"
+                continue
+            sheet_asset = db.get(Asset, aid)
+            native = str(centry.get("layout") or "").strip().lower() in {
+                "native_production_crs",
+                "production_crs",
+            } or _is_sensenova_family(str(centry.get("workflowKey") or centry.get("model") or ""))
+            if native:
+                from .sensenova_crs_gate import assess_native_production_crs
+
+                assessment = assess_native_production_crs(sheet_asset.path if sheet_asset else None)
+                centry["layout"] = "native_production_crs"
+                centry["layoutVerified"] = bool(assessment.get("layoutVerified"))
+                centry["layoutNoncompliant"] = bool(assessment.get("layoutNoncompliant"))
+                centry["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
+                centry["layoutNote"] = assessment.get("note")
+            else:
+                assessment = assess_four_view_layout(sheet_asset.path if sheet_asset else None)
+                apply_layout_assessment_to_candidate(centry, assessment)
+            if native:
+                centry["characterSheetIntent"] = {
+                    "purpose": "character_sheet",
+                    "layout": "native_production_crs",
+                    "referenceMode": "identity_preservation",
+                }
+            else:
+                centry["characterSheetIntent"] = four_view_sheet_intent()
+            centry["sheetAssetId"] = aid
+            centry["assetId"] = aid
+            centry["sourceAssetIds"] = [aid]
+            centry["status"] = "done"
+        else:
+            validation = _validate_candidate_view_consistency(view_jobs)
+            source_ids = list(validation.get("assetIds") or final_asset_ids or [])
+            four_view_compose = str(centry.get("layout") or "").strip().lower() in {
+                "four_view",
+                "four_panel_2x2",
+            } or len(source_ids) == 4
+            # Isolated 5-view law enforces seed/family consistency. Default 4-view
+            # tiles are independent Flux cameras (different seeds) and compose first.
+            if not four_view_compose and not validation.get("ok"):
+                centry["status"] = "failed"
+                centry["error"] = "; ".join(validation.get("reasons") or []) or (
+                    "CRS law-view consistency failed"
+                )
+                continue
+            if not source_ids:
+                centry["status"] = "failed"
+                centry["error"] = "law view jobs produced no assets"
+                continue
+            layout_name = str(centry.get("layout") or "").strip().lower()
+            if layout_name in {"single_view", "crs_view_generation", "v2_21x9"} or len(source_ids) < 2:
+                # V2: identity views stay individual. Sheet is POST .../sheet/compose only.
+                aid = str(source_ids[0])
+                centry["status"] = "done"
+                centry["assetId"] = aid
+                centry["sheetAssetId"] = None
+                continue
+            view_paths: list[str] = []
+            missing = False
+            for aid in source_ids:
+                asset = db.get(Asset, str(aid))
+                if not asset or not asset.path:
+                    missing = True
+                    break
+                view_paths.append(str(asset.path))
+            if missing:
+                centry["status"] = "failed"
+                centry["error"] = "missing source view asset path"
+                continue
+            def _slot_path(vj: dict[str, Any]) -> str | None:
+                aid = vj.get("stage2AssetId") if vj.get("stage2Status") == "done" else vj.get("assetId")
+                if not aid:
+                    return None
+                asset = db.get(Asset, str(aid))
+                return str(asset.path) if asset and asset.path else None
+
+            # Default 4-view path composes first, then fail-closes on
+            # assess_four_view_layout. Isolated 5-view law still uses tile gates.
+            if four_view_compose:
+                gate = {"accepted": True, "skipped": "four_view_compose"}
+            else:
+                gate = gate_candidate_law_views(view_jobs, resolve_path=_slot_path)
+            if not gate.get("accepted"):
+                centry["status"] = "failed"
+                centry["error"] = gate.get("error") or "CRS law-view gate failed"
+                centry["gateFailed"] = True
+                centry["crsLawViewGate"] = {
+                    "accepted": False,
+                    "autoApproved": False,
+                    "kreaInvoked": False,
+                    "error": centry["error"],
+                }
+                continue
+            try:
+                out_path = _composed_sheet_output_path(
+                    project_id, character_id, int(centry.get("candidateIndex") or 0)
+                )
+                sheet_layout: dict[str, Any] = {}
+                composed_path = _compose_character_sheet_grid(
+                    view_paths,
+                    str(out_path),
+                    profile=_sheet_profile_with_wardrobe(db, profile),
+                    layout_out=sheet_layout,
+                )
+                lineage = _workflow_lineage(str(centry.get("workflowKey") or ""))
+                sheet_asset = _ingest_composed_sheet_asset(
+                    db,
+                    project_id,
+                    character_id=character_id,
+                    candidate_index=int(centry.get("candidateIndex") or 0),
+                    composed_path=composed_path,
+                    source_asset_ids=source_ids,
+                    lineage=lineage,
+                    layout=sheet_layout or None,
+                )
+            except Exception as exc:  # noqa: BLE001
+                centry["status"] = "failed"
+                centry["error"] = f"character sheet composition failed: {exc}"
+                continue
+            centry["sheetAssetId"] = sheet_asset.id
+            centry["assetId"] = sheet_asset.id
+            centry["sourceAssetIds"] = source_ids
+            centry["status"] = "done"
+            centry["fourViewSingleOutput"] = False
+            if len(view_paths) == 4:
+                assessment = assess_four_view_layout(
+                    composed_path, view_count=4, composed=True
+                )
+                apply_layout_assessment_to_candidate(centry, assessment)
+                if assessment.get("layoutNoncompliant"):
+                    centry["status"] = "failed"
+                    centry["error"] = (
+                        assessment.get("note")
+                        or "Character Reference Sheet is not four views."
+                    )
+                    centry["sheetAssetId"] = None
+                    continue
+                centry["layout"] = "four_view"
+            else:
+                centry["layout"] = "law_views"
+                centry["layoutNoncompliant"] = False
+                centry["layout_noncompliant"] = False
+            aid = sheet_asset.id
         if not primary_sheet_set:
             role_assets["hero_identity"] = aid
-            _attach_role(db, project_id, character_id, aid, "hero_identity")
+            # Draft only. Approve is the only persist / canon writer.
             primary_sheet_set = True
         continue
 
@@ -2544,9 +4085,9 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
             "sourceAssetIds": item.get("sourceAssetIds") or [],
             "viewJobs": item.get("viewJobs") or [],
             "error": public_job_error(item.get("error")) or item.get("error"),
-            "layout": item.get("layout") or "four_view",
-            "fourViewSingleOutput": bool(item.get("fourViewSingleOutput", True)),
-            "requiredViews": item.get("requiredViews") or list(REQUIRED_VIEWS),
+            "layout": item.get("layout") or "law_views",
+            "fourViewSingleOutput": bool(item.get("fourViewSingleOutput", False)),
+            "requiredViews": item.get("requiredViews") or list(FOUR_VIEW_REQUIRED_VIEWS),
             "referenceMode": item.get("referenceMode") or "identity_preservation",
             "layoutVerified": item.get("layoutVerified"),
             "layoutNote": item.get("layoutNote"),
@@ -2583,9 +4124,21 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
 
     # Coverage pack: sequential per-role txt2img with compiled identity prompts,
     # routed on the SAME Local/Cloud source the creator selected for the hero.
+    # After labeled Adept 5-view compose, coverage/details/performance are
+    # optional leftovers. includeDetails=false (and includePerformance=false)
+    # must not enqueue them.
     phase_source = _resolve_pack_phase_source(pack)
     coverage_specs = _coverage_role_specs()
-    if "coverage" not in jobs:
+    skip_optional_phases = _skip_optional_sheet_enqueue(pack)
+    law_views_pending = any(
+        isinstance(c.get("viewJobs"), list)
+        and bool(c.get("viewJobs"))
+        and not str(c.get("sheetAssetId") or "").strip()
+        for c in candidate_entries
+    )
+    if skip_optional_phases:
+        pack["phase"] = pack.get("phase") or ("awaiting_hero" if law_views_pending else "sheet_ready")
+    if (not skip_optional_phases) and "coverage" not in jobs:
         cov_jobs = []
         references = service.list_references(db, project_id, character_id)
         for role, prompt_goal, composition in coverage_specs:
@@ -2643,6 +4196,8 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                     _attach_role(db, project_id, character_id, aid, role)
                     item["assetId"] = aid
             elif job.status == "failed":
+                if skip_optional_phases:
+                    continue
                 # Resilient Generation: retry once per role before platform NO-GO
                 retries = int(item.get("retries") or 0)
                 role = item.get("role") or ""
@@ -2695,9 +4250,16 @@ def advance_visual_sheet_pack(db: Session, project_id: str, character_id: str) -
                 pack["roleAssets"] = role_assets
                 return _save_pack(db, project_id, character_id, pack)
 
-    sheet_done = bool(jobs.get("coverage")) and all(
-        i.get("status") == "done" for i in (jobs.get("coverage") or [])
-    )
+    if skip_optional_phases:
+        # Flags-off must not enqueue coverage, but the new law-view compose
+        # still has to finish before the pack is sheet_done / READY_FOR_OWNER.
+        sheet_done = (not law_views_pending) or _labeled_adept_compose_done(
+            pack, candidate_entries=candidate_entries
+        )
+    else:
+        sheet_done = bool(jobs.get("coverage")) and all(
+            i.get("status") == "done" for i in (jobs.get("coverage") or [])
+        )
     if sheet_done and pack.get("includeDetails") and "details" not in jobs:
         detail_jobs = []
         references = service.list_references(db, project_id, character_id)
@@ -2924,20 +4486,7 @@ def owner_approve_visual_sheet_gates(
     pack["ownerApprovedBy"] = approved_by
     pack["ownerApprovedAt"] = _now()
     _save_pack(db, project_id, character_id, pack)
-    hero = str(role_assets.get("hero_identity") or "").strip()
-    if hero and pack.get("status") in {"OWNER_APPROVED", "OWNER_APPROVED_WITH_PENDING"}:
-        try:
-            service.approve_character_candidate(
-                db,
-                project_id,
-                character_id,
-                asset_id=hero,
-                reference_role="hero_identity",
-                source_type="generation",
-                notes=f"Owner approved visual sheet ({approved_by})",
-            )
-        except Exception:
-            logger.exception("Visual sheet owner-approve did not persist canonical hero %s", character_id)
+    # Approve / persist_crs is owner-facing Character Creator Approve only.
     return {
         "ok": True,
         "characterId": character_id,
@@ -3021,7 +4570,6 @@ def retry_visual_sheet_candidate(
     style_profile = _resolve_style_profile(profile.get("visual_style") or "")
     references = service.list_references(db, project_id, character_id)
     seed = int(centry.get("seed") or _candidate_seed(character_id, candidate_index))
-    four_view_retry = True  # CC/CD: never re-enqueue 4 tile jobs
     family = str(
         centry.get("selectedSource")
         or centry.get("modelFamily")
@@ -3040,69 +4588,84 @@ def retry_visual_sheet_candidate(
     char_slug = pack.get("characterSlug") or "character"
     candidate_count = int(pack.get("candidateCount") or 1)
     view_jobs = list(centry.get("viewJobs") or [])
-    if four_view_retry:
-        view_jobs = view_jobs[:1] or [{"role": "hero_identity", "viewRole": "four_view_sheet", "status": "failed"}]
+    pack_packet = pack.get("identityPacket") if isinstance(pack.get("identityPacket"), dict) else None
+    packet_views = list((pack_packet or {}).get("requiredViews") or [])
+    specs = {item[0]: item for item in _candidate_view_specs(packet_views or None)}
     for vj in view_jobs:
         terminal_fail = vj.get("status") in ("failed", "error", "cancelled", "missing")
         if not terminal_fail and vj.get("assetId"):
             continue
-        vrole = str(vj.get("role") or "")
-        if four_view_retry:
-            vprompt = _compile_visual_prompt(
-                profile,
-                prompt_goal="a professional four-panel character turnaround sheet",
-                composition={"candidate_index": int(candidate_index), "layout": "four_view"},
-                references=references,
-                role="hero_identity",
-                extra_negative_constraints=[],
-                style_profile=style_profile,
-                reference_locked=bool(centry.get("referenceLocked")),
-                sheet_request=_sheet_request_for_role("hero_identity"),
-            )
-            vtag = f"{char_slug}_four_view_retry" + (f"_c{int(candidate_index) + 1}" if candidate_count > 1 else "")
-            vjob = _enqueue_txt2img(
-                db,
-                project_id,
-                character_id=character_id,
-                prompt=strengthen_four_view_prompt(vprompt.prompt),
-                negative_prompt=vprompt.negative_prompt,
-                tag=vtag,
-                role="hero_identity",
-                model_family_preference=family,
-                source_asset_id=source_id,
-                denoise=denoise,
-                seed=seed,
-                force_workflow_key=force_key,
-                provider_kind=provider_kind,
-                hosted_model_id=hosted,
-                sheet_layout="four_view",
-                prompt_metadata={
-                    "candidateIndex": int(candidate_index),
-                    "viewRole": "four_view_sheet",
-                    "batchIndex": int(centry.get("batchIndex") or 1),
-                    "batchOf": int(centry.get("batchOf") or 1),
-                    "workflowKey": force_key or vj.get("workflowKey"),
-                    "modelFamily": family,
-                    "referenceLocked": bool(centry.get("referenceLocked")),
-                    "conditioningMode": centry.get("conditioningMode"),
-                    "providerKind": provider_kind,
-                    "providerId": centry.get("providerId") or "",
-                    "modelId": centry.get("modelId") or hosted or family,
-                    "layout": "four_view",
-                    "requiredViews": list(REQUIRED_VIEWS),
-                    "referenceMode": "identity_preservation",
-                    "fourViewSingleOutput": True,
-                    "retry": True,
-                },
-            )
-            vj["jobId"] = vjob.id
-            vj["role"] = "hero_identity"
-            vj["viewRole"] = "four_view_sheet"
-            vj["status"] = vjob.status
-            vj["assetId"] = None
-            vj["error"] = None
-            vj["fourViewSingleOutput"] = True
-            continue
+        vrole = str(vj.get("role") or "hero_identity")
+        spec = specs.get(vrole)
+        if spec:
+            _role, vgoal, vcomp, vneg = spec
+        else:
+            vgoal = "a production character reference"
+            vcomp = {}
+            vneg = None
+        vprompt = _compile_visual_prompt(
+            profile,
+            prompt_goal=vgoal,
+            composition={"candidate_index": int(candidate_index), **dict(vcomp or {})},
+            references=references,
+            role=vrole,
+            extra_negative_constraints=_negative_rules_for_view(vrole, vneg),
+            style_profile=style_profile,
+            reference_locked=bool(centry.get("referenceLocked")),
+            sheet_request={},
+            model_family=family,
+        )
+        vtag = f"{char_slug}_{vrole}_retry" + (
+            f"_c{int(candidate_index) + 1}" if candidate_count > 1 else ""
+        )
+        vjob = _enqueue_txt2img(
+            db,
+            project_id,
+            character_id=character_id,
+            prompt=vprompt.prompt,
+            negative_prompt=vprompt.negative_prompt,
+            tag=vtag,
+            role=vrole,
+            model_family_preference=family,
+            source_asset_id=source_id,
+            denoise=denoise,
+            seed=seed,
+            force_workflow_key=force_key,
+            provider_kind=provider_kind,
+            hosted_model_id=hosted,
+            sheet_layout="crs_view",
+            prompt_metadata={
+                "candidateIndex": int(candidate_index),
+                "viewRole": vrole,
+                "canonicalView": VIEW_ROLE_CANONICAL.get(vrole) or vrole,
+                "batchIndex": int(centry.get("batchIndex") or 1),
+                "batchOf": int(centry.get("batchOf") or 1),
+                "workflowKey": force_key or vj.get("workflowKey"),
+                "modelFamily": family,
+                "referenceLocked": bool(centry.get("referenceLocked")),
+                "conditioningMode": centry.get("conditioningMode"),
+                "providerKind": provider_kind,
+                "providerId": centry.get("providerId") or "",
+                "modelId": centry.get("modelId") or hosted or family,
+                "taskType": "CRS_SINGLE_VIEW",
+                "fourViewSingleOutput": False,
+                "fourViewPackTile": required_views_are_default_four(
+                    packet_views or FOUR_VIEW_REQUIRED_VIEWS
+                ),
+                "requiredViews": list(packet_views or FOUR_VIEW_REQUIRED_VIEWS),
+                "referenceMode": "identity_preservation",
+                "identityPacket": pack_packet,
+                "retry": True,
+            },
+        )
+        vj["jobId"] = vjob.id
+        vj["role"] = vrole
+        vj["viewRole"] = vrole
+        vj["status"] = vjob.status
+        vj["assetId"] = None
+        vj["error"] = None
+        vj["fourViewSingleOutput"] = False
+        continue
     centry["viewJobs"] = view_jobs
     centry["status"] = "queued"
     centry["error"] = None
@@ -3203,6 +4766,10 @@ def _enqueue_txt2img(
         "model": model_family_preference,
         "modelFamilyPreference": model_family_preference,
         "lockModelFamily": True,
+        "allowDraft": _is_qwen_edit_2509_family(model_family_preference)
+        or _is_sensenova_family(model_family_preference),
+        "allow_draft": _is_qwen_edit_2509_family(model_family_preference)
+        or _is_sensenova_family(model_family_preference),
         "purpose": "character_sheet",
         "presetId": "builtin-character-sheet",
         "creativeContext": creative_context,
@@ -3226,12 +4793,71 @@ def _enqueue_txt2img(
         creative_context["qualityTier"] = "2K"
         creative_context["resolutionOrigin"] = "native"
         body["creativeContext"] = creative_context
+    elif sheet_layout in {"crs_view", "crs_view_generation"}:
+        vw, vh = crs_2k_view_pixels()
+        body["width"] = vw
+        body["height"] = vh
+        body["quality"] = "2K"
+        body["resolutionOrigin"] = "native"
+        task_name = (
+            CRS_VIEW_GENERATION_TASK
+            if sheet_layout == "crs_view_generation"
+            else "CRS_SINGLE_VIEW"
+        )
+        body["taskType"] = task_name
+        body["fourViewSingleOutput"] = False
+        body["useExpandedPrompt"] = False
+        body["sheetComposition"] = False
+        body["outputCount"] = 1
+        body["characterCount"] = 1
+        body["viewRole"] = role
+        identity_packet = (prompt_metadata or {}).get("identityPacket")
+        if isinstance(identity_packet, dict):
+            body["identityPacket"] = identity_packet
+            creative_context["identityPacket"] = identity_packet
+            body.pop("sceneCanvas", None)
+            body.pop("environmentEditSource", None)
+            creative_context.pop("sceneCanvas", None)
+            creative_context.pop("environmentEditSource", None)
+        creative_context["taskType"] = task_name
+        creative_context["viewRole"] = role
+        creative_context["sheetComposition"] = False
+        creative_context["outputCount"] = 1
+        creative_context["characterCount"] = 1
+        creative_context["qualityTier"] = "2K"
+        creative_context["resolutionOrigin"] = "native"
+        creative_context["fourViewSingleOutput"] = False
+        body["creativeContext"] = creative_context
+    elif sheet_layout == "native_production_crs":
+        body["width"] = 2720
+        body["height"] = 1536
+        body["quality"] = "2K"
+        body["resolutionOrigin"] = "native"
+        body["taskType"] = "CRS_NATIVE_SHEET"
+        body["fourViewSingleOutput"] = True
+        body["useExpandedPrompt"] = False
+        body["sheetComposition"] = True
+        body["outputCount"] = 1
+        body["characterCount"] = 1
+        body["layout"] = "native_production_crs"
+        creative_context["taskType"] = "CRS_NATIVE_SHEET"
+        creative_context["layout"] = "native_production_crs"
+        creative_context["fourViewSingleOutput"] = True
+        creative_context["qualityTier"] = "2K"
+        creative_context["resolutionOrigin"] = "native"
+        body["creativeContext"] = creative_context
     # Reference-locked candidates route to a reference-capable edit workflow
     # (zimage.ref_edit) by supplying the reference asset as the source image so
     # its PIXELS participate in conditioning — not merely a filename in the prompt.
     # Stage 2 refinement also uses source_asset_id, pointing at the Stage 1 output.
     if source_asset_id:
         body["source_asset_id"] = source_asset_id
+        if sheet_layout in {"crs_view", "crs_view_generation"}:
+            body["referenceKind"] = "IDENTITY_REFERENCE"
+            body["references"] = [
+                {"assetId": source_asset_id, "role": "IDENTITY_REFERENCE"}
+            ]
+            creative_context["referenceKind"] = "IDENTITY_REFERENCE"
     if denoise is not None:
         body["denoise"] = denoise
     if seed is not None:
@@ -3247,55 +4873,195 @@ def _enqueue_txt2img(
         body.pop("allow_force_workflow_key", None)
         if not source_asset_id:
             body.pop("source_asset_id", None)
-        return enqueue_imagegen_job(db, project_id, body)
+        job = enqueue_imagegen_job(db, project_id, body)
+        _pin_crs_generation_job_params(db, job)
+        return job
 
     if force_workflow_key:
         body["forceWorkflowKey"] = force_workflow_key
         body["allow_force_workflow_key"] = True
-    return enqueue_imagegen_job(db, project_id, body)
+    job = enqueue_imagegen_job(db, project_id, body)
+    _pin_crs_generation_job_params(db, job)
+    return job
+
+
+def apply_crs_single_figure_gate_to_job(db: Session, job: Job, params: dict[str, Any], image_path: str) -> None:
+    """Hard-reject a CRS tile that is not one figure. May enqueue one Qwen fallback.
+
+    Default 4-view pack tiles skip this gate: DINO false-positives were failing
+    real single-person Flux cameras, and AUTO Flux then silently enqueued an
+    untracked Qwen job. Isolated 5-view law still fail-closes here.
+    """
+    from .crs_single_figure import (
+        is_crs_single_view_job,
+        is_default_four_view_pack_tile,
+        should_fallback_to_qwen,
+        validate_crs_single_figure,
+    )
+
+    if not is_crs_single_view_job(params):
+        return
+    if is_default_four_view_pack_tile(params):
+        params["crsSingleFigure"] = {
+            "single_figure_pass": None,
+            "detected_figures": None,
+            "failure_code": None,
+            "view_angle_pass": None,
+            "note": "skipped: four_view_pack_tile",
+            "skipped": "four_view_pack_tile",
+        }
+        job.params_json = json.dumps(params)
+        db.commit()
+        return
+    result = validate_crs_single_figure(image_path)
+    params["crsSingleFigure"] = result.to_dict()
+    job.params_json = json.dumps(params)
+    db.commit()
+    if result.single_figure_pass is False:
+        if should_fallback_to_qwen(params, result):
+            enqueue_crs_qwen_fallback_for_job(db, job)
+        raise RuntimeError(result.failure_code or "CRS_SINGLE_VIEW_MULTI_FIGURE")
+
+
+def enqueue_crs_qwen_fallback_for_job(db: Session, job: Job) -> Job | None:
+    """One Qwen CRS_SINGLE_VIEW retry after a failed AUTO FLUX one-figure gate."""
+    params = _loads(job.params_json, {})
+    if not isinstance(params, dict):
+        return None
+    ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+    character_id = str(ctx.get("characterId") or params.get("characterId") or "").strip()
+    role = str(params.get("viewRole") or params.get("role") or ctx.get("viewRole") or "hero_identity")
+    if not character_id:
+        return None
+    profile_out = service.get_profile(db, job.project_id, character_id)
+    profile = profile_out.model_dump()
+    name = profile.get("name") or "Character"
+    char_slug = (profile.get("slug") or name).replace(" ", "_").lower()
+    style_profile = _resolve_style_profile(str(profile.get("visual_style") or ""))
+    references = service.list_references(db, job.project_id, character_id)
+    vprompt = _compile_visual_prompt(
+        profile,
+        prompt_goal="a production character reference",
+        composition={},
+        references=references,
+        role=role,
+        extra_negative_constraints=_negative_rules_for_view(role, None),
+        style_profile=style_profile,
+        sheet_request={},
+        model_family=CRS_AUTO_FALLBACK_FAMILY,
+    )
+    return _enqueue_txt2img(
+        db,
+        job.project_id,
+        character_id=character_id,
+        prompt=vprompt.prompt,
+        negative_prompt=vprompt.negative_prompt,
+        tag=f"{char_slug}_{role}_qwen_fallback",
+        role=role,
+        model_family_preference=CRS_AUTO_FALLBACK_FAMILY,
+        force_workflow_key="qwen2512.txt2img",
+        provider_kind="local",
+        sheet_layout="crs_view",
+        prompt_metadata={
+            "promptFamily": getattr(vprompt, "prompt_family", ""),
+            "promptModel": getattr(vprompt, "model_key", ""),
+            "viewRole": role,
+            "canonicalView": VIEW_ROLE_CANONICAL.get(role) or role,
+            "workflowKey": "qwen2512.txt2img",
+            "modelFamily": CRS_AUTO_FALLBACK_FAMILY,
+            "taskType": "CRS_SINGLE_VIEW",
+            "fourViewSingleOutput": False,
+            "autoSelect": False,
+            "crsSingleFigureFallback": True,
+            "fallbackFromJobId": job.id,
+        },
+    )
+
+
+def _pin_crs_generation_job_params(db: Session, job: Job) -> None:
+    """Stop post-enqueue four-view pollution on CRS singles."""
+    if not hasattr(job, "params_json"):
+        return
+    params = _loads(job.params_json, {})
+    if not isinstance(params, dict):
+        return
+    ctx = params.get("creativeContext") if isinstance(params.get("creativeContext"), dict) else {}
+    task = str(params.get("taskType") or ctx.get("taskType") or "").strip().upper()
+    layout = str(params.get("layout") or ctx.get("layout") or "").strip().lower()
+    if layout in {"native_production_crs", "production_crs"} or task == "CRS_NATIVE_SHEET":
+        return
+    if task not in {"CRS_GENERATION", "CRS_SINGLE_VIEW", CRS_VIEW_GENERATION_TASK}:
+        return
+    changed = False
+    if params.get("useExpandedPrompt") is not False:
+        params["useExpandedPrompt"] = False
+        changed = True
+    if params.get("fourViewSingleOutput") is not False:
+        params["fourViewSingleOutput"] = False
+        changed = True
+    if ctx.get("fourViewSingleOutput") is not False:
+        ctx = dict(ctx)
+        ctx["fourViewSingleOutput"] = False
+        params["creativeContext"] = ctx
+        changed = True
+    if str(params.get("layout") or "") == "four_view":
+        params["layout"] = "crs_view"
+        changed = True
+    intent = params.get("characterSheetIntent")
+    if isinstance(intent, dict) and str(intent.get("layout") or "") == "four_view":
+        intent = dict(intent)
+        intent["layout"] = "law_views"
+        params["characterSheetIntent"] = intent
+        changed = True
+    if not changed:
+        return
+    job.params_json = json.dumps(params)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
 
 
 def _coverage_role_specs() -> list[tuple[str, str, dict[str, Any]]]:
     return [
         (
             "full_body_front",
-            "a production turnaround full-body front reference",
+            "a production full-body front reference",
             {
-                "shot_type": "turnaround reference",
+                "shot_type": "single-camera front reference",
                 "framing": "full body",
                 "camera_angle": "eye level",
                 "orientation": "front view",
                 "environment": "plain gray background",
                 "lighting": "soft studio light",
-                "pose": "standing facing camera in a neutral production turnaround pose",
+                "pose": "standing facing camera in a neutral stance",
                 "focus": "wardrobe silhouette and body proportions",
             },
         ),
         (
             "full_body_side_left",
-            "a production turnaround full-body side reference",
+            "a production full-body side reference",
             {
-                "shot_type": "turnaround reference",
+                "shot_type": "single-camera side reference",
                 "framing": "full body",
                 "camera_angle": "eye level",
                 "orientation": "left side profile",
                 "environment": "plain gray background",
                 "lighting": "soft studio light",
-                "pose": "standing in a neutral side-profile turnaround pose",
+                "pose": "standing in a neutral side-profile stance",
                 "focus": "profile silhouette and hair construction",
             },
         ),
         (
             "full_body_back",
-            "a production turnaround full-body back reference",
+            "a production full-body back reference",
             {
-                "shot_type": "turnaround reference",
+                "shot_type": "single-camera back reference",
                 "framing": "full body",
                 "camera_angle": "eye level",
                 "orientation": "back view",
                 "environment": "plain gray background",
                 "lighting": "soft studio light",
-                "pose": "standing facing away in a neutral turnaround pose",
+                "pose": "standing facing away in a neutral stance",
                 "focus": "rear wardrobe silhouette and ponytail construction",
             },
         ),
@@ -3478,3 +5244,293 @@ def _resolve_sheet_roles_by_tag(db: Session, project_id: str, character_name: st
             out[role] = hit.id
     return out
 
+
+def _candidate_key(item: dict[str, Any]) -> str:
+    for key in ("id", "candidateId", "jobId", "job_id", "sheetAssetId", "assetId", "asset_id"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _candidate_asset_ids(item: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    for key in ("sheetAssetId", "sheet_asset_id", "assetId", "asset_id"):
+        value = str(item.get(key) or "").strip()
+        if value and value not in ids:
+            ids.append(value)
+    for view in item.get("viewJobs") or []:
+        if not isinstance(view, dict):
+            continue
+        for key in ("assetId", "asset_id", "sheetAssetId"):
+            value = str(view.get(key) or "").strip()
+            if value and value not in ids:
+                ids.append(value)
+    return ids
+
+
+def _protected_crs_asset_ids(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    pack: dict[str, Any],
+) -> set[str]:
+    """Assets reject must never delete: canon, persist_crs, parent sheets, uploads, shared refs."""
+    protected: set[str] = set()
+    for key in ("approvedHeroIdentity", "approved_hero_identity"):
+        value = str(pack.get(key) or "").strip()
+        if value:
+            protected.add(value)
+    # Pack roleAssets.hero_identity may point at the current DRAFT sheet.
+    # Protect only persist / approved pointers — never the unapproved draft.
+    try:
+        approved = service.resolve_approved_reference(db, character_id, "hero_identity")
+        if approved:
+            protected.add(str(approved))
+    except Exception:
+        pass
+    try:
+        from .crs_service import get_crs_summary
+
+        summary = get_crs_summary(db, project_id, character_id)
+        if summary is not None:
+            for attr in ("approved_reference_asset_id", "approvedReferenceAssetId", "sheet_asset_id"):
+                value = str(getattr(summary, attr, "") or "").strip()
+                if value:
+                    protected.add(value)
+            dumped = summary.model_dump() if hasattr(summary, "model_dump") else {}
+            for key in ("approved_reference_asset_id", "approvedReferenceAssetId", "sheetAssetId"):
+                value = str(dumped.get(key) or "").strip()
+                if value:
+                    protected.add(value)
+    except Exception:
+        pass
+    from .models import CharacterReferenceAssetRow
+
+    rows = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(CharacterReferenceAssetRow.character_profile_id == character_id)
+        .all()
+    )
+    for row in rows:
+        source = str(getattr(row, "source_type", "") or "").strip().lower()
+        if row.canonical or row.approval_status == "approved" or source in {"upload", "library", "user"}:
+            if row.asset_id:
+                protected.add(str(row.asset_id))
+    for item in list(pack.get("candidates") or []) + list(pack.get("previousCandidates") or []):
+        if not isinstance(item, dict):
+            continue
+        parent = str(item.get("parentSheetId") or item.get("parent_sheet_id") or "").strip()
+        if parent:
+            protected.add(parent)
+    return {aid for aid in protected if aid}
+
+
+def reject_visual_sheet_candidate(
+    db: Session,
+    project_id: str,
+    character_id: str,
+    *,
+    asset_id: str = "",
+    candidate_id: str = "",
+) -> dict[str, Any]:
+    """Delete one draft candidate and candidate-owned pixels only.
+
+    Never mutates persist_crs / crs_revision / canonical hero_identity.
+    If asset delete fails, the candidate stays visible.
+    """
+    wanted = {str(asset_id or "").strip(), str(candidate_id or "").strip()} - {""}
+    if not wanted:
+        raise ValueError("assetId or candidateId is required")
+
+    pack = _load_pack_raw(db, character_id)
+    if not pack:
+        return {
+            "ok": True,
+            "alreadyGone": True,
+            "characterId": character_id,
+            "rejectedAssetIds": [],
+            "dismissedExecutionIds": [],
+            "terminalizedJobIds": [],
+            "pack": None,
+            "crsRevision": None,
+            "approvedHeroIdentity": None,
+        }
+
+    buckets = {
+        "candidates": list(pack.get("candidates") or []),
+        "previousCandidates": list(pack.get("previousCandidates") or []),
+    }
+    matches: list[dict[str, Any]] = []
+    for items in buckets.values():
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            keys = {_candidate_key(item), *(_candidate_asset_ids(item))}
+            if keys & wanted:
+                matches.append(item)
+    if not matches:
+        return {
+            "ok": True,
+            "alreadyGone": True,
+            "characterId": character_id,
+            "rejectedAssetIds": [],
+            "dismissedExecutionIds": [],
+            "terminalizedJobIds": [],
+            "pack": pack,
+            "crsRevision": pack.get("crsRevision"),
+            "approvedHeroIdentity": pack.get("approvedHeroIdentity"),
+        }
+
+    found = matches[0]
+    protected = _protected_crs_asset_ids(db, project_id, character_id, pack)
+    owned: list[str] = []
+    seen_owned: set[str] = set()
+    for item in matches:
+        for aid in _candidate_asset_ids(item):
+            if aid not in seen_owned:
+                seen_owned.add(aid)
+                owned.append(aid)
+    if any(aid in protected for aid in owned):
+        raise ValueError("Cannot reject an approved or canonical Character Reference Sheet.")
+
+    from .models import CharacterReferenceAssetRow
+
+    deletable: list[Asset] = []
+    for aid in owned:
+        asset = db.get(Asset, aid)
+        if asset is None:
+            continue
+        if str(asset.project_id) != str(project_id):
+            raise ValueError("Candidate asset is not owned by this project.")
+        if str(getattr(asset, "scope", "") or "").lower() in {"shared", "global"}:
+            raise ValueError("Cannot reject a shared or library reference.")
+        labels_raw = getattr(asset, "labels_json", "") or "[]"
+        try:
+            labels = json.loads(labels_raw) if isinstance(labels_raw, str) else list(labels_raw or [])
+        except Exception:
+            labels = []
+        label_blob = " ".join(str(x) for x in labels).lower()
+        tag = str(getattr(asset, "tag", "") or "").lower()
+        filename = str(getattr(asset, "filename", "") or "").lower()
+        candidate_owned = (
+            "candidate_" in label_blob
+            or "character_sheet" in label_blob
+            or tag in {"character_sheet", "composed", "imagegen", "imagegen_edit"}
+            or "character_sheet" in filename
+            or "candidate_" in filename
+            or "imagegen" in filename
+        )
+        # Pack-listed draft candidates are owned even when Image Product tags
+        # them as imagegen rather than character_sheet / candidate_*.
+        if not candidate_owned and aid in owned:
+            candidate_owned = True
+        if not candidate_owned:
+            raise ValueError("Refusing to delete an asset that is not candidate-owned.")
+        deletable.append(asset)
+
+    # Also drop non-canonical draft reference rows for these assets only.
+    ref_rows = (
+        db.query(CharacterReferenceAssetRow)
+        .filter(
+            CharacterReferenceAssetRow.character_profile_id == character_id,
+            CharacterReferenceAssetRow.asset_id.in_(owned or ["__none__"]),
+        )
+        .all()
+    )
+    for row in ref_rows:
+        if row.canonical or row.approval_status == "approved":
+            raise ValueError("Cannot reject an approved or canonical Character Reference Sheet.")
+
+    try:
+        for row in ref_rows:
+            db.delete(row)
+        for asset in deletable:
+            path = Path(str(asset.path or ""))
+            db.delete(asset)
+            if path.is_file() and (
+                "character_sheet" in path.name.lower()
+                or "candidate_" in path.name.lower()
+                or "imagegen" in path.name.lower()
+            ):
+                path.unlink()
+        drop = set(owned) | wanted
+
+        def _keep(item: Any) -> bool:
+            if not isinstance(item, dict):
+                return True
+            keys = {_candidate_key(item), *(_candidate_asset_ids(item))}
+            return not (keys & drop)
+
+        pack["candidates"] = [item for item in buckets["candidates"] if _keep(item)]
+        pack["previousCandidates"] = [item for item in buckets["previousCandidates"] if _keep(item)]
+        role_assets = pack.get("roleAssets") if isinstance(pack.get("roleAssets"), dict) else {}
+        hero_ptr = str(role_assets.get("hero_identity") or "").strip()
+        if hero_ptr in drop:
+            role_assets = dict(role_assets)
+            role_assets.pop("hero_identity", None)
+            pack["roleAssets"] = role_assets
+            if not pack.get("approvedHeroIdentity"):
+                pack["phase"] = "awaiting_hero"
+                if not pack.get("candidates"):
+                    pack["status"] = "NOT_STARTED"
+        # Never call persist_crs. Never bump crs_revision / approvedHeroIdentity.
+        _save_pack(db, project_id, character_id, pack)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    dismissed_executions: list[str] = []
+    terminalized_jobs: list[str] = []
+    try:
+        from ..codirector.execution.cancel import dismiss_executions_for_assets
+
+        dismissed_executions = dismiss_executions_for_assets(db, project_id, owned)
+        job_ids = {str(found.get("jobId") or found.get("job_id") or "").strip()} - {""}
+        for view in found.get("viewJobs") or []:
+            if isinstance(view, dict):
+                jid = str(view.get("jobId") or view.get("job_id") or "").strip()
+                if jid:
+                    job_ids.add(jid)
+        for job in db.query(Job).filter(Job.project_id == project_id).all():
+            blob = " ".join(
+                [
+                    str(job.id or ""),
+                    str(job.params_json or ""),
+                    str(job.message or ""),
+                    str(job.output_path or ""),
+                ]
+            )
+            if job.id not in job_ids and not any(aid in blob for aid in owned):
+                continue
+            status = str(job.status or "").lower()
+            if status not in {"done", "failed", "cancelled", "error", "rejected"}:
+                job.status = "cancelled"
+            job.message = f"{job.message or ''} REJECTED".strip()
+            terminalized_jobs.append(str(job.id))
+            # Marking the job cancelled in the DB does not stop the in-flight
+            # Comfy prompt (a blocked native call never checks the cooperative
+            # cancel flag). POST /interrupt when this job owns the active
+            # prompt so reject-during-gen actually cancels the runtime job.
+            try:
+                from ..queue_worker import schedule_comfy_interrupt_if_owner
+
+                schedule_comfy_interrupt_if_owner(str(job.id))
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not schedule Comfy /interrupt for rejected job %s", job.id)
+        if dismissed_executions or terminalized_jobs:
+            db.commit()
+    except Exception:
+        logger.exception("Reject did not dismiss leftover Co-Director executions for %s", character_id)
+
+    return {
+        "ok": True,
+        "characterId": character_id,
+        "rejectedAssetIds": owned,
+        "dismissedExecutionIds": dismissed_executions,
+        "terminalizedJobIds": terminalized_jobs,
+        "pack": _load_pack_raw(db, character_id),
+        "crsRevision": pack.get("crsRevision"),
+        "approvedHeroIdentity": pack.get("approvedHeroIdentity"),
+    }

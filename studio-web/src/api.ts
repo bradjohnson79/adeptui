@@ -8104,6 +8104,44 @@ export const api = {
         body: "{}",
       }),
   },
+  getCharacterCreatorV2: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/cc-v2`,
+    ),
+  generateCharacterViewV2: (
+    projectId: string,
+    characterId: string,
+    view: "front" | "back" | "closeup",
+    body?: { family?: string; visualStyle?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/views/${encodeURIComponent(view)}/generate`,
+      { method: "POST", body: JSON.stringify(body || {}) },
+    ),
+  approveCharacterViewV2: (
+    projectId: string,
+    characterId: string,
+    view: "front" | "back" | "closeup",
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/views/${encodeURIComponent(view)}/approve`,
+      { method: "POST", body: "{}" },
+    ),
+  retryCharacterVisionV2: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/canon/retry-vision`,
+      { method: "POST", body: "{}" },
+    ),
+  retryCharacterRevision2V2: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/canon/retry-revision-2`,
+      { method: "POST", body: "{}" },
+    ),
+  composeCharacterSheetV2: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/sheet/compose`,
+      { method: "POST", body: "{}" },
+    ),
   startCharacterVisualSheet: (
     projectId: string,
     characterId: string,

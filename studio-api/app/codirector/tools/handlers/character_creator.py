@@ -465,6 +465,14 @@ async def get_visual_sheet_status(ctx: ToolContext, args: dict[str, Any]) -> dic
     }
 
 
+
+def _crs_generator_sources(args: dict | None = None, pack: dict | None = None) -> dict:
+    """CD propose sources: explicit args, else saved Character Creator prefs, else AUTO."""
+    from ....character_identity.visual_sheet import resolve_character_creator_generator_sources
+
+    return resolve_character_creator_generator_sources(args=args, pack=pack)
+
+
 def preview_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> ToolPreview:
     character_id = _require_character(ctx, args)
     profile = _profile_or_raise(ctx, character_id)
@@ -479,11 +487,11 @@ def preview_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> Tool
     else:
         count = 1
     return ToolPreview(
-        summary=f"Generate visual character sheet for “{profile.name}” via certified Qwen-Image-2512.",
+        summary=f"Generate visual character sheet for “{profile.name}” via AUTO (Co-Director chooses among available CRS providers).",
         lines=[
             f"Hero candidates: {count} (defaults to 4 when 'candidates'/'options' requested without a number).",
             "Enqueues real image jobs (hero → turnaround/facial → detail samples → performance).",
-            "Engine: qwen2512.txt2img with sequential compiled identity prompts (no silent zimage.ref_edit mix-in).",
+            "Provider AUTO: extras OFF (includeDetails=false, includePerformance=false). Chooses among available CRS providers.",
             "Attaches outputs as Character Identity reference roles (not mock).",
             "Does NOT owner-approve gates — owner must approve after READY_FOR_OWNER.",
             "Preserves locked Korri identity when slug=korri (no blonde/aqua/Anadriya drift).",
@@ -496,7 +504,11 @@ def preview_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> Tool
 
 def apply_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     character_id = _require_character(ctx, args)
-    from ....character_identity.visual_sheet import advance_visual_sheet_pack, start_visual_sheet_generation
+    from ....character_identity.visual_sheet import (
+        _load_pack_raw,
+        advance_visual_sheet_pack,
+        start_visual_sheet_generation,
+    )
 
     # Resolve candidate count: explicit candidateCount wins; otherwise when the
     # request implies "candidates"/"options" without a number, default to 4;
@@ -536,11 +548,14 @@ def apply_propose_visual_sheet(ctx: ToolContext, args: dict[str, Any]) -> dict[s
         ctx.db,
         ctx.project_id,
         character_id,
-        include_details=bool(args.get("includeDetails", True)),
-        include_performance=bool(args.get("includePerformance", True)),
+        include_details=False,
+        include_performance=False,
         hero_asset_id=hero,
-        candidate_count=candidate_count,
+        candidate_count=1,
         visual_style=getattr(profile, "visual_style", "") or "",
+        generator_sources=_crs_generator_sources(args, pack=_load_pack_raw(ctx.db, character_id)),
+        required_views=["front_full"],
+        layout="single_view",
     )
     # Advance once in case hero was provided (sheet can enqueue immediately)
     pack = advance_visual_sheet_pack(ctx.db, ctx.project_id, character_id)

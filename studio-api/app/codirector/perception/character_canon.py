@@ -24,9 +24,25 @@ def register_character_canon(db: Session, project_id: str, character_id: str) ->
     asset_id = ""
     if context is not None:
         asset_id = str(getattr(context, "asset_id", None) or "")
-    if not asset_id and isinstance(by_name, dict):
-        asset_id = str(by_name.get("approved_sheet_asset_id") or by_name.get("approved_casting_asset_id") or "")
-    ok = bool(name and by_name and by_name.get("character_id") and asset_id)
+    if isinstance(by_name, dict):
+        # Identity pixels are the Front view, never the composed 21:9 sheet.
+        asset_id = str(
+            by_name.get("visual_reference")
+            or by_name.get("approved_casting_asset_id")
+            or asset_id
+            or by_name.get("approved_sheet_asset_id")
+            or ""
+        )
+    lock_status = "none"
+    try:
+        from ...character_identity.cc_v2 import load_state
+
+        lock_status = str((load_state(db, character_id).get("visualLock") or {}).get("status") or "none")
+    except Exception:
+        lock_status = "none"
+    # Pre-V2 characters have no lock (`none`) and remain resolvable.
+    lock_ok = lock_status in {"ok", "none"}
+    ok = bool(name and by_name and by_name.get("character_id") and asset_id and lock_ok)
     return {
         "ok": ok,
         "characterId": character_id,
@@ -34,5 +50,6 @@ def register_character_canon(db: Session, project_id: str, character_id: str) ->
         "atTag": f"@{name}" if name else "",
         "approvedSheetAssetId": asset_id,
         "resolvesByName": bool(by_name and by_name.get("character_id")),
+        "visualLockOk": lock_ok,
         "embeddings": False,
     }

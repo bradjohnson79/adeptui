@@ -36,6 +36,7 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
         projectId={projectId}
         characterId={characterId}
         onDeleted={() => onOpenFull?.("__delete__")}
+        mode="express"
       />
       <div className="character-compact__actions">
         <div className="character-compact__actions-left">
@@ -53,6 +54,8 @@ function CharacterDetail({ projectId, characterId, onOpenFull }: CharacterDetail
   );
 }
 
+const LOAD_TIMEOUT_MS = 10_000;
+
 export function CharacterCompactView({ projectId, onOpenFull }: Props) {
   const [characters, setCharacters] = useState<CharacterProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
@@ -63,7 +66,12 @@ export function CharacterCompactView({ projectId, onOpenFull }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = (await api.listCharacterProfiles(projectId)) as { items?: CharacterProfile[] };
+      const result = (await Promise.race([
+        api.listCharacterProfiles(projectId) as Promise<{ items?: CharacterProfile[] }>,
+        new Promise<never>((_, reject) =>
+          window.setTimeout(() => reject(new Error("Character Creator took too long to load.")), LOAD_TIMEOUT_MS),
+        ),
+      ]));
       const list = Array.isArray(result?.items) ? result.items : [];
       setCharacters(list);
       setSelectedId((prev) => prev || list[0]?.id || "");
@@ -100,8 +108,11 @@ export function CharacterCompactView({ projectId, onOpenFull }: Props) {
         <div className="character-compact__state character-compact__state--error" data-testid="character-compact-error">
           <strong>Characters could not load</strong>
           <p>{error}</p>
-          <button type="button" className="character-compact__actions-button primary" onClick={() => void refresh()}>
+          <button type="button" className="character-compact__actions-button primary" data-testid="character-compact-retry" onClick={() => void refresh()}>
             Retry
+          </button>
+          <button type="button" className="character-compact__actions-button" data-testid="character-compact-open-standard" onClick={() => onOpenFull?.()}>
+            Open Standard
           </button>
         </div>
       ) : (

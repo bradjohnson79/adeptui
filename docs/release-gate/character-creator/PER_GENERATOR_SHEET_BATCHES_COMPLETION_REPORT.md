@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.**
+
 # Per-Generator Character Sheet Batches — Completion Report
 
 Governing increment: per-generator Character Sheet batches + API shortlist + close-up portrait law.

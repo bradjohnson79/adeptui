@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.** Four-view / collage default is retired. See `CHARACTER_CREATOR_V2_ARCHITECTURE.md`.
+
 # ADEPT UI — Character Creator Simplification + Character Sheet Pipeline + Advanced Workspaces
 
 **Completion Report** · Branch `beta` · Base SHA `867067c` · Date 2026-08-13

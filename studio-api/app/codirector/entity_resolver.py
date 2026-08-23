@@ -127,13 +127,31 @@ def resolve_character(
     except Exception:
         persisted = {}
     sheet_id = persisted.get("approved_sheet_asset_id") or casting_asset_id
+    v2: dict[str, Any] = {}
+    try:
+        from ..character_identity.cc_v2 import load_state
+
+        v2 = load_state(db, profile.id)
+    except Exception:
+        v2 = {}
+    lock = v2.get("visualLock") or {}
+    views = v2.get("views") or {}
+    front_id = str((views.get("front") or {}).get("assetId") or "") or None
     result: dict[str, Any] = {
         "character_id": profile.id,
         "name": profile.name,
-        "approved_casting_asset_id": sheet_id,
+        "approved_casting_asset_id": front_id or sheet_id,
         "crs_revision": int(persisted.get("crs_revision") or 0),
         "approved_sheet_asset_id": sheet_id,
-        "production_ready": (profile.approval_status or "").lower() == "approved",
+        "production_ready": (profile.approval_status or "").lower() == "approved"
+        or str(lock.get("status") or "") == "ok",
+        "json_revision": int(v2.get("jsonRevision") or persisted.get("json_revision") or 1),
+        "visual_lock": lock,
+        "visual_reference": front_id,
+        "back_reference": str((views.get("back") or {}).get("assetId") or "") or None,
+        "closeup_reference": str((views.get("closeup") or {}).get("assetId") or "") or None,
+        "sheet_asset_id": v2.get("sheetAssetId") or None,
+        "at_tag": f"@{profile.name}" if profile.name else "",
     }
     try:
         from ..character_identity.crs_service import get_crs_summary
@@ -347,7 +365,14 @@ def resolve_shot_request_entities(
 # ---------------------------------------------------------------------------
 
 
-def _character_metadata(db: Session, project_id: str, character_ids: list[str]) -> list[dict[str, Any]]:
+def _character_metadata(
+    db: Session,
+    project_id: str,
+    character_ids: list[str],
+    *,
+    camera: str | None = None,
+    framing: str | None = None,
+) -> list[dict[str, Any]]:
     """Pull concise, production-relevant metadata for each resolved character."""
     from ..character_identity.service import get_profile, list_references
 
@@ -358,14 +383,37 @@ def _character_metadata(db: Session, project_id: str, character_ids: list[str]) 
         except Exception:
             continue
         casting = resolve_approved_reference(db, character_id, "hero_identity")
-        if not casting:
-            try:
-                from ..character_identity.crs_service import load_persisted_crs
+        sheet_id = None
+        try:
+            from ..character_identity.crs_service import load_persisted_crs
 
-                persisted = load_persisted_crs(db, character_id)
-                casting = persisted.get("approved_sheet_asset_id") or casting
-            except Exception:
-                pass
+            persisted = load_persisted_crs(db, character_id)
+            sheet_id = persisted.get("approved_sheet_asset_id")
+            if not casting:
+                casting = sheet_id or casting
+        except Exception:
+            persisted = {}
+        identity_view_id = None
+        identity_view_role = None
+        identity_view_lineage = {}
+        try:
+            from ..character_identity.visual_context import resolve_scene_identity_view
+
+            view = resolve_scene_identity_view(
+                db,
+                project_id,
+                character_id,
+                camera=camera,
+                framing=framing,
+            )
+            if view is not None and view.sourceAssetId:
+                identity_view_id = view.sourceAssetId
+                identity_view_role = view.reference_role
+                identity_view_lineage = dict(view.lineage or {})
+                if not sheet_id:
+                    sheet_id = view.crs_sheet_asset_id
+        except Exception:
+            pass
         refs = list_references(db, project_id, character_id)
         out.append(
             {
@@ -375,6 +423,10 @@ def _character_metadata(db: Session, project_id: str, character_ids: list[str]) 
                 "visual_description": profile.visual_description or "",
                 "visual_style": profile.visual_style or "",
                 "approved_casting_asset_id": casting,
+                "approved_sheet_asset_id": sheet_id,
+                "approved_identity_view_asset_id": identity_view_id,
+                "identity_view_role": identity_view_role,
+                "identity_view_lineage": identity_view_lineage,
                 "reference_asset_ids": [r["asset_id"] for r in refs if r.get("asset_id")],
             }
         )
@@ -412,7 +464,17 @@ def identity_reference_ids(
     """Approved character casting + prop library ids, in that order."""
     ids: list[str] = []
     for char in char_meta or []:
-        aid = str(char.get("approved_casting_asset_id") or "").strip()
+        sheet = str(char.get("approved_sheet_asset_id") or "").strip()
+        aid = str(
+            char.get("approved_identity_view_asset_id")
+            or char.get("identityViewAssetId")
+            or ""
+        ).strip()
+        if not aid:
+            casting = str(char.get("approved_casting_asset_id") or "").strip()
+            # Composed CRS sheet is authority, not scene identity pixels.
+            if casting and casting != sheet:
+                aid = casting
         if aid and aid not in ids:
             ids.append(aid)
     for prop in prop_meta or []:
@@ -478,7 +540,22 @@ def compile_shot_prompt(
 
     Amendment #3: only reads ERS/spatial state — never writes back.
     """
-    char_meta = _character_metadata(db, project_id, shot.characters)
+    camera_hint = " ".join(
+        str(x)
+        for x in (
+            getattr(shot, "raw_text", ""),
+            getattr(shot, "framing", ""),
+            getattr(shot, "orientation", ""),
+        )
+        if x
+    )
+    char_meta = _character_metadata(
+        db,
+        project_id,
+        shot.characters,
+        camera=camera_hint,
+        framing=str(getattr(shot, "framing", "") or ""),
+    )
     prop_meta = _prop_metadata(db, project_id, shot.prop_entities)
 
     from ..spatial_map.ers_projection import compile_structured_blocking
@@ -530,8 +607,12 @@ def compile_shot_prompt(
     # into the provider array (those extras are never loaded by a one-slot graph).
     reference_image_ids: list[str] = []
     for char in char_meta:
-        if char.get("approved_casting_asset_id"):
-            reference_image_ids.append(char["approved_casting_asset_id"])
+        view_id = str(char.get("approved_identity_view_asset_id") or "").strip()
+        sheet_id = str(char.get("approved_sheet_asset_id") or "").strip()
+        casting = str(char.get("approved_casting_asset_id") or "").strip()
+        identity = view_id or (casting if casting and casting != sheet_id else "")
+        if identity:
+            reference_image_ids.append(identity)
     for prop in prop_meta:
         visual = (prop.get("approved_asset_id") or prop.get("library_asset_id") or "").strip()
         if visual and visual not in reference_image_ids:

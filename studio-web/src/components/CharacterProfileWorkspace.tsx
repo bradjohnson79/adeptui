@@ -563,6 +563,7 @@ export function CharacterProfileWorkspace({
           key={selectedId}
           projectId={project.id}
           characterId={selectedId}
+          mode="standard"
           autoFocusName={autoFocusNew}
           renderAdvanced={({ saved }) => (
             <>
@@ -1172,16 +1173,10 @@ function VisualGatesPanel({
           onClick={() => {
             setBusy(true);
             void api
-              .startCharacterVisualSheet(projectId, characterId, {
-                includeDetails: false,
-                includePerformance: false,
-                candidateCount: 1,
-                taskType: "CRS_GENERATION",
-                layout: "four_view",
-              })
+              .generateCharacterViewV2(projectId, characterId, "front")
               .then((r) => {
                 setPack(r.pack);
-                onMsg(`Visual sheet generating · status ${r.pack?.status || "?"}`);
+                onMsg(`Front view started · ${String((r as { phase?: string }).phase || "FRONT_GENERATING")}`);
                 onPackChanged?.();
               })
               .catch((e) => onMsg(e.message))

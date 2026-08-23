@@ -7,20 +7,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import { useOpenCoDirector } from "../CoDirector";
+import { Dialog } from "../ui/Dialog";
 import { LibraryQuickPreviewModal, type LibraryQuickPreviewAsset } from "../library/LibraryQuickPreviewModal";
 import { CharacterActions } from "./CharacterActions";
 import { CharacterActiveCrsCard } from "./CharacterActiveCrsCard";
-import { CharacterGeneratorPanel } from "./CharacterGeneratorPanel";
 import { CharacterProfileForm } from "./CharacterProfileForm";
 import { CharacterReferenceControl } from "./CharacterReferenceControl";
-import { CharacterSheetGenerator } from "./CharacterSheetGenerator";
+import { CharacterV2Studio } from "./CharacterV2Studio";
 import {
   DEFAULT_CHARACTER_GENERATOR_PLAN,
   buildGeneratorSourcesPayload,
   hydratePlanFromPreferences,
   type CharacterGeneratorPlan,
 } from "./characterGeneratorPlan";
-import type { CharacterCandidate, GeneratorOption } from "./types";
+import { candidateAssetId, resolveActiveCrsCard } from "./activeCrsCard";
+import { approvedHistoricalRevisions, type CharacterCandidate, type GeneratorOption } from "./types";
 import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
 import "./characterCore.css";
 
@@ -32,13 +33,11 @@ type Props = {
   onDeleted?: () => void;
   /** When true, auto-focus the name field (new character). */
   autoFocusName?: boolean;
+  /** Express (Co-Director) hides Close-up and generator internals. */
+  mode?: "express" | "standard";
 };
 
-function candidateAssetId(c: CharacterCandidate | null | undefined): string {
-  return String(c?.sheetAssetId || c?.assetId || "").trim();
-}
-
-export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, autoFocusName }: Props) {
+export function CharacterCore({ projectId, characterId, renderAdvanced, onDeleted, autoFocusName, mode = "standard" }: Props) {
   const { t } = useTranslation("characterCreator");
   const openCoDirector = useOpenCoDirector();
   const cp = useCharacterProfile(projectId, characterId);
@@ -52,9 +51,12 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [profileDirty, setProfileDirty] = useState(false);
   const [notice, setNotice] = useState("");
   const [crsRevision, setCrsRevision] = useState<number | null>(null);
+  const [crsApprovedAssetId, setCrsApprovedAssetId] = useState<string>("");
   const [previewAsset, setPreviewAsset] = useState<LibraryQuickPreviewAsset | null>(null);
+  const [approveTarget, setApproveTarget] = useState<CharacterCandidate | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<CharacterCandidate | null>(null);
+  const [crsActionBusy, setCrsActionBusy] = useState(false);
   const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
-  const generateHandlerRef = useRef<(() => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
   const rawPrefsRef = useRef<unknown>(null);
@@ -132,6 +134,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
 
   useEffect(() => {
     let cancelled = false;
+    setCrsApprovedAssetId("");
     void api
       .getCharacterCrs(projectId, characterId)
       .then((res) => {
@@ -139,6 +142,13 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         const rev = (res as { crs_revision?: number; crsRevision?: number })?.crs_revision
           ?? (res as { crsRevision?: number })?.crsRevision;
         if (typeof rev === "number" && rev > 0) setCrsRevision(rev);
+        const approvedId = String(
+          (res as { approved_reference_asset_id?: string; approvedReferenceAssetId?: string })
+            .approved_reference_asset_id
+            || (res as { approvedReferenceAssetId?: string }).approvedReferenceAssetId
+            || "",
+        ).trim();
+        if (approvedId) setCrsApprovedAssetId(approvedId);
       })
       .catch(() => {
         /* CRS endpoint may be empty before first Approve */
@@ -166,32 +176,30 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     async (candidate: CharacterCandidate) => {
       const assetId = candidate.sheetAssetId || candidate.assetId;
       if (!assetId) {
-        setNotice("That look is still generating. Wait for it to finish.");
+        setNotice("That look is still generating. Wait for it to finish, then approve it.");
+        setApproveTarget(null);
         return;
       }
-      if (hero?.asset_id && hero.asset_id !== assetId) {
-        const confirmed = window.confirm(
-          `Replace ${profile?.name || "this character"}'s approved Character Reference Sheet with this one?`,
-        );
-        if (!confirmed) return;
-      }
       setNotice("");
+      setCrsActionBusy(true);
       try {
         const result = await api.approveCharacterCandidate(projectId, characterId, {
           assetId,
           referenceRole: "hero_identity",
           sourceType: candidate.generator || candidate.provider ? "generation" : "generation",
           notes: `Approved character sheet ${candidate.label || ""}`.trim(),
+          ownerConfirmed: true,
         });
         const rev =
           (result as { crsRevision?: number; crs_revision?: number })?.crsRevision
           ?? (result as { crs_revision?: number })?.crs_revision;
         if (typeof rev === "number") setCrsRevision(rev);
-        try {
-          await api.ownerApproveCharacterVisualSheet(projectId, characterId);
-        } catch {
-          // gate approval optional in embedded flow
-        }
+        const approvedId = String(
+          (result as { approvedSheetAssetId?: string; assetId?: string }).approvedSheetAssetId
+          || (result as { assetId?: string }).assetId
+          || assetId,
+        ).trim();
+        if (approvedId) setCrsApprovedAssetId(approvedId);
         await cp.refresh();
         try {
           await api.promoteCharacterIdentity(projectId, characterId);
@@ -202,9 +210,71 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         setNotice(`${profile?.name || "Character"} is ready. ${at}`);
       } catch (e) {
         setNotice(e instanceof Error ? e.message : "Approve failed");
+      } finally {
+        setCrsActionBusy(false);
+        setApproveTarget(null);
       }
     },
-    [projectId, characterId, hero, profile, cp],
+    [projectId, characterId, profile, cp],
+  );
+
+  const requestApprove = useCallback((candidate: CharacterCandidate) => {
+    const assetId = candidate.sheetAssetId || candidate.assetId;
+    if (!assetId) {
+      setNotice("That look is still generating. Wait for it to finish.");
+      return;
+    }
+    setApproveTarget(candidate);
+  }, []);
+
+  const requestReject = useCallback((candidate: CharacterCandidate) => {
+    setRejectTarget(candidate);
+  }, []);
+
+  const handleReject = useCallback(
+    async (candidate: CharacterCandidate) => {
+      const assetId = candidate.sheetAssetId || candidate.assetId || "";
+      // Reject-during-gen: a generating draft has no asset yet, but it has a
+      // jobId. The backend reject path matches by candidateId (jobId), cancels
+      // the in-flight Comfy job (POST /interrupt), and removes the placeholder
+      // from the pack — so the creator can cancel a stuck generation.
+      const candidateKey =
+        (candidate as { id?: string; jobId?: string }).id
+        || (candidate as { jobId?: string }).jobId
+        || "";
+      if (!assetId && !candidateKey) {
+        setNotice("This draft has no asset or job to reject yet.");
+        setRejectTarget(null);
+        return;
+      }
+      setNotice("");
+      setCrsActionBusy(true);
+      try {
+        await api.rejectCharacterCandidate(projectId, characterId, {
+          assetId,
+          candidateId: candidateKey,
+        });
+        // Remove the rejected candidate by assetId OR candidateKey (jobId) so a
+        // generating draft with no asset is still cleared from the grid.
+        const matchId = assetId || candidateKey;
+        const isMatch = (c: CharacterCandidate) => {
+          const a = candidateAssetId(c);
+          if (a && a === matchId) return true;
+          const cId = (c as { id?: string; jobId?: string }).id || (c as { jobId?: string }).jobId || "";
+          return Boolean(cId) && cId === matchId;
+        };
+        setCandidates((prev) => prev.filter((c) => !isMatch(c)));
+        setHistory((prev) => prev.filter((c) => !isMatch(c)));
+        await cp.refresh();
+        setNotice("Draft Character Reference Sheet rejected.");
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : "Reject failed");
+      } finally {
+        setCrsActionBusy(false);
+        setRejectTarget(null);
+      }
+    },
+    [projectId, characterId, cp],
   );
 
   const handleUseAsIdentity = useCallback(
@@ -216,6 +286,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           referenceRole: "hero_identity",
           sourceType,
           notes: "Used reference image as character identity (no AI generation).",
+          ownerConfirmed: true,
         });
         await cp.refresh();
         setNotice("Reference set as this character's look.");
@@ -255,31 +326,34 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     if (ok) onDeleted?.();
   }, [cp, profile, onDeleted]);
 
-  const approvedSheet = useMemo((): CharacterCandidate | null => {
-    if (!hero?.asset_id) return null;
-    const match = candidates.find((c) => candidateAssetId(c) === hero.asset_id)
-      || history.find((c) => candidateAssetId(c) === hero.asset_id);
-    if (match) return { ...match, assetId: hero.asset_id, sheetAssetId: match.sheetAssetId || hero.asset_id };
-    return {
-      assetId: hero.asset_id,
-      sheetAssetId: hero.asset_id,
-      label: profile?.name || "Character Reference Sheet",
-      status: "done",
-      qualityTier: "2K",
-    };
-  }, [hero, candidates, history, profile?.name]);
-
-  const draftSheet = useMemo((): CharacterCandidate | null => {
-    const current = candidates[0];
-    if (!current) return null;
-    const id = candidateAssetId(current);
-    if (hero?.asset_id && id === hero.asset_id) return null;
-    return current;
-  }, [candidates, hero]);
-
-  const activeSheet = draftSheet || approvedSheet;
-  const displayRevision = (activeSheet?.revision as number | undefined) ?? crsRevision;
-  const activeStatus = draftSheet ? "draft" : approvedSheet ? "approved" : "none";
+  const approvedAssetId = crsApprovedAssetId || hero?.asset_id || "";
+  const approvedHistory = useMemo(
+    () => approvedHistoricalRevisions(history, approvedAssetId),
+    [history, approvedAssetId],
+  );
+  const approvedMatch = useMemo(() => {
+    if (!approvedAssetId) return null;
+    return (
+      candidates.find((c) => candidateAssetId(c) === approvedAssetId)
+      || history.find((c) => candidateAssetId(c) === approvedAssetId)
+      || null
+    );
+  }, [approvedAssetId, candidates, history]);
+  const draftSheet = candidates[0] || null;
+  const resolvedCrs = useMemo(
+    () =>
+      resolveActiveCrsCard({
+        approvedAssetId,
+        crsRevision,
+        draft: draftSheet,
+        approvedMatch,
+        characterName: profile?.name,
+      }),
+    [approvedAssetId, approvedMatch, crsRevision, draftSheet, profile?.name],
+  );
+  const activeSheet = resolvedCrs.hero;
+  const displayRevision = resolvedCrs.revision;
+  const activeStatus = resolvedCrs.status;
   const generatorLabel =
     activeSheet?.provenance ||
     activeSheet?.generator ||
@@ -300,7 +374,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         match?.provenance || match?.generator || "",
         match?.width && match?.height ? `${match.width}×${match.height}` : "",
         crsRevision != null ? `Revision ${crsRevision}` : "",
-        productionReady && !draftSheet ? "Approved" : "Draft",
+        activeStatus === "approved" ? "Approved" : "Draft",
       ].filter(Boolean);
       setPreviewAsset({
         id: assetId,
@@ -309,7 +383,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
         filename: match?.label || undefined,
       });
     },
-    [candidates, profile?.name, crsRevision, productionReady],
+    [activeStatus, candidates, profile?.name, crsRevision],
   );
 
   if (cp.loading && !profile) {
@@ -346,49 +420,68 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       </div>
 
       <div className="character-core__section">
-        <h3 className="character-core__section-title">{t("sheet")}</h3>
-        <CharacterGeneratorPanel
-          projectId={projectId}
-          visualStyle={profile?.visual_style}
-          hasReference={hasReference}
-          value={plan}
-          onChange={setPlan}
-          onInventory={handleInventory}
-        />
-        <CharacterSheetGenerator
+        <h3 className="character-core__section-title">{mode === "express" ? "Character views" : t("sheet")}</h3>
+        <CharacterV2Studio
           projectId={projectId}
           characterId={characterId}
-          profile={profile}
-          plan={plan}
-          localOptions={localOptions}
-          apiOptions={apiOptions}
-          hasReference={hasReference}
-          onCandidates={setCandidates}
-          onHistory={setHistory}
-          retryHandlerRef={retryHandlerRef}
-          generateHandlerRef={generateHandlerRef}
+          mode={mode}
+          saved={saved}
         />
+        {resolvedCrs.showBoth && resolvedCrs.canon ? (
+          <CharacterActiveCrsCard
+            hero={resolvedCrs.canon}
+            characterName={profile?.name || ""}
+            status="approved"
+            revision={typeof crsRevision === "number" ? crsRevision : displayRevision}
+            generatorLabel={
+              resolvedCrs.canon.provenance
+              || resolvedCrs.canon.generator
+              || (resolvedCrs.canon.model ? String(resolvedCrs.canon.model) : null)
+            }
+            conditioningLabel={
+              resolvedCrs.canon.conditioningMode === "REFERENCE_CONDITIONED"
+                ? "Uses your photo"
+                : resolvedCrs.canon.conditioningMode === "PROFILE_GUIDED"
+                  ? "From the profile"
+                  : null
+            }
+            testId="character-active-crs-canon"
+            title="Approved Character Reference Sheet"
+            onPreview={openPreview}
+            disabled={crsActionBusy}
+            onApprove={requestApprove}
+          />
+        ) : null}
         <CharacterActiveCrsCard
-          hero={activeSheet}
+          hero={resolvedCrs.showBoth ? resolvedCrs.draft : activeSheet}
           characterName={profile?.name || ""}
-          status={activeStatus}
+          status={resolvedCrs.showBoth ? "draft" : activeStatus}
           revision={typeof displayRevision === "number" ? displayRevision : crsRevision}
           generatorLabel={generatorLabel}
           conditioningLabel={conditioningLabel}
+          testId={resolvedCrs.showBoth ? "character-active-crs-draft" : "character-active-crs"}
+          title={
+            resolvedCrs.showBoth
+              ? "Draft Character Reference Sheet"
+              : activeStatus === "approved"
+                ? "Approved Character Reference Sheet"
+                : undefined
+          }
           onPreview={openPreview}
-          onRegenerate={() => generateHandlerRef.current?.()}
-          onApprove={(c) => void handleApprove(c)}
+          disabled={crsActionBusy}
+          onApprove={requestApprove}
+          onReject={requestReject}
         />
         {productionReady && atName ? (
           <p className="character-core__hint" data-testid="character-approved-banner">
             {profile?.name || "Character"} is ready. {atName}
           </p>
         ) : null}
-        {history.length ? (
+        {approvedHistory.length ? (
           <details className="character-core__history" data-testid="character-crs-history">
             <summary>Advanced — Previous versions</summary>
             <ul className="character-core__history-list">
-              {history.slice(0, 8).map((item, i) => {
+              {approvedHistory.slice(0, 8).map((item, i) => {
                 const id = candidateAssetId(item);
                 return (
                   <li key={id || `hist-${i}`}>
@@ -438,6 +531,43 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       ) : null}
 
       <LibraryQuickPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} />
+      <Dialog
+        open={!!approveTarget}
+        title={`Approve ${profile?.name || "this character"}'s Character Reference Sheet?`}
+        primaryLabel="Approve"
+        secondaryLabel="Cancel"
+        closeOnPrimary={false}
+        primaryDisabled={crsActionBusy}
+        primaryLoading={crsActionBusy}
+        testId="character-approve-crs-dialog"
+        onClose={() => {
+          if (!crsActionBusy) setApproveTarget(null);
+        }}
+        onPrimary={() => {
+          if (approveTarget) void handleApprove(approveTarget);
+        }}
+      >
+        This becomes the look for {profile?.name || "this character"}. Cancel or dismiss keeps the draft unchanged.
+      </Dialog>
+      <Dialog
+        open={!!rejectTarget}
+        title={`Reject ${profile?.name || "this character"}'s draft Character Reference Sheet?`}
+        primaryLabel="Reject"
+        secondaryLabel="Cancel"
+        danger
+        closeOnPrimary={false}
+        primaryDisabled={crsActionBusy}
+        primaryLoading={crsActionBusy}
+        testId="character-reject-crs-dialog"
+        onClose={() => {
+          if (!crsActionBusy) setRejectTarget(null);
+        }}
+        onPrimary={() => {
+          if (rejectTarget) void handleReject(rejectTarget);
+        }}
+      >
+        This deletes only that draft candidate. The approved Character Reference Sheet is not touched. Cancel or dismiss keeps the draft.
+      </Dialog>
     </div>
   );
 }

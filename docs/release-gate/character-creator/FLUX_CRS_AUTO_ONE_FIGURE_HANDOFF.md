@@ -1,3 +1,5 @@
+> **HISTORICAL — SUPERSEDED BY CHARACTER CREATOR V2.**
+
 # FLUX CRS AUTO Route + One-Figure Gate — Grok Integration Handoff
 
 Status: implementation slice on `feat/crs-flux-auto-one-figure`.

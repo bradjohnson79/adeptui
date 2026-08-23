@@ -132,6 +132,7 @@ class ApproveCandidateBody(BaseModel):
     referenceRole: str = "hero_identity"
     sourceType: str = "generation"
     notes: str = "Approved casting candidate"
+    ownerConfirmed: bool = False
 
 
 @router.post("/projects/{project_id}/characters/{character_id}/approve-candidate")
@@ -149,7 +150,40 @@ def approve_candidate(
         reference_role=body.referenceRole,
         source_type=body.sourceType,
         notes=body.notes,
+        owner_confirmed=body.ownerConfirmed,
     )
+
+
+class RejectCandidateBody(BaseModel):
+    assetId: str = ""
+    candidateId: str = ""
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/reject-candidate")
+def reject_candidate(
+    project_id: str, character_id: str, body: RejectCandidateBody, db: Session = Depends(get_db)
+):
+    """Remove one draft CRS candidate and candidate-owned pixels only.
+
+    Never mutates persist_crs, crs_revision, or the approved hero identity.
+    """
+    _require_flag()
+    _project(db, project_id)
+    from .visual_sheet import reject_visual_sheet_candidate
+
+    try:
+        return reject_visual_sheet_candidate(
+            db,
+            project_id,
+            character_id,
+            asset_id=body.assetId,
+            candidate_id=body.candidateId,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "REJECT_CANDIDATE_FAILED", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/projects/{project_id}/characters/{character_id}/crs")
@@ -166,6 +200,22 @@ def get_character_crs(project_id: str, character_id: str, db: Session = Depends(
             detail={"code": "NOT_FOUND", "message": "Character Profile not found."},
         )
     return summary.model_dump()
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/character-json")
+def get_character_json_route(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    """Approved Character JSON: profile + approved sheet + four panel roles. No third schema."""
+    _require_flag()
+    _project(db, project_id)
+    from .crs_service import get_character_json
+
+    payload = get_character_json(db, project_id, character_id)
+    if payload is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Character Profile not found."},
+        )
+    return payload
 
 
 @router.get("/projects/{project_id}/characters/{character_id}/coverage")
@@ -909,8 +959,8 @@ def get_korri_canon(project_id: str, db: Session = Depends(get_db)):
 
 
 class VisualSheetStartBody(BaseModel):
-    includeDetails: bool = True
-    includePerformance: bool = True
+    includeDetails: bool = False
+    includePerformance: bool = False
     heroAssetId: Optional[str] = None
     candidateCount: Optional[int] = None
     visualStyle: Optional[str] = None
@@ -919,6 +969,114 @@ class VisualSheetStartBody(BaseModel):
     # A pool set to None (or omitted entirely when neither key present) is disabled.
     generatorSources: Optional[Dict[str, Any]] = None
     generationMode: Optional[str] = None
+    taskType: Optional[str] = None
+    viewType: Optional[str] = None
+    family: Optional[str] = None
+    generatorFamily: Optional[str] = None
+    layout: Optional[str] = None
+    requiredViews: Optional[list[str]] = None
+    fourViewSingleOutput: Optional[bool] = None
+
+
+class CCV2GenerateBody(BaseModel):
+    family: Optional[str] = None
+    visualStyle: Optional[str] = None
+
+
+class CCV2ApproveBody(BaseModel):
+    ownerConfirmed: bool = True
+
+
+@router.get("/projects/{project_id}/characters/{character_id}/cc-v2")
+def get_cc_v2(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import get_status
+
+    return get_status(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/views/{view}/generate")
+def generate_cc_v2_view(
+    project_id: str,
+    character_id: str,
+    view: str,
+    body: CCV2GenerateBody | None = None,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import generate_view
+
+    payload = body or CCV2GenerateBody()
+    try:
+        return generate_view(
+            db,
+            project_id,
+            character_id,
+            view,
+            family=payload.family,
+            visual_style=payload.visualStyle,
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "CC_V2_ERROR", "message": str(exc)}) from exc
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/views/{view}/approve")
+async def approve_cc_v2_view(
+    project_id: str,
+    character_id: str,
+    view: str,
+    body: CCV2ApproveBody | None = None,
+    db: Session = Depends(get_db),
+):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import approve_view
+
+    payload = body or CCV2ApproveBody()
+    try:
+        return await approve_view(
+            db, project_id, character_id, view, owner_confirmed=payload.ownerConfirmed
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "CC_V2_ERROR", "message": str(exc)}) from exc
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/canon/retry-vision")
+async def retry_cc_v2_vision(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import retry_vision
+
+    return await retry_vision(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/canon/retry-revision-2")
+async def retry_cc_v2_revision_2(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import retry_revision_2
+
+    return await retry_revision_2(db, project_id, character_id)
+
+
+@router.post("/projects/{project_id}/characters/{character_id}/sheet/compose")
+def compose_cc_v2_sheet(project_id: str, character_id: str, db: Session = Depends(get_db)):
+    _require_flag()
+    _project(db, project_id)
+    from .cc_v2 import compose_sheet
+
+    try:
+        return compose_sheet(db, project_id, character_id)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "CC_V2_ERROR", "message": str(exc)}) from exc
 
 
 class VisualSheetPreferencesBody(BaseModel):
@@ -932,7 +1090,7 @@ class VisualSheetApproveBody(BaseModel):
 
 @router.post("/projects/{project_id}/characters/{character_id}/visual-sheet/generate")
 def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStartBody, db: Session = Depends(get_db)):
-    """Enqueue Generated Character Image Profile via certified Z-Image / character-sheet."""
+    """Enqueue a Character Reference Sheet. Provider AUTO chooses among available CRS routes; extras default OFF."""
     _require_flag()
     _project(db, project_id)
     from .visual_sheet import start_visual_sheet_generation
@@ -949,6 +1107,13 @@ def start_visual_sheet(project_id: str, character_id: str, body: VisualSheetStar
             visual_style=body.visualStyle,
             generator_sources=body.generatorSources,
             generation_mode=body.generationMode,
+            task_type=body.taskType,
+            view_type=body.viewType,
+            family=body.family,
+            generator_family=body.generatorFamily,
+            required_views=body.requiredViews,
+            layout=body.layout,
+            four_view_single_output=body.fourViewSingleOutput,
         )
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "VISUAL_SHEET_ERROR", "message": str(exc)}) from exc
