@@ -29,11 +29,15 @@ Adept UI accumulated overlapping launch stacks, readiness aliases, unbounded pol
 
 **Program shape:** inventory first, then six certified batches. This document is updated after each batch.
 
-**Working tree:** implemented on `feat/character-creator-final-closure` above starting SHA `1c86560` (unccommitted cull work).
+**Cull commits:** `2a83a49` then `0dd6edf` (tip). Leftover dirty tree is Character Creator / evidence, not the cull SHA.
 
-**Named cert project:** `Adept Stability Cert` `2bc632b8-b329-4d3b-bc40-b68dc41b6bb1` (`data/runtime/stability-cert-project.json`).
+**Named cert project:** `Adept Stability Cert` `2bc632b8-b329-4d3b-bc40-b68dc41b6bb1` (`data/runtime/stability-cert-project.json` — runtime artifact, not committed).
 
-**Verdict (living):** pending peer review (see Final Recommendation)
+**Verdict (living):**
+
+```text
+GO — ADEPT UI STABILITY CULL + RELIABILITY CONSOLIDATION CERTIFIED
+```
 
 ---
 
@@ -867,21 +871,87 @@ Recorded honestly; not hidden to force green.
 | Future | Electron/OSS supervisor without Windows-only pieces |
 | Leftover | Historical milestone reports and one-off m30/m42 capture scripts still mention `:8760` |
 | Leftover | Duplicate HTTP aliases not converted to `410` in bulk |
-| Blocker | **CULL SOURCE UNCOMMITTED** — required files are on the working tree only (Clean-Clone Law / AGENTS.md §4). Not committed because this conversation did not request a git commit. |
+| Leftover | EXTERNAL `scripts/beta_runtime/web_server.py --port 8760` may still be bound from an old session. Supervisor does not start it. |
+| Leftover | Dirty tree still holds mixed Character Creator files (`certified-registry.json`, `imagegen_workflows.py`, ~1176 untracked). Not part of the cull SHA. |
+| Accepted | Windows `DETACHED_PROCESS` can make the first post-restart API PID differ from the listener; a later `start` adopts the healthy listener. |
+| Accepted | `test_modern_foundation_ready` / `test_wave2_gate_go` need gitignored `artifacts/`. They passed from the main repo that has those artifacts. |
+| Accepted | `.cursor/rules/beta-refresh-after-build.mdc` remains gitignored. Product start is `npm run beta:*` → Python supervisor. |
+
+---
+
+## Recertification from committed SHA (2026-08-23)
+
+### A — Commit closure
+
+| Item | Evidence |
+|---|---|
+| Cull commit | `2a83a493648692859f8323e11c82de8b8b106cca` — `feat: certify Adept UI stability cull and runtime consolidation` (107 files) |
+| Follow-up | `0dd6edf6a94b63b4bcd74e8f06bc888e4fd9ac1c` — fail-close modules + drop extra m42 hash asserts that needed uncommitted registry hashes |
+| Tip | `0dd6edf` |
+| Included | Runtime supervisor + shims + `beta:*`; Comfy bind-or-fail / family readiness; JobPanel `onDoneRef`; CRS `pollExhaustedRef`; `/api/file` + owner deny; torch isolation; `defaultEligible`; stability-cull tests/e2e; this doc |
+| Excluded | `certified-registry.json`; `imagegen_workflows.py`; `audit.py`; Korri approve scripts; untracked CC specs; `.runtime/`; `data/runtime/`; `studio-web/dist`; remaining ~1100 untracked CC/docs tree |
+| Worktree proof | Disposable `.worktrees/cull-head` at `0dd6edf`: required strings present; supervisor `:8760` mentions are retired-not-started only; Vite default `8758` |
+
+### B — Owner canon
+
+`GET` Schnick `2347bf46-3762-4763-86c5-4a6032522278` name=Schnick Coffee. `GET` Korri `c49371ed-ba6b-4c16-ba98-a8b28b72118b` name=Korri. Persist CRS Rev 4 `READY_FOR_OWNER` `autoApproved=False`. Owner-write POST with deny header 403; Korri still Korri after.
+
+```text
+OWNER CANON MUTATION: NONE
+```
+
+### C — Runtime evidence
+
+- `python scripts/run_runtime_supervisor.py status`: API UP; Comfy reused pid 66596; Ollama EXTERNAL pid 20576; `retired_web_8760: not started`
+- Controlled `restart`: API new owned PID; Comfy reused; tunnel owned; Ollama EXTERNAL unchanged; healthz 200; Vite `:5173` 200
+- Duplicate `start` #2: `studio_api: OK (reused) already healthy — reused PID 64000` in 856ms
+- Leftover EXTERNAL `:8760` (`web_server.py` pid 21536) was not started by this supervisor
+
+### D — Exact test counts
+
+| Suite | Result |
+|---|---|
+| Worktree pytest (cull + installer/dock/qwen/m42 minus 2 artifact-gated) | **81 passed, 2 deselected** |
+| Main-repo artifact-gated m42 foundation/wave2 | **2 passed** |
+| Worktree vitest (sheet + JobPanel + CIS fail-close) | **33 passed (4 files)** |
+| Worktree `npm --prefix studio-web run build` | **PASS** |
+| Playwright stability-cull (cert `2bc632b8-…`, `:5173` / `:8758`) | **2 passed (7.0s)** |
+| Break: `..` file API | live **403** |
+| Break: owner-write header | live **403** `OWNER_FIXTURE_WRITE_DENIED` |
+| Break: `creatorUiBase()` on `:8760` | throws |
+
+### E — Peer review
+
+| Reviewer | Agent | Verdict |
+|---|---|---|
+| GLM 5.2 | [GLM 5.2 cull peer](b1a06e3b-e225-47fc-9720-6dedcc733f2e) | **GO** — independently confirmed all 11 required strings at `0dd6edf` |
+| Kimi K3 | [Kimi K3 cull peer](15f35a12-4ec5-46ae-8807-b2fb0fcd7913) | **GO** — no blocker; disclosed test-trim + stale pre-commit doc text (this section stamps it) |
+
+Reconcile: no valid mandatory finding. Do not self-certify around a blocker — none remained.
+
+### F — Binary cull verdict
+
+```text
+GO — ADEPT UI STABILITY CULL + RELIABILITY CONSOLIDATION CERTIFIED
+```
+
+### G — Workflow matrix
+
+See [WORKFLOW_AUDIT_HANDOFF.md](WORKFLOW_AUDIT_HANDOFF.md). Live `:8188/object_info` 200 / 2007 nodes. Isolated H3 `:8192` down.
+
+### H — Next-workflow priorities (no rebuild)
+
+1. H3 containment (`:8192` down; H3-named nodes exist on production `:8188`).
+2. Commit or drop dirty SenseNova / Qwen Edit 2509 registry rows so clean-clone Character Creator matches callers.
+3. FLUX loader honesty (Certified, Nunchaku absent).
+4. Illustrious Certified + null `graphHash`.
+5. LTX 2.5 stay Testing/Built until executable certification.
 
 ---
 
 ## Final Recommendation
 
-Peer reviews: [GLM 5.2](e8f12234-e21e-475a-9aed-7a5b2579b09e) (1 blocker, fixed) and [Kimi K3](7c8c4890-de3c-4b36-8455-700a819ed14a) (5 blockers; 4 fixed in tree, 1 remaining).
-
-Code and measured tests for Batches 1–6 are on this working tree. The governing binary gate cannot pass while the cull is absent from git.
-
-```text
-NO-GO — CULL SOURCE UNCOMMITTED
-```
-
-After an explicit commit of the cull (without secrets, without Schnick/Korri mutation), re-run the no-8760 + file-API + JobPanel tests and the two Playwright stability-cull specs. Desired end state only then:
+Pre-commit peers: [GLM 5.2](e8f12234-e21e-475a-9aed-7a5b2579b09e) and [Kimi K3](7c8c4890-de3c-4b36-8455-700a819ed14a) (blockers fixed before commit). Post-commit peers both **GO**.
 
 ```text
 GO — ADEPT UI STABILITY CULL + RELIABILITY CONSOLIDATION CERTIFIED
