@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
-const BETA_UI_BASE = "http://127.0.0.1:8760";
+const BETA_UI_BASE = "http://127.0.0.1:5173";
 const BETA_API_BASE = "http://127.0.0.1:8758";
 const BETA_API_PORT = "8758";
 

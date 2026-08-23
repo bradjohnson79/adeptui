@@ -33,6 +33,24 @@ export const CHARACTER_SHEET_PRODUCT_CANDIDATE_COUNT = 1;
 /** Minimal live proof only. Do not use as the product default. */
 export const CHARACTER_SHEET_E2E_CANDIDATE_COUNT = 1;
 
+
+/** First local option that is Runtime Ready / executable. FLUX wins when it is first ready. */
+export function firstExecutableReadyLocal(
+  localOptions?: GeneratorOption[],
+): GeneratorOption | undefined {
+  return (localOptions || []).find((opt) => opt.executable !== false);
+}
+
+export function useReadyLocalButtonLabel(opt: GeneratorOption): string {
+  const id = `${opt.id} ${opt.family || ""} ${opt.label || ""}`.toLowerCase();
+  if (id.includes("flux")) return "FLUX";
+  return opt.label || opt.id;
+}
+
+export function selectedLocalNotReadyCopy(selectedLabel: string): string {
+  return `${selectedLabel} is installed but not Runtime Ready.`;
+}
+
 export function characterGenerateBlockReason(input: {
   name?: string | null;
   plan: CharacterGeneratorPlan;
@@ -45,6 +63,13 @@ export function characterGenerateBlockReason(input: {
   if (!input.name?.trim()) return `${CHARACTER_SHEET_START_ERROR_PREFIX} Character Profile is missing required name.`;
   if (!input.plan.localEnabled && !input.plan.apiEnabled) {
     return `${CHARACTER_SHEET_START_ERROR_PREFIX} Enable a Local or Cloud generator to create character sheets.`;
+  }
+  const selected2509 = input.plan.localFamilies.find(
+    (row) => row.enabled && (row.family === "qwen_edit_2509" || row.family === "qwen-image-edit-2509"),
+  );
+  const opt2509 = (input.localOptions || []).find((o) => o.id === "qwen_edit_2509");
+  if (selected2509 && opt2509 && opt2509.executable === false) {
+    return `${CHARACTER_SHEET_START_ERROR_PREFIX} Qwen Image Edit 2509 is installed but not Runtime Ready.`;
   }
   const summary = summarizeGenerationPlan(input.plan, input.localOptions);
   if (summary.totalSheets < 1 || !hasExecutableSource(input.plan, input.localOptions)) {
@@ -66,6 +91,10 @@ export function buildCharacterSheetStartBody(input: {
   generationMode?: "profile_guided" | "reference_conditioned";
   generatorSources: CharacterSheetGeneratorSourcesPayload;
   candidateCount: number;
+  taskType: "CRS_GENERATION";
+  layout: "four_view";
+  requiredViews: string[];
+  fourViewSingleOutput: false;
 } {
   const generationMode = firstPlannedGenerationMode(
     input.plan,
@@ -80,6 +109,10 @@ export function buildCharacterSheetStartBody(input: {
     generationMode,
     generatorSources: buildGeneratorSourcesPayload(input.plan),
     candidateCount: 1,
+    taskType: "CRS_GENERATION",
+    layout: "four_view",
+    requiredViews: ["front_full", "side_full", "back_full", "face_closeup"],
+    fourViewSingleOutput: false,
   };
 }
 

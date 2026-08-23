@@ -9,9 +9,11 @@ from .contracts import GenerationMode, ImageProviderDescriptor, ProviderReadines
 GenerationModeFilter = Literal["best_match", "choose_model", "all_models"]
 
 _FAMILY_FALLBACK: dict[str, str] = {
+    "qwen-image-edit-2509-local": "qwen_edit_2509",
     "qwen-image-2512-local": "qwen2512",
     "flux-local": "flux",
     "zimage-local": "zimage",
+    "illustrious-local": "illustrious",
     "krea2-turbo-local": "krea2",
     "krea2-raw-local": "krea2",
     "flux-kie": "flux",
@@ -25,9 +27,16 @@ _FAMILY_FALLBACK: dict[str, str] = {
     "hidream-local": "hidream",
     "flux-schnell-local": "flux",
     "flux-dev-local": "flux",
+    "sensenova-u15-local": "sensenova",
 }
 
 _HINTS: dict[str, dict[str, Any]] = {
+    "qwen-image-edit-2509-local": {
+        "nativeResolutions": ["1K", "2K"],
+        "upscaleSupported": False,
+        "licenseNote": "Apache-2.0 local (Qwen-Image-Edit-2509 I2I)",
+        "costHint": "Local GPU",
+    },
     "qwen-image-2512-local": {
         "nativeResolutions": ["1K", "2K"],
         "upscaleSupported": True,
@@ -132,6 +141,13 @@ _HINTS: dict[str, dict[str, Any]] = {
         "licenseNote": "FLUX Dev — non-commercial / license restricted",
         "costHint": "Local GPU",
     },
+    "sensenova-u15-local": {
+        "nativeResolutions": ["2K"],
+        "nativePixelSizes": ["2720x1536", "2048x2048"],
+        "upscaleSupported": False,
+        "licenseNote": "Apache-2.0 local (SenseNova U1.5-8B-MoT)",
+        "costHint": "Local GPU (24 GB-class VRAM)",
+    },
 }
 
 
@@ -175,6 +191,7 @@ def _map_local_readiness(model: Any) -> ProviderReadiness:
 #: A model is "ready" only when its weights verify on disk; Certified metadata
 #: alone is never install truth.
 _COMPONENT_GATE_BY_MODEL: dict[str, str] = {
+    "qwen-image-edit-2509-local": "qwen_image_edit_2509_models",
     "qwen-image-2512-local": "qwen_image_2512_models",
     "zimage-local": "zimage_models",
     "flux-local": "flux1_dev_local",
@@ -193,6 +210,7 @@ _COMPONENT_GATE_BY_MODEL: dict[str, str] = {
     "omnigen-local": "omnigen_local",
     "janus-pro-local": "janus_pro_local",
     "hunyuan-image-local": "hunyuan_image_local",
+    "sensenova-u15-local": "sensenova_u15_models",
 }
 
 #: Dock model → certified-registry workflow whose capability flags the
@@ -284,6 +302,7 @@ def _from_local_model(model: Any) -> ImageProviderDescriptor:
         "supports": list(getattr(model, "supports", None) or []),
         "estimatedVramGb": getattr(model, "estimatedVramGb", None),
         "lifecycle": lifecycle,
+        "defaultEligible": bool(getattr(model, "defaultEligible", False)),
     }
     caps = _workflow_capabilities(mid)
     if caps:
@@ -346,9 +365,11 @@ def list_image_providers(*, include_unready: bool = True) -> list[ImageProviderD
     seen: set[str] = set()
 
     try:
-        from ..production_control.model_registry import list_models
+        from ..production_control.model_registry import is_ordinary_picker_hidden, list_models
 
         for model in list_models("image"):
+            if is_ordinary_picker_hidden(str(getattr(model, "id", "") or "")):
+                continue
             locality = str(getattr(model, "locality", "") or "")
             if locality not in {"local", "docker"} and getattr(model, "executionClass", "") != "docker_local":
                 # Hosted static catalog rows are superseded by live discovery when available
@@ -478,6 +499,7 @@ def family_catalog() -> list[dict[str, Any]]:
     from ..image_product.recommend import _estimates, _executable, _family_status
 
     labels = {
+        "qwen_edit_2509": "Qwen Image Edit 2509",
         "qwen2512": "Qwen-Image-2512",
         "zimage": "ZImage",
         "flux": "FLUX",
@@ -485,8 +507,9 @@ def family_catalog() -> list[dict[str, Any]]:
         "imagen": "Imagen",
         "hidream": "HiDream",
         "krea2": "Krea 2",
+        "sensenova": "SenseNova U1.5",
     }
-    families = ("qwen2512", "zimage", "flux", "qwen", "imagen", "hidream", "krea2")
+    families = ("qwen2512", "zimage", "flux", "qwen", "imagen", "hidream", "krea2", "sensenova")
     out = []
     for fam in families:
         status = _family_status(fam)

@@ -1,3 +1,4 @@
+/** Dead route — not wired into product chrome (Stability Cull). Keep for historical tests only. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,

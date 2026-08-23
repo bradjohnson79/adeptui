@@ -242,7 +242,7 @@ test.describe.serial("Adept UI Graduation — Two-Character Dramatic Scene (phas
     expect(handoff.name).toBe(MANUAL_HANDOFF_NAME);
 
     writeArtifact(ctx, "readiness.json", {
-      beta: "http://127.0.0.1:8760",
+      beta: "http://127.0.0.1:5173",
       api: API_BASE,
       comfy: "http://127.0.0.1:8188",
       h3: "http://127.0.0.1:8192",

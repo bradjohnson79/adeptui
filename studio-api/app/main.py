@@ -261,6 +261,45 @@ async def lifespan(_: FastAPI):
             )
     except Exception:
         logger.exception("Studio job queue recovery failed")
+    try:
+        from .codirector.execution.advance import reconcile_non_terminal_packs
+        from .db import SessionLocal as _ReconcileSessionLocal
+
+        with _ReconcileSessionLocal() as session:
+            updated = reconcile_non_terminal_packs(session, persist_artifacts=False)
+            now_terminal = [p for p in updated if p.is_terminal]
+            if updated:
+                logger.info(
+                    "Co-Director execution startup reconcile: advanced=%s now_terminal=%s",
+                    len(updated),
+                    len(now_terminal),
+                )
+            try:
+                from .codirector.bible.proposals import ProposalService as _ProposalService
+
+                stale_n = _ProposalService.persist_stale_non_terminal(session)
+                if stale_n:
+                    logger.info(
+                        "Co-Director proposal startup hydrate: persisted_stale=%s",
+                        stale_n,
+                    )
+            except Exception:
+                logger.exception("Co-Director proposal startup stale hydrate failed")
+            try:
+                from .character_identity.visual_sheet import (
+                    reconcile_generating_visual_sheet_packs as _reconcile_vs_packs,
+                )
+
+                vs_n = _reconcile_vs_packs(session)
+                if vs_n:
+                    logger.info(
+                        "Visual-sheet pack startup reconcile: healed=%s",
+                        vs_n,
+                    )
+            except Exception:
+                logger.exception("Visual-sheet pack startup reconcile failed")
+    except Exception:
+        logger.exception("Co-Director execution pack startup reconcile failed")
     job_queue.start()
 
     exec_worker_started = False
@@ -732,13 +771,38 @@ def get_asset_thumbnail(asset_id: str, w: int = 256):
 
 
 @app.get("/api/file")
-def get_file(path: str):
-    p = Path(path)
-    if not p.exists() or not p.is_file():
+def get_file(path: str, advanced: bool = False):
+    from fastapi import HTTPException
+
+    from .project_security.permissions import (
+        file_path_is_ambiguous,
+        project_id_from_file_path,
+        resolve_data_file_path,
+    )
+
+    resolved = resolve_data_file_path(path, settings.data_dir)
+    if resolved is None:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "FILE_API_RESTRICTED", "reason": "path traversal or escape"},
+        )
+    if not resolved.exists() or not resolved.is_file():
         return {"error": "not found"}
-    try:
-        p.resolve().relative_to(settings.data_dir.resolve())
-    except ValueError:
-        return {"error": "forbidden"}
-    return FileResponse(p)
+    raw = str(resolved)
+    if file_path_is_ambiguous(raw):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "FILE_API_RESTRICTED", "reason": "ambiguous project scope"},
+        )
+    if not project_id_from_file_path(raw):
+        allow_advanced = advanced and os.environ.get("ADEPT_FILE_API_ADVANCED") == "1"
+        if not allow_advanced:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "FILE_API_RESTRICTED",
+                    "reason": "project-scoped paths only — Advanced diagnostics required",
+                },
+            )
+    return FileResponse(resolved)
 

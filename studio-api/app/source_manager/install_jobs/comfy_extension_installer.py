@@ -13,11 +13,23 @@ from .errors import InstallJobError, InstallJobErrorCode
 from .requirements import _KNOWN_HUNYUAN_NODES, _live_node_types, resolve_requirements
 
 # Official / recommended Hunyuan ComfyUI node sources (user may override via Source Manager).
+_KNOWN_SENSENOVA_NODES = (
+    "SenseNovaU1LocalLoader",
+    "SenseNovaU1LocalTextToImage",
+    "SenseNovaU1LocalImageEdit",
+)
+
 DEFAULT_EXTENSION_SOURCES: dict[str, dict[str, str]] = {
     "comfyui_hunyuan_nodes": {
         "packageName": "ComfyUI-HunyuanVideoWrapper",
         "defaultUrl": "https://github.com/kijai/ComfyUI-HunyuanVideoWrapper",
         "provides": ",".join(sorted(_KNOWN_HUNYUAN_NODES)),
+    },
+    "comfyui_sensenova_nodes": {
+        "packageName": "ComfyUI-SenseNova-U1",
+        "defaultUrl": "https://github.com/OpenSenseNova/ComfyUI-SenseNova-U1",
+        "revision": "v0.2.0",
+        "provides": ",".join(_KNOWN_SENSENOVA_NODES),
     },
 }
 
@@ -70,6 +82,7 @@ def resolve_extension_source(component_id: str, source_url: str | None = None) -
         "sourceId": source.get("id"),
         "officialDefault": bool(not source_url and not source and meta.get("defaultUrl")),
         "executesCode": True,
+        "provides": meta.get("provides") or "",
     }
 
 
@@ -100,7 +113,13 @@ def preflight_extension(
         "destinationWritable": writable,
         "executesCode": True,
         "requiresRestart": True,
-        "requiredNodes": sorted(_KNOWN_HUNYUAN_NODES) if component_id.startswith("comfyui_hunyuan") else [],
+        "requiredNodes": (
+            sorted(_KNOWN_HUNYUAN_NODES)
+            if component_id.startswith("comfyui_hunyuan")
+            else list(_KNOWN_SENSENOVA_NODES)
+            if component_id.startswith("comfyui_sensenova")
+            else []
+        ),
     }
 
 
@@ -188,30 +207,118 @@ def clone_or_update_extension(
     }
 
 
-def install_extension_dependencies(target_dir: Path) -> dict[str, Any]:
+# Official sensenova-u1 metadata pins torch==2.8.0. A plain `pip install -r`
+# previously replaced Comfy's CUDA 2.10.0+cu130 with 2.8.0+cpu. Never let a
+# node pack uninstall or replace the Comfy torch stack.
+_PROTECTED_TORCH_PACKAGES = frozenset({"torch", "torchvision", "torchaudio"})
+_FILTERED_REQUIREMENTS_NAME = "requirements.adept-no-torch.txt"
+
+
+def _requirements_mentions_torch_stack(requirements: Path) -> bool:
+    """Any torch / torchvision / torchaudio pin can replace Comfy CUDA torch."""
+    text = requirements.read_text(encoding="utf-8", errors="ignore").lower()
+    for raw in text.splitlines():
+        if is_protected_torch_requirement(raw):
+            return True
+    return "sensenova-u1" in text
+
+
+def pip_should_isolate_torch(component_id: str = "", requirements: Path | None = None) -> bool:
+    if "sensenova" in str(component_id or "").lower():
+        return True
+    if requirements is not None and requirements.is_file():
+        return _requirements_mentions_torch_stack(requirements)
+    return False
+
+
+def _requirement_package_name(line: str) -> str:
+    raw = line.split("#", 1)[0].strip()
+    if not raw or raw.startswith("-"):
+        return ""
+    token = raw.split()[0]
+    if token.lower() in {"-r", "-c", "-e", "--requirement", "--constraint", "--editable"}:
+        return ""
+    name = token.split("[", 1)[0]
+    for sep in ("===", "==", "!=", "<=", ">=", "~=", "<", ">"):
+        if sep in name:
+            name = name.split(sep, 1)[0]
+            break
+    return name.strip().lower()
+
+
+def is_protected_torch_requirement(line: str) -> bool:
+    return _requirement_package_name(line) in _PROTECTED_TORCH_PACKAGES
+
+
+def write_torch_isolated_requirements(source: Path, destination: Path | None = None) -> Path:
+    """Write a requirements file with torch/torchvision/torchaudio lines removed."""
+    dest = destination or (source.parent / _FILTERED_REQUIREMENTS_NAME)
+    kept: list[str] = []
+    for line in source.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if is_protected_torch_requirement(line):
+            continue
+        kept.append(line)
+    dest.write_text("\n".join(kept).rstrip() + ("\n" if kept else ""), encoding="utf-8")
+    return dest
+
+
+def prepare_extension_requirements(requirements: Path, *, isolate: bool) -> Path:
+    if not isolate:
+        return requirements
+    return write_torch_isolated_requirements(requirements)
+
+
+def build_extension_pip_install_cmd(
+    python: str,
+    requirements: Path,
+    *,
+    component_id: str = "",
+    extra_prefix: list[str] | None = None,
+) -> list[str]:
+    """Build a pip/uv-compatible install command that cannot replace Comfy CUDA torch."""
+    isolate = pip_should_isolate_torch(component_id, requirements)
+    req_file = prepare_extension_requirements(requirements, isolate=isolate)
+    cmd = [python, "-m", "pip", "install"]
+    if extra_prefix:
+        cmd.extend(extra_prefix)
+    if isolate:
+        cmd.append("--no-deps")
+    cmd.extend(["-r", str(req_file)])
+    return cmd
+
+
+def install_extension_dependencies(target_dir: Path, *, component_id: str = "") -> dict[str, Any]:
     requirements = target_dir / "requirements.txt"
     if not requirements.is_file():
         return {"ok": True, "skipped": True, "message": "No requirements.txt found."}
     python = os.environ.get("STUDIO_COMFY_PYTHON") or os.environ.get("COMFY_PYTHON") or "python"
-    method = "pip"
-    result = _run([python, "-m", "pip", "install", "-r", str(requirements)], cwd=target_dir)
+    isolate = pip_should_isolate_torch(component_id, requirements)
+    req_file = prepare_extension_requirements(requirements, isolate=isolate)
+    method = "pip_no_deps" if isolate else "pip"
+    result = _run(build_extension_pip_install_cmd(python, requirements, component_id=component_id), cwd=target_dir)
     output = f"{result.stdout or ''}\n{result.stderr or ''}".lower()
     if result.returncode != 0 and (
         "externally managed" in output or "externally-managed-environment" in output
     ):
         # Comfy Desktop often uses a uv-managed Python where plain pip is blocked by
         # PEP 668. Fall back to uv's system install path instead of failing closed.
-        method = "uv_pip_system"
+        extra = ["--system"]
+        if isolate:
+            extra.append("--no-deps")
+        method = "uv_pip_system_no_deps" if isolate else "uv_pip_system"
         result = _run(
-            [python, "-m", "uv", "pip", "install", "--system", "-r", str(requirements)],
+            [python, "-m", "uv", "pip", "install", *extra, "-r", str(req_file)],
             cwd=target_dir,
         )
         if result.returncode != 0 and "no module named uv" in f"{result.stdout or ''}\n{result.stderr or ''}".lower():
             uv_exe = _find_uv_executable()
             if uv_exe:
-                method = "uv_cli_python"
+                uv_extra = ["--python", python]
+                if isolate:
+                    uv_extra.append("--no-deps")
+                method = "uv_cli_python_no_deps" if isolate else "uv_cli_python"
                 result = _run(
-                    [uv_exe, "pip", "install", "--python", python, "-r", str(requirements)],
+                    [uv_exe, "pip", "install", *uv_extra, "-r", str(req_file)],
                     cwd=target_dir,
                 )
     return {
@@ -220,6 +327,8 @@ def install_extension_dependencies(target_dir: Path) -> dict[str, Any]:
         "message": result.stdout or result.stderr or "Dependency install finished.",
         "returncode": result.returncode,
         "method": method,
+        "requirementsFile": str(req_file),
+        "torchIsolated": isolate,
     }
 
 

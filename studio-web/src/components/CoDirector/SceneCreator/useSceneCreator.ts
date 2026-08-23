@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../api";
+import { shouldSuspendDependentPolling } from "../../../runtime/studioApiConnection";
 import { spatialMapApi } from "../SpatialMap/spatialMapApi";
 import { activeMovement, listMovements, movementLabel } from "../SpatialMap/movementSegments";
 import type { MovementSegment, SpatialMapDocument } from "../SpatialMap/types";
@@ -256,7 +257,19 @@ export function useSceneCreator(projectId: string) {
   const startPoll = useCallback(
     (shotId: string) => {
       stopPoll();
+      const startedAt = Date.now();
       pollRef.current = setInterval(() => {
+        if (shouldSuspendDependentPolling()) return;
+        if (Date.now() - startedAt > 30_000) {
+          const pending = (shot?.candidates || []).some(
+            (c) => c.status === "queued" || c.status === "generating",
+          );
+          const anyAsset = (shot?.candidates || []).some((c) => Boolean(c.asset_id));
+          if (pending && !anyAsset) {
+            stopPoll();
+            return;
+          }
+        }
         void sceneCreatorApi
           .getShot(projectId, shotId)
           .then(async (res) => {

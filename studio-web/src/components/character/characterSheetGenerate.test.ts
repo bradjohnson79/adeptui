@@ -3,7 +3,10 @@ import {
   buildCharacterSheetStartBody,
   characterGenerateBlockReason,
   CHARACTER_SHEET_START_ERROR_PREFIX,
+  firstExecutableReadyLocal,
   formatCharacterSheetStartError,
+  selectedLocalNotReadyCopy,
+  useReadyLocalButtonLabel,
 } from "./characterSheetGenerate";
 import { DEFAULT_CHARACTER_GENERATOR_PLAN, type CharacterGeneratorPlan } from "./characterGeneratorPlan";
 
@@ -43,6 +46,10 @@ describe("Character Sheet generate request", () => {
       localOptions,
     });
     expect(body.candidateCount).toBe(1);
+    expect(body.taskType).toBe("CRS_GENERATION");
+    expect(body.layout).toBe("four_view");
+    expect(body.requiredViews).toEqual(["front_full", "side_full", "back_full", "face_closeup"]);
+    expect(body.fourViewSingleOutput).toBe(false);
     expect(body.generationMode).toBe("profile_guided");
     expect(body.generatorSources.local?.find((r) => r.family === "illustrious")).toMatchObject({
       enabled: true,
@@ -118,6 +125,25 @@ describe("Character Sheet generate request", () => {
     expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
     expect(reason).toMatch(/local generator/i);
     expect(reason).toMatch(/Cloud/i);
+  });
+
+  it("blocks explicit Qwen Image Edit 2509 when Not Ready", () => {
+    const reason = characterGenerateBlockReason({
+      name: "Korri",
+      plan: plan({
+        autoSelect: { enabled: false, batchCount: 1 },
+        localFamilies: [
+          { family: "qwen_edit_2509", enabled: true, batchCount: 1 },
+          { family: "qwen2512", enabled: false, batchCount: 1 },
+        ],
+      }),
+      localOptions: [
+        { id: "qwen_edit_2509", label: "Qwen Image Edit 2509", executable: false },
+        { id: "qwen2512", label: "Qwen Image", executable: true },
+      ],
+    });
+    expect(reason).toContain(CHARACTER_SHEET_START_ERROR_PREFIX);
+    expect(reason).toMatch(/Qwen Image Edit 2509 is installed but not Runtime Ready/i);
   });
 
   it("blocks Generate when the inventory has no executable family and cloud is off", () => {
@@ -211,5 +237,20 @@ describe("Character Sheet generate request", () => {
       localOptions,
     });
     expect(body.candidateCount).toBe(1);
+  });
+});
+
+describe("not-ready local selection recovery", () => {
+  it("keeps 2509 selected and names the first executable ready local (FLUX when first)", () => {
+    const locals = [
+      { id: "qwen_edit_2509", label: "Qwen Image Edit 2509", executable: false },
+      { id: "flux", label: "FLUX.1 Kontext", executable: true },
+      { id: "qwen2512", label: "Qwen Image", executable: true },
+    ];
+    expect(firstExecutableReadyLocal(locals)?.id).toBe("flux");
+    expect(useReadyLocalButtonLabel(firstExecutableReadyLocal(locals)!)).toBe("FLUX");
+    expect(selectedLocalNotReadyCopy("Qwen Image Edit 2509")).toBe(
+      "Qwen Image Edit 2509 is installed but not Runtime Ready.",
+    );
   });
 });

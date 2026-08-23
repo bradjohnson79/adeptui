@@ -431,7 +431,11 @@ def write_asset_library_meta(asset: Asset, meta: AssetLibraryMeta) -> None:
         prompt_meta = json.loads(asset.prompt_meta_json or "{}")
     except Exception:
         prompt_meta = {}
-    prompt_meta["library"] = meta.to_dict()
+    blob = meta.to_dict()
+    # Approval canon is Asset.production_approval — do not persist a second store.
+    blob.pop("approvalState", None)
+    blob.pop("isCanonical", None)
+    prompt_meta["library"] = blob
     asset.prompt_meta_json = json.dumps(prompt_meta, ensure_ascii=False)
 
 

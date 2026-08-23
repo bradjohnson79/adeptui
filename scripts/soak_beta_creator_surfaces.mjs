@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
-const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const UI = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const TL = `${API}/api/director-timeline`;
 
 const args = process.argv.slice(2);

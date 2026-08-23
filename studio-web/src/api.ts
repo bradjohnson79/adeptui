@@ -70,7 +70,8 @@ import { perceptionAbortSignal } from "./codirector/perception/requestPolicy";
 /**
  * Central API origin abstraction.
  *
- * - Local dev: BASE="" → relative /api/* paths proxied by Vite to Studio API :8742
+ * - Local Vite product/cert: BASE="" → relative /api/* proxied to Studio API :8758
+ * - `npm run dev` only: scripts/run-web-devapi.mjs proxies to reload API :8742
  * - Hosted (Vercel): BASE=VITE_API_BASE → absolute HTTPS URL of the secure Studio API bridge
  *   (e.g. https://api-beta.adeptui.org)
  *
@@ -4035,7 +4036,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
-  imagegenModels: () =>
+  imagegenModels: (surface?: string) =>
     req<
       {
         id: string;
@@ -4043,9 +4044,15 @@ export const api = {
         group: string;
         status?: string;
         supportsReferences?: boolean;
+        supportsEditing?: boolean;
         executable?: boolean;
+        runtimeReady?: boolean;
+        installed?: boolean;
+        readinessLabel?: string;
+        modeLabel?: string;
+        t2iOnly?: boolean;
       }[]
-    >("/api/imagegen/models"),
+    >(surface ? `/api/imagegen/models?surface=${encodeURIComponent(surface)}` : "/api/imagegen/models"),
   imageCoreRecommend: (operation: string, family = "") =>
     req<{
       operation: string;
@@ -7123,7 +7130,12 @@ export const api = {
     }
     return apiUrl(`/api/file?path=${encodeURIComponent(absPath)}`);
   },
-  assetUrl: (assetId: string) => apiUrl(`/api/assets/${assetId}/file`),
+  assetUrl: (assetId: string, rev?: string | number | null) => {
+    const base = apiUrl(`/api/assets/${assetId}/file`);
+    if (rev == null || String(rev).trim() === "") return base;
+    const join = base.includes("?") ? "&" : "?";
+    return `${base}${join}rev=${encodeURIComponent(String(rev))}`;
+  },
   m28Status: () => req<Record<string, boolean>>("/api/codirector/m28/status"),
   m28RadarDiscover: (source: "huggingface" | "github") =>
     req<any>("/api/codirector/m28/radar/discover", {
@@ -8118,6 +8130,10 @@ export const api = {
         stage2Family?: string;
       };
       generationMode?: "profile_guided" | "reference_conditioned";
+      taskType?: string;
+      layout?: string;
+      requiredViews?: string[];
+      fourViewSingleOutput?: boolean;
     },
   ) =>
     req<{ ok: boolean; pack: any }>(
@@ -8155,15 +8171,35 @@ export const api = {
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/crs`,
     ),
+  getCharacterJson: (projectId: string, characterId: string) =>
+    req<any>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/character-json`,
+    ),
   approveCharacterCandidate: (
     projectId: string,
     characterId: string,
-    body: { assetId: string; referenceRole?: string; sourceType?: string; notes?: string },
+    body: {
+      assetId: string;
+      referenceRole?: string;
+      sourceType?: string;
+      notes?: string;
+      ownerConfirmed?: boolean;
+    },
   ) =>
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/approve-candidate`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  rejectCharacterCandidate: (
+    projectId: string,
+    characterId: string,
+    body: { assetId?: string; candidateId?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/reject-candidate`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+
   startExecution: (
     projectId: string,
     body: { capability: string; context?: Record<string, unknown>; characterName?: string; count?: number; sceneId?: string; prompt?: string; visualStyle?: string; attachmentAssetIds?: string[]; userInstructions?: string; frameIndex?: number; frameMetadata?: Record<string, unknown> },
@@ -8180,6 +8216,11 @@ export const api = {
   cancelExecution: (projectId: string, executionId: string) =>
     req<any>(
       `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/cancel`,
+      { method: "POST" },
+    ),
+  dismissExecution: (projectId: string, executionId: string) =>
+    req<any>(
+      `/api/codirector/projects/${encodeURIComponent(projectId)}/executions/${encodeURIComponent(executionId)}/dismiss`,
       { method: "POST" },
     ),
   approveExecution: (projectId: string, executionId: string) =>

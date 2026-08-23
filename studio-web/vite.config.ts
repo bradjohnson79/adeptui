@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 // checkout (git worktree, parallel E2E run) can bring up its own stack without the browser
 // silently proxying /api to the other one's backend.
 const apiHost = process.env.STUDIO_API_HOST || "127.0.0.1";
-const apiPort = process.env.STUDIO_API_PORT || "8742";
+const apiPort = process.env.STUDIO_API_PORT || "8758";
 const apiTarget = `http://${apiHost}:${apiPort}`;
 const webPort = Number(process.env.PLAYWRIGHT_WEB_PORT || process.env.STUDIO_WEB_PORT || 5173);
 

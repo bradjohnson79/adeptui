@@ -123,12 +123,22 @@ def test_resolve_provenance(isolated_prefs):
     assert isinstance(selection, ResolvedSelection)
 
 
-def test_runtime_map_image_and_video(isolated_prefs):
+def test_runtime_map_image_and_video(isolated_prefs, monkeypatch):
     from app.production_control.runtime_map import (
         apply_image_dock_preference,
         apply_video_dock_preference,
         image_family_for_dock_model,
         video_engine_for_dock_model,
+    )
+
+    monkeypatch.setattr(
+        "app.production_control.runtime_map.require_executable_route",
+        lambda project_id, modality: {
+            "activeModelId": "ltx-local" if modality == "video" else "qwen-image-2512-local",
+            "executable": True,
+            "videoEngine": "ltx",
+            "imageFamily": "qwen2512",
+        },
     )
 
     assert image_family_for_dock_model("qwen-image-2512-local") == "qwen2512"

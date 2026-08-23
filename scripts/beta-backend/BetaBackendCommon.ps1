@@ -304,7 +304,19 @@ function Get-StudioApiPortState {
 
 
 function Test-ComfyUiHealth {
-    try { $r = Invoke-WebRequest -Uri "http://127.0.0.1:8188/system_stats" -UseBasicParsing -TimeoutSec 5; return ($r.StatusCode -eq 200) } catch { return $false }
+    # Official SenseNova (and similar) loaders block the prompt worker for many
+    # minutes while still serving /queue. A 5s /system_stats miss is not a dead
+    # Comfy and must not drive a watchdog kill mid-load.
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:8188/system_stats" -UseBasicParsing -TimeoutSec 15
+        if ($r.StatusCode -eq 200) { return $true }
+    } catch { }
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:8188/queue" -UseBasicParsing -TimeoutSec 15
+        return ($r.StatusCode -eq 200)
+    } catch {
+        return $false
+    }
 }
 
 function Test-CloudflareHealth {

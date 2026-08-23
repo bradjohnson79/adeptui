@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const WEB = process.env.ADEPT_WEB_URL || process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const WEB = process.env.ADEPT_WEB_URL || process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.ADEPT_API_URL || process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const PROJECT =
   process.env.ADEPT_SCHNICK_PROJECT_ID ||

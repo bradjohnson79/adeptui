@@ -163,7 +163,7 @@ test.describe("@critical @beta timeline multi-batch + preview monitor cert", () 
 
   test("H. preview monitor is timeline-driven (UI)", async ({ page, request }) => {
     const { pid } = await firstProjectScene(request);
-    await page.goto(`http://127.0.0.1:8760/project/${pid}?workspace=timeline`);
+    await page.goto(`http://127.0.0.1:5173/project/${pid}?workspace=timeline`);
     await page.waitForLoadState("domcontentloaded");
     // The preview monitor container should be present (image, video, or the
     // empty/idle stage). timeline-driven means it is mounted and reactive.

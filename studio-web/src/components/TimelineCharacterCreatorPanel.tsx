@@ -121,8 +121,11 @@ export function TimelineCharacterCreatorPanel({
             setError(null);
             void api
               .startCharacterVisualSheet(project.id, korri.id, {
-                includeDetails: true,
-                includePerformance: true,
+                includeDetails: false,
+                includePerformance: false,
+                candidateCount: 1,
+                taskType: "CRS_GENERATION",
+                layout: "four_view",
               })
               .then((r) => {
                 setMsg(

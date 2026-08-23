@@ -86,6 +86,21 @@ describe("character sheet failed-job hydration", () => {
     expect(progress.totalViews).toBe(4);
   });
 
+  it("does not treat a front tile as a complete four-view sheet", () => {
+    const c: CharacterCandidate = {
+      status: "done",
+      assetId: "front-only",
+      viewJobs: [
+        { role: "hero_identity", status: "done", assetId: "front-only" },
+        { role: "full_body_side_left", status: "queued" },
+        { role: "full_body_back", status: "queued" },
+        { role: "closeup_front", status: "queued" },
+      ],
+    };
+    expect(candidateStage(c)).toBe("generating");
+    expect(canUseCharacterLook(c)).toBe(false);
+  });
+
   it("does not fall back generatorName to workflowKey", () => {
     expect(gridSrc).toContain("c.provenance || c.modelVariant || c.model || \"Local generator\"");
     expect(gridSrc).not.toContain("c.workflowKey");
@@ -170,7 +185,14 @@ describe("Character Reference Sheet progress honesty", () => {
 
   it("does not clear the candidate grid when a new generate starts", () => {
     const src = readFileSync(new URL("./CharacterSheetGenerator.tsx", import.meta.url), "utf8");
-    expect(src).toContain("Generate Character Reference Sheet");
+    expect(src).toContain('data-testid="character-generate"');
     expect(src).not.toContain("onCandidates([])");
+  });
+
+  it("does not restart the 60-minute poll budget after it is exhausted", () => {
+    const src = readFileSync(new URL("./CharacterSheetGenerator.tsx", import.meta.url), "utf8");
+    expect(src).toContain("pollExhaustedRef");
+    expect(src).toContain("pollExhaustedRef.current = true");
+    expect(src).toContain("pollExhaustedRef.current) return");
   });
 });

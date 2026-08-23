@@ -187,6 +187,33 @@ def build_leaf_graph(
         )
 
     if key in {
+        "qwen_edit_2509.edit",
+        "qwen_edit_2509.crs_single_view",
+    }:
+        from ..workflows.qwen_image_edit_2509 import build_qwen_edit_2509_i2i_workflow
+
+        img = reference_image or source_image
+        if not img:
+            raise RuntimeError("qwen_edit_2509.edit requires an IDENTITY_REFERENCE image")
+        from ..config import settings as _settings
+
+        return build_qwen_edit_2509_i2i_workflow(
+            image_name=img,
+            positive=prompt,
+            negative=negative,
+            unet_name=getattr(_settings, "qwen_image_edit_2509_unet", None),
+            clip_name=getattr(_settings, "qwen_image_edit_2509_clip", None),
+            vae_name=getattr(_settings, "qwen_image_edit_2509_vae", None),
+            width=width or 1024,
+            height=height or 1024,
+            seed=seed,
+            steps=steps,
+            cfg=cfg,
+            filename_prefix=filename_prefix or "studio/qwen_edit_2509",
+            identity_role="IDENTITY_REFERENCE",
+        )
+
+    if key in {
         "qwen2512.ref",
         "qwen2512.txt2img",
         "qwen2512.character_concept",
@@ -263,6 +290,32 @@ def build_leaf_graph(
             model_shift=settings.qwen_image_2512_shift,
             filename_prefix=filename_prefix or default_prefix,
             workflow_variant=variant,
+        )
+
+    if key in {
+        "sensenova.txt2img",
+        "sensenova.edit",
+        "sensenova.reference",
+        "sensenova.crs",
+        "sensenova.ers",
+    }:
+        from ..workflows.sensenova_u15 import build_sensenova_workflow
+
+        kind = key.split(".", 1)[1]
+        img = reference_image or source_image
+        if kind in {"edit", "reference", "ers"} and not img:
+            raise RuntimeError(f"{key} requires a source/reference image")
+        return build_sensenova_workflow(
+            kind,  # type: ignore[arg-type]
+            prompt=prompt,
+            negative=negative,
+            image_name=img or "",
+            width=width or 2720,
+            height=height or 1536,
+            seed=seed,
+            steps=steps if steps not in {0, 8, 20} else 50,
+            cfg=cfg if cfg not in {0.0, 1.0} else 4.0,
+            filename_prefix=filename_prefix or f"studio/{key.replace('.', '_')}",
         )
 
     if key in {"krea2.turbo_txt2img", "krea2.raw_txt2img"}:
@@ -439,10 +492,12 @@ def build_leaf_graph(
             filename_prefix=filename_prefix,
         )
 
-    if key in {"qwen.txt2img", "checkpoint.txt2img", "illustrious.txt2img"}:
+    if key in {"qwen.txt2img", "checkpoint.txt2img", "illustrious.txt2img", "sd15.txt2img"}:
         from ..imagegen_workflows import build_txt2img_workflow
 
         ckpt = checkpoint or getattr(settings, "default_checkpoint", None) or ""
+        if key == "sd15.txt2img":
+            ckpt = checkpoint or getattr(settings, "imagegen_sd15_checkpoint", None) or ckpt
         if not ckpt:
             raise RuntimeError(f"{key} requires checkpoint")
         return build_txt2img_workflow(
@@ -458,6 +513,32 @@ def build_leaf_graph(
             lora=lora_spec,
         )
 
+    if key == "crs.sd15.control":
+        from ..imagegen_workflows import build_sd15_control_workflow
+
+        ckpt = (
+            checkpoint
+            or getattr(settings, "imagegen_sd15_checkpoint", None)
+            or ""
+        )
+        if not ckpt:
+            raise RuntimeError(f"{key} requires imagegen_sd15_checkpoint")
+        control_image = reference_image or source_image
+        return build_sd15_control_workflow(
+            checkpoint=ckpt,
+            positive=prompt,
+            negative=negative,
+            width=width if width else getattr(settings, "imagegen_sd15_width", 512),
+            height=height if height else getattr(settings, "imagegen_sd15_height", 768),
+            seed=seed,
+            steps=steps if steps not in {0, 8} else getattr(settings, "imagegen_sd15_steps", 20),
+            cfg=cfg if cfg not in {0, 1.0} else getattr(settings, "imagegen_sd15_cfg", 7.0),
+            filename_prefix=filename_prefix,
+            controlnet_name=getattr(settings, "imagegen_sd15_openpose", "control_v11p_sd15_openpose.safetensors"),
+            control_image=control_image,
+            apply_preprocessor=bool(control_image),
+        )
+
     if key.startswith("imagen."):
         raise RuntimeError(
             f"Cloud workflow {key} uses provider adapter — not a local Comfy graph builder"
@@ -470,30 +551,28 @@ def build_leaf_graph(
 
 
 def legacy_comfy_workflow_key(workflow_key: str) -> str | None:
-    """Map image certified keys onto legacy DEFAULT_WORKFLOW_REGISTRY keys for ensure_queueable."""
-    mapping = {
-        "zimage.txt2img": "image.txt2img",
-        "zimage.ref_edit": "image.zimage_reference",
-        # Map onto existing registry keys for ensure_queueable (dedicated keys not in DEFAULT_WORKFLOW_REGISTRY)
-        "zimage.inpaint": "image.zimage_reference",
-        "zimage.outpaint": "image.zimage_reference",
-        "image.upscale": "image.img2img_edit",
-        "qwen2512.txt2img": "image.txt2img",
-        "qwen2512.character_concept": "image.txt2img",
-        "qwen2512.character_profile": "image.txt2img",
-        "flux.txt2img": "image.txt2img",
-        "flux.img2img": "image.img2img_edit",
-        "flux.edit": "image.img2img_edit",
-        "flux.reference": "image.img2img_edit",
-        "flux.inpaint": "image.img2img_edit",
-        "flux.outpaint": "image.img2img_edit",
-        "qwen.txt2img": "image.txt2img",
-        "qwen.edit": "image.img2img_edit",
-        "qwen.reference": "image.img2img_edit",
-        "checkpoint.txt2img": "image.txt2img",
-        "checkpoint.img2img": "image.img2img_edit",
+    """Resolve the readiness key for ensure_queueable.
+
+    Z-Image certified keys keep their legacy inventory aliases. Every other
+    family keeps its own key so Flux/Qwen/Illustrious/SenseNova cannot pass
+    readiness merely because Z-Image weights are installed.
+    """
+    key = str(workflow_key or "").strip()
+    zimage_aliases = {
+        "zimage.txt2img": "zimage.txt2img",
+        "zimage.ref_edit": "zimage.ref_edit",
+        "zimage.inpaint": "zimage.inpaint",
+        "zimage.outpaint": "zimage.outpaint",
+        "image.txt2img": "image.txt2img",
+        "image.img2img_edit": "image.img2img_edit",
+        "image.zimage_reference": "image.zimage_reference",
+        "image.upscale": "image.upscale",
     }
-    return mapping.get(workflow_key)
+    if key in zimage_aliases:
+        return zimage_aliases[key]
+    if key:
+        return key
+    return None
 
 
 def prepare_executable_graph(

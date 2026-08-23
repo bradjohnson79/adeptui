@@ -138,6 +138,35 @@ def queued_job_is_stale_approved_crs(job: Job, db: Session | None = None) -> boo
             session.close()
 
 
+def job_cancel_should_interrupt_comfy(
+    job_id: str,
+    *,
+    job_prompt_id: str | None = None,
+    active_prompt_by_job: dict[str, str] | None = None,
+    heavy_local_active: str | None = None,
+) -> bool:
+    """Interrupt Comfy only when this job owns the in-flight prompt.
+
+    Leftover coverage cancel must not drop a sibling CRS law-view prompt.
+    """
+    jid = str(job_id or "").strip()
+    if not jid:
+        return False
+    if heavy_local_active and str(heavy_local_active) != jid:
+        return False
+    tracked_map = active_prompt_by_job or {}
+    tracked = str(tracked_map.get(jid) or "").strip()
+    bound = tracked or str(job_prompt_id or "").strip()
+    if not bound:
+        return False
+    for other_id, other_prompt in tracked_map.items():
+        if str(other_id) == jid:
+            continue
+        if str(other_prompt or "").strip():
+            return False
+    return True
+
+
 class JobQueue:
     def __init__(self) -> None:
         self._q: asyncio.Queue[str] = asyncio.Queue()
@@ -158,10 +187,41 @@ class JobQueue:
         return job_id in self._cancel
 
     def bind_prompt(self, job_id: str, prompt_id: str) -> None:
-        self._active_prompt[job_id] = prompt_id
+        pid = str(prompt_id or "").strip()
+        if not pid:
+            raise RuntimeError("Refusing to bind an empty Comfy prompt_id")
+        self._active_prompt[job_id] = pid
+        db = SessionLocal()
+        try:
+            job = db.get(Job, job_id)
+            if job:
+                job.comfy_prompt_id = pid
+                if job.status == "queued":
+                    job.status = "running"
+                    job.stage = job.stage or "processing"
+                    job.message = job.message or "Bound to ComfyUI"
+                job.updated_at = datetime.utcnow()
+                db.commit()
+        finally:
+            db.close()
 
     def unbind_prompt(self, job_id: str) -> None:
         self._active_prompt.pop(job_id, None)
+
+    @staticmethod
+    def _job_skips_comfy_bind(job: Job) -> bool:
+        try:
+            params = json.loads(job.params_json or "{}")
+        except Exception:
+            params = {}
+        if not isinstance(params, dict):
+            return False
+        provider = str(
+            params.get("provider") or params.get("providerId") or params.get("engine") or ""
+        ).lower()
+        if "fal" in provider or provider == "kie":
+            return True
+        return bool(params.get("cloudPaid") or params.get("useFal"))
 
     async def _wait_comfy(
         self,
@@ -259,6 +319,17 @@ class JobQueue:
                 interrupted.append(job.id)
             if rows:
                 db.commit()
+            # Pack is a projection of Job rows. Recover may have just marked
+            # jobs failed (e.g. e1422136 interrupted) while the parent pack
+            # stayed queued — advance those packs now.
+            try:
+                from .codirector.execution.advance import reconcile_non_terminal_packs
+
+                reconcile_non_terminal_packs(db, persist_artifacts=False)
+            except Exception:
+                logger.exception(
+                    "Execution pack reconcile after recover_interrupted failed"
+                )
         finally:
             db.close()
 
@@ -343,7 +414,43 @@ class JobQueue:
                 len(started),
                 len(abandoned),
             )
-        return {"started": started, "abandoned": abandoned}
+        unbound_failed = self.fail_unbound_running()
+        return {"started": started, "abandoned": abandoned, "unboundFailed": unbound_failed}
+
+    def fail_unbound_running(self, *, older_than_sec: int = 45) -> list[str]:
+        """Fail running Comfy jobs that never received a prompt_id (bind-or-fail)."""
+        failed: list[str] = []
+        cutoff = datetime.utcnow() - timedelta(seconds=older_than_sec)
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(Job)
+                .filter(Job.status == "running")
+                .order_by(Job.updated_at.asc())
+                .all()
+            )
+            for job in rows:
+                if job.comfy_prompt_id:
+                    continue
+                if job.id in self._active_prompt:
+                    continue
+                if str(job.stage or "") != "claimed":
+                    continue
+                if JobQueue._job_skips_comfy_bind(job):
+                    continue
+                updated = job.updated_at or job.created_at or datetime.utcnow()
+                if updated > cutoff:
+                    continue
+                job.status = "failed"
+                job.stage = "failed"
+                job.message = "Failed closed: running without a bound Comfy prompt_id."
+                job.updated_at = datetime.utcnow()
+                failed.append(job.id)
+            if failed:
+                db.commit()
+        finally:
+            db.close()
+        return failed
 
     async def _drain_watchdog(self) -> None:
         while True:
@@ -378,9 +485,19 @@ class JobQueue:
                 return {"ok": True, "alreadyCancelled": True, "promptId": job.comfy_prompt_id}
             if not prompt_id and job.comfy_prompt_id:
                 prompt_id = job.comfy_prompt_id
+            owns_active = job_cancel_should_interrupt_comfy(
+                job_id,
+                job_prompt_id=prompt_id,
+                active_prompt_by_job=dict(self._active_prompt),
+                heavy_local_active=self._heavy_local_active,
+            )
             job.status = "cancelling"
             job.stage = "cancelling"
-            job.message = "Cancel requested — waiting for ComfyUI to confirm prompt stopped"
+            job.message = (
+                "Cancel requested — waiting for ComfyUI to confirm prompt stopped"
+                if owns_active
+                else "Cancel requested — isolating leftover job (active Comfy prompt untouched)"
+            )
             job.updated_at = datetime.utcnow()
             from .video_runtime.job_model import merge_video_runtime_history
 
@@ -390,11 +507,40 @@ class JobQueue:
                     "stage": "cancelling",
                     "cancelRequestedAt": datetime.utcnow().isoformat(),
                     "promptId": prompt_id,
+                    "isolatedCancel": not owns_active,
                 },
             )
             db.commit()
         finally:
             db.close()
+
+        if not owns_active:
+            if prompt_id:
+                try:
+                    await comfy.delete_queue_prompt(prompt_id)
+                except Exception:
+                    logger.exception("Isolated cancel could not delete queued prompt %s", prompt_id)
+            self._set_status(
+                job_id,
+                "cancelled",
+                0,
+                "Cancelled leftover job without interrupting the active Comfy prompt",
+                stage="cancelled",
+                video_runtime_patch={
+                    "stage": "cancelled",
+                    "failureClass": "user_cancellation",
+                    "computeConsumed": False,
+                    "isolatedCancel": True,
+                },
+            )
+            return {
+                "ok": True,
+                "status": "cancelled",
+                "promptId": prompt_id,
+                "halt": {"interrupt": False, "confirmedStopped": True, "isolated": True},
+                "confirmedStopped": True,
+                "isolated": True,
+            }
 
         halt = await comfy.halt_prompt(prompt_id, confirm_timeout_sec=20.0)
         confirmed = bool(halt.get("confirmedStopped"))
@@ -564,7 +710,7 @@ class JobQueue:
 
                 bridge_job_status_change(db, job_id, status, stage=stage or "", message=message)
             except Exception:
-                pass
+                logger.exception("bridge_job_status_change failed for job %s", job_id)
         finally:
             db.close()
 
@@ -577,9 +723,14 @@ class JobQueue:
             project = db.get(Project, job.project_id)
             if not project:
                 raise RuntimeError("Project missing")
-            job.status = "running"
+            job.status = "queued"
+            job.stage = "claimed"
             job.progress = 0.05
-            job.message = "Starting"
+            job.message = "Claimed — waiting for runtime bind"
+            if self._job_skips_comfy_bind(job):
+                job.status = "running"
+                job.stage = "processing"
+                job.message = "Starting"
             job.updated_at = datetime.utcnow()
             try:
                 from .video_runtime.job_model import merge_video_runtime_history
@@ -2448,6 +2599,8 @@ class JobQueue:
             return settings.imagegen_sd35_checkpoint
         if mid == "illustrious":
             return settings.imagegen_illustrious_checkpoint
+        if mid in ("sd15", "sd1.5", "sd_1.5", "stable-diffusion-1.5", "stable_diffusion_15"):
+            return settings.imagegen_sd15_checkpoint
         if mid in ("qwen2512", "qwen-image-2512", "qwen_image_2512", "qwen"):
             # Qwen Image 2512 runs use the Qwen UNET, not the FLUX checkpoint —
             # job status must name the real checkpoint (CDX-082).
@@ -2476,9 +2629,15 @@ class JobQueue:
             from .setup.paths import default_models_root
 
             roots = [default_models_root(), Path(settings.data_dir) / "models"]
+            sd15_root = str(getattr(settings, "sd15_model_root", "") or "").strip()
+            if sd15_root:
+                roots.append(Path(sd15_root))
             for root in roots:
                 if not root or not Path(root).exists():
                     continue
+                direct = Path(root) / name
+                if direct.is_file():
+                    return True
                 for sub in ("checkpoints", "diffusion_models", "unet"):
                     candidate = Path(root) / sub / name
                     if candidate.is_file():
@@ -2931,6 +3090,10 @@ class JobQueue:
             poll as local_comfy_poll,
             submit as local_comfy_submit,
         )
+        from .image_runtime.ref_generate_pixels import (
+            choose_imagegen_pixel_asset,
+            identity_refs_from_intent,
+        )
 
         params = self._job_params(job)
         edit_op = params.get("edit_op") or ("generate" if job.kind == "imagegen" else "edit")
@@ -2972,37 +3135,23 @@ class JobQueue:
         prompt = (intent.prompt or params.get("prompt") or "").strip()
         from .character_identity.four_view_sheet import (
             assess_four_view_layout,
-            attach_four_view_sheet_intent,
-            is_single_image_four_view,
-            strengthen_four_view_prompt,
+            apply_job_four_view_prompt,
         )
 
         ers_purpose = str(getattr(intent, "purpose", "") or params.get("purpose") or "")
-        four_view = is_single_image_four_view(params) or is_single_image_four_view(
-            intent.metadata if isinstance(intent.metadata, dict) else {}
+        # Full job params only. Never OR imageIntent/metadata -- purpose=character_sheet
+        # is shared with CRS law-view singles and would inject four-panel strengthen.
+        params, prompt, four_view = apply_job_four_view_prompt(
+            params,
+            prompt,
+            family=str(intent.enginePreference or params.get("model") or ""),
+            ers_purpose=ers_purpose,
         )
-        if ers_purpose != "environment_reference_sheet" and four_view:
-            params = attach_four_view_sheet_intent(params)
-            prompt = strengthen_four_view_prompt(prompt)
-            intent.prompt = prompt
-            if isinstance(intent.metadata, dict):
-                intent.metadata = {**intent.metadata, **(params.get("characterSheetIntent") or {})}
+        intent.prompt = prompt
+        if four_view and isinstance(intent.metadata, dict):
+            intent.metadata = {**intent.metadata, **(params.get("characterSheetIntent") or {})}
         if style and isinstance(style, str):
             prompt = f"{prompt}, {style}".strip(", ")
-        try:
-            from .character_identity.four_view_sheet import (
-                is_single_image_four_view,
-                strengthen_local_character_sheet_prompt,
-            )
-            if ers_purpose != "environment_reference_sheet" and (
-                is_single_image_four_view(params) or is_single_image_four_view(intent_block or {})
-            ):
-                prompt = strengthen_local_character_sheet_prompt(
-                    prompt, family=str(intent.enginePreference or params.get("model") or "")
-                )
-                intent.prompt = prompt
-        except Exception:
-            pass
         negative = intent.negativePrompt or params.get("negative") or project.negative_prompt
         seed = int(
             intent.seed
@@ -3014,6 +3163,8 @@ class JobQueue:
         steps = int(params.get("steps") or settings.imagegen_default_steps)
         cfg = float(params.get("cfg") or settings.imagegen_default_cfg)
         source_asset_id = intent.sourceAssetId or params.get("source_asset_id")
+        _ref_ids, _ref_image_id = identity_refs_from_intent(intent, params)
+        has_ref_pixels = bool(source_asset_id or _ref_ids or _ref_image_id)
         meta = intent.metadata or {}
         denoise = float(
             params.get("denoise")
@@ -3066,6 +3217,15 @@ class JobQueue:
                 cfg = float(
                     params.get("cfg") if params.get("cfg") is not None else settings.imagegen_illustrious_cfg
                 )
+            if model in ("sd15", "sd1.5", "sd_1.5"):
+                steps = int(params.get("steps") or settings.imagegen_sd15_steps)
+                cfg = float(
+                    params.get("cfg") if params.get("cfg") is not None else settings.imagegen_sd15_cfg
+                )
+                if not params.get("width") and not getattr(intent, "width", None):
+                    width = int(settings.imagegen_sd15_width)
+                if not params.get("height") and not getattr(intent, "height", None):
+                    height = int(settings.imagegen_sd15_height)
 
         # Resolve / revalidate pinned contract — never silently switch certified version
         allow_draft = bool(params.get("allow_draft_cert_harness"))
@@ -3091,7 +3251,7 @@ class JobQueue:
                 model_family=pinned.get("modelFamily") or intent.enginePreference,
                 force_workflow_key=str(pinned["workflowKey"]),
                 allow_draft=allow_draft or wf_meta.status != "Certified",
-                present_inputs={"prompt": prompt, "reference_image": bool(source_asset_id)},
+                present_inputs={"prompt": prompt, "reference_image": has_ref_pixels},
             )
             expected_fp = pinned.get("fingerprint") or (pinned.get("fingerprints") or {}).get("graphHash")
         else:
@@ -3101,7 +3261,7 @@ class JobQueue:
                 model_family=intent.enginePreference,
                 force_workflow_key=intent.workflowPreference,
                 allow_draft=allow_draft,
-                present_inputs={"prompt": prompt, "reference_image": bool(source_asset_id)},
+                present_inputs={"prompt": prompt, "reference_image": has_ref_pixels},
                 provider_preference=intent.providerPreference,
             )
             pinned = contract.to_pinned_snapshot()
@@ -3171,8 +3331,18 @@ class JobQueue:
         prefix = f"studio/{project.id[:8]}_imagegen"
         reference_image = None
         mask_image = None
+        # Generate-with-reference (qwen2512.ref / certified *.ref): identity
+        # pixels ride referenceImage / first referenceIds. Never copy CRS into
+        # sourceAssetId (prior identity FAIL: CRS-as-canvas on zimage.ref_edit).
+        _pixel = choose_imagegen_pixel_asset(
+            workflow_key=contract.workflow_key,
+            source_asset_id=source_asset_id,
+            reference_ids=_ref_ids,
+            reference_image=_ref_image_id,
+        )
         needs_source = (
             source_asset_id
+            or _pixel.is_ref_generate
             or contract.workflow_key.endswith("ref_edit")
             or "img2img" in contract.workflow_key
             or "edit" in contract.workflow_key
@@ -3182,11 +3352,14 @@ class JobQueue:
             or contract.workflow_key == "image.upscale"
         )
         if needs_source:
-            if source_asset_id:
-                src = self._get_asset(db, source_asset_id)
+            pixel_id = _pixel.load_asset_id if _pixel.is_ref_generate else source_asset_id
+            if pixel_id:
+                src = self._get_asset(db, pixel_id)
                 reference_image = await self._ensure_comfy_image(src)
                 if not reference_image:
                     raise RuntimeError("Edit/reference source image missing or unreadable")
+            elif _pixel.is_ref_generate or _pixel.missing_required_pixels:
+                raise RuntimeError(f"{contract.workflow_key} requires a source/reference image")
             elif "reference_image" in (contract.required_inputs or []) or "inpaint" in contract.workflow_key:
                 raise RuntimeError("Reference image required before queue execution")
 
@@ -3418,6 +3591,10 @@ class JobQueue:
             params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
             job.params_json = json.dumps(params)
             db.commit()
+        else:
+            from .character_identity.visual_sheet import apply_crs_single_figure_gate_to_job
+
+            apply_crs_single_figure_gate_to_job(db, job, params, str(tmp_path))
 
         job.stage = ImageJobStage.REGISTERING_ASSET.value
         job.message = "Registering asset"
@@ -3617,6 +3794,10 @@ class JobQueue:
             params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
             job.params_json = json.dumps(params)
             db.commit()
+        else:
+            from .character_identity.visual_sheet import apply_crs_single_figure_gate_to_job
+
+            apply_crs_single_figure_gate_to_job(db, job, params, str(tmp_path))
         await self._imagegen_commit_asset(
             db,
             job,
@@ -3760,12 +3941,17 @@ class JobQueue:
         gate = validate_image_output(tmp_path, expected_aspect=params.get("aspect"), generate_previews=True)
         if not gate.ok:
             raise RuntimeError(f"Fal image failed output validation: {gate.errors}")
+        four_view_fal = False
         try:
-            from .character_identity.four_view_sheet import (
-                assess_four_view_layout,
-                is_single_image_four_view,
-            )
-            if is_single_image_four_view(params):
+            from .character_identity.four_view_sheet import is_single_image_four_view
+
+            four_view_fal = bool(is_single_image_four_view(params))
+        except Exception:
+            four_view_fal = False
+        if four_view_fal:
+            try:
+                from .character_identity.four_view_sheet import assess_four_view_layout
+
                 assessment = assess_four_view_layout(tmp_path)
                 params["characterSheetLayout"] = assessment
                 params["layoutAssessment"] = assessment
@@ -3775,8 +3961,12 @@ class JobQueue:
                 params["layout_noncompliant"] = bool(assessment.get("layoutNoncompliant"))
                 job.params_json = json.dumps(params)
                 db.commit()
-        except Exception:
-            pass
+            except Exception:
+                pass
+        else:
+            from .character_identity.visual_sheet import apply_crs_single_figure_gate_to_job
+
+            apply_crs_single_figure_gate_to_job(db, job, params, str(tmp_path))
         await self._imagegen_commit_asset(
             db,
             job,

@@ -5,7 +5,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import fs from "node:fs";
 import path from "node:path";
 
-const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const ARTIFACT_ROOT = path.join(
   process.cwd(),

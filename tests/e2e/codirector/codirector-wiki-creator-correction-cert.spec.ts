@@ -294,7 +294,7 @@ test.describe("@critical @beta refine wiki creator correction cert", () => {
     await seedFact(request, project.id, "Barnes enters DW6 in 2027.", "story");
     await compileWiki(request, project.id);
 
-    await page.goto(`http://127.0.0.1:8760/?project=${project.id}`);
+    await page.goto(`http://127.0.0.1:5173/?project=${project.id}`);
     // Open the Co-Director Wiki panel.
     const refineBtn = page.getByTestId("project-wiki-refine");
     await expect(refineBtn).toBeVisible({ timeout: 60_000 });

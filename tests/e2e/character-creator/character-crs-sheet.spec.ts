@@ -1,12 +1,14 @@
 /**
  * Playwright A–N — Character Creator CRS Sheet Closure on Schnick Coffee / Korri.
- * Live Beta only. Never POST /api/projects. Never delete Korri.
+ * Quarantined: mutates Korri persist CRS. Set ADEPT_ALLOW_KORRI_MUTATION=1 to run.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+test.skip(process.env.ADEPT_ALLOW_KORRI_MUTATION !== "1", "Quarantined: mutates Korri persist CRS");
+
+const BASE = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const PROJECT_ID = "2347bf46-3762-4763-86c5-4a6032522278";
 const KORRI_ID = "c49371ed-ba6b-4c16-ba98-a8b28b72118b";
@@ -49,18 +51,28 @@ test.describe("Character Creator CRS sheet A–N", () => {
     await openKorri(page);
     await expect(page.getByTestId("character-generator-compact")).toBeVisible();
     await expect(page.getByTestId("character-generator-select")).toBeVisible();
-    await expect(page.getByTestId("character-generator-batch")).toBeVisible();
     await expect(page.getByTestId("character-generate")).toBeVisible();
-    await expect(page.getByTestId("character-more-generators")).toBeVisible();
+    await expect(page.getByTestId("character-generator-batch")).toHaveCount(0);
+    await expect(page.getByTestId("character-more-generators")).toHaveCount(0);
     await shot(page, "A-compact-generator.png");
   });
 
-  test("B Qwen is the default generator", async ({ page }) => {
+  test("B Local Generator lists 2509 first and selects a ready model", async ({ page }) => {
     await openKorri(page);
     const select = page.getByTestId("character-generator-select");
     await expect(select).toBeVisible();
+    const optionValues = await select.locator("option").evaluateAll((els) =>
+      els.map((el) => (el as HTMLOptionElement).value),
+    );
+    const optionTexts = await select.locator("option").allTextContents();
+    expect(optionValues[0]).toBe("qwen_edit_2509");
+    expect(optionTexts[0]).toMatch(/Qwen Image Edit 2509/i);
+    expect(optionValues).not.toContain("sd15");
     const value = await select.inputValue();
-    expect(["qwen2512", "qwen"]).toContain(value);
+    const selectedText = optionTexts[optionValues.indexOf(value)] || "";
+    if (/not ready/i.test(selectedText)) {
+      expect(value).not.toBe("qwen_edit_2509");
+    }
     await shot(page, "B-qwen-default.png");
   });
 
@@ -84,7 +96,9 @@ test.describe("Character Creator CRS sheet A–N", () => {
   test("E Active Character Reference Sheet card", async ({ page }) => {
     await openKorri(page);
     await expect(page.getByTestId("character-active-crs")).toBeVisible();
-    await expect(page.getByTestId("character-previous-generations")).toContainText("Previous Generations");
+    await expect(page.getByTestId("character-active-crs-status")).toBeVisible();
+    await expect(page.getByTestId("character-previous-generations")).toHaveCount(0);
+    await expect(page.getByTestId("character-candidate-grid")).toHaveCount(0);
     await shot(page, "E-active-crs.png");
   });
 
@@ -101,21 +115,22 @@ test.describe("Character Creator CRS sheet A–N", () => {
     }
   });
 
-  test("G More Generators stays collapsed by default", async ({ page }) => {
+  test("G More Generators chrome is gone (single CRS)", async ({ page }) => {
     await openKorri(page);
-    const details = page.getByTestId("character-more-generators");
-    await expect(details).toBeVisible();
-    expect(await details.getAttribute("open")).toBeNull();
+    await expect(page.getByTestId("character-more-generators")).toHaveCount(0);
+    await expect(page.getByTestId("character-generator-batch")).toHaveCount(0);
     await shot(page, "G-more-generators.png");
   });
 
-  test("H Generate Character Reference Sheet label", async ({ page }) => {
+  test("H Generate control is visible and labeled Generate", async ({ page }) => {
     await openKorri(page);
-    await expect(page.getByTestId("character-generate")).toContainText(/Character Reference Sheet/i);
+    await expect(page.getByTestId("character-generator-panel")).toContainText(/Character Reference Sheet/i);
+    await expect(page.getByTestId("character-generate")).toHaveText(/^(Generate|Starting|Generating)/);
     await shot(page, "H-generate-label.png");
   });
 
   test("I–K real Qwen generate, 2K metadata, Approve", async ({ page, request }) => {
+    test.skip(process.env.ADEPT_ALLOW_LIVE_GENERATE !== "1", "HOLD live Generate / Korri pixels — sanitation phase 1");
     test.setTimeout(SHEET_WAIT_MS + 60_000);
     await openKorri(page);
     const models = await request.get(`${API}/api/imagegen/models`);
@@ -300,10 +315,16 @@ test.describe("Character Creator CRS sheet A–N", () => {
     const char = await request.get(`${API}/api/projects/${PROJECT_ID}/characters/${KORRI_ID}`);
     const body = await char.json();
     expect(String(body.approval_status || "")).toBe("approved");
+    const crs = await request.get(`${API}/api/projects/${PROJECT_ID}/characters/${KORRI_ID}/crs`);
+    expect(crs.ok()).toBeTruthy();
+    const summary = await crs.json();
+    expect(Number(summary.crs_revision || 0)).toBe(3);
+    expect(summary.has_approved_reference).toBeTruthy();
     await shot(page, "M-reload-approved.png");
   });
 
   test("N disposable delete lifecycle", async ({ request }) => {
+    test.skip(process.env.ADEPT_ALLOW_SCHNICK_WRITE !== "1", "HOLD Schnick writes — disposable test project only");
     const created = await request.post(`${API}/api/projects/${PROJECT_ID}/characters`, {
       data: { name: `CRS Fixture ${Date.now()}`, role: "lead" },
     });

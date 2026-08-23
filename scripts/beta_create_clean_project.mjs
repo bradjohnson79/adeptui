@@ -1,6 +1,6 @@
 import { chromium } from "@playwright/test";
 
-const baseUrl = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const baseUrl = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();

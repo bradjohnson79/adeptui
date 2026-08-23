@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Optional
 
 # /api/projects/{id}/... and /api/codirector/projects/{id}/...
@@ -109,6 +110,42 @@ def project_id_from_file_path(raw_path: str) -> Optional[str]:
     if not m:
         return None
     return m.group(1)
+
+
+def path_has_dotdot(raw_path: str) -> bool:
+    """True when the caller supplied a parent-directory segment."""
+    try:
+        parts = Path(raw_path or "").parts
+    except Exception:
+        return True
+    return any(part == ".." for part in parts)
+
+
+def resolve_data_file_path(raw_path: str, data_dir: Path) -> Optional[Path]:
+    """Resolve a /api/file path inside data_dir. None if traversal or escape."""
+    if not raw_path or path_has_dotdot(raw_path):
+        return None
+    root = data_dir.resolve()
+    p = Path(raw_path)
+    try:
+        resolved = p.resolve() if p.is_absolute() else (root / p).resolve()
+        resolved.relative_to(root)
+    except Exception:
+        return None
+    return resolved
+
+
+SCHNICK_PROJECT_ID = "2347bf46-3762-4763-86c5-4a6032522278"
+KORRI_CHARACTER_ID = "c49371ed-ba6b-4c16-ba98-a8b28b72118b"
+OWNER_WRITE_DENY_HEADER = "x-adept-deny-owner-writes"
+
+
+def owner_write_denied(method: str, path: str, raw_file_path: str = "") -> bool:
+    """True when a mutating request targets the owner Schnick/Korri fixtures."""
+    if str(method or "GET").upper() in {"GET", "HEAD", "OPTIONS"}:
+        return False
+    blob = f"{path or ''} {raw_file_path or ''}"
+    return SCHNICK_PROJECT_ID in blob or KORRI_CHARACTER_ID in blob
 
 
 def file_path_is_ambiguous(raw_path: str) -> bool:

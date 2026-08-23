@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const WEB = process.env.ADEPT_WEB_URL || "http://127.0.0.1:8760";
+const WEB = process.env.ADEPT_WEB_URL || "http://127.0.0.1:5173";
 const API = process.env.ADEPT_API_URL || "http://127.0.0.1:8758";
 const PROJECT =
   process.env.M48_PROJECT_ID || "e32dae30-a014-4ea4-a2f2-69f4b7809bde";

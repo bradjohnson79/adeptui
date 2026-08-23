@@ -571,7 +571,7 @@ test.describe.serial("Adept UI Full Creator Pipeline (phases 0–17)", () => {
     expect(handoff.name).toBe(MANUAL_HANDOFF_NAME);
 
     writeJson(ctx.artifactDir, "readiness.json", {
-      beta: "http://127.0.0.1:8760",
+      beta: "http://127.0.0.1:5173",
       api: API_BASE,
       comfy: "http://127.0.0.1:8188",
       h3: "http://127.0.0.1:8192",

@@ -59,14 +59,22 @@ class ComfyClient:
         return data
 
     async def _known_node_types(self) -> set[str] | None:
-        """Live node type names, or None when the catalogue cannot be read."""
-        try:
-            catalogue = await self.get_object_info()
-        except Exception:  # noqa: BLE001 - unknown must not be treated as invalid
-            return None
-        if not isinstance(catalogue, dict) or not catalogue:
-            return None
-        return {str(key) for key in catalogue}
+        """Live node type names, or None when the catalogue cannot be read.
+
+        Retry once. Unknown is not treated as ready when a workflow_key is bound
+        (Stability Cull Batch 2).
+        """
+        last_error: Exception | None = None
+        for _attempt in range(2):
+            try:
+                catalogue = await self.get_object_info()
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+            if isinstance(catalogue, dict) and catalogue:
+                return {str(key) for key in catalogue}
+        _ = last_error
+        return None
 
     async def queue_prompt(
         self,
@@ -84,6 +92,19 @@ class ComfyClient:
 
             known = await self._known_node_types()
             if workflow_key:
+                if known is None:
+                    from .capabilities.errors import CapabilityError
+
+                    raise CapabilityError(
+                        code="WORKFLOW_READINESS_UNKNOWN",
+                        message=(
+                            f"ComfyUI node catalogue is unavailable; refusing to treat "
+                            f"{workflow_key} as ready."
+                        ),
+                        details={"workflowId": workflow_key},
+                        recoverable=True,
+                        recommended_action="start_comfyui",
+                    )
                 from .video_runtime.preflight import ensure_local_queueable
 
                 ensure_local_queueable(workflow_key, node_types=known)
@@ -97,7 +118,10 @@ class ComfyClient:
             data = r.json()
             if "error" in data:
                 raise RuntimeError(f"ComfyUI error: {data['error']}")
-            return data["prompt_id"]
+            prompt_id = str(data.get("prompt_id") or "").strip()
+            if not prompt_id:
+                raise RuntimeError("ComfyUI accepted the graph but returned no prompt_id")
+            return prompt_id
 
     async def get_history(self, prompt_id: str) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -197,6 +221,12 @@ class ComfyClient:
             "confirmedStopped": False,
             "errorCode": None,
         }
+        if not prompt_id:
+            # Isolate: this job never owned a Comfy prompt. Do not interrupt a
+            # sibling in-flight graph (CRS law-view vs leftover coverage).
+            result["confirmedStopped"] = True
+            result["confirmation"] = {"confirmed": True, "reason": "no_prompt_id"}
+            return result
         try:
             await self.interrupt()
             result["interrupt"] = True
@@ -293,6 +323,8 @@ class ComfyClient:
         timeout = timeout_sec or settings.job_timeout_sec
         elapsed = 0.0
         normalizer = ProgressNormalizer()
+        running_without_history_sec = 0.0
+        stall_limit_sec = min(180.0, float(timeout))
         while elapsed < timeout:
             if cancel_check and cancel_check():
                 # Interrupt promptly; full confirm/transition is owned by JobQueue.cancel_and_halt.
@@ -372,6 +404,16 @@ class ComfyClient:
             pending = queue.get("queue_pending") or []
             in_running = any(item[1] == prompt_id for item in running if len(item) > 1)
             in_pending = any(item[1] == prompt_id for item in pending if len(item) > 1)
+            if in_running and prompt_id not in history:
+                running_without_history_sec += settings.poll_interval_sec
+                if running_without_history_sec >= stall_limit_sec:
+                    raise TimeoutError(
+                        f"ComfyUI stall: prompt {prompt_id} has been queue_running "
+                        f"for {int(running_without_history_sec)}s with no history. "
+                        "Failing closed instead of polling for up to an hour."
+                    )
+            else:
+                running_without_history_sec = 0.0
             if on_progress:
                 if in_running:
                     msg = "running in ComfyUI"

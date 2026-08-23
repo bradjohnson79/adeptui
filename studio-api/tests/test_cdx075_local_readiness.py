@@ -111,6 +111,7 @@ def test_static_catalog_local_rows_do_not_claim_install_truth():
             "Certified",
             "Available",
             "Testing",
+            "Draft",
             "Requires Setup",
             "Unavailable",
         }

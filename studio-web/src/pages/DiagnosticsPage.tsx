@@ -124,24 +124,6 @@ export function DiagnosticsPage() {
             </div>
           </section>
 
-          {result.layers.proxy.healthz.status !== null && (
-            <section className="diagnostics-layers">
-              <h3>Proxy (8760)</h3>
-              <div className="diagnostics-grid">
-                <div className={`diagnostics-card ${result.layers.proxy.healthz.status === 200 ? "state-ok" : "state-error"}`}>
-                  <strong>/healthz (proxied)</strong>
-                  <span>{result.layers.proxy.healthz.status ?? "—"}</span>
-                  <span className="muted">{result.layers.proxy.healthz.elapsedMs}ms</span>
-                </div>
-                <div className={`diagnostics-card ${result.layers.proxy.health.status === 200 ? "state-ok" : "state-warn"}`}>
-                  <strong>/api/health (proxied)</strong>
-                  <span>{result.layers.proxy.health.status ?? "—"}</span>
-                  <span className="muted">{result.layers.proxy.health.elapsedMs}ms</span>
-                </div>
-              </div>
-            </section>
-          )}
-
           <section className="diagnostics-layers">
             <h3>Providers</h3>
             <div className="diagnostics-grid">

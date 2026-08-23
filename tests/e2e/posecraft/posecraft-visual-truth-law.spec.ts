@@ -9,9 +9,10 @@
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
-const PROJECT_ID = process.env.ADEPT_PROJECT_ID || "2347bf46-3762-4763-86c5-4a6032522278";
+const SCHNICK_ID = "2347bf46-3762-4763-86c5-4a6032522278";
+const PROJECT_ID = process.env.ADEPT_PROJECT_ID || SCHNICK_ID;
 
 const SEVEN_REGIONS = [
   ["head", "head"],
@@ -35,6 +36,11 @@ function byteDiff(a: Buffer, b: Buffer): number {
   for (let i = 0; i < n; i += 1) if (a[i] !== b[i]) diff += 1;
   return diff + Math.abs(a.length - b.length);
 }
+
+test.skip(
+  PROJECT_ID === SCHNICK_ID && process.env.ADEPT_ALLOW_SCHNICK_WRITE !== "1",
+  "HOLD Schnick writes — disposable test project only",
+);
 
 async function waitReady(page: Page, figureId: string) {
   await page.waitForFunction(() => Boolean((window as any).__posecraftController), null, { timeout: 20_000 });

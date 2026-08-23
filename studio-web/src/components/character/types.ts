@@ -102,6 +102,8 @@ export type CharacterCandidate = {
   revision?: number | null;
   parentSheetId?: string | null;
   createdAt?: string | null;
+  approvalStatus?: string | null;
+  approved?: boolean;
 };
 
 /** True when the API stamps this result as not a four-view Character Sheet. */
@@ -145,7 +147,25 @@ export function normalizeCharacterCandidate(raw: unknown): CharacterCandidate {
   if (typeof parent === "string" && parent.trim()) c.parentSheetId = parent.trim();
   const created = rec.createdAt ?? rec.created_at;
   if (typeof created === "string" && created.trim()) c.createdAt = created.trim();
+  const approval = rec.approvalStatus ?? rec.approval_status;
+  if (typeof approval === "string" && approval.trim()) c.approvalStatus = approval.trim();
+  if (rec.approved === true || String(approval || rec.status || "").toLowerCase() === "approved") {
+    c.approved = true;
+  }
   return c;
+}
+
+export function approvedHistoricalRevisions(
+  history: CharacterCandidate[],
+  currentApprovedId?: string | null,
+): CharacterCandidate[] {
+  const current = String(currentApprovedId || "").trim();
+  return history.filter((item) => {
+    const id = String(item.sheetAssetId || item.assetId || "").trim();
+    if (!id || (current && id === current)) return false;
+    const status = String(item.status || item.approvalStatus || "").toLowerCase();
+    return item.approved === true || status === "approved";
+  });
 }
 
 export type CandidateStage =
@@ -158,9 +178,19 @@ export type CandidateStage =
 /** Friendly label for each sheet-view role. */
 export const SHEET_VIEW_LABELS: Record<string, string> = {
   hero_identity: "Front",
+  front_full: "Front",
+  full_body_front: "Front",
+  full_body_three_quarter_front: "3/4",
+  full_body_three_quarter: "3/4",
+  three_quarter_full: "3/4",
+  three_quarter: "3/4",
   full_body_side_left: "Side",
+  side_full: "Side",
   full_body_back: "Back",
+  back_full: "Back",
   closeup_front: "Close-Up",
+  face_closeup: "Close-Up",
+  head_shoulders_closeup: "Close-Up",
 };
 
 const LOCAL_FAMILY_PROVENANCE: Record<string, string> = {
@@ -289,21 +319,25 @@ export function candidateStage(c: CharacterCandidate): CandidateStage {
   const anyFailed =
     (VIEW_FAIL_STATUSES as readonly string[]).includes(status) || views.some(viewIsFailed);
   if (anyFailed) return "failed";
-  if (status === "done" || c.sheetAssetId || c.assetId) return "complete";
+  if (c.sheetAssetId) return "complete";
   if (status === "assembling") return "assembling";
   // All views done but no composed sheet yet → assembling.
   if (views.length && views.every((v) => normStatus(v.status) === "done" || v.assetId) && !c.sheetAssetId) {
     return "assembling";
   }
-  const anyRunning = views.some((v) => normStatus(v.status) === "running");
-  if (anyRunning || status === "generating") return "generating";
+  if (views.length) {
+    const anyRunning = views.some((v) => normStatus(v.status) === "running");
+    if (anyRunning || status === "generating" || status === "done") return "generating";
+    return "queued";
+  }
+  if (status === "done" || c.assetId) return "complete";
   return "queued";
 }
 
 /** Use This Look is only for a complete, layout-compliant sheet. */
 export function canUseCharacterLook(c: CharacterCandidate): boolean {
   if (isLayoutNoncompliant(c)) return false;
-  const assetId = c.sheetAssetId || c.assetId;
+  const assetId = c.sheetAssetId || ((c.viewJobs || []).length ? "" : c.assetId);
   return candidateStage(c) === "complete" && !!assetId;
 }
 
@@ -314,16 +348,20 @@ export function batchProgress(candidates: CharacterCandidate[]): {
   doneSheets: number;
   totalSheets: number;
   percent: number;
+  activeGenerating: number;
 } {
   let doneViews = 0;
   let totalViews = 0;
   let doneSheets = 0;
+  let activeGenerating = 0;
   const totalSheets = candidates.length;
   for (const c of candidates) {
     const views = c.viewJobs || [];
     totalViews += views.length;
     doneViews += views.filter(viewIsFinished).length;
-    if (candidateStage(c) === "complete") doneSheets += 1;
+    const stage = candidateStage(c);
+    if (stage === "complete") doneSheets += 1;
+    if (stage === "generating" || stage === "queued" || stage === "assembling") activeGenerating += 1;
   }
   // Percent reflects real completed units: finished views + a finished sheet
   // counts its assembly. Failed views count as finished so a failed batch
@@ -331,7 +369,7 @@ export function batchProgress(candidates: CharacterCandidate[]): {
   const units = totalViews + totalSheets; // views + one assembly step per sheet
   const done = doneViews + doneSheets;
   const percent = units > 0 ? Math.round((done / units) * 100) : 0;
-  return { doneViews, totalViews, doneSheets, totalSheets, percent };
+  return { doneViews, totalViews, doneSheets, totalSheets, percent, activeGenerating };
 }
 
 export type {

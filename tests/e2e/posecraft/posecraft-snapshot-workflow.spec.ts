@@ -11,7 +11,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { waitForAppReady } from "../helpers/app";
 
 const API_BASE = process.env.STUDIO_API_BASE?.trim() || "http://127.0.0.1:8758";
-const WEB_BASE = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:8760";
+const WEB_BASE = process.env.PLAYWRIGHT_BASE_URL?.trim() || "http://127.0.0.1:5173";
 const RUN_PREFIX = "POSECRAFT-SNAPSHOT-WORKFLOW";
 const RUN_ID = `${RUN_PREFIX}-${new Date().toISOString().replace(/[:.]/g, "-")}`;
 const ARTIFACT_DIR = path.join(

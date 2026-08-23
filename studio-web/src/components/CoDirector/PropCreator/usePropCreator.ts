@@ -3,10 +3,11 @@
  * Express (and Standard) are views over this hook.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { shouldSuspendDependentPolling } from "../../../runtime/studioApiConnection";
 import { DEFAULT_GENERATOR_PLAN, type CharacterGeneratorPlan } from "../../generators/generatorPlan";
 import { persistGeneratorPayload, propGenerateRequest, sourcesFromPropGenerator } from "./propGenerator";
 import { propCreatorApi } from "./propCreatorApi";
-import { candidateIsFinished, type PropCreatorWorkspace, type PropEntity } from "./types";
+import { candidateIsFinished, markStaleQueuedFailed, PROP_QUEUED_NO_HYDRATE_MS, type PropCreatorWorkspace, type PropEntity } from "./types";
 
 export type PropCreatorVariant = "express" | "standard";
 
@@ -39,11 +40,13 @@ export function usePropCreator(projectId: string) {
   const [plan, setPlan] = useState<CharacterGeneratorPlan>(emptyPlan);
   const [useAsIdentity, setUseAsIdentity] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const genStartedAtRef = useRef<number | null>(null);
 
   const flashNotice = useCallback((message: string, ms = PROP_SAVE_NOTICE_MS) => {
     if (noticeTimerRef.current) {
@@ -80,13 +83,24 @@ export function usePropCreator(projectId: string) {
     (propId: string) => {
       stopPoll();
       const tick = () => {
+        if (shouldSuspendDependentPolling()) return;
         void propCreatorApi
           .get(projectId, propId)
           .then((res) => {
-            applyProp(res.prop);
-            // GET hydrates live job status (including failed + job.message).
-            const pending = (res.prop.candidates || []).some((c) => !candidateIsFinished(c));
-            if (!pending) stopPoll();
+            const elapsed = genStartedAtRef.current != null ? Date.now() - genStartedAtRef.current : 0;
+            const generatingNow = (res.prop.candidates || []).some((c) => !candidateIsFinished(c));
+            const candidates = markStaleQueuedFailed(
+              res.prop.candidates || [],
+              generatingNow,
+              elapsed,
+              PROP_QUEUED_NO_HYDRATE_MS,
+            );
+            applyProp({ ...res.prop, candidates });
+            const pending = candidates.some((c) => !candidateIsFinished(c));
+            if (!pending) {
+              genStartedAtRef.current = null;
+              stopPoll();
+            }
           })
           .catch(() => undefined);
       };
@@ -117,6 +131,8 @@ export function usePropCreator(projectId: string) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadTimedOut(false);
+    const timeoutId = window.setTimeout(() => setLoadTimedOut(true), 10_000);
     void refresh()
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -126,6 +142,7 @@ export function usePropCreator(projectId: string) {
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
       stopPoll();
       if (noticeTimerRef.current) {
         clearTimeout(noticeTimerRef.current);
@@ -213,6 +230,7 @@ export function usePropCreator(projectId: string) {
       const current = await persist();
       const res = await propCreatorApi.generate(projectId, current.id, propGenerateRequest(plan));
       applyProp(res.prop);
+      genStartedAtRef.current = Date.now();
       startPoll(res.prop.id);
       setNotice("Generating prop looks.");
     } catch (err) {
@@ -321,6 +339,7 @@ export function usePropCreator(projectId: string) {
     useAsIdentity,
     setUseAsIdentity,
     loading,
+    loadTimedOut,
     busy,
     error,
     notice,

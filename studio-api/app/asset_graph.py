@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-"""Asset graph + version lineage helpers."""
+"""Asset graph + version lineage helpers.
+
+Canonical Library lineage is ``asset_versions`` / this module.
+``m29_asset_versions`` is a historical M2.9 tool store — read-compat only.
+Do not add a third lineage table (CDX-074).
+"""
 
 import json
 import uuid

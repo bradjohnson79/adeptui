@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 
-const WEB = process.env.ADEPT_WEB_URL || process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const WEB = process.env.ADEPT_WEB_URL || process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.ADEPT_API_URL || process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 const PROJECT =
   process.env.ADEPT_SCHNICK_PROJECT_ID ||
@@ -125,6 +125,7 @@ test.describe("Image Generator library references + accordion UX", () => {
     const intentIds = body.imageProductBody?.creativeContext?.reference_image_ids || [];
     expect(ids).toEqual(expect.arrayContaining(remaining));
     expect(intentIds).toEqual(expect.arrayContaining(remaining));
+    expect(body.imageProductBody?.taskType).toBe("IMAGE_I2I");
     fs.writeFileSync(path.join(ARTIFACTS, "compile-preview-refs.json"), JSON.stringify(body, null, 2));
 
     await page.screenshot({ path: path.join(ARTIFACTS, "imagegen-refs-accordion.png"), fullPage: true });

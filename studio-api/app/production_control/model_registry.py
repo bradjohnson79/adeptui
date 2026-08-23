@@ -6,6 +6,27 @@ from typing import Any
 
 from .contracts import CapabilityLabel, LocalLifecycle, ModelDescriptor, Modality
 
+# Catalog-only families with no certified workflow — hide from ordinary pickers.
+CATALOG_ONLY_HIDDEN_FROM_PICKER = frozenset(
+    {
+        "cogview-4-local",
+        "hidream-local",
+        "lumina-image-2-local",
+        "pixart-sigma-local",
+        "kolors-local",
+        "omnigen-local",
+        "sana-15-local",
+        "janus-local",
+        "janus-pro-local",
+        "hunyuan-image-local",
+    }
+)
+
+
+def is_ordinary_picker_hidden(model_id: str) -> bool:
+    return str(model_id or "") in CATALOG_ONLY_HIDDEN_FROM_PICKER
+
+
 # Action tags map to TimelineActionCapability + common generator actions.
 _ACTION_TAGS: dict[str, set[str]] = {
     "generate": {"audio_generation", "full_scene", "timeline_batch"},
@@ -98,7 +119,7 @@ _CATALOG: list[ModelDescriptor] = [
         label="LTX 2.5 Full",
         locality="local",
         provider_id="comfy",
-        capability="Certified",
+        capability="Testing",
         lifecycle="Installed",
         supports=["text_to_video", "image_to_video", "continuation", "native_multishot", "audio_generation", "auto_duration", "fast_generation"],
         vram=24.0,
@@ -111,7 +132,7 @@ _CATALOG: list[ModelDescriptor] = [
         label="LTX 2.5 Distilled",
         locality="local",
         provider_id="comfy",
-        capability="Certified",
+        capability="Testing",
         lifecycle="Installed",
         supports=["text_to_video", "image_to_video", "continuation", "native_multishot", "audio_generation", "auto_duration", "fast_generation"],
         vram=16.0,
@@ -124,7 +145,7 @@ _CATALOG: list[ModelDescriptor] = [
         label="LTX 2.5 Comfy INT8",
         locality="local",
         provider_id="comfy",
-        capability="Certified",
+        capability="Testing",
         lifecycle="Installed",
         supports=["text_to_video", "image_to_video", "continuation", "audio_generation"],
         vram=12.0,
@@ -203,10 +224,10 @@ _CATALOG: list[ModelDescriptor] = [
         label="Kling (fal.ai)",
         locality="hosted",
         provider_id="fal",
-        capability="Certified",
+        capability="Unavailable",
         supports=["text_to_video", "image_to_video"],
         gpu=False,
-        executable=True,
+        executable=False,
     ),
     _desc(
         id="seedance-fal",
@@ -214,10 +235,10 @@ _CATALOG: list[ModelDescriptor] = [
         label="Seedance (fal.ai)",
         locality="hosted",
         provider_id="fal",
-        capability="Certified",
+        capability="Unavailable",
         supports=["text_to_video", "image_to_video"],
         gpu=False,
-        executable=True,
+        executable=False,
     ),
     _desc(
         id="veo-fal",
@@ -225,12 +246,25 @@ _CATALOG: list[ModelDescriptor] = [
         label="Veo (fal.ai)",
         locality="hosted",
         provider_id="fal",
-        capability="Certified",
+        capability="Unavailable",
         supports=["text_to_video"],
         gpu=False,
-        executable=True,
+        executable=False,
     ),
     # Image — local
+    _desc(
+        id="qwen-image-edit-2509-local",
+        modality="image",
+        label="Qwen Image Edit 2509 (Local)",
+        locality="local",
+        provider_id="comfy",
+        capability="Draft",
+        lifecycle="Installed",
+        supports=["edit", "reference_conditioning", "identity_reference"],
+        vram=24.0,
+        gpu=True,
+        executable=False,
+    ),
     _desc(
         id="qwen-image-2512-local",
         modality="image",
@@ -271,6 +305,19 @@ _CATALOG: list[ModelDescriptor] = [
         executable=True,
     ),
     _desc(
+        id="illustrious-local",
+        modality="image",
+        label="Illustrious XL (Local)",
+        locality="local",
+        provider_id="comfy",
+        capability="Certified",
+        lifecycle="Installed",
+        supports=["text_to_image"],
+        vram=12.0,
+        gpu=True,
+        executable=True,
+    ),
+    _desc(
         id="krea2-turbo-local",
         modality="image",
         label="Krea 2 Turbo (Local)",
@@ -283,6 +330,20 @@ _CATALOG: list[ModelDescriptor] = [
         vram=24.0,
         gpu=True,
         executable=True,
+    ),
+    _desc(
+        id="sensenova-u15-local",
+        modality="image",
+        label="SenseNova U1.5 (Local)",
+        locality="local",
+        provider_id="comfy",
+        capability="Draft",
+        lifecycle="Installed",
+        supports=["text_to_image", "edit", "reference_conditioning", "native_reference_sheet"],
+        does_not_support=["inpaint", "outpaint"],
+        vram=24.0,
+        gpu=True,
+        executable=False,
     ),
     _desc(
         id="krea2-raw-local",
@@ -719,13 +780,16 @@ _SETUP_COMPONENT_BY_MODEL_ID = {
     "wan-local": "wan_models",
     "hunyuan-video-1.5-local": "hunyuan_video_15",
     "hunyuan-video-13b-local": "hunyuan_video_13b",
+    "qwen-image-edit-2509-local": "qwen_image_edit_2509_models",
     "qwen-image-2512-local": "qwen_image_2512_models",
     "flux-local": "flux1_dev_local",
     "flux-schnell-local": "flux1_schnell_local",
     "flux-kontext-dev-local": "flux1_kontext_dev_local",
     "zimage-local": "zimage_models",
+    "illustrious-local": "illustrious_local",
     "krea2-turbo-local": "krea2_models",
     "krea2-raw-local": "krea2_models",
+    "sensenova-u15-local": "sensenova_u15_models",
     "sana-15-local": "sana_15_local",
     "sdxl-local": "sdxl_local",
     "sd35-large-local": "sd35_large_local",
@@ -1063,6 +1127,112 @@ def _registered_local_llm_models() -> list[ModelDescriptor]:
     return out
 
 
+_REGISTRY_WORKFLOW_BY_MODEL: dict[str, tuple[str, str]] = {
+    "ltx-2.5-full": ("video", "ltx_25.t2v"),
+    "ltx-2.5-distilled": ("video", "ltx_25.t2v"),
+    "ltx-2.5-comfy": ("video", "ltx_25.i2v"),
+    "kling-fal": ("video", "fal.kling"),
+    "seedance-fal": ("video", "fal.seedance"),
+    "veo-fal": ("video", "fal.veo"),
+    "illustrious-local": ("image", "illustrious.txt2img"),
+}
+
+_NEVER_DEFAULT_ELIGIBLE = frozenset(
+    {
+        "sensenova-u15-local",
+        "krea2-turbo-local",
+        "krea2-raw-local",
+        "krea2-turbo-fal",
+        "krea2-medium-fal",
+        "krea2-large-fal",
+        "minimax-h3",
+        "qwen-image-edit-2509-local",
+    }
+)
+
+_LABEL_RANK = {
+    "Certified": 6,
+    "Testing": 5,
+    "Available": 4,
+    "Loading": 3,
+    "Requires Setup": 2,
+    "Draft": 2,
+    "Error": 1,
+    "Unavailable": 1,
+    "Unsupported": 0,
+}
+
+
+def _registry_status_to_label(status: str) -> CapabilityLabel:
+    s = str(status or "").strip()
+    if s == "Certified":
+        return "Certified"
+    if s == "Blocked":
+        return "Unavailable"
+    if s == "Retired":
+        return "Unsupported"
+    if s in {"Draft", "Built", "SmokeTested"}:
+        return "Testing"
+    if s == "Deferred":
+        return "Requires Setup"
+    return "Available"
+
+
+def _more_conservative_label(current: CapabilityLabel, registry: CapabilityLabel) -> CapabilityLabel:
+    if _LABEL_RANK.get(registry, 0) < _LABEL_RANK.get(current, 0):
+        return registry
+    return current
+
+
+def _workflow_status(modality: str, workflow_key: str) -> str | None:
+    try:
+        if modality == "video":
+            from ..video_runtime.certified_registry import get_workflow
+        else:
+            from ..image_runtime.certified_registry import get_workflow
+        wf = get_workflow(workflow_key)
+    except Exception:
+        return None
+    if wf is None:
+        return None
+    return str(getattr(wf, "status", "") or "")
+
+
+def _apply_certified_registry_honesty(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
+    """Dock labels cannot exceed certified-registry status (LTX 2.5 Built, fal Blocked)."""
+    out: list[ModelDescriptor] = []
+    for model in models:
+        mapped = _REGISTRY_WORKFLOW_BY_MODEL.get(model.id)
+        if not mapped:
+            out.append(model)
+            continue
+        status = _workflow_status(*mapped)
+        if not status:
+            out.append(model)
+            continue
+        capped = _more_conservative_label(model.capabilityLabel, _registry_status_to_label(status))
+        executable = False if capped in {"Unavailable", "Unsupported", "Requires Setup"} else model.executable
+        out.append(model.model_copy(update={"capabilityLabel": capped, "executable": executable}))
+    return out
+
+
+def _stamp_default_eligible(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
+    out: list[ModelDescriptor] = []
+    for model in models:
+        eligible = (
+            model.capabilityLabel == "Certified"
+            and bool(model.executable)
+            and model.id not in _NEVER_DEFAULT_ELIGIBLE
+            and not is_ordinary_picker_hidden(model.id)
+        )
+        if model.id == "sensenova-u15-local":
+            eligible = False
+            if model.capabilityLabel == "Certified":
+                model = model.model_copy(update={"capabilityLabel": "Testing", "executable": False})
+        out.append(model.model_copy(update={"defaultEligible": eligible}))
+    return out
+
+
 def list_models(modality: Modality | None = None) -> list[ModelDescriptor]:
     merged = list(_CATALOG) + _docker_dock_models() + _ollama_dock_models() + _registered_local_llm_models()
     # Deduplicate by id — prefer earlier (static catalog) then live Ollama
@@ -1081,6 +1251,8 @@ def list_models(modality: Modality | None = None) -> list[ModelDescriptor]:
         stamped.append(m)
     stamped = _apply_setup_status(stamped)
     stamped = _apply_private_owner_h3(stamped)
+    stamped = _apply_certified_registry_honesty(stamped)
+    stamped = _stamp_default_eligible(stamped)
     if modality is None:
         return stamped
     return [m for m in stamped if m.modality == modality]

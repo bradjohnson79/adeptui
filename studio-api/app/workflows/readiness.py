@@ -46,6 +46,28 @@ WORKFLOW_MODEL_COMPONENTS: dict[str, tuple[str, ...]] = {
     "image.txt2img": ("zimage_models",),
     "image.img2img_edit": ("zimage_models",),
     "image.zimage_reference": ("zimage_models",),
+    # Certified image keys must check their own Setup components — never Z-Image.
+    "zimage.txt2img": ("zimage_models",),
+    "zimage.ref_edit": ("zimage_models",),
+    "zimage.inpaint": ("zimage_models",),
+    "zimage.outpaint": ("zimage_models",),
+    "qwen2512.txt2img": ("qwen_image_2512_models",),
+    "qwen2512.ref": ("qwen_image_2512_models",),
+    "qwen2512.character_concept": ("qwen_image_2512_models",),
+    "qwen2512.character_profile": ("qwen_image_2512_models",),
+    "qwen_edit_2509.edit": ("qwen_image_edit_2509_models",),
+    "qwen_edit_2509.crs_single_view": ("qwen_image_edit_2509_models",),
+    "flux.txt2img": ("flux1_kontext_dev_local", "flux1_dev_local"),
+    "flux.img2img": ("flux1_kontext_dev_local", "flux1_dev_local"),
+    "image.upscale": (),
+    "illustrious.txt2img": ("illustrious_local",),
+    "sd15.txt2img": ("sd15_local",),
+    "crs.sd15.control": ("sd15_local", "sd15_controlnet"),
+    "sensenova.txt2img": ("sensenova_u15_models",),
+    "sensenova.crs": ("sensenova_u15_models",),
+    "sensenova.edit": ("sensenova_u15_models",),
+    "sensenova.reference": ("sensenova_u15_models",),
+    "sensenova.ers": ("sensenova_u15_models",),
 }
 
 WORKFLOW_NOT_FOUND = "WORKFLOW_NOT_FOUND"
@@ -145,11 +167,28 @@ def workflow_readiness(
     """
     try:
         metadata = DEFAULT_WORKFLOW_REGISTRY.get(workflow_id)
-    except KeyError as exc:
-        raise KeyError(workflow_id) from exc
+    except KeyError:
+        metadata = None
+        if workflow_id not in WORKFLOW_MODEL_COMPONENTS:
+            raise KeyError(workflow_id) from None
 
-    payload = _describe(metadata)
-    required_nodes = tuple(metadata.compatibility.required_node_types)
+    if metadata is not None:
+        payload = _describe(metadata)
+        required_nodes = tuple(metadata.compatibility.required_node_types)
+    else:
+        payload = {
+            "id": workflow_id,
+            "family": workflow_id.split(".", 1)[0],
+            "modality": "image",
+            "capabilities": [],
+            "templateVersion": "1.0.0",
+            "engine": "comfy",
+            "requiredInputs": [],
+            "requiredNodeTypes": [],
+            "requiredModelComponentIds": list(WORKFLOW_MODEL_COMPONENTS.get(workflow_id, ())),
+            "modelRequirementsKnown": bool(WORKFLOW_MODEL_COMPONENTS.get(workflow_id)),
+        }
+        required_nodes = ()
     required_components = WORKFLOW_MODEL_COMPONENTS.get(workflow_id, ())
 
     if model_states is None:
@@ -167,6 +206,9 @@ def workflow_readiness(
         ]
 
     missing_models = [item for item in states if not item["present"]]
+    # Flux is satisfied by Kontext Dev OR generic Dev — not both required.
+    if workflow_id.startswith("flux.") and any(item["present"] for item in states):
+        missing_models = []
     node_catalog_available = node_types is not None
     missing_extensions = (
         _missing_required_node_types(required_nodes, node_types)

@@ -18,11 +18,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .permissions import (
+    OWNER_WRITE_DENY_HEADER,
     file_path_is_ambiguous,
     media_path_is_ambiguous,
+    owner_write_denied,
     project_id_from_file_path,
     project_id_from_media_path,
     project_id_from_path,
+    resolve_data_file_path,
     should_enforce_lock,
 )
 
@@ -82,6 +85,24 @@ class ProjectPasswordLockMiddleware(BaseHTTPMiddleware):
         method = request.method or "GET"
         if method == "OPTIONS":
             return await call_next(request)
+        raw_file = ""
+        if path == "/api/file":
+            try:
+                raw_file = request.query_params.get("path") or ""
+            except Exception:
+                raw_file = ""
+        if request.headers.get(OWNER_WRITE_DENY_HEADER) == "1" and owner_write_denied(
+            method, path, raw_file
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": {
+                        "code": "OWNER_FIXTURE_WRITE_DENIED",
+                        "message": "Destructive tests must not write Schnick Coffee or Korri. Use ADEPT_CERT_PROJECT_ID.",
+                    }
+                },
+            )
         try:
             from ..db import Asset, SessionLocal
             from . import service
@@ -103,8 +124,21 @@ class ProjectPasswordLockMiddleware(BaseHTTPMiddleware):
                             media_ambiguous = True
                     elif path == "/api/file":
                         raw_path = request.query_params.get("path") or ""
-                        project_id = project_id_from_file_path(raw_path)
-                        if not project_id and file_path_is_ambiguous(raw_path):
+                        from ..config import settings
+
+                        resolved = resolve_data_file_path(raw_path, settings.data_dir)
+                        if resolved is None:
+                            return JSONResponse(
+                                status_code=403,
+                                content={
+                                    "detail": {
+                                        "code": "FILE_API_RESTRICTED",
+                                        "message": "path traversal or escape",
+                                    }
+                                },
+                            )
+                        project_id = project_id_from_file_path(str(resolved))
+                        if not project_id and file_path_is_ambiguous(str(resolved)):
                             media_ambiguous = True
                 if media_ambiguous:
                     return _media_unresolvable_response()

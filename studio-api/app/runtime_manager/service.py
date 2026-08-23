@@ -1,16 +1,18 @@
 """Runtime Manager service layer.
 
-Aggregates health from existing endpoints, tracks ownership,
-and invokes PowerShell scripts for lifecycle actions.
+Aggregates health and delegates lifecycle to the Python Runtime Supervisor.
+Does not invoke PowerShell launchers.
 """
+
+from __future__ import annotations
+
 import asyncio
 import logging
-import subprocess
-from pathlib import Path
 from typing import Optional
 
 import httpx
 
+from .preferences import load_preferences
 from .schemas import (
     ComfyUiStatus,
     GpuInfo,
@@ -21,7 +23,6 @@ from .schemas import (
     StudioApiStatus,
     TunnelStatus,
 )
-from .preferences import load_preferences
 
 logger = logging.getLogger(__name__)
 
@@ -29,15 +30,21 @@ _STUDIO_API_URL = "http://127.0.0.1:8758"
 _COMFY_URL = "http://127.0.0.1:8188"
 _OLLAMA_URL = "http://127.0.0.1:11434"
 _TUNNEL_HOSTNAME = "api-beta.adeptui.org"
-_TUNNEL_URL = f"https://{_TUNNEL_HOSTNAME}/api/healthz"
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+def _ownership(raw: str | None) -> ServiceOwnership:
+    key = (raw or "").lower()
+    if key == "owned":
+        return ServiceOwnership.OWNED
+    if key == "reused":
+        return ServiceOwnership.REUSED
+    return ServiceOwnership.EXTERNAL
 
 
-def _script(name: str) -> Path:
-    return _repo_root() / name
+def _collect() -> dict:
+    from runtime_supervisor.services import collect_status
+
+    return collect_status()
 
 
 async def _probe(url: str, timeout: float = 5.0) -> bool:
@@ -56,15 +63,17 @@ async def _probe_json(url: str, timeout: float = 8.0) -> Optional[dict]:
             if r.status_code == 200:
                 return r.json()
     except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError):
-        pass
+        return None
     return None
 
 
 async def get_comfyui_status() -> ComfyUiStatus:
+    snap = await asyncio.to_thread(_collect)
+    row = snap.get("comfyui") or {}
     data = await _probe_json(f"{_COMFY_URL}/system_stats", timeout=8.0)
     if data:
         devices = data.get("devices")
-        if isinstance(devices, list) and len(devices) > 0:
+        if isinstance(devices, list) and devices:
             dev = devices[0]
         elif isinstance(devices, dict):
             dev = devices
@@ -72,43 +81,47 @@ async def get_comfyui_status() -> ComfyUiStatus:
             dev = {}
         return ComfyUiStatus(
             status=ServiceStatus.RUNNING,
-            ownership=ServiceOwnership.REUSED,
+            ownership=_ownership(row.get("ownership")),
             version=data.get("system", {}).get("comfyui_version", ""),
-            device=str(dev.get("name", "")).split(":")[0] if dev.get("name") else None,
+            device=str(dev.get("name", "")).split(":")[0] if isinstance(dev, dict) and dev.get("name") else None,
             vram_total=dev.get("vram_total") if isinstance(dev, dict) else None,
         )
-    return ComfyUiStatus(status=ServiceStatus.STOPPED)
+    return ComfyUiStatus(
+        status=ServiceStatus.STOPPED,
+        ownership=_ownership(row.get("ownership")),
+    )
 
 
 async def get_studio_api_status() -> StudioApiStatus:
-    ok = await _probe(f"{_STUDIO_API_URL}/api/healthz", timeout=5.0)
-    if ok:
-        return StudioApiStatus(
-            status=ServiceStatus.RUNNING,
-            ownership=ServiceOwnership.REUSED,
-        )
-    return StudioApiStatus(status=ServiceStatus.STOPPED)
+    snap = await asyncio.to_thread(_collect)
+    row = snap.get("studio_api") or {}
+    ok = bool(row.get("running")) or await _probe(f"{_STUDIO_API_URL}/api/healthz", timeout=5.0)
+    return StudioApiStatus(
+        status=ServiceStatus.RUNNING if ok else ServiceStatus.STOPPED,
+        ownership=_ownership(row.get("ownership")),
+    )
 
 
 async def get_ollama_status() -> OllamaStatus:
+    snap = await asyncio.to_thread(_collect)
+    row = snap.get("ollama") or {}
     data = await _probe_json(f"{_OLLAMA_URL}/api/tags", timeout=4.0)
-    if data is not None:
-        return OllamaStatus(
-            status=ServiceStatus.RUNNING,
-            ownership=ServiceOwnership.EXTERNAL,
-        )
-    return OllamaStatus(status=ServiceStatus.STOPPED)
+    running = data is not None or bool(row.get("running"))
+    return OllamaStatus(
+        status=ServiceStatus.RUNNING if running else ServiceStatus.STOPPED,
+        ownership=ServiceOwnership.EXTERNAL if running else _ownership(row.get("ownership")),
+    )
 
 
 async def get_tunnel_status() -> TunnelStatus:
-    ok = await _probe(_TUNNEL_URL, timeout=8.0)
-    if ok:
-        return TunnelStatus(
-            status=ServiceStatus.RUNNING,
-            ownership=ServiceOwnership.REUSED,
-            hostname=_TUNNEL_HOSTNAME,
-        )
-    return TunnelStatus(status=ServiceStatus.STOPPED)
+    snap = await asyncio.to_thread(_collect)
+    row = snap.get("cloudflared") or {}
+    running = bool(row.get("running"))
+    return TunnelStatus(
+        status=ServiceStatus.RUNNING if running else ServiceStatus.STOPPED,
+        ownership=_ownership(row.get("ownership")),
+        hostname=_TUNNEL_HOSTNAME,
+    )
 
 
 async def get_gpu_info() -> GpuInfo:
@@ -121,14 +134,9 @@ async def get_gpu_info() -> GpuInfo:
                 detected=True,
                 name=gpu.get("device") or gpu.get("name") or "GPU",
             )
-    health = await _probe_json(f"{_STUDIO_API_URL}/api/health", timeout=10.0)
-    if health:
-        operator = health.get("operator") or {}
-        comfy_block = health.get("comfy") or {}
-        if comfy_block.get("gpu"):
-            return GpuInfo(detected=True, name=str(comfy_block["gpu"]))
-        if operator.get("gpu"):
-            return GpuInfo(detected=True, name=str(operator["gpu"]))
+    health = await _probe_json(f"{_STUDIO_API_URL}/api/comfy/health", timeout=10.0)
+    if health and health.get("gpu"):
+        return GpuInfo(detected=True, name=str(health["gpu"]))
     return GpuInfo(detected=False)
 
 
@@ -158,61 +166,43 @@ async def get_status() -> RuntimeManagerStatus:
     )
 
 
-async def start_services() -> str:
-    script = _script("Start-AdeptRuntime.ps1")
-    if not script.exists():
-        return "Start script not found"
-    proc = await asyncio.create_subprocess_exec(
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", str(script),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+def _start_sync() -> str:
+    from runtime_supervisor.services import LifecycleError, start_all
+
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120.0)
-        output = stdout.decode("utf-8", errors="replace")
-        if proc.returncode != 0:
-            err = stderr.decode("utf-8", errors="replace")[:500]
-            logger.warning("Start-AdeptRuntime.ps1 exited %d: %s", proc.returncode, err)
-        return output
-    except asyncio.TimeoutError:
-        proc.kill()
-        return "Start timed out after 120s"
+        report = start_all()
+        return "\n".join(report.lines())
+    except LifecycleError as exc:
+        return f"ERROR: {exc}"
+
+
+def _stop_sync() -> str:
+    from runtime_supervisor.services import LifecycleError, stop_all
+
+    try:
+        results = stop_all(force=True)
+        return "\n".join(f"{r.service}: {'OK' if r.ok else 'FAIL'} {r.message}" for r in results)
+    except LifecycleError as exc:
+        return f"ERROR: {exc}"
+
+
+def _restart_sync() -> str:
+    from runtime_supervisor.services import LifecycleError, restart_all
+
+    try:
+        report = restart_all(force=True)
+        return "\n".join(report.lines())
+    except LifecycleError as exc:
+        return f"ERROR: {exc}"
+
+
+async def start_services() -> str:
+    return await asyncio.to_thread(_start_sync)
 
 
 async def stop_services() -> str:
-    script = _script("Stop-AdeptRuntime.ps1")
-    if not script.exists():
-        return "Stop script not found"
-    proc = await asyncio.create_subprocess_exec(
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", str(script), "-Force",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60.0)
-        output = stdout.decode("utf-8", errors="replace")
-        return output
-    except asyncio.TimeoutError:
-        proc.kill()
-        return "Stop timed out after 60s"
+    return await asyncio.to_thread(_stop_sync)
 
 
 async def restart_services() -> str:
-    script = _script("Restart-AdeptRuntime.ps1")
-    if not script.exists():
-        return "Restart script not found"
-    proc = await asyncio.create_subprocess_exec(
-        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", str(script), "-Force",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180.0)
-        output = stdout.decode("utf-8", errors="replace")
-        return output
-    except asyncio.TimeoutError:
-        proc.kill()
-        return "Restart timed out after 180s"
+    return await asyncio.to_thread(_restart_sync)

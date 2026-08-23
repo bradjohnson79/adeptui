@@ -8,6 +8,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
+import { shouldSuspendDependentPolling } from "../../runtime/studioApiConnection";
 import { GenerationProgressBar } from "./GenerationProgressBar";
 import {
   buildCharacterSheetStartBody,
@@ -15,9 +16,13 @@ import {
   formatCharacterSheetStartError,
 } from "./characterSheetGenerate";
 import type { CharacterGeneratorPlan } from "./characterGeneratorPlan";
-import { normalizeCharacterCandidate, viewIsFinished, type CharacterCandidate, type CharacterProfile, type GeneratorOption } from "./types";
+import { approvedHistoricalRevisions, normalizeCharacterCandidate, viewIsFinished, type CharacterCandidate, type CharacterProfile, type GeneratorOption } from "./types";
 
 type Phase = "idle" | "starting" | "generating";
+
+/** 2s interval × 1800 = 60 minutes. Bounded — do not restart this budget. */
+const SHEET_POLL_ATTEMPTS = 1800;
+const SHEET_QUEUED_NO_HYDRATE_MS = 30_000;
 
 type Props = {
   projectId: string;
@@ -43,17 +48,18 @@ function readPackLists(pack: unknown): { current: CharacterCandidate[]; history:
   const currentRaw = p?.pack?.candidates || p?.candidates || [];
   const previousRaw = p?.pack?.previousCandidates || p?.previousCandidates || [];
   const current = currentRaw.map((raw) => normalizeCharacterCandidate(raw));
-  const history = previousRaw.map((raw) => normalizeCharacterCandidate(raw));
+  const history = approvedHistoricalRevisions(previousRaw.map((raw) => normalizeCharacterCandidate(raw)));
   return { current, history };
 }
 
 function viewsTerminal(c: CharacterCandidate): boolean {
   const views = c.viewJobs || [];
-  if (!views.length) {
-    const status = String(c.status || "").trim().toLowerCase();
-    return status === "failed" || status === "error" || status === "cancelled" || status === "done" || !!c.sheetAssetId || !!c.assetId;
+  const status = String(c.status || "").trim().toLowerCase();
+  if (status === "failed" || status === "error" || status === "cancelled") return true;
+  if (views.length) {
+    return views.every(viewIsFinished) && (!!c.sheetAssetId || status === "failed");
   }
-  return views.every(viewIsFinished);
+  return status === "done" || !!c.sheetAssetId || !!c.assetId;
 }
 
 export function CharacterSheetGenerator({
@@ -74,6 +80,8 @@ export function CharacterSheetGenerator({
   const [message, setMessage] = useState("");
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const inFlightRef = useRef(false);
+  const pollStartedAtRef = useRef(0);
+  const pollExhaustedRef = useRef(false);
 
   const generating = phase !== "idle";
   const anyEnabled = plan.localEnabled || plan.apiEnabled;
@@ -88,7 +96,12 @@ export function CharacterSheetGenerator({
 
   const poll = useCallback(
     async (attemptsLeft: number) => {
+      if (shouldSuspendDependentPolling()) {
+        setTimeout(() => void poll(attemptsLeft), 4000);
+        return;
+      }
       if (attemptsLeft <= 0) {
+        pollExhaustedRef.current = true;
         inFlightRef.current = false;
         setPhase("idle");
         setMessage(
@@ -108,6 +121,20 @@ export function CharacterSheetGenerator({
         onHistory?.(lists.history);
         const packStatus = String(pack?.status || "").toUpperCase();
         const allDone = lists.current.length > 0 && lists.current.every(viewsTerminal);
+        const noViewsYet = lists.current.every((c) => !(c.viewJobs || []).length);
+        if (
+          noViewsYet &&
+          pollStartedAtRef.current &&
+          Date.now() - pollStartedAtRef.current > SHEET_QUEUED_NO_HYDRATE_MS &&
+          (packStatus === "GENERATING" || packStatus === "QUEUED" || packStatus === "RUNNING")
+        ) {
+          inFlightRef.current = false;
+          setPhase("idle");
+          setMessage(
+            formatCharacterSheetStartError("Still queued with no views after 30 seconds. You can retry."),
+          );
+          return;
+        }
         if (
           allDone ||
           packStatus === "FAILED" ||
@@ -145,7 +172,8 @@ export function CharacterSheetGenerator({
             inFlightRef.current = true;
             setPhase("generating");
             setMessage("Generating…");
-            void poll(180);
+            pollStartedAtRef.current = Date.now();
+            void poll(SHEET_POLL_ATTEMPTS);
           }
         }
       } catch {
@@ -165,11 +193,12 @@ export function CharacterSheetGenerator({
       inFlightRef.current = true;
       setPhase("generating");
       setMessage("Generating…");
-      void poll(180);
+      pollStartedAtRef.current = Date.now();
+            void poll(SHEET_POLL_ATTEMPTS);
     };
     window.addEventListener("adept:character-crs-pack-changed", onPackChanged);
     const tick = window.setInterval(() => {
-      if (inFlightRef.current) return;
+      if (inFlightRef.current || pollExhaustedRef.current) return;
       void api
         .getCharacterVisualSheet(projectId, characterId)
         .then((res) => {
@@ -180,7 +209,8 @@ export function CharacterSheetGenerator({
             inFlightRef.current = true;
             setPhase("generating");
             setMessage("Generating…");
-            void poll(180);
+            pollStartedAtRef.current = Date.now();
+            void poll(SHEET_POLL_ATTEMPTS);
           }
         })
         .catch(() => undefined);
@@ -205,6 +235,7 @@ export function CharacterSheetGenerator({
       return;
     }
     inFlightRef.current = true;
+    pollExhaustedRef.current = false;
     setPhase("starting");
     setMessage("Starting…");
     try {
@@ -222,7 +253,8 @@ export function CharacterSheetGenerator({
       setCandidates(lists.current);
       onCandidates(lists.current);
       onHistory?.(lists.history);
-      void poll(180);
+      pollStartedAtRef.current = Date.now();
+            void poll(SHEET_POLL_ATTEMPTS);
     } catch (e) {
       inFlightRef.current = false;
       setPhase("idle");
@@ -245,7 +277,8 @@ export function CharacterSheetGenerator({
           onCandidates(lists.current);
         }
         onHistory?.(lists.history);
-        void poll(180);
+        pollStartedAtRef.current = Date.now();
+            void poll(SHEET_POLL_ATTEMPTS);
       } catch (e) {
         inFlightRef.current = false;
         setPhase("idle");

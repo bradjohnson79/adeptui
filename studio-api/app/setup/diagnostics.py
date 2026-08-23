@@ -145,6 +145,112 @@ def _krea2_find(
     return None
 
 
+def _sd15_roots(location: str | None) -> list[Path]:
+    """SD 1.5 search roots: configured path, then the owner SD 1.5 model root.
+
+    Comfy-Shared is excluded — this family is stored under D:\\01_Models.
+    """
+    roots: list[Path] = []
+    if location:
+        roots.append(Path(location).expanduser())
+    model_root = str(getattr(settings, "sd15_model_root", "") or "").strip()
+    if model_root:
+        roots.append(Path(model_root).expanduser())
+    return roots
+
+
+def _sd15_controlnet_roots(location: str | None) -> list[Path]:
+    roots: list[Path] = []
+    if location:
+        roots.append(Path(location).expanduser())
+    cn_root = str(getattr(settings, "sd15_controlnet_root", "") or "").strip()
+    if cn_root:
+        roots.append(Path(cn_root).expanduser())
+    return roots
+
+
+def _verify_sd15_files(location: str | None) -> Verification:
+    name = str(getattr(settings, "imagegen_sd15_checkpoint", "") or "").strip()
+    found = None
+    for root in _sd15_roots(location):
+        if not name:
+            break
+        if root.is_file() and root.name.lower() == name.lower():
+            found = root
+            break
+        candidate = root / name
+        if candidate.is_file():
+            found = candidate
+            break
+        checkpoints = root / "checkpoints" / name
+        if checkpoints.is_file():
+            found = checkpoints
+            break
+    if found and os.access(found, os.R_OK):
+        return Verification(
+            True,
+            False,
+            None,
+            f"Stable Diffusion 1.5 checkpoint ({name}) is readable.",
+            str(found),
+        )
+    return Verification(
+        False,
+        found is None,
+        "required_models_missing",
+        f"Stable Diffusion 1.5 checkpoint ({name}) was not found under {settings.sd15_model_root}.",
+        location or str(getattr(settings, "sd15_model_root", "") or ""),
+        details=(f"Missing: {name}",),
+        recommendation="correct_path" if location else "install",
+        requires_user_interaction=True,
+    )
+
+
+def _verify_sd15_controlnet_files(location: str | None) -> Verification:
+    names = (
+        str(getattr(settings, "imagegen_sd15_openpose", "") or "").strip(),
+        str(getattr(settings, "imagegen_sd15_depth", "") or "").strip(),
+        str(getattr(settings, "imagegen_sd15_lineart", "") or "").strip(),
+    )
+    found: list[Path | None] = []
+    for name in names:
+        match = None
+        for root in _sd15_controlnet_roots(location):
+            if not name:
+                break
+            if root.is_file() and root.name.lower() == name.lower():
+                match = root
+                break
+            candidate = root / name
+            if candidate.is_file():
+                match = candidate
+                break
+            nested = root / "controlnet" / name
+            if nested.is_file():
+                match = nested
+                break
+        found.append(match)
+    missing = [name for name, path in zip(names, found) if not name or path is None]
+    if not missing and all(path and os.access(path, os.R_OK) for path in found):
+        return Verification(
+            True,
+            False,
+            None,
+            "SD 1.5 OpenPose, Depth, and Lineart ControlNets are readable.",
+            str(found[0]) if found[0] else location,
+        )
+    return Verification(
+        False,
+        not any(found),
+        "required_models_missing",
+        "One or more SD 1.5 ControlNet files are missing.",
+        location or str(getattr(settings, "sd15_controlnet_root", "") or ""),
+        details=tuple(f"Missing: {name}" for name in missing),
+        recommendation="correct_path" if location else "install",
+        requires_user_interaction=True,
+    )
+
+
 def _verify_krea2_files(location: str | None) -> Verification:
     roots = _krea2_roots(location)
     specs = (
@@ -432,6 +538,31 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
             requires_user_interaction=True,
         )
 
+    if component.verifier == "qwen_image_edit_2509_files":
+        from ..workflows.qwen_image_edit_2509 import inspect_weights
+
+        root = location or str(getattr(settings, "qwen_image_edit_2509_root", "") or "")
+        weights = inspect_weights(Path(root) if root else None)
+        if weights.get("installed"):
+            return Verification(
+                True,
+                False,
+                None,
+                "Qwen Image Edit 2509 HF weights (QwenImageEditPlusPipeline) are readable. Installed is not Runtime Ready.",
+                str(weights.get("root") or root),
+            )
+        missing = tuple(weights.get("missing") or ("root",))
+        return Verification(
+            False,
+            True,
+            "required_models_missing",
+            "Qwen Image Edit 2509 weights are not complete at the registered D: path.",
+            str(weights.get("root") or root),
+            details=tuple(f"Missing: {name}" for name in missing),
+            recommendation="correct_path" if root else "install",
+            requires_user_interaction=True,
+        )
+
     if component.verifier == "illustrious_files":
         name = settings.imagegen_illustrious_checkpoint
         found = _candidate_file(location, name, ("checkpoints",))
@@ -456,6 +587,37 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
 
     if component.verifier == "krea2_files":
         return _verify_krea2_files(location)
+
+    if component.verifier == "sensenova_u15_files":
+        from ..workflows.sensenova_u15 import inspect_weights
+
+        root = location or str(getattr(settings, "sensenova_u15_root", "") or r"D:\01_Models\SenseNova\U1.5-8B-MoT")
+        weights = inspect_weights(Path(root) if root else None)
+        if weights.get("installed"):
+            return Verification(
+                True,
+                False,
+                None,
+                "SenseNova U1.5-8B-MoT weights are readable at the registered D: path.",
+                str(weights.get("root") or root),
+            )
+        missing = tuple(weights.get("missing") or ("root",))
+        return Verification(
+            False,
+            True,
+            "required_models_missing",
+            "SenseNova U1.5 weights are not complete at the registered D: path.",
+            str(weights.get("root") or root),
+            details=tuple(f"Missing: {name}" for name in missing),
+            recommendation="correct_path" if root else "install",
+            requires_user_interaction=True,
+        )
+
+    if component.verifier == "sd15_files":
+        return _verify_sd15_files(location)
+
+    if component.verifier == "sd15_controlnet_files":
+        return _verify_sd15_controlnet_files(location)
 
     if component.verifier == "linked_files":
         if not location:
@@ -986,7 +1148,15 @@ def _verify_component_uncached(component_id: str, state: dict[str, Any] | None =
                 recommendation="install",
                 requires_user_interaction=True,
             )
-        probe = probe_required_nodes()
+        provides = str((source or {}).get("provides") or "")
+        needed = [n.strip() for n in provides.split(",") if n.strip()]
+        if component_id == "comfyui_sensenova_nodes" and not needed:
+            needed = [
+                "SenseNovaU1LocalLoader",
+                "SenseNovaU1LocalTextToImage",
+                "SenseNovaU1LocalImageEdit",
+            ]
+        probe = probe_required_nodes(needed or None)
         if probe.get("ok"):
             return Verification(
                 True,

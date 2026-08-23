@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
+import { shouldSuspendDependentPolling } from "../../runtime/studioApiConnection";
 import { languageProjectContext, useLanguagePrefs } from "../../i18n";
 import type { Job, Project } from "../../types";
 import type { EditorTab } from "../../workspacePrefs";
@@ -33,6 +34,8 @@ import { CREATOR_IMAGE_CATEGORIES, DEFAULT_IMAGE_CATEGORY } from "../../contract
 import { DEFAULT_COLOR_GRADE, resolveColorGradeId } from "../../contracts/colorGrades";
 import type { ImagePipelineDeploymentPreference } from "../../contracts/imagePipeline";
 import type { VisualContinuitySession } from "../../contracts/visualContinuity";
+import { CIS_QUEUED_NO_HYDRATE_MS, staleCisQueuedNoHydrate } from "./cisFailClose";
+import { consumePoseCraftHandoff } from "./posecraftHandoff";
 import "./cinematic-image-studio.css";
 
 type StudioMode = "generate" | "edit";
@@ -229,6 +232,8 @@ export function CinematicImageStudio({
   const [uploading, setUploading] = useState(false);
   const [piStatus, setPiStatus] = useState("Co-Director");
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const jobStartedAtRef = useRef<Record<string, number>>({});
+  const poseHandoffRef = useRef(false);
   const [sceneId, setSceneId] = useState("");
   const [continuityOn, setContinuityOn] = useState(false);
   const [continuitySession, setContinuitySession] = useState<VisualContinuitySession | null>(null);
@@ -357,6 +362,15 @@ export function CinematicImageStudio({
     } catch {
       /* ignore */
     }
+    const pose = consumePoseCraftHandoff(project.id);
+    if (pose?.imageAssetId) {
+      poseHandoffRef.current = true;
+      setRefIds((prev) => Array.from(new Set([pose.imageAssetId!, ...prev])));
+      setMsg(
+        pose.honestyLabel ||
+          "PoseCraft snapshot attached as a picture reference. Generate uses image-to-image when this generator supports it.",
+      );
+    }
   }, [project.id]);
 
   useEffect(() => {
@@ -368,11 +382,25 @@ export function CinematicImageStudio({
     const active = jobs.filter((j) => !["done", "failed", "cancelled"].includes(j.status));
     if (!active.length) return;
     const tick = setInterval(() => {
+      if (shouldSuspendDependentPolling()) return;
       Promise.all(active.map((j) => api.getJob(j.id)))
         .then((updated) => {
           setJobs((prev) => {
             const map = new Map(updated.map((j) => [j.id, j]));
-            return prev.map((j) => map.get(j.id) || j);
+            return prev.map((j) => {
+              const latest = map.get(j.id) || j;
+              const startedAt = jobStartedAtRef.current[j.id] || Date.now();
+              if (staleCisQueuedNoHydrate(latest, startedAt, Date.now(), CIS_QUEUED_NO_HYDRATE_MS)) {
+                return {
+                  ...latest,
+                  status: "failed",
+                  message:
+                    latest.message ||
+                    "Generation stalled before progress was reported. Retry this image.",
+                };
+              }
+              return latest;
+            });
           });
           const cards: ResultCard[] = [];
           for (const j of updated) {
@@ -528,6 +556,11 @@ export function CinematicImageStudio({
             ...(preview.imageProductBody || {}),
             lockModelFamily: true,
           };
+          if (poseHandoffRef.current && refIds.length) {
+            body.taskType = "POSE_CONDITIONED_IMAGE";
+            const creative = (body.creativeContext as Record<string, unknown> | undefined) || {};
+            body.creativeContext = { ...creative, taskType: "POSE_CONDITIONED_IMAGE", referenceKind: "IDENTITY_REFERENCE" };
+          }
           // Shared LoRA registry: single-family generations only. Mixed-family
           // batches (all_models) never carry a LoRA — the registry refuses
           // incompatible selections and the UI hides the selector there.
@@ -577,6 +610,10 @@ export function CinematicImageStudio({
         }
       }
 
+      const now = Date.now();
+      for (const j of queued) {
+        jobStartedAtRef.current[j.id] = now;
+      }
       setJobs((prev) => [...queued, ...prev].slice(0, 24));
       setResults((prev) => [...cards, ...prev].slice(0, 48));
       if (failures.length && queued.length) {

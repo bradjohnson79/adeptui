@@ -70,7 +70,7 @@ def test_qwen_2512_build_leaf_graph_uses_split_loaders():
     assert graph["4"]["class_type"] == "ModelSamplingAuraFlow"
     assert graph["5"]["class_type"] == "CLIPTextEncode"
     assert graph["8"]["class_type"] == "KSampler"
-    assert legacy_comfy_workflow_key("qwen2512.txt2img") == "image.txt2img"
+    assert legacy_comfy_workflow_key("qwen2512.txt2img") == "qwen2512.txt2img"
 
 
 def test_qwen_2512_force_character_profile_key():

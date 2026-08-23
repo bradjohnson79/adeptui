@@ -27,7 +27,7 @@ import {
  *   Co-Director provider supplies instant stubbed "[mock]" replies via
  *   `/api/e2e/codirector/scenario`, so no real LLM is exercised. This is the
  *   fast durability-contract environment.
- * - **Live Beta** (`ADEPT_BETA_TARGET=1`, `PLAYWRIGHT_BASE_URL=http://127.0.0.1:8760`,
+ * - **Live Beta** (`ADEPT_BETA_TARGET=1`, `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173`,
  *   `STUDIO_API_BASE=http://127.0.0.1:8758`): the e2e router and mock provider
  *   are intentionally disabled on production Beta (`STUDIO_E2E=0`), so the spec
  *   skips the mock-scenario control and drives the REAL Co-Director + real

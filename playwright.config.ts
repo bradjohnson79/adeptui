@@ -1,11 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const betaBaseURL = "http://127.0.0.1:8760";
+const betaBaseURL = "http://127.0.0.1:5173";
 const betaApiBase = "http://127.0.0.1:8758";
 const betaApiPort = "8758";
 
-/** ADEPT_BETA_TARGET=1 or explicit 8760/8758 wiring → certify against live Beta, not e2e-start. */
+/** ADEPT_BETA_TARGET=1 or explicit 5173/8758 wiring → certify against live Vite + Studio API. Retired :8760 is not a creator UI. */
 const betaTarget =
   process.env.ADEPT_BETA_TARGET === "1" ||
   process.env.ADEPT_BETA_TARGET === "true" ||
@@ -49,6 +49,10 @@ export default defineConfig({
   ],
   outputDir: path.join(artifactDir, "test-output"),
   use: {
+    extraHTTPHeaders:
+      process.env.ADEPT_ALLOW_KORRI_MUTATION === "1"
+        ? {}
+        : { "X-Adept-Deny-Owner-Writes": "1" },
     baseURL,
     trace: "on-first-retry",
     screenshot: "only-on-failure",

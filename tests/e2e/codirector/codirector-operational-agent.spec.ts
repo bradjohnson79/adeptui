@@ -12,7 +12,7 @@
  *   STUDIO_API_BASE=http://127.0.0.1:8758
  *   STUDIO_FEATURE_CODIRECTOR_OPERATIONAL_AGENT_V1=true (for execution tests)
  *
- * Beta: http://127.0.0.1:8760
+ * Beta: http://127.0.0.1:5173
  */
 
 import { expect, test, type APIRequestContext } from "@playwright/test";

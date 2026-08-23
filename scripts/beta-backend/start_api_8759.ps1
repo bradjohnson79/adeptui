@@ -1,3 +1,4 @@
+# RETIRED from the normal product path (Stability Cull). Do not use for hosted/local Beta.
 # Load beta-local.env into environment, then start the Studio API on port 8759.
 $RepoRoot = "C:\AdeptFilmWorks\AIVideoStudio"
 $envFiles = @(

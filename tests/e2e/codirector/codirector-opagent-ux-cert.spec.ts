@@ -8,7 +8,7 @@
  *  Task 4: Agent Execution Law regression — storyboard.generate dispatches a real 4-job execution.
  *
  * Routing decision (documented in task brief + live verification):
- *  - The Beta web UI at http://127.0.0.1:8760 proxies /api to STUDIO_API_PORT, which the
+ *  - The Beta web UI at http://127.0.0.1:5173 proxies /api to STUDIO_API_PORT, which the
  *    Beta supervisor defaults to 8758. Neither 8758 nor the original 8759 instance had
  *    STUDIO_FEATURE_CODIRECTOR_OPERATIONAL_AGENT_V1 enabled (verified by probing the
  *    chat stream for an execution_status SSE event — both returned no execution event).
@@ -38,7 +38,7 @@ import { openCoDirectorFullScreen } from "./helpers/audit";
 const OPAGENT_API = "http://127.0.0.1:8761";
 
 /** Beta web UI (used for the navigation test — Task 2). */
-const BETA_WEB = "http://127.0.0.1:8760";
+const BETA_WEB = "http://127.0.0.1:5173";
 
 /** Hosted Vercel deployment (Task 3). */
 const HOSTED_URL = "https://adeptui-fmqnttwhz-anoint.vercel.app/";

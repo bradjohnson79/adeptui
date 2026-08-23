@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Job, Project } from "../types";
 import { api } from "../api";
+import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 import { HelpTip, PanelHeading } from "./HelpTip";
 import { Button, EmptyState, StatusBadge } from "./ui";
 import { mapJobStatus } from "../status";
@@ -107,15 +108,24 @@ export function JobPanel({
   onViewInDirector?: (sceneId: string, jobId: string) => void;
 }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const seenDoneRef = useRef<Set<string>>(new Set());
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     let alive = true;
+    seenDoneRef.current = new Set();
     const tick = async () => {
+      if (shouldSuspendDependentPolling()) return;
       try {
         const list = await api.listJobs(projectId);
         if (!alive) return;
         setJobs(list);
-        if (list.some((j) => j.status === "done")) onDone();
+        const newlyDone = list.filter((j) => j.status === "done" && !seenDoneRef.current.has(j.id));
+        for (const j of list) {
+          if (j.status === "done") seenDoneRef.current.add(j.id);
+        }
+        if (newlyDone.length) onDoneRef.current();
       } catch {
         /* ignore */
       }
@@ -126,7 +136,7 @@ export function JobPanel({
       alive = false;
       clearInterval(id);
     };
-  }, [projectId, onDone]);
+  }, [projectId]);
 
   return (
     <div className="panel ds-surface">

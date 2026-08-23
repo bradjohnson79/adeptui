@@ -1173,8 +1173,11 @@ function VisualGatesPanel({
             setBusy(true);
             void api
               .startCharacterVisualSheet(projectId, characterId, {
-                includeDetails: true,
-                includePerformance: true,
+                includeDetails: false,
+                includePerformance: false,
+                candidateCount: 1,
+                taskType: "CRS_GENERATION",
+                layout: "four_view",
               })
               .then((r) => {
                 setPack(r.pack);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
+import { shouldSuspendDependentPolling } from "../runtime/studioApiConnection";
 import type { Job, Project } from "../types";
 import {
   ASPECT_PRESETS,
@@ -119,6 +120,7 @@ export function Txt2VidPanel({
   useEffect(() => {
     if (!job || job.status === "done" || job.status === "failed" || job.status === "cancelled") return;
     const t = setInterval(() => {
+      if (shouldSuspendDependentPolling()) return;
       api.getJob(job.id).then((j) => {
         setJob(j);
         if (j.status === "failed") {

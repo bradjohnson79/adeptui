@@ -15,12 +15,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const env = {
   ...process.env,
   ADEPT_BETA_TARGET: "1",
-  PLAYWRIGHT_BASE_URL: "http://127.0.0.1:8760",
+  PLAYWRIGHT_BASE_URL: "http://127.0.0.1:5173",
   STUDIO_API_BASE: "http://127.0.0.1:8758",
   STUDIO_API_PORT: "8758",
 };
 
-// Avoid accidentally reusing a leftover Vite/harness server on 5173.
+// Live Beta UI is Vite :5173 (or hosted Vercel). Retired :8760 is not a creator UI.
 delete env.CI;
 
 console.log(

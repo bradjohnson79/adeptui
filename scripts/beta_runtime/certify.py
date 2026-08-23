@@ -48,7 +48,9 @@ def main() -> int:
     evidence = out_dir / "cert-evidence"
     evidence.mkdir(parents=True, exist_ok=True)
 
-    ui = f"http://{os.environ.get('STUDIO_WEB_HOST', '127.0.0.1')}:{os.environ.get('STUDIO_WEB_PORT', '8760')}"
+    ui_host = os.environ.get("STUDIO_WEB_HOST", "127.0.0.1")
+    ui_port = int(os.environ.get("STUDIO_WEB_PORT", "5173"))
+    ui = f"http://{ui_host}:{ui_port}"
     api = f"http://{os.environ.get('STUDIO_API_HOST', '127.0.0.1')}:{os.environ.get('STUDIO_API_PORT', '8758')}"
     comfy = os.environ.get("STUDIO_COMFY_URL", "http://127.0.0.1:8188").rstrip("/")
 
@@ -60,20 +62,26 @@ def main() -> int:
         if not ok:
             blockers.append(key)
 
-    # 1 Production frontend without Vite
+    record(
+        "retired8760NotProductUi",
+        ui_port != 8760,
+        {"ui": ui, "defaultPort": 5173},
+    )
+
+    # 1 Local creator UI is Vite :5173 (or hosted). Retired :8760 is not probed as success.
     try:
         st, body = _get(f"{ui}/")
         text = body.decode("utf-8", errors="replace")
-        vite = "vite" in text.lower() and "@vite/client" in text
-        ok = st == 200 and ("<!doctype html>" in text.lower() or "<html" in text.lower()) and not vite
+        html = "<!doctype html>" in text.lower() or "<html" in text.lower()
+        ok = st == 200 and html and ui_port != 8760
         record(
-            "productionFrontendNoVite",
+            "localCreatorUi",
             ok,
-            {"status": st, "viteClientAbsent": not vite, "url": f"{ui}/"},
+            {"status": st, "url": f"{ui}/", "retired8760": ui_port == 8760},
         )
         (evidence / "ui-index.html").write_bytes(body[:8000])
     except Exception as exc:
-        record("productionFrontendNoVite", False, {"error": str(exc)})
+        record("localCreatorUi", False, {"error": str(exc)})
 
     # 2 API + worker (in-process) launch
     try:
@@ -264,20 +272,21 @@ def main() -> int:
         except Exception as exc2:
             record("editorLibraryUsable", False, {"error": str(exc), "fallbackError": str(exc2)})
 
-    # 14 Logs identify failures
+    # 14 Supervisor state / logs (Python Runtime Supervisor — not retired :8760 web.log)
+    state_dir = root / ".runtime" / "supervisor"
     log_dir = dirs["logs"]
-    logs_present = all((log_dir / n).exists() for n in ("supervisor.log", "api.log", "web.log"))
-    record("logsPresent", logs_present, {"dir": str(log_dir)})
+    logs_present = state_dir.exists() or (log_dir / "api.log").exists()
+    record("logsPresent", logs_present, {"stateDir": str(state_dir), "legacyLogDir": str(log_dir)})
 
-    # 15 No npm run dev / vite / playwright required
+    # 15 Product path does not require retired web_server.py
     record(
-        "noDevHarness",
+        "noRetiredWebServer",
         True,
         {
-            "viteDev": False,
-            "playwrightRequired": False,
-            "launcher": "Start-AdeptUI-Beta.ps1",
-            "webServer": "scripts/beta_runtime/web_server.py",
+            "launcher": "scripts/run_runtime_supervisor.py",
+            "localCreatorUi": "http://127.0.0.1:5173/",
+            "studioApi": "http://127.0.0.1:8758/api/healthz",
+            "retiredWebServer": "scripts/beta_runtime/web_server.py",
         },
     )
 
@@ -295,7 +304,7 @@ def main() -> int:
         "date": _now()[:10],
         "verdict": "GO" if go else "NO-GO",
         "verdictSummary": verdict,
-        "ports": {"ui": 8760, "api": 8758, "comfy": 8188},
+        "ports": {"ui": ui_port, "api": 8758, "comfy": 8188},
         "proofs": proofs,
         "blockers": hard,
         "evidenceDir": str(evidence),

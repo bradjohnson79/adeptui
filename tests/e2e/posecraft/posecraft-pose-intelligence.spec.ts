@@ -4,7 +4,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { createTempProject, deleteProject, waitForAppReady } from "../helpers/app";
 
-const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:8760";
+const WEB = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:5173";
 const API = process.env.STUDIO_API_BASE || "http://127.0.0.1:8758";
 
 async function openPoseCraft(page: Page, projectId: string) {

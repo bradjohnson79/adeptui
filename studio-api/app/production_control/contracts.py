@@ -18,6 +18,7 @@ CapabilityLabel = Literal[
     "Requires Setup",
     "Loading",
     "Error",
+    "Draft",
 ]
 LocalLifecycle = Literal[
     "Installed",
@@ -59,6 +60,8 @@ class ModelDescriptor(BaseModel):
     estimatedVramGb: Optional[float] = None
     gpuCompatible: bool = False
     executable: bool = False
+    """True only when Certified and Runtime Ready — the only default-eligible class."""
+    defaultEligible: bool = False
 
 
 class ModelRoutingPreference(BaseModel):

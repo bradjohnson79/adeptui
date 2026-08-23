@@ -30,7 +30,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-WEB_URL = "http://127.0.0.1:8760/"
+WEB_URL = "http://127.0.0.1:5173/"
 API_URL = "http://127.0.0.1:8758/api/health"
 STATUS_FILE = Path("data/runtime/beta/status.json")
 SUPERVISOR_LOG = Path("data/runtime/logs/beta/supervisor.log")

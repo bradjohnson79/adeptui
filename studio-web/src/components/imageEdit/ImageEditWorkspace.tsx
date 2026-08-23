@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { shouldSuspendDependentPolling } from "../../runtime/studioApiConnection";
 import {
   api,
   type ImageProductEditRecommendation,
@@ -144,6 +145,7 @@ export function ImageEditWorkspace({
     const activeJobs = jobs.filter((j) => !["done", "failed", "cancelled"].includes(j.status));
     if (!activeJobs.length) return;
     const tick = setInterval(() => {
+      if (shouldSuspendDependentPolling()) return;
       Promise.all(activeJobs.map((j) => api.getJob(j.id)))
         .then((updated) => {
           setJobs((prev) => {
