@@ -143,8 +143,15 @@ def resolve_character(
         "approved_casting_asset_id": front_id or sheet_id,
         "crs_revision": int(persisted.get("crs_revision") or 0),
         "approved_sheet_asset_id": sheet_id,
-        "production_ready": (profile.approval_status or "").lower() == "approved"
-        or str(lock.get("status") or "") == "ok",
+        "production_ready": (
+            str(lock.get("status") or "") == "ok"
+            if bool(
+                (views.get("front") or {}).get("approved")
+                or (views.get("front") or {}).get("jobId")
+                or str(lock.get("status") or "none") != "none"
+            )
+            else (profile.approval_status or "").lower() == "approved"
+        ),
         "json_revision": int(v2.get("jsonRevision") or persisted.get("json_revision") or 1),
         "visual_lock": lock,
         "visual_reference": front_id,

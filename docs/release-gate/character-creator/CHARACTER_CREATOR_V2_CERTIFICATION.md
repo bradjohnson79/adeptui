@@ -34,10 +34,17 @@ Do not mutate Schnick Coffee `2347bf46-3762-4763-86c5-4a6032522278` or Korri `c4
 
 ## Peer review models
 
-Law 27 requests GPT 5.4 for specialized subagents; that slug is not in the current Task allowlist. Review-only peers used the available allowlist models named in the completion report.
+Law 27 requests GPT 5.4 for specialized subagents; that slug is not in the current Task allowlist. Review-only peers:
+
+- [Peer A](a0fa12c7-b51d-4c87-aa36-1e323f7d8648) — GLM 5.2 Max — `READY FOR PRIMARY REVIEW`
+- [Peer B](e5a37176-81c6-4b53-8da4-26840bc7635d) — Kimi K3 Max — `READY FOR PRIMARY REVIEW`
+
+Peer B defects repaired in follow-up: Front remake invalidates Back/Rev 2/sheet; `@Name` `production_ready` follows the vision lock for V2 characters.
+
+Remaining peer notes (not repaired this session): `character-json` Back/Close-up mapping still prefers legacy crop/sheet; Close-up re-approve re-calls vision; no V2 cancel-job route; `USER_PROTECTED_FIELDS` is documentation-only.
 
 ## Verdict
 
 **NO-GO — LIVE GPU FRONT/BACK/REV2/SHEET AND CO-DIRECTOR @ CONVERSATION E2E NOT EXECUTED**
 
-Implementation, retirement, MCP graph validation, unit/API tests, and Express/Standard UI Playwright are complete. Production certification still requires one real Mira Vale Front job through Comfy, Front vision lock, pixel-ref Back, JSON Rev 2, 21:9 compose, and a Co-Director `@Mira Vale` resolve after reload.
+Implementation, retirement, MCP graph validation, unit/API tests, Express/Standard UI Playwright, and two review-only peers are complete. Production certification still requires one real Mira Vale Front job through Comfy, Front vision lock, pixel-ref Back, JSON Rev 2, 21:9 compose, and a Co-Director `@Mira Vale` resolve after reload.

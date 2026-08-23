@@ -21,6 +21,7 @@ from app.character_identity.cc_v2 import (
     compose_sheet,
     empty_state,
     generate_view,
+    invalidate_after_regenerate,
 )
 from app.character_identity.schemas import CharacterProfileCreate
 from app.config import settings
@@ -66,6 +67,26 @@ def test_phase_active_after_front_lock():
     state["views"]["back"]["approved"] = True
     state["revision2"]["status"] = "ok"
     assert _compute_phase(state) == "DETAILS_READY"
+
+
+def test_front_regenerate_invalidates_back_rev2_and_sheet():
+    state = empty_state()
+    state["views"]["front"]["approved"] = True
+    state["views"]["back"]["approved"] = True
+    state["views"]["back"]["assetId"] = "back-old"
+    state["visualLock"] = {"status": "ok", "facts": {"hair": "black"}}
+    state["revision2"] = {"status": "ok", "facts": {"rear_hair": "bob"}}
+    state["sheetAssetId"] = "sheet-old"
+    state["jsonRevision"] = 2
+    invalidate_after_regenerate(state, "front")
+    assert state["visualLock"]["status"] == "none"
+    assert state["revision2"]["status"] == "none"
+    assert state["sheetAssetId"] is None
+    assert state["jsonRevision"] == 1
+    assert state["views"]["back"]["approved"] is False
+    assert state["views"]["back"]["status"] == "stale"
+    assert _compute_phase(state) != "SHEET_READY"
+    assert _compute_phase(state) != "DETAILS_READY"
 
 
 def test_back_not_required_for_active():
@@ -170,6 +191,27 @@ def test_sheet_compose_requires_revision_2(db):
         compose_sheet(db, "proj-v2", profile.id)
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "SHEET_GATE"
+
+
+def test_resolver_production_ready_follows_vision_lock(db):
+    from app.character_identity.cc_v2 import save_state
+    from app.codirector.entity_resolver import resolve_character
+
+    profile = service.create_profile(
+        db,
+        "proj-v2",
+        CharacterProfileCreate(name="Mira Vale", slug="mira-vale-lock", role="fixture"),
+    )
+    profile.approval_status = "approved"
+    state = empty_state()
+    state["views"]["front"]["approved"] = True
+    state["views"]["front"]["jobId"] = "front-job"
+    state["visualLock"] = {"status": "failed", "facts": {}, "error": "vlm_error"}
+    save_state(db, profile, state)
+    db.commit()
+    resolved = resolve_character(db, "proj-v2", "Mira Vale")
+    assert resolved is not None
+    assert resolved["production_ready"] is False
 
 
 def test_resolve_mira_vale_compact_alias(db):

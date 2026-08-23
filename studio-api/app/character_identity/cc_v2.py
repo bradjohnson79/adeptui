@@ -261,6 +261,30 @@ def _active_job_busy(state: dict[str, Any]) -> Optional[str]:
     return None
 
 
+def invalidate_after_regenerate(state: dict[str, Any], view: str) -> dict[str, Any]:
+    """Remaking Front (or Back) cannot keep a stale lock, Rev 2, or sheet."""
+    if view == "front":
+        state["visualLock"] = {"status": "none", "facts": {}, "error": None, "at": None}
+        state["revision2"] = {"status": "none", "facts": {}, "error": None, "at": None}
+        state["closeupMerge"] = {"status": "none", "facts": {}, "error": None, "at": None}
+        state["sheetAssetId"] = None
+        state["jsonRevision"] = 1
+        state["productionReady"] = False
+        for stale in ("back", "closeup"):
+            prior = state["views"][stale]
+            if prior.get("approved") or prior.get("assetId"):
+                state["views"][stale] = {
+                    **empty_view(),
+                    "status": "stale",
+                    "assetId": prior.get("assetId"),
+                    "error": "Front was remade. Create this view again from the new Front.",
+                }
+    elif view == "back":
+        state["revision2"] = {"status": "none", "facts": {}, "error": None, "at": None}
+        state["sheetAssetId"] = None
+    return state
+
+
 def generate_view(
     db: Session,
     project_id: str,
@@ -353,6 +377,8 @@ def generate_view(
         brief = ", ".join(f"{k}: {v}" for k, v in lock_facts.items() if str(v).strip())
         if brief:
             prompt_text = f"{prompt_text}\nIdentity lock from approved front: {brief}"
+
+    invalidate_after_regenerate(state, view)
 
     job = _enqueue_txt2img(
         db,
