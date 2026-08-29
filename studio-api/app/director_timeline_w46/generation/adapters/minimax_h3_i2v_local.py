@@ -8,6 +8,7 @@ from ....minimax_h3.contracts import AdeptMiniMaxH3Request, H3ReferenceAssignmen
 from ....minimax_h3.service import cancel as h3_cancel
 from ....minimax_h3.service import create_job_or_block, get_job, prepare_plan
 from ..adapter import validate_against_capabilities
+from .minimax_h3_local import apply_minimax_camera_nl
 from ..contracts import (
     NormalizedJobStatus,
     NormalizedJobSubmission,
@@ -22,6 +23,9 @@ ALIASES = frozenset({"minimax-h3-i2v-local", "minimax-h3-i2v"})
 
 
 def _capabilities() -> VideoGeneratorCapabilities:
+    from .minimax_h3_local import route_a_executable
+
+    ready = route_a_executable()
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
         label="MiniMax H3 Image-to-Video (Local)",
@@ -41,12 +45,17 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportedAspectRatios=["≈16:9"],
         supportsSeed=True,
         supportsNegativePrompt=False,
+        supportsTemperature=False,
         supportsCameraControls=False,
-        executable=True,
+        executable=ready,
         notes=(
-            "Experimental Private Profile — image-to-video with native audio. "
-            "Requires a start image; never silently falls back to text-to-video. "
-            "Draft Mode is unavailable — this profile only generates at 480x256."
+            "MiniMax H3 isolated Route A is not ready."
+            if not ready
+            else (
+                "Experimental Private Profile — image-to-video with native audio. "
+                "Requires a start image; never silently falls back to text-to-video. "
+                "Draft Mode is unavailable — this profile only generates at 480x256."
+            )
         ),
         draftPathway="none",
         supportsQueuedCancel=True,
@@ -88,7 +97,7 @@ class MiniMaxH3I2VLocalAdapter:
         start_id = str(request.startImageAssetId or "").strip()
         h3_req = AdeptMiniMaxH3Request(
             projectId=request.projectId,
-            prompt=request.prompt,
+            prompt=apply_minimax_camera_nl(request),
             territory=str(request.providerOptions.get("territory") or "PRIVATE"),
             sourceSurface="timeline",
             mode="one-frame",

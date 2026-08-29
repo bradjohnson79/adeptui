@@ -3,11 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 describe("requestCache", () => {
   let cachedFetch: typeof import("../requestCache").cachedFetch;
   let clearAllCache: typeof import("../requestCache").clearAllCache;
+  let clearCacheEntry: typeof import("../requestCache").clearCacheEntry;
 
   beforeEach(async () => {
     const mod = await import("../requestCache");
     cachedFetch = mod.cachedFetch;
     clearAllCache = mod.clearAllCache;
+    clearCacheEntry = mod.clearCacheEntry;
     clearAllCache();
     vi.useFakeTimers();
   });
@@ -88,6 +90,119 @@ describe("requestCache", () => {
     await cachedFetch("GET", "/api/test", fetcher, 0);
     await cachedFetch("GET", "/api/test", fetcher, 0);
     expect(callCount).toBe(2);
+  });
+
+  it("does not share cache across GET query strings (modality isolation)", async () => {
+    const calls: string[] = [];
+    const makeFetcher = (modality: string) =>
+      vi.fn().mockImplementation(async () => {
+        calls.push(modality);
+        return { modality, models: [{ id: modality, modality }] };
+      });
+    const llmFetcher = makeFetcher("llm");
+    const videoFetcher = makeFetcher("video");
+    const imageFetcher = makeFetcher("image");
+    const audioFetcher = makeFetcher("audio");
+
+    const [llm, video, image, audio] = await Promise.all([
+      cachedFetch("GET", "/api/production-control/models?modality=llm", llmFetcher, 30_000),
+      cachedFetch("GET", "/api/production-control/models?modality=video", videoFetcher, 30_000),
+      cachedFetch("GET", "/api/production-control/models?modality=image", imageFetcher, 30_000),
+      cachedFetch("GET", "/api/production-control/models?modality=audio", audioFetcher, 30_000),
+    ]);
+
+    expect(llm).toEqual({ modality: "llm", models: [{ id: "llm", modality: "llm" }] });
+    expect(video).toEqual({ modality: "video", models: [{ id: "video", modality: "video" }] });
+    expect(image).toEqual({ modality: "image", models: [{ id: "image", modality: "image" }] });
+    expect(audio).toEqual({ modality: "audio", models: [{ id: "audio", modality: "audio" }] });
+    expect(calls.sort()).toEqual(["audio", "image", "llm", "video"]);
+    expect(llmFetcher).toHaveBeenCalledTimes(1);
+    expect(videoFetcher).toHaveBeenCalledTimes(1);
+    expect(imageFetcher).toHaveBeenCalledTimes(1);
+    expect(audioFetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("still deduplicates identical query strings", async () => {
+    let callCount = 0;
+    const fetcher = vi.fn().mockImplementation(async () => {
+      callCount++;
+      return { modality: "video" };
+    });
+    const [a, b] = await Promise.all([
+      cachedFetch("GET", "/api/production-control/models?modality=video", fetcher, 30_000),
+      cachedFetch("GET", "/api/production-control/models?modality=video", fetcher, 30_000),
+    ]);
+    expect(a).toEqual(b);
+    expect(callCount).toBe(1);
+  });
+
+  it("uses default TTL map so models?modality= keys stay isolated without explicit ttlMs", async () => {
+    const llmFetcher = vi.fn().mockResolvedValue({ modality: "llm", models: [{ id: "gemma", modality: "llm" }] });
+    const videoFetcher = vi.fn().mockResolvedValue({ modality: "video", models: [{ id: "minimax-h3", modality: "video" }] });
+    const [llm, video] = await Promise.all([
+      cachedFetch("GET", "/api/production-control/models?modality=llm", llmFetcher),
+      cachedFetch("GET", "/api/production-control/models?modality=video", videoFetcher),
+    ]);
+    expect(llm).toEqual({ modality: "llm", models: [{ id: "gemma", modality: "llm" }] });
+    expect(video).toEqual({ modality: "video", models: [{ id: "minimax-h3", modality: "video" }] });
+    expect(llmFetcher).toHaveBeenCalledTimes(1);
+    expect(videoFetcher).toHaveBeenCalledTimes(1);
+
+    const llmAgain = await cachedFetch(
+      "GET",
+      "/api/production-control/models?modality=llm",
+      vi.fn().mockResolvedValue({ modality: "poison" }),
+    );
+    expect(llmAgain).toEqual(llm);
+  });
+
+  it("isolates TTL query endpoints /resolved /queue /status by projectId", async () => {
+    const cases: Array<[string, string]> = [
+      ["/api/production-control/resolved?projectId=alpha", "/api/production-control/resolved?projectId=beta"],
+      ["/api/production-control/queue?projectId=alpha", "/api/production-control/queue?projectId=beta"],
+      ["/api/production-control/status?projectId=alpha", "/api/production-control/status?projectId=beta"],
+    ];
+    for (const [aPath, bPath] of cases) {
+      const aFetcher = vi.fn().mockResolvedValue({ id: "alpha" });
+      const bFetcher = vi.fn().mockResolvedValue({ id: "beta" });
+      const [a, b] = await Promise.all([
+        cachedFetch("GET", aPath, aFetcher),
+        cachedFetch("GET", bPath, bFetcher),
+      ]);
+      expect(a).toEqual({ id: "alpha" });
+      expect(b).toEqual({ id: "beta" });
+      expect(aFetcher).toHaveBeenCalledTimes(1);
+      expect(bFetcher).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("does not cache POST or PUT even when the path has a query string", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true });
+    const put = vi.fn().mockResolvedValue({ ok: true });
+    await cachedFetch("POST", "/api/production-control/models?modality=video", post, 30_000);
+    await cachedFetch("POST", "/api/production-control/models?modality=video", post, 30_000);
+    await cachedFetch("PUT", "/api/production-control/queue?projectId=alpha", put, 30_000);
+    await cachedFetch("PUT", "/api/production-control/queue?projectId=alpha", put, 30_000);
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(put).toHaveBeenCalledTimes(2);
+  });
+
+  it("clearCacheEntry without query invalidates all query variants of that GET path", async () => {
+    const llmFetcher = vi.fn().mockResolvedValue({ modality: "llm" });
+    const videoFetcher = vi.fn().mockResolvedValue({ modality: "video" });
+    await cachedFetch("GET", "/api/production-control/models?modality=llm", llmFetcher);
+    await cachedFetch("GET", "/api/production-control/models?modality=video", videoFetcher);
+    clearCacheEntry("GET", "/api/production-control/models");
+    const llmFetcher2 = vi.fn().mockResolvedValue({ modality: "llm-2" });
+    const videoFetcher2 = vi.fn().mockResolvedValue({ modality: "video-2" });
+    const [llm, video] = await Promise.all([
+      cachedFetch("GET", "/api/production-control/models?modality=llm", llmFetcher2),
+      cachedFetch("GET", "/api/production-control/models?modality=video", videoFetcher2),
+    ]);
+    expect(llm).toEqual({ modality: "llm-2" });
+    expect(video).toEqual({ modality: "video-2" });
+    expect(llmFetcher2).toHaveBeenCalledTimes(1);
+    expect(videoFetcher2).toHaveBeenCalledTimes(1);
   });
 });
 

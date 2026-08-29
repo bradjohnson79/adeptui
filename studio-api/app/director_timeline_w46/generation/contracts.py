@@ -47,6 +47,8 @@ class VideoGeneratorCapabilities(BaseModel):
     supportsSeed: bool = True
     supportsNegativePrompt: bool = False
     supportsCameraControls: bool = False
+    # Explicit on every adapter. False = do not send temperature/cfg/creativity.
+    supportsTemperature: bool = False
     native_multishot: bool = False
     audio_generation: bool = False
     auto_duration: bool = False
@@ -84,6 +86,10 @@ class TimelineGenerationRequest(BaseModel):
     aspectRatio: Optional[str] = None
     seed: Optional[int] = None
     cameraMotion: Optional[str] = None
+    # Canonical structured camera. Adapters translate; never a fake camera-controls field.
+    camera: Optional[dict[str, Any]] = None
+    # Set only when the adapter supportsTemperature. Otherwise leave None.
+    temperature: Optional[float] = None
     providerOptions: dict[str, Any] = Field(default_factory=dict)
     # Shared LoRA registry selection ({loraId, name, strength}); None = baseline.
     lora: Optional[dict[str, Any]] = None

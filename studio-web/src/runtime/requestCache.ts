@@ -18,6 +18,7 @@ const GET_TTL_MS: Record<string, number> = {
   "/api/healthz": 5_000,
   "/api/capabilities": 15_000,
   "/api/runtime/beta": 10_000,
+  "/api/runtime/local-generation": 2_500,
   "/api/gpu/stats": 5_000,
   "/api/production-control/status": 15_000,
   "/api/production-control/preferences": 30_000,
@@ -28,8 +29,9 @@ const GET_TTL_MS: Record<string, number> = {
 };
 
 function cacheKey(method: string, path: string): string {
-  const url = path.split("?")[0];
-  return `${method}:${url}`;
+  // Query string is part of GET identity. Stripping it collapsed
+  // /api/production-control/models?modality=video onto the LLM payload.
+  return `${method}:${path}`;
 }
 
 function getDefaultTtl(method: string, path: string): number {
@@ -39,8 +41,15 @@ function getDefaultTtl(method: string, path: string): number {
 }
 
 export function clearCacheEntry(method: string, path: string): void {
-  const key = cacheKey(method, path);
-  cache.delete(key);
+  const exact = `${method}:${path}`;
+  cache.delete(exact);
+  const base = path.split("?")[0];
+  const prefix = `${method}:${base}`;
+  for (const key of [...cache.keys()]) {
+    if (key === prefix || key.startsWith(`${prefix}?`)) {
+      cache.delete(key);
+    }
+  }
 }
 
 export function clearAllCache(): void {

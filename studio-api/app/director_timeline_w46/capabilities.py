@@ -7,6 +7,19 @@ from typing import Any
 from .contracts import GeneratorCapability, InPaintStrategy
 
 
+def _adapter_max_duration(generator_id: str) -> float | None:
+    try:
+        from .generation.registry import get_registry
+
+        caps = get_registry().capabilities(generator_id)
+        durations = [float(item) for item in (caps.supportedDurations or []) if item]
+        if durations:
+            return max(durations)
+    except Exception:
+        return None
+    return None
+
+
 def list_generators() -> list[GeneratorCapability]:
     from ..video_runtime.hunyuan_providers import HUNYUAN_13B, HUNYUAN_15, describe_provider
     from .generation.adapters.stub_cert import stub_enabled
@@ -24,7 +37,7 @@ def list_generators() -> list[GeneratorCapability]:
             supportsStartEndFrame=False,
             supportsContinuation=False,
             inPaintStrategies=["complete_batch_retake"],
-            executable=True,
+            executable=False,
             supportsQueuedCancel=True,
             supportsRunningCancel=True,
             supportsInterrupt=True,
@@ -36,7 +49,7 @@ def list_generators() -> list[GeneratorCapability]:
         ),
         GeneratorCapability(
             id="ltx-local",
-            label="LTX 2.3/2.5 (Local)",
+            label="LTX 2.3 (Local)",
             locality="local",
             providerId="comfy",
             capabilityLabel="Certified",
@@ -49,11 +62,11 @@ def list_generators() -> list[GeneratorCapability]:
             supportsQueuedCancel=True,
             supportsRunningCancel=True,
             supportsInterrupt=True,
-            draftPathway="local_live",
-            draftResolution="768x432",
-            finalResolution="1280x720",
+            draftPathway="none",
+            draftResolution=None,
+            finalResolution="1280x704",
             finalRequiresNewGeneration=True,
-            notes="Default production engine. LTX 2.5 variants available via ltx-2.5-full, ltx-2.5-distilled, ltx-2.5-comfy.",
+            notes="Local Comfy LTX 2.3 image-to-video. Start image required.",
         ),
         GeneratorCapability(
             id="ltx-2.5-full",
@@ -195,6 +208,17 @@ def list_generators() -> list[GeneratorCapability]:
             notes="Requires Setup for project-specific workflows.",
         ),
     ]
+    for gen in gens:
+        live_max = _adapter_max_duration(gen.id)
+        if live_max is not None:
+            gen.maxDurationSec = live_max
+        if gen.id in {"minimax-h3-local", "minimax-h3", "minimax-h3-t2v-local", "minimax-h3-i2v-local"}:
+            try:
+                from .generation.adapters.minimax_h3_local import route_a_executable
+
+                gen.executable = route_a_executable()
+            except Exception:
+                gen.executable = False
     # CERT_STUB_ENV_GATED: cert stub generator visible only in certification runs.
     if stub_enabled():
         gens.append(
@@ -222,7 +246,17 @@ def list_generators() -> list[GeneratorCapability]:
 def get_generator(generator_id: str | None) -> GeneratorCapability | None:
     if not generator_id:
         return None
-    return next((g for g in list_generators() if g.id == generator_id), None)
+    gens = list_generators()
+    hit = next((g for g in gens if g.id == generator_id), None)
+    if hit:
+        return hit
+    try:
+        from .generation.registry import get_registry
+
+        resolved = get_registry().resolve_id(generator_id)
+        return next((g for g in gens if g.id == resolved or g.id == generator_id), None)
+    except Exception:
+        return None
 
 
 def registry_snapshot() -> dict[str, Any]:
@@ -237,18 +271,31 @@ def registry_snapshot() -> dict[str, Any]:
 
 
 def validate_duration(generator_id: str | None, planned: float) -> dict[str, Any]:
-    gen = get_generator(generator_id)
-    if not gen or gen.maxDurationSec is None:
+    max_sec = None
+    label = generator_id or "generator"
+    try:
+        from .generation.registry import get_registry
+
+        caps = get_registry().capabilities(generator_id)
+        durations = [float(item) for item in (caps.supportedDurations or []) if item]
+        max_sec = max(durations) if durations else None
+        label = caps.label
+    except Exception:
+        gen = get_generator(generator_id)
+        if gen is not None:
+            max_sec = gen.maxDurationSec
+            label = gen.label
+    if max_sec is None:
         return {"ok": True, "action": "keep", "plannedDuration": planned, "maxDurationSec": None}
-    if planned <= gen.maxDurationSec + 1e-6:
-        return {"ok": True, "action": "keep", "plannedDuration": planned, "maxDurationSec": gen.maxDurationSec}
+    if planned <= max_sec + 1e-6:
+        return {"ok": True, "action": "keep", "plannedDuration": planned, "maxDurationSec": max_sec}
     return {
         "ok": False,
         "action": "choose",
         "plannedDuration": planned,
-        "maxDurationSec": gen.maxDurationSec,
+        "maxDurationSec": max_sec,
         "options": ["split", "shorten", "keep", "cancel"],
-        "message": f"Planned duration {planned}s exceeds {gen.label} max {gen.maxDurationSec}s — no silent truncate.",
+        "message": f"Planned duration {planned}s exceeds {label} max {max_sec}s — no silent truncate.",
     }
 
 

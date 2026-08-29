@@ -317,7 +317,8 @@ def preflight(project_id: str, scene_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, bundle.get("error") or "Not found")
     master = bundle["master"]
     director_timeline = bundle["directorTimeline"]
-    return {"ok": True, "findings": orchestrator.run_preflight(master, director_timeline=director_timeline, db=db, project_id=project_id), "mock": False}
+    findings = orchestrator.run_preflight(master, director_timeline=director_timeline, db=db, project_id=project_id)
+    return {"ok": orchestrator.preflight_ok(findings), "findings": findings, "mock": False}
 
 
 @router.get("/projects/{project_id}/scenes/{scene_id}/snapshots/{snapshot_id}")

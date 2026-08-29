@@ -1,4 +1,4 @@
-/* Timeline V2 layout shell. Layout only — no generic element selectors. */
+/* Timeline V2 layout shell. Layout only â€” no generic element selectors. */
 
 .timeline-v2 {
   --timeline-left-width: 280px;
@@ -25,6 +25,15 @@
 .timeline-v2 input[type="radio"] {
   width: 16px;
   height: 16px;
+}
+
+.timeline-v2__action-notice {
+  margin: 0;
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+  flex: 0 0 auto;
 }
 
 .timeline-v2__header {
@@ -163,6 +172,8 @@
   width: 8px;
   cursor: col-resize;
   align-self: stretch;
+  z-index: 46;
+  position: relative;
   border-radius: 4px;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
@@ -230,7 +241,18 @@
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.timeline-v2__dock--generator {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.7rem 0.8rem;
+  border-bottom: 1px solid rgba(124, 156, 188, 0.14);
+}
+
+.timeline-v2__dock--generator select {
+  width: 100%;
 }
 
 .timeline-v2__dock--scenes {
@@ -238,7 +260,8 @@
   flex-direction: column;
   flex: 0 1 28%;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .timeline-v2__dock--scenes .timeline {
@@ -246,7 +269,8 @@
   flex-direction: column;
   flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .timeline-v2__scenes-list {
@@ -265,17 +289,20 @@
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
-  min-height: 8rem;
-  overflow: hidden;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
+.timeline-v2 .timeline-v2__drawer--left .panel,
 .timeline-v2__dock--library .panel,
 .timeline-v2__dock--references .panel {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .timeline-v2__dock--library .asset-list,
@@ -409,4 +436,64 @@
   /* Canvas stays cinematic dark in every theme, including aurora-day. */
   background: #0c121b;
   color: #e1e8f2;
+}
+
+
+/* Portaled to document.body — do not attach to .timeline-v2 drawers. */
+.timeline-library-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.timeline-library-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.timeline-library-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--panel, #16161c);
+  color: inherit;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+.timeline-library-modal__header,
+.timeline-library-modal__footer,
+.timeline-library-modal__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.timeline-library-modal__header {
+  justify-content: space-between;
+}
+.timeline-library-modal__header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.timeline-library-modal__tools input {
+  flex: 1 1 160px;
+}
+.timeline-library-modal__grid {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 8px;
+}
+.timeline-library-modal__footer {
+  justify-content: flex-end;
 }

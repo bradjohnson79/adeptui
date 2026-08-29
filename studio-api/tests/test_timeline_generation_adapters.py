@@ -211,6 +211,16 @@ def test_ltx_routes_through_shared_interface(db_scene):
                     "versionId": "psv1",
                 }
             ],
+            "sourceAnchors": [
+                {
+                    "id": "anc-ltx",
+                    "kind": "image",
+                    "assetId": "img-ltx-start",
+                    "label": "Start",
+                    "atTime": 0,
+                    "strength": 1,
+                }
+            ],
         },
     )
     with patch(
@@ -385,6 +395,16 @@ def test_ltx_submit_enqueues_job_queue_not_missing_worker_alias(db_scene):
                     "anchorIds": [],
                     "executionStrategy": "compiled",
                     "versionId": "psv1",
+                }
+            ],
+            "sourceAnchors": [
+                {
+                    "id": "anc-ltx-q",
+                    "kind": "image",
+                    "assetId": "img-ltx-start",
+                    "label": "Start",
+                    "atTime": 0,
+                    "strength": 1,
                 }
             ],
         },
@@ -794,7 +814,7 @@ def test_retake_does_not_overwrite_active_take(db_scene):
 def test_draft_capability_truth_table():
     reg = get_registry()
     ltx = reg.capabilities("ltx-local")
-    assert ltx.draftPathway == "local_live"
+    assert ltx.draftPathway == "none"
     assert ltx.supportsQueuedCancel is True
     assert ltx.supportsRunningCancel is True
     assert ltx.supportsVideoReferences is False
@@ -904,8 +924,8 @@ def test_request_builder_sets_draft_and_aspect(db_scene):
         project_id=pid, scene_id=sid, batch=batch, snapshot=snap, aspect_ratio="21:9"
     )
     assert req.aspectRatio == "21:9"
-    assert req.resolution == "672x288"
-    assert req.providerOptions.get("draftMode") is True
+    assert req.resolution == "1280x704"
+    assert req.providerOptions.get("draftMode") is False
     assert req.videoReferenceAssetId == "motion-1"
     refused = get_registry().get("ltx-local").validate(req)
     assert refused.ok is False
@@ -989,4 +1009,303 @@ def test_draft_completion_does_not_auto_approve(db_scene):
     assert cand["takeState"]["quality"] == "draft"
     assert cand["approved"] is False
 
+
+
+
+def test_supports_temperature_false_on_all_timeline_adapters():
+    reg = get_registry()
+    for gen_id in (
+        "minimax-h3-t2v-local",
+        "minimax-h3-i2v-local",
+        "ltx-local",
+        "kling-api",
+        "seedance-api",
+    ):
+        caps = reg.capabilities(gen_id)
+        assert caps.supportsTemperature is False
+
+
+def test_minimax_payload_has_no_unsupported_keys_and_includes_camera_nl():
+    from app.director_timeline import CameraClip, DirectorTimeline
+    from app.director_timeline_w46.contracts import BatchBlock, DurationState, TimelinePromptSegment
+    from app.director_timeline_w46.generation.adapters.minimax_h3_local import minimax_built_payload
+
+    batch = BatchBlock(
+        sceneId="scene-1",
+        generatorId="minimax-h3-t2v-local",
+        duration=DurationState(plannedDuration=5.0),
+        promptSegments=[
+            TimelinePromptSegment(text="glass bottle condensation", temperature=0.3, strength=0.9)
+        ],
+    )
+    tl = DirectorTimeline(
+        duration_sec=5.0,
+        camera_clips=[
+            CameraClip(
+                id="cam1",
+                start=0,
+                length=5,
+                motion_type="dolly_in",
+                rig="dolly",
+                shot_id="close_up",
+                lens_id="35",
+                text="slow push toward the bottle",
+            )
+        ],
+    )
+    snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="minimax-h3-t2v-local")
+    req = build_timeline_generation_request(
+        project_id="p",
+        scene_id="s",
+        batch=batch,
+        snapshot=snap,
+        fallback_allowed=False,
+        director_timeline=tl,
+        window_start=0.0,
+    )
+    assert req.cameraMotion is None
+    assert req.temperature is None
+    assert req.camera is not None
+    assert "close up" in (req.prompt or "").lower() or "close_up" in (req.prompt or "")
+    assert "35" in (req.prompt or "")
+    assert "dolly" in (req.prompt or "").lower()
+    assert "slow push toward the bottle" in (req.prompt or "")
+    payload = minimax_built_payload(req)
+    for banned in ("temperature", "cfg", "creativity", "cameraMotion"):
+        assert banned not in payload
+    assert "slow push toward the bottle" in payload["prompt"]
+
+
+def test_generate_preflight_reconciles_inspector_over_stale_master(db_scene):
+    import json
+
+    from app.db import Scene
+    from app.director_timeline import CameraClip, DirectorTimeline, PromptSegment
+    from app.director_timeline_w46.contracts import SceneTimelineMaster
+
+    db, pid, sid = db_scene
+    ws = service.workspace(db, pid, sid)
+    assert ws["ok"]
+    scene = db.get(Scene, sid)
+    data = json.loads(scene.director_json or "{}")
+    master = data.setdefault("timelineMaster", ws["master"])
+    batch = master["batchBlocks"][0]
+    batch["promptSegments"] = [
+        {
+            "id": "ps_stale",
+            "start": 0,
+            "length": 5,
+            "text": "STALE MASTER",
+            "legacyPromptSegmentId": "leg_insp",
+            "role": "primary",
+            "strength": 1.0,
+            "temperature": 1.0,
+        }
+    ]
+    data["prompt_segments"] = [
+        {
+            "id": "leg_insp",
+            "start": 0.0,
+            "length": 5.0,
+            "text": "INSPECTOR WINS",
+            "weight": 1.0,
+            "temperature": 0.4,
+            "movement_segment_ref": {"segmentId": "mv1"},
+            "movement_segment_revision": 3,
+        }
+    ]
+    data["camera_clips"] = [
+        {
+            "id": "cam1",
+            "start": 0.0,
+            "length": 5.0,
+            "motion_type": "dolly_in",
+            "rig": "dolly",
+            "shot_id": "close_up",
+            "lens_id": "35",
+            "lighting_id": "golden_hour",
+            "text": "slow push",
+        }
+    ]
+    scene.director_json = json.dumps(data)
+    db.add(scene)
+    db.commit()
+
+    bundle = service.load_timeline_bundle(db, pid, sid)
+    findings = orchestrator.run_preflight(
+        bundle["master"],
+        director_timeline=bundle["directorTimeline"],
+        db=db,
+        project_id=pid,
+    )
+    assert isinstance(findings, list)
+    reloaded = service.workspace(db, pid, sid)
+    seg = reloaded["master"]["batchBlocks"][0]["promptSegments"][0]
+    assert seg["text"] == "INSPECTOR WINS"
+    assert seg["temperature"] == 0.4
+    assert (seg.get("movementSegmentRef") or {}).get("segmentId") == "mv1"
+    cams = reloaded["master"]["batchBlocks"][0]["cameraInstructions"]
+    assert cams
+    assert cams[0]["shot_id"] == "close_up"
+    assert cams[0]["lens_id"] == "35"
+
+
+def test_put_director_style_persist_reconciles_into_master(db_scene):
+    from app.db import Scene
+    from app.director_timeline import CameraClip, DirectorTimeline, PromptSegment
+    from app.director_timeline_w46.contracts import SceneTimelineMaster
+    from app.director_timeline_w46.migration import load_or_migrate_scene_master
+    from app.director_timeline_w46.store import reconcile_master_from_director
+
+    db, pid, sid = db_scene
+    service.workspace(db, pid, sid)
+    scene = db.get(Scene, sid)
+    body = DirectorTimeline(
+        duration_sec=5.0,
+        prompt_segments=[
+            PromptSegment(
+                id="leg_put",
+                start=1.0,
+                length=3.0,
+                text="PUT inspector text",
+                temperature=0.55,
+                weight=0.3,
+                movement_segment_ref={"segmentId": "mv9"},
+                movement_segment_revision=2,
+            )
+        ],
+        camera_clips=[
+            CameraClip(
+                id="cam_put",
+                start=0,
+                length=5,
+                motion_type="push",
+                rig="dolly",
+                shot_id="medium",
+                lens_id="50",
+                lighting_id="daylight",
+            )
+        ],
+    )
+    master, _tl, _data = load_or_migrate_scene_master(
+        scene.director_json, scene_id=sid, fallback_duration=5.0, fallback_prompt=""
+    )
+    changed = reconcile_master_from_director(db, pid, sid, master, body)
+    assert changed is True
+    ws = service.workspace(db, pid, sid)
+    segs = ws["master"]["batchBlocks"][0]["promptSegments"]
+    seg = next(
+        s
+        for s in segs
+        if s.get("legacyPromptSegmentId") == "leg_put" or s.get("text") == "PUT inspector text"
+    )
+    assert seg["text"] == "PUT inspector text"
+    assert seg["temperature"] == 0.55
+    assert seg["strength"] == 0.3
+    assert seg["temperature"] != seg["strength"]
+    cam = ws["master"]["batchBlocks"][0]["cameraInstructions"][0]
+    assert cam["shot_id"] == "medium"
+    assert cam["lens_id"] == "50"
+
+
+def test_preflight_empty_prompt_and_length_and_outside_duration():
+    from app.director_timeline import CameraClip, DirectorTimeline, PromptSegment
+    from app.director_timeline_w46.contracts import (
+        BatchBlock,
+        DurationState,
+        SceneTimelineMaster,
+        TimelinePromptSegment,
+    )
+
+    master = SceneTimelineMaster(
+        mode="video_finishing",
+        batchBlocks=[
+            BatchBlock(
+                id="bb_empty",
+                sceneId="sc",
+                label="Empty Batch",
+                duration=DurationState(plannedDuration=5.0),
+                promptSegments=[],
+            )
+        ],
+    )
+    findings = orchestrator.run_preflight(master, director_timeline=DirectorTimeline(duration_sec=5.0))
+    assert any(f["code"] == "empty_prompt" and f["severity"] == "error" for f in findings)
+
+    master.batchBlocks[0].promptSegments = [
+        TimelinePromptSegment(productionPrompt="  production only  ", text="   ")
+    ]
+    findings = orchestrator.run_preflight(master, director_timeline=DirectorTimeline(duration_sec=5.0))
+    assert not any(f["code"] in {"empty_prompt", "missing_prompt", "empty_required_prompt"} for f in findings)
+
+    tl = DirectorTimeline(
+        duration_sec=5.0,
+        prompt_segments=[PromptSegment(id="p1", start=0.0, length=0.0, text="x")],
+        camera_clips=[CameraClip(id="c1", start=0.0, length=-1.0, motion_type="static")],
+    )
+    findings = orchestrator.run_preflight(master, director_timeline=tl)
+    assert any(f["code"] == "invalid_length" and f["severity"] == "error" for f in findings)
+
+    tl = DirectorTimeline(
+        duration_sec=5.0,
+        prompt_segments=[PromptSegment(id="p2", start=4.0, length=3.0, text="late")],
+    )
+    findings = orchestrator.run_preflight(master, director_timeline=tl)
+    assert any(f["code"] == "clip_outside_duration" and f["severity"] == "error" for f in findings)
+
+def test_put_director_does_not_overwrite_scene_prompt(db_scene):
+    from app.director_timeline import DirectorTimeline, PromptSegment
+    from app.director_timeline import sync_legacy_fields_from_director
+    from app.routers.api import put_director
+
+    db, pid, sid = db_scene
+    scene = db.get(Scene, sid)
+    scene.prompt = "INDEPENDENT SCENE PROMPT"
+    db.add(scene)
+    db.commit()
+
+    body = DirectorTimeline(
+        duration_sec=5.0,
+        media_mode="video",
+        prompt_segments=[
+            PromptSegment(id="timed1", start=0.0, length=2.0, text="timed flatten bait")
+        ],
+    )
+    legacy = sync_legacy_fields_from_director(body)
+    assert "prompt" not in legacy
+
+    put_director(pid, sid, body, db)
+    db.refresh(scene)
+    assert scene.prompt == "INDEPENDENT SCENE PROMPT"
+
+
+def test_request_builder_audio_kind_not_in_reference_asset_ids():
+    from app.director_timeline_w46.contracts import BatchBlock, DurationState
+
+    batch = BatchBlock(
+        sceneId="scene-1",
+        generatorId="minimax-h3-t2v-local",
+        duration=DurationState(plannedDuration=5.0),
+        promptSegments=[],
+        references=[
+            {"kind": "audio", "role": "audio_reference", "assetId": "aud-1", "consumed": True},
+            {"kind": "image", "role": "image_reference", "assetId": "img-1", "consumed": True},
+            {"kind": "video", "role": "video_reference", "assetId": "vid-1", "consumed": True},
+        ],
+    )
+    snap = ExecutionSnapshot(batchBlockId=batch.id, selectedGenerator="minimax-h3-t2v-local")
+    req = build_timeline_generation_request(
+        project_id="p",
+        scene_id="s",
+        batch=batch,
+        snapshot=snap,
+        fallback_allowed=False,
+        scene_prompt="Scene base",
+    )
+    assert "aud-1" not in (req.referenceAssetIds or [])
+    assert "img-1" in (req.referenceAssetIds or [])
+    assert req.videoReferenceAssetId == "vid-1"
+    assert req.prompt == "Scene base"
+    assert req.temperature is None
+    assert req.cameraMotion is None
 

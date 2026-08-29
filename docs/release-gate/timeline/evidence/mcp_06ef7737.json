@@ -1,0 +1,108 @@
+{
+  "promptId": "06ef7737-08b9-4ea7-9d19-98971b9a3f7c",
+  "historyStatus": "success",
+  "outputs": {
+    "12": {
+      "gifs": [
+        {
+          "filename": "batch_bb_0b021_00003.mp4",
+          "subfolder": "studio\\0ffe56e2_0",
+          "type": "output",
+          "format": "video/h264-mp4",
+          "frame_rate": 24.0,
+          "workflow": "batch_bb_0b021_00003.png",
+          "fullpath": "studio/0ffe56e2_0/batch_bb_0b021_00003.mp4"
+        }
+      ]
+    }
+  },
+  "graph": {
+    "classTypes": [
+      "CheckpointLoaderSimple",
+      "LTXAVTextEncoderLoader",
+      "CLIPTextEncode",
+      "CLIPTextEncode",
+      "LTXVConditioning",
+      "LoadImage",
+      "LTXVImgToVideo",
+      "RandomNoise",
+      "KSamplerSelect",
+      "BasicScheduler",
+      "CFGGuider",
+      "SamplerCustomAdvanced",
+      "VAEDecode",
+      "VHS_VideoCombine"
+    ],
+    "inputs": {
+      "1.CheckpointLoaderSimple.ckpt_name": "ltx-2.3-22b-distilled-fp8.safetensors",
+      "1b.LTXAVTextEncoderLoader.ckpt_name": "ltx-2.3-22b-distilled-fp8.safetensors",
+      "2.CLIPTextEncode.text": "UNCHANGED FACTS: environment, cameras, ERS\nSTARTING STATE (M2): beat Talking in Corridor\nENDING STATE (M3): beat Inside Combat Chamber\nSpecial Agent Jacob Barnes stands in the Observatory Control Room. Cool instrument light, slow cinematic hold, quiet tension, photoreal, 16:9.\nCamera: Close Up, 35mm, dolly in on dolly, lighting: Dramatic, focus on @SpecialAgentJacobBarnes",
+      "3.CLIPTextEncode.text": "blurry, low quality, watermark",
+      "3b.LTXVConditioning.frame_rate": 24.0,
+      "4.LoadImage.image": "studio/imagegen_edit_97271e7a.png",
+      "5.LTXVImgToVideo.width": 1280,
+      "5.LTXVImgToVideo.height": 704,
+      "5.LTXVImgToVideo.length": 113,
+      "5.LTXVImgToVideo.image": [
+        "4",
+        0
+      ],
+      "12.VHS_VideoCombine.frame_rate": 24.0
+    }
+  },
+  "mcp": {
+    "ok": true,
+    "tools": [
+      "server_info",
+      "auth_status",
+      "auth_login",
+      "run_workflow",
+      "generate_image",
+      "list_partner_models",
+      "partner_model_schema",
+      "partner_generate",
+      "emit_partner_workflow",
+      "run_template",
+      "job",
+      "system_stats",
+      "free_memory",
+      "fetch_outputs",
+      "launch_comfyui",
+      "stop_comfyui",
+      "restart_comfyui",
+      "update_comfyui",
+      "switch_comfyui_version",
+      "install_node",
+      "get_logs",
+      "discover",
+      "which",
+      "project",
+      "search_templates",
+      "get_template",
+      "fetch_template",
+      "nodes",
+      "node_dependencies",
+      "workflow_deps",
+      "search_models",
+      "download_model",
+      "download",
+      "upload_file",
+      "validate_workflow",
+      "list_workflow_slots",
+      "list_workflow_notes",
+      "set_workflow_slot",
+      "vary_workflow"
+    ],
+    "calls": {
+      "system_stats": [
+        "{\n  \"system\": {\n    \"os\": \"win32\",\n    \"ram_total\": 68135153664,\n    \"ram_free\": 7050903552,\n    \"comfyui_version\": \"0.32.0\",\n    \"required_frontend_version\": \"1.48.7\",\n    \"installed_templates_version\": \"0.11.39\",\n    \"required_templates_version\": \"0.11.39\",\n    \"comfy_package_versions\": [\n      {\n        \"name\": \"comfyui-frontend-package\",\n        \"installed\": \"1.48.7\",\n        \"required\": \"1.48.7\"\n      },\n      {\n        \"name\": \"comfyui-workflow-templates\",\n        \"installed\": \"0.11.39\",\n        \"required\": \"0.11.39\"\n      },\n      {\n        \"name\": \"comfyui-embedded-docs\",\n        \"installed\": \"0.5.9\",\n        \"required\": \"0.5.9\"\n      },\n      {\n        \"name\": \"comfy-kitchen\",\n        \"installed\": \"0.2.30\",\n        \"required\": \"0.2.30\"\n      },\n      {\n        \"name\": \"comfy-aimdo\",\n        \"installed\": \"0.4.13\",\n        \"required\": \"0.4.13\"\n      }\n    ],\n    \"python_version\": \"3.13.12 (main, Feb 12 2026, 00:38:53) [MSC v.1944 64 bit (AMD64)]\",\n    \"pytorch_version\": \"2.10.0+cu130\",\n    \"embedded_python\": false,\n    \"deploy_environment\": \"local-desktop2-standalone\",\n    \"argv\": [\n      \"ComfyUI\\\\main.py\",\n      \"--enable-manager\",\n      \"--extra-model-paths-config\",\n      \"[REDACTED_LOCAL_PATH]\",\n      \"--input-directory\",\n      \"[REDACTED_LOCAL_PATH]\",\n      \"--output-directory\",\n      \"[REDACTED_LOCAL_PATH]\"\n    ]\n  },\n  \"devices\": [\n    {\n      \"name\": \"cuda:0 NVIDIA GeForce RTX 5090 : cudaMallocAsync\",\n      \"type\": \"cuda\",\n      \"index\": 0,\n      \"vram_total\": 34190458880,\n      \"vram_free\": 11077005796,\n      \"torch_vram_total\": 67108864,\n      \"torch_vram_free\": 32354788\n    }\n  ]\n}"
+      ],
+      "job": [
+        "{\n  \"prompt_id\": \"06ef7737-08b9-4ea7-9d19-98971b9a3f7c\",\n  \"status\": \"completed\",\n  \"workflow_size\": null,\n  \"outputs\": [\n    \"http://127.0.0.1:8188/view?filename=batch_bb_0b021_00003.mp4&subfolder=studio%5C0ffe56e2_0&type=output\"\n  ],\n  \"outputs_by_node\": {\n    \"12\": [\n      \"http://127.0.0.1:8188/view?filename=batch_bb_0b021_00003.mp4&subfolder=studio%5C0ffe56e2_0&type=output\"\n    ]\n  },\n  \"outputs_by_item\": {},\n  \"text_outputs\": {},\n  \"error\": null,\n  \"host\": \"127.0.0.1\",\n  \"port\": 8188\n}"
+      ],
+      "validate_workflow": [
+        "{\n  \"workflow\": \"C:\\\\AdeptFilmWorks\\\\AIVideoStudio\\\\docs\\\\release-gate\\\\timeline\\\\evidence\\\\graph_06ef7737.json\",\n  \"valid\": true,\n  \"error_count\": 0,\n  \"warning_count\": 0,\n  \"errors\": [],\n  \"warnings\": [],\n  \"partner_nodes\": [],\n  \"spends_credits\": false,\n  \"object_info_source\": {\n    \"mode\": \"local\",\n    \"host\": \"127.0.0.1\",\n    \"port\": 8188\n  }\n}"
+      ]
+    }
+  }
+}

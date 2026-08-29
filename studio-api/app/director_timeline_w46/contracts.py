@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..codirector.video_intelligence.contracts import (
     CoDirectorContinuityPolicy,
@@ -119,6 +119,8 @@ class TimelinePromptSegment(BaseModel):
     text: str = ""
     role: str = "primary"
     strength: float = 1.0
+    # Canonical generation temperature. Independent of strength/weight.
+    temperature: float = 1.0
     negativePrompt: Optional[str] = None
     anchorIds: list[str] = Field(default_factory=list)
     executionStrategy: PromptStrategy = "compiled"
@@ -216,6 +218,8 @@ class ApprovedClip(BaseModel):
 
 
 class BatchClip(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
     """A clip owned by a BatchBlock. Stable unique ID; never re-keyed on reorder.
 
     Batches own their clips directly so adding media to one batch can never
@@ -237,6 +241,19 @@ class BatchClip(BaseModel):
     # Camera-specific fields (ignored for non-camera kinds)
     motion_type: Optional[str] = None
     rig: Optional[str] = None
+    motion_id: Optional[str] = None
+    shot_id: Optional[str] = None
+    lens_id: Optional[str] = None
+    focus_id: Optional[str] = None
+    focus_name: Optional[str] = None
+    lighting_id: Optional[str] = None
+    text: str = ""
+    speed: Optional[float] = None
+    distance: Optional[float] = None
+    ease: Optional[str] = None
+    shake: Optional[float] = None
+    intensity: Optional[float] = None
+    subject_lock: Optional[float] = None
     # Migration metadata: when this clip was migrated from a legacy scene-global
     # clip, the original legacy clip ID is preserved here for audit/reversibility.
     legacyClipId: Optional[str] = None
@@ -413,6 +430,7 @@ class GeneratorCapability(BaseModel):
     supportsImageAndVideoTogether: bool = False
     maximumReferenceVideos: int = 0
     supportedAspectRatios: list[str] = Field(default_factory=list)
+    supportsTemperature: bool = False
 
 
 class PreflightFinding(BaseModel):

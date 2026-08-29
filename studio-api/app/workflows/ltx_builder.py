@@ -4,6 +4,8 @@ import json
 import uuid
 from typing import Any, Optional
 
+from .ltx_25_builder import _snap_ltx_25_spatial
+
 
 def _nid() -> str:
     return str(uuid.uuid4().int)[:8]
@@ -333,6 +335,7 @@ def build_ltx_simple_i2v(
     lora_strength: float = 0.8,
 ) -> dict[str, Any]:
     """Fallback simpler LTXVImgToVideo path if Director graph fails validation/execution."""
+    width, height = _snap_ltx_25_spatial(width, height)
     graph = {
         "1": {
             "class_type": "CheckpointLoaderSimple",

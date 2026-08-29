@@ -25,6 +25,9 @@ import {
   type TimelineViewerPreset,
   type TimelineWorkspaceLayout,
 } from "../../timelineMaster/workspaceLayout";
+import { clampTimelineZoom } from "../../timelineMaster/timelineZoom";
+import { timelineBoardDurationSec } from "../../timelineMaster/generatorDuration";
+import { VideoGeneratorDock } from "./VideoGeneratorDock";
 import {
   WorkspaceFullscreenBanner,
   WorkspaceFullscreenControls,
@@ -41,8 +44,11 @@ import {
 } from "../../timelineMaster/timelineHotkeys";
 import { DirectorTracks, lipSyncTrackHasContent, normalizeLipSyncTracks, type DirectorTimeline } from "../DirectorTracks";
 import { TimelinePreviewComposer } from "./TimelinePreviewComposer";
+import { bindShellTimelineSnapshot, getInspectingPrompt, lockPromptSelection, subscribeShellTimelineSnapshot } from "./timelineMutateBridge";
 import { Timeline } from "../Timeline";
+import { timelineActionError } from "../../timelineMaster/timelineErrors";
 import { AssetTray } from "../AssetTray";
+import { AddFromProjectLibraryModal } from "./AddFromProjectLibraryModal";
 import { ReferencesPane } from "../sceneReferences/ReferencesPane";
 import { useOpenCoDirector } from "../CoDirector";
 import { TimelineWorkspaceStack } from "./TimelineWorkspaceStack";
@@ -58,14 +64,16 @@ import "../../styles/timeline-master/timeline-editor-shell.css";
 import "../../styles/timeline-master/timeline-v2-shell.css";
 import "../../styles/timeline-master/timeline-v2-canvas.css";
 
-function generatorLabel(engine: string) {
-  if (engine === "auto") return "Auto";
-  if (engine === "minimax-h3") return "MiniMax H3 (Default)";
-  if (engine === "ltx") return "LTX 2.5";
+function generatorLabel(engine: string, sceneGeneratorId?: string | null) {
+  const token = String(sceneGeneratorId || engine || "").trim();
+  if (token === "auto") return "Auto";
+  if (token === "ltx-local" || token === "ltx") return "LTX 2.3 (Local)";
+  if (token.startsWith("ltx-2.5")) return token;
+  if (token === "minimax-h3" || token === "minimax-h3-local" || token === "minimax-h3-t2v-local") return "MiniMax H3";
   if (engine === "hunyuan15") return "HunyuanVideo 1.5";
   if (engine === "hunyuan13b") return "HunyuanVideo 13B";
   if (engine === "wan") return "WAN 2.2";
-  return engine.replace(/^fal_/, "").replace(/_/g, " ");
+  return token.replace(/^fal_/, "").replace(/_/g, " ") || engine;
 }
 
 function batchHasContent(batch: BatchBlock) {
@@ -77,6 +85,35 @@ function batchHasContent(batch: BatchBlock) {
   if (batch.promptSegments?.some((s) => (s.text || "").trim())) return true;
   if (batch.status && batch.status !== "Draft") return true;
   return false;
+}
+
+
+function overlayLiveTimeline(live: DirectorTimeline, memory: DirectorTimeline | null): DirectorTimeline {
+  if (!memory) return live;
+  const memPromptList = memory.prompt_segments || [];
+  const memPrompts = new Map(memPromptList.filter((row) => row.id).map((row) => [row.id, row]));
+  const livePrompts = live.prompt_segments || [];
+  const livePromptIds = new Set(livePrompts.map((row) => row.id).filter(Boolean));
+  const prompt_segments = [
+    ...livePrompts.map((row) => (row.id && memPrompts.has(row.id) ? { ...row, ...memPrompts.get(row.id) } : row)),
+    // Keep pending clips that exist only in editor memory (no id yet on the server doc).
+    ...memPromptList.filter((row) => !row.id || !livePromptIds.has(row.id)),
+  ];
+  const memCamList = memory.camera_clips || [];
+  const memCams = new Map(memCamList.filter((row) => row.id).map((row) => [row.id, row]));
+  const liveCams = live.camera_clips || [];
+  const liveCamIds = new Set(liveCams.map((row) => row.id).filter(Boolean));
+  const camera_clips = [
+    ...liveCams.map((row) => (row.id && memCams.has(row.id) ? { ...row, ...memCams.get(row.id) } : row)),
+    ...memCamList.filter((row) => !row.id || !liveCamIds.has(row.id)),
+  ];
+  return {
+    ...live,
+    prompt_segments,
+    camera_clips,
+    library_asset_ids: memory.library_asset_ids !== undefined ? memory.library_asset_ids : live.library_asset_ids,
+    track_flags: memory.track_flags !== undefined ? memory.track_flags : live.track_flags,
+  };
 }
 
 export function TimelineEditorShell({
@@ -98,7 +135,10 @@ export function TimelineEditorShell({
     [project.scenes, selectedScene],
   );
   const [playheadSec, setPlayheadSec] = useState(0);
+  const playheadSecRef = useRef(0);
+  playheadSecRef.current = playheadSec;
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
+  const [libraryModalOpen, setLibraryModalOpen] = useState(false);
   const [master, setMaster] = useState<SceneTimelineMaster | null>(null);
   const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -112,6 +152,7 @@ export function TimelineEditorShell({
   const [pauseUpdates, setPauseUpdates] = useState(false);
   const [inpaintOpen, setInpaintOpen] = useState(false);
   const [retakeOpen, setRetakeOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [viewportMode, setViewportMode] = useState<WorkspaceViewportMode>("STANDARD");
   const workspaceFs = useWorkspaceFullscreen({
     workspaceId: "timeline",
@@ -241,6 +282,14 @@ export function TimelineEditorShell({
   // superseded refresh) must never overwrite newer state (NO_STALE_RELOAD,
   // same generation-token pattern as DirectorTracks.loadTokenRef).
   const masterLoadTokenRef = useRef(0);
+  const directorTimelineRef = useRef<DirectorTimeline | null>(null);
+  const mutateChainRef = useRef(Promise.resolve());
+
+  useEffect(() => {
+    return subscribeShellTimelineSnapshot((snapshot) => {
+      directorTimelineRef.current = snapshot;
+    });
+  }, []);
 
   const refreshMaster = useCallback(async () => {
     if (!selected) return;
@@ -256,7 +305,11 @@ export function TimelineEditorShell({
     try {
       const tl = (await api.getDirector(project.id, sceneId)) as DirectorTimeline;
       if (token !== masterLoadTokenRef.current) return;
-      setDirectorTimeline(tl);
+      const memory = directorTimelineRef.current;
+      const merged = overlayLiveTimeline(tl, memory);
+      directorTimelineRef.current = merged;
+      setDirectorTimeline(merged);
+      bindShellTimelineSnapshot(merged);
     } catch {
       if (token !== masterLoadTokenRef.current) return;
       setDirectorTimeline(null);
@@ -308,8 +361,9 @@ export function TimelineEditorShell({
         setPlayheadSec(detail.playheadSec);
         if (selected) {
           void api.getDirector(project.id, selected.id).then((timeline) => {
+            const merged = overlayLiveTimeline(timeline as DirectorTimeline, directorTimelineRef.current);
             void api.putDirector(project.id, selected.id, {
-              ...(timeline as DirectorTimeline),
+              ...merged,
               playhead: detail.playheadSec,
             });
           });
@@ -318,7 +372,7 @@ export function TimelineEditorShell({
       if (typeof detail.zoom === "number") {
         setZoom(detail.zoom);
       } else if (typeof detail.zoomDelta === "number") {
-        setZoom(Math.min(3, Math.max(0.5, Number((zoom + detail.zoomDelta).toFixed(2)))));
+        setZoom(clampTimelineZoom(zoom + detail.zoomDelta));
       }
       if (detail.findingCode) setFocusFinding(detail.findingCode);
       if (detail.openInpaint === true) {
@@ -354,6 +408,42 @@ export function TimelineEditorShell({
     setReloadKey((value) => value + 1);
   }, [refresh, refreshMaster]);
 
+  const persistPlayhead = useCallback(
+    (next: number) => {
+      playheadSecRef.current = next;
+      setPlayheadSec(next);
+      const sceneId = selected?.id;
+      const memory = directorTimelineRef.current;
+      if (!sceneId || !memory) return;
+      const updated = { ...memory, playhead: next };
+      directorTimelineRef.current = updated;
+      setDirectorTimeline(updated);
+      bindShellTimelineSnapshot(updated);
+      void api.putDirector(project.id, sceneId, updated).catch((error) => {
+        setActionNotice(error instanceof Error ? error.message : "Could not save the playhead.");
+      });
+    },
+    [project.id, selected?.id],
+  );
+
+  const runSceneAction = useCallback(
+    async (fn: () => Promise<unknown>) => {
+      try {
+        const result = await fn();
+        const err = timelineActionError(result);
+        if (err) {
+          setActionNotice(err);
+          return;
+        }
+        setActionNotice(null);
+        await afterMutation();
+      } catch (error) {
+        setActionNotice(error instanceof Error ? error.message : "That Timeline action failed.");
+      }
+    },
+    [afterMutation],
+  );
+
   // c5: refresh project + Timeline master when Co-Director mutates this project
   // so the creator sees approved changes without a manual reload.
   useEffect(() => {
@@ -371,25 +461,59 @@ export function TimelineEditorShell({
       mutator: (timeline: DirectorTimeline) => DirectorTimeline,
       opts?: { refresh?: boolean },
     ) => {
-      if (!selected) return;
-      const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
-      const next = mutator(current);
-      setUndoStack((stack) => [...stack.slice(-19), current]);
-      setRedoStack([]);
-      await api.putDirector(project.id, selected.id, next);
-      // Soft text edits must not remount the Inspector (preserves focus/cursor).
-      if (opts?.refresh === false) return;
-      await afterMutation();
+      const sceneId = selected?.id || selectedScene || project.scenes[0]?.id;
+      if (!sceneId) return;
+      const run = async () => {
+        // Authoritative store is in-memory. GET-overlay-then-verify-PUT was
+        // racing the toolbar add: a stale GET or verify retry could PUT the
+        // seed-only doc and wipe the new prompt_segments id.
+        const memory = directorTimelineRef.current;
+        const base =
+          memory ??
+          ((await api.getDirector(project.id, sceneId)) as DirectorTimeline);
+        const next = mutator(base);
+        if (JSON.stringify(next) === JSON.stringify(base)) {
+          directorTimelineRef.current = next;
+          setDirectorTimeline(next);
+          bindShellTimelineSnapshot(next);
+          return;
+        }
+        directorTimelineRef.current = next;
+        setDirectorTimeline(next);
+        bindShellTimelineSnapshot(next);
+        setUndoStack((stack) => [...stack.slice(-19), base]);
+        setRedoStack([]);
+        try {
+          await api.putDirector(project.id, sceneId, next);
+          setActionNotice(null);
+        } catch (error) {
+          setActionNotice(error instanceof Error ? error.message : "Could not save the Timeline.");
+          throw error;
+        }
+        // Soft text edits must not remount the Inspector (preserves focus/cursor).
+        if (opts?.refresh === false) return;
+        await afterMutation();
+      };
+      const pending = mutateChainRef.current.then(run, run);
+      mutateChainRef.current = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      await pending;
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, project.id, selected, selectedScene],
   );
 
   const applyHistorySnapshot = useCallback(
     async (direction: "undo" | "redo") => {
       if (!selected) return;
+      const sceneId = selected.id;
+      const run = async () => {
       if (direction === "undo" && undoStack.length === 0) return;
       if (direction === "redo" && redoStack.length === 0) return;
-      const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const current =
+        directorTimelineRef.current ??
+        ((await api.getDirector(project.id, sceneId)) as DirectorTimeline);
       let next: DirectorTimeline;
       if (direction === "undo") {
         next = undoStack[undoStack.length - 1];
@@ -400,7 +524,10 @@ export function TimelineEditorShell({
         setRedoStack((stack) => stack.slice(0, -1));
         setUndoStack((stack) => [...stack, current]);
       }
-      await api.putDirector(project.id, selected.id, next);
+      directorTimelineRef.current = next;
+      setDirectorTimeline(next);
+      bindShellTimelineSnapshot(next);
+      await api.putDirector(project.id, sceneId, next);
       await afterMutation();
       // Restore visible selection state: if the currently selected clip no
       // longer exists in the restored timeline, fall back to scene so the
@@ -420,8 +547,15 @@ export function TimelineEditorShell({
           normalizeLipSyncTracks(next.lipsync?.tracks).some((t) =>
             t.id === s.id || (t.clips || []).some((c) => c.id === s.id),
           );
-        if (!exists) setSelection({ kind: "scene", id: selected.id });
+        if (!exists) setSelection({ kind: "scene", id: sceneId });
       }
+      };
+      const pending = mutateChainRef.current.then(run, run);
+      mutateChainRef.current = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      await pending;
     },
     [afterMutation, project.id, redoStack, selected, selection, setSelection, undoStack],
   );
@@ -444,7 +578,8 @@ export function TimelineEditorShell({
     }
 
     if (selection.kind === "lipsyncTrack") {
-      const timeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const live = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const timeline = overlayLiveTimeline(live, directorTimelineRef.current);
       const tracks = normalizeLipSyncTracks(timeline.lipsync?.tracks);
       const targetIndex = tracks.findIndex((track) => track.id === selection.id);
       if (targetIndex < 1) return;
@@ -625,10 +760,10 @@ export function TimelineEditorShell({
         }
         if (selected) setSelection({ kind: "scene", id: selected.id });
       }),
-      registerTimelineCommand("playheadLeft", () => setPlayheadSec((t) => Math.max(0, t - 0.1))),
-      registerTimelineCommand("playheadRight", () => setPlayheadSec((t) => Math.min(duration, t + 0.1))),
-      registerTimelineCommand("playheadLeftLarge", () => setPlayheadSec((t) => Math.max(0, t - 1))),
-      registerTimelineCommand("playheadRightLarge", () => setPlayheadSec((t) => Math.min(duration, t + 1))),
+      registerTimelineCommand("playheadLeft", () => persistPlayhead(Math.max(0, playheadSecRef.current - 0.1))),
+      registerTimelineCommand("playheadRight", () => persistPlayhead(Math.min(duration, playheadSecRef.current + 0.1))),
+      registerTimelineCommand("playheadLeftLarge", () => persistPlayhead(Math.max(0, playheadSecRef.current - 1))),
+      registerTimelineCommand("playheadRightLarge", () => persistPlayhead(Math.min(duration, playheadSecRef.current + 1))),
     ];
     return () => {
       unsubscribers.forEach((off) => off());
@@ -637,6 +772,7 @@ export function TimelineEditorShell({
     applyHistorySnapshot,
     deleteSelection,
     duplicateSelection,
+    persistPlayhead,
     focusTimelineWorkspace,
     inpaintOpen,
     openRightDrawer,
@@ -691,6 +827,9 @@ export function TimelineEditorShell({
           audio_clips: [...(timeline.audio_clips || []), { id, start: 0, length: duration, label: asset.tag || "Audio", asset_id: asset.id, volume: 1 }],
         };
       }
+      directorTimelineRef.current = next;
+      setDirectorTimeline(next);
+      bindShellTimelineSnapshot(next);
       await api.putDirector(project.id, selected.id, next);
       await afterMutation();
     },
@@ -703,19 +842,62 @@ export function TimelineEditorShell({
       if (asset.kind === "audio") return;
       const mediaKind = asset.kind === "video" ? "video" : asset.kind === "image" ? "image" : null;
       if (!mediaKind) return;
-      await api.sceneReferences.attach(project.id, {
+      const alias = (asset.tag || asset.filename || mediaKind).replace(/\s+/g, "");
+      const payload = {
         asset_id: asset.id,
-        scope_type: "project",
-        scope_id: project.id,
         reference_type: mediaKind,
         media_kind: mediaKind,
-        alias: (asset.tag || asset.filename || mediaKind).replace(/\s+/g, ""),
+        alias,
         usage_modes: mediaKind === "video" ? ["motion"] : ["appearance"],
         reference_roles: [mediaKind],
-      });
+      };
+      const listScene = () =>
+        api.sceneReferences.list(project.id, {
+          scopeType: "scene",
+          scopeId: selected.id,
+          sceneId: selected.id,
+        });
+      let sceneRows = await listScene();
+      let sceneBinding = (sceneRows.items || []).find((row: { asset_id?: string; id?: string }) => row.asset_id === asset.id);
+      if (!sceneBinding) {
+        const created = (await api.sceneReferences.attach(project.id, {
+          ...payload,
+          scope_type: "scene",
+          scope_id: selected.id,
+        })) as { id?: string; asset_id?: string };
+        if (created?.id) {
+          sceneBinding = created;
+        } else {
+          sceneRows = await listScene();
+          sceneBinding = (sceneRows.items || []).find((row: { asset_id?: string; id?: string }) => row.asset_id === asset.id);
+        }
+      }
+      const sceneBindingId = String(sceneBinding?.id || "").trim();
+      const promptId = getInspectingPrompt() || (selection.kind === "promptSeg" ? selection.id : null);
+      if (promptId && sceneBindingId) {
+        const projectRows = await api.sceneReferences
+          .list(project.id, { scopeType: "project", scopeId: project.id })
+          .catch(() => ({ items: [] as { id?: string; asset_id?: string }[] }));
+        const siblingIds = new Set(
+          (projectRows.items || [])
+            .filter((row: { asset_id?: string }) => row.asset_id === asset.id)
+            .map((row: { id?: string }) => String(row.id || "").trim())
+            .filter(Boolean),
+        );
+        await mutateTimeline((current) => ({
+          ...current,
+          prompt_segments: (current.prompt_segments || []).map((seg) => {
+            if (seg.id !== promptId) return seg;
+            const existing = seg.reference_binding_ids || [];
+            const next = existing.filter((id) => id !== sceneBindingId && !siblingIds.has(id));
+            if (!next.includes(sceneBindingId)) next.push(sceneBindingId);
+            return { ...seg, reference_binding_ids: next };
+          }),
+        }));
+      }
       await afterMutation();
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, mutateTimeline, project.id, selected, selection.id, selection.kind],
   );
 
   if (!selected) {
@@ -745,8 +927,8 @@ export function TimelineEditorShell({
       <header className="timeline-v2__header" data-testid="timeline-scene-header">
         <div className="timeline-v2__header-identity">
           <h2 className="timeline-v2__header-title">{selected.name}</h2>
-          <p className="timeline-v2__header-meta">
-            {generatorLabel(selected.engine)} · {t("timeline:durationSec", { seconds: selected.duration_sec.toFixed(1) })} · {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
+          <p className="timeline-v2__header-meta" data-testid="timeline-scene-header-meta">
+            {generatorLabel(selected.engine, master?.sceneGeneratorId)} · {t("timeline:durationSec", { seconds: timelineBoardDurationSec(master, directorTimeline, selected).toFixed(1) })} · {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
           </p>
         </div>
         <div className="timeline-v2__header-actions">
@@ -787,7 +969,9 @@ export function TimelineEditorShell({
                 title={t("timeline:pictureShapeTitle")}
                 aria-label={t("timeline:pictureShape")}
                 onChange={(e) =>
-                  void api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }).then(afterMutation)
+                  void runSceneAction(() =>
+                    api.updateScene(project.id, selected.id, { ...selected, aspect_ratio: e.target.value }),
+                  )
                 }
               >
                 {PRODUCTION_ASPECTS.map((ratio) => (
@@ -800,6 +984,7 @@ export function TimelineEditorShell({
             <button
               type="button"
               className={`timeline-v2__header-btn ${!hideOverlay ? "primary" : "ghost"}`}
+              data-testid="timeline-viewer-guides"
               title={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-label={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-pressed={!hideOverlay}
@@ -846,18 +1031,20 @@ export function TimelineEditorShell({
           <button
             type="button"
             className={`timeline-v2__header-btn ${master?.mode === "image_planning" ? "primary" : "ghost"}`}
+            data-testid="timeline-mode-image-planning"
             title={t("timeline:imagePlanningTitle")}
             aria-label={t("timeline:imagePlanningTitle")}
-            onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "image_planning").then(afterMutation)}
+            onClick={() => void runSceneAction(() => api.directorTimelineSetMode(project.id, selected.id, "image_planning"))}
           >
             {t("timeline:imagePlanning")}
           </button>
           <button
             type="button"
             className={`timeline-v2__header-btn ${master?.mode === "video_finishing" ? "primary" : "ghost"}`}
+            data-testid="timeline-mode-video-finishing"
             title={t("timeline:videoFinishingTitle")}
             aria-label={t("timeline:videoFinishingTitle")}
-            onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "video_finishing").then(afterMutation)}
+            onClick={() => void runSceneAction(() => api.directorTimelineSetMode(project.id, selected.id, "video_finishing"))}
           >
             {t("timeline:videoFinishing")}
           </button>
@@ -868,31 +1055,39 @@ export function TimelineEditorShell({
             aria-label={t("timeline:preflightTitle")}
             data-testid="timeline-header-preflight"
             onClick={() =>
-              void api.directorTimelinePreflight(project.id, selected.id).then((result) => {
-                const blocking = result.findings.filter((f) =>
-                  ["error", "critical", "blocker"].includes(String(f.severity || "").toLowerCase()),
-                );
-                setPreflightBlockingCount(blocking.length);
-                const advisories = result.findings.filter((f) =>
-                  ["warning", "advisory", "info"].includes(String(f.severity || "").toLowerCase()),
-                );
-                const summaryParts: string[] = [];
-                if (blocking.length) {
-                  const codes = [...new Set(blocking.map((f) => f.code || f.severity).filter(Boolean))];
-                  summaryParts.push(`${blocking.length} blocking (${codes.join(", ")})`);
+              void (async () => {
+                try {
+                  const result = await api.directorTimelinePreflight(project.id, selected.id);
+                  const err = timelineActionError(result);
+                  if (err) setActionNotice(err);
+                  else setActionNotice(null);
+                  const blocking = result.findings.filter((f) =>
+                    ["error", "critical", "blocker"].includes(String(f.severity || "").toLowerCase()),
+                  );
+                  setPreflightBlockingCount(blocking.length);
+                  const advisories = result.findings.filter((f) =>
+                    ["warning", "advisory", "info"].includes(String(f.severity || "").toLowerCase()),
+                  );
+                  const summaryParts: string[] = [];
+                  if (blocking.length) {
+                    const codes = [...new Set(blocking.map((f) => f.code || f.severity).filter(Boolean))];
+                    summaryParts.push(`${blocking.length} blocking (${codes.join(", ")})`);
+                  }
+                  if (advisories.length) {
+                    summaryParts.push(`${advisories.length} advisory`);
+                  }
+                  setPreflightSummary(
+                    blocking.length
+                      ? `Blocked: ${summaryParts.join(" · ")}`
+                      : result.findings.length
+                        ? `Ready with ${summaryParts.join(" · ") || `${result.findings.length} finding(s)`}`
+                        : "Ready",
+                  );
+                  await afterMutation();
+                } catch (error) {
+                  setActionNotice(error instanceof Error ? error.message : "Preflight failed.");
                 }
-                if (advisories.length) {
-                  summaryParts.push(`${advisories.length} advisory`);
-                }
-                setPreflightSummary(
-                  blocking.length
-                    ? `Blocked: ${summaryParts.join(" · ")}`
-                    : result.findings.length
-                      ? `Ready with ${summaryParts.join(" · ") || `${result.findings.length} finding(s)`}`
-                      : "Ready",
-                );
-                void afterMutation();
-              })
+              })()
             }
           >
             {t("timeline:preflight")}
@@ -908,7 +1103,7 @@ export function TimelineEditorShell({
             aria-label={t("timeline:generateSceneTitle")}
             data-testid="timeline-header-generate"
             disabled={preflightBlockingCount > 0}
-            onClick={() => void api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }).then(afterMutation)}
+            onClick={() => void runSceneAction(() => api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }))}
           >
             {t("timeline:generateScene")}
           </button>
@@ -917,21 +1112,27 @@ export function TimelineEditorShell({
             className="timeline-v2__header-btn ghost"
             title={t("timeline:stopJobsTitle")}
             aria-label={t("timeline:stopJobsTitle")}
-            onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "stop_remaining_scene_jobs" }).then(afterMutation)}
+            onClick={() => void runSceneAction(() => api.directorTimelineCancel(project.id, selected.id, { action: "stop_remaining_scene_jobs" }))}
           >
             {t("timeline:stopJobs")}
           </button>
           <button
             type="button"
             className="timeline-v2__header-btn ghost"
+            data-testid="timeline-header-resume"
             title={t("timeline:resumeTitle")}
             aria-label={t("timeline:resumeTitle")}
-            onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }).then(afterMutation)}
+            onClick={() => void runSceneAction(() => api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }))}
           >
             {t("timeline:resume")}
           </button>
         </div>
       </header>
+      {actionNotice ? (
+        <p className="timeline-v2__action-notice" role="alert" data-testid="timeline-action-notice">
+          {actionNotice}
+        </p>
+      ) : null}
 
       <div className="timeline-v2__body">
         <main className="timeline-v2__workspace" data-testid="timeline-v2-workspace">
@@ -957,6 +1158,9 @@ export function TimelineEditorShell({
                   onDismissFailure={(jobId) =>
                     void api.directorTimelineDismissFailure(project.id, selected.id, jobId).then(afterMutation)
                   }
+                  onRetry={() =>
+                    void runSceneAction(() => api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }))
+                  }
                 />
               </div>
             }
@@ -981,6 +1185,7 @@ export function TimelineEditorShell({
                   }}
                   onOpenInpaint={() => setInpaintOpen(true)}
                   onOpenRetake={() => setRetakeOpen(true)}
+                  onActionError={setActionNotice}
                 />
                 <DirectorTracks
                   project={project}
@@ -992,6 +1197,7 @@ export function TimelineEditorShell({
                   reloadKey={reloadKey}
                   master={master}
                   shellMode
+                  shellTimeline={directorTimeline}
                 />
                 <TimelineInpaintWorkspace
                   open={inpaintOpen}
@@ -1038,6 +1244,16 @@ export function TimelineEditorShell({
           className={`timeline-v2__drawer timeline-v2__drawer--left${workspaceLayout.leftDrawerOpen ? " timeline-v2__drawer--open" : " timeline-v2__drawer--closed"}`}
         >
           <div className="timeline-v2__drawer-body">
+            {selected ? (
+              <VideoGeneratorDock
+                projectId={project.id}
+                scene={selected}
+                master={master}
+                timeline={directorTimeline}
+                onRefresh={afterMutation}
+                mutateTimeline={mutateTimeline}
+              />
+            ) : null}
             <div className="timeline-v2__dock timeline-v2__dock--scenes">
               <Timeline
                 project={project}
@@ -1058,7 +1274,27 @@ export function TimelineEditorShell({
                 onAddToTimeline={(asset) => void handleAddAssetToTimeline(asset)}
                 onAddAsReference={(asset) => void handleAddAssetAsReference(asset)}
                 allowUpload={false}
+                libraryAssetIds={directorTimeline?.library_asset_ids}
+                onOpenLibrary={() => setLibraryModalOpen(true)}
               />
+              {libraryModalOpen ? (
+                <AddFromProjectLibraryModal
+                  project={project}
+                  alreadyIds={directorTimeline?.library_asset_ids || []}
+                  onClose={() => setLibraryModalOpen(false)}
+                  onAdd={(ids) => {
+                    void mutateTimeline((timeline) => {
+                      const prev = timeline.library_asset_ids;
+                      const base = Array.isArray(prev) ? prev : [];
+                      const next = [...base];
+                      for (const id of ids) {
+                        if (!next.includes(id)) next.push(id);
+                      }
+                      return { ...timeline, library_asset_ids: next };
+                    });
+                  }}
+                />
+              ) : null}
             </div>
             <div className="timeline-v2__dock timeline-v2__dock--references">
               <ReferencesPane
@@ -1109,7 +1345,13 @@ export function TimelineEditorShell({
               data-testid="timeline-tab-inspector"
               title={t("timeline:showInspector")}
               aria-label={t("timeline:showInspector")}
-              onClick={() => {
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                lockPromptSelection();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                lockPromptSelection();
                 setRightTab("inspector");
                 openRightDrawer();
               }}
@@ -1157,6 +1399,8 @@ export function TimelineEditorShell({
                 focusFinding={focusFinding}
                 onRefresh={afterMutation}
                 mutateTimeline={mutateTimeline}
+                shellTimeline={directorTimeline}
+                onActionError={setActionNotice}
               />
             </div>
             <div
@@ -1202,9 +1446,13 @@ export function TimelineEditorShell({
           aria-controls="timeline-drawer-right"
           title={workspaceLayout.rightDrawerOpen ? t("timeline:closeRightDrawer") : t("timeline:openRightDrawer")}
           aria-label={workspaceLayout.rightDrawerOpen ? t("timeline:closeRightDrawer") : t("timeline:openRightDrawer")}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            lockPromptSelection();
+          }}
           onClick={(event) => {
             event.stopPropagation();
+            lockPromptSelection();
             toggleDrawer("right");
           }}
         >

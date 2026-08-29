@@ -93,6 +93,8 @@ def validate_against_capabilities(
         errors.append("Negative prompt is not supported by this generator (refusing silent drop).")
     if request.cameraMotion and not caps.supportsCameraControls:
         errors.append("Camera controls are not supported by this generator (refusing silent drop).")
+    if request.temperature is not None and not caps.supportsTemperature:
+        errors.append("Temperature is not supported by this generator (refusing silent drop).")
     if request.seed is not None and not caps.supportsSeed:
         errors.append("Seed is not supported by this generator (refusing silent drop).")
 

@@ -42,6 +42,13 @@ def _resolution_for_request(
     if caps.draftPathway == "cheap_preview" and (caps.draftResolution or caps.finalResolution):
         chosen = caps.draftResolution if draft_mode else caps.finalResolution
         return chosen or caps.finalResolution
+    if draft_mode and caps.draftResolution:
+        return caps.draftResolution
+    if caps.finalResolution:
+        return caps.finalResolution
+    listed = [str(item) for item in (caps.supportedResolutions or []) if item]
+    if listed:
+        return listed[0]
     quality = "draft" if draft_mode and caps.draftPathway != "none" else "final"
     width, height = production_pixels(aspect, quality)
     return f"{width}x{height}"
@@ -58,6 +65,9 @@ def build_timeline_generation_request(
     aspect_ratio: str | None = None,
     draft_mode: bool | None = None,
     temporal_packet: object | None = None,
+    director_timeline: object | None = None,
+    window_start: float = 0.0,
+    scene_prompt: str | None = None,
 ) -> TimelineGenerationRequest:
     registry = get_registry()
     generator_id = batch.generatorId
@@ -76,6 +86,13 @@ def build_timeline_generation_request(
         for p in (batch.promptSegments or [])
         if (str(p.productionPrompt or "").strip() or (p.text or "").strip())
     ]
+    # Scene Prompt (SQL scenes.prompt) is the per-scene global base.
+    # Dedupe only when the first timed text equals the scene base (strip).
+    scene_base = _resolve_scene_prompt(project_id, scene_id, scene_prompt)
+    if scene_base:
+        first_timed = prompt_parts[0] if prompt_parts else ""
+        if first_timed != scene_base:
+            prompt_parts.insert(0, scene_base)
     prompt = "\n".join(prompt_parts)
     negative = next((p.negativePrompt for p in batch.promptSegments if p.negativePrompt), None)
     temporal_compile: dict[str, Any] = {}
@@ -129,8 +146,15 @@ def build_timeline_generation_request(
             continue
         if ref.get("consumed") is False:
             continue
-        kind = str(ref.get("kind") or "").lower()
+        kind = _reference_media_kind(ref, project_id)
         if "video" in kind:
+            continue
+        if _is_audio_kind(kind):
+            continue
+        if "lineage" in kind:
+            continue
+        role = str(ref.get("role") or "").lower()
+        if role in ("start_image", "end_image"):
             continue
         ref_ids.append(str(ref["assetId"]))
 
@@ -144,6 +168,37 @@ def build_timeline_generation_request(
             vid = str(ref["assetId"]).strip()
             if vid and vid not in video_ids:
                 video_ids.append(vid)
+
+    if (
+        not start_image
+        and "minimax" in canonical
+        and caps.supportsImageToVideo
+    ):
+        for ref in batch.references or []:
+            if not isinstance(ref, dict):
+                continue
+            if str(ref.get("source") or "") != "pane":
+                continue
+            kind = _reference_media_kind(ref, project_id)
+            if _is_audio_kind(kind) or "video" in kind:
+                continue
+            aid = str(ref.get("assetId") or "").strip()
+            if aid:
+                start_image = aid
+                break
+
+    # PANE_SCENE_REFERENCE_BINDINGS: project-scoped + scene-scoped pane rows.
+    # Clip reference_binding_ids / batch.references stay. library_asset_ids is
+    # Timeline Library staging only — never generation input.
+    start_image, video_ref_id = _apply_pane_scene_bindings(
+        project_id,
+        scene_id,
+        caps,
+        start_image=start_image,
+        video_ref_id=video_ref_id,
+        ref_ids=ref_ids,
+        video_ids=video_ids,
+    )
 
     mode: GenerationMode = "text_to_video"
     gen_start = None
@@ -160,7 +215,7 @@ def build_timeline_generation_request(
         gen_start = None
         gen_end = None
     else:
-        mode = "text_to_video"
+        mode = "image_to_video" if caps.supportsImageToVideo else "text_to_video"
 
     last_frame = None
     tail_asset = None
@@ -203,6 +258,31 @@ def build_timeline_generation_request(
             f"{caps.label} may not honor {aspect}. Adept will not crop a different ratio and call it {aspect}."
         )
 
+    from ...cinematography import camera_nl_instruction, compile_canonical_camera
+
+    planned = float(getattr(getattr(batch, "duration", None), "plannedDuration", None) or 5.0)
+    camera = compile_canonical_camera(
+        batch=batch,
+        director_timeline=director_timeline,
+        window_start=window_start,
+        window_length=planned,
+    )
+    # NL-only generators (supportsCameraControls=False): compile camera into prompt.
+    # Never set a fake cameraMotion MiniMax/LTX would refuse.
+    if camera and not caps.supportsCameraControls:
+        camera_nl = camera_nl_instruction(camera)
+        if camera_nl and camera_nl not in prompt:
+            prompt = "\n".join(part for part in (prompt, camera_nl) if part)
+    camera_motion = None
+    if caps.supportsCameraControls and camera:
+        camera_motion = camera.get("motion") or camera.get("motionType") or camera.get("motionId")
+
+    requested_temp = 1.0
+    for seg in batch.promptSegments or []:
+        requested_temp = float(getattr(seg, "temperature", 1.0) or 1.0)
+        break
+    request_temperature = requested_temp if caps.supportsTemperature else None
+
     return TimelineGenerationRequest(
         projectId=project_id,
         sceneId=scene_id,
@@ -221,7 +301,9 @@ def build_timeline_generation_request(
         resolution=resolution,
         aspectRatio=aspect,
         seed=None,
-        cameraMotion=None,
+        cameraMotion=camera_motion,
+        camera=camera,
+        temperature=request_temperature,
         providerOptions={
             "lora": batch.lora,
             "planningStartImageAssetId": planning_start,
@@ -287,6 +369,195 @@ def build_timeline_generation_request(
         continuityStrategy=strategy,
         temporalContinuityPacketId=temporal_packet_id,
     )
+
+
+
+
+
+def _pane_binding_kind(binding: Any, asset_kind: str) -> str:
+    """Prefer Asset.kind, then binding.media_kind / reference_type."""
+    kind = (asset_kind or "").strip().lower()
+    if kind:
+        return kind
+    media = str(getattr(binding, "media_kind", None) or "").strip().lower()
+    if media:
+        return media
+    ref_type = str(getattr(binding, "reference_type", None) or "").strip().lower()
+    return ref_type
+
+
+def _load_scene_pane_bindings(project_id: str, scene_id: str) -> list[dict[str, Any]]:
+    """Scene-scoped pane bindings only. Chief lock: no project-scope ingest.
+
+    library_asset_ids is staging only and is never read.
+    """
+    if not (project_id or "").strip():
+        return []
+    try:
+        from ...db import Asset, SessionLocal
+        from ...scene_references.repository import list_pane_generation_bindings
+
+        db = SessionLocal()
+        try:
+            rows = list_pane_generation_bindings(db, project_id, (scene_id or "").strip() or None)
+            out: list[dict[str, Any]] = []
+            seen: set[str] = set()
+            for row in rows:
+                    if not getattr(row, "enabled", True):
+                        continue
+                    token = str(getattr(row, "id", "") or "").strip()
+                    if token and token in seen:
+                        continue
+                    asset_id = str(getattr(row, "asset_id", "") or "").strip()
+                    if not asset_id:
+                        continue
+                    asset = getattr(row, "asset", None)
+                    if asset is None:
+                        asset = db.get(Asset, asset_id)
+                        if (
+                            asset is not None
+                            and project_id
+                            and getattr(asset, "project_id", None)
+                            and str(asset.project_id) != str(project_id)
+                        ):
+                            asset = None
+                    asset_kind = str(getattr(asset, "kind", "") or "").lower() if asset is not None else ""
+                    kind = _pane_binding_kind(row, asset_kind)
+                    if token:
+                        seen.add(token)
+                    out.append(
+                        {
+                            "bindingId": token,
+                            "assetId": asset_id,
+                            "kind": kind,
+                            "referenceType": str(getattr(row, "reference_type", "") or ""),
+                            "mediaKind": str(getattr(row, "media_kind", "") or ""),
+                        }
+                    )
+            return out
+        finally:
+            db.close()
+    except Exception:
+        return []
+
+
+def _extra_image_ref_slots(caps: Any, *, start_filled: bool, ref_count: int) -> int:
+    """Slots left for pane images on referenceAssetIds. MiniMax T2V max=0."""
+    max_n = int(getattr(caps, "maximumReferenceImages", 0) or 0)
+    if max_n <= 0:
+        return 0
+    used = int(ref_count or 0)
+    if start_filled and not bool(getattr(caps, "supportsMultipleImageReferences", False)):
+        used += 1
+    return max(0, max_n - used)
+
+
+def _apply_pane_scene_bindings(
+    project_id: str,
+    scene_id: str,
+    caps: Any,
+    *,
+    start_image: str | None,
+    video_ref_id: str | None,
+    ref_ids: list[str],
+    video_ids: list[str],
+) -> tuple[str | None, str | None]:
+    """Fill empty start / video-ref / extra image slots from the Scene pane."""
+    seen: set[str] = set(ref_ids)
+    if start_image:
+        seen.add(str(start_image))
+    if video_ref_id:
+        seen.add(str(video_ref_id))
+    for binding in _load_scene_pane_bindings(project_id, scene_id):
+        aid = str(binding.get("assetId") or "").strip()
+        if not aid or aid in seen:
+            continue
+        kind = str(binding.get("kind") or "").lower()
+        if _is_audio_kind(kind):
+            continue
+        if "video" in kind or kind == "motion":
+            if bool(getattr(caps, "supportsVideoReferences", False)) and not video_ref_id:
+                video_ref_id = aid
+                if aid not in video_ids:
+                    video_ids.append(aid)
+                seen.add(aid)
+            continue
+        media = str(binding.get("mediaKind") or "").lower()
+        ref_type = str(binding.get("referenceType") or "").lower()
+        if media == "entity" or ref_type in ("character", "prop"):
+            continue
+        is_image = kind == "image" or "image" in kind or media == "image"
+        if not is_image:
+            continue
+        gen_id = str(getattr(caps, "id", "") or "").lower()
+        is_minimax_i2v = "minimax" in gen_id and bool(getattr(caps, "supportsImageToVideo", False))
+        is_minimax_t2v = "minimax" in gen_id and not bool(getattr(caps, "supportsImageToVideo", False))
+        if is_minimax_t2v:
+            continue
+        # Image slots: start (I2V) then extra referenceAssetIds when the adapter has them.
+        if bool(getattr(caps, "supportsImageToVideo", False)) and not start_image:
+            start_image = aid
+            seen.add(aid)
+            continue
+        if is_minimax_i2v:
+            continue
+        if _extra_image_ref_slots(caps, start_filled=bool(start_image), ref_count=len(ref_ids)) > 0:
+            ref_ids.append(aid)
+            seen.add(aid)
+    return start_image, video_ref_id
+
+
+def _resolve_scene_prompt(project_id: str, scene_id: str, explicit: str | None) -> str:
+    """Current SQL scenes.prompt. Explicit None reloads so PATCH/Inspector cannot miss."""
+    if explicit is not None:
+        return str(explicit).strip()
+    try:
+        from ...db import SessionLocal
+        from ..store import get_scene
+
+        db = SessionLocal()
+        try:
+            scene = get_scene(db, project_id, scene_id)
+            return str(getattr(scene, "prompt", "") or "").strip() if scene else ""
+        finally:
+            db.close()
+    except Exception:
+        return ""
+
+
+def _project_asset_kind(project_id: str, asset_id: str) -> str:
+    """Resolve project-scoped Asset.kind only. Never copy blobs."""
+    token = (asset_id or "").strip()
+    if not token:
+        return ""
+    try:
+        from ...db import Asset, SessionLocal
+
+        db = SessionLocal()
+        try:
+            row = db.get(Asset, token)
+            if row is None:
+                return ""
+            if project_id and getattr(row, "project_id", None) and str(row.project_id) != str(project_id):
+                return ""
+            return str(getattr(row, "kind", "") or "").lower()
+        finally:
+            db.close()
+    except Exception:
+        return ""
+
+
+def _reference_media_kind(ref: dict[str, Any], project_id: str) -> str:
+    kind = str(ref.get("kind") or ref.get("mediaKind") or ref.get("media_kind") or "").lower()
+    if kind:
+        return kind
+    aid = str(ref.get("assetId") or "").strip()
+    return _project_asset_kind(project_id, aid) if aid else ""
+
+
+def _is_audio_kind(kind: str) -> bool:
+    token = (kind or "").lower()
+    return token == "audio" or "audio" in token
 
 
 def _is_alias_only(text: str) -> bool:

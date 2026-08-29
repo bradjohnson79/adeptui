@@ -11,6 +11,7 @@ import { buildAiGuidedSetupPath } from "../../setup/navigation";
 import { StatusBadge } from "../ui";
 import { InstallStatusChip } from "../install/InstallStatusChip";
 import type { ProductionDockApi } from "./useProductionDock";
+import { modelsForModality } from "../../modelRegistry/filterByModality";
 
 function setupComponentIdForModel(modelId: string): string | null {
   if (modelId === "hunyuan-video-15" || (modelId.includes("hunyuan") && modelId.includes("15"))) {
@@ -307,10 +308,13 @@ export function ModelMenuDrawer({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const sections = dock.sections[modality];
-  const localModels = sections?.local ?? (dock.models[modality] ?? []).filter((m) => m.locality === "local");
+  const localModels = modelsForModality(
+    sections?.local ?? (dock.models[modality] ?? []).filter((m) => m.locality === "local"),
+    modality,
+  );
   const nativeModels = localModels.filter((m) => (m.executionClass || "native_local") === "native_local");
   const dockerModels = localModels.filter((m) => m.executionClass === "docker_local");
-  const apiModels = sections?.api ?? [];
+  const apiModels = modelsForModality(sections?.api ?? [], modality);
   const apiMeta = sections?.apiMeta ?? dock.apiMeta[modality];
   const resolved = dock.resolved[modality] ?? dock.status?.modalities?.[modality] ?? null;
   const activeId = resolved?.activeModelId ?? null;

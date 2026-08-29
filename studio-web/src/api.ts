@@ -3847,6 +3847,11 @@ export const api = {
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/activate-take`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId }) },
     ),
+  directorTimelineApproveBatch: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/approve`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ candidateId }) },
+    ),
   directorTimelineRejectTake: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
     req<Record<string, unknown>>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/reject`,

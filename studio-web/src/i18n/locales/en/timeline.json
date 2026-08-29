@@ -27,8 +27,8 @@
   "resetLayoutTitle": "Reset pane widths and Viewer size. Does not change Timeline content.",
   "focusTimeline": "Focus Timeline",
   "focusTimelineTitle": "Hide both drawers so Preview and Timeline fill the workspace. This is not Full Screen.",
-  "openLeftDrawer": "Open Library & References",
-  "closeLeftDrawer": "Close Library & References",
+  "openLeftDrawer": "Open Video Generator, Scenes, and Library",
+  "closeLeftDrawer": "Close Video Generator, Scenes, and Library",
   "openRightDrawer": "Open Inspector & Co-Director",
   "closeRightDrawer": "Close Inspector & Co-Director",
   "generateScene": "Generate Scene",
@@ -36,8 +36,8 @@
   "generateSceneBlocked": "Blocked: {{count}} blocking preflight finding(s). Run Preflight to see details.",
   "stopJobs": "Stop Jobs",
   "stopJobsTitle": "Stop remaining Scene generation jobs",
-  "resume": "Resume",
-  "resumeTitle": "Resume incomplete Scene generation jobs",
+  "resume": "Resume incomplete",
+  "resumeTitle": "Re-queue cancelled or failed Scene batches. This does not resume a stopped render.",
   "imagePlanning": "Image Planning",
   "imagePlanningTitle": "Set Scene mode to Image Planning",
   "videoFinishing": "Video Finishing",
@@ -104,5 +104,7 @@
   "cameraAcceptsAtStar": "Camera uses @ characters and * video motion references.",
   "emptyCamera": "Add a Camera clip when the shot needs movement or a motion reference.",
   "addCameraTitle": "Add a Camera clip",
-  "libraryPreviewHint": "Click to show in the Preview Monitor. Double-click for Quick Preview."
+  "libraryPreviewHint": "Click to show in the Preview Monitor. Double-click for Quick Preview.",
+  "addFromProjectLibrary": "Add from Project Library",
+  "libraryAdd": "Add"
 }

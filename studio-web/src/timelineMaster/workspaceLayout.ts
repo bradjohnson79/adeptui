@@ -1,5 +1,7 @@
 /** Timeline workspace layout prefs — local only, not project media. */
 
+import { clampTimelineZoom } from "./timelineZoom";
+
 export const TIMELINE_WORKSPACE_KEY = "adept_timeline_workspace_layout_v1";
 export const TIMELINE_LAYOUT_EVENT = "adept-timeline-layout";
 
@@ -130,7 +132,7 @@ function normalizeSnapshot(
     trackDensity: snapshot.trackDensity || "compact",
     zoom:
       typeof snapshot.zoom === "number" && Number.isFinite(snapshot.zoom)
-        ? clamp(snapshot.zoom, 0.5, 3)
+        ? clampTimelineZoom(snapshot.zoom)
         : 1,
   };
 }
@@ -144,7 +146,7 @@ function normalizeWorkspaceLayout(parsed: Partial<TimelineWorkspaceLayout>): Tim
         ? parsed.monitorHeightPx
         : getPresetViewerRatio(preset, currentViewportWidth());
   const zoom =
-    typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom) ? clamp(parsed.zoom, 0.5, 3) : 1;
+    typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom) ? clampTimelineZoom(parsed.zoom) : 1;
 
   return {
     ...DEFAULT_TIMELINE_WORKSPACE,
@@ -217,7 +219,7 @@ export function createTimelineViewerSnapshot(
     viewerPreset: layout.viewerPreset,
     viewerHeight: layout.viewerHeight,
     trackDensity: layout.trackDensity,
-    zoom: clamp(layout.zoom, 0.5, 3),
+    zoom: clampTimelineZoom(layout.zoom),
   };
 }
 

@@ -4,7 +4,8 @@ import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
-import { generatorOptionsFromPayload, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
+import { resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
+import { useTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import { HelpTip } from "../HelpTip";
 import {
@@ -16,7 +17,10 @@ import {
   type TimelineClip,
 } from "../DirectorTracks";
 import { TimelineSettingsDrawer } from "./TimelineSettingsDrawer";
+import { bindInspectingPrompt } from "./timelineMutateBridge";
 import { registerTimelineCommand } from "../../timelineMaster/timelineHotkeys";
+import { sliderToZoom, stepTimelineZoom, zoomToSlider } from "../../timelineMaster/timelineZoom";
+import { timelineActionError } from "../../timelineMaster/timelineErrors";
 
 function nid() {
   return Math.random().toString(36).slice(2, 10);
@@ -116,6 +120,7 @@ export function TimelineToolbar({
   onGuidancePriorityChange,
   onOpenInpaint,
   onOpenRetake,
+  onActionError,
 }: {
   projectId: string;
   scene: Scene;
@@ -130,25 +135,13 @@ export function TimelineToolbar({
   onGuidancePriorityChange: (value: DirectorTimeline["guidance_priority"]) => void;
   onOpenInpaint: () => void;
   onOpenRetake?: () => void;
+  onActionError?: (message: string) => void;
 }) {
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
   const { t } = useTranslation("timeline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [generatorOptions, setGeneratorOptions] = useState(() => [] as ReturnType<typeof generatorOptionsFromPayload>);
-
-  useEffect(() => {
-    let alive = true;
-    void api.directorTimelineGenerators().then((payload) => {
-      if (!alive) return;
-      setGeneratorOptions(generatorOptionsFromPayload(payload));
-    }).catch(() => {
-      if (alive) setGeneratorOptions([]);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const generatorOptions = useTimelineVideoGenerators();
 
   const selectedBatch = useMemo(
     () => (selection.kind === "batch" ? master?.batchBlocks.find((b) => b.id === selection.id) : null),
@@ -165,32 +158,65 @@ export function TimelineToolbar({
   const generating = (master?.batchBlocks || []).some((b) => b.status === "Generating");
   const canStop = generating && (selectedGen?.supportsQueuedCancel || selectedGen?.supportsRunningCancel);
 
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
     try {
-      await fn();
+      const result = await fn();
+      const err = timelineActionError(result);
+      if (err) {
+        onActionError?.(err);
+        return;
+      }
       await onRefresh();
+    } catch (error) {
+      onActionError?.(error instanceof Error ? error.message : "That Timeline action failed.");
     } finally {
       setBusy(false);
     }
   };
 
   const addPrompt = async () => {
+    let createdId = "";
     await mutateTimeline((timeline) => {
       const segments = timeline.prompt_segments || [];
+      const duration = Number(timeline.duration_sec || scene.duration_sec || 5);
       const last = segments[segments.length - 1];
-      const start = last ? Math.min(scene.duration_sec - 0.5, last.start + last.length) : 0;
+      let start = last ? last.start + last.length : 0;
+      let length = Math.min(2, Math.max(0.25, duration));
+      // Keep midpoint inside the scene so PUT->reconcile does not drop the clip.
+      if (start + length / 2 >= duration - 1e-6) {
+        if (start < duration - 0.15) {
+          length = Math.max(0.25, duration - start);
+        } else {
+          start = Math.max(0, duration - length);
+          const taken = new Set(segments.map((s) => Number(s.start).toFixed(2)));
+          let nudge = 0;
+          while (taken.has(Number(start).toFixed(2)) && start > 0 && nudge < 8) {
+            start = Math.max(0, Math.round((start - 0.5) * 100) / 100);
+            nudge += 1;
+          }
+          if (start + length / 2 >= duration - 1e-6) {
+            length = Math.max(0.25, duration - start);
+          }
+        }
+      }
       const segment: PromptSegment = {
         id: nid(),
         start: Math.max(0, start),
-        length: Math.min(2, scene.duration_sec || 5),
+        length,
         text: "",
         weight: 1,
+        temperature: 1.0,
         region: null,
         reference_binding_ids: [],
       };
+      createdId = segment.id;
       return { ...timeline, prompt_segments: [...segments, segment] };
-    });
+    }, { refresh: false });
+    if (createdId) {
+      bindInspectingPrompt(createdId);
+      setSelection({ kind: "promptSeg", id: createdId });
+    }
   };
 
   const removePrompt = async () => {
@@ -254,7 +280,7 @@ export function TimelineToolbar({
 
   const addBatch = async () => {
     await run(async () => {
-      await api.directorTimelineAddBatch(projectId, scene.id, { plannedDuration: scene.duration_sec });
+      return api.directorTimelineAddBatch(projectId, scene.id, { plannedDuration: scene.duration_sec });
     });
   };
 
@@ -271,10 +297,11 @@ export function TimelineToolbar({
       if (!ok) return;
     }
     await run(async () => {
-      await api.directorTimelineDeleteBatch(projectId, scene.id, target.id);
+      const result = await api.directorTimelineDeleteBatch(projectId, scene.id, target.id);
       if (selection.kind === "batch" && selection.id === target.id) {
         setSelection({ kind: "scene", id: scene.id });
       }
+      return result;
     });
   };
 
@@ -373,14 +400,14 @@ export function TimelineToolbar({
   const toggleMode = async () => {
     const next = master?.mode === "video_finishing" ? "image_planning" : "video_finishing";
     await run(async () => {
-      await api.directorTimelineSetMode(projectId, scene.id, next);
+      return api.directorTimelineSetMode(projectId, scene.id, next);
     });
   };
 
   const setMode = async (next: "image_planning" | "video_finishing") => {
     if (master?.mode === next) return;
     await run(async () => {
-      await api.directorTimelineSetMode(projectId, scene.id, next);
+      return api.directorTimelineSetMode(projectId, scene.id, next);
     });
   };
 
@@ -388,8 +415,12 @@ export function TimelineToolbar({
     setBusy(true);
     try {
       const result = await api.directorTimelinePreflight(projectId, scene.id);
+      const err = timelineActionError(result);
+      if (err) onActionError?.(err);
       onPreflight(result);
       await onRefresh();
+    } catch (error) {
+      onActionError?.(error instanceof Error ? error.message : "Preflight failed.");
     } finally {
       setBusy(false);
     }
@@ -398,10 +429,9 @@ export function TimelineToolbar({
   const generateScene = async (scope: "full" | "selected") => {
     await run(async () => {
       if (scope === "selected" && selection.kind === "batch" && selection.id) {
-        await api.directorTimelineGenerateBatch(projectId, scene.id, selection.id);
-        return;
+        return api.directorTimelineGenerateBatch(projectId, scene.id, selection.id);
       }
-      await api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
+      return api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
     });
   };
 
@@ -412,8 +442,8 @@ export function TimelineToolbar({
       registerTimelineCommand("retake", () => onOpenRetake?.()),
       registerTimelineCommand("imagePlanning", () => void setMode("image_planning")),
       registerTimelineCommand("videoFinishing", () => void setMode("video_finishing")),
-      registerTimelineCommand("zoomIn", () => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))),
-      registerTimelineCommand("zoomOut", () => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))),
+      registerTimelineCommand("zoomIn", () => setZoom(stepTimelineZoom(zoom, 1))),
+      registerTimelineCommand("zoomOut", () => setZoom(stepTimelineZoom(zoom, -1))),
       registerTimelineCommand("toggleSnap", () => setSnap(!snap)),
       registerTimelineCommand("addPrompt", () => void addPrompt()),
       registerTimelineCommand("addLipSync", () => void addLipSyncTrack()),
@@ -496,6 +526,7 @@ export function TimelineToolbar({
 
   const generateButtons = (
     <>
+      <span className="help-tip-pair">
       <button
         type="button"
         title="Run Co-Director Preflight inspection for this Scene"
@@ -503,8 +534,10 @@ export function TimelineToolbar({
         data-testid="timeline-toolbar-preflight"
         onClick={() => void preflight()}
       >
-        Preflight <Help id="preflight" />
+        Preflight
       </button>
+        <Help id="preflight" />
+      </span>
       <button
         type="button"
         className="primary"
@@ -546,7 +579,7 @@ export function TimelineToolbar({
           aria-label="Stop the current local generation"
           onClick={() =>
             void run(async () => {
-              await api.directorTimelineCancel(projectId, scene.id, { action: "cancel_active_local_job" });
+              return api.directorTimelineCancel(projectId, scene.id, { action: "cancel_active_local_job" });
             })
           }
         >
@@ -609,7 +642,7 @@ export function TimelineToolbar({
         title={`Zoom out (current ${zoom.toFixed(2)}×)`}
         aria-label={`Zoom out timeline (current ${zoom.toFixed(2)} times)`}
         data-testid="timeline-toolbar-zoom-out"
-        onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}
+        onClick={() => setZoom(stepTimelineZoom(zoom, -1))}
       >
         −Z
       </button>
@@ -618,7 +651,7 @@ export function TimelineToolbar({
         title={`Zoom in (current ${zoom.toFixed(2)}×)`}
         aria-label={`Zoom in timeline (current ${zoom.toFixed(2)} times)`}
         data-testid="timeline-toolbar-zoom-in"
-        onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}
+        onClick={() => setZoom(stepTimelineZoom(zoom, 1))}
       >
         +Z
       </button>
@@ -629,13 +662,13 @@ export function TimelineToolbar({
         <span className="sr-only">Timeline zoom</span>
         <input
           type="range"
-          min={0.5}
-          max={3}
-          step={0.05}
-          value={zoom}
+          min={0}
+          max={1}
+          step={0.001}
+          value={zoomToSlider(zoom)}
           data-testid="timeline-toolbar-zoom-slider"
           aria-label="Timeline zoom"
-          onChange={(e) => setZoom(Number(e.target.value) || 1)}
+          onChange={(e) => setZoom(sliderToZoom(Number(e.target.value)))}
         />
       </label>
       <button
@@ -643,6 +676,7 @@ export function TimelineToolbar({
         className={snap ? "primary" : ""}
         title={snap ? "Disable clip snapping" : "Enable clip snapping"}
         aria-label={snap ? "Disable clip snapping" : "Enable clip snapping"}
+        data-testid="timeline-toolbar-snap"
         onClick={() => setSnap(!snap)}
       >
         Snap

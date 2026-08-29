@@ -20,6 +20,10 @@ export function useDraftField(
 
   useEffect(() => {
     // Reset draft when selection/identity changes
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     focusedRef.current = false;
     setValue(externalValue);
     latestRef.current = externalValue;
@@ -27,6 +31,10 @@ export function useDraftField(
 
   useEffect(() => {
     if (focusedRef.current) return;
+    if (timerRef.current != null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setValue(externalValue);
     latestRef.current = externalValue;
   }, [externalValue]);
@@ -44,7 +52,7 @@ export function useDraftField(
       timerRef.current = null;
     }
     const next = latestRef.current;
-    void persistRef.current(next);
+    return persistRef.current(next);
   };
 
   const onChange = (next: string) => {
@@ -52,6 +60,10 @@ export function useDraftField(
     latestRef.current = next;
     setValue(next);
     if (timerRef.current != null) window.clearTimeout(timerRef.current);
+    if (idleMs <= 0) {
+      void persistRef.current(latestRef.current);
+      return;
+    }
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       void persistRef.current(latestRef.current);

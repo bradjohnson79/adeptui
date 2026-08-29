@@ -134,6 +134,7 @@ export function TimelineMasterPanel({
 
       <div className="timeline-master-panel__toolbar" data-testid="timeline-master-scene-actions">
         <span className="scene-meta">Scene Actions</span>
+        <span className="help-tip-pair">
         <button
           type="button"
           disabled={busy || !(selection?.kind === "batch" && selection.id)}
@@ -161,8 +162,11 @@ export function TimelineMasterPanel({
             })
           }
         >
-          Generate Current <HelpBtn id="generate_current" />
+          Generate Current
         </button>
+          <HelpBtn id="generate_current" />
+        </span>
+        <span className="help-tip-pair">
         <button
           type="button"
           disabled={busy || !(selection?.kind === "batch" && selection.id)}
@@ -193,8 +197,11 @@ export function TimelineMasterPanel({
             })
           }
         >
-          Generate Selected <HelpBtn id="generate_selected" />
+          Generate Selected
         </button>
+          <HelpBtn id="generate_selected" />
+        </span>
+        <span className="help-tip-pair">
         <button
           type="button"
           className="primary"
@@ -214,8 +221,11 @@ export function TimelineMasterPanel({
             })
           }
         >
-          Generate Full Scene <HelpBtn id="generate_full_scene" />
+          Generate Full Scene
         </button>
+          <HelpBtn id="generate_full_scene" />
+        </span>
+        <span className="help-tip-pair">
         <button
           type="button"
           data-testid="timeline-master-stop-remaining"
@@ -230,8 +240,11 @@ export function TimelineMasterPanel({
             })
           }
         >
-          Stop Remaining Jobs <HelpBtn id="stop_remaining" />
+          Stop Remaining Jobs
         </button>
+          <HelpBtn id="stop_remaining" />
+        </span>
+        <span className="help-tip-pair">
         <button
           type="button"
           data-testid="timeline-master-resume-incomplete"
@@ -246,8 +259,10 @@ export function TimelineMasterPanel({
             })
           }
         >
-          Resume Incomplete Jobs <HelpBtn id="resume_incomplete" />
+          Resume Incomplete Jobs
         </button>
+          <HelpBtn id="resume_incomplete" />
+        </span>
       </div>
 
       {message ? (
@@ -337,6 +352,7 @@ export function TimelineMasterPanel({
                     >
                       Generate
                     </button>
+                    <span className="help-tip-pair">
                     <button
                       type="button"
                       disabled={busy}
@@ -349,8 +365,10 @@ export function TimelineMasterPanel({
                         })
                       }
                     >
-                      Edit Duration <HelpBtn id="edit_duration" />
+                      Edit Duration
                     </button>
+                      <HelpBtn id="edit_duration" />
+                    </span>
                     <button
                       type="button"
                       disabled={busy}
@@ -363,6 +381,7 @@ export function TimelineMasterPanel({
                     >
                       Duplicate
                     </button>
+                    <span className="help-tip-pair">
                     <button
                       type="button"
                       disabled={busy}
@@ -377,8 +396,10 @@ export function TimelineMasterPanel({
                         })
                       }
                     >
-                      Mark Repair Range <HelpBtn id="mark_repair_range" />
+                      Mark Repair Range
                     </button>
+                      <HelpBtn id="mark_repair_range" />
+                    </span>
                   </div>
                 </>
               ) : null}

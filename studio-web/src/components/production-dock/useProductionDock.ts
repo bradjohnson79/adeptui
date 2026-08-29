@@ -14,6 +14,7 @@ import type {
   UserGlobalPreferences,
 } from "../../modelRegistry/contracts";
 import { applyTheme, watchSystemTheme } from "../../theme/applyTheme";
+import { sectionsFromProductionControlModels } from "../../modelRegistry/filterByModality";
 
 type DockState = {
   status: ProductionControlStatus | null;
@@ -116,21 +117,16 @@ export function useProductionDock() {
           modalities.map(async (modality) => {
             try {
               const list = await api.productionControlModels(modality);
-              const local = list.sections?.local ?? (list.models ?? []).filter((m) => m.locality === "local");
-              const apiModels = list.sections?.api ?? [];
-              const apiMeta: ApiModelsSectionMeta = {
+              const sections = sectionsFromProductionControlModels(list, modality);
+              const apiMeta: ApiModelsSectionMeta = sections.apiMeta ?? {
                 activeProviderId: list.api?.activeProviderId,
                 emptyReason: list.api?.emptyReason,
                 emptyMessage: list.api?.emptyMessage,
                 summary: list.api?.summary,
                 updatedAt: list.api?.updatedAt,
               };
-              const sections: ModalityModelSections = {
-                local,
-                api: apiModels,
-                apiMeta,
-              };
-              return [modality, list.models ?? list, sections, apiMeta] as const;
+              if (!sections.apiMeta) sections.apiMeta = apiMeta;
+              return [modality, [...sections.local, ...sections.api], sections, apiMeta] as const;
             } catch {
               return [
                 modality,

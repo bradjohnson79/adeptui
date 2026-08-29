@@ -1,0 +1,177 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "ltx-2.3-22b-distilled-fp8.safetensors"
+    }
+  },
+  "1b": {
+    "class_type": "LTXAVTextEncoderLoader",
+    "inputs": {
+      "text_encoder": "gemma_3_12B_it_fp4_mixed.safetensors",
+      "ckpt_name": "ltx-2.3-22b-distilled-fp8.safetensors",
+      "device": "default"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "UNCHANGED FACTS: environment, cameras, ERS\nSTARTING STATE (M2): beat Talking in Corridor\nENDING STATE (M3): beat Inside Combat Chamber\nSpecial Agent Jacob Barnes stands in the Observatory Control Room. Cool instrument light, slow cinematic hold, quiet tension, photoreal, 16:9.\nCamera: Close Up, 35mm, dolly in on dolly, lighting: Dramatic, focus on @SpecialAgentJacobBarnes",
+      "clip": [
+        "1b",
+        0
+      ]
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "blurry, low quality, watermark",
+      "clip": [
+        "1b",
+        0
+      ]
+    }
+  },
+  "3b": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "2",
+        0
+      ],
+      "negative": [
+        "3",
+        0
+      ],
+      "frame_rate": 24.0
+    }
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "studio/imagegen_edit_97271e7a.png"
+    }
+  },
+  "5": {
+    "class_type": "LTXVImgToVideo",
+    "inputs": {
+      "positive": [
+        "3b",
+        0
+      ],
+      "negative": [
+        "3b",
+        1
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "image": [
+        "4",
+        0
+      ],
+      "width": 1280,
+      "height": 704,
+      "length": 113,
+      "batch_size": 1,
+      "strength": 0.95
+    }
+  },
+  "6": {
+    "class_type": "RandomNoise",
+    "inputs": {
+      "noise_seed": 42
+    }
+  },
+  "7": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "8": {
+    "class_type": "BasicScheduler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "scheduler": "normal",
+      "steps": 10,
+      "denoise": 1.0
+    }
+  },
+  "9": {
+    "class_type": "CFGGuider",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "5",
+        0
+      ],
+      "negative": [
+        "5",
+        1
+      ],
+      "cfg": 1.0
+    }
+  },
+  "10": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": [
+        "6",
+        0
+      ],
+      "guider": [
+        "9",
+        0
+      ],
+      "sampler": [
+        "7",
+        0
+      ],
+      "sigmas": [
+        "8",
+        0
+      ],
+      "latent_image": [
+        "5",
+        2
+      ]
+    }
+  },
+  "11": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "10",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    }
+  },
+  "12": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "frame_rate": 24.0,
+      "loop_count": 0,
+      "filename_prefix": "studio/0ffe56e2_0/batch_bb_0b021",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

@@ -21,7 +21,18 @@ GENERATOR_ID = "minimax-h3-t2v-local"
 ALIASES = frozenset({"minimax-h3-t2v-local", "minimax-h3-local", "minimax-h3"})
 
 
+def route_a_executable() -> bool:
+    """Route A :8192 readiness — never claim MiniMax is ready from a hardcoded True."""
+    try:
+        from ....minimax_h3.route_a_adapter import RouteARuntimeAdapter
+
+        return bool(RouteARuntimeAdapter().readiness().get("ready"))
+    except Exception:
+        return False
+
+
 def _capabilities() -> VideoGeneratorCapabilities:
+    ready = route_a_executable()
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
         label="MiniMax H3 Text-to-Video (Local)",
@@ -41,13 +52,18 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportedAspectRatios=["≈16:9"],
         supportsSeed=True,
         supportsNegativePrompt=False,
+        supportsTemperature=False,
         supportsCameraControls=False,
-        executable=True,
+        executable=ready,
         notes=(
-            "Experimental Private Profile — text-to-video with native audio. "
-            "Image-to-video is not supported; batch start images remain Timeline planning anchors. "
-            "Continuity uses prompt_context only — never native video extend or last-frame I2V. "
-            "Draft Mode is unavailable — this profile only generates at 480x256."
+            "MiniMax H3 isolated Route A is not ready."
+            if not ready
+            else (
+                "Experimental Private Profile — text-to-video with native audio. "
+                "Image-to-video is not supported; batch start images remain Timeline planning anchors. "
+                "Continuity uses prompt_context only — never native video extend or last-frame I2V. "
+                "Draft Mode is unavailable — this profile only generates at 480x256."
+            )
         ),
         draftPathway="none",
         supportsQueuedCancel=True,
@@ -58,6 +74,30 @@ def _capabilities() -> VideoGeneratorCapabilities:
         supportsImageAndVideoTogether=False,
     )
 
+
+
+
+def apply_minimax_camera_nl(request: TimelineGenerationRequest) -> str:
+    """Append compiled camera NL. Never invent MiniMax cameraMotion/temperature keys."""
+    prompt = request.prompt or ""
+    camera = getattr(request, "camera", None)
+    if camera:
+        from ....cinematography import camera_nl_instruction
+
+        nl = camera_nl_instruction(camera)
+        if nl and nl not in prompt:
+            prompt = "\n".join(part for part in (prompt, nl) if part)
+    return prompt
+
+
+def minimax_built_payload(request: TimelineGenerationRequest) -> dict:
+    """MiniMax-facing payload used by tests and submit. Unsupported keys omitted."""
+    return {
+        "projectId": request.projectId,
+        "prompt": apply_minimax_camera_nl(request),
+        "durationSec": float(request.duration or 5.0),
+        "mode": "text-to-video" if request.generationMode == "text_to_video" else "one-frame",
+    }
 
 class MiniMaxH3LocalAdapter:
     id = GENERATOR_ID
@@ -90,7 +130,7 @@ class MiniMaxH3LocalAdapter:
             notes.append(f"continuityLastFrameAssetId={request.lastFrameAssetId}")
             notes.append("Continue the same scene, characters, wardrobe, lighting, and location from the previous shot.")
 
-        prompt = request.prompt
+        prompt = apply_minimax_camera_nl(request)
         if strategy == "prompt_context" and request.lastFrameAssetId:
             prompt = (
                 "Continue this scene from the previous shot. Keep the same characters, wardrobe, "

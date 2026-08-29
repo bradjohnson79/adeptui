@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { Asset, Project, Scene } from "../types";
-import { api } from "../api";
+import { api, type DirectorTimelineCameraCatalog } from "../api";
 import { LipSyncTracksPanel } from "./LipSyncTracks";
 import { PanelHeading, HelpTip } from "./HelpTip";
 import { useDirectorSelectionOptional } from "./DirectorSelectionContext";
@@ -19,7 +19,16 @@ import {
   formatTimelineTime,
 } from "./timeline-master/TimelineSettingsDrawer";
 import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
+import { buildMagneticSnapTargets, magneticSnapTime } from "../timelineMaster/magneticSnap";
+import { stepTimelineZoom, sliderToZoom, zoomToSlider } from "../timelineMaster/timelineZoom";
 import { TimelineTrackLabel } from "./timeline-master/TimelineTrackLabel";
+import { TimedPromptEditorModal } from "./timeline-master/TimedPromptEditorModal";
+import { resolveGeneratorOption } from "../timelineMaster/draftCapabilities";
+import { useTimelineVideoGenerators } from "../timelineMaster/useTimelineVideoGenerators";
+import { CameraSettingsModal } from "./timeline-master/CameraSettingsModal";
+import { bindInspectingPrompt, bindShellTimelineSnapshot, getBoundShellTimeline, getBoundShellTimelineMutate, getInspectingPrompt, isPromptSelectionLocked, subscribeShellTimelineSnapshot } from "./timeline-master/timelineMutateBridge";
+import { effectiveTrackFlags, toggleTrackFlag, type TrackControl } from "../timelineMaster/trackFlags";
+import { formatCameraClipLabel } from "../cinematography";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
 import { formatBatchStatus } from "../timelineMaster/contracts";
 import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
@@ -77,6 +86,8 @@ export type PromptSegment = {
   dialogue?: string | null;
   movement_segment_ref?: { id: string; segmentNumber: number; alias: string } | null;
   movement_segment_revision?: number | null;
+  /** New field. Do not rename weight to temperature and do not copy historical weight. */
+  temperature?: number;
 };
 export type CameraClip = {
   id: string;
@@ -101,6 +112,11 @@ export type CameraClip = {
   preset_id?: string | null;
   text?: string;
   reference_binding_ids?: string[];
+  shot_id?: string | null;
+  lens_id?: string | null;
+  focus_id?: string | null;
+  focus_name?: string | null;
+  lighting_id?: string | null;
 };
 export type LipSyncClip = {
   id: string;
@@ -147,6 +163,10 @@ export type DirectorTimeline = {
   /** How visual / prompt / camera guidance is weighted at compile time. */
   guidance_priority?: TimelineWorkspaceLayout["guidancePriority"];
   prompt_refs_migrated?: boolean;
+  /** Curated Timeline Library asset ids. null/undefined = uncurated (all media). */
+  library_asset_ids?: string[] | null;
+  /** Per-track hide / lock / mute / solo. Survives reload via PUT director. */
+  track_flags?: import("../timelineMaster/trackFlags").TrackFlagMap;
 };
 
 function nid() {
@@ -161,9 +181,38 @@ function pct(start: number, length: number, duration: number) {
   };
 }
 
-function snapTime(t: number, snap: boolean, step = 0.25) {
-  if (!snap) return Math.max(0, t);
-  return Math.max(0, Math.round(t / step) * step);
+function placeTime(t: number, snap: boolean, targets: ReturnType<typeof buildMagneticSnapTargets>, pxPerSec: number) {
+  return magneticSnapTime(t, targets, pxPerSec, snap).time;
+}
+
+function cameraMotionLabel(clip: CameraClip, catalog: DirectorTimelineCameraCatalog | null) {
+  if (catalog) {
+    const key = (clip.motion_id || clip.motion_type || "").trim().toLowerCase().replace(/-/g, "_");
+    const entry =
+      catalog.motions.find((item) => item.id === key) ||
+      catalog.motions.find((item) =>
+        item.aliases.some((alias) => alias.trim().toLowerCase().replace(/-/g, "_") === key),
+      );
+    if (entry) return entry.label;
+  }
+  if ((clip.custom_motion_label || "").trim()) return String(clip.custom_motion_label);
+  return (clip.motion_type || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function cameraClipDisplayLabel(clip: CameraClip, catalog: DirectorTimelineCameraCatalog | null) {
+  return (
+    formatCameraClipLabel({
+      shotId: clip.shot_id,
+      lensId: clip.lens_id,
+      focusId: clip.focus_id,
+      focusName: clip.focus_name,
+      motionLabel: cameraMotionLabel(clip, catalog),
+    }) ||
+    clip.label ||
+    "Camera"
+  );
 }
 
 export function createLipSyncTrack(slot: number): LipSyncTrack {
@@ -266,6 +315,8 @@ function TrackHeader({
   controls = ["eye", "lock"],
   actionLabel,
   onAction,
+  controlState,
+  onControlToggle,
 }: {
   label: string;
   labelKey?: string;
@@ -274,6 +325,8 @@ function TrackHeader({
   controls?: Array<"eye" | "lock" | "mute" | "solo">;
   actionLabel?: string;
   onAction?: () => void;
+  controlState?: Partial<Record<TrackControl, boolean>>;
+  onControlToggle?: (control: TrackControl) => void;
 }) {
   if (shellMode) {
     return (
@@ -282,6 +335,8 @@ function TrackHeader({
         labelKey={labelKey}
         testId={testId}
         controls={controls}
+        controlState={controlState}
+        onControlToggle={onControlToggle}
         onAction={onAction}
       />
     );
@@ -330,6 +385,7 @@ export function DirectorTracks({
   reloadKey = 0,
   master = null,
   shellMode = false,
+  shellTimeline = null,
 }: {
   project: Project;
   scene?: Scene;
@@ -343,6 +399,8 @@ export function DirectorTracks({
   reloadKey?: number;
   master?: SceneTimelineMaster | null;
   shellMode?: boolean;
+  /** Authoritative in-memory DirectorTimeline from TimelineEditorShell. */
+  shellTimeline?: DirectorTimeline | null;
 }) {
   const { t } = useTranslation("timeline");
   void t;
@@ -359,6 +417,7 @@ export function DirectorTracks({
   const [sendMsg, setSendMsg] = useState<string | null>(null);
   const [sendBusy, setSendBusy] = useState(false);
   const [bindings, setBindings] = useState<ReferenceBindingView[]>([]);
+  const [siblingBindings, setSiblingBindings] = useState<ReferenceBindingView[]>([]);
   const [tokenDraft, setTokenDraft] = useState<Record<string, string>>({});
   void tokenDraft;
   void setTokenDraft;
@@ -373,7 +432,12 @@ export function DirectorTracks({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [workspaceLayout, setWorkspaceLayout] = useState(() => loadTimelineWorkspaceLayout());
   const [rulerHoverSec, setRulerHoverSec] = useState<number | null>(null);
+  const [snapGuideSec, setSnapGuideSec] = useState<number | null>(null);
   const [undoSnapshot, setUndoSnapshot] = useState<DirectorTimeline | null>(null);
+  const [promptModalId, setPromptModalId] = useState<string | null>(null);
+  const [cameraModalId, setCameraModalId] = useState<string | null>(null);
+  const [cameraCatalog, setCameraCatalog] = useState<DirectorTimelineCameraCatalog | null>(null);
+  const generatorOptions = useTimelineVideoGenerators();
   const boardScrollRef = useRef<HTMLDivElement>(null);
   // Scroll-aware batch windowing (100+ batches): the render window tracks the
   // visible scroll range in addition to playhead/selection, so scrolling to a
@@ -459,12 +523,22 @@ export function DirectorTracks({
 
   useEffect(() => {
     let cancelled = false;
+    if (!scene?.id) {
+      setBindings([]);
+      setSiblingBindings([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+    const sceneId = scene.id;
     Promise.all([
-      api.sceneReferences.list(project.id, { scopeType: "project", scopeId: project.id }),
+      api.sceneReferences.list(project.id, { scopeType: "scene", scopeId: sceneId, sceneId }),
+      api.sceneReferences.list(project.id, { scopeType: "project", scopeId: project.id }).catch(() => ({ items: [] })),
       api.listCharacterProfiles(project.id).catch(() => ({ items: [] })),
     ])
-      .then(([res, characters]) => {
+      .then(([res, projectRes, characters]) => {
         if (cancelled) return;
+        setSiblingBindings((projectRes.items || []) as ReferenceBindingView[]);
         const items = ((res.items || []) as ReferenceBindingView[]).map((binding) => {
           const asset = project.assets.find((a) => a.id === binding.asset_id);
           return { ...binding, duration_sec: assetDurationSec(asset) };
@@ -492,12 +566,60 @@ export function DirectorTracks({
         setBindings([...items, ...extra]);
       })
       .catch(() => {
-        if (!cancelled) setBindings([]);
+        if (!cancelled) {
+          setBindings([]);
+          setSiblingBindings([]);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [project.assets, project.id, reloadKey]);
+  }, [project.assets, project.id, reloadKey, scene?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .directorTimelineCameraCatalog()
+      .then((result) => {
+        if (!alive) return;
+        setCameraCatalog(result);
+      })
+      .catch(() => {
+        if (alive) setCameraCatalog(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const applyTimeline = (source: DirectorTimeline) => {
+    const next = {
+      ...source,
+      image_clips: freeImageClips(source),
+      video_reference_clips: source.video_reference_clips || [],
+      image_reference_clips: source.image_reference_clips || [],
+      lipsync: { tracks: normalizeLipSyncTracks(source.lipsync?.tracks) },
+    } as DirectorTimeline;
+    setTl(next);
+    return next;
+  };
+
+  // Paint from the shell's in-memory timeline (addPrompt / mutateTimeline)
+  // without a GET remount that can clobber pending clips.
+  useEffect(() => {
+    if (!shellMode) return;
+    return subscribeShellTimelineSnapshot((snapshot) => {
+      if (!snapshot) return;
+      loadTokenRef.current += 1;
+      applyTimeline(snapshot);
+    });
+  }, [shellMode]);
+
+  useEffect(() => {
+    if (!shellTimeline) return;
+    loadTokenRef.current += 1;
+    applyTimeline(shellTimeline);
+  }, [shellTimeline]);
 
   useEffect(() => {
     if (!scene) return;
@@ -507,17 +629,21 @@ export function DirectorTracks({
       .getDirector(project.id, scene.id)
       .then((d) => {
         if (cancelled || token !== loadTokenRef.current) return;
-        const next = {
-          ...d,
-          image_clips: freeImageClips(d as DirectorTimeline),
-          video_reference_clips: (d as DirectorTimeline).video_reference_clips || [],
-          image_reference_clips: (d as DirectorTimeline).image_reference_clips || [],
-          lipsync: { tracks: normalizeLipSyncTracks((d as DirectorTimeline).lipsync?.tracks) },
-        } as DirectorTimeline;
-        setTl(next);
+        const fetched = d as DirectorTimeline;
+        const snapshot = getBoundShellTimeline();
+        const liveIds = new Set((fetched.prompt_segments || []).map((s) => s.id).filter(Boolean));
+        const snapHasPending = Boolean(
+          snapshot && (snapshot.prompt_segments || []).some((s) => s.id && !liveIds.has(s.id)),
+        );
+        const snapCount = snapshot ? (snapshot.prompt_segments || []).length : 0;
+        const fetchCount = (fetched.prompt_segments || []).length;
+        const source = snapshot && (snapHasPending || snapCount >= fetchCount) ? snapshot : fetched;
+        const next = applyTimeline(source);
         setSelectedSeg((prev) => {
+          const inspecting = getInspectingPrompt();
+          if (inspecting && next.prompt_segments.some((s) => s.id === inspecting)) return inspecting;
           if (prev && next.prompt_segments.some((s) => s.id === prev)) return prev;
-          return next.prompt_segments[0]?.id;
+          return prev;
         });
         onPlayheadChange?.(next.playhead || 0);
         const layout = loadTimelineWorkspaceLayout();
@@ -593,6 +719,17 @@ export function DirectorTracks({
     return m;
   }, [project.assets]);
 
+  const selectedTimelineGenerator = useMemo(
+    () =>
+      resolveGeneratorOption(
+        generatorOptions,
+        master?.batchBlocks[0]?.generatorId,
+        master?.sceneGeneratorId,
+        scene?.engine,
+      ),
+    [generatorOptions, master?.batchBlocks, master?.sceneGeneratorId, scene?.engine],
+  );
+
   if (!scene) {
     return (
       <div className={shellMode ? "timeline-v2__canvas" : "panel"} data-testid="timeline-track-board">
@@ -653,10 +790,17 @@ export function DirectorTracks({
       lipsync: { tracks: normalizeLipSyncTracks(next.lipsync?.tracks) },
     } as DirectorTimeline;
     // Preserve local drafts immediately so a failed save never loses edits.
-    setTl(normalized);
+    const snapshot = getBoundShellTimeline();
+    const localIds = new Set((normalized.prompt_segments || []).map((s) => s.id).filter(Boolean));
+    const extras = (snapshot?.prompt_segments || []).filter((s) => s.id && !localIds.has(s.id));
+    const merged = extras.length
+      ? { ...normalized, prompt_segments: [...(normalized.prompt_segments || []), ...extras] }
+      : normalized;
+    setTl(merged);
+    bindShellTimelineSnapshot(merged);
     setSaving(true);
     try {
-      await api.putDirector(project.id, scene.id, normalized);
+      await api.putDirector(project.id, scene.id, merged);
       setSaveError(null);
       onChange();
     } catch (e) {
@@ -666,6 +810,60 @@ export function DirectorTracks({
     } finally {
       setSaving(false);
     }
+  };
+
+  const persistViaMutate = async (mutator: (current: DirectorTimeline) => DirectorTimeline) => {
+    const bound = getBoundShellTimelineMutate();
+    if (bound) {
+      setTl((current) => (current ? mutator(current) : current));
+      await bound(mutator, { refresh: false });
+      return;
+    }
+    if (!tl) return;
+    setUndoSnapshot({ ...tl });
+    scheduleUndoClear();
+    await save(mutator(tl));
+  };
+
+  const trackFlags = tl.track_flags || {};
+  const headerControls = (key: string, controls?: Array<TrackControl>) => {
+    const state = effectiveTrackFlags(trackFlags, key);
+    return {
+      controls,
+      controlState: {
+        eye: Boolean(state.hidden),
+        lock: Boolean(state.locked),
+        mute: Boolean(state.muted),
+        solo: Boolean(state.solo),
+      },
+      onControlToggle: (control: TrackControl) => {
+        void persistViaMutate((current) => ({
+          ...current,
+          track_flags: toggleTrackFlag(current.track_flags, key, control),
+        }));
+      },
+    };
+  };
+  const visualFlags = effectiveTrackFlags(trackFlags, "visual");
+  const promptFlags = effectiveTrackFlags(trackFlags, "prompt");
+  const cameraFlags = effectiveTrackFlags(trackFlags, "camera");
+  const audioFlags = effectiveTrackFlags(trackFlags, "audio");
+  const sfxFlags = effectiveTrackFlags(trackFlags, "sfx");
+  const batchFlags = effectiveTrackFlags(trackFlags, "batch");
+  const repairFlags = effectiveTrackFlags(trackFlags, "repair");
+
+  const updatePrompt = async (segment: PromptSegment, patch: Partial<PromptSegment>) => {
+    await persistViaMutate((current) => ({
+      ...current,
+      prompt_segments: current.prompt_segments.map((item) => (item.id === segment.id ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const updateCamera = async (clip: CameraClip, patch: Partial<CameraClip>) => {
+    await persistViaMutate((current) => ({
+      ...current,
+      camera_clips: (current.camera_clips || []).map((item) => (item.id === clip.id ? { ...item, ...patch } : item)),
+    }));
   };
 
   const duration = tl.duration_sec || scene.duration_sec || 5;
@@ -723,6 +921,26 @@ export function DirectorTracks({
     })),
   );
   const boardWidth = Math.max(480, boardDuration * 90 * zoom);
+  const pxPerSec = boardWidth / Math.max(0.1, boardDuration);
+  const snapTargets = buildMagneticSnapTargets({
+    sceneEnd: boardDuration,
+    batches: batchWindows.map((entry) => ({
+      id: entry.batch.id,
+      start: entry.start,
+      length: entry.length,
+      label: entry.batch.label,
+    })),
+    clips: [
+      ...(tl?.image_clips || []),
+      ...(tl?.video_clips || []),
+      ...(tl?.prompt_segments || []),
+      ...(tl?.camera_clips || []),
+      ...(tl?.audio_clips || []),
+      ...(tl?.sfx_clips || []),
+      ...lipSyncTracks.flatMap((track) => track.clips || []),
+    ].map((clip) => ({ id: clip.id, start: clip.start, length: clip.length })),
+    playhead,
+  });
 
   const laneClipsFor = (kind: "image" | "video" | "videoReference" | "imageReference" | "prompt" | "audio" | "sfx" | "camera") => {
     if (!tl) return [] as Array<{ id: string; start: number; length: number }>;
@@ -781,8 +999,7 @@ export function DirectorTracks({
     next: ClipGeometry,
     mode: ClipDragMode,
   ) => {
-    const snapped = snapTime(next.start, snap, snap ? 1 / sceneFps : 0.01);
-    const clamped = clampToLane(kind, id, snapped, Math.max(0.15, next.length), mode);
+    const clamped = clampToLane(kind, id, next.start, Math.max(0.15, next.length), mode);
     const start = clamped.start;
     const length = clamped.length;
     // Snapshot the pre-drag timeline so the creator can undo a move/trim via
@@ -836,10 +1053,10 @@ export function DirectorTracks({
       return;
     }
     if (kind === "prompt") {
-      void save({
-        ...tl,
-        prompt_segments: (tl.prompt_segments || []).map((s) => (s.id === id ? { ...s, start, length } : s)),
-      });
+      void persistViaMutate((current) => ({
+        ...current,
+        prompt_segments: (current.prompt_segments || []).map((s) => (s.id === id ? { ...s, start, length } : s)),
+      }));
       return;
     }
     if (kind === "audio" || kind === "sfx") {
@@ -857,7 +1074,10 @@ export function DirectorTracks({
   };
 
   const selectSeg = (id: string) => {
+    const current = getInspectingPrompt();
+    if (isPromptSelectionLocked() && current && current !== id) return;
     setSelectedSeg(id);
+    bindInspectingPrompt(id);
     sel?.setSelection({ kind: "promptSeg", id });
   };
   const selectClip = (kind: "imageClip" | "videoClip" | "videoReferenceClip" | "imageReferenceClip" | "camera" | "audio" | "sfx", id: string) => {
@@ -901,7 +1121,7 @@ export function DirectorTracks({
     const start = imageClips.reduce((m, c) => Math.max(m, c.start + c.length), 0);
     const clip: TimelineClip = {
       id: nid(),
-      start: snapTime(Math.min(start, Math.max(0, duration - 1)), snap),
+      start: placeTime(Math.min(start, Math.max(0, duration - 1)), snap, snapTargets, pxPerSec),
       length: Math.min(2, duration),
       label: `Image ${imageClips.length + 1}`,
       role: "guide",
@@ -966,10 +1186,14 @@ export function DirectorTracks({
         setTokenError("Broken Reference — this character needs an approved picture in the Library.");
         return;
       }
+      if (!scene?.id) {
+        setTokenError("Pick a named reference from this scene's References.");
+        return;
+      }
       const created = (await api.sceneReferences.attach(project.id, {
         asset_id: binding.asset_id,
-        scope_type: "project",
-        scope_id: project.id,
+        scope_type: "scene",
+        scope_id: scene.id,
         reference_type: "character",
         media_kind: "entity",
         identity_id: binding.identity_id,
@@ -1031,7 +1255,7 @@ export function DirectorTracks({
         ...tl,
         sfx_clips: [
           ...tl.sfx_clips,
-          { id: nid(), start: snapTime(1, snap), length: 1, label: "SFX", asset_id: assetId, volume: 1 },
+          { id: nid(), start: placeTime(1, snap, snapTargets, pxPerSec), length: 1, label: "SFX", asset_id: assetId, volume: 1 },
         ],
       });
     }
@@ -1054,10 +1278,11 @@ export function DirectorTracks({
   const addPromptSegment = async () => {
     const seg: PromptSegment = {
       id: nid(),
-      start: snapTime(Math.min(duration - 1, activeSeg ? activeSeg.start + activeSeg.length : 0), snap),
+      start: placeTime(Math.min(duration - 1, activeSeg ? activeSeg.start + activeSeg.length : 0), snap, snapTargets, pxPerSec),
       length: Math.min(2, duration),
       text: "",
       weight: 1,
+      temperature: 1.0,
       region: null,
       reference_binding_ids: [],
     };
@@ -1070,7 +1295,7 @@ export function DirectorTracks({
     const seg: PromptSegment = {
       ...activeSeg,
       id: nid(),
-      start: snapTime(Math.min(duration - 0.2, activeSeg.start + activeSeg.length), snap),
+      start: placeTime(Math.min(duration - 0.2, activeSeg.start + activeSeg.length), snap, snapTargets, pxPerSec),
     };
     await save({ ...tl, prompt_segments: [...tl.prompt_segments, seg] });
     selectSeg(seg.id);
@@ -1083,7 +1308,7 @@ export function DirectorTracks({
     const b: PromptSegment = {
       ...activeSeg,
       id: nid(),
-      start: snapTime(activeSeg.start + mid, snap),
+      start: placeTime(activeSeg.start + mid, snap, snapTargets, pxPerSec),
       length: mid,
     };
     await save({
@@ -1118,7 +1343,7 @@ export function DirectorTracks({
     if (!laneEl || !tl) return;
     const rect = laneEl.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)));
-    const t = snapTime(ratio * boardDuration, snap, snap ? 1 / sceneFps : 0.01);
+    const t = placeTime(ratio * boardDuration, snap, snapTargets.filter((target) => target.kind !== "playhead"), pxPerSec);
     onPlayheadChange?.(t);
     void save({ ...tl, playhead: t });
     if (workspaceLayout.playheadFollow && boardScrollRef.current) {
@@ -1144,7 +1369,7 @@ export function DirectorTracks({
     if (e.key === "End") next = duration;
     if (next !== playhead) {
       e.preventDefault();
-      const t = snapTime(Math.min(boardDuration, next), snap, frame);
+      const t = Math.max(0, Math.min(boardDuration, next));
       onPlayheadChange?.(t);
       void save({ ...tl, playhead: t });
     }
@@ -1198,6 +1423,7 @@ export function DirectorTracks({
       length: selectedImageClip.length,
       text: "",
       weight: 1,
+      temperature: 1.0,
       region: null,
       bound_image_clip_id: selectedImageClip.id,
     };
@@ -1218,7 +1444,14 @@ export function DirectorTracks({
 
   const clipIsPersisted = (clip: { asset_id?: string | null; text?: string }) =>
     Boolean(clip.asset_id || (clip.text && clip.text.trim()));
-
+  const canonicalTimeline = getBoundShellTimeline() || tl;
+  const promptModalSeg = promptModalId
+    ? canonicalTimeline.prompt_segments.find((seg) => seg.id === promptModalId)
+    : undefined;
+  const cameraModalClip = cameraModalId
+    ? (canonicalTimeline.camera_clips || []).find((clip) => clip.id === cameraModalId)
+    : undefined;
+  const timelineGeneratorId = master?.sceneGeneratorId || scene.engine;
   return (
     <div className={shellMode ? "timeline-v2__canvas" : "panel director-tracks"}>
       {!shellMode ? (
@@ -1351,6 +1584,7 @@ export function DirectorTracks({
           {!shellMode ? (
             <>
               <div className="director-toolbar">
+                <span className="help-tip-pair">
                 <button
                   type="button"
                   className="primary"
@@ -1361,8 +1595,10 @@ export function DirectorTracks({
                     void api.directorTimelineAddBatch(project.id, scene.id, { plannedDuration: duration }).then(onChange);
                   }}
                 >
-                  Add Batch <HelpBtn id="add_batch" />
+                  Add Batch
                 </button>
+                  <HelpBtn id="add_batch" />
+                </span>
 
                 {tl.media_mode === "image" ? (
                   images.length > 0 ? (
@@ -1421,6 +1657,7 @@ export function DirectorTracks({
                   </button>
                 )}
 
+                <span className="help-tip-pair">
                 <button
                   type="button"
                   data-testid="timeline-toolbar-preflight"
@@ -1439,8 +1676,10 @@ export function DirectorTracks({
                     });
                   }}
                 >
-                  Preflight <HelpBtn id="preflight" />
+                  Preflight
                 </button>
+                  <HelpBtn id="preflight" />
+                </span>
 
                 {tl.media_mode === "image" ? (
                   <button type="button" onClick={switchToVideo}>
@@ -1472,23 +1711,23 @@ export function DirectorTracks({
                 <button
                   type="button"
                   className="ghost"
-                  onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}
+                  onClick={() => setZoom(stepTimelineZoom(zoom, -1))}
                 >
                   −
                 </button>
                 <input
                   type="range"
-                  min={0.5}
-                  max={3}
-                  step={0.05}
-                  value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
+                  min={0}
+                  max={1}
+                  step={0.001}
+                  value={zoomToSlider(zoom)}
+                  onChange={(e) => setZoom(sliderToZoom(Number(e.target.value)))}
                   aria-label="Zoom timeline tracks"
                 />
                 <button
                   type="button"
                   className="ghost"
-                  onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}
+                  onClick={() => setZoom(stepTimelineZoom(zoom, 1))}
                 >
                   +
                 </button>
@@ -1505,6 +1744,7 @@ export function DirectorTracks({
                   />
                   Snap
                 </label>
+                <span className="help-tip-pair">
                 <button
                   type="button"
                   className="ghost"
@@ -1514,8 +1754,10 @@ export function DirectorTracks({
                   aria-expanded={settingsOpen}
                   onClick={() => setSettingsOpen((v) => !v)}
                 >
-                  ⚙ <HelpBtn id="timeline_settings" />
+                  ⚙
                 </button>
+                  <HelpBtn id="timeline_settings" />
+                </span>
                 <TimelineSettingsDrawer
                   open={settingsOpen}
                   onClose={() => setSettingsOpen(false)}
@@ -1558,11 +1800,11 @@ export function DirectorTracks({
               onWheel={(e) => {
                 if (!(e.ctrlKey || e.metaKey)) return;
                 e.preventDefault();
-                const delta = e.deltaY > 0 ? -0.1 : 0.1;
-                setZoom?.(Math.min(3, Math.max(0.5, +(zoom + delta).toFixed(2))));
+                setZoom?.(stepTimelineZoom(zoom, e.deltaY > 0 ? -1 : 1));
               }}
               data-zoom={String(zoom)}
               data-board-width={String(boardWidth)}
+              data-board-duration={String(boardDuration)}
             >
               <div className={shellMode ? "timeline-v2__ruler" : "track-ruler"} data-testid="timeline-ruler">
                 <div className={shellMode ? "timeline-v2__ruler-gutter" : "track-ruler__gutter"} aria-hidden />
@@ -1626,15 +1868,23 @@ export function DirectorTracks({
                   >
                     <span className="track-playhead__head" aria-hidden />
                   </div>
+                  {snapGuideSec != null ? (
+                    <div
+                      className="timeline-v2__snap-guide"
+                      data-testid="timeline-snap-guide"
+                      style={{ left: `${(snapGuideSec / Math.max(0.1, boardDuration)) * 100}%` }}
+                    />
+                  ) : null}
                 </div>
               </div>
 
               {shellMode && (
-                <div className={trackRowClass(shellMode, "timeline-v2__track-row--batch")}>
+                <div className={trackRowClass(shellMode, `timeline-v2__track-row--batch${batchFlags.hidden ? " timeline-v2__track-row--hidden" : ""}`)}>
                   <TrackHeader
                     label="BATCHES"
                     labelKey="tracks.batches"
                     shellMode={shellMode}
+                    {...headerControls("batch")}
                     onAction={() => {
                       if (!scene) return;
                       void api.directorTimelineAddBatch(project.id, scene.id, { plannedDuration: duration }).then(onChange);
@@ -1696,6 +1946,8 @@ export function DirectorTracks({
                             type="button"
                             id={`timeline-track-item-batch-${batch.id}`}
                             data-testid={`timeline-batch-${batch.id}`}
+                            data-start={String(start)}
+                            data-length={String(length)}
                             className={`track-clip track-clip--batch ${sel?.selection?.kind === "batch" && sel.selection.id === batch.id ? "active" : ""}`}
                             style={pct(start, length, boardDuration)}
                             onClick={() => sel?.setSelection({ kind: "batch", id: batch.id })}
@@ -1737,11 +1989,11 @@ export function DirectorTracks({
 
               {tl.media_mode === "image" ? (
                 <div
-                  className={trackRowClass(shellMode)}
+                  className={trackRowClass(shellMode, visualFlags.hidden ? "timeline-v2__track-row--hidden" : "")}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => onDropAsset(e, "image")}
                 >
-                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} />
+                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} {...headerControls("visual")} />
                   <div className={trackContentClass(shellMode)}>
                     {imageClips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add an image clip or drop an image here.</div>
@@ -1757,13 +2009,15 @@ export function DirectorTracks({
                           boardDuration={boardDuration}
                           boardWidthPx={boardWidth}
                           snapEnabled={snap}
-                          snapStep={snap ? 1 / sceneFps : 0.01}
+                          snapTargets={snapTargets}
+                          onSnapGuide={setSnapGuideSec}
                           selected={selectedClip === clip.id}
                           className="media"
                           domId={`timeline-track-item-imageClip-${clip.id}`}
                           testId={`track-clip-image-${clip.id}`}
                           onSelect={() => selectClip("imageClip", clip.id)}
                           onCommit={(next, mode) => commitClipGeometry("image", clip.id, next, mode)}
+                          locked={visualFlags.locked}
                         >
                           <button
                             type="button"
@@ -1817,8 +2071,8 @@ export function DirectorTracks({
                   </div>
                 </div>
               ) : (
-                <div className={trackRowClass(shellMode)}>
-                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} controls={["eye", "lock"]} />
+                <div className={trackRowClass(shellMode, visualFlags.hidden ? "timeline-v2__track-row--hidden" : "")}>
+                  <TrackHeader label="VISUAL" labelKey="tracks.visual" shellMode={shellMode} {...headerControls("visual", ["eye", "lock"])} />
                   <div className={trackContentClass(shellMode)}>
                     {tl.video_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                       <div className="track-empty">Add a video clip or switch back to image planning.</div>
@@ -1834,13 +2088,15 @@ export function DirectorTracks({
                           boardDuration={boardDuration}
                           boardWidthPx={boardWidth}
                           snapEnabled={snap}
-                          snapStep={snap ? 1 / sceneFps : 0.01}
+                          snapTargets={snapTargets}
+                          onSnapGuide={setSnapGuideSec}
                           selected={selectedClip === clip.id}
                           className="media video"
                           domId={`timeline-track-item-videoClip-${clip.id}`}
                           testId={`track-clip-video-${clip.id}`}
                           onSelect={() => selectClip("videoClip", clip.id)}
                           onCommit={(next, mode) => commitClipGeometry("video", clip.id, next, mode)}
+                          locked={visualFlags.locked}
                         >
                           <button
                             type="button"
@@ -1904,7 +2160,7 @@ export function DirectorTracks({
               {/* Image/Video Reference lanes retired: bindings live on Prompt clips. */}
 
               <div
-                className={trackRowClass(shellMode, "timeline-v2__track-row--prompt")}
+                className={trackRowClass(shellMode, `timeline-v2__track-row--prompt${promptFlags.hidden ? " timeline-v2__track-row--hidden" : ""}`)}
                 data-testid="timeline-timed-prompt-track"
               >
                 <TrackHeader
@@ -1912,6 +2168,7 @@ export function DirectorTracks({
                   labelKey="tracks.timedPrompt"
                   testId="timeline-v2-label-timed-prompt"
                   shellMode={shellMode}
+                  {...headerControls("prompt")}
                   onAction={addPromptSegment}
                   actionLabel="+ Prompt"
                 />
@@ -1928,13 +2185,20 @@ export function DirectorTracks({
                       boardDuration={boardDuration}
                       boardWidthPx={boardWidth}
                       snapEnabled={snap}
-                      snapStep={snap ? 1 / sceneFps : 0.01}
+                      snapTargets={snapTargets}
+                      onSnapGuide={setSnapGuideSec}
                       selected={selectedSeg === seg.id}
                       className="prompt"
+                      style={{ zIndex: 4 + Math.round(Number(seg.start) * 10) }}
                       domId={`timeline-track-item-promptSeg-${seg.id}`}
                       testId={`track-clip-prompt-${seg.id}`}
-                      onSelect={() => selectSeg(seg.id)}
+                      onSelect={selectSeg}
+                      onDoubleClick={() => {
+                        selectSeg(seg.id);
+                        setPromptModalId(seg.id);
+                      }}
                       onCommit={(next, mode) => commitClipGeometry("prompt", seg.id, next, mode)}
+                      locked={promptFlags.locked}
                     >
                       <button
                         type="button"
@@ -1954,11 +2218,11 @@ export function DirectorTracks({
                         </span>
                       ) : null}
                       <span className="timeline-v2__clip-tokens" data-testid={`prompt-token-summary-${seg.id}`}>
-                        {tokenSummary(seg.reference_binding_ids, bindings) ||
+                        {tokenSummary(seg.reference_binding_ids, bindings, 3, siblingBindings) ||
                           (seg.region ? t("timedPromptRegion") : null) ||
                           (seg.text ? seg.text.slice(0, 36) : t("emptyPromptClip"))}
                       </span>
-                      {tokenSummary(seg.reference_binding_ids, bindings) && seg.text ? (
+                      {tokenSummary(seg.reference_binding_ids, bindings, 3, siblingBindings) && seg.text ? (
                         <span className="timeline-v2__clip-instruction">{seg.text.slice(0, 40)}</span>
                       ) : null}
                     </TrackClipInteractive>
@@ -1966,12 +2230,13 @@ export function DirectorTracks({
                 </div>
               </div>
 
-              <div className={trackRowClass(shellMode, "timeline-v2__track-row--camera")} data-testid="timeline-camera-track">
+              <div className={trackRowClass(shellMode, `timeline-v2__track-row--camera${cameraFlags.hidden ? " timeline-v2__track-row--hidden" : ""}`)} data-testid="timeline-camera-track">
                 <TrackHeader
                   label="CAMERA"
                   labelKey="tracks.camera"
                   testId="timeline-v2-label-camera"
                   shellMode={shellMode}
+                  {...headerControls("camera")}
                   onAction={() => {
                     const clip: CameraClip = {
                       id: nid(),
@@ -2031,13 +2296,19 @@ export function DirectorTracks({
                       boardDuration={boardDuration}
                       boardWidthPx={boardWidth}
                       snapEnabled={snap}
-                      snapStep={snap ? 1 / sceneFps : 0.01}
+                      snapTargets={snapTargets}
+                      onSnapGuide={setSnapGuideSec}
                       selected={selectedClip === clip.id}
                       className="camera"
                       domId={`timeline-track-item-camera-${clip.id}`}
                       testId={`track-clip-camera-${clip.id}`}
                       onSelect={() => selectClip("camera", clip.id)}
+                      onDoubleClick={() => {
+                        selectClip("camera", clip.id);
+                        setCameraModalId(clip.id);
+                      }}
                       onCommit={(next, mode) => commitClipGeometry("camera", clip.id, next, mode)}
+                      locked={cameraFlags.locked}
                     >
                       <button
                         type="button"
@@ -2054,16 +2325,16 @@ export function DirectorTracks({
                       {shellMode ? (
                         <>
                           <span className="timeline-v2__clip-tokens" data-testid={`camera-token-summary-${clip.id}`}>
-                            {tokenSummary(clip.reference_binding_ids, bindings) ||
-                              clip.motion_type.replace(/_/g, " ")}
+                            {tokenSummary(clip.reference_binding_ids, bindings, 3, siblingBindings) ||
+                              cameraClipDisplayLabel(clip, cameraCatalog)}
                           </span>
-                          {tokenSummary(clip.reference_binding_ids, bindings) && (clip.text || "").trim() ? (
-                            <span className="timeline-v2__clip-instruction">{(clip.text || "").slice(0, 40)}</span>
+                          {tokenSummary(clip.reference_binding_ids, bindings, 3, siblingBindings) ? (
+                            <span className="timeline-v2__clip-instruction">{cameraClipDisplayLabel(clip, cameraCatalog)}</span>
                           ) : null}
                         </>
                       ) : (
                         <>
-                          <strong>{clip.motion_type.replace(/_/g, " ")}</strong>
+                          <strong>{cameraClipDisplayLabel(clip, cameraCatalog)}</strong>
                           <span>{clip.rig}</span>
                         </>
                       )}
@@ -2136,11 +2407,11 @@ export function DirectorTracks({
               </div>
 
               <div
-                className={trackRowClass(shellMode, "timeline-v2__track-row--audio")}
+                className={trackRowClass(shellMode, `timeline-v2__track-row--audio${audioFlags.hidden ? " timeline-v2__track-row--hidden" : ""}${audioFlags.muted ? " timeline-v2__track-row--muted" : ""}`)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "audio")}
               >
-                <TrackHeader label="AUDIO" labelKey="tracks.audio" shellMode={shellMode} controls={["mute", "solo"]} />
+                <TrackHeader label="AUDIO" labelKey="tracks.audio" shellMode={shellMode} {...headerControls("audio", ["eye", "lock", "mute", "solo"])} />
                 <div className={trackContentClass(shellMode)}>
                   {tl.audio_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Add ambience, score, or dialogue stems for this scene.</div>
@@ -2154,13 +2425,15 @@ export function DirectorTracks({
                       boardDuration={boardDuration}
                       boardWidthPx={boardWidth}
                       snapEnabled={snap}
-                      snapStep={snap ? 1 / sceneFps : 0.01}
+                      snapTargets={snapTargets}
+                      onSnapGuide={setSnapGuideSec}
                       selected={selectedClip === clip.id}
                       className="audio"
                       domId={`timeline-track-item-audio-${clip.id}`}
                       testId={`track-clip-audio-${clip.id}`}
                       onSelect={() => selectClip("audio", clip.id)}
                       onCommit={(next, mode) => commitClipGeometry("audio", clip.id, next, mode)}
+                      locked={audioFlags.locked}
                     >
                       <button
                         type="button"
@@ -2202,11 +2475,11 @@ export function DirectorTracks({
               </div>
 
               <div
-                className={trackRowClass(shellMode, "timeline-v2__track-row--audio")}
+                className={trackRowClass(shellMode, `timeline-v2__track-row--audio${sfxFlags.hidden ? " timeline-v2__track-row--hidden" : ""}${sfxFlags.muted ? " timeline-v2__track-row--muted" : ""}`)}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "sfx")}
               >
-                <TrackHeader label="SFX" labelKey="tracks.sfx" shellMode={shellMode} controls={["mute", "solo"]} />
+                <TrackHeader label="SFX" labelKey="tracks.sfx" shellMode={shellMode} {...headerControls("sfx", ["eye", "lock", "mute", "solo"])} />
                 <div className={trackContentClass(shellMode)}>
                   {tl.sfx_clips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Drop quick impact or spot effects here.</div>
@@ -2220,13 +2493,15 @@ export function DirectorTracks({
                       boardDuration={boardDuration}
                       boardWidthPx={boardWidth}
                       snapEnabled={snap}
-                      snapStep={snap ? 1 / sceneFps : 0.01}
+                      snapTargets={snapTargets}
+                      onSnapGuide={setSnapGuideSec}
                       selected={selectedClip === clip.id}
                       className="sfx"
                       domId={`timeline-track-item-sfx-${clip.id}`}
                       testId={`track-clip-sfx-${clip.id}`}
                       onSelect={() => selectClip("sfx", clip.id)}
                       onCommit={(next, mode) => commitClipGeometry("sfx", clip.id, next, mode)}
+                      locked={sfxFlags.locked}
                     >
                       <button
                         type="button"
@@ -2270,19 +2545,21 @@ export function DirectorTracks({
               {lipSyncTracks.map((track, index) => {
                 const trackSelected =
                   sel?.selection?.kind === "lipsyncTrack" && sel.selection.id === track.id;
+                const lipKey = `lipsync:${track.id}`;
+                const lipFlags = effectiveTrackFlags(trackFlags, lipKey);
                 return (
                   <div
                     key={track.id}
                     className={trackRowClass(
                       shellMode,
-                      `${trackSelected ? "is-selected " : ""}timeline-v2__track-row--lipsync`.trim(),
+                      `${trackSelected ? "is-selected " : ""}timeline-v2__track-row--lipsync${lipFlags.hidden ? " timeline-v2__track-row--hidden" : ""}${lipFlags.muted ? " timeline-v2__track-row--muted" : ""}`.trim(),
                     )}
                   >
                     <TrackHeader
                       label={shellMode ? (index === 0 ? "LIP SYNC" : `LIP SYNC ${index + 1}`) : track.label || `Lip Sync ${index + 1}`}
                       labelKey={index === 0 ? "tracks.lipSync" : undefined}
                       shellMode={shellMode}
-                      controls={["eye", "lock"]}
+                      {...headerControls(lipKey, ["eye", "lock", "mute"])}
                     />
                     <div
                       id={`timeline-track-item-lipsyncTrack-${track.id}`}
@@ -2309,21 +2586,47 @@ export function DirectorTracks({
                             selectedLipSyncClip?.id === clip.id ||
                             (sel?.selection?.kind === "lipsyncClip" && sel.selection.id === clip.id);
                           return (
-                            <button
+                            <TrackClipInteractive
                               key={clip.id}
-                              type="button"
-                              id={`timeline-track-item-lipsyncClip-${clip.id}`}
-                              className={`track-clip lipsync lipsync-clip ${clipSelected ? "active" : ""}`}
-                              data-testid={`track-clip-lipsync-${clip.id}`}
-                              style={pct(clip.start, clip.length, boardDuration)}
-                              onClick={(event) => {
-                                event.stopPropagation();
+                              clipId={clip.id}
+                              start={clip.start}
+                              length={clip.length}
+                              boardDuration={boardDuration}
+                              boardWidthPx={boardWidth}
+                              snapEnabled={snap}
+                              snapTargets={snapTargets}
+                              onSnapGuide={setSnapGuideSec}
+                              selected={clipSelected}
+                              className="lipsync lipsync-clip"
+                              domId={`timeline-track-item-lipsyncClip-${clip.id}`}
+                              testId={`track-clip-lipsync-${clip.id}`}
+                              locked={lipFlags.locked}
+                              onSelect={() =>
                                 sel?.setSelection({
                                   kind: "lipsyncClip",
                                   id: clip.id,
                                   trackId: track.id,
                                   trackIndex: index,
-                                });
+                                })
+                              }
+                              onCommit={(next) => {
+                                void persistViaMutate((current) => ({
+                                  ...current,
+                                  lipsync: {
+                                    tracks: normalizeLipSyncTracks(current.lipsync?.tracks).map((row) =>
+                                      row.id !== track.id
+                                        ? row
+                                        : {
+                                            ...row,
+                                            clips: (row.clips || []).map((item) =>
+                                              item.id === clip.id
+                                                ? { ...item, start: next.start, length: next.length }
+                                                : item,
+                                            ),
+                                          },
+                                    ),
+                                  },
+                                }));
                               }}
                             >
                               <strong className="timeline-v2__clip-tokens">
@@ -2342,7 +2645,7 @@ export function DirectorTracks({
                                   return asset?.filename || asset?.tag || clip.audio_asset_id || "No audio";
                                 })()}
                               </span>
-                            </button>
+                            </TrackClipInteractive>
                           );
                         })
                       )}
@@ -2352,8 +2655,8 @@ export function DirectorTracks({
               })}
 
               {shellMode && (
-                <div className={trackRowClass(shellMode)}>
-                  <TrackHeader label="MASK · REPAIR" labelKey="tracks.maskRepair" shellMode={shellMode} controls={["eye", "lock"]} />
+                <div className={trackRowClass(shellMode, repairFlags.hidden ? "timeline-v2__track-row--hidden" : "")}>
+                  <TrackHeader label="MASK · REPAIR" labelKey="tracks.maskRepair" shellMode={shellMode} {...headerControls("repair", ["eye", "lock"])} />
                   <div className={trackContentClass(shellMode)}>
                     {repairWindows.length === 0 ? (
                       <div className="track-empty">Repair ranges will appear here when a batch needs a focused fix.</div>
@@ -2428,7 +2731,7 @@ export function DirectorTracks({
                     ...tl,
                     prompt_segments: tl.prompt_segments.map((s) =>
                       s.id === activeSeg.id
-                        ? { ...s, start: snapTime(Number(e.target.value) || 0, snap) }
+                        ? { ...s, start: placeTime(Number(e.target.value) || 0, snap, snapTargets, pxPerSec) }
                         : s
                     ),
                   })
@@ -2616,6 +2919,32 @@ export function DirectorTracks({
       )}
 
       {viewMode === "full" && <LipSyncTracksPanel project={project} scene={scene} onChange={onChange} />}
+
+      {promptModalSeg ? (
+        <TimedPromptEditorModal
+          key={`${promptModalSeg.id}:${promptModalSeg.text}:${promptModalSeg.start}:${promptModalSeg.length}:${promptModalSeg.temperature ?? ""}`}
+          segment={promptModalSeg}
+          projectId={project.id}
+          generatorId={selectedTimelineGenerator?.id || timelineGeneratorId}
+          generatorCapability={selectedTimelineGenerator}
+          onCancel={() => setPromptModalId(null)}
+          onCommit={async (patch) => {
+            await updatePrompt(promptModalSeg, patch);
+            setPromptModalId(null);
+          }}
+        />
+      ) : null}
+      {cameraModalClip ? (
+        <CameraSettingsModal
+          clip={cameraModalClip}
+          projectId={project.id}
+          onCancel={() => setCameraModalId(null)}
+          onCommit={async (patch) => {
+            await updateCamera(cameraModalClip, patch);
+            setCameraModalId(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

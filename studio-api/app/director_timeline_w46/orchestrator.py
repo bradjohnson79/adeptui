@@ -27,6 +27,7 @@ from .contracts import (
 from .migration import compute_config_fingerprint
 from .repair_policy import apply_repair_overlap_policy
 from . import store
+from ..cinematography.catalog import CAMERA_FOCUS_ENVIRONMENT_ID
 
 
 def _batch_map(master: SceneTimelineMaster) -> dict[str, BatchBlock]:
@@ -60,7 +61,9 @@ def _bind_video_reference_anchor(
     from .generation.reference_compile import apply_compiled_references
     from .generation.speech_compile import apply_compiled_speech
 
-    warnings = apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
+    warnings = apply_compiled_references(
+        batch, director_timeline, db=db, project_id=project_id, scene_id=getattr(batch, "sceneId", None)
+    )
     speech_errors = apply_compiled_speech(batch, director_timeline, db=db, project_id=project_id)
     return list(warnings or []) + list(speech_errors or [])
 
@@ -239,6 +242,9 @@ def submit_batch_generation(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    director_tl = _load_director_timeline(db, project_id, scene_id)
+    if director_tl is not None:
+        store.reconcile_master_from_director(db, project_id, scene_id, master, director_tl)
     batch = _batch_map(master).get(batch_id)
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
@@ -354,6 +360,14 @@ def submit_batch_generation(
                 "message": "Co-Director is still reviewing the previous shot. The next generation has not been sent.",
                 "mock": False,
             }
+        from .reconcile import batch_time_windows
+
+        window_start = 0.0
+        for _b, w_start, _w_end in batch_time_windows(master):
+            if _b.id == batch.id:
+                window_start = w_start
+                break
+        scene_prompt = str(getattr(scene_row, "prompt", "") or "").strip() if scene_row else ""
         request = build_timeline_generation_request(
             project_id=project_id,
             scene_id=scene_id,
@@ -364,6 +378,9 @@ def submit_batch_generation(
             aspect_ratio=aspect_ratio,
             draft_mode=draft_mode,
             temporal_packet=temporal_packet,
+            director_timeline=director_timeline,
+            window_start=window_start,
+            scene_prompt=scene_prompt,
         )
         if incoming and incoming.status == "Ready" and request.continuityStrategy:
             incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
@@ -567,6 +584,10 @@ def complete_batch_candidate(
     batch.duration.sourceMediaDuration = generated_duration
     # Visible duration: min(planned, generated) — no silent stretch
     batch.duration.timelineVisibleDuration = min(batch.duration.plannedDuration, generated_duration)
+    # TERMINAL-STATE GUARD: a Cancelled/Failed batch whose render
+    # completed during the cancel race must not auto-transition.
+    if batch.status in ("Cancelled", "Failed"):
+        return None
     batch.status = "CandidateReady"
     for job in batch.generationJobs:
         if job.executionSnapshotId == execution_snapshot_id:
@@ -1051,17 +1072,191 @@ def add_repair_range(
     return {**decision.model_dump(), "inPaintDisclosure": strategy, "mock": False}
 
 
+
+def _load_project_character_ids(db: Session | None, project_id: str | None) -> set[str] | None:
+    if not db or not project_id:
+        return None
+    try:
+        from ..character_identity.models import CharacterProfileRow
+
+        rows = db.query(CharacterProfileRow).filter(CharacterProfileRow.project_id == project_id).all()
+        return {str(r.id) for r in rows}
+    except Exception:
+        return None
+
+
+def _append_timeline_validity_findings(
+    findings,
+    master: SceneTimelineMaster,
+    director_timeline: DirectorTimeline | None,
+    *,
+    db: Session | None = None,
+    project_id: str | None = None,
+    known_character_ids: set[str] | None = None,
+) -> None:
+    """Genuine production-invalid states only. Do not add noisy warnings."""
+    from .contracts import PreflightFinding
+    from .generation.registry import get_registry
+
+    registry = get_registry()
+    duration = 0.0
+    if director_timeline is not None:
+        duration = float(getattr(director_timeline, "duration_sec", 0.0) or 0.0)
+    if duration <= 0 and master.batchBlocks:
+        duration = sum(max(0.1, float(b.duration.plannedDuration or 0.0)) for b in master.batchBlocks)
+
+    char_ids = known_character_ids
+    if char_ids is None:
+        char_ids = _load_project_character_ids(db, project_id)
+
+    def _clip_outside(start: float, length: float) -> bool:
+        if duration <= 0:
+            return False
+        return float(start) < -1e-6 or (float(start) + float(length)) > duration + 1e-3
+
+    def _invalid_length(length: float) -> bool:
+        return float(length) <= 0
+
+    clips = []
+    if director_timeline is not None:
+        clips.extend(("prompt", s) for s in (director_timeline.prompt_segments or []))
+        clips.extend(("camera", c) for c in (director_timeline.camera_clips or []))
+    for kind, clip in clips:
+        start = float(getattr(clip, "start", 0.0) or 0.0)
+        length = float(getattr(clip, "length", 0.0) or 0.0)
+        if _invalid_length(length):
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="invalid_length",
+                    message=f"{kind} clip length must be > 0.",
+                    fixProposal="Set a positive clip length.",
+                )
+            )
+        elif _clip_outside(start, length):
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="clip_outside_duration",
+                    message=f"{kind} clip extends outside the scene duration.",
+                    fixProposal="Move or shorten the clip so it stays inside the scene.",
+                )
+            )
+
+    clips_to_check = []
+    if director_timeline is not None:
+        clips_to_check.extend(director_timeline.camera_clips or [])
+    for batch in master.batchBlocks:
+        clips_to_check.extend(
+            c for c in (batch.cameraInstructions or []) if getattr(c, "kind", "camera") == "camera"
+        )
+    for clip in clips_to_check:
+        focus = (getattr(clip, "focus_id", None) or "").strip()
+        if not focus or focus == CAMERA_FOCUS_ENVIRONMENT_ID:
+            continue
+        # Fail closed: catalog down, or focus_id not in live project characters.
+        if char_ids is None or focus not in char_ids:
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="focus_deleted_character",
+                    message="Camera focus is bound to a character that no longer exists.",
+                    fixProposal="Choose a living character or Environment focus.",
+                )
+            )
+
+    for batch in master.batchBlocks:
+        for seg in batch.promptSegments or []:
+            if _invalid_length(float(seg.length or 0.0)):
+                findings.append(
+                    PreflightFinding(
+                        severity="error",
+                        code="invalid_length",
+                        message=f"{batch.label} prompt segment length must be > 0.",
+                        batchBlockId=batch.id,
+                    )
+                )
+        gen_id = batch.generatorId
+        if not gen_id:
+            continue
+        try:
+            caps = registry.capabilities(registry.resolve_id(gen_id))
+        except Exception:
+            continue
+        temps = [float(getattr(p, "temperature", 1.0) or 1.0) for p in (batch.promptSegments or [])]
+        if temps and any(abs(t - 1.0) > 1e-6 for t in temps) and not caps.supportsTemperature:
+            findings.append(
+                PreflightFinding(
+                    severity="error",
+                    code="temperature_unsupported",
+                    message=(
+                        f"{batch.label}: temperature is set but {caps.label} cannot honor it "
+                        "(no temperature/cfg/creativity param will be invented)."
+                    ),
+                    batchBlockId=batch.id,
+                    fixProposal="Reset temperature to 1.0 or choose a generator that supports temperature.",
+                )
+            )
+
+    from .generation.adapters.ltx_local import ALIASES as LTX_LOCAL_IDS
+
+    def _batch_start_still_id(batch: BatchBlock) -> str:
+        for anchor in batch.sourceAnchors or []:
+            asset_id = str(getattr(anchor, "assetId", None) or "").strip()
+            if not asset_id:
+                continue
+            kind = str(getattr(anchor, "kind", "") or "")
+            if kind == "end_frame":
+                continue
+            label = str(getattr(anchor, "label", "") or "").lower()
+            if "end" in label:
+                continue
+            if kind in ("image", "start_frame"):
+                return asset_id
+        return ""
+
+    for batch in master.batchBlocks:
+        gen_id = str(batch.generatorId or "").strip()
+        if gen_id not in LTX_LOCAL_IDS:
+            continue
+        if _batch_start_still_id(batch):
+            continue
+        findings.append(
+            PreflightFinding(
+                severity="error",
+                code="empty_required_start_frame",
+                message=(
+                    f"{batch.label}: local LTX is image-to-video only and requires a start frame."
+                ),
+                batchBlockId=batch.id,
+                fixProposal="Bind a start still to this Batch. Local LTX cannot run as text-to-video.",
+            )
+        )
+
+
 def run_preflight(
     master: SceneTimelineMaster,
     *,
     director_timeline: DirectorTimeline | None = None,
     db: Session | None = None,
     project_id: str | None = None,
+    scene_prompt: str | None = None,
 ) -> list[dict[str, Any]]:
     from .contracts import PreflightFinding
     from .store import OPTIONAL_REFS_POLICY_NOTE
     from .generation.speech_compile import lipsync_speaker_errors
     from .generation.reference_compile import apply_compiled_references
+
+
+    if director_timeline is not None and db is not None and project_id:
+        try:
+            scene_id = None
+            if master.batchBlocks:
+                scene_id = master.batchBlocks[0].sceneId
+            if scene_id:
+                store.reconcile_master_from_director(db, project_id, scene_id, master, director_timeline)
+        except Exception:
+            pass
 
     findings: list[PreflightFinding] = []
     for batch in master.batchBlocks:
@@ -1075,12 +1270,28 @@ def run_preflight(
                     fixProposal="Select a generator for this Batch in the Batch Inspector.",
                 )
             )
-        if not batch.promptSegments or not any(p.text.strip() for p in batch.promptSegments):
+        has_timed = bool(batch.promptSegments) and any(
+            (str(p.productionPrompt or "").strip() or (p.text or "").strip())
+            for p in batch.promptSegments
+        )
+        live_scene_prompt = (scene_prompt or "").strip()
+        if not live_scene_prompt and db is not None and project_id:
+            try:
+                sid = batch.sceneId or (master.batchBlocks[0].sceneId if master.batchBlocks else None)
+                if sid:
+                    scene_row = store.get_scene(db, project_id, sid)
+                    if scene_row is not None:
+                        live_scene_prompt = str(getattr(scene_row, "prompt", "") or "").strip()
+            except Exception:
+                pass
+        has_prompt = has_timed or bool(live_scene_prompt)
+        if not has_prompt:
+            required = str(getattr(master, "mode", "") or "") == "video_finishing"
             findings.append(
                 PreflightFinding(
-                    severity="warning",
-                    code="missing_prompt",
-                    message=f"{batch.label} has no prompt text.",
+                    severity="error" if required else "warning",
+                    code="empty_prompt" if required else "missing_prompt",
+                    message=f"{batch.label} has no production prompt or text.",
                     batchBlockId=batch.id,
                     fixProposal="Add a Prompt Segment before generate.",
                 )
@@ -1139,6 +1350,7 @@ def run_preflight(
                     fixProposal="Add an End Frame anchor.",
                 )
             )
+    _append_timeline_validity_findings(findings, master, director_timeline, db=db, project_id=project_id)
     if director_timeline and director_timeline.camera_clips:
         strategy = summarize_camera_strategy(director_timeline.camera_clips)
         if strategy["capability"] in ("Approximate", "Unsupported"):
@@ -1175,7 +1387,7 @@ def run_preflight(
             )
         for batch in master.batchBlocks:
             ref_notes = apply_compiled_references(
-                batch, director_timeline, db=db, project_id=project_id
+                batch, director_timeline, db=db, project_id=project_id, scene_id=getattr(batch, "sceneId", None)
             )
             for note in ref_notes:
                 code = str(note.get("code") or "")
@@ -1193,6 +1405,11 @@ def run_preflight(
                     )
                 )
     return [f.model_dump() for f in findings]
+
+
+def preflight_ok(findings: list[dict[str, Any]]) -> bool:
+    """True only when no production-invalid (error) findings exist."""
+    return not any(str(f.get("severity") or "") == "error" for f in findings)
 
 
 def stage_batch_snapshot(
@@ -1365,13 +1582,24 @@ def generate_scene(
 
     gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
     ensure_policy(master, gid)
-    store.save_master(db, project_id, scene_id, master, touch_batches=False)
     director_timeline = _load_director_timeline(db, project_id, scene_id)
+    if director_timeline is not None:
+        store.reconcile_master_from_director(db, project_id, scene_id, master, director_timeline)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    scene_row = store.get_scene(db, project_id, scene_id)
+    scene_prompt = str(getattr(scene_row, "prompt", "") or "").strip() if scene_row else ""
     findings = run_preflight(
-        master, director_timeline=director_timeline, db=db, project_id=project_id
+        master,
+        director_timeline=director_timeline,
+        db=db,
+        project_id=project_id,
+        scene_prompt=scene_prompt,
     )
-    if master.preflightMode == "strict" and any(f["severity"] == "error" for f in findings):
-        return {"ok": False, "error": "PREFLIGHT_STRICT", "findings": findings, "mock": False}
+    _blocking = {"empty_required_start_frame", "temperature_unsupported"}
+    if any(str(f.get("code") or "") in _blocking for f in findings) or (
+        master.preflightMode == "strict" and any(f["severity"] == "error" for f in findings)
+    ):
+        return {"ok": False, "error": "PREFLIGHT_BLOCKED", "findings": findings, "mock": False}
 
     selected = batch_ids or []
     jobs = []

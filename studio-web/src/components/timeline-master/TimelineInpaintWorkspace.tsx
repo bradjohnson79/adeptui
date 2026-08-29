@@ -11,6 +11,7 @@ import { useDirectorSelection } from "../DirectorSelectionContext";
 import type { DirectorTimeline, TimelineClip } from "../DirectorTracks";
 import { Drawer } from "../ui/Drawer";
 import { formatTimelineTime } from "./TimelineSettingsDrawer";
+import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
 
 type GeneratorCapability = {
   id: string;
@@ -304,15 +305,21 @@ export function TimelineInpaintWorkspace({
     setMessage(null);
     Promise.all([
       api.getDirector(projectId, scene.id),
-      api.directorTimelineGenerators().catch(() => ({ generators: [] })),
+      loadTimelineVideoGenerators().catch(() => []),
     ])
-      .then(([director, generatorPayload]) => {
+      .then(([director, options]) => {
         if (cancelled) return;
         setTimeline(director as DirectorTimeline);
-        const items = Array.isArray((generatorPayload as { generators?: unknown[] }).generators)
-          ? ((generatorPayload as { generators?: GeneratorCapability[] }).generators || [])
-          : [];
-        setGenerators(items);
+        setGenerators(
+          options.map((option) => ({
+            id: option.id,
+            label: option.label,
+            executable: option.executable,
+            capabilityLabel: option.capabilityLabel,
+            inPaintStrategies: option.inPaintStrategies,
+            notes: option.notes,
+          })),
+        );
       })
       .catch((error: unknown) => {
         if (cancelled) return;

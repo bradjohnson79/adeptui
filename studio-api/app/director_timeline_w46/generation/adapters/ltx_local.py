@@ -20,7 +20,37 @@ from ..contracts import (
 )
 
 GENERATOR_ID = "ltx-local"
+RUNTIME_UNAVAILABLE_NOTE = "Local generation runtime unavailable"
+_COMFY_EXEC_CACHE: tuple[float, bool] | None = None
+
+
+def comfy_runtime_executable() -> bool:
+    """Probe Comfy GET /system_stats. Cached 5 seconds. Fail-closed."""
+    global _COMFY_EXEC_CACHE
+    import time
+
+    import httpx
+
+    from ....config import settings
+
+    now = time.monotonic()
+    if _COMFY_EXEC_CACHE is not None:
+        cached_at, cached_val = _COMFY_EXEC_CACHE
+        if (now - cached_at) < 5.0:
+            return cached_val
+    reachable = False
+    try:
+        url = str(settings.comfy_url).rstrip("/") + "/system_stats"
+        with httpx.Client(timeout=1.5) as client:
+            r = client.get(url)
+            reachable = r.status_code == 200
+    except Exception:
+        reachable = False
+    _COMFY_EXEC_CACHE = (now, reachable)
+    return reachable
+
 ALIASES = frozenset({
+    "ltx",
     "ltx-local",
     "ltx-2.5-full",
     "ltx-2.5-distilled",
@@ -29,14 +59,15 @@ ALIASES = frozenset({
 
 
 def _capabilities() -> VideoGeneratorCapabilities:
+    up = comfy_runtime_executable()
     return VideoGeneratorCapabilities(
         id=GENERATOR_ID,
-        label="LTX 2.5 (Local)",
+        label="LTX 2.3 (Local)",
         executionType="local",
-        supportsTextToVideo=True,
+        supportsTextToVideo=False,
         supportsImageToVideo=True,
         supportsStartFrame=True,
-        supportsEndFrame=True,
+        supportsEndFrame=False,
         supportsMultipleImageReferences=False,
         supportsVideoReferences=False,
         supportsAudioReferences=False,
@@ -44,11 +75,12 @@ def _capabilities() -> VideoGeneratorCapabilities:
         maximumReferenceVideos=0,
         maximumReferenceAudio=0,
         supportedDurations=[5.0, 8.0, 10.0, 15.0, 20.0],
-        supportedResolutions=["1280x720", "768x432", "672x288", "1344x576", "512x512", "1024x1024", "512x384", "1024x768"],
+        supportedResolutions=["1280x704"],
         supportedAspectRatios=["1:1", "4:3", "16:9", "21:9", "9:16"],
         supportedFps=[24, 30, 48, 50],
         supportsSeed=True,
         supportsNegativePrompt=True,
+        supportsTemperature=False,
         supportsCameraControls=False,
         native_multishot=True,
         audio_generation=True,
@@ -59,21 +91,32 @@ def _capabilities() -> VideoGeneratorCapabilities:
             "synchronized": True,
             "native": True,
         },
-        executable=True,
-        notes="Local Comfy LTX path via studio render_scene jobs. Supports LTX 2.3 and 2.5 variants.",
-        draftPathway="local_live",
+        executable=up,
+        notes=(
+            RUNTIME_UNAVAILABLE_NOTE
+            if not up
+            else (
+                "Local Comfy LTX 2.3 image-to-video via LTXVImgToVideo. "
+                "A start image is required. Text-to-video is not installed on this Adept path. "
+                "This workflow generates at 1280×704 (LTX /32 spatial snap)."
+            )
+        ),
+        draftPathway="none",
         supportsQueuedCancel=True,
         supportsRunningCancel=True,
         finalRequiresNewGeneration=True,
-        draftResolution="768x432",
-        finalResolution="1280x720",
+        draftResolution=None,
+        finalResolution="1280x704",
         supportsImageAndVideoTogether=False,
     )
 
 
 class LtxLocalAdapter:
     id = GENERATOR_ID
-    capabilities = _capabilities()
+
+    @property
+    def capabilities(self) -> VideoGeneratorCapabilities:
+        return _capabilities()
 
     def validate(self, request: TimelineGenerationRequest) -> ValidationResult:
         result = validate_against_capabilities(self.capabilities, request)
@@ -134,6 +177,10 @@ class LtxLocalAdapter:
             "temporalContinuityPacketId": request.temporalContinuityPacketId,
             "temporalContinuation": request.providerOptions.get("temporalContinuation"),
         }
+        # Structured-ready camera object only. Do NOT map to Comfy cfg/nodes.
+        if request.camera:
+            params["camera"] = request.camera
+        # Temperature is unsupported while Comfy is down — never invent cfg.
 
         if timeline_model in ("ltx-2.5-full", "ltx-2.5-distilled", "ltx-2.5-comfy"):
             params["fast_mode"] = bool(request.providerOptions.get("fast_generation", True))
@@ -268,6 +315,21 @@ class LtxLocalAdapter:
             if mapped == "completed" and not output_ids:
                 output_ids = _ensure_output_asset_ids(db, row, params)
             prompt_id = row.comfy_prompt_id or None
+            error_code = None
+            if mapped == "failed":
+                try:
+                    hist = json.loads(row.history_json or "{}")
+                    fail = hist.get("failure") if isinstance(hist, dict) else None
+                    if not fail and isinstance(hist, dict):
+                        fail = (hist.get("videoRuntime") or {}).get("failure")
+                    if isinstance(fail, dict) and fail.get("failureClass"):
+                        error_code = str(fail.get("failureClass"))
+                except Exception:
+                    error_code = None
+                if not error_code and (row.message or "").startswith(
+                    "Local generation runtime unavailable"
+                ):
+                    error_code = "runtime_unavailable"
             return NormalizedJobStatus(
                 internalJobId=job.internalJobId,
                 providerJobId=prompt_id,
@@ -275,6 +337,7 @@ class LtxLocalAdapter:
                 generatorId=job.generatorId,
                 status=mapped,
                 progress=float(row.progress or 0.0),
+                errorCode=error_code,
                 errorMessage=row.message if mapped == "failed" else None,
                 apiUsed=False,
                 providerMetadata={

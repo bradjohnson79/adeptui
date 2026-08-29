@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Asset, Job, Project, Scene } from "../../types";
 import { api } from "../../api";
 import { apiUrl } from "../../runtime/apiBase";
+import { useProjectJobs } from "../../runtime/projectJobsStore";
 import type { DirectorTimeline } from "../DirectorTracks";
 import type { DirectorSelection } from "../../directorSelection";
 import { LivePreviewMonitor } from "../LivePreviewMonitor";
@@ -73,6 +74,47 @@ function isVideoSrc(src: string): boolean {
   return /\.(mp4|webm|mov)(\?|$)/i.test(src);
 }
 
+function newestByCreatedAt(jobs: Job[]): Job | null {
+  if (!jobs.length) return null;
+  return (
+    jobs
+      .slice()
+      .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0] || null
+  );
+}
+
+/**
+ * Choose the job the Preview Monitor should follow.
+ *
+ * Queued/running always wins. A terminal failed/cancelled job is only pinned
+ * when it is the in-session in-flight job that just finished (lastInFlightJobId)
+ * — that keeps the failed overlay up until Dismiss after a generate. Historical
+ * newest-failed jobs must NOT become activeJob while the creator is idle, or
+ * the navy empty monitor is painted as overlay.bad with Idle copy.
+ *
+ * Newest `done` is still selected so final_output can resolve after idle.
+ */
+export function pickActivePreviewJob(
+  sceneJobs: Job[],
+  lastInFlightJobId?: string | null,
+): Job | null {
+  const inFlight = sceneJobs.find((j) => j.status === "queued" || j.status === "running");
+  if (inFlight) return inFlight;
+
+  if (lastInFlightJobId) {
+    const last = sceneJobs.find((j) => j.id === lastInFlightJobId);
+    if (
+      last &&
+      (last.status === "failed" || last.status === "cancelled" || last.status === "done")
+    ) {
+      return last;
+    }
+  }
+
+  // Idle: follow newest completed output, never a historical failed/cancelled pin.
+  return newestByCreatedAt(sceneJobs.filter((j) => j.status === "done"));
+}
+
 /**
  * useGenerationState — owns the generation state machine for the active scene.
  * Returns jobs, the active job, and the latest streamed preview payload.
@@ -88,11 +130,14 @@ export function useGenerationState(
   preview: PreviewPayload | null;
   seq: number;
 } {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const { jobs } = useProjectJobs(projectId);
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [seq, setSeq] = useState(0);
   const seqRef = useRef(0);
   seqRef.current = seq;
+  const lastInFlightJobIdRef = useRef<string | null>(null);
 
   // Scene-switch reset: the component is NOT remounted across scene changes,
   // so without this the prior scene's high-water seq would reject the new
@@ -103,30 +148,32 @@ export function useGenerationState(
     setPreview(null);
     setSeq(0);
     seqRef.current = 0;
+    lastInFlightJobIdRef.current = null;
   }, [sceneId]);
 
   useEffect(() => {
+    // Jobs list is shared via projectJobsStore. This effect keeps only the
+    // scene-specific preview frame fetch on its original cadence.
     let alive = true;
     const tick = async () => {
       // VISIBILITY_GATED_POLLING: skip network work while the tab is hidden;
       // the interval keeps ticking cheaply and the next visible tick resyncs.
       if (document.visibilityState === "hidden") return;
-      try {
-        const list = await api.listJobs(projectId);
-        if (!alive) return;
-        setJobs(list);
-        const job = list.find(
-          (j) => j.scene_id === scene?.id && (j.status === "queued" || j.status === "running"),
-        );
-        if (job && !pauseUpdates) {
+      const list = jobsRef.current;
+      const job = list.find(
+        (j) => j.scene_id === scene?.id && (j.status === "queued" || j.status === "running"),
+      );
+      if (job && !pauseUpdates) {
+        try {
           const p = await api.getJobPreview(job.id);
+          if (!alive) return;
           if (p.preview && (p.preview.sequenceNumber || 0) >= seqRef.current) {
             setSeq(p.preview.sequenceNumber || seqRef.current);
             setPreview(p.preview);
           }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
     };
     tick();
@@ -164,12 +211,12 @@ export function useGenerationState(
   }, [projectId, scene?.id, pauseUpdates, scene?.name]);
 
   const sceneJobs = jobs.filter((j) => j.scene_id === scene?.id);
-  const activeJob =
-    sceneJobs.find((j) => j.status === "queued" || j.status === "running") ||
-    // Newest terminal job wins — explicitly sorted, never reliant on listJobs
-    // response ordering (the failed-overlay dismissal logic depends on this).
-    sceneJobs.slice().sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))[0] ||
-    null;
+  const inFlight = sceneJobs.find((j) => j.status === "queued" || j.status === "running");
+  if (inFlight) lastInFlightJobIdRef.current = inFlight.id;
+  // Do not pin a historical newest-failed/cancelled job while idle. Failed
+  // overlay is reserved for the in-session in-flight job that just finished
+  // (and is not yet dismissed). Idle browsing with old failed jobs stays navy.
+  const activeJob = pickActivePreviewJob(sceneJobs, lastInFlightJobIdRef.current);
 
   return { jobs, activeJob, preview, seq };
 }
@@ -334,6 +381,7 @@ export function TimelinePreviewComposer({
   onPauseUpdatesChange,
   inlineActions = false,
   onDismissFailure,
+  onRetry,
 }: {
   project: Project;
   scene: Scene | undefined;
@@ -350,6 +398,7 @@ export function TimelinePreviewComposer({
   onPauseUpdatesChange?: (value: boolean) => void;
   inlineActions?: boolean;
   onDismissFailure?: (jobId: string) => void;
+  onRetry?: () => void;
 }) {
   const { activeJob, preview } = useGenerationState(project.id, scene, Boolean(pauseUpdates));
 
@@ -384,6 +433,7 @@ export function TimelinePreviewComposer({
         onPauseUpdatesChange={onPauseUpdatesChange}
         composition={composition}
         onDismissFailure={onDismissFailure}
+        onRetry={onRetry}
       />
       <TimelineDiagnostics selection={selection} composition={composition} reloadKey={0} saveError={null} />
     </>

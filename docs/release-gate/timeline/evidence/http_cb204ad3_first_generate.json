@@ -1,0 +1,18 @@
+{
+  "note": "Captured from live Comfy /history before supervisor --force restarted Comfy. History was empty after restart; MCP after-cert uses 06ef7737.",
+  "promptId": "cb204ad3-72b0-4a91-bec5-9d63748fb3f2",
+  "historyStatus": "success",
+  "checkpoint": "ltx-2.3-22b-distilled-fp8.safetensors",
+  "clipPositive": "UNCHANGED FACTS: environment, cameras, ERS\nSTARTING STATE (M2): beat Talking in Corridor\nENDING STATE (M3): beat Inside Combat Chamber\nSpecial Agent Jacob Barnes stands in the Observatory Control Room. Cool instrument light, slow cinematic hold, quiet tension, photoreal, 16:9.\nCamera: dolly in on dolly",
+  "startImage": "studio/imagegen_edit_97271e7a.png",
+  "ltxvImgToVideo": { "width": 1280, "height": 720, "length": 113 },
+  "outputMp4": {
+    "path": "studio/0ffe56e2_0/batch_bb_0b021_00002.mp4",
+    "width": 1280,
+    "height": 704,
+    "frames": 113,
+    "fps": 24,
+    "durationSec": 4.708333
+  },
+  "rootCause": "LTX /32 spatial snap. 720 is not legal. Capability and builder now claim/send 1280x704."
+}

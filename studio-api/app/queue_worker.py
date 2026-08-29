@@ -1058,6 +1058,21 @@ class JobQueue:
             if str(resolved_engine).lower() == "wan":
                 width = min(width, 832)
                 height = min(height, 480)
+            # Timeline compile is the resolution authority for batch jobs.
+            _tl_res = self._job_params(job)
+            if bool(_tl_res.get("timelineGeneration")):
+                tw = _tl_res.get("width")
+                th = _tl_res.get("height")
+                if isinstance(tw, int) and isinstance(th, int) and tw > 0 and th > 0:
+                    width, height = tw, th
+                else:
+                    res = str(_tl_res.get("resolution") or "")
+                    if "x" in res.lower():
+                        try:
+                            w_s, h_s = res.lower().split("x", 1)
+                            width, height = int(w_s), int(h_s)
+                        except ValueError:
+                            pass
 
             # TIMELINE_BATCH_LTX: when this render_scene job was submitted by the
             # LTX Timeline adapter (timelineGeneration=True), override the
@@ -1382,17 +1397,8 @@ class JobQueue:
                         text_encoder=settings.ltx_text_encoder,
                     )
 
-                try:
-                    history = await _run_graph(wf, workflow_key)
-                except Exception as first_err:
-                    if workflow_key == "ltx.scene" and start:
-                        job.message = f"Director submit failed, falling back to simple I2V: {first_err}"
-                        db.commit()
-                        contract.leaf_workflow_key = "ltx.simple_i2v"
-                        wf = _simple_i2v_workflow()
-                        history = await _run_graph(wf, "ltx.simple_i2v")
-                    else:
-                        raise
+                # No silent ltx.scene -> ltx.simple_i2v fallback. Surface the real error.
+                history = await _run_graph(wf, workflow_key)
 
                 if job.id in self._cancel:
                     from .comfy_client import JobCancelledError

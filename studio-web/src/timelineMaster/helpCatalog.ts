@@ -53,7 +53,7 @@ export const TIMELINE_HELP: Record<string, TimelineHelpEntry> = {
   resume_incomplete: {
     id: "resume_incomplete",
     title: "Resume Incomplete Jobs",
-    body: "Continues only Batches that have not completed. Successful Batches are not regenerated.",
+    body: "Re-queues cancelled or failed Batches so you can generate them again. A stopped render is not resumed mid-frame. Approved takes stay as they are.",
     scope: "scene",
   },
   mark_repair_range: {

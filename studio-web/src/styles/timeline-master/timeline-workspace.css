@@ -96,6 +96,14 @@
   overflow: hidden;
 }
 
+/* Idle/empty must stay a 16:9 navy monitor. Do not let the stage collapse
+   to the overlay.bad card height (~120px). */
+.timeline-workspace-monitor__body .live-preview-stage:has(.director-stage-empty) {
+  aspect-ratio: 16 / 9 !important;
+  width: 100%;
+  min-height: 220px;
+}
+
 .timeline-workspace-stack.is-fullscreen-viewer .timeline-workspace-monitor {
   flex: 1 1 auto;
   height: auto !important;
