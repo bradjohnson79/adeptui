@@ -14,6 +14,7 @@ export type ReferenceBindingView = {
   broken?: boolean;
   broken_reason?: string | null;
   duration_sec?: number | null;
+  scope_type?: string | null;
 };
 
 export function stripReferencePrefix(raw: string): string {
@@ -151,13 +152,56 @@ export function tokenAtCaret(
   };
 }
 
+function isListedGenerateBinding(item: ReferenceBindingView): boolean {
+  return isRealBindingId(item.id) && !String(item.id).startsWith("character:");
+}
+
+/** Prefer scene-scope / listed rows. Sibling (project-scope) ids resolve via asset_id. */
+export function resolveBinding(
+  id: string | null | undefined,
+  bindings: ReferenceBindingView[],
+  siblingBindings: ReferenceBindingView[] = [],
+): ReferenceBindingView | undefined {
+  const token = String(id || "").trim();
+  if (!token) return undefined;
+  const listedById = bindings.find((item) => item.id === token);
+  if (listedById) return listedById;
+  const listedByAsset = bindings.find((item) => item.asset_id === token && isListedGenerateBinding(item));
+  if (listedByAsset) return listedByAsset;
+  const sibling =
+    siblingBindings.find((item) => item.id === token) ||
+    siblingBindings.find((item) => item.asset_id === token);
+  if (sibling?.asset_id) {
+    const sceneRow =
+      bindings.find((item) => item.asset_id === sibling.asset_id && item.scope_type === "scene" && isListedGenerateBinding(item)) ||
+      bindings.find((item) => item.asset_id === sibling.asset_id && isListedGenerateBinding(item));
+    if (sceneRow) return sceneRow;
+  }
+  return undefined;
+}
+
+export function remapBindingIdsToSceneScope(
+  ids: string[] | null | undefined,
+  bindings: ReferenceBindingView[],
+  siblingBindings: ReferenceBindingView[] = [],
+): string[] {
+  const next: string[] = [];
+  for (const id of ids || []) {
+    const resolved = resolveBinding(id, bindings, siblingBindings);
+    const keep = resolved && isListedGenerateBinding(resolved) ? resolved.id : "";
+    if (keep && !next.includes(keep)) next.push(keep);
+  }
+  return next;
+}
+
 export function tokenSummary(
   ids: string[] | null | undefined,
   bindings: ReferenceBindingView[],
   limit = 3,
+  siblingBindings: ReferenceBindingView[] = [],
 ): string {
   const tokens = (ids || []).map((id) => {
-    const binding = bindings.find((item) => item.id === id);
+    const binding = resolveBinding(id, bindings, siblingBindings);
     if (!binding) return "Broken Reference";
     return displayToken(binding.alias || binding.asset_name, binding.media_kind);
   });
@@ -173,7 +217,7 @@ export function countBindingsByKind(
 ): { image: number; video: number; entity: number } {
   const counts = { image: 0, video: 0, entity: 0 };
   for (const id of ids || []) {
-    const binding = bindings.find((item) => item.id === id);
+    const binding = resolveBinding(id, bindings);
     const kind = binding?.media_kind || mediaKindForType(binding?.reference_type || "image");
     if (kind === "video") counts.video += 1;
     else if (kind === "entity") counts.entity += 1;

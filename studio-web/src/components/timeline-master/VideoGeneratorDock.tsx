@@ -124,11 +124,6 @@ export function VideoGeneratorDock({
             },
           })),
         });
-      } else {
-        const first = master?.batchBlocks[0];
-        if (first) {
-          await api.directorTimelinePatchBatch(projectId, scene.id, first.id, { generatorId });
-        }
       }
       await onRefresh();
     } finally {

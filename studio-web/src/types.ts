@@ -112,6 +112,13 @@ export interface Job {
   status: string;
   progress: number;
   message: string;
+  /** Same uuid as id when the Studio JobOut contract is present. */
+  jobId?: string;
+  reasonCode?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  /** Timeline generation job id when JobOut.jobId is absent. */
+  internalJobId?: string;
   stage?: string;
   preview_json?: string;
   params_json?: string;

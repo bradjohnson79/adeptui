@@ -22,6 +22,8 @@ export function AssetTray({
   onAddToTimeline,
   onAddAsReference,
   allowUpload = true,
+  libraryAssetIds,
+  onOpenLibrary,
 }: {
   project: Project;
   onChange: () => void;
@@ -30,6 +32,8 @@ export function AssetTray({
   onAddToTimeline?: (asset: Asset) => void;
   onAddAsReference?: (asset: Asset) => void;
   allowUpload?: boolean;
+  libraryAssetIds?: string[] | null;
+  onOpenLibrary?: () => void;
 }) {
   const { t } = useTranslation(["timeline", "library", "common"]);
   const [tag, setTag] = useState("");
@@ -51,10 +55,12 @@ export function AssetTray({
   // TIMELINE_LIBRARY_MEDIA_ONLY: the Library only lists media that can live
   // on a track (image/video/audio). Documents and other non-media are
   // excluded. "all" means all compatible media, never every asset kind.
-  const timelineAssets = useMemo(
-    () => project.assets.filter((a) => isTimelineMediaAsset(a)),
-    [project.assets],
-  );
+  const timelineAssets = useMemo(() => {
+    const media = project.assets.filter((a) => isTimelineMediaAsset(a));
+    if (!Array.isArray(libraryAssetIds)) return media;
+    const allow = new Set(libraryAssetIds);
+    return media.filter((a) => allow.has(a.id));
+  }, [libraryAssetIds, project.assets]);
   const filtered = timelineAssets.filter((a) => {
     if (filter !== "all" && normalizeTimelineMediaKind(a.kind, a.filename) !== filter) return false;
     const q = search.trim().toLowerCase();
@@ -68,6 +74,18 @@ export function AssetTray({
         title={t("timeline:library")}
         tip={t("timeline:libraryTip")}
       />
+      {onOpenLibrary ? (
+        <div className="row-actions">
+          <button
+            type="button"
+            className="primary"
+            data-testid="timeline-library-open"
+            onClick={onOpenLibrary}
+          >
+            {t("timeline:library")}
+          </button>
+        </div>
+      ) : null}
       {allowUpload ? (
         <>
           <p className="scene-meta">
@@ -183,6 +201,12 @@ export function AssetTray({
               onDragStart={(e) => {
                 e.dataTransfer.setData("application/x-adept-asset", a.id);
                 e.dataTransfer.setData("application/x-adept-kind", a.kind);
+                e.dataTransfer.setData("application/x-adept-name", a.tag || a.filename || "");
+                e.dataTransfer.setData("application/x-adept-project", a.project_id || project.id);
+                e.dataTransfer.setData(
+                  "application/x-adept-provenance",
+                  a.parent_asset_id || a.prompt_meta_json || "",
+                );
                 e.dataTransfer.effectAllowed = "copy";
               }}
             >

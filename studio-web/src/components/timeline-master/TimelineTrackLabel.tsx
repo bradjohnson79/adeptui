@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
-
-type TrackControl = "eye" | "lock" | "mute" | "solo";
+import {
+  trackControlLabel,
+  type TrackControl,
+} from "../../timelineMaster/trackFlags";
 
 function TrackGlyph({ name }: { name: TrackControl | "plus" }) {
   const common = { width: 12, height: 12, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: 1.4 };
@@ -47,12 +49,16 @@ export function TimelineTrackLabel({
   labelKey,
   testId,
   controls = ["eye", "lock"],
+  controlState,
+  onControlToggle,
   onAction,
 }: {
   label: string;
   labelKey?: string;
   testId?: string;
   controls?: TrackControl[];
+  controlState?: Partial<Record<TrackControl, boolean>>;
+  onControlToggle?: (control: TrackControl) => void;
   onAction?: () => void;
 }) {
   const { t } = useTranslation("timeline");
@@ -62,11 +68,24 @@ export function TimelineTrackLabel({
     <div className="timeline-v2__track-label" data-testid={testId || `timeline-v2-label-${slug}`}>
       <span className="timeline-v2__track-label-text">{text}</span>
       <div className="timeline-v2__track-label-tools">
-        {controls.map((control) => (
-          <span key={control} className="timeline-v2__track-label-icon" aria-hidden>
-            <TrackGlyph name={control} />
-          </span>
-        ))}
+        {controls.map((control) => {
+          const active = Boolean(controlState?.[control]);
+          const title = trackControlLabel(control, active, text);
+          return (
+            <button
+              key={control}
+              type="button"
+              className={`timeline-v2__track-label-icon${active ? " is-active" : ""}`}
+              aria-pressed={active}
+              aria-label={title}
+              title={title}
+              data-testid={`track-control-${slug}-${control}`}
+              onClick={() => onControlToggle?.(control)}
+            >
+              <TrackGlyph name={control} />
+            </button>
+          );
+        })}
         {onAction ? (
           <button
             type="button"

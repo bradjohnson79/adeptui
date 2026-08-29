@@ -127,7 +127,10 @@ export function TimelineToolbar({
   master: SceneTimelineMaster | null;
   onRefresh: () => void | Promise<void>;
   onPreflight: (result: { ok: boolean; findings: Array<{ severity: string; message: string; code?: string }> }) => void;
-  mutateTimeline: (mutator: (timeline: DirectorTimeline) => DirectorTimeline) => Promise<void>;
+  mutateTimeline: (
+    mutator: (timeline: DirectorTimeline) => DirectorTimeline,
+    opts?: { refresh?: boolean },
+  ) => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void | Promise<void>;

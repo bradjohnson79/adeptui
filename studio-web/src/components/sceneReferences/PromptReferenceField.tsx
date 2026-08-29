@@ -5,6 +5,8 @@ import {
   displayToken,
   isRealBindingId,
   mediaKindForType,
+  remapBindingIdsToSceneScope,
+  resolveBinding,
   tokenAtCaret,
   type ReferenceBindingView,
   type ReferenceTrack,
@@ -14,6 +16,7 @@ export function PromptReferenceField({
   text,
   bindingIds,
   bindings,
+  siblingBindings = [],
   maxImages,
   maxVideos,
   track = "prompt",
@@ -29,6 +32,7 @@ export function PromptReferenceField({
   text: string;
   bindingIds: string[];
   bindings: ReferenceBindingView[];
+  siblingBindings?: ReferenceBindingView[];
   maxImages?: number | null;
   maxVideos?: number | null;
   track?: Extract<ReferenceTrack, "prompt" | "camera">;
@@ -70,7 +74,11 @@ export function PromptReferenceField({
       onReject(`This generator supports up to ${maxVideos} video references for this clip.`);
       return;
     }
-    const nextIds = bindingIds.includes(resolved.id) ? bindingIds : [...bindingIds, resolved.id];
+    const remappedExisting = remapBindingIdsToSceneScope(bindingIds, bindings, siblingBindings);
+    const sceneMatch = resolveBinding(resolved.id, bindings, siblingBindings);
+    const storeId =
+      sceneMatch && isRealBindingId(sceneMatch.id) ? sceneMatch.id : resolved.id;
+    const nextIds = remappedExisting.includes(storeId) ? remappedExisting : [...remappedExisting, storeId];
     onBindingsChange(nextIds);
     if (insertToken) {
       const token = displayToken(resolved.alias || resolved.asset_name, resolved.media_kind);
@@ -117,7 +125,7 @@ export function PromptReferenceField({
       </div>
       <div className="prompt-ref-field__chips" data-testid="prompt-ref-chips">
         {bindingIds.map((id) => {
-          const binding = bindings.find((item) => item.id === id);
+          const binding = resolveBinding(id, bindings, siblingBindings);
           const broken = !binding || Boolean(binding.broken);
           const label = broken
             ? `Broken Reference${binding?.alias ? ` ${binding.alias}` : ""}`

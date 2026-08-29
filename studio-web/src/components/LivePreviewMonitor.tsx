@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import type { Asset, Job, Project, Scene } from "../types";
 import { api } from "../api";
 import { apiUrl } from "../runtime/apiBase";
+import { useProjectJobs } from "../runtime/projectJobsStore";
 import { aspectCssValue } from "../workspacePrefs";
-import { formatJobTimestamp } from "../lib/formatDuration";
 import { PanelHeading } from "./HelpTip";
 import type { PreviewComposition } from "./timeline-master/TimelinePreviewComposer";
+import { localGenerationFailureCopy, previewMonitorPhase, resolvePreviewJobId } from "./livePreviewFailure";
 
 export type PreviewMonitorState =
   | "idle"
@@ -53,6 +54,7 @@ export function LivePreviewMonitor({
    */
   composition,
   onDismissFailure,
+  onRetry,
 }: {
   project: Project;
   scene?: Scene;
@@ -86,9 +88,15 @@ export function LivePreviewMonitor({
   composition?: PreviewComposition;
   /** Creator acknowledgment of a terminal failure — clears the failed overlay. */
   onDismissFailure?: (jobId: string) => void;
+  /** Re-queue via the existing Timeline generate path — not a parallel payload. */
+  onRetry?: () => void;
 }) {
   const { t } = useTranslation("timeline");
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const composed = composition;
+  const projectJobs = useProjectJobs(composed ? undefined : project.id);
+  const jobs = composed ? [] : projectJobs.jobs;
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
   const [preview, setPreview] = useState<PreviewPayload | null>(null);
   const [seq, setSeq] = useState(0);
   const [hideOverlayLocal, setHideOverlayLocal] = useState(false);
@@ -109,11 +117,6 @@ export function LivePreviewMonitor({
     if (onPauseUpdatesChange) onPauseUpdatesChange(value);
     else setPauseUpdatesLocal(value);
   };
-
-  // When a composition is provided (Timeline path via TimelinePreviewComposer),
-  // it is the SOLE source of truth — we derive all display state from it and
-  // skip the legacy internal resolution (PREVIEW_COMPOSER_IS_SOLE_SOURCE_OF_TRUTH).
-  const composed = composition;
 
   const activeJob = composed
     ? composed.kind === "preparing" ||
@@ -185,28 +188,27 @@ export function LivePreviewMonitor({
   }, [libraryAsset]);
 
   useEffect(() => {
-    // Generation state polling is owned by TimelinePreviewComposer on the
-    // Timeline path. Only poll here for legacy/non-composed callers.
+    // Jobs list polling is shared via projectJobsStore. This effect only keeps
+    // the legacy scene-preview frame fetch on its original cadence.
     if (composed) return;
     let alive = true;
     const tick = async () => {
       if (document.visibilityState === "hidden") return;
-      try {
-        const list = await api.listJobs(project.id);
-        if (!alive) return;
-        setJobs(list);
-        const job = list.find(
-          (j) => j.scene_id === scene?.id && (j.status === "queued" || j.status === "running")
-        );
-        if (job && !pauseUpdates) {
+      const list = jobsRef.current;
+      const job = list.find(
+        (j) => j.scene_id === scene?.id && (j.status === "queued" || j.status === "running"),
+      );
+      if (job && !pauseUpdates) {
+        try {
           const p = await api.getJobPreview(job.id);
+          if (!alive) return;
           if (p.preview && (p.preview.sequenceNumber || 0) >= seq) {
             setSeq(p.preview.sequenceNumber || seq);
             setPreview(p.preview);
           }
+        } catch {
+          /* ignore */
         }
-      } catch {
-        /* ignore */
       }
     };
     tick();
@@ -380,8 +382,14 @@ export function LivePreviewMonitor({
     onClearLibraryAsset,
   ]);
 
+  const phase = previewMonitorPhase(monitorState);
+  const failureCopy =
+    monitorState === "failed"
+      ? localGenerationFailureCopy({ id: activeJob?.id, jobId: activeJob?.jobId, internalJobId: activeJob?.internalJobId, message: activeJob?.message, stage: activeJob?.stage, status: activeJob?.status, reasonCode: activeJob?.reasonCode, errorCode: activeJob?.errorCode, errorMessage: activeJob?.errorMessage, historyJson: activeJob?.history_json })
+      : null;
+
   return (
-    <div className="panel live-preview-monitor" data-testid="live-preview-monitor">
+    <div className="panel live-preview-monitor" data-testid="live-preview-monitor" data-preview-state={phase}>
       <PanelHeading
         title={t("previewMonitor")}
         tip="Click a Library asset to preview it here. During renders, live generation frames appear when the engine provides them."
@@ -433,6 +441,10 @@ export function LivePreviewMonitor({
               style={{ objectFit: fit }}
             />
           )
+        ) : (monitorState === "failed" || monitorState === "cancelled") ? (
+          // Navy empty fill only — Idle copy must never sit under overlay.bad.
+          // Failed/cancelled chrome is the overlay card with real failureCopy.
+          <div className="director-stage-empty" data-testid="live-preview-empty-stage" aria-hidden="true" />
         ) : (
           <div className="director-stage-empty">
             <strong>{monitorState === "preparing" ? "Preparing…" : "Idle"}</strong>
@@ -480,7 +492,7 @@ export function LivePreviewMonitor({
               {scene?.name} — {scene?.engine}
             </div>
             <div className="scene-meta">
-              {activeJob?.stage || activeJob?.message || monitorState} ·{" "}
+              {activeJob?.stage || phase} ·{" "}
               {Math.round((activeJob?.progress || 0) * 100)}%
             </div>
             {capsUnsupported && (
@@ -491,24 +503,46 @@ export function LivePreviewMonitor({
           </div>
         )}
 
-        {monitorState === "failed" && !showingLibrary && (
-          <div className="live-preview-overlay bad" data-testid="live-preview-failed-overlay">
-            <strong>
-              Render failed
-              {activeJob?.updated_at ? ` · ${formatJobTimestamp(activeJob.updated_at)}` : ""}
-            </strong>
-            {activeJob?.message ? <div className="scene-meta">{activeJob.message}</div> : null}
-            <div className="scene-meta">Latest draft preview preserved when available.</div>
-            {onDismissFailure && activeJob ? (
-              <button
-                type="button"
-                className="ghost"
-                data-testid="live-preview-dismiss-failure"
-                title="Clear this failure message and return to the preview — the job history is kept"
-                onClick={() => onDismissFailure(activeJob.id)}
-              >
-                Dismiss
-              </button>
+        {monitorState === "failed" && !showingLibrary && failureCopy && (
+          <div
+            className="live-preview-overlay bad"
+            data-testid="live-preview-failed-overlay"
+            aria-live="polite"
+          >
+            <strong data-testid="live-preview-failed-title">{failureCopy.title}</strong>
+            <div className="scene-meta" data-testid="live-preview-failed-reason">
+              {failureCopy.reason}
+            </div>
+            <div className="live-preview-failed-actions">
+              {onRetry ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid="live-preview-retry"
+                  title="Retry local generation"
+                  aria-label="Retry local generation"
+                  onClick={() => onRetry()}
+                >
+                  Retry
+                </button>
+              ) : null}
+              {onDismissFailure && activeJob ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  data-testid="live-preview-dismiss-failure"
+                  title="Clear this failure message and return to the preview — the job history is kept"
+                  onClick={() => onDismissFailure(resolvePreviewJobId(activeJob) || activeJob.id)}
+                >
+                  Dismiss
+                </button>
+              ) : null}
+            </div>
+            {failureCopy.details ? (
+              <details className="live-preview-failed-details" data-testid="live-preview-failed-details">
+                <summary>Details</summary>
+                <pre data-testid="live-preview-failed-diagnostics">{failureCopy.details}</pre>
+              </details>
             ) : null}
           </div>
         )}

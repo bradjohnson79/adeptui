@@ -5,6 +5,8 @@ import {
   displayToken,
   formatAutocompleteRow,
   parseTokenQuery,
+  remapBindingIdsToSceneScope,
+  resolveBinding,
   sanitizeAlias,
   sortBindingsForTrack,
   tokenSummary,
@@ -118,4 +120,31 @@ test("camera autocomplete lists characters before videos", () => {
   };
   const sorted = sortBindingsForTrack([video, cup, korri], "camera");
   assert.deepEqual(sorted.map((item) => item.alias), ["Korri", "Cup", "Macarena"]);
+});
+
+test("sibling-scope project id resolves to scene-scope row by asset_id", () => {
+  const sceneRow = {
+    id: "scene-bind",
+    asset_id: "asset-k",
+    alias: "KorriPoseVideo",
+    media_kind: "video" as const,
+    reference_type: "video",
+    scope_type: "scene",
+  };
+  const projectRow = {
+    id: "project-bind",
+    asset_id: "asset-k",
+    alias: "KorriDanceMotion",
+    media_kind: "video" as const,
+    reference_type: "video",
+    scope_type: "project",
+  };
+  const resolved = resolveBinding("project-bind", [sceneRow], [projectRow]);
+  assert.equal(resolved?.id, "scene-bind");
+  assert.equal(resolved?.alias, "KorriPoseVideo");
+  assert.deepEqual(
+    remapBindingIdsToSceneScope(["project-bind"], [sceneRow], [projectRow]),
+    ["scene-bind"],
+  );
+  assert.equal(tokenSummary(["project-bind"], [sceneRow], 3, [projectRow]), "*KorriPoseVideo");
 });

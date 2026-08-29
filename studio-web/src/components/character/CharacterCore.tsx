@@ -22,7 +22,7 @@ import {
 } from "./characterGeneratorPlan";
 import { candidateAssetId, resolveActiveCrsCard } from "./activeCrsCard";
 import { approvedHistoricalRevisions, type CharacterCandidate, type GeneratorOption } from "./types";
-import { getHeroIdentity, getReferenceImage, useCharacterProfile } from "./useCharacterProfile";
+import { getHeroIdentity, useCharacterProfile } from "./useCharacterProfile";
 import "./characterCore.css";
 
 type Props = {
@@ -44,8 +44,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const { profile, references } = cp;
 
   const [plan, setPlan] = useState<CharacterGeneratorPlan>(DEFAULT_CHARACTER_GENERATOR_PLAN);
-  const [localOptions, setLocalOptions] = useState<GeneratorOption[]>([]);
-  const [apiOptions, setApiOptions] = useState<GeneratorOption[]>([]);
   const [candidates, setCandidates] = useState<CharacterCandidate[]>([]);
   const [history, setHistory] = useState<CharacterCandidate[]>([]);
   const [profileDirty, setProfileDirty] = useState(false);
@@ -56,7 +54,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const [approveTarget, setApproveTarget] = useState<CharacterCandidate | null>(null);
   const [rejectTarget, setRejectTarget] = useState<CharacterCandidate | null>(null);
   const [crsActionBusy, setCrsActionBusy] = useState(false);
-  const retryHandlerRef = useRef<((candidate: CharacterCandidate) => void) | null>(null);
   const prefsHydratedRef = useRef(false);
   const prefsTimerRef = useRef<number | null>(null);
   const rawPrefsRef = useRef<unknown>(null);
@@ -64,8 +61,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
   const inventoryRef = useRef<{ localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] } | null>(null);
 
   const hero = useMemo(() => getHeroIdentity(references), [references]);
-  const referenceImage = useMemo(() => getReferenceImage(references), [references]);
-  const hasReference = !!referenceImage?.asset_id;
   const productionReady = (profile?.approval_status || "").toLowerCase() === "approved";
 
   const saved = !!profile?.id;
@@ -90,17 +85,6 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
       setPlan(hydratePlanFromPreferences(prefs, inv.localOptions, apiModels));
     },
     [],
-  );
-
-  const handleInventory = useCallback(
-    (inv: { localOptions: GeneratorOption[]; apiOptions: GeneratorOption[] }) => {
-      inventoryRef.current = inv;
-      setLocalOptions(inv.localOptions);
-      setApiOptions(inv.apiOptions);
-      if (packLoadedRef.current) applyHydration(rawPrefsRef.current, inv);
-      if (packLoadedRef.current) prefsHydratedRef.current = true;
-    },
-    [applyHydration],
   );
 
   useEffect(() => {

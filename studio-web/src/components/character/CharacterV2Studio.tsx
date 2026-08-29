@@ -60,7 +60,7 @@ export function CharacterV2Studio({ projectId, characterId, mode, saved }: Props
       "VISION_FRONT",
       "VISION_BOTH_UPDATING_JSON",
     ].includes(String(state?.phase || ""));
-    const views = state?.views || {};
+    const views = (state?.views ?? {}) as Partial<Record<ViewName, ViewSlot>>;
     const live = Object.values(views).some((v) => ["generating", "queued", "running"].includes(String(v?.status || "")));
     if (!generating && !live) {
       if (pollRef.current) window.clearInterval(pollRef.current);
@@ -94,7 +94,7 @@ export function CharacterV2Studio({ projectId, characterId, mode, saved }: Props
     return <p className="cc-v2__hint">Save the character first. The profile becomes the character file before any picture is made.</p>;
   }
 
-  const views = state?.views || {};
+  const views = (state?.views ?? {}) as Partial<Record<ViewName, ViewSlot>>;
   const lock = state?.visualLock?.status || "none";
   const rev2 = state?.revision2?.status || "none";
   const frontOk = Boolean(views.front?.approved && lock === "ok");

@@ -3663,6 +3663,19 @@ export const api = {
     req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/master`,
     ),
+  directorTimelinePutMaster: (
+    projectId: string,
+    sceneId: string,
+    master: import("./timelineMaster/contracts").SceneTimelineMaster,
+  ) =>
+    req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/master`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ master }),
+      },
+    ),
   directorTimelineDismissFailure: (projectId: string, sceneId: string, jobId: string) =>
     req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/dismiss-failure`,
