@@ -24,6 +24,7 @@ from app.director_timeline_w46.generation.registry import (
     get_registry,
 )
 from app.director_timeline_w46.generation.request_builder import build_timeline_generation_request
+from app.minimax_h3.route_a_adapter import experimental_duration_seconds
 from app.director_timeline_w46.contracts import ExecutionSnapshot
 
 
@@ -456,6 +457,7 @@ def test_minimax_submit_mocked_adapter(db_scene):
         batch_id,
         {
             "generatorId": "minimax-h3-t2v-local",
+            "plannedDuration": experimental_duration_seconds(),
             "promptSegments": [
                 {
                     "id": "ps1",

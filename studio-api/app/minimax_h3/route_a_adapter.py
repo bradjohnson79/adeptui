@@ -50,6 +50,26 @@ EXPERIMENTAL_WIDTH = 480
 EXPERIMENTAL_HEIGHT = 256
 EXPERIMENTAL_LENGTH = 5
 EXPERIMENTAL_STEPS = 4
+EXPERIMENTAL_CREATE_VIDEO_FPS = 24.0
+
+
+def experimental_duration_seconds() -> float:
+    """Wall-clock seconds implied by EXPERIMENTAL_LENGTH frames at CreateVideo fps."""
+    return EXPERIMENTAL_LENGTH / EXPERIMENTAL_CREATE_VIDEO_FPS
+
+
+def measured_media_duration_seconds(media: Any) -> float | None:
+    """Return Route A ffprobe media.durationSeconds, or None if missing/non-positive."""
+    if not isinstance(media, dict):
+        return None
+    raw = media.get("durationSeconds")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
 
 
 @dataclass
@@ -134,7 +154,7 @@ def build_t2va_graph(prompt: str, *, seed: int, filename_prefix: str) -> dict[st
         "12": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["10", 0], "vae": ["4", 0]}},
         "13": {
             "class_type": "CreateVideo",
-            "inputs": {"images": ["11", 0], "fps": 24.0, "audio": ["12", 0], "bit_depth": 8},
+            "inputs": {"images": ["11", 0], "fps": EXPERIMENTAL_CREATE_VIDEO_FPS, "audio": ["12", 0], "bit_depth": 8},
         },
         "14": {
             "class_type": "SaveVideo",

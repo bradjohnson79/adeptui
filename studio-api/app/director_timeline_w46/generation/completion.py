@@ -111,6 +111,15 @@ def _stash_generation_lineage(
     store.save_master(db, project_id, scene_id, master)
 
 
+
+def result_duration_seconds(result: TimelineGenerationResult) -> float:
+    """Measured clip length. Missing/invalid duration is 0 — never a fake 5.0s."""
+    try:
+        return float(result.duration) if result.duration is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def apply_shared_completion(
     db: Session,
     *,
@@ -139,7 +148,8 @@ def apply_shared_completion(
         }
 
     asset_id = str(result.outputAssetIds[0])
-    duration = float(result.duration or 5.0)
+    duration = result_duration_seconds(result)
+
 
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):

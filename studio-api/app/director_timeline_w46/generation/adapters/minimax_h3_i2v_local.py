@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from ....minimax_h3.contracts import AdeptMiniMaxH3Request, H3ReferenceAssignment, H3TimelineContext
+from ....minimax_h3.route_a_adapter import (
+    EXPERIMENTAL_CREATE_VIDEO_FPS,
+    EXPERIMENTAL_LENGTH,
+    experimental_duration_seconds,
+    measured_media_duration_seconds,
+)
 from ....minimax_h3.service import cancel as h3_cancel
 from ....minimax_h3.service import create_job_or_block, get_job, prepare_plan
 from ..adapter import validate_against_capabilities
@@ -36,7 +42,7 @@ def _capabilities() -> VideoGeneratorCapabilities:
         maximumReferenceImages=1,
         maximumReferenceVideos=0,
         maximumReferenceAudio=0,
-        supportedDurations=[5.0],
+        supportedDurations=[experimental_duration_seconds()],
         supportedResolutions=["480x256"],
         supportedAspectRatios=["≈16:9"],
         supportsSeed=True,
@@ -45,6 +51,8 @@ def _capabilities() -> VideoGeneratorCapabilities:
         executable=True,
         notes=(
             "Experimental Private Profile — image-to-video with native audio. "
+            f"{EXPERIMENTAL_LENGTH} frames at {EXPERIMENTAL_CREATE_VIDEO_FPS:g} fps "
+            "(not a 5s or 15s Timeline generator). "
             "Requires a start image; never silently falls back to text-to-video. "
             "Draft Mode is unavailable — this profile only generates at 480x256."
         ),
@@ -93,7 +101,7 @@ class MiniMaxH3I2VLocalAdapter:
             sourceSurface="timeline",
             mode="one-frame",
             deployment="local_weights",
-            durationSec=float(request.duration or 5.0),
+            durationSec=float(request.duration or experimental_duration_seconds()),
             referenceAssignments=[
                 H3ReferenceAssignment(
                     role="start",
@@ -298,6 +306,20 @@ class MiniMaxH3I2VLocalAdapter:
                 errorMessage="I2V path produced a T2V workflow id — refused.",
                 providerMetadata=status.providerMetadata,
             )
+        media = status.providerMetadata.get("media") or {}
+        duration = measured_media_duration_seconds(media)
+        if duration is None:
+            return TimelineGenerationResult(
+                internalJobId=job.internalJobId,
+                providerJobId=job.providerJobId,
+                queueJobId=job.queueJobId,
+                generatorId=GENERATOR_ID,
+                status="failed",
+                apiUsed=status.apiUsed,
+                providerMetadata=status.providerMetadata,
+                errorCode="H3_DURATION_UNMEASURED",
+                errorMessage="MiniMax I2V completed but media.durationSeconds was not measured.",
+            )
         return TimelineGenerationResult(
             internalJobId=job.internalJobId,
             providerJobId=job.providerJobId,
@@ -306,7 +328,7 @@ class MiniMaxH3I2VLocalAdapter:
             status="completed",
             progress=1.0,
             outputAssetIds=[str(asset_id)],
-            duration=5.0,
+            duration=duration,
             resolution="480x256",
             apiUsed=bool(prov.get("apiUsed", False)),
             providerMetadata={
