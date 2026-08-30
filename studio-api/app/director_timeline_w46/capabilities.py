@@ -8,6 +8,7 @@ from .contracts import GeneratorCapability, InPaintStrategy
 
 
 def list_generators() -> list[GeneratorCapability]:
+    from ..minimax_h3.route_a_adapter import experimental_duration_seconds
     from ..video_runtime.hunyuan_providers import HUNYUAN_13B, HUNYUAN_15, describe_provider
     from .generation.adapters.stub_cert import stub_enabled
 
@@ -20,7 +21,7 @@ def list_generators() -> list[GeneratorCapability]:
             locality="local",
             providerId="minimax-h3",
             capabilityLabel="Testing",
-            maxDurationSec=5.0,
+            maxDurationSec=experimental_duration_seconds(),
             supportsStartEndFrame=False,
             supportsContinuation=False,
             inPaintStrategies=["complete_batch_retake"],
@@ -222,7 +223,16 @@ def list_generators() -> list[GeneratorCapability]:
 def get_generator(generator_id: str | None) -> GeneratorCapability | None:
     if not generator_id:
         return None
-    return next((g for g in list_generators() if g.id == generator_id), None)
+    gens = list_generators()
+    match = next((g for g in gens if g.id == generator_id), None)
+    if match:
+        return match
+    # MiniMax T2V/I2V aliases share the MiniMax H3 capability row (same duration authority).
+    from .generation.adapters.minimax_h3_i2v_local import ALIASES as minimax_i2v_aliases
+    from .generation.adapters.minimax_h3_local import ALIASES as minimax_t2v_aliases
+    if generator_id in minimax_t2v_aliases or generator_id in minimax_i2v_aliases:
+        return next((g for g in gens if g.id == "minimax-h3-local"), None)
+    return None
 
 
 def registry_snapshot() -> dict[str, Any]:

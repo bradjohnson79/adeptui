@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from app.director_timeline_w46.capabilities import get_generator, list_generators, validate_duration
 from app.director_timeline_w46.generation.adapters.minimax_h3_i2v_local import MiniMaxH3I2VLocalAdapter
 from app.director_timeline_w46.generation.adapters.minimax_h3_local import MiniMaxH3LocalAdapter
 from app.director_timeline_w46.generation.completion import result_duration_seconds
@@ -87,6 +88,54 @@ def test_supported_durations_match_experimental_route_a_not_five_seconds():
         assert "not a 5s or 15s timeline generator" in lower
         assert "5.0s" not in lower
         assert "production-ready" not in lower
+
+
+def test_list_generators_minimax_max_duration_matches_experimental_not_five():
+    expected = experimental_duration_seconds()
+    gens = list_generators()
+    mini_rows = [g for g in gens if g.id == "minimax-h3-local"]
+    assert len(mini_rows) == 1
+    assert mini_rows[0].maxDurationSec == expected
+    assert mini_rows[0].maxDurationSec != 5.0
+    # Shared table: other generators keep their own maxDurationSec values.
+    by_id = {g.id: g.maxDurationSec for g in gens}
+    assert by_id["ltx-local"] == 20.0
+    assert by_id["wan-local"] == 8.0
+    assert by_id["kling-fal"] == 10.0
+    assert "minimax-h3-i2v-local" not in by_id
+
+
+def test_validate_duration_rejects_five_seconds_for_minimax_ids():
+    expected = experimental_duration_seconds()
+    ids = (
+        "minimax-h3-local",
+        "minimax-h3",
+        "minimax-h3-t2v-local",
+        "minimax-h3-i2v-local",
+        "minimax-h3-i2v",
+    )
+    for gid in ids:
+        gen = get_generator(gid)
+        assert gen is not None, gid
+        assert gen.maxDurationSec == expected
+        rejected = validate_duration(gid, 5.0)
+        assert rejected["ok"] is False, gid
+        assert rejected["action"] != "keep", gid
+        assert rejected["maxDurationSec"] == expected
+        kept = validate_duration(gid, expected)
+        assert kept["ok"] is True, gid
+        assert kept["action"] == "keep", gid
+        assert kept["maxDurationSec"] == expected
+
+
+def test_validate_duration_other_generators_unchanged():
+    ltx_ok = validate_duration("ltx-local", 5.0)
+    assert ltx_ok["ok"] is True
+    assert ltx_ok["action"] == "keep"
+    assert ltx_ok["maxDurationSec"] == 20.0
+    ltx_over = validate_duration("ltx-local", 30.0)
+    assert ltx_over["ok"] is False
+    assert ltx_over["maxDurationSec"] == 20.0
 
 
 def test_measured_media_duration_seconds_rejects_missing_and_nonpositive():
