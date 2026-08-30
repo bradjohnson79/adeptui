@@ -11,6 +11,8 @@ import { formatBatchStatus } from "../../timelineMaster/contracts";
 import { formatDurationSeconds } from "../../lib/formatDuration";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import {
+  dropTombstonedPrompts,
+  isPromptTombstoned,
   normalizeLipSyncTracks,
   type CameraClip,
   type DirectorTimeline,
@@ -253,13 +255,12 @@ export function TimelineInspector({
     let alive = true;
     void api.getDirector(project.id, scene.id).then((result) => {
       if (!alive) return;
-      // Do not clobber local timeline while an inspector field is focused.
-      const active = document.activeElement as HTMLElement | null;
-      if (active && active.closest?.("[data-testid='timeline-inspector']")) {
-        const tag = active.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) return;
-      }
-      setTimeline(result as DirectorTimeline);
+      const incoming = result as DirectorTimeline;
+      const cleaned = {
+        ...incoming,
+        prompt_segments: dropTombstonedPrompts(incoming.prompt_segments || []),
+      };
+      setTimeline(cleaned);
     });
     return () => {
       alive = false;
@@ -565,7 +566,7 @@ export function TimelineInspector({
 
   const persistPromptSegText = useCallback(
     async (text: string) => {
-      if (!selectedPrompt) return;
+      if (!selectedPrompt || isPromptTombstoned(selectedPrompt.id)) return;
       await updatePrompt(selectedPrompt, { text }, { refresh: false });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

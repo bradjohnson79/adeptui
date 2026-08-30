@@ -21,6 +21,13 @@ import {
 import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
 import { TimelineTrackLabel } from "./timeline-master/TimelineTrackLabel";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
+import { runTimelineCommand } from "../timelineMaster/timelineHotkeys";
+import {
+  bindInspectingPrompt,
+  bindShellTimelineMutate,
+  dropPromptIdsFromMaster,
+  getBoundShellTimelineMutate,
+} from "./timeline-master/timelineMutateBridge";
 import { formatBatchStatus } from "../timelineMaster/contracts";
 import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
 // TS6133 unblock: JSX usage removed by in-progress refactor; keep symbol for re-wire.
@@ -151,6 +158,84 @@ export type DirectorTimeline = {
 
 function nid() {
   return Math.random().toString(36).slice(2, 10);
+}
+
+/** Deleted Timed Prompt ids that GET/overlay must not treat as pending drafts. */
+const deletedPromptIds = new Set<string>();
+
+export function tombstonePromptId(id: string) {
+  if (id) deletedPromptIds.add(id);
+}
+
+export function forgetPromptTombstone(id: string) {
+  if (id) deletedPromptIds.delete(id);
+}
+
+export function isPromptTombstoned(id: string | null | undefined): boolean {
+  return Boolean(id && deletedPromptIds.has(id));
+}
+export function dropTombstonedPrompts<
+  T extends { id?: string | null; legacyPromptSegmentId?: string | null },
+>(segments: T[] | null | undefined): T[] {
+  const seen = new Set<string>();
+  const next: T[] = [];
+  for (const seg of segments || []) {
+    if (seg.id && deletedPromptIds.has(seg.id)) continue;
+    if (seg.legacyPromptSegmentId && deletedPromptIds.has(seg.legacyPromptSegmentId)) continue;
+    if (seg.id) {
+      if (seen.has(seg.id)) continue;
+      seen.add(seg.id);
+    }
+    next.push(seg);
+  }
+  return next;
+}
+
+/** Overlay GET director with in-memory drafts. Deleted prompt ids are never pending drafts. */
+export function overlayLiveTimeline(live: DirectorTimeline, memory: DirectorTimeline | null): DirectorTimeline {
+  if (!memory) {
+    return { ...live, prompt_segments: dropTombstonedPrompts(live.prompt_segments || []) };
+  }
+  const memPromptList = memory.prompt_segments || [];
+  const memPrompts = new Map(memPromptList.filter((row) => row.id).map((row) => [row.id, row]));
+  const livePrompts = live.prompt_segments || [];
+  const prompt_segments = dropTombstonedPrompts([
+    ...livePrompts.map((row) => (row.id && memPrompts.has(row.id) ? { ...row, ...memPrompts.get(row.id) } : row)),
+    // Keep pending clips that exist only in editor memory with no id yet.
+    // Do not re-union ids missing from live — those are deletes, not drafts.
+    ...memPromptList.filter((row) => !row.id),
+  ]);
+  return { ...live, prompt_segments };
+}
+
+export { bindShellTimelineMutate, getBoundShellTimelineMutate };
+
+export function syncPromptTombstones(before: DirectorTimeline, after: DirectorTimeline) {
+  const beforeIds = new Set((before.prompt_segments || []).map((seg) => seg.id).filter(Boolean));
+  const afterIds = new Set((after.prompt_segments || []).map((seg) => seg.id).filter(Boolean));
+  for (const id of beforeIds) {
+    if (!afterIds.has(id)) tombstonePromptId(id);
+  }
+  for (const id of afterIds) {
+    if (!beforeIds.has(id)) forgetPromptTombstone(id);
+  }
+}
+
+export function promptIdsOf(timeline: DirectorTimeline | null | undefined): Set<string> {
+  return new Set((timeline?.prompt_segments || []).map((seg) => seg.id).filter(Boolean));
+}
+
+export function omitPromptFromMasterBatches<
+  T extends { id: string; promptSegments?: Array<{ id: string; legacyPromptSegmentId?: string | null }> },
+>(batches: T[] | null | undefined, removedIds: Iterable<string>): T[] {
+  const removed = removedIds instanceof Set ? removedIds : new Set(removedIds);
+  if (!removed.size) return batches || [];
+  return (batches || []).map((batch) => ({
+    ...batch,
+    promptSegments: (batch.promptSegments || []).filter(
+      (seg) => !removed.has(seg.id) && !removed.has(seg.legacyPromptSegmentId || ""),
+    ),
+  }));
 }
 
 function pct(start: number, length: number, duration: number) {
@@ -330,6 +415,7 @@ export function DirectorTracks({
   reloadKey = 0,
   master = null,
   shellMode = false,
+  mutateTimeline,
 }: {
   project: Project;
   scene?: Scene;
@@ -343,6 +429,10 @@ export function DirectorTracks({
   reloadKey?: number;
   master?: SceneTimelineMaster | null;
   shellMode?: boolean;
+  mutateTimeline?: (
+    mutator: (timeline: DirectorTimeline) => DirectorTimeline,
+    opts?: { refresh?: boolean },
+  ) => Promise<void>;
 }) {
   const { t } = useTranslation("timeline");
   void t;
@@ -374,6 +464,8 @@ export function DirectorTracks({
   const [workspaceLayout, setWorkspaceLayout] = useState(() => loadTimelineWorkspaceLayout());
   const [rulerHoverSec, setRulerHoverSec] = useState<number | null>(null);
   const [undoSnapshot, setUndoSnapshot] = useState<DirectorTimeline | null>(null);
+  const [removeNotice, setRemoveNotice] = useState(false);
+  const [promptModalId, setPromptModalId] = useState<string | null>(null);
   const boardScrollRef = useRef<HTMLDivElement>(null);
   // Scroll-aware batch windowing (100+ batches): the render window tracks the
   // visible scroll range in addition to playhead/selection, so scrolling to a
@@ -507,17 +599,29 @@ export function DirectorTracks({
       .getDirector(project.id, scene.id)
       .then((d) => {
         if (cancelled || token !== loadTokenRef.current) return;
-        const next = {
+        const incoming = {
           ...d,
           image_clips: freeImageClips(d as DirectorTimeline),
           video_reference_clips: (d as DirectorTimeline).video_reference_clips || [],
           image_reference_clips: (d as DirectorTimeline).image_reference_clips || [],
           lipsync: { tracks: normalizeLipSyncTracks((d as DirectorTimeline).lipsync?.tracks) },
         } as DirectorTimeline;
-        setTl(next);
+        let next: DirectorTimeline = incoming;
+        setTl((prev) => {
+          next = overlayLiveTimeline(incoming, prev);
+          return next;
+        });
         setSelectedSeg((prev) => {
           if (prev && next.prompt_segments.some((s) => s.id === prev)) return prev;
-          return next.prompt_segments[0]?.id;
+          if (
+            sel?.selection?.kind === "promptSeg" &&
+            sel.selection.id &&
+            next.prompt_segments.some((s) => s.id === sel.selection.id)
+          ) {
+            return sel.selection.id;
+          }
+          // Never treat a deleted Timed Prompt as a pending draft / remaining[0] selection.
+          return undefined;
         });
         onPlayheadChange?.(next.playhead || 0);
         const layout = loadTimelineWorkspaceLayout();
@@ -652,7 +756,8 @@ export function DirectorTracks({
       ...next,
       lipsync: { tracks: normalizeLipSyncTracks(next.lipsync?.tracks) },
     } as DirectorTimeline;
-    // Preserve local drafts immediately so a failed save never loses edits.
+    // Canonical persist: PUT `next` only. Never extras-union omitted
+    // prompt_segments from a bound shell snapshot — that re-inserts deleted Timed Prompts.
     setTl(normalized);
     setSaving(true);
     try {
@@ -666,6 +771,39 @@ export function DirectorTracks({
     } finally {
       setSaving(false);
     }
+  };
+
+  const persistMasterPromptRemoval = async (removedIds: Iterable<string>) => {
+    if (!master || !scene) return;
+    const removed = removedIds instanceof Set ? removedIds : new Set(removedIds);
+    if (!removed.size) return;
+    const nextBatches = dropPromptIdsFromMaster(master, removed).batchBlocks;
+    for (let i = 0; i < (master.batchBlocks || []).length; i += 1) {
+      const before = master.batchBlocks[i];
+      const after = nextBatches[i];
+      const beforeIds = (before.promptSegments || []).map((seg) => seg.id).join(",");
+      const afterIds = (after.promptSegments || []).map((seg) => seg.id).join(",");
+      if (beforeIds === afterIds) continue;
+      await api.directorTimelinePatchBatch(project.id, scene.id, before.id, {
+        promptSegments: after.promptSegments || [],
+      });
+    }
+  };
+
+  const persistViaMutate = async (mutator: (current: DirectorTimeline) => DirectorTimeline) => {
+    if (!tl) return null;
+    const bound = mutateTimeline || getBoundShellTimelineMutate();
+    const next = mutator(tl);
+    const removedPromptIds = [...promptIdsOf(tl)].filter((id) => !promptIdsOf(next).has(id));
+    syncPromptTombstones(tl, next);
+    setTl(next);
+    if (bound) {
+      await bound(mutator);
+    } else {
+      await save(next);
+      await persistMasterPromptRemoval(removedPromptIds);
+    }
+    return next;
   };
 
   const duration = tl.duration_sec || scene.duration_sec || 5;
@@ -1152,7 +1290,10 @@ export function DirectorTracks({
 
   const scheduleUndoClear = () => {
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
-    undoTimerRef.current = window.setTimeout(() => setUndoSnapshot(null), 8000);
+    undoTimerRef.current = window.setTimeout(() => {
+      setUndoSnapshot(null);
+      setRemoveNotice(false);
+    }, 8000);
   };
 
   const removeClip = async (
@@ -1167,26 +1308,55 @@ export function DirectorTracks({
       );
       if (!ok) return;
     }
-    const prev = { ...tl };
-    const next = { ...tl };
-    if (kind === "image") next.image_clips = tl.image_clips.filter((c) => c.id !== id);
-    if (kind === "video") next.video_clips = tl.video_clips.filter((c) => c.id !== id);
-    if (kind === "videoReference") next.video_reference_clips = (tl.video_reference_clips || []).filter((c) => c.id !== id);
-    if (kind === "imageReference") next.image_reference_clips = (tl.image_reference_clips || []).filter((c) => c.id !== id);
-    if (kind === "audio") next.audio_clips = tl.audio_clips.filter((c) => c.id !== id);
-    if (kind === "sfx") next.sfx_clips = tl.sfx_clips.filter((c) => c.id !== id);
-    if (kind === "prompt") next.prompt_segments = tl.prompt_segments.filter((c) => c.id !== id);
-    if (kind === "camera") next.camera_clips = (tl.camera_clips || []).filter((c) => c.id !== id);
-    setUndoSnapshot(prev);
-    scheduleUndoClear();
-    await save(next);
-    if (kind === "prompt" && next.prompt_segments.length) selectSeg(next.prompt_segments[0].id);
+    const prev = tl;
+    const bound = Boolean(mutateTimeline || getBoundShellTimelineMutate());
+    const selectedThisPrompt =
+      kind === "prompt" &&
+      ((sel?.selection?.kind === "promptSeg" && sel.selection.id === id) || selectedSeg === id);
+    const next = await persistViaMutate((current) => {
+      const updated = { ...current };
+      if (kind === "image") updated.image_clips = (current.image_clips || []).filter((c) => c.id !== id);
+      if (kind === "video") updated.video_clips = (current.video_clips || []).filter((c) => c.id !== id);
+      if (kind === "videoReference") {
+        updated.video_reference_clips = (current.video_reference_clips || []).filter((c) => c.id !== id);
+      }
+      if (kind === "imageReference") {
+        updated.image_reference_clips = (current.image_reference_clips || []).filter((c) => c.id !== id);
+      }
+      if (kind === "audio") updated.audio_clips = (current.audio_clips || []).filter((c) => c.id !== id);
+      if (kind === "sfx") updated.sfx_clips = (current.sfx_clips || []).filter((c) => c.id !== id);
+      if (kind === "prompt") {
+        updated.prompt_segments = (current.prompt_segments || []).filter((c) => c.id !== id);
+      }
+      if (kind === "camera") updated.camera_clips = (current.camera_clips || []).filter((c) => c.id !== id);
+      return updated;
+    });
+    if (kind === "prompt") {
+      if (promptModalId === id) setPromptModalId(null);
+      bindInspectingPrompt(null);
+      if (selectedThisPrompt && scene) {
+        setSelectedSeg(undefined);
+        sel?.setSelection({ kind: "scene", id: scene.id });
+      }
+      if (next && !(next.prompt_segments || []).some((seg) => seg.id === id)) {
+        if (!bound) setUndoSnapshot(prev);
+        setRemoveNotice(true);
+        scheduleUndoClear();
+      } else {
+        setRemoveNotice(false);
+      }
+    } else if (next) {
+      if (!bound) setUndoSnapshot(prev);
+      setRemoveNotice(true);
+      scheduleUndoClear();
+    }
   };
 
   const undoRemove = async () => {
     if (!undoSnapshot) return;
     await save(undoSnapshot);
     setUndoSnapshot(null);
+    setRemoveNotice(false);
     if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
   };
 
@@ -1532,10 +1702,21 @@ export function DirectorTracks({
             </>
           ) : null}
 
-          {undoSnapshot && (
+          {(undoSnapshot || removeNotice) && (
             <div className="timeline-undo-toast" role="status" data-testid="timeline-undo-toast">
               <span>Removed from Timeline</span>
-              <button type="button" className="primary" onClick={() => void undoRemove()}>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  if (undoSnapshot) {
+                    void undoRemove();
+                    return;
+                  }
+                  setRemoveNotice(false);
+                  runTimelineCommand("undo");
+                }}
+              >
                 Undo
               </button>
             </div>

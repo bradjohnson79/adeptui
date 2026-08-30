@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Asset, Project } from "../../types";
-import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import type { BatchBlock, SceneTimelineMaster, TimelinePromptSegment } from "../../timelineMaster/contracts";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 import type { DirectorSelectionKind } from "../../directorSelection";
 import {
@@ -39,7 +39,16 @@ import {
   registerTimelineCommand,
   runTimelineCommand,
 } from "../../timelineMaster/timelineHotkeys";
-import { DirectorTracks, lipSyncTrackHasContent, normalizeLipSyncTracks, type DirectorTimeline } from "../DirectorTracks";
+import {
+  DirectorTracks,
+  lipSyncTrackHasContent,
+  normalizeLipSyncTracks,
+  overlayLiveTimeline,
+  promptIdsOf,
+  syncPromptTombstones,
+  type DirectorTimeline,
+} from "../DirectorTracks";
+import { bindShellTimelineMutate, dropPromptIdsFromMaster } from "./timelineMutateBridge";
 import { TimelinePreviewComposer } from "./TimelinePreviewComposer";
 import { Timeline } from "../Timeline";
 import { AssetTray } from "../AssetTray";
@@ -79,6 +88,18 @@ function batchHasContent(batch: BatchBlock) {
   return false;
 }
 
+type TimelineHistoryEntry = {
+  timeline: DirectorTimeline;
+  batchPrompts: { batchId: string; promptSegments: TimelinePromptSegment[] }[];
+};
+
+function snapshotBatchPrompts(master: SceneTimelineMaster | null): TimelineHistoryEntry["batchPrompts"] {
+  return (master?.batchBlocks || []).map((batch) => ({
+    batchId: batch.id,
+    promptSegments: (batch.promptSegments || []).map((seg) => ({ ...seg })),
+  }));
+}
+
 export function TimelineEditorShell({
   project,
   selectedScene,
@@ -101,12 +122,16 @@ export function TimelineEditorShell({
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
   const [master, setMaster] = useState<SceneTimelineMaster | null>(null);
   const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
+  const masterRef = useRef<SceneTimelineMaster | null>(null);
+  const directorTimelineRef = useRef<DirectorTimeline | null>(null);
+  masterRef.current = master;
+  directorTimelineRef.current = directorTimeline;
   const [reloadKey, setReloadKey] = useState(0);
   const [preflightSummary, setPreflightSummary] = useState(() => "");
   const [preflightBlockingCount, setPreflightBlockingCount] = useState(0);
   const [rightTab, setRightTab] = useState<"inspector" | "codirector" | "hotkeys">("inspector");
-  const [undoStack, setUndoStack] = useState<DirectorTimeline[]>([]);
-  const [redoStack, setRedoStack] = useState<DirectorTimeline[]>([]);
+  const [undoStack, setUndoStack] = useState<TimelineHistoryEntry[]>([]);
+  const [redoStack, setRedoStack] = useState<TimelineHistoryEntry[]>([]);
   const [focusFinding, setFocusFinding] = useState<string | null>(null);
   const [hideOverlay, setHideOverlay] = useState(false);
   const [pauseUpdates, setPauseUpdates] = useState(false);
@@ -256,7 +281,9 @@ export function TimelineEditorShell({
     try {
       const tl = (await api.getDirector(project.id, sceneId)) as DirectorTimeline;
       if (token !== masterLoadTokenRef.current) return;
-      setDirectorTimeline(tl);
+      const merged = overlayLiveTimeline(tl, directorTimelineRef.current);
+      directorTimelineRef.current = merged;
+      setDirectorTimeline(merged);
     } catch {
       if (token !== masterLoadTokenRef.current) return;
       setDirectorTimeline(null);
@@ -366,6 +393,33 @@ export function TimelineEditorShell({
     return () => window.removeEventListener("adept:codirector-project-mutated", onProjectMutated);
   }, [project.id, afterMutation]);
 
+  const persistBatchPrompts = useCallback(
+    async (entries: TimelineHistoryEntry["batchPrompts"]) => {
+      if (!selected) return;
+      const currentMaster = masterRef.current;
+      for (const entry of entries) {
+        const existing = currentMaster?.batchBlocks.find((batch) => batch.id === entry.batchId);
+        const beforeIds = (existing?.promptSegments || []).map((seg) => seg.id).join(",");
+        const afterIds = (entry.promptSegments || []).map((seg) => seg.id).join(",");
+        if (beforeIds === afterIds) continue;
+        await api.directorTimelinePatchBatch(project.id, selected.id, entry.batchId, {
+          promptSegments: entry.promptSegments,
+        });
+      }
+      setMaster((prev) => {
+        if (!prev) return prev;
+        const byId = new Map(entries.map((entry) => [entry.batchId, entry.promptSegments]));
+        return {
+          ...prev,
+          batchBlocks: prev.batchBlocks.map((batch) =>
+            byId.has(batch.id) ? { ...batch, promptSegments: byId.get(batch.id) || [] } : batch,
+          ),
+        };
+      });
+    },
+    [project.id, selected],
+  );
+
   const mutateTimeline = useCallback(
     async (
       mutator: (timeline: DirectorTimeline) => DirectorTimeline,
@@ -374,56 +428,83 @@ export function TimelineEditorShell({
       if (!selected) return;
       const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
       const next = mutator(current);
-      setUndoStack((stack) => [...stack.slice(-19), current]);
+      setUndoStack((stack) => [
+        ...stack.slice(-19),
+        { timeline: current, batchPrompts: snapshotBatchPrompts(masterRef.current) },
+      ]);
       setRedoStack([]);
+      directorTimelineRef.current = next;
+      setDirectorTimeline(next);
       await api.putDirector(project.id, selected.id, next);
+      const removed = [...promptIdsOf(current)].filter((id) => !promptIdsOf(next).has(id));
+      if (removed.length && masterRef.current) {
+        const patched = dropPromptIdsFromMaster(masterRef.current, removed);
+        await persistBatchPrompts(
+          patched.batchBlocks.map((batch) => ({ batchId: batch.id, promptSegments: batch.promptSegments || [] })),
+        );
+      }
+      syncPromptTombstones(current, next);
       // Soft text edits must not remount the Inspector (preserves focus/cursor).
       if (opts?.refresh === false) return;
       await afterMutation();
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, persistBatchPrompts, project.id, selected],
   );
+
+  useEffect(() => {
+    bindShellTimelineMutate(mutateTimeline);
+    return () => bindShellTimelineMutate(null);
+  }, [mutateTimeline]);
 
   const applyHistorySnapshot = useCallback(
     async (direction: "undo" | "redo") => {
       if (!selected) return;
       if (direction === "undo" && undoStack.length === 0) return;
       if (direction === "redo" && redoStack.length === 0) return;
-      const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
-      let next: DirectorTimeline;
+      const currentTimeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const currentEntry: TimelineHistoryEntry = {
+        timeline: currentTimeline,
+        batchPrompts: snapshotBatchPrompts(masterRef.current),
+      };
+      let next: TimelineHistoryEntry;
       if (direction === "undo") {
         next = undoStack[undoStack.length - 1];
         setUndoStack((stack) => stack.slice(0, -1));
-        setRedoStack((stack) => [...stack, current]);
+        setRedoStack((stack) => [...stack, currentEntry]);
       } else {
         next = redoStack[redoStack.length - 1];
         setRedoStack((stack) => stack.slice(0, -1));
-        setUndoStack((stack) => [...stack, current]);
+        setUndoStack((stack) => [...stack, currentEntry]);
       }
-      await api.putDirector(project.id, selected.id, next);
+      directorTimelineRef.current = next.timeline;
+      setDirectorTimeline(next.timeline);
+      await api.putDirector(project.id, selected.id, next.timeline);
+      await persistBatchPrompts(next.batchPrompts);
+      syncPromptTombstones(currentTimeline, next.timeline);
       await afterMutation();
       // Restore visible selection state: if the currently selected clip no
       // longer exists in the restored timeline, fall back to scene so the
       // Inspector never shows a stale/deleted item (NO_PASSIVE_SELECTION_LOSS
       // for legitimate state changes; no stale Inspector after undo/redo).
       const s = selection;
+      const restored = next.timeline;
       if (s && s.kind !== "scene" && s.kind !== null && s.id) {
         const exists =
-          (next.prompt_segments || []).some((c) => c.id === s.id) ||
-          (next.image_clips || []).some((c) => c.id === s.id) ||
-          (next.video_clips || []).some((c) => c.id === s.id) ||
-          (next.video_reference_clips || []).some((c) => c.id === s.id) ||
-          (next.image_reference_clips || []).some((c) => c.id === s.id) ||
-          (next.audio_clips || []).some((c) => c.id === s.id) ||
-          (next.sfx_clips || []).some((c) => c.id === s.id) ||
-          (next.camera_clips || []).some((c) => c.id === s.id) ||
-          normalizeLipSyncTracks(next.lipsync?.tracks).some((t) =>
+          (restored.prompt_segments || []).some((c) => c.id === s.id) ||
+          (restored.image_clips || []).some((c) => c.id === s.id) ||
+          (restored.video_clips || []).some((c) => c.id === s.id) ||
+          (restored.video_reference_clips || []).some((c) => c.id === s.id) ||
+          (restored.image_reference_clips || []).some((c) => c.id === s.id) ||
+          (restored.audio_clips || []).some((c) => c.id === s.id) ||
+          (restored.sfx_clips || []).some((c) => c.id === s.id) ||
+          (restored.camera_clips || []).some((c) => c.id === s.id) ||
+          normalizeLipSyncTracks(restored.lipsync?.tracks).some((t) =>
             t.id === s.id || (t.clips || []).some((c) => c.id === s.id),
           );
         if (!exists) setSelection({ kind: "scene", id: selected.id });
       }
     },
-    [afterMutation, project.id, redoStack, selected, selection, setSelection, undoStack],
+    [afterMutation, persistBatchPrompts, project.id, redoStack, selected, selection, setSelection, undoStack],
   );
 
   const deleteSelection = useCallback(async () => {
@@ -992,6 +1073,7 @@ export function TimelineEditorShell({
                   reloadKey={reloadKey}
                   master={master}
                   shellMode
+                  mutateTimeline={mutateTimeline}
                 />
                 <TimelineInpaintWorkspace
                   open={inpaintOpen}
