@@ -225,19 +225,6 @@ export function promptIdsOf(timeline: DirectorTimeline | null | undefined): Set<
   return new Set((timeline?.prompt_segments || []).map((seg) => seg.id).filter(Boolean));
 }
 
-export function omitPromptFromMasterBatches<
-  T extends { id: string; promptSegments?: Array<{ id: string; legacyPromptSegmentId?: string | null }> },
->(batches: T[] | null | undefined, removedIds: Iterable<string>): T[] {
-  const removed = removedIds instanceof Set ? removedIds : new Set(removedIds);
-  if (!removed.size) return batches || [];
-  return (batches || []).map((batch) => ({
-    ...batch,
-    promptSegments: (batch.promptSegments || []).filter(
-      (seg) => !removed.has(seg.id) && !removed.has(seg.legacyPromptSegmentId || ""),
-    ),
-  }));
-}
-
 function pct(start: number, length: number, duration: number) {
   const d = Math.max(0.1, duration);
   return {
@@ -757,7 +744,7 @@ export function DirectorTracks({
       lipsync: { tracks: normalizeLipSyncTracks(next.lipsync?.tracks) },
     } as DirectorTimeline;
     // Canonical persist: PUT `next` only. Never extras-union omitted
-    // prompt_segments from a bound shell snapshot — that re-inserts deleted Timed Prompts.
+    // prompt_segments from a bound shell snapshot - that re-inserts deleted Timed Prompts.
     setTl(normalized);
     setSaving(true);
     try {

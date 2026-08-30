@@ -61,6 +61,47 @@ function promptClips(page: Page) {
   return page.locator('[data-testid^="track-clip-prompt-"]');
 }
 
+type MasterPrompt = {
+  id: string;
+  start?: number;
+  length?: number;
+  text?: string;
+  productionPrompt?: string | null;
+  legacyPromptSegmentId?: string | null;
+};
+
+type SceneMaster = {
+  batchBlocks?: Array<{ id: string; promptSegments?: MasterPrompt[] }>;
+};
+
+async function getMaster(request: APIRequestContext, sceneId: string): Promise<SceneMaster> {
+  const res = await request.get(
+    `${API}/director-timeline/projects/${PROJECT_ID}/scenes/${sceneId}/master`,
+  );
+  expect(res.ok(), await res.text()).toBeTruthy();
+  const body = await res.json();
+  return (body.master || body) as SceneMaster;
+}
+
+function compileMasterPrompts(master: SceneMaster): string {
+  const parts: string[] = [];
+  for (const batch of master.batchBlocks || []) {
+    for (const seg of batch.promptSegments || []) {
+      const text = String(seg.productionPrompt || seg.text || "").trim();
+      if (text) parts.push(text);
+    }
+  }
+  return parts.join("\n");
+}
+
+function masterHasPrompt(master: SceneMaster, id: string): boolean {
+  return (master.batchBlocks || []).some((batch) =>
+    (batch.promptSegments || []).some(
+      (seg) => seg.id === id || seg.legacyPromptSegmentId === id || seg.id === `ps_${id}`,
+    ),
+  );
+}
+
 test.describe("Timeline single Timed Prompt track", () => {
   test.beforeEach(async ({ request }) => {
     await waitApiReady(request);
@@ -196,5 +237,115 @@ test.describe("Timeline single Timed Prompt track", () => {
         data: original,
       });
     }
+  });
+
+  test("Timed Prompt X delete is canonical on both lanes", async ({ page, request }) => {
+    test.setTimeout(180_000);
+    const scene = await firstScene(request);
+    const marker = `e2e-timed-prompt-x-${Date.now()}`;
+    await openTimeline(page, scene.id);
+
+    const seeded = await page.evaluate(
+      async ({ projectId, sceneId, text }) => {
+        const dirRes = await fetch(`/api/projects/${projectId}/scenes/${sceneId}/director`);
+        if (!dirRes.ok) throw new Error(`director GET ${dirRes.status}`);
+        const director = await dirRes.json();
+        const id = `e2e_tp_${Date.now().toString(36)}`;
+        const seg = {
+          id,
+          start: 0.5,
+          length: 1.25,
+          text,
+          weight: 1,
+          reference_binding_ids: [],
+        };
+        director.prompt_segments = [...(director.prompt_segments || []), seg];
+        const put = await fetch(`/api/projects/${projectId}/scenes/${sceneId}/director`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(director),
+        });
+        if (!put.ok) throw new Error(`director PUT ${put.status} ${await put.text()}`);
+        const masterRes = await fetch(
+          `/api/director-timeline/projects/${projectId}/scenes/${sceneId}/master`,
+        );
+        if (!masterRes.ok) throw new Error(`master GET ${masterRes.status}`);
+        const masterBody = await masterRes.json();
+        const master = masterBody.master || masterBody;
+        const batch = (master.batchBlocks || [])[0];
+        if (!batch?.id) throw new Error("no batch to seed promptSegments");
+        const ps = {
+          id: `ps_${id}`,
+          start: seg.start,
+          length: seg.length,
+          text,
+          role: "primary",
+          strength: 1,
+          anchorIds: [],
+          executionStrategy: "compiled",
+          versionId: `psv_${id}`,
+          legacyPromptSegmentId: id,
+          referenceBindingIds: [],
+        };
+        const patch = await fetch(
+          `/api/director-timeline/projects/${projectId}/scenes/${sceneId}/batches/${batch.id}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ promptSegments: [...(batch.promptSegments || []), ps] }),
+          },
+        );
+        if (!patch.ok) throw new Error(`batch PATCH ${patch.status} ${await patch.text()}`);
+        return { id, start: seg.start, length: seg.length, text };
+      },
+      { projectId: PROJECT_ID, sceneId: scene.id, text: marker },
+    );
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("timeline-editor-shell")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(`track-clip-prompt-${seeded.id}`)).toBeVisible({ timeout: 60_000 });
+    expect(masterHasPrompt(await getMaster(request, scene.id), seeded.id)).toBeTruthy();
+
+    await page.getByTestId(`track-clip-prompt-${seeded.id}`).click();
+    const rightOpen = await page.getByTestId("timeline-drawer-right-toggle").getAttribute("aria-expanded");
+    if (rightOpen !== "true") {
+      const handle = page.getByTestId("timeline-drawer-right-toggle");
+      const handleBox = await handle.boundingBox();
+      expect(handleBox).toBeTruthy();
+      await handle.click({ position: { x: Math.max(2, handleBox!.width / 2), y: 16 } });
+    }
+    await page.getByTestId("timeline-tab-inspector").click();
+    await expect(page.getByTestId("timeline-timed-prompt-start")).toBeVisible({ timeout: 20_000 });
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByTestId(`track-clip-prompt-${seeded.id}`).locator(".track-clip__remove").click();
+
+    await expect(page.getByTestId(`track-clip-prompt-${seeded.id}`)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId("timeline-undo-toast")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("timeline-inspector")).toContainText("Scene Inspector");
+    await expect(page.getByTestId("timeline-timed-prompt-start")).toHaveCount(0);
+
+    await expect
+      .poll(async () => {
+        const tl = await getDirector(request, scene.id);
+        return ((tl.prompt_segments || []) as PromptSeg[]).some((seg) => seg.id === seeded.id);
+      }, { timeout: 20_000 })
+      .toBeFalsy();
+    await expect
+      .poll(async () => masterHasPrompt(await getMaster(request, scene.id), seeded.id), { timeout: 20_000 })
+      .toBeFalsy();
+    expect(compileMasterPrompts(await getMaster(request, scene.id))).not.toContain(marker);
+
+    await page.getByRole("button", { name: "Undo the last Timeline edit" }).click();
+    await expect(page.getByTestId(`track-clip-prompt-${seeded.id}`)).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => {
+        const tl = await getDirector(request, scene.id);
+        return ((tl.prompt_segments || []) as PromptSeg[]).some((seg) => seg.id === seeded.id);
+      }, { timeout: 20_000 })
+      .toBeTruthy();
+    await expect
+      .poll(async () => masterHasPrompt(await getMaster(request, scene.id), seeded.id), { timeout: 20_000 })
+      .toBeTruthy();
   });
 });
