@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../../api";
+import { api, bindAssetUrlProject } from "../../api";
 import type { Asset, Project } from "../../types";
-import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import type { BatchBlock, SceneTimelineMaster, TimelinePromptSegment } from "../../timelineMaster/contracts";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 import type { DirectorSelectionKind } from "../../directorSelection";
 import {
@@ -39,34 +39,52 @@ import {
   registerTimelineCommand,
   runTimelineCommand,
 } from "../../timelineMaster/timelineHotkeys";
-import { DirectorTracks, lipSyncTrackHasContent, normalizeLipSyncTracks, type DirectorTimeline } from "../DirectorTracks";
+import {
+  DirectorTracks,
+  lipSyncTrackHasContent,
+  normalizeLipSyncTracks,
+  overlayLiveTimeline,
+  promptIdsOf,
+  syncPromptTombstones,
+  type DirectorTimeline,
+} from "../DirectorTracks";
+import { playableVisualClipsFromMaster } from "../../timelineMaster/playableVisualTakes";
+import { bindShellTimelineMutate, bindShellTimelineSnapshot, dropPromptIdsFromMaster } from "./timelineMutateBridge";
 import { TimelinePreviewComposer } from "./TimelinePreviewComposer";
 import { Timeline } from "../Timeline";
 import { AssetTray } from "../AssetTray";
+import { AddFromProjectLibraryModal } from "./AddFromProjectLibraryModal";
+import { VideoGeneratorDock } from "./VideoGeneratorDock";
 import { ReferencesPane } from "../sceneReferences/ReferencesPane";
+import { formatDurationSeconds } from "../../lib/formatDuration";
+import { creatorGeneratorLine, timelineBoardDurationSec } from "../../timelineMaster/generatorDuration";
+import { buildBatchTimeWindows } from "../../timelineMaster/batchWindows";
+import { resolveTimelineTransportBounds } from "../../timelineMaster/timelineTransport";
+import { useTimelineClock } from "../../timelineMaster/useTimelineClock";
+import { useTimelineAudioPlayback } from "./useTimelineAudioPlayback";
+import { anyTimelineGeneratorExecutable, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
+import { useTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
+import { useTimelinePreflight } from "../../timelineMaster/useTimelinePreflight";
+import { stepTimelineZoom } from "../../timelineMaster/timelineZoom";
 import { useOpenCoDirector } from "../CoDirector";
 import { TimelineWorkspaceStack } from "./TimelineWorkspaceStack";
 import { TimelineToolbar } from "./TimelineToolbar";
 import { SceneStatusStrip } from "./SceneStatusStrip";
 import { TimelineInspector } from "./TimelineInspector";
 import { TimelineHotKeysPane } from "./TimelineHotKeysPane";
+import { ActionWithHelp } from "../HelpTip";
+import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
+import { completedApprovedBatches } from "../../timelineMaster/sceneStitch";
+import { addTimelineBatch } from "../../timelineMaster/addTimelineBatch";
 import { CompactRenderQueue } from "./CompactRenderQueue";
+import { TimelineGpuPane } from "./TimelineGpuPane";
+import { timelineActionError, timelineGenerateEmpty } from "../../timelineMaster/timelineErrors";
 import { TimelineGeneratorBanner } from "./TimelineGeneratorBanner";
-import { TimelineInpaintWorkspace } from "./TimelineInpaintWorkspace";
-import { TimelineRetakeDrawer } from "./TimelineRetakeDrawer";
+import { useVideoRetake } from "./useVideoRetake";
 import "../../styles/timeline-master/timeline-editor-shell.css";
 import "../../styles/timeline-master/timeline-v2-shell.css";
 import "../../styles/timeline-master/timeline-v2-canvas.css";
 
-function generatorLabel(engine: string) {
-  if (engine === "auto") return "Auto";
-  if (engine === "minimax-h3") return "MiniMax H3 (Default)";
-  if (engine === "ltx") return "LTX 2.5";
-  if (engine === "hunyuan15") return "HunyuanVideo 1.5";
-  if (engine === "hunyuan13b") return "HunyuanVideo 13B";
-  if (engine === "wan") return "WAN 2.2";
-  return engine.replace(/^fal_/, "").replace(/_/g, " ");
-}
 
 function batchHasContent(batch: BatchBlock) {
   if (batch.approvedClip) return true;
@@ -77,6 +95,18 @@ function batchHasContent(batch: BatchBlock) {
   if (batch.promptSegments?.some((s) => (s.text || "").trim())) return true;
   if (batch.status && batch.status !== "Draft") return true;
   return false;
+}
+
+type TimelineHistoryEntry = {
+  timeline: DirectorTimeline;
+  batchPrompts: { batchId: string; promptSegments: TimelinePromptSegment[] }[];
+};
+
+function snapshotBatchPrompts(master: SceneTimelineMaster | null): TimelineHistoryEntry["batchPrompts"] {
+  return (master?.batchBlocks || []).map((batch) => ({
+    batchId: batch.id,
+    promptSegments: (batch.promptSegments || []).map((seg) => ({ ...seg })),
+  }));
 }
 
 export function TimelineEditorShell({
@@ -99,19 +129,109 @@ export function TimelineEditorShell({
   );
   const [playheadSec, setPlayheadSec] = useState(0);
   const [libraryPreviewId, setLibraryPreviewId] = useState<string | null>(null);
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false);
+  const generatorOptions = useTimelineVideoGenerators();
   const [master, setMaster] = useState<SceneTimelineMaster | null>(null);
   const [directorTimeline, setDirectorTimeline] = useState<DirectorTimeline | null>(null);
+  const [appliedSceneId, setAppliedSceneId] = useState<string | null>(null);
+  const masterRef = useRef<SceneTimelineMaster | null>(null);
+  const directorTimelineRef = useRef<DirectorTimeline | null>(null);
+  const masterCacheRef = useRef<Map<string, SceneTimelineMaster>>(new Map());
+  const directorCacheRef = useRef<Map<string, DirectorTimeline>>(new Map());
+  const liveMaster = appliedSceneId === selected.id ? master : masterCacheRef.current.get(selected.id) ?? null;
+  const selectedGenerator = useMemo(
+    () =>
+      resolveGeneratorOption(
+        generatorOptions,
+        liveMaster?.sceneGeneratorId,
+        liveMaster?.batchBlocks[0]?.generatorId,
+        selected.engine,
+      ),
+    [generatorOptions, liveMaster?.batchBlocks, liveMaster?.sceneGeneratorId, selected.engine],
+  );
+  const sceneCanGenerate = useMemo(
+    () =>
+      anyTimelineGeneratorExecutable(
+        generatorOptions,
+        liveMaster?.sceneGeneratorId,
+        ...(liveMaster?.batchBlocks || []).map((batch) => batch.generatorId),
+        selected.engine,
+      ),
+    [generatorOptions, liveMaster?.batchBlocks, liveMaster?.sceneGeneratorId, selected.engine],
+  );
+  const canReviewExtend = useMemo(
+    () => (liveMaster?.batchBlocks || []).some((batch) => batch.approvedClip?.playable),
+    [liveMaster?.batchBlocks],
+  );
+  const liveDirector =
+    appliedSceneId === selected.id ? directorTimeline : directorCacheRef.current.get(selected.id) ?? null;
+  masterRef.current = liveMaster;
+  directorTimelineRef.current = liveDirector;
+  const sceneEndSec = timelineBoardDurationSec(liveMaster, liveDirector, selected);
+  const batchWindows = useMemo(() => buildBatchTimeWindows(liveMaster?.batchBlocks), [liveMaster?.batchBlocks]);
+  const { playing, toggle, seek, pause } = useTimelineClock({ playheadSec, setPlayheadSec, sceneEndSec });
+  const { audioHostRef } = useTimelineAudioPlayback({
+    projectId: project.id,
+    playing,
+    playheadSec,
+    timeline: liveDirector,
+    master: liveMaster,
+  });
+  const playheadLiveRef = useRef(playheadSec);
+  playheadLiveRef.current = playheadSec;
+  const selectedBatchId = selection.kind === "batch" ? selection.id : null;
+  const resolveTransport = useCallback(() => {
+    return resolveTimelineTransportBounds({
+      windows: batchWindows,
+      playheadSec: playheadLiveRef.current,
+      boardDurationSec: sceneEndSec,
+      selectedBatchId,
+    });
+  }, [batchWindows, sceneEndSec, selectedBatchId]);
+  const transportBounds = useMemo(
+    () =>
+      resolveTimelineTransportBounds({
+        windows: batchWindows,
+        playheadSec,
+        boardDurationSec: sceneEndSec,
+        selectedBatchId,
+      }),
+    [batchWindows, playheadSec, sceneEndSec, selectedBatchId],
+  );
+  const goToSceneStart = useCallback(() => {
+    seek(resolveTransport().sceneStart);
+  }, [resolveTransport, seek]);
+  const goToBatchIn = useCallback(() => {
+    seek(resolveTransport().activeBatchStart);
+  }, [resolveTransport, seek]);
+  const goToBatchOut = useCallback(() => {
+    seek(resolveTransport().activeBatchEnd);
+  }, [resolveTransport, seek]);
+  const goToSceneEnd = useCallback(() => {
+    seek(resolveTransport().sceneEnd);
+  }, [resolveTransport, seek]);
   const [reloadKey, setReloadKey] = useState(0);
-  const [preflightSummary, setPreflightSummary] = useState(() => "");
-  const [preflightBlockingCount, setPreflightBlockingCount] = useState(0);
-  const [rightTab, setRightTab] = useState<"inspector" | "codirector" | "hotkeys">("inspector");
-  const [undoStack, setUndoStack] = useState<DirectorTimeline[]>([]);
-  const [redoStack, setRedoStack] = useState<DirectorTimeline[]>([]);
+  // Always-on Preflight: event-driven (signature over exactly what the backend
+  // run_preflight reads), single-flight, 400ms debounce. One shared state feeds
+  // the header button, the toolbar button, the Generate gate, and the Inspector.
+  const timelinePreflight = useTimelinePreflight({
+    projectId: project.id,
+    sceneId: selected?.id ?? null,
+    master: liveMaster,
+    director: liveDirector,
+  });
+  const preflightSummary = timelinePreflight.summary;
+  const preflightBlockingCount = timelinePreflight.blockingCount;
+  const [stitchBusy, setStitchBusy] = useState(false);
+  const [rightTab, setRightTab] = useState<"inspector" | "codirector" | "hotkeys" | "gpu">("inspector");
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [extendBusy, setExtendBusy] = useState(false);
+  const [undoStack, setUndoStack] = useState<TimelineHistoryEntry[]>([]);
+  const [redoStack, setRedoStack] = useState<TimelineHistoryEntry[]>([]);
   const [focusFinding, setFocusFinding] = useState<string | null>(null);
   const [hideOverlay, setHideOverlay] = useState(false);
   const [pauseUpdates, setPauseUpdates] = useState(false);
-  const [inpaintOpen, setInpaintOpen] = useState(false);
-  const [retakeOpen, setRetakeOpen] = useState(false);
   const [viewportMode, setViewportMode] = useState<WorkspaceViewportMode>("STANDARD");
   const workspaceFs = useWorkspaceFullscreen({
     workspaceId: "timeline",
@@ -127,6 +247,8 @@ export function TimelineEditorShell({
   } | null>(null);
   const layoutRef = useRef(workspaceLayout);
   layoutRef.current = workspaceLayout;
+  const openRetakeRef = useRef(() => undefined as void);
+  const retakeOpenRef = useRef(false);
 
   useEffect(() => {
     const onLayout = (event: Event) => {
@@ -237,6 +359,11 @@ export function TimelineEditorShell({
   const selectedAsset =
     (libraryPreviewId && project.assets.find((asset) => asset.id === libraryPreviewId)) || null;
 
+  useEffect(() => {
+    bindAssetUrlProject(project.id);
+    return () => bindAssetUrlProject(null);
+  }, [project.id]);
+
   // Stale-fetch guard: a slow master response from a prior scene (or a
   // superseded refresh) must never overwrite newer state (NO_STALE_RELOAD,
   // same generation-token pattern as DirectorTracks.loadTokenRef).
@@ -248,7 +375,10 @@ export function TimelineEditorShell({
     const sceneId = selected.id;
     const data = await api.directorTimelineMaster(project.id, sceneId);
     if (token !== masterLoadTokenRef.current) return;
-    setMaster(data.master as SceneTimelineMaster);
+    const nextMaster = data.master as SceneTimelineMaster;
+    masterCacheRef.current.set(sceneId, nextMaster);
+    setMaster(nextMaster);
+    setAppliedSceneId(sceneId);
     // TIMELINE_DRIVEN_PREVIEW: fetch the real DirectorTimeline (image_clips,
     // prompt_segments, etc.) so the Preview Composer can resolve the active
     // clip at the playhead. Previously the shell passed `master` (the batch
@@ -256,9 +386,14 @@ export function TimelineEditorShell({
     try {
       const tl = (await api.getDirector(project.id, sceneId)) as DirectorTimeline;
       if (token !== masterLoadTokenRef.current) return;
-      setDirectorTimeline(tl);
+      const priorForScene = directorCacheRef.current.get(sceneId) ?? null;
+      const merged = overlayLiveTimeline(tl, priorForScene);
+      directorCacheRef.current.set(sceneId, merged);
+      directorTimelineRef.current = merged;
+      setDirectorTimeline(merged);
     } catch {
       if (token !== masterLoadTokenRef.current) return;
+      directorCacheRef.current.delete(sceneId);
       setDirectorTimeline(null);
     }
   }, [project.id, selected]);
@@ -269,11 +404,23 @@ export function TimelineEditorShell({
   // back to scene — the root cause of the Prompt clip selection slip
   // (NO_PASSIVE_SELECTION_LOSS / TIMELINE_OWNS_SELECTION).
   const selectedSceneId = selected?.id;
+  useLayoutEffect(() => {
+    if (!selectedSceneId) return;
+    const cachedMaster = masterCacheRef.current.get(selectedSceneId) ?? null;
+    const cachedDirector = directorCacheRef.current.get(selectedSceneId) ?? null;
+    setMaster(cachedMaster);
+    setDirectorTimeline(cachedDirector);
+    directorTimelineRef.current = cachedDirector;
+    setAppliedSceneId(cachedMaster ? selectedSceneId : null);
+    setSelection({ kind: "scene", id: selectedSceneId });
+    pause();
+    seek(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSceneId]);
   useEffect(() => {
     if (!selectedSceneId) return;
-    setSelection({ kind: "scene", id: selectedSceneId });
-    setPlayheadSec(0);
-    setPreflightSummary(t("common:notRunYet"));
+    // Preflight state is owned by useTimelinePreflight (scene-open triggers a
+    // fresh run via the signature effect) — no manual "notRunYet" reset here.
     setUndoStack([]);
     setRedoStack([]);
     void refreshMaster();
@@ -305,7 +452,7 @@ export function TimelineEditorShell({
         });
       }
       if (typeof detail.playheadSec === "number") {
-        setPlayheadSec(detail.playheadSec);
+        seek(detail.playheadSec);
         if (selected) {
           void api.getDirector(project.id, selected.id).then((timeline) => {
             void api.putDirector(project.id, selected.id, {
@@ -318,11 +465,11 @@ export function TimelineEditorShell({
       if (typeof detail.zoom === "number") {
         setZoom(detail.zoom);
       } else if (typeof detail.zoomDelta === "number") {
-        setZoom(Math.min(3, Math.max(0.5, Number((zoom + detail.zoomDelta).toFixed(2)))));
+        setZoom(stepTimelineZoom(zoom, detail.zoomDelta > 0 ? 1 : -1));
       }
       if (detail.findingCode) setFocusFinding(detail.findingCode);
-      if (detail.openInpaint === true) {
-        setInpaintOpen(true);
+      if (detail.openInpaint === true || detail.openRetake === true) {
+        openRetakeRef.current();
       }
       window.setTimeout(() => {
         if (detail.target === "scenePrompt" || detail.fieldId === "scenePrompt") {
@@ -346,13 +493,193 @@ export function TimelineEditorShell({
     };
     window.addEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
     return () => window.removeEventListener(TIMELINE_FOCUS_EVENT, onFocus as EventListener);
-  }, [openRightDrawer, project.id, selected, setSelectedScene, setSelection, setZoom, zoom]);
+  }, [openRightDrawer, project.id, seek, selected, setSelectedScene, setSelection, setZoom, zoom]);
 
   const afterMutation = useCallback(async () => {
     await refresh();
     await refreshMaster();
     setReloadKey((value) => value + 1);
   }, [refresh, refreshMaster]);
+
+  const anyGenerating = useMemo(
+    () => (liveMaster?.batchBlocks || []).some((batch) => batch.status === "Generating"),
+    [liveMaster?.batchBlocks],
+  );
+  const takeSignature = useMemo(
+    () =>
+      (liveMaster?.batchBlocks || [])
+        .map((batch) => {
+          const approved = batch.approvedClip?.assetId || "";
+          const candidates = (batch.candidateVersions || []).map((candidate) => candidate.assetId || "").join(",");
+          return `${batch.id}:${batch.status}:${approved}:${candidates}`;
+        })
+        .join("|"),
+    [liveMaster?.batchBlocks],
+  );
+  const wasGeneratingRef = useRef(false);
+  const takeSignatureRef = useRef(takeSignature);
+
+  useEffect(() => {
+    if (!anyGenerating) return;
+    const timer = window.setInterval(() => {
+      void refreshMaster();
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [anyGenerating, refreshMaster]);
+
+  useEffect(() => {
+    if (wasGeneratingRef.current && !anyGenerating) {
+      void afterMutation();
+    }
+    wasGeneratingRef.current = anyGenerating;
+  }, [anyGenerating, afterMutation]);
+
+  useEffect(() => {
+    if (takeSignatureRef.current === takeSignature) return;
+    takeSignatureRef.current = takeSignature;
+    if (!takeSignature) return;
+    setReloadKey((value) => value + 1);
+  }, [takeSignature]);
+
+  const timelineCancelSupported = useMemo(() => {
+    const generating = (liveMaster?.batchBlocks || []).some((b) => b.status === "Generating");
+    if (!generating) return false;
+    return Boolean(selectedGenerator?.supportsQueuedCancel || selectedGenerator?.supportsRunningCancel);
+  }, [liveMaster?.batchBlocks, selectedGenerator?.supportsQueuedCancel, selectedGenerator?.supportsRunningCancel]);
+
+  const handleTimelineCancelRender = useCallback(() => {
+    if (!timelineCancelSupported) return;
+    void api
+      .directorTimelineCancel(project.id, selected.id, { action: "cancel_active_local_job" })
+      .then(afterMutation);
+  }, [afterMutation, project.id, selected.id, timelineCancelSupported]);
+
+  const runGenerateScene = useCallback(async () => {
+    if (!selected || generateBusy) return;
+    if (!sceneCanGenerate) {
+      setActionNotice(
+        t("timeline:generateSceneNotReady", {
+          reason: selectedGenerator?.readiness || "no ready video engine is selected",
+        }),
+      );
+      return;
+    }
+    if (preflightBlockingCount > 0) {
+      setActionNotice(t("timeline:generateSceneBlocked", { count: preflightBlockingCount }));
+      return;
+    }
+    setGenerateBusy(true);
+    setActionNotice(null);
+    try {
+      const result = await api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" });
+      const err = timelineActionError(result);
+      if (err) {
+        setActionNotice(err);
+        return;
+      }
+      if (timelineGenerateEmpty(result)) {
+        setActionNotice(t("timeline:generateSceneNothingQueued"));
+        return;
+      }
+      setActionNotice(t("timeline:generateSceneSubmitted"));
+      await afterMutation();
+    } catch (error) {
+      setActionNotice(error instanceof Error && error.message ? error.message : t("timeline:generateSceneNotReady", { reason: "the request failed" }));
+    } finally {
+      setGenerateBusy(false);
+    }
+  }, [
+    afterMutation,
+    generateBusy,
+    sceneCanGenerate,
+    preflightBlockingCount,
+    project.id,
+    selected,
+    selectedGenerator?.readiness,
+    t,
+  ]);
+
+  const runReviewExtend = useCallback(async () => {
+    if (!selected || extendBusy) return;
+    if (!canReviewExtend) {
+      setActionNotice(t("timeline:reviewExtendNeedApproved"));
+      return;
+    }
+    setExtendBusy(true);
+    setActionNotice(null);
+    try {
+      const result = await api.directorTimelineExtend(project.id, selected.id, {
+        prompt: selected.prompt || "",
+        durationSec: 5,
+      });
+      const err = timelineActionError(result);
+      if (err) {
+        setActionNotice(err);
+        return;
+      }
+      if (!result.ok) {
+        setActionNotice(result.error || result.message || t("timeline:reviewExtendFailed"));
+        return;
+      }
+      setActionNotice(t("timeline:reviewExtendSubmitted"));
+      await afterMutation();
+    } catch (error) {
+      setActionNotice(
+        error instanceof Error && error.message
+          ? error.message
+          : t("timeline:reviewExtendFailed"),
+      );
+    } finally {
+      setExtendBusy(false);
+    }
+  }, [afterMutation, canReviewExtend, extendBusy, project.id, selected, t]);
+
+  const videoRetake = useVideoRetake({
+    projectId: project.id,
+    sceneId: selected?.id,
+    playheadSec,
+    batchWindows,
+    pausePlayback: pause,
+    afterMutation,
+  });
+  openRetakeRef.current = videoRetake.open;
+  retakeOpenRef.current = videoRetake.session.open;
+
+  const handleOpenRetake = useCallback(() => {
+    videoRetake.toggle();
+  }, [videoRetake]);
+
+  const handleAddBatch = useCallback(async () => {
+    if (!selected) return;
+    await addTimelineBatch(project.id, selected.id, master);
+    await afterMutation();
+  }, [afterMutation, master, project.id, selected]);
+
+  const completedBatches = useMemo(() => completedApprovedBatches(liveMaster), [liveMaster]);
+  const canStitch = Boolean(selected?.id) && completedBatches.length >= 2 && !stitchBusy;
+
+  const onStitchBatches = useCallback(async () => {
+    if (!selected || stitchBusy) return;
+    if (completedApprovedBatches(liveMaster).length < 2) {
+      window.alert(t("timeline:stitchNeedTwo"));
+      return;
+    }
+    if (!window.confirm(t("timeline:stitchConfirm"))) return;
+    setStitchBusy(true);
+    try {
+      const result = await api.directorTimelineStitchScene(project.id, selected.id);
+      if (result.master) {
+        masterCacheRef.current.set(selected.id, result.master);
+        setMaster(result.master);
+      }
+      await afterMutation();
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : t("timeline:stitchFailed");
+      window.alert(message);
+    } finally {
+      setStitchBusy(false);
+    }
+  }, [afterMutation, liveMaster, project.id, selected, stitchBusy, t]);
 
   // c5: refresh project + Timeline master when Co-Director mutates this project
   // so the creator sees approved changes without a manual reload.
@@ -366,6 +693,35 @@ export function TimelineEditorShell({
     return () => window.removeEventListener("adept:codirector-project-mutated", onProjectMutated);
   }, [project.id, afterMutation]);
 
+  const persistBatchPrompts = useCallback(
+    async (entries: TimelineHistoryEntry["batchPrompts"]) => {
+      if (!selected) return;
+      const currentMaster = masterRef.current;
+      for (const entry of entries) {
+        const existing = currentMaster?.batchBlocks.find((batch) => batch.id === entry.batchId);
+        const beforeIds = (existing?.promptSegments || []).map((seg) => seg.id).join(",");
+        const afterIds = (entry.promptSegments || []).map((seg) => seg.id).join(",");
+        if (beforeIds === afterIds) continue;
+        await api.directorTimelinePatchBatch(project.id, selected.id, entry.batchId, {
+          promptSegments: entry.promptSegments,
+        });
+      }
+      setMaster((prev) => {
+        if (!prev) return prev;
+        const byId = new Map(entries.map((entry) => [entry.batchId, entry.promptSegments]));
+        const next = {
+          ...prev,
+          batchBlocks: prev.batchBlocks.map((batch) =>
+            byId.has(batch.id) ? { ...batch, promptSegments: byId.get(batch.id) || [] } : batch,
+          ),
+        };
+        masterCacheRef.current.set(selected.id, next);
+        return next;
+      });
+    },
+    [project.id, selected],
+  );
+
   const mutateTimeline = useCallback(
     async (
       mutator: (timeline: DirectorTimeline) => DirectorTimeline,
@@ -374,56 +730,90 @@ export function TimelineEditorShell({
       if (!selected) return;
       const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
       const next = mutator(current);
-      setUndoStack((stack) => [...stack.slice(-19), current]);
+      setUndoStack((stack) => [
+        ...stack.slice(-19),
+        { timeline: current, batchPrompts: snapshotBatchPrompts(masterRef.current) },
+      ]);
       setRedoStack([]);
+      directorTimelineRef.current = next;
+      directorCacheRef.current.set(selected.id, next);
+      setDirectorTimeline(next);
       await api.putDirector(project.id, selected.id, next);
+      const removed = [...promptIdsOf(current)].filter((id) => !promptIdsOf(next).has(id));
+      if (removed.length && masterRef.current) {
+        const patched = dropPromptIdsFromMaster(masterRef.current, removed);
+        await persistBatchPrompts(
+          patched.batchBlocks.map((batch) => ({ batchId: batch.id, promptSegments: batch.promptSegments || [] })),
+        );
+      }
+      syncPromptTombstones(current, next);
       // Soft text edits must not remount the Inspector (preserves focus/cursor).
       if (opts?.refresh === false) return;
       await afterMutation();
     },
-    [afterMutation, project.id, selected],
+    [afterMutation, persistBatchPrompts, project.id, selected],
   );
+
+  useEffect(() => {
+    bindShellTimelineMutate(mutateTimeline);
+    return () => bindShellTimelineMutate(null);
+  }, [mutateTimeline]);
+
+  useEffect(() => {
+    bindShellTimelineSnapshot(liveDirector);
+    return () => bindShellTimelineSnapshot(null);
+  }, [liveDirector]);
 
   const applyHistorySnapshot = useCallback(
     async (direction: "undo" | "redo") => {
       if (!selected) return;
       if (direction === "undo" && undoStack.length === 0) return;
       if (direction === "redo" && redoStack.length === 0) return;
-      const current = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
-      let next: DirectorTimeline;
+      const currentTimeline = (await api.getDirector(project.id, selected.id)) as DirectorTimeline;
+      const currentEntry: TimelineHistoryEntry = {
+        timeline: currentTimeline,
+        batchPrompts: snapshotBatchPrompts(masterRef.current),
+      };
+      let next: TimelineHistoryEntry;
       if (direction === "undo") {
         next = undoStack[undoStack.length - 1];
         setUndoStack((stack) => stack.slice(0, -1));
-        setRedoStack((stack) => [...stack, current]);
+        setRedoStack((stack) => [...stack, currentEntry]);
       } else {
         next = redoStack[redoStack.length - 1];
         setRedoStack((stack) => stack.slice(0, -1));
-        setUndoStack((stack) => [...stack, current]);
+        setUndoStack((stack) => [...stack, currentEntry]);
       }
-      await api.putDirector(project.id, selected.id, next);
+      directorTimelineRef.current = next.timeline;
+      directorCacheRef.current.set(selected.id, next.timeline);
+      setDirectorTimeline(next.timeline);
+      await api.putDirector(project.id, selected.id, next.timeline);
+      await persistBatchPrompts(next.batchPrompts);
+      syncPromptTombstones(currentTimeline, next.timeline);
       await afterMutation();
       // Restore visible selection state: if the currently selected clip no
       // longer exists in the restored timeline, fall back to scene so the
       // Inspector never shows a stale/deleted item (NO_PASSIVE_SELECTION_LOSS
       // for legitimate state changes; no stale Inspector after undo/redo).
       const s = selection;
+      const restored = next.timeline;
       if (s && s.kind !== "scene" && s.kind !== null && s.id) {
         const exists =
-          (next.prompt_segments || []).some((c) => c.id === s.id) ||
-          (next.image_clips || []).some((c) => c.id === s.id) ||
-          (next.video_clips || []).some((c) => c.id === s.id) ||
-          (next.video_reference_clips || []).some((c) => c.id === s.id) ||
-          (next.image_reference_clips || []).some((c) => c.id === s.id) ||
-          (next.audio_clips || []).some((c) => c.id === s.id) ||
-          (next.sfx_clips || []).some((c) => c.id === s.id) ||
-          (next.camera_clips || []).some((c) => c.id === s.id) ||
-          normalizeLipSyncTracks(next.lipsync?.tracks).some((t) =>
+          (restored.prompt_segments || []).some((c) => c.id === s.id) ||
+          (restored.image_clips || []).some((c) => c.id === s.id) ||
+          (restored.video_clips || []).some((c) => c.id === s.id) ||
+          (restored.video_reference_clips || []).some((c) => c.id === s.id) ||
+          (restored.image_reference_clips || []).some((c) => c.id === s.id) ||
+          (restored.audio_clips || []).some((c) => c.id === s.id) ||
+          (restored.sfx_clips || []).some((c) => c.id === s.id) ||
+          (restored.camera_clips || []).some((c) => c.id === s.id) ||
+          normalizeLipSyncTracks(restored.lipsync?.tracks).some((t) =>
             t.id === s.id || (t.clips || []).some((c) => c.id === s.id),
           );
         if (!exists) setSelection({ kind: "scene", id: selected.id });
       }
     },
-    [afterMutation, project.id, redoStack, selected, selection, setSelection, undoStack],
+    [afterMutation, persistBatchPrompts, project.id, redoStack, selected, selection, setSelection, undoStack],
   );
 
   const deleteSelection = useCallback(async () => {
@@ -489,7 +879,10 @@ export function TimelineEditorShell({
         confirmed = window.confirm(t("timeline:removeImage"));
       }
     } else if (clipKind === "video") {
-      const clip = (timeline.video_clips || []).find((c) => c.id === selection.id);
+      const playableTakes = playableVisualClipsFromMaster(masterRef.current);
+      const clip =
+        (timeline.video_clips || []).find((c) => c.id === selection.id) ||
+        playableTakes.find((c) => c.id === selection.id);
       if (!clip) return;
       if (clip.asset_id) {
         confirmed = window.confirm(t("timeline:removeVideo"));
@@ -533,7 +926,13 @@ export function TimelineEditorShell({
     await mutateTimeline((current) => {
       const next = { ...current };
       if (clipKind === "image") next.image_clips = (current.image_clips || []).filter((c) => c.id !== selection.id);
-      if (clipKind === "video") next.video_clips = (current.video_clips || []).filter((c) => c.id !== selection.id);
+      if (clipKind === "video") {
+        const playableTakes = playableVisualClipsFromMaster(masterRef.current);
+        const source =
+          (current.video_clips || []).length > 0 ? current.video_clips : playableTakes;
+        next.video_clips = source.filter((c) => c.id !== selection.id);
+        next.media_mode = "video";
+      }
       if (clipKind === "videoReference") next.video_reference_clips = (current.video_reference_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "imageReference") next.image_reference_clips = (current.image_reference_clips || []).filter((c) => c.id !== selection.id);
       if (clipKind === "audio") next.audio_clips = (current.audio_clips || []).filter((c) => c.id !== selection.id);
@@ -584,7 +983,6 @@ export function TimelineEditorShell({
   }, [mutateTimeline, selected, selection.id, selection.kind]);
 
   useEffect(() => {
-    const duration = selected?.duration_sec || 5;
     const unsubscribers = [
       registerTimelineCommand("undo", () => void applyHistorySnapshot("undo")),
       registerTimelineCommand("redo", () => void applyHistorySnapshot("redo")),
@@ -597,7 +995,11 @@ export function TimelineEditorShell({
         void deleteSelection();
       }),
       registerTimelineCommand("duplicateClip", () => duplicateSelection()),
-      registerTimelineCommand("playPause", () => setPauseUpdates((v) => !v)),
+      registerTimelineCommand("playPause", () => toggle()),
+      registerTimelineCommand("goToSceneStart", () => goToSceneStart()),
+      registerTimelineCommand("goToBatchIn", () => goToBatchIn()),
+      registerTimelineCommand("goToBatchOut", () => goToBatchOut()),
+      registerTimelineCommand("goToSceneEnd", () => goToSceneEnd()),
       registerTimelineCommand("fullscreen", () => void workspaceFs.toggleFullscreen()),
       registerTimelineCommand("openHotkeys", () => {
         setRightTab("hotkeys");
@@ -607,12 +1009,8 @@ export function TimelineEditorShell({
       registerTimelineCommand("toggleRightDrawer", () => toggleDrawer("right")),
       registerTimelineCommand("focusTimeline", () => focusTimelineWorkspace()),
       registerTimelineCommand("escape", () => {
-        if (retakeOpen) {
-          setRetakeOpen(false);
-          return;
-        }
-        if (inpaintOpen) {
-          setInpaintOpen(false);
+        if (videoRetake.session.open) {
+          videoRetake.close();
           return;
         }
         if (layoutRef.current.rightDrawerOpen) {
@@ -625,10 +1023,10 @@ export function TimelineEditorShell({
         }
         if (selected) setSelection({ kind: "scene", id: selected.id });
       }),
-      registerTimelineCommand("playheadLeft", () => setPlayheadSec((t) => Math.max(0, t - 0.1))),
-      registerTimelineCommand("playheadRight", () => setPlayheadSec((t) => Math.min(duration, t + 0.1))),
-      registerTimelineCommand("playheadLeftLarge", () => setPlayheadSec((t) => Math.max(0, t - 1))),
-      registerTimelineCommand("playheadRightLarge", () => setPlayheadSec((t) => Math.min(duration, t + 1))),
+      registerTimelineCommand("playheadLeft", () => seek((t) => t - 0.1)),
+      registerTimelineCommand("playheadRight", () => seek((t) => t + 0.1)),
+      registerTimelineCommand("playheadLeftLarge", () => seek((t) => t - 1)),
+      registerTimelineCommand("playheadRightLarge", () => seek((t) => t + 1)),
     ];
     return () => {
       unsubscribers.forEach((off) => off());
@@ -637,11 +1035,16 @@ export function TimelineEditorShell({
     applyHistorySnapshot,
     deleteSelection,
     duplicateSelection,
+    goToSceneStart,
+    goToBatchIn,
+    goToBatchOut,
+    goToSceneEnd,
     focusTimelineWorkspace,
-    inpaintOpen,
     openRightDrawer,
     persistLayout,
-    retakeOpen,
+    videoRetake,
+    seek,
+    toggle,
     selected,
     selection.kind,
     setSelection,
@@ -651,6 +1054,12 @@ export function TimelineEditorShell({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && retakeOpenRef.current) {
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        runTimelineCommand("escape");
+        return;
+      }
       if (isEditableTarget(e.target)) return;
       const hit = matchHotkey(e, loadHotkeys());
       if (!hit) return;
@@ -669,21 +1078,36 @@ export function TimelineEditorShell({
       const id = Math.random().toString(36).slice(2, 10);
       let next = { ...timeline };
       if (asset.kind === "image") {
-        const imageClips = timeline.image_clips || [];
-        const start = imageClips.reduce((max, clip) => Math.max(max, clip.start + clip.length), 0);
-        next = {
-          ...next,
-          media_mode: "image",
-          image_clips: [
-            ...imageClips,
-            { id, start: Math.min(start, Math.max(0, duration - 1)), length: Math.min(2, duration), label: "Image", role: "guide", asset_id: asset.id },
-          ],
-        };
+        // Omni Wave 3A Law 2: Library image → References only (mediaType=image).
+        // Do NOT write Visual image_clips guide takes. No silent generation.
+        await api.sceneReferences.attach(project.id, {
+          asset_id: asset.id,
+          scope_type: "project",
+          scope_id: project.id,
+          reference_type: "image",
+          media_kind: "image",
+          alias: (asset.tag || asset.filename || "Image").replace(/\s+/g, ""),
+          usage_modes: ["appearance"],
+          reference_roles: ["image"],
+        });
+        await afterMutation();
+        return;
       } else if (asset.kind === "video") {
         next = {
           ...next,
           media_mode: "video",
-          video_clips: [{ id, start: 0, length: duration, label: "Video", asset_id: asset.id, trim_start: 0 }],
+          video_clips: [
+            {
+              id,
+              start: 0,
+              length: duration,
+              label: "Video",
+              asset_id: asset.id,
+              trim_start: 0,
+              mediaType: "video",
+              media_type: "video",
+            },
+          ],
         };
       } else if (asset.kind === "audio") {
         next = {
@@ -718,8 +1142,83 @@ export function TimelineEditorShell({
     [afterMutation, project.id, selected],
   );
 
+  const handleAddFromProjectLibrary = useCallback(
+    (assetIds: string[]) => {
+      if (!assetIds.length) return;
+      void mutateTimeline((current) => {
+        const already = new Set(current.library_asset_ids || []);
+        const nextIds = [...(current.library_asset_ids || [])];
+        for (const id of assetIds) {
+          if (!already.has(id)) nextIds.push(id);
+        }
+        return { ...current, library_asset_ids: nextIds };
+      });
+    },
+    [mutateTimeline],
+  );
+
+  const handleRemoveFromLibrary = useCallback(
+    (asset: { id: string }) => {
+      setLibraryPreviewId((current) => (current === asset.id ? null : current));
+      void mutateTimeline((current) => {
+        const nextIds = (current.library_asset_ids || []).filter((id) => id !== asset.id);
+        if (nextIds.length === (current.library_asset_ids || []).length) return current;
+        return { ...current, library_asset_ids: nextIds };
+      });
+    },
+    [mutateTimeline],
+  );
+
   if (!selected) {
-    return <div className="page"><p className="empty">{t("timeline:selectScene")}</p></div>;
+    return (
+      <div className="timeline-v2" data-testid="timeline-editor-shell" data-empty-scenes="true">
+        <header className="timeline-v2__header" data-testid="timeline-scene-header">
+          <div className="timeline-v2__header-identity">
+            <h2 className="timeline-v2__header-title" data-testid="timeline-scene-header-title">
+              No scenes yet
+            </h2>
+            <p className="timeline-v2__header-meta">Add a Scene to start the Timeline.</p>
+          </div>
+        </header>
+        <button
+          type="button"
+          className="timeline-v2__drawer-handle timeline-v2__drawer-handle--left"
+          data-testid="timeline-drawer-left-toggle"
+          aria-expanded={workspaceLayout.leftDrawerOpen}
+          aria-controls="timeline-drawer-left"
+          onClick={(event) => {
+            event.stopPropagation();
+            toggleDrawer("left");
+          }}
+        >
+          {workspaceLayout.leftDrawerOpen ? "‹" : "›"}
+        </button>
+        <aside
+          id="timeline-drawer-left"
+          data-testid="timeline-drawer-left"
+          className={`timeline-v2__drawer timeline-v2__drawer--left${workspaceLayout.leftDrawerOpen ? " timeline-v2__drawer--open" : " timeline-v2__drawer--closed"}`}
+        >
+          <div className="timeline-v2__drawer-body">
+            <div className="timeline-v2__dock timeline-v2__dock--scenes">
+              <Timeline
+                project={project}
+                selectedId={selectedScene}
+                onSelect={(id) => {
+                  setSelectedScene(id);
+                  setSelection({ kind: "scene", id });
+                }}
+                onChange={() => void refresh()}
+              />
+            </div>
+          </div>
+        </aside>
+        <main className="timeline-v2__main">
+          <p className="empty" data-testid="timeline-scenes-empty">
+            Add a Scene to start the Timeline.
+          </p>
+        </main>
+      </div>
+    );
   }
 
   const resetWorkspaceLayout = () => {
@@ -740,13 +1239,23 @@ export function TimelineEditorShell({
         } as CSSProperties
       }
     >
+      <div ref={audioHostRef} data-testid="timeline-audio-playback" hidden />
       <WorkspaceFullscreenBanner visible={workspaceFs.showBanner} />
       <TimelineGeneratorBanner />
       <header className="timeline-v2__header" data-testid="timeline-scene-header">
         <div className="timeline-v2__header-identity">
-          <h2 className="timeline-v2__header-title">{selected.name}</h2>
-          <p className="timeline-v2__header-meta">
-            {generatorLabel(selected.engine)} · {t("timeline:durationSec", { seconds: selected.duration_sec.toFixed(1) })} · {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
+          <h2 className="timeline-v2__header-title" data-testid="timeline-scene-header-title">{selected.name}</h2>
+          <p className="timeline-v2__header-meta" data-testid="timeline-scene-header-meta">
+            {creatorGeneratorLine(
+              resolveGeneratorOption(
+                generatorOptions,
+                liveMaster?.sceneGeneratorId,
+                liveMaster?.batchBlocks[0]?.generatorId,
+                selected.engine,
+              ) || { label: selected.engine || "Engine", executionType: "local" },
+            )}{" "}
+            · {t("timeline:durationSec", { seconds: formatDurationSeconds(sceneEndSec).replace(/s$/, "") })} ·{" "}
+            {master?.mode === "video_finishing" ? t("timeline:videoFinishing") : t("timeline:imagePlanning")}
           </p>
         </div>
         <div className="timeline-v2__header-actions">
@@ -800,6 +1309,7 @@ export function TimelineEditorShell({
             <button
               type="button"
               className={`timeline-v2__header-btn ${!hideOverlay ? "primary" : "ghost"}`}
+              data-testid="timeline-viewer-guides"
               title={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-label={hideOverlay ? t("timeline:guidesShow") : t("timeline:guidesHide")}
               aria-pressed={!hideOverlay}
@@ -846,6 +1356,7 @@ export function TimelineEditorShell({
           <button
             type="button"
             className={`timeline-v2__header-btn ${master?.mode === "image_planning" ? "primary" : "ghost"}`}
+            data-testid="timeline-mode-image-planning"
             title={t("timeline:imagePlanningTitle")}
             aria-label={t("timeline:imagePlanningTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "image_planning").then(afterMutation)}
@@ -855,62 +1366,73 @@ export function TimelineEditorShell({
           <button
             type="button"
             className={`timeline-v2__header-btn ${master?.mode === "video_finishing" ? "primary" : "ghost"}`}
+            data-testid="timeline-mode-video-finishing"
             title={t("timeline:videoFinishingTitle")}
             aria-label={t("timeline:videoFinishingTitle")}
             onClick={() => void api.directorTimelineSetMode(project.id, selected.id, "video_finishing").then(afterMutation)}
           >
             {t("timeline:videoFinishing")}
           </button>
+          <ActionWithHelp
+            help={{
+              label: getTimelineHelp("stitch_batches").title,
+              content: getTimelineHelp("stitch_batches").body,
+              text: getTimelineHelp("stitch_batches").title,
+            }}
+          >
+            <button
+              type="button"
+              className="timeline-v2__header-btn ghost"
+              data-testid="timeline-stitch-batches"
+              title={completedBatches.length < 2 ? t("timeline:stitchNeedTwo") : t("timeline:stitchTitle")}
+              aria-label={t("timeline:stitchTitle")}
+              disabled={!canStitch}
+              onClick={() => void onStitchBatches()}
+            >
+              {stitchBusy ? t("timeline:stitchBusy") : t("timeline:stitch")}
+            </button>
+          </ActionWithHelp>
           <button
             type="button"
             className="timeline-v2__header-btn"
             title={t("timeline:preflightTitle")}
             aria-label={t("timeline:preflightTitle")}
             data-testid="timeline-header-preflight"
-            onClick={() =>
-              void api.directorTimelinePreflight(project.id, selected.id).then((result) => {
-                const blocking = result.findings.filter((f) =>
-                  ["error", "critical", "blocker"].includes(String(f.severity || "").toLowerCase()),
-                );
-                setPreflightBlockingCount(blocking.length);
-                const advisories = result.findings.filter((f) =>
-                  ["warning", "advisory", "info"].includes(String(f.severity || "").toLowerCase()),
-                );
-                const summaryParts: string[] = [];
-                if (blocking.length) {
-                  const codes = [...new Set(blocking.map((f) => f.code || f.severity).filter(Boolean))];
-                  summaryParts.push(`${blocking.length} blocking (${codes.join(", ")})`);
-                }
-                if (advisories.length) {
-                  summaryParts.push(`${advisories.length} advisory`);
-                }
-                setPreflightSummary(
-                  blocking.length
-                    ? `Blocked: ${summaryParts.join(" · ")}`
-                    : result.findings.length
-                      ? `Ready with ${summaryParts.join(" · ") || `${result.findings.length} finding(s)`}`
-                      : "Ready",
-                );
-                void afterMutation();
-              })
-            }
+            onClick={() => timelinePreflight.recheckNow()}
           >
-            {t("timeline:preflight")}
+            {timelinePreflight.status === "checking"
+              ? t("timeline:preflightChecking")
+              : t("timeline:preflightRecheck")}
           </button>
           <button
             type="button"
             className="timeline-v2__header-btn primary"
             title={
-              preflightBlockingCount > 0
+              !sceneCanGenerate
+                ? t("timeline:generateSceneNotReady", {
+                    reason: selectedGenerator?.readiness || "no ready video engine is selected",
+                  })
+                : preflightBlockingCount > 0
                 ? t("timeline:generateSceneBlocked", { count: preflightBlockingCount })
                 : t("timeline:generateSceneTitle")
             }
             aria-label={t("timeline:generateSceneTitle")}
             data-testid="timeline-header-generate"
-            disabled={preflightBlockingCount > 0}
-            onClick={() => void api.directorTimelineGenerateScene(project.id, selected.id, { scope: "full" }).then(afterMutation)}
+            disabled={generateBusy}
+            onClick={() => void runGenerateScene()}
           >
-            {t("timeline:generateScene")}
+            {generateBusy ? t("timeline:generateSceneBusy") : t("timeline:generateScene")}
+          </button>
+          <button
+            type="button"
+            className="timeline-v2__header-btn primary"
+            title={canReviewExtend ? t("timeline:reviewExtendTitle") : t("timeline:reviewExtendNeedBatch")}
+            aria-label={t("timeline:reviewExtendTitle")}
+            data-testid="timeline-header-review-extend"
+            disabled={extendBusy}
+            onClick={() => void runReviewExtend()}
+          >
+            {extendBusy ? t("timeline:reviewExtendBusy") : t("timeline:reviewExtend")}
           </button>
           <button
             type="button"
@@ -924,6 +1446,7 @@ export function TimelineEditorShell({
           <button
             type="button"
             className="timeline-v2__header-btn ghost"
+            data-testid="timeline-header-resume"
             title={t("timeline:resumeTitle")}
             aria-label={t("timeline:resumeTitle")}
             onClick={() => void api.directorTimelineCancel(project.id, selected.id, { action: "resume_incomplete_only" }).then(afterMutation)}
@@ -931,9 +1454,18 @@ export function TimelineEditorShell({
             {t("timeline:resume")}
           </button>
         </div>
+        {actionNotice ? (
+          <p className="timeline-v2__action-notice" data-testid="timeline-action-notice" role="status">
+            {actionNotice}
+          </p>
+        ) : null}
       </header>
 
-      <div className="timeline-v2__body">
+      <div
+        className="timeline-v2__body"
+        data-left-open={workspaceLayout.leftDrawerOpen ? "true" : "false"}
+        data-right-open={workspaceLayout.rightDrawerOpen ? "true" : "false"}
+      >
         <main className="timeline-v2__workspace" data-testid="timeline-v2-workspace">
           <TimelineWorkspaceStack
             projectId={project.id}
@@ -942,11 +1474,13 @@ export function TimelineEditorShell({
                 <TimelinePreviewComposer
                   project={project}
                   scene={selected}
-                  timeline={directorTimeline}
-                  master={master}
+                  timeline={liveDirector}
+                  master={liveMaster}
                   selection={selection}
                   playheadSec={playheadSec}
-                  onPlayheadChange={setPlayheadSec}
+                  onPlayheadChange={seek}
+                  timelinePlaying={playing}
+                  sceneEndSec={sceneEndSec}
                   libraryAsset={selectedAsset}
                   onClearLibraryAsset={() => setLibraryPreviewId(null)}
                   hideOverlay={hideOverlay}
@@ -954,9 +1488,27 @@ export function TimelineEditorShell({
                   pauseUpdates={pauseUpdates}
                   onPauseUpdatesChange={setPauseUpdates}
                   inlineActions={false}
+                  cancelRenderSupported={timelineCancelSupported}
+                  onCancelRender={handleTimelineCancelRender}
+                  onAddBatch={() => void handleAddBatch()}
+                  onOpenRetake={handleOpenRetake}
+                  retakeActive={videoRetake.session.open}
+                  retakeSession={videoRetake.session}
+                  retakeMediaRef={videoRetake.mediaRef}
+                  onRetakeMarkIn={videoRetake.markIn}
+                  onRetakeMarkOut={videoRetake.markOut}
+                  onRetakeTool={videoRetake.setTool}
+                  onRetakeBrushSize={videoRetake.setBrushSize}
+                  onRetakePrompt={videoRetake.setPrompt}
+                  onRetakeClearMask={videoRetake.clearMask}
+                  onRetakeRemoveBackground={() => void videoRetake.removeBackground()}
+                  onRetakeCancel={videoRetake.close}
+                  onRetakeSubmit={() => void videoRetake.submit()}
+                  onRetakeMaskChange={videoRetake.setHasMask}
                   onDismissFailure={(jobId) =>
                     void api.directorTimelineDismissFailure(project.id, selected.id, jobId).then(afterMutation)
                   }
+                  onApproved={afterMutation}
                 />
               </div>
             }
@@ -966,11 +1518,10 @@ export function TimelineEditorShell({
                 <TimelineToolbar
                   projectId={project.id}
                   scene={selected}
-                  master={master}
+                  master={liveMaster}
                   onRefresh={afterMutation}
-                  onPreflight={(result) => {
-                    setPreflightSummary(result.findings.length ? `${result.findings.length} finding(s)` : "Ready");
-                  }}
+                  onActionError={(message) => setActionNotice(message)}
+                  onPreflightRecheck={timelinePreflight.recheckNow}
                   mutateTimeline={mutateTimeline}
                   canUndo={undoStack.length > 0}
                   canRedo={redoStack.length > 0}
@@ -979,8 +1530,17 @@ export function TimelineEditorShell({
                   onGuidancePriorityChange={(value) => {
                     void mutateTimeline((timeline) => ({ ...timeline, guidance_priority: value }));
                   }}
-                  onOpenInpaint={() => setInpaintOpen(true)}
-                  onOpenRetake={() => setRetakeOpen(true)}
+                  onOpenRetake={handleOpenRetake}
+                  retakeActive={videoRetake.session.open}
+                  playing={playing}
+                  playheadSec={playheadSec}
+                  onGoToSceneStart={goToSceneStart}
+                  onGoToBatchIn={goToBatchIn}
+                  onTogglePlay={toggle}
+                  onGoToBatchOut={goToBatchOut}
+                  onGoToSceneEnd={goToSceneEnd}
+                  transportBounds={transportBounds}
+                  transportSceneId={selected.id}
                 />
                 <DirectorTracks
                   project={project}
@@ -988,27 +1548,13 @@ export function TimelineEditorShell({
                   onChange={() => void afterMutation()}
                   hideEmbeddedStage
                   externalPlayhead={playheadSec}
-                  onPlayheadChange={setPlayheadSec}
+                  onPlayheadChange={seek}
                   reloadKey={reloadKey}
-                  master={master}
+                  master={liveMaster}
                   shellMode
-                />
-                <TimelineInpaintWorkspace
-                  open={inpaintOpen}
-                  projectId={project.id}
-                  scene={selected}
-                  master={master}
-                  playheadSec={playheadSec}
-                  onClose={() => setInpaintOpen(false)}
-                  onRefresh={afterMutation}
-                />
-                <TimelineRetakeDrawer
-                  projectId={project.id}
-                  sceneId={selected.id}
-                  shotId={`scene-${selected.id}-shot-1`}
-                  open={retakeOpen}
-                  onClose={() => setRetakeOpen(false)}
-                  baselinePrompt="A glowing glass bottle on a dark studio table, slow cinematic push-in, subtle condensation, controlled rim lighting."
+                  mutateTimeline={mutateTimeline}
+                  retakeMode={videoRetake.session.open}
+                  retakeRange={videoRetake.highlight}
                 />
               </div>
             }
@@ -1038,6 +1584,14 @@ export function TimelineEditorShell({
           className={`timeline-v2__drawer timeline-v2__drawer--left${workspaceLayout.leftDrawerOpen ? " timeline-v2__drawer--open" : " timeline-v2__drawer--closed"}`}
         >
           <div className="timeline-v2__drawer-body">
+            <VideoGeneratorDock
+              projectId={project.id}
+              scene={selected}
+              master={liveMaster}
+              timeline={liveDirector}
+              onRefresh={afterMutation}
+              mutateTimeline={mutateTimeline}
+            />
             <div className="timeline-v2__dock timeline-v2__dock--scenes">
               <Timeline
                 project={project}
@@ -1054,10 +1608,15 @@ export function TimelineEditorShell({
                 project={project}
                 onChange={() => void refresh()}
                 selectedAssetId={libraryPreviewId}
-                onSelectAsset={(asset) => setLibraryPreviewId(asset.id)}
+                onSelectAsset={(asset) =>
+                  setLibraryPreviewId((current) => (current === asset.id ? null : asset.id))
+                }
                 onAddToTimeline={(asset) => void handleAddAssetToTimeline(asset)}
                 onAddAsReference={(asset) => void handleAddAssetAsReference(asset)}
+                onRemoveFromLibrary={handleRemoveFromLibrary}
                 allowUpload={false}
+                stagedAssetIds={liveDirector?.library_asset_ids ?? []}
+                onOpenProjectLibrary={() => setLibraryPickerOpen(true)}
               />
             </div>
             <div className="timeline-v2__dock timeline-v2__dock--references">
@@ -1066,7 +1625,7 @@ export function TimelineEditorShell({
                 sceneId={selected.id}
                 workflowTab="timeline"
                 reloadKey={reloadKey}
-                onChange={() => void refresh()}
+                onChange={() => void afterMutation()}
               />
             </div>
           </div>
@@ -1102,9 +1661,11 @@ export function TimelineEditorShell({
             onKeyDown={onPaneKeyDown("right")}
           />
           <div className="timeline-v2__drawer-body">
-          <div className="timeline-v2__tabs">
+          <div className="timeline-v2__tabs" role="tablist" aria-label={t("timeline:inspector")}>
             <button
               type="button"
+              role="tab"
+              aria-selected={rightTab === "inspector"}
               className={rightTab === "inspector" ? "primary" : "ghost"}
               data-testid="timeline-tab-inspector"
               title={t("timeline:showInspector")}
@@ -1118,6 +1679,8 @@ export function TimelineEditorShell({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={rightTab === "codirector"}
               className={rightTab === "codirector" ? "primary" : "ghost"}
               data-testid="timeline-tab-codirector"
               title={t("timeline:showCoDirector")}
@@ -1131,6 +1694,8 @@ export function TimelineEditorShell({
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={rightTab === "hotkeys"}
               className={rightTab === "hotkeys" ? "primary" : "ghost"}
               data-testid="timeline-tab-hotkeys"
               title={t("timeline:showHotKeys")}
@@ -1142,6 +1707,21 @@ export function TimelineEditorShell({
             >
               {t("timeline:hotKeys")}
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === "gpu"}
+              className={rightTab === "gpu" ? "primary" : "ghost"}
+              data-testid="timeline-tab-gpu"
+              title={t("timeline:showGpu")}
+              aria-label={t("timeline:showGpu")}
+              onClick={() => {
+                setRightTab("gpu");
+                openRightDrawer();
+              }}
+            >
+              {t("timeline:gpu")}
+            </button>
           </div>
           <div className="timeline-v2__right-content">
             <div
@@ -1151,11 +1731,12 @@ export function TimelineEditorShell({
               <TimelineInspector
                 project={project}
                 scene={selected}
-                master={master}
+                master={liveMaster}
                 reloadKey={reloadKey}
                 preflightSummary={preflightSummary}
                 focusFinding={focusFinding}
                 onRefresh={afterMutation}
+                onActionError={(message) => setActionNotice(message)}
                 mutateTimeline={mutateTimeline}
               />
             </div>
@@ -1164,6 +1745,12 @@ export function TimelineEditorShell({
               data-testid="timeline-right-panel-hotkeys"
             >
               <TimelineHotKeysPane />
+            </div>
+            <div
+              className={`timeline-v2__panel timeline-v2__panel--gpu${rightTab === "gpu" ? "" : " timeline-v2__panel--inactive"}`}
+              data-testid="timeline-right-panel-gpu"
+            >
+              <TimelineGpuPane project={project} scene={selected} onChange={afterMutation} />
             </div>
             <div
               className={`timeline-v2__panel timeline-v2__panel--codirector${rightTab === "codirector" ? "" : " timeline-v2__panel--inactive"}`}
@@ -1211,6 +1798,15 @@ export function TimelineEditorShell({
           {workspaceLayout.rightDrawerOpen ? "›" : "‹"}
         </button>
       </div>
+      {libraryPickerOpen ? (
+        <AddFromProjectLibraryModal
+          project={project}
+          alreadyIds={liveDirector?.library_asset_ids || []}
+          onAdd={handleAddFromProjectLibrary}
+          onAssetsChanged={() => void refresh()}
+          onClose={() => setLibraryPickerOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

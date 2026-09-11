@@ -92,6 +92,13 @@
   line-height: 1.2;
 }
 
+.timeline-v2__action-notice {
+  flex: 1 0 100%;
+  margin: 0;
+  color: #ffd4a8;
+  font-size: 0.78rem;
+}
+
 .timeline-v2__body {
   position: relative;
   direction: ltr;
@@ -106,9 +113,21 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  width: 100%;
+  width: auto;
   min-height: 0;
   overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Drawers are overlays. Inset with margin, not padding: overflow:hidden clips
+   to the padding box, so padding-right still lets Timed Prompt clips paint
+   under the Inspector. Margin shrinks the workspace border box. */
+.timeline-v2__body[data-left-open="true"] .timeline-v2__workspace {
+  margin-left: var(--timeline-left-width);
+}
+
+.timeline-v2__body[data-right-open="true"] .timeline-v2__workspace {
+  margin-right: var(--timeline-right-width);
 }
 
 .timeline-v2__drawer-handle {
@@ -278,6 +297,25 @@
   overflow: hidden;
 }
 
+.timeline-v2__dock--library .asset-tray {
+  container-type: inline-size;
+  padding: 0.45rem 0.35rem 0.55rem;
+}
+
+.timeline-v2__dock--library .asset-tray .panel-heading-title h2 {
+  font-size: 0.95rem;
+}
+
+@container (max-width: 220px) {
+  .timeline-v2__dock--library .asset-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+  .timeline-v2__dock--library .asset-item__actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
+
 .timeline-v2__dock--library .asset-list,
 .timeline-v2__dock--references .ref-chip-list,
 .timeline-v2__dock--references [data-testid="references-list"] {
@@ -286,6 +324,65 @@
   max-height: none;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* Left drawer owns one vertical scroll. Right Inspector stays on its own panel scroll.
+   Shared content gutter clears the absolute left handle so headings are not clipped. */
+.timeline-v2__drawer--left > .timeline-v2__drawer-body {
+  box-sizing: border-box;
+  padding-left: calc(var(--timeline-drawer-handle-width) + 0.65rem);
+  padding-right: 0.65rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.timeline-v2__drawer--left .timeline-v2__dock,
+.timeline-v2__drawer--left .timeline-v2__dock--scenes,
+.timeline-v2__drawer--left .timeline-v2__dock--library,
+.timeline-v2__drawer--left .timeline-v2__dock--references {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.timeline-v2__drawer--left .timeline-v2__dock--scenes .timeline,
+.timeline-v2__drawer--left .timeline-v2__dock--library .panel,
+.timeline-v2__drawer--left .timeline-v2__dock--references .panel {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.timeline-v2__drawer--left .timeline-v2__scenes-list,
+.timeline-v2__drawer--left .timeline-v2__dock--library .asset-list,
+.timeline-v2__drawer--left .timeline-v2__dock--references .ref-chip-list,
+.timeline-v2__drawer--left .timeline-v2__dock--references [data-testid="references-list"] {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+.timeline-v2__turbo-lora {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  margin: 0 0 0.2rem;
+}
+
+.timeline-v2__turbo-lora-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: inherit;
+}
+
+.timeline-v2__turbo-lora-toggle {
+  flex: 0 0 auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -310,24 +407,62 @@
 
 .timeline-v2__tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.16rem;
   flex: 0 0 auto;
+  min-width: 0;
+  padding: 0.12rem 0 0.2rem;
 
-  /* Right-rail timeline tabs: deep navy background with light text.
-     Scoped overrides so these tabs never inherit the generic dark-on-dark
-     button.primary (#06201c) / button.ghost colors, in either theme. */
-  --timeline-v2-tab-bg: #14294a;               /* deep navy */
-  --timeline-v2-tab-bg-hover: #1a3358;         /* navy, hover */
-  --timeline-v2-tab-bg-active: #1d3f72;        /* brighter navy, selected */
-  --timeline-v2-tab-ink: rgba(225, 232, 242, 0.92);   /* light gray text */
-  --timeline-v2-tab-ink-active: #ffffff;       /* white text, selected */
+  /* Compact inspector tabs — same navy language, production density. */
+  --timeline-v2-tab-bg: #14294a;
+  --timeline-v2-tab-bg-hover: #1a3358;
+  --timeline-v2-tab-bg-active: #1d3f72;
+  --timeline-v2-tab-ink: rgba(225, 232, 242, 0.92);
+  --timeline-v2-tab-ink-active: #ffffff;
   --timeline-v2-tab-border: rgba(148, 180, 220, 0.28);
   --timeline-v2-tab-border-active: rgba(130, 190, 255, 0.55);
 }
 
+.timeline-gpu-pane {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.timeline-gpu-pane__meter {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.timeline-gpu-pane__fill {
+  height: 100%;
+  background: #54a8ff;
+}
+
+.timeline-v2__drawer--right > .timeline-v2__drawer-body {
+  box-sizing: border-box;
+  padding-right: calc(var(--timeline-drawer-handle-width) + 0.45rem);
+  padding-left: 0.4rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.4rem;
+}
+
 .timeline-v2__tabs button,
-.timeline-v2__tabs button.ghost {
+.timeline-v2__tabs button.ghost,
+.timeline-v2__tabs button.primary {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
+  padding: 0.22rem 0.36rem;
+  border-radius: 7px;
+  white-space: nowrap;
   color: var(--timeline-v2-tab-ink);
   background: var(--timeline-v2-tab-bg);
   border: 1px solid var(--timeline-v2-tab-border);
@@ -338,14 +473,14 @@
 .timeline-v2__tabs button.ghost:hover:not(:disabled) {
   color: var(--timeline-v2-tab-ink-active);
   background: var(--timeline-v2-tab-bg-hover);
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .timeline-v2__tabs button.primary {
   color: var(--timeline-v2-tab-ink-active);
   background: var(--timeline-v2-tab-bg-active);
   border-color: var(--timeline-v2-tab-border-active);
-  box-shadow: 0 8px 18px rgba(20, 41, 74, 0.45);
+  box-shadow: none;
 }
 
 .timeline-v2__tabs button.primary:hover:not(:disabled) {
@@ -373,13 +508,15 @@
 }
 
 .timeline-v2__panel--inspector,
-.timeline-v2__panel--hotkeys {
+.timeline-v2__panel--hotkeys,
+.timeline-v2__panel--gpu {
   overflow-x: hidden;
   overflow-y: auto;
 }
 
 .timeline-v2__panel--inspector .timeline-inspector,
 .timeline-v2__panel--hotkeys .timeline-hotkeys-pane,
+.timeline-v2__panel--gpu .timeline-gpu-pane,
 .timeline-v2__panel--codirector .timeline-codirector-placeholder {
   min-height: 0;
 }
@@ -409,4 +546,73 @@
   /* Canvas stays cinematic dark in every theme, including aurora-day. */
   background: #0c121b;
   color: #e1e8f2;
+}
+
+.timeline-library-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+}
+
+.timeline-library-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.timeline-library-modal__panel {
+  position: relative;
+  z-index: 1;
+  width: min(720px, calc(100vw - 2rem));
+  max-height: min(80vh, 640px);
+  overflow: auto;
+  padding: 1rem;
+  border-radius: 12px;
+  background: var(--surface-primary, #121820);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.timeline-library-modal__header,
+.timeline-library-modal__tools,
+.timeline-library-modal__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timeline-library-modal__header {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.timeline-library-modal__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.timeline-library-modal__tools {
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.timeline-library-modal__error {
+  margin: 0 0 0.75rem;
+  color: #ffb4b4;
+}
+
+.timeline-library-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.6rem;
+  min-height: 8rem;
+}
+
+.timeline-library-modal__footer {
+  justify-content: flex-end;
+  margin-top: 0.85rem;
 }

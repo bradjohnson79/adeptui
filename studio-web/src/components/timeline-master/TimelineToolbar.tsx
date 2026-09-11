@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next";
 import { api } from "../../api";
 import type { Scene } from "../../types";
 import type { BatchBlock, SceneTimelineMaster } from "../../timelineMaster/contracts";
+import { addTimelineBatch } from "../../timelineMaster/addTimelineBatch";
 import { getTimelineHelp } from "../../timelineMaster/helpCatalog";
-import { generatorOptionsFromPayload, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
+import { anyTimelineGeneratorExecutable, resolveGeneratorOption } from "../../timelineMaster/draftCapabilities";
+import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
 import { useDirectorSelection } from "../DirectorSelectionContext";
-import { HelpTip } from "../HelpTip";
+import { ActionWithHelp, HelpTip } from "../HelpTip";
 import {
   createLipSyncTrack,
   lipSyncTrackHasContent,
@@ -17,7 +19,10 @@ import {
 } from "../DirectorTracks";
 import { TimelineSettingsDrawer } from "./TimelineSettingsDrawer";
 import { registerTimelineCommand } from "../../timelineMaster/timelineHotkeys";
+import { stepTimelineZoom, sliderToZoom, zoomToSlider } from "../../timelineMaster/timelineZoom";
+import { timelineActionError, timelineGenerateEmpty } from "../../timelineMaster/timelineErrors";
 
+/** Header + transport generate controls for the Timeline board. */
 function nid() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -107,44 +112,73 @@ export function TimelineToolbar({
   scene,
   master,
   onRefresh,
-  onPreflight,
+  onPreflightRecheck,
   mutateTimeline,
   canUndo,
   canRedo,
   onUndo,
   onRedo,
   onGuidancePriorityChange,
-  onOpenInpaint,
   onOpenRetake,
+  onActionError,
+  retakeActive: _retakeActive,
+  playing,
+  playheadSec,
+  onGoToSceneStart,
+  onGoToBatchIn,
+  onTogglePlay,
+  onGoToBatchOut,
+  onGoToSceneEnd,
+  transportBounds,
+  transportSceneId,
 }: {
   projectId: string;
   scene: Scene;
   master: SceneTimelineMaster | null;
   onRefresh: () => void | Promise<void>;
-  onPreflight: (result: { ok: boolean; findings: Array<{ severity: string; message: string; code?: string }> }) => void;
+  /** Manual "Re-check now" — routes into the shell's always-on preflight hook. */
+  onPreflightRecheck: () => void;
   mutateTimeline: (mutator: (timeline: DirectorTimeline) => DirectorTimeline) => Promise<void>;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void | Promise<void>;
   onRedo: () => void | Promise<void>;
   onGuidancePriorityChange: (value: DirectorTimeline["guidance_priority"]) => void;
-  onOpenInpaint: () => void;
   onOpenRetake?: () => void;
+  onActionError?: (message: string) => void;
+  retakeActive?: boolean;
+  playing: boolean;
+  playheadSec: number;
+  onGoToSceneStart: () => void;
+  onGoToBatchIn: () => void;
+  onTogglePlay: () => void;
+  onGoToBatchOut: () => void;
+  onGoToSceneEnd: () => void;
+  transportBounds: {
+    sceneStart: number;
+    sceneEnd: number;
+    activeBatchStart: number;
+    activeBatchEnd: number;
+  };
+  transportSceneId?: string;
 }) {
   const { selection, snap, setSnap, zoom, setZoom, setSelection } = useDirectorSelection();
   const { t } = useTranslation("timeline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [generatorOptions, setGeneratorOptions] = useState(() => [] as ReturnType<typeof generatorOptionsFromPayload>);
+  const [generatorOptions, setGeneratorOptions] = useState(
+    () => [] as Awaited<ReturnType<typeof loadTimelineVideoGenerators>>,
+  );
 
   useEffect(() => {
     let alive = true;
-    void api.directorTimelineGenerators().then((payload) => {
-      if (!alive) return;
-      setGeneratorOptions(generatorOptionsFromPayload(payload));
-    }).catch(() => {
-      if (alive) setGeneratorOptions([]);
-    });
+    void loadTimelineVideoGenerators()
+      .then((rows) => {
+        if (alive) setGeneratorOptions(rows);
+      })
+      .catch(() => {
+        if (alive) setGeneratorOptions([]);
+      });
     return () => {
       alive = false;
     };
@@ -188,6 +222,7 @@ export function TimelineToolbar({
         weight: 1,
         region: null,
         reference_binding_ids: [],
+        reference_name_bindings: [],
       };
       return { ...timeline, prompt_segments: [...segments, segment] };
     });
@@ -254,7 +289,7 @@ export function TimelineToolbar({
 
   const addBatch = async () => {
     await run(async () => {
-      await api.directorTimelineAddBatch(projectId, scene.id, { plannedDuration: scene.duration_sec });
+      await addTimelineBatch(projectId, scene.id, master);
     });
   };
 
@@ -384,24 +419,40 @@ export function TimelineToolbar({
     });
   };
 
-  const preflight = async () => {
-    setBusy(true);
-    try {
-      const result = await api.directorTimelinePreflight(projectId, scene.id);
-      onPreflight(result);
-      await onRefresh();
-    } finally {
-      setBusy(false);
-    }
+  // Preflight is always-on via useTimelinePreflight in the editor shell — this
+  // button is a manual "Re-check now" through the same shared hook state.
+  const preflight = () => {
+    onPreflightRecheck();
   };
 
+  const sceneCanGenerate = anyTimelineGeneratorExecutable(
+    generatorOptions,
+    selectedBatch?.generatorId,
+    ...(master?.batchBlocks || []).map((batch) => batch.generatorId),
+    master?.sceneGeneratorId,
+    scene.engine,
+  );
+
   const generateScene = async (scope: "full" | "selected") => {
+    if (!sceneCanGenerate) {
+      onActionError?.(
+        `Generate is not ready — ${selectedGen?.readiness || "no ready video engine is selected"}`,
+      );
+      return;
+    }
     await run(async () => {
-      if (scope === "selected" && selection.kind === "batch" && selection.id) {
-        await api.directorTimelineGenerateBatch(projectId, scene.id, selection.id);
+      const result =
+        scope === "selected" && selection.kind === "batch" && selection.id
+          ? await api.directorTimelineGenerateBatch(projectId, scene.id, selection.id)
+          : await api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
+      const err = timelineActionError(result);
+      if (err) {
+        onActionError?.(err);
         return;
       }
-      await api.directorTimelineGenerateScene(projectId, scene.id, { scope: "full" });
+      if (timelineGenerateEmpty(result)) {
+        onActionError?.("Nothing was queued to generate. Finished batches stay as they are.");
+      }
     });
   };
 
@@ -412,8 +463,8 @@ export function TimelineToolbar({
       registerTimelineCommand("retake", () => onOpenRetake?.()),
       registerTimelineCommand("imagePlanning", () => void setMode("image_planning")),
       registerTimelineCommand("videoFinishing", () => void setMode("video_finishing")),
-      registerTimelineCommand("zoomIn", () => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))),
-      registerTimelineCommand("zoomOut", () => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))),
+      registerTimelineCommand("zoomIn", () => setZoom(stepTimelineZoom(zoom, 1))),
+      registerTimelineCommand("zoomOut", () => setZoom(stepTimelineZoom(zoom, -1))),
       registerTimelineCommand("toggleSnap", () => setSnap(!snap)),
       registerTimelineCommand("addPrompt", () => void addPrompt()),
       registerTimelineCommand("addLipSync", () => void addLipSyncTrack()),
@@ -428,12 +479,6 @@ export function TimelineToolbar({
     master?.mode === "video_finishing"
       ? "Switch Timeline mode to Image Planning"
       : "Switch Timeline mode to Video Finishing";
-  const inpaintEnabled = selection.kind === "videoClip" || selection.kind === "repair";
-  const inpaintTitle =
-    selection.kind === "videoClip" || selection.kind === "repair"
-      ? "Open the Inpaint workspace for this selected range"
-      : "Select the Video clip or a Repair range to open Inpaint";
-
   const addButtons = (
     <>
       <PlusMinusGroup
@@ -496,43 +541,47 @@ export function TimelineToolbar({
 
   const generateButtons = (
     <>
-      <button
-        type="button"
-        title="Run Co-Director Preflight inspection for this Scene"
-        aria-label="Run Co-Director Preflight inspection for this Scene"
-        data-testid="timeline-toolbar-preflight"
-        onClick={() => void preflight()}
+      <ActionWithHelp
+        help={{
+          label: getTimelineHelp("preflight").title,
+          content: getTimelineHelp("preflight").body,
+          text: getTimelineHelp("preflight").title,
+        }}
       >
-        Preflight <Help id="preflight" />
-      </button>
+        <button
+          type="button"
+          title="Preflight runs automatically as you edit — Re-check now refreshes it"
+          aria-label="Preflight runs automatically as you edit — Re-check now refreshes it"
+          data-testid="timeline-toolbar-preflight"
+          onClick={() => void preflight()}
+        >
+          Re-check now
+        </button>
+      </ActionWithHelp>
       <button
         type="button"
         className="primary"
-        title={draftAvailable ? "Generate a low-cost preview first" : "Generate the full Scene"}
+        title={
+          !sceneCanGenerate
+            ? `Generate is not ready — ${selectedGen?.readiness || "no ready video engine is selected"}`
+            : draftAvailable
+              ? "Generate a low-cost preview first"
+              : "Generate the full Scene"
+        }
         aria-label={draftAvailable ? "Generate Draft for the full Scene" : "Generate the full Scene"}
         data-testid="timeline-generate-scene"
+        disabled={busy}
         onClick={() => void generateScene("full")}
       >
         {draftAvailable ? "Generate Draft" : "Generate"}
       </button>
-      {onOpenRetake ? (
-        <button
-          type="button"
-          className="primary"
-          title="Open Re-take for the selected Timeline shot (MiniMax H3)"
-          aria-label="Open Re-take"
-          data-testid="timeline-open-retake"
-          onClick={onOpenRetake}
-        >
-          Re-take
-        </button>
-      ) : null}
       {selection.kind === "batch" && selection.id ? (
         <button
           type="button"
           title="Generate only the selected Batch Block"
           aria-label="Generate only the selected Batch Block"
           data-testid="timeline-gen-batch"
+          disabled={!sceneCanGenerate}
           onClick={() => void generateScene("selected")}
         >
           {draftAvailable ? "Draft Batch" : "Gen Batch"}
@@ -557,19 +606,6 @@ export function TimelineToolbar({
         <span className="scene-meta" data-testid="timeline-toolbar-cancel-unavailable">
           Provider is rendering — cancellation unavailable
         </span>
-      ) : null}
-      {master?.mode === "video_finishing" ? (
-        <button
-          type="button"
-          className={inpaintEnabled ? "primary" : ""}
-          disabled={!inpaintEnabled}
-          title={inpaintTitle}
-          aria-label={inpaintTitle}
-          data-testid="timeline-toolbar-inpaint"
-          onClick={onOpenInpaint}
-        >
-          Inpaint
-        </button>
       ) : null}
       <button
         type="button"
@@ -609,7 +645,7 @@ export function TimelineToolbar({
         title={`Zoom out (current ${zoom.toFixed(2)}×)`}
         aria-label={`Zoom out timeline (current ${zoom.toFixed(2)} times)`}
         data-testid="timeline-toolbar-zoom-out"
-        onClick={() => setZoom(Math.max(0.5, +(zoom - 0.25).toFixed(2)))}
+        onClick={() => setZoom(stepTimelineZoom(zoom, -1))}
       >
         −Z
       </button>
@@ -618,7 +654,7 @@ export function TimelineToolbar({
         title={`Zoom in (current ${zoom.toFixed(2)}×)`}
         aria-label={`Zoom in timeline (current ${zoom.toFixed(2)} times)`}
         data-testid="timeline-toolbar-zoom-in"
-        onClick={() => setZoom(Math.min(3, +(zoom + 0.25).toFixed(2)))}
+        onClick={() => setZoom(stepTimelineZoom(zoom, 1))}
       >
         +Z
       </button>
@@ -629,18 +665,19 @@ export function TimelineToolbar({
         <span className="sr-only">Timeline zoom</span>
         <input
           type="range"
-          min={0.5}
-          max={3}
-          step={0.05}
-          value={zoom}
+          min={0}
+          max={1}
+          step={0.001}
+          value={zoomToSlider(zoom)}
           data-testid="timeline-toolbar-zoom-slider"
           aria-label="Timeline zoom"
-          onChange={(e) => setZoom(Number(e.target.value) || 1)}
+          onChange={(e) => setZoom(sliderToZoom(Number(e.target.value)))}
         />
       </label>
       <button
         type="button"
         className={snap ? "primary" : ""}
+        data-testid="timeline-toolbar-snap"
         title={snap ? "Disable clip snapping" : "Enable clip snapping"}
         aria-label={snap ? "Disable clip snapping" : "Enable clip snapping"}
         onClick={() => setSnap(!snap)}
@@ -650,14 +687,75 @@ export function TimelineToolbar({
     </>
   );
 
+  const playLabel = playing ? t("pauseTimeline") : t("playTimeline");
+
   return (
     <div className="timeline-toolbar-shell" data-testid="timeline-toolbar" aria-busy={busy}>
-      <div className="timeline-toolbar__row" role="toolbar" aria-label="Timeline add controls">
-        <div className="timeline-toolbar__group">{addButtons}</div>
-      </div>
-      <div className="timeline-toolbar__row" role="toolbar" aria-label="Timeline generate and edit controls">
-        <div className="timeline-toolbar__group">{generateButtons}</div>
-        <div className="timeline-toolbar__group">
+      <div className="timeline-toolbar__row timeline-toolbar__row--transport" role="toolbar" aria-label="Timeline add, transport, and edit controls">
+        <div className="timeline-toolbar__group timeline-toolbar__group--left">{addButtons}</div>
+        <div className="timeline-toolbar__group timeline-toolbar__group--center">
+          <div
+            className="timeline-toolbar__transport"
+            data-testid="timeline-transport"
+            role="group"
+            aria-label="Timeline transport"
+            data-scene-id={transportSceneId || ""}
+            data-scene-start={String(transportBounds.sceneStart)}
+            data-scene-end={String(transportBounds.sceneEnd)}
+            data-batch-in={String(transportBounds.activeBatchStart)}
+            data-batch-out={String(transportBounds.activeBatchEnd)}
+            data-playhead={String(playheadSec)}
+          >
+            <button
+              type="button"
+              data-testid="timeline-transport-scene-start"
+              title={t("goToSceneStartTitle")}
+              aria-label={t("goToSceneStart")}
+              onClick={onGoToSceneStart}
+            >
+              <span className="timeline-toolbar__transport-glyph">{"|<<"}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="timeline-transport-in"
+              title={t("goToBatchInTitle")}
+              aria-label={t("goToBatchIn")}
+              onClick={onGoToBatchIn}
+            >
+              <span className="timeline-toolbar__transport-glyph">{"|<"}</span>
+            </button>
+            <button
+              type="button"
+              className={playing ? "primary" : ""}
+              data-testid="timeline-transport-play"
+              title={t("playPauseTitle")}
+              aria-label={playLabel}
+              aria-pressed={playing}
+              onClick={onTogglePlay}
+            >
+              <span className="timeline-toolbar__transport-glyph">{playing ? "⏸" : "▶"}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="timeline-transport-out"
+              title={t("goToBatchOutTitle")}
+              aria-label={t("goToBatchOut")}
+              onClick={onGoToBatchOut}
+            >
+              <span className="timeline-toolbar__transport-glyph">{">|"}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="timeline-transport-scene-end"
+              title={t("goToSceneEndTitle")}
+              aria-label={t("goToSceneEnd")}
+              onClick={onGoToSceneEnd}
+            >
+              <span className="timeline-toolbar__transport-glyph">{">>|"}</span>
+            </button>
+          </div>
+        </div>
+        <div className="timeline-toolbar__group timeline-toolbar__group--right">
           {toolButtons}
           <button
             type="button"
@@ -669,6 +767,9 @@ export function TimelineToolbar({
             ⚙
           </button>
         </div>
+      </div>
+      <div className="timeline-toolbar__row" role="toolbar" aria-label="Timeline generate controls">
+        <div className="timeline-toolbar__group">{generateButtons}</div>
       </div>
       <TimelineSettingsDrawer
         open={settingsOpen}

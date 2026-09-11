@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Project } from "../types";
-import { api } from "../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Project, Scene } from "../types";
+import { ApiError, api } from "../api";
 import { PanelHeading } from "./HelpTip";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
+import { formatDurationSeconds } from "../lib/formatDuration";
+import { LOCAL_SCENE_DURATION_CAP_SEC, nextLocalSceneDurationSec } from "./timelineSceneDuration";
+import { Menu } from "./ui/Menu";
+import { SceneRemoveDialog, SceneRenameDialog } from "./timeline-master/SceneCardDialogs";
+import { isSceneDeleteAlreadyGone, neighborSceneId, normalizeSceneName } from "../sceneLifecycle";
 
 /** Compact scene strip — detailed tracks live in DirectorTracks. */
 export function Timeline({
@@ -21,6 +26,22 @@ export function Timeline({
     [project.scenes]
   );
   const [sceneMeta, setSceneMeta] = useState<Record<string, { batches: number; status: string }>>({});
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<Scene | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<Scene | null>(null);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const [dialogError, setDialogError] = useState<string | null>(null);
+  const scenesListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const active = scenesListRef.current?.querySelector<HTMLElement>(`[data-scene-id="${selectedId}"]`);
+    active?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedId]);
+
+  useEffect(() => {
+    setOpenMenuId(null);
+  }, [selectedId]);
 
   useEffect(() => {
     let alive = true;
@@ -51,26 +72,126 @@ export function Timeline({
     };
   }, [project.id, project.scenes]);
 
+  const closeDialogs = () => {
+    if (dialogBusy) return;
+    setRenameTarget(null);
+    setRemoveTarget(null);
+    setDialogError(null);
+  };
+
+  const confirmRename = async (name: string) => {
+    if (!renameTarget) return;
+    const parsed = normalizeSceneName(name);
+    if (!parsed.ok) {
+      setDialogError(parsed.reason);
+      return;
+    }
+    if (parsed.name === renameTarget.name) {
+      setRenameTarget(null);
+      setDialogError(null);
+      return;
+    }
+    setDialogBusy(true);
+    setDialogError(null);
+    try {
+      await api.updateScene(project.id, renameTarget.id, { name: parsed.name });
+      setRenameTarget(null);
+      onChange();
+    } catch (error) {
+      setDialogError(error instanceof ApiError ? error.message : "Could not rename this scene.");
+    } finally {
+      setDialogBusy(false);
+    }
+  };
+
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setDialogBusy(true);
+    setDialogError(null);
+    const removedId = removeTarget.id;
+    const removingActive = selectedId === removedId;
+    const nextId = neighborSceneId(
+      project.scenes.map((scene) => scene.id),
+      removedId,
+    );
+    if (removingActive) onSelect(nextId || "");
+    try {
+      await api.deleteScene(project.id, removedId);
+    } catch (error) {
+      if (!isSceneDeleteAlreadyGone(error)) {
+        if (removingActive) onSelect(removedId);
+        setDialogError(error instanceof ApiError ? error.message : "Could not remove this scene.");
+        setDialogBusy(false);
+        return;
+      }
+    }
+    setRemoveTarget(null);
+    setDialogBusy(false);
+    onChange();
+  };
+
   return (
     <div className="panel timeline">
       <PanelHeading
         title="Scenes"
-        tip="Ordered story beats for this project. Select one to open Timeline tracks; total Scene duration is capped at 20s for local Timeline renders."
+        tip="Ordered story beats for this project. Select one to open Timeline tracks. Each local Scene can be up to 20 seconds."
       >
-        <span className="scene-meta">{total.toFixed(1)}s / 20s</span>
+        <span className="scene-meta">{formatDurationSeconds(total)} · {LOCAL_SCENE_DURATION_CAP_SEC}s max per Scene</span>
       </PanelHeading>
-      <div className="timeline-v2__scenes-list">
+      <div className="timeline-v2__scenes-list" ref={scenesListRef}>
+        {project.scenes.length === 0 ? (
+          <p className="empty" data-testid="scenes-empty">
+            No scenes yet. Add a Scene to start.
+          </p>
+        ) : null}
         {project.scenes.map((scene) => (
           <div
             key={scene.id}
             className={`scene-block ${selectedId === scene.id ? "active" : ""}`}
+            data-testid={`scene-block-${scene.id}`}
+            data-scene-id={scene.id}
             onClick={() => onSelect(scene.id)}
           >
             <div className="scene-head">
-              <strong>{scene.name}</strong>
-              <span className="scene-meta scene-head__meta">
-                {scene.engine.replace(/^fal_/, "FAL/").toUpperCase()} · {scene.duration_sec}s
-              </span>
+              <div className="scene-head__identity">
+                <strong data-testid={`scene-block-name-${scene.id}`}>{scene.name}</strong>
+                <span className="scene-meta scene-head__meta">
+                  {scene.engine.replace(/^fal_/, "FAL/").toUpperCase()} · {formatDurationSeconds(scene.duration_sec)}
+                </span>
+              </div>
+              <Menu
+                compact
+                align="end"
+                showChevron={false}
+                label="⋯"
+                trigger="⋯"
+                ariaLabel={`Scene options for ${scene.name}`}
+                testId={`scene-overflow-${scene.id}`}
+                className="scene-block__menu"
+                open={openMenuId === scene.id}
+                onOpenChange={(open) => setOpenMenuId(open ? scene.id : null)}
+                items={[
+                  {
+                    id: "rename",
+                    label: "Rename scene",
+                    testId: "scene-menu-rename",
+                    onSelect: () => {
+                      setDialogError(null);
+                      setRenameTarget(scene);
+                    },
+                  },
+                  {
+                    id: "remove",
+                    label: "Remove scene",
+                    danger: true,
+                    testId: "scene-menu-remove",
+                    onSelect: () => {
+                      setDialogError(null);
+                      setRemoveTarget(scene);
+                    },
+                  },
+                ]}
+              />
             </div>
             <div className="scene-meta" style={{ marginTop: 6 }}>
               {(sceneMeta[scene.id]?.batches ?? 0) || 0} batches · {sceneMeta[scene.id]?.status || "Draft"}
@@ -80,25 +201,48 @@ export function Timeline({
       </div>
       <button
         type="button"
-        title="Add a Scene (project total capped at 20s)"
-        aria-label="Add a Scene (project total capped at 20 seconds)"
+        title="Add a Scene"
+        aria-label="Add a Scene"
+        data-testid="timeline-add-scene"
         onClick={async () => {
-          const remaining = Math.max(0, 20 - total);
-          if (remaining < 0.5) {
-            window.alert("Scene total is capped at 20s for local Timeline renders. Shorten an existing Scene first.");
+          const next = nextLocalSceneDurationSec(LOCAL_SCENE_DURATION_CAP_SEC, {
+            engine: project.engine_default,
+          });
+          if (!next.ok) {
+            window.alert(next.reason || "Could not add a Scene.");
             return;
           }
-          await api.addScene(project.id, {
+          const created = await api.addScene(project.id, {
             name: `Scene ${project.scenes.length + 1}`,
             engine: project.engine_default,
-            duration_sec: Math.min(5, remaining),
+            duration_sec: next.durationSec,
             prompt: "",
           });
+          if (created?.id) onSelect(created.id);
           onChange();
         }}
       >
         Add scene
       </button>
+      {renameTarget ? (
+        <SceneRenameDialog
+          currentName={renameTarget.name}
+          busy={dialogBusy}
+          error={dialogError}
+          onCancel={closeDialogs}
+          onConfirm={(name) => void confirmRename(name)}
+        />
+      ) : null}
+      {removeTarget ? (
+        <SceneRemoveDialog
+          sceneName={removeTarget.name}
+          busy={dialogBusy}
+          working={sceneMeta[removeTarget.id]?.status === "Working"}
+          error={dialogError}
+          onCancel={closeDialogs}
+          onConfirm={() => void confirmRemove()}
+        />
+      ) : null}
     </div>
   );
 }
