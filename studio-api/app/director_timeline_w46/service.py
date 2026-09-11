@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from ..director_timeline import parse_director_timeline
+from ..director_timeline import attach_scene_lipsync, parse_director_timeline
 from . import orchestrator, store
 from .camera_catalog import camera_catalog_payload
 from .capabilities import list_generators, registry_snapshot, validate_duration
@@ -28,6 +28,7 @@ def load_timeline_bundle(db: Session, project_id: str, scene_id: str) -> dict[st
         fallback_duration=float(scene.duration_sec or 5.0),
         fallback_prompt=scene.prompt or "",
     )
+    director_tl = attach_scene_lipsync(director_tl, getattr(scene, "lipsync_tracks_json", None))
     workspace_state = store.extract_timeline_workspace(scene.director_json)
     return {
         "ok": True,
@@ -86,7 +87,7 @@ def add_batch(
     scene_id: str,
     *,
     label: str | None = None,
-    planned_duration: float = 5.0,
+    planned_duration: float | None = None,
     generator_id: str | None = None,
     at_order: int | None = None,
 ) -> dict[str, Any]:
@@ -94,12 +95,19 @@ def add_batch(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    resolved_generator = generator_id or master.sceneGeneratorId
+    if planned_duration is None:
+        # Caller did not choose -> seed by generator law (H3/blank/auto -> 15s).
+        # An explicit creator duration is never overridden.
+        from ..video_runtime.legal_canvas import seed_new_scene_duration_sec
+
+        planned_duration = seed_new_scene_duration_sec(resolved_generator)
     order = at_order if at_order is not None else (max((b.order for b in master.batchBlocks), default=-1) + 1)
     batch = BatchBlock(
         sceneId=scene_id,
         order=order,
         label=label or f"Batch {order + 1}",
-        generatorId=generator_id or master.sceneGeneratorId,
+        generatorId=resolved_generator,
         duration=DurationState(plannedDuration=planned_duration, timelineVisibleDuration=planned_duration),
         promptSegments=[TimelinePromptSegment(start=0.0, length=planned_duration, text="")],
         status="Draft",
@@ -112,6 +120,15 @@ def add_batch(
                 b.order += 1
     master.batchBlocks.append(batch)
     master.batchBlocks.sort(key=lambda b: b.order)
+    from .continuity import prepare_outgoing_bridge
+
+    previous = [
+        item
+        for item in master.batchBlocks
+        if item.order < batch.order and item.approvedClip and item.approvedClip.assetId
+    ]
+    if previous:
+        prepare_outgoing_bridge(db, project_id, scene_id, master, max(previous, key=lambda item: item.order).id)
     store.save_master(db, project_id, scene_id, master)
     try:
         from ..production_events import ACTOR_USER, record_production_event
@@ -237,6 +254,12 @@ def delete_batch(db: Session, project_id: str, scene_id: str, batch_id: str) -> 
 
 def patch_batch(db: Session, project_id: str, scene_id: str, batch_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     return orchestrator.touch_batch_config(db, project_id, scene_id, batch_id, patch)
+
+
+def stitch_scene(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
+    from .scene_stitch import stitch_scene as _stitch_scene
+
+    return _stitch_scene(db, project_id, scene_id)
 
 
 def set_mode(db: Session, project_id: str, scene_id: str, mode: str) -> dict[str, Any]:

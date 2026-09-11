@@ -148,6 +148,13 @@ class SceneService:
         for field, value in data.items():
             if value is not None:
                 setattr(scene, field, value)
+        # Creator did not choose a duration -> seed by engine law:
+        # MiniMax H3 / blank / "auto" -> 15.0s; other engines -> 5.0s legacy.
+        # An explicit creator duration_sec is never overridden.
+        if "duration_sec" not in data or data.get("duration_sec") is None:
+            from ..video_runtime.legal_canvas import seed_new_scene_duration_sec
+
+            scene.duration_sec = seed_new_scene_duration_sec(str(data.get("engine") or "minimax-h3"))
         db.add(scene)
         project.updated_at = datetime.utcnow()
         if commit:
@@ -229,7 +236,8 @@ class SceneService:
         that only meant to rename a scene).
         """
         scene = cls.get(db, project_id, scene_id)
-        unknown = sorted(set(values) - WRITABLE_FIELDS)
+        data = dict(values)
+        unknown = sorted(set(data) - WRITABLE_FIELDS)
         if unknown:
             raise CapabilityError(
                 code=VALIDATION_ERROR,
@@ -237,7 +245,24 @@ class SceneService:
                 details={"fields": unknown},
                 recommended_action="review_request",
             )
-        for field, value in values.items():
+        if "name" in data:
+            name = str(data.get("name") or "").strip()
+            if not name:
+                raise CapabilityError(
+                    code=VALIDATION_ERROR,
+                    message="Enter a scene name.",
+                    details={"field": "name"},
+                    recommended_action="review_request",
+                )
+            if len(name) > 200:
+                raise CapabilityError(
+                    code=VALIDATION_ERROR,
+                    message="Scene names can be up to 200 characters.",
+                    details={"field": "name", "maxLength": 200},
+                    recommended_action="review_request",
+                )
+            data["name"] = name
+        for field, value in data.items():
             setattr(scene, field, _coerce(field, value))
         project = db.get(Project, project_id)
         if project is not None:

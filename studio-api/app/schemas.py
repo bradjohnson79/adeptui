@@ -9,10 +9,13 @@ from pydantic import BaseModel, Field, field_validator
 EngineName = Literal[
     "auto",
     "minimax-h3",
+    "ltx-2.5",
     "ltx",
     "wan",
     "hunyuan15",
     "hunyuan13b",
+    "seedance-2.0",
+    "seedance-2.5",
     "fal_seedance",
     "fal_kling",
     "fal_veo",
@@ -128,12 +131,14 @@ class AssetOut(BaseModel):
 
 
 class SceneIn(BaseModel):
-    name: str = "Scene"
+    name: str = Field(default="Scene", max_length=200)
     #: Short description of the scene for humans and for Co-Director. Not generation input.
     summary: str = ""
     engine: EngineName = "minimax-h3"
     prompt: str = ""
-    duration_sec: float = 5.0
+    #: None = creator did not choose -> the service seeds by engine
+    #: (MiniMax H3 / blank / "auto" -> 15.0s, other engines -> 5.0s).
+    duration_sec: Optional[float] = None
     start_asset_id: Optional[str] = None
     middle_asset_id: Optional[str] = None
     end_asset_id: Optional[str] = None
@@ -224,7 +229,7 @@ class ProjectCreate(BaseModel):
     global_prompt: str = ""
     negative_prompt: str = "blurry, low quality, watermark"
     width: int = 1280
-    height: int = 720
+    height: int = 704
     fps: int = 24
     seed: int = -1
     preset: PresetName = "quality"
@@ -369,7 +374,7 @@ class VramProfileOut(BaseModel):
 
 
 class VramDetectOut(BaseModel):
-    detected_gb: Optional[int] = None
+    detected_gb: Optional[float] = None
     tier: Optional[int] = None
     message: str = ""
 
@@ -395,6 +400,10 @@ class GpuStatsOut(BaseModel):
     gpus: list[GpuDeviceOut] = Field(default_factory=list)
     primary_index: int = 0
     recommended_tier: Optional[int] = None
+    memory_total_gb: Optional[float] = None
+    memory_used_gb: Optional[float] = None
+    memory_free_gb: Optional[float] = None
+    gpu_name: Optional[str] = None
 
 
 class FalKeyStatus(BaseModel):
@@ -482,6 +491,20 @@ class RenderRequest(BaseModel):
     generate_audio: Optional[bool] = None
     # M3.2g Phase 6 — Editor final mix primary video override
     primary_video_path: Optional[str] = None
+    # CREATE surfaces (1 Frame / 3 Frame) are I2V drafts/exploration, not final
+    # Timeline production. Threading action_scope="exploration" routes them
+    # through the Smart Production Gate's EXPLORATION level (always allowed),
+    # matching the CIS precedent and the per-surface product contract.
+    # Default "production" preserves the Timeline (R2V) PRODUCTION_LOCK behavior.
+    action_scope: Optional[str] = None
+    # Surface-selected engine (1 Frame / 3 Frame / Timeline). Wins over a
+    # leftover Production Dock engine when the creator already chose one.
+    engine: Optional[str] = None
+    # Exact legal canvas chosen on the CREATE surface. Required for local /32
+    # families so Adept never falls back to a stale 1280×720 project record.
+    width: Optional[int] = None
+    height: Optional[int] = None
+    resolution: Optional[str] = None
 
 
 class LipSyncRequest(BaseModel):
@@ -513,6 +536,7 @@ class SpatialMap(BaseModel):
 class HealthOut(BaseModel):
     ok: bool
     comfy_reachable: bool
+    comfy_probed: bool = False
     comfy: dict[str, Any] = Field(default_factory=dict)
     #: Human-readable labels for REQUIRED gaps only, kept for existing consumers.
     missing_models: list[str] = Field(default_factory=list)

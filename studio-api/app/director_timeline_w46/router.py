@@ -66,7 +66,9 @@ def dismiss_failure(project_id: str, scene_id: str, body: DismissFailureBody, db
 
 class AddBatchBody(BaseModel):
     label: Optional[str] = None
-    plannedDuration: float = 5.0
+    #: None = caller did not choose -> service seeds by generator law
+    #: (MiniMax H3 / blank / "auto" -> 15.0s, other generators -> 5.0s).
+    plannedDuration: Optional[float] = None
     generatorId: Optional[str] = None
     atOrder: Optional[int] = None
 
@@ -170,6 +172,91 @@ def set_mode(project_id: str, scene_id: str, body: ModeBody, db: Session = Depen
     return service.set_mode(db, project_id, scene_id, body.mode)
 
 
+@router.post("/projects/{project_id}/scenes/{scene_id}/stitch")
+def stitch_scene(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    result = service.stitch_scene(db, project_id, scene_id)
+    if not result.get("ok"):
+        code = str(result.get("error") or "STITCH_FAILED")
+        status = 404 if code == "SCENE_NOT_FOUND" else 503 if code == "FFMPEG_UNAVAILABLE" else 400
+        raise HTTPException(
+            status,
+            {
+                "error": code,
+                "message": result.get("message") or code,
+                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
+            },
+        )
+    return result
+
+
+class ExtendBody(BaseModel):
+    prompt: Optional[str] = None
+    durationSec: Optional[float] = None
+    force: bool = False
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/extend")
+def extend_scene(project_id: str, scene_id: str, body: ExtendBody, db: Session = Depends(get_db)):
+    """Long-form Review & Extend — analyze the current scene video, compile the
+    Continuity Packet, append the next Batch Block, and generate only that
+    segment (one legal H3 segment; prior batches untouched)."""
+    from .extend_service import review_and_extend
+
+    result = review_and_extend(
+        db,
+        project_id,
+        scene_id,
+        prompt=body.prompt,
+        duration_sec=body.durationSec,
+        force=body.force,
+    )
+    if not result.get("ok"):
+        code = str(result.get("error") or "EXTEND_FAILED")
+        status = (
+            404
+            if code == "SCENE_NOT_FOUND"
+            else 409
+            if code in {"EXTEND_IN_FLIGHT", "EXTEND_GENERATION_IN_FLIGHT"}
+            else 400
+        )
+        raise HTTPException(
+            status,
+            {
+                "error": code,
+                "message": result.get("message") or code,
+                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
+            },
+        )
+    return result
+
+
+class ExtendRetakeBody(BaseModel):
+    prompt: Optional[str] = None
+    durationSec: Optional[float] = None
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/extend-segments/{segment_id}/retake")
+def retake_extend_segment(
+    project_id: str, scene_id: str, segment_id: str, body: ExtendRetakeBody, db: Session = Depends(get_db)
+):
+    """Replace one extend segment's take; later segments are marked stale."""
+    from .extend_service import retake_extend_segment as _retake
+
+    result = _retake(db, project_id, scene_id, segment_id, prompt=body.prompt, duration_sec=body.durationSec)
+    if not result.get("ok"):
+        code = str(result.get("error") or "EXTEND_FAILED")
+        status = 404 if code in {"SCENE_NOT_FOUND", "SEGMENT_NOT_FOUND"} else 400
+        raise HTTPException(
+            status,
+            {
+                "error": code,
+                "message": result.get("message") or code,
+                "details": {k: v for k, v in result.items() if k not in {"ok", "error", "message", "mock"}},
+            },
+        )
+    return result
+
+
 class GenerateBody(BaseModel):
     scope: Literal["current", "selected", "ready", "full"] = "full"
     batchBlockIds: list[str] = Field(default_factory=list)
@@ -203,6 +290,31 @@ def generate_batch(
     draft_mode = body.draftMode if body else None
     return orchestrator.submit_batch_generation(
         db, project_id, scene_id, batch_id, draft_mode=draft_mode
+    )
+
+
+@router.get("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/reference-transport")
+def inspect_reference_transport(
+    project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)
+):
+    """Diagnostic: Timeline References → Direct Transport → intended Comfy sockets."""
+    from . import store
+    from .contracts import SceneTimelineMaster
+    from .generation.direct_reference import inspect_direct_reference
+
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        raise HTTPException(404, payload.get("error") or "Not found")
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = next((item for item in master.batchBlocks if item.id == batch_id), None)
+    if batch is None:
+        raise HTTPException(404, "BATCH_NOT_FOUND")
+    return inspect_direct_reference(
+        db,
+        project_id=project_id,
+        scene_id=scene_id,
+        batch=batch,
+        generator_id=batch.generatorId,
     )
 
 
@@ -329,8 +441,10 @@ def get_snapshot(project_id: str, scene_id: str, snapshot_id: str, db: Session =
 
 
 class DurationBody(BaseModel):
+    """Duration-check request. plannedDuration is required - no silent 5.0 steal."""
+
     generatorId: Optional[str] = None
-    plannedDuration: float = 5.0
+    plannedDuration: float  # required; omit => 422 (do not default to 5.0)
 
 
 @router.post("/duration-check")
@@ -390,6 +504,131 @@ def retake_batch(
         user_correction=body.userCorrection,
         continuity_aware=body.continuityAware,
         mode=body.mode,
+    )
+
+
+class RetakeRangeBody(BaseModel):
+    start: float
+    length: float
+    prompt: str = ""
+    spendApiCredits: bool = False
+    maskPngBase64: Optional[str] = None
+    referenceFrameTime: Optional[float] = None
+    frameAssetId: Optional[str] = None
+    removeBackground: bool = False
+
+
+class RepairFrameBody(BaseModel):
+    atSeconds: Optional[float] = None
+
+
+class RepairInpaintSubmitBody(BaseModel):
+    prompt: str
+    maskPngBase64: str
+    atSeconds: Optional[float] = None
+    frameAssetId: Optional[str] = None
+
+
+class RepairInpaintApplyBody(BaseModel):
+    jobId: Optional[str] = None
+    repairedAssetId: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake-range")
+def retake_range(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    body: RetakeRangeBody,
+    db: Session = Depends(get_db),
+):
+    """Replace only the marked Timeline region with the selected generator."""
+    return orchestrator.retake_range(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        start=body.start,
+        length=body.length,
+        prompt=body.prompt,
+        spend_api_credits=body.spendApiCredits,
+        mask_png_base64=body.maskPngBase64,
+        reference_frame_time=body.referenceFrameTime,
+        frame_asset_id=body.frameAssetId,
+        remove_background=body.removeBackground,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/repair-ranges/{repair_id}/extract-frame"
+)
+def extract_repair_frame(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    repair_id: str,
+    body: RepairFrameBody = Body(default_factory=RepairFrameBody),
+    db: Session = Depends(get_db),
+):
+    from .inpaint_repair import extract_repair_frame as extract_frame
+
+    return extract_frame(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        repair_id,
+        at_seconds=body.atSeconds,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/repair-ranges/{repair_id}/inpaint"
+)
+def submit_inpaint_repair(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    repair_id: str,
+    body: RepairInpaintSubmitBody,
+    db: Session = Depends(get_db),
+):
+    from .inpaint_repair import submit_inpaint_repair as submit_repair
+
+    return submit_repair(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        repair_id,
+        prompt=body.prompt,
+        mask_png_base64=body.maskPngBase64,
+        at_seconds=body.atSeconds,
+        frame_asset_id=body.frameAssetId,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/repair-ranges/{repair_id}/apply-inpaint"
+)
+def apply_inpaint_repair(
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    repair_id: str,
+    body: RepairInpaintApplyBody = Body(default_factory=RepairInpaintApplyBody),
+    db: Session = Depends(get_db),
+):
+    from .inpaint_repair import apply_inpaint_repair as apply_repair
+
+    return apply_repair(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        repair_id,
+        job_id=body.jobId,
+        repaired_asset_id=body.repairedAssetId,
     )
 
 
@@ -630,3 +869,37 @@ def cert_seed_failed_job(body: CertSeedFailedJobBody, db: Session = Depends(get_
     )
     db.commit()
     return {"ok": True, "jobId": job_id}
+
+
+class OmniExportVideoBody(BaseModel):
+    assetId: str
+    label: str | None = None
+    sourceSurface: str | None = Field(default=None, description="one-frame | three-frame | omni")
+
+
+@router.post("/projects/{project_id}/scenes/{scene_id}/export-video-to-timeline")
+def export_video_to_timeline(
+    project_id: str,
+    scene_id: str,
+    body: OmniExportVideoBody,
+    db: Session = Depends(get_db),
+):
+    """Wave 2B: deposit a completed Library VIDEO onto Timeline Visual.
+
+    No regeneration. Rejects non-video assets (image = reference under Omni law).
+    """
+    from .generation.omni_visual_export import export_completed_video_to_timeline
+
+    result = export_completed_video_to_timeline(
+        db,
+        project_id,
+        scene_id,
+        body.assetId,
+        label=body.label,
+        source_surface=body.sourceSurface,
+    )
+    if not result.get("ok"):
+        code = str(result.get("error") or "EXPORT_FAILED")
+        status = 404 if code in {"SCENE_NOT_FOUND", "ASSET_OWNERSHIP", "BATCH_NOT_FOUND"} else 400
+        raise HTTPException(status_code=status, detail=result)
+    return result

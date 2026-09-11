@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..director_references.tags import ensure_tags
 from ..director_timeline import (
     DirectorTimeline,
+    attach_scene_lipsync,
     dumps_director_timeline,
     dumps_director_timeline_preserving_embedded,
     hydrate_prompt_refs,
@@ -166,6 +167,75 @@ def _project_out(db: Session, project: Project) -> ProjectOut:
     )
 
 
+def _project_list_out(db: Session, project: Project) -> ProjectOut:
+    """Home / project-switcher card. Counts and cover only — not the full Library."""
+    scene_count = (
+        db.query(Scene).filter(Scene.project_id == project.id).count()
+    )
+    with_output = (
+        db.query(Scene)
+        .filter(
+            Scene.project_id == project.id,
+            Scene.output_path.isnot(None),
+            Scene.output_path != "",
+        )
+        .count()
+    )
+    asset_count = db.query(Asset).filter(Asset.project_id == project.id).count()
+    render_pct = int(100 * with_output / max(1, scene_count)) if scene_count else 0
+    cover = project_service.pick_cover_for_project(db, project.id)
+    status_label = project_service.status_label(
+        archived=bool(getattr(project, "archived", 0)),
+        active_jobs=project_service.active_job_count(db, project.id),
+        scene_count=scene_count,
+        scenes_with_output=with_output,
+    )
+    return ProjectOut(
+        id=project.id,
+        name=project.name,
+        engine_default=project.engine_default,
+        global_prompt=project.global_prompt or "",
+        negative_prompt=project.negative_prompt or "",
+        width=project.width,
+        height=project.height,
+        fps=project.fps,
+        seed=project.seed,
+        preset=project.preset,
+        vram_gb=getattr(project, "vram_gb", 32) or 32,
+        spatial_map_json="{}",
+        render_safety_json="",
+        learning_json="",
+        learning_enabled_json="",
+        preview_settings_json="",
+        description=getattr(project, "description", "") or "",
+        company=getattr(project, "company", "") or "",
+        director_name=getattr(project, "director_name", "") or "",
+        storyboard_style=_settings_get(project, "storyboardStyle"),
+        preferred_video_generator=_settings_get(project, "preferredVideoGenerator"),
+        version=getattr(project, "version", "1.0") or "1.0",
+        tags_json=getattr(project, "tags_json", "[]") or "[]",
+        archived=int(getattr(project, "archived", 0) or 0),
+        defaults_json="",
+        settings_json="",
+        primary_project_type=getattr(project, "primary_project_type", None) or "custom",
+        project_traits_json=getattr(project, "project_traits_json", None) or "[]",
+        resolved_profile_json="{}",
+        project_type_version=int(getattr(project, "project_type_version", 1) or 1),
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+        scenes=[],
+        assets=[],
+        scene_count=scene_count,
+        asset_count=asset_count,
+        render_pct=render_pct,
+        cover_asset_id=cover.id if cover else None,
+        cover_kind=project_service.cover_media_kind(cover),
+        status_label=status_label,
+        password_protected=False,
+        password_locked=False,
+    )
+
+
 def _settings_get(project: Project, key: str) -> Optional[str]:
     """Read a value from project.settings_json JSON blob."""
     raw = getattr(project, "settings_json", None)
@@ -247,7 +317,7 @@ async def health():
 
     operator = {
         "api": "ok",
-        "comfy": "unknown",
+        "comfy": "not_probed",
         "provider": {
             "id": None,
             "status": "skipped",
@@ -298,17 +368,19 @@ async def health():
     }
     return HealthOut(
         ok=True,
-        comfy_reachable=True,
+        comfy_reachable=False,
+        comfy_probed=False,
         comfy={
-            "status": "unknown",
+            "status": "not_probed",
             "reachable": False,
+            "probed": False,
             "message": "liveness only; use /api/comfy/health for Comfy and /api/capabilities for catalog",
         },
         missing_models=[],
         missing_model_component_ids=[],
         missing_optional_models=[],
         missing_optional_model_component_ids=[],
-        comfy_status="unknown",
+        comfy_status="not_probed",
         comfy_version=None,
         node_catalog_available=False,
         reason_code=None,
@@ -339,19 +411,21 @@ def vram_presets():
 
 @router.get("/vram-detect", response_model=VramDetectOut)
 def vram_detect():
-    from ..vram_profiles import detect_vram_gb
+    from ..vram_profiles import query_gpu_stats
 
-    tier = detect_vram_gb()
-    if tier is None:
+    stats = query_gpu_stats()
+    total = stats.get("memory_total_gb")
+    if not stats.get("ok") or total is None:
         return VramDetectOut(
             detected_gb=None,
             tier=None,
-            message="Could not detect GPU VRAM (nvidia-smi unavailable). Pick a tier manually.",
+            message="Could not detect GPU VRAM (nvidia-smi unavailable).",
         )
+    name = stats.get("gpu_name") or "GPU"
     return VramDetectOut(
-        detected_gb=tier,
-        tier=tier,
-        message=f"Detected approximately {tier} GB class GPU — recommended preset applied when you confirm.",
+        detected_gb=float(total),
+        tier=None,
+        message=f"{name}: {total} GB total. This number is informational and does not change your canvas.",
     )
 
 
@@ -365,9 +439,9 @@ def gpu_stats():
 
 @router.get("/engines", response_model=list[EngineOptionOut])
 def list_engines():
-    from ..fal_catalog import list_engines_for_ui
+    from ..production_control.generator_authority import list_create_engines
 
-    return [EngineOptionOut.model_validate(e) for e in list_engines_for_ui()]
+    return [EngineOptionOut.model_validate(e) for e in list_create_engines()]
 
 
 @router.get("/fal/models", response_model=list[FalModelOut])
@@ -472,11 +546,11 @@ def list_projects(request: Request, db: Session = Depends(get_db)):
         from ..project_security import service as project_security
 
         for p in projects:
-            po = _project_out(db, p)
+            po = _project_list_out(db, p)
             redacted = project_security.redact_project_dict(db, po.model_dump(), p.id, request)
             out.append(ProjectOut.model_validate(redacted))
     except Exception:
-        out = [_project_out(db, p) for p in projects]
+        out = [_project_list_out(db, p) for p in projects]
     return out
 
 
@@ -510,14 +584,16 @@ def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
         settings_json=json.dumps(settings) if settings else "{}",
     )
     db.add(project)
-    # default first scene
+    # default first scene — duration seeded by engine law (H3/blank/auto -> 15s)
+    from ..video_runtime.legal_canvas import seed_new_scene_duration_sec
+
     scene = Scene(
         id=str(uuid.uuid4()),
         project_id=project.id,
         index=0,
         name="Scene 1",
         engine=body.engine_default,
-        duration_sec=5.0,
+        duration_sec=seed_new_scene_duration_sec(body.engine_default),
     )
     db.add(scene)
     from ..vram_profiles import apply_profile_to_project, detect_vram_gb, normalize_vram_tier
@@ -660,14 +736,8 @@ def get_execution_plan(
     if scene and scene.project_id == project_id:
         sw, sh = resolve_scene_dims(project, scene)
         sfps = resolve_scene_fps(project, scene)
-        # Prefer scene dims but still respect VRAM clamp from plan
-        if plan.vram_gb < 32:
-            width, height = min(sw, plan.width), min(sh, plan.height)
-            fps = min(sfps, plan.fps)
-            clamped = width < sw or height < sh or fps < sfps or plan.clamped
-        else:
-            width, height, fps = sw, sh, sfps
-            clamped = plan.clamped
+        width, height, fps = sw, sh, sfps
+        clamped = False
         aspect = getattr(scene, "aspect_ratio", None) or "16:9"
         fps_mode = getattr(scene, "fps_mode", None) or "auto"
         eng_warn = validate_engine_aspect(scene.engine, aspect)
@@ -930,16 +1000,16 @@ def update_scene(project_id: str, scene_id: str, body: SceneIn, db: Session = De
     return SceneOut.model_validate(scene)
 
 
-def _scene_director(scene: Scene) -> DirectorTimeline:
+def _scene_director(scene: Scene, db: Session | None = None) -> DirectorTimeline:
     if scene.director_json and scene.director_json.strip():
         tl = parse_director_timeline(
             scene.director_json,
             fallback_duration=scene.duration_sec,
             fallback_prompt=scene.prompt,
         )
-        return ensure_tags(tl)
-    return ensure_tags(
-        migrate_scene_to_director(
+        tl = attach_scene_lipsync(tl, scene.lipsync_tracks_json)
+    else:
+        tl = migrate_scene_to_director(
             duration_sec=scene.duration_sec,
             prompt=scene.prompt,
             start_asset_id=scene.start_asset_id,
@@ -948,7 +1018,18 @@ def _scene_director(scene: Scene) -> DirectorTimeline:
             audio_asset_id=scene.audio_asset_id,
             lipsync_tracks_json=scene.lipsync_tracks_json,
         )
-    )
+    if db is not None:
+        from ..director_timeline_w46.generation.prompt_token_bindings import (
+            hydrate_timeline_prompt_tokens,
+            load_scene_reference_catalog,
+        )
+
+        catalog = load_scene_reference_catalog(db, scene.project_id, scene.id)
+        if hydrate_timeline_prompt_tokens(tl, catalog) and scene.director_json:
+            scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
+            db.add(scene)
+            db.commit()
+    return ensure_tags(tl)
 
 
 @router.get("/projects/{project_id}/scenes/{scene_id}/director", response_model=DirectorTimeline)
@@ -956,7 +1037,7 @@ def get_director(project_id: str, scene_id: str, db: Session = Depends(get_db)):
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
-    return _scene_director(scene)
+    return _scene_director(scene, db)
 
 
 @router.put("/projects/{project_id}/scenes/{scene_id}/director", response_model=DirectorTimeline)
@@ -965,6 +1046,12 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
     body = hydrate_prompt_refs(ensure_tags(body))
+    from ..director_timeline_w46.generation.prompt_token_bindings import (
+        hydrate_timeline_prompt_tokens,
+        load_scene_reference_catalog,
+    )
+
+    hydrate_timeline_prompt_tokens(body, load_scene_reference_catalog(db, project_id, scene_id))
     # PUT_DIRECTOR_PRESERVES_MASTER: never replace the entire director_json
     # blob. Merge the incoming DirectorTimeline fields over the existing blob
     # so embedded timelineMaster / timelineWorkspace (W46 batch state) and
@@ -973,6 +1060,30 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     # timelineMaster and load_master re-migrated to a single Batch 1,
     # destroying all other batches.
     scene.director_json = dumps_director_timeline_preserving_embedded(body, scene.director_json)
+    try:
+        from ..director_timeline_w46.migration import (
+            embed_master_into_director_dict,
+            load_or_migrate_scene_master,
+        )
+        from ..director_timeline_w46.reconcile import reconcile_legacy_to_master
+
+        master, _tl, _data = load_or_migrate_scene_master(
+            scene.director_json,
+            scene_id=scene_id,
+            fallback_duration=float(scene.duration_sec or 5.0),
+            fallback_prompt=scene.prompt or "",
+        )
+        if master.batchBlocks and reconcile_legacy_to_master(master, body):
+            parsed = json.loads(scene.director_json or "{}")
+            if isinstance(parsed, dict):
+                scene.director_json = json.dumps(embed_master_into_director_dict(parsed, master))
+    except Exception:
+        logger.warning(
+            "put_director reconcile failed project=%s scene=%s — lane saved, master left as-is",
+            project_id,
+            scene_id,
+            exc_info=True,
+        )
     legacy = sync_legacy_fields_from_director(body)
     for k, v in legacy.items():
         setattr(scene, k, v)
@@ -1108,10 +1219,53 @@ async def apply_dual_lipsync(project_id: str, scene_id: str, db: Session = Depen
 
 
 
+def _stop_scene_owned_jobs(db: Session, project_id: str, scene_id: str) -> None:
+    """Use existing Timeline / job cancel authority. Do not silently orphan in-flight work."""
+    try:
+        from ..director_timeline_w46.contracts import CancelRequest
+        from ..director_timeline_w46.orchestrator import cancel_scene
+
+        cancel_scene(db, project_id, scene_id, CancelRequest(action="stop_remaining_scene_jobs"))
+    except Exception:
+        logger.exception("scene delete: timeline job stop failed scene=%s", scene_id)
+    try:
+        from ..codirector.execution.cancel import _cancel_job
+
+        jobs = (
+            db.query(Job)
+            .filter(
+                Job.project_id == project_id,
+                Job.scene_id == scene_id,
+                Job.status.in_(("queued", "running")),
+            )
+            .all()
+        )
+        for job in jobs:
+            _cancel_job(job.id)
+    except Exception:
+        logger.exception("scene delete: job cancel failed scene=%s", scene_id)
+
+
 @router.delete("/projects/{project_id}/scenes/{scene_id}")
 def delete_scene(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+    SceneService.get(db, project_id, scene_id)
+    _stop_scene_owned_jobs(db, project_id, scene_id)
     SceneService.delete(db, project_id, scene_id)
     return {"ok": True}
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/file")
+def get_project_asset_file(project_id: str, asset_id: str, db: Session = Depends(get_db)):
+    from ..project_security.asset_file import serve_project_asset_file
+
+    return serve_project_asset_file(db, project_id, asset_id)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/thumb")
+def get_project_asset_thumb(project_id: str, asset_id: str, w: int = 256, db: Session = Depends(get_db)):
+    from ..project_security.asset_file import serve_project_asset_thumb
+
+    return serve_project_asset_thumb(db, project_id, asset_id, w)
 
 
 @router.post("/projects/{project_id}/assets", response_model=AssetOut)
@@ -1386,6 +1540,19 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
     if kind in {"render_scene", "render_shot"} and not body.scene_id:
         raise HTTPException(400, "scene_id required for scene/shot render")
     params: dict = {}
+    if body.engine:
+        params["engine"] = str(body.engine).strip()
+    elif body.scene_id:
+        scene_row = db.get(Scene, body.scene_id)
+        scene_engine = str(getattr(scene_row, "engine", "") or "").strip()
+        if scene_engine and scene_engine.lower() not in {"auto", "default"}:
+            params["engine"] = scene_engine
+    if body.width:
+        params["width"] = int(body.width)
+    if body.height:
+        params["height"] = int(body.height)
+    if body.resolution:
+        params["resolution"] = str(body.resolution).strip()
     if body.reference_method:
         params["reference_method"] = body.reference_method
     if body.sheet_id:
@@ -1430,7 +1597,7 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
             from ..codirector.timeline_context.smart_gates import can_generate_scene
 
             allowed, reason, gate = can_generate_scene(
-                db, project_id, body.scene_id, action_scope="production"
+                db, project_id, body.scene_id, action_scope=body.action_scope or "production"
             )
             params["smartGate"] = {
                 "level": gate.get("level"),

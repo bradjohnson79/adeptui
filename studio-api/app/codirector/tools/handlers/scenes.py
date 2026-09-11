@@ -137,7 +137,10 @@ def apply_create_scene(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]
             "name": str(args.get("name") or ""),
             "engine": str(args.get("engine") or project.engine_default or "ltx"),
             "prompt": str(args.get("prompt") or ""),
-            "duration_sec": float(args.get("durationSec") or 5.0),
+            # None when the creator did not choose -> SceneService.create seeds
+            # by engine law (MiniMax H3 / blank / "auto" -> 15.0s). An explicit
+            # creator duration is never overridden.
+            "duration_sec": (float(args["durationSec"]) if args.get("durationSec") is not None else None),
         },
     )
     return {"created": "scene", "scene": scene_helpers.scene_summary(scene)}
