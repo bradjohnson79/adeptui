@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   Capability,
   CapabilitySnapshot,
   ComfyHealth,
@@ -70,9 +70,9 @@ import { perceptionAbortSignal } from "./codirector/perception/requestPolicy";
 /**
  * Central API origin abstraction.
  *
- * - Local Vite product/cert: BASE="" → relative /api/* proxied to Studio API :8758
+ * - Local Vite product/cert: BASE="" â†’ relative /api/* proxied to Studio API :8758
  * - `npm run dev` only: scripts/run-web-devapi.mjs proxies to reload API :8742
- * - Hosted (Vercel): BASE=VITE_API_BASE → absolute HTTPS URL of the secure Studio API bridge
+ * - Hosted (Vercel): BASE=VITE_API_BASE â†’ absolute HTTPS URL of the secure Studio API bridge
  *   (e.g. https://api-beta.adeptui.org)
  *
  * VITE_API_BASE is a PUBLIC, client-visible configuration value (never secrets).
@@ -573,7 +573,7 @@ export interface CoDirectorBible {
   versionCount: number;
 }
 
-/** SSE events emitted by POST /api/codirector/chat/stream. Additive union — new `type`
+/** SSE events emitted by POST /api/codirector/chat/stream. Additive union â€” new `type`
  * values may appear over time; unknown types must be safely ignorable by callers. */
 export type CoDirectorStreamEvent =
   | { type: "request_started"; requestId: string }
@@ -740,6 +740,23 @@ export type CoDirectorStreamEvent =
   | { type: "marketing_strategy"; requestId: string; marketing?: Record<string, unknown> }
   | { type: "collaboration_profile"; requestId: string; collaboration?: Record<string, unknown> }
   | {
+      type: "deliberation_decision";
+      requestId: string;
+      act?: string;
+      reasonCodes?: string[];
+      capabilityId?: string;
+      effortHint?: string;
+      schemaVersion?: string;
+      failedExecutionSummary?: string;
+      runtimePrecheck?: Record<string, unknown>;
+      responsePlan?: { purpose?: string; clarificationQuestion?: string; talkHint?: string };
+      pendingBrief?: Record<string, unknown>;
+      pendingBriefFresh?: boolean;
+      productionPlan?: Record<string, unknown>;
+      selectivePreflight?: Record<string, unknown>;
+      intentEvidence?: Record<string, unknown>;
+    }
+  | {
       type: "completed";
       requestId: string;
       content: string;
@@ -752,10 +769,23 @@ export type CoDirectorStreamEvent =
       structuredRecommendation?: Record<string, unknown> | null;
       messageId?: string;
       fallbackUsed?: boolean;
+      fallbackReason?: string;
+      providerError?: ApiErrorDetailShape;
     }
   | { type: "cancelled"; requestId: string }
   | { type: "error"; requestId: string; error: ApiErrorDetailShape }
   | { type: "context_manifest"; requestId: string; manifest: CoDirectorContextManifest }
+  | {
+      type: "project_grounding";
+      requestId: string;
+      snapshot?: Record<string, unknown>;
+      entities?: Record<string, unknown>;
+      routeLock?: Record<string, unknown>;
+      sessionStatus?: string;
+      projectId?: string | null;
+      activeSceneId?: string | null;
+      workspace?: string | null;
+    }
   | { type: "proposal_created"; requestId: string; proposal: CoDirectorProposal }
   | { type: "proposal_updated"; requestId: string; proposal: CoDirectorProposal }
   | { type: "approval_required"; requestId: string; proposal: CoDirectorProposal }
@@ -814,7 +844,7 @@ export type CoDirectorStreamEvent =
       requestId: string;
       proposal: CoDirectorProposal;
     }
-  // Workstream H — honest execution status with real job state. Carries an
+  // Workstream H â€” honest execution status with real job state. Carries an
   // execution payload that the message renderer turns into a compact progress
   // card. messageType disambiguates "Working" (execution_status) vs "Done"
   // (completion) vs "Error" (failed/cancelled).
@@ -936,7 +966,7 @@ export function isAbortError(error: unknown): boolean {
 
 /**
  * True when a fetch failed because the browser tore down the connection
- * (SPA navigation / tab close). Not a substitute for AbortError — use with a
+ * (SPA navigation / tab close). Not a substitute for AbortError â€” use with a
  * mounted/aborted check so real outages still surface while mounted.
  */
 export function isNavigationFetchFailure(error: unknown): boolean {
@@ -946,7 +976,7 @@ export function isNavigationFetchFailure(error: unknown): boolean {
   );
 }
 
-/** Credential status for the fal.ai key. Never carries the key itself — only a masked hint. */
+/** Credential status for the fal.ai key. Never carries the key itself â€” only a masked hint. */
 export type FalKeyStatus = {
   configured: boolean;
   hint?: string | null;
@@ -1275,7 +1305,7 @@ export interface DirectorTimelineCameraCatalog {
 export type ServiceOwnership = "owned" | "reused" | "external";
 export type ServiceStatusValue = "running" | "stopped" | "error" | "not_configured" | "starting";
 
-// --- Phase 6 — Character Variants -----------------------------------------
+// --- Phase 6 â€” Character Variants -----------------------------------------
 // A Variant is an alternate look (wardrobe/styling) that preserves the locked
 // identity. The Original canonical sheet is immutable and lives on the
 // character's hero_identity reference; variants hang off the character's
@@ -1311,6 +1341,7 @@ export type CharacterVariant = {
 export interface ComfyUiStatus {
   status: ServiceStatusValue;
   ownership: ServiceOwnership;
+  logicalId?: string;
   version?: string;
   device?: string;
   vram_total?: number;
@@ -1326,6 +1357,14 @@ export interface OllamaStatus {
   status: ServiceStatusValue;
   ownership: ServiceOwnership;
   version?: string;
+  logicalId?: string;
+  configured?: boolean;
+  daemonOnline?: boolean;
+  modelReady?: boolean;
+  requiredModel?: string | null;
+  models?: string[];
+  pid?: number | null;
+  message?: string | null;
 }
 
 export interface TunnelStatus {
@@ -1334,11 +1373,30 @@ export interface TunnelStatus {
   hostname?: string;
 }
 
+export interface RouteAStatus {
+  status: ServiceStatusValue;
+  ownership: ServiceOwnership;
+  logicalId?: string;
+  port: number;
+  adeptOwnedReady: boolean;
+  message?: string | null;
+}
+
+export interface GpuAdmission {
+  dualResident: boolean;
+  comfyuiAllowed: boolean;
+  routeAAllowed: boolean;
+  reason?: string | null;
+}
+
 export interface GpuInfo {
   detected: boolean;
   name?: string;
   driver?: string;
   vram_total_mib?: number;
+  vram_used_mib?: number;
+  vram_free_mib?: number;
+  source?: string;
 }
 
 export interface RuntimeManagerPreferences {
@@ -1348,13 +1406,52 @@ export interface RuntimeManagerPreferences {
   remoteAccessEnabled: boolean;
 }
 
+export interface ChildRuntimeStatus {
+  pid?: number | null;
+  owned: boolean;
+  startedAt?: string | null;
+  health: string;
+  port?: number | null;
+  lastExit?: string | null;
+  restartCount?: number;
+  lastRestartReason?: string | null;
+  logPath?: string | null;
+}
+
+export interface AdeptRuntimeServiceStatus {
+  configured: boolean;
+  taskRegistered: boolean;
+  startWithWindows: boolean;
+  windowsStartupPresent?: boolean;
+  legacyOwners?: string[];
+  canonicalTask?: string;
+  serviceState: string;
+  comfyState: string;
+  worker: string;
+  falConnected?: boolean | null;
+  creatorMessage: string;
+  comfyPid?: number | null;
+  owned: boolean;
+  managerPid?: number | null;
+  studioApiPid?: number | null;
+  studioApiOwned?: boolean;
+  studioApiHealth?: string;
+  studioApiStartedAt?: string | null;
+  studioApiChild?: ChildRuntimeStatus | null;
+  comfyChild?: ChildRuntimeStatus | null;
+}
+
 export interface RuntimeManagerStatus {
   comfyui: ComfyUiStatus;
   studioApi: StudioApiStatus;
   ollama: OllamaStatus;
   tunnel: TunnelStatus;
   gpu: GpuInfo;
+  routeA?: RouteAStatus;
+  gpuAdmission?: GpuAdmission;
   preferences: RuntimeManagerPreferences;
+  adeptRuntime?: AdeptRuntimeServiceStatus;
+  logicalServices?: Record<string, Record<string, unknown>>;
 }
 
 export interface RuntimeActionResponse {
@@ -1363,8 +1460,15 @@ export interface RuntimeActionResponse {
   status?: RuntimeManagerStatus;
 }
 
+export interface RuntimeConfigValidation {
+  ok: boolean;
+  message: string;
+  errors?: string[];
+  source?: string;
+}
+
 /**
- * Library taxonomy types — additive mirror of project_library/schema.py
+ * Library taxonomy types â€” additive mirror of project_library/schema.py
  * FolderNode.to_dict() and project_library/service.build_folder_map.
  * The backend library endpoint (/api/projects/{id}/library) returns these
  * as tree.folders (nested) and folderMap (flattened).
@@ -1402,7 +1506,20 @@ export interface LibraryFolderMapEntry {
   entityName?: string;
 }
 
+let _boundAssetProjectId: string | null = null;
+
+/** Bind the open project so `api.assetUrl(id)` emits the canonical project-scoped path. */
+export function bindAssetUrlProject(projectId: string | null | undefined): void {
+  const pid = String(projectId || "").trim();
+  _boundAssetProjectId = pid || null;
+}
+
+export function getBoundAssetProjectId(): string | null {
+  return _boundAssetProjectId;
+}
+
 export const api = {
+  bindAssetUrlProject,
   health: () => req<Health>("/api/health"),
   betaRuntimeStatus: () =>
     req<{
@@ -1415,6 +1532,14 @@ export const api = {
       logsDir?: string;
       updatedAt?: string;
     }>("/api/runtime/beta"),
+  getLocalGeneration: () =>
+    req<{
+      active: boolean;
+      jobId: string | null;
+      projectId: string | null;
+      feature: string | null;
+      cancelable: boolean;
+    }>("/api/runtime/local-generation"),
   listProjects: (init?: RequestInit) => req<Project[]>("/api/projects", init),
   storyGet: (projectId: string) =>
     req<{ id: string; projectId: string; title: string; content: string; wordCount: number; createdAt: string; updatedAt: string }>(
@@ -1499,7 +1624,7 @@ export const api = {
       body: JSON.stringify({
         name,
         width: opts?.width ?? 1280,
-        height: opts?.height ?? 720,
+        height: opts?.height ?? 704,
         fps: opts?.fps ?? 24,
         preset: "quality",
         vram_gb: 32,
@@ -1590,7 +1715,63 @@ export const api = {
       }[];
       primary_index: number;
       recommended_tier: number | null;
+      memory_total_gb?: number | null;
+      memory_used_gb?: number | null;
+      memory_free_gb?: number | null;
+      gpu_name?: string | null;
     }>("/api/gpu/stats"),
+  videoLegalCanvas: (args: { engine: string; aspect?: string; surface?: string }) => {
+    const q = new URLSearchParams({
+      engine: args.engine,
+      aspect: args.aspect || "16:9",
+      surface: args.surface || "t2v",
+    });
+    return req<{
+      ok: boolean;
+      tiers: {
+        tier: string;
+        width: number | null;
+        height: number | null;
+        available: boolean;
+        honestyLabel: string;
+        generationMode?: string;
+      }[];
+    }>(`/api/video-runtime/legal-canvas?${q.toString()}`);
+  },
+  videoViability: (args: {
+    engine: string;
+    aspect?: string;
+    surface?: string;
+    fps?: number;
+    durationSec?: number;
+  }) => {
+    const q = new URLSearchParams({
+      engine: args.engine,
+      aspect: args.aspect || "16:9",
+      surface: args.surface || "t2v",
+      fps: String(args.fps ?? 24),
+      durationSec: String(args.durationSec ?? 5),
+    });
+    return req<{
+      productId: string;
+      telemetry: {
+        gpuName?: string;
+        memoryTotalGb?: number | null;
+        memoryFreeGb?: number | null;
+        memoryUsedGb?: number | null;
+      };
+      tiers: {
+        tier: string;
+        verdict: string;
+        honestyLabel?: string;
+        width?: number | null;
+        height?: number | null;
+        estimatedPeakGb?: number | null;
+        reason?: string;
+      }[];
+      mutatesRequest: boolean;
+    }>(`/api/video-runtime/viability?${q.toString()}`);
+  },
   deleteProject: (id: string) => req(`/api/projects/${id}`, { method: "DELETE" }),
   listEngines: () => req<{ id: string; label: string; group: string }[]>("/api/engines"),
   falModels: () =>
@@ -1634,11 +1815,26 @@ export const api = {
       { method: "POST" },
     ),
   hostedProvidersDiscoveryStatus: () => req<any>("/api/hosted-providers/discovery"),
+  // Provider Catalog Sync (developer chrome — Settings → Advanced only)
+  hostedProvidersVideoCatalog: (reviewStatus?: string) =>
+    req<any>(
+      reviewStatus
+        ? `/api/hosted-providers/catalog?reviewStatus=${encodeURIComponent(reviewStatus)}`
+        : "/api/hosted-providers/catalog",
+    ),
+  hostedProvidersCatalogRefresh: () =>
+    req<any>("/api/hosted-providers/catalog/refresh", { method: "POST" }),
+  hostedProvidersCatalogReview: (rowId: string, action: "approved" | "hidden" | "pending_review") =>
+    req<any>(`/api/hosted-providers/catalog/review/${encodeURIComponent(rowId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    }),
   /**
    * Live hosted catalog from GET /api/hosted-providers/discovered-models.
    * Character Creator / Prop Creator pass modality "image".
    * Co-Director video / audio / LLM pickers should reuse this same helper
-   * with modality "video" | "audio" | "llm" — do not add a second
+   * with modality "video" | "audio" | "llm" â€” do not add a second
    * catalog client or a new App route.
    */
   hostedProvidersDiscoveredModels: (modality?: string) =>
@@ -1836,6 +2032,19 @@ export const api = {
       /** Wave 6P production intent id when compiled client-side / via Co-Director. */
       productionIntentId?: string;
       shot_id?: string;
+      /**
+       * Smart Production Gate action scope. CREATE surfaces (1 Frame / 3 Frame)
+       * pass "exploration" so I2V drafts are not blocked by the Timeline's
+       * PRODUCTION_LOCK. Omit/leave undefined to keep the default "production"
+       * gate behavior (Timeline R2V final generation).
+       */
+      action_scope?: "exploration" | "production";
+      /** Scene / surface engine. Prevents leftover Dock from owning Generate. */
+      engine?: string;
+      /** Exact legal canvas from the CREATE resolution picker. */
+      width?: number;
+      height?: number;
+      resolution?: string;
     },
   ) =>
     req<Job>(`/api/projects/${projectId}/render`, {
@@ -2154,6 +2363,27 @@ export const api = {
       unresolvedBlockers: string[];
     }>(`/api/codirector/session-context${q ? `?${q}` : ""}`);
   },
+  codirectorTurnGrounding: (
+    projectId: string,
+    body: { text: string; sceneId?: string; workspace?: string },
+  ) =>
+    req<{
+      snapshot?: Record<string, unknown>;
+      entities?: Record<string, unknown>;
+      routeLock?: { requestedModelId?: string; requestedProvider?: string; level?: string };
+      sessionStatus?: string;
+      projectId?: string | null;
+      activeSceneId?: string | null;
+      workspace?: string | null;
+    }>(`/api/codirector/projects/${encodeURIComponent(projectId)}/turn-grounding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: body.text,
+        sceneId: body.sceneId,
+        workspace: body.workspace,
+      }),
+    }),
   codirectorStatusRegistry: () =>
     req<{
       checks: StatusRegistryCheck[];
@@ -2164,6 +2394,7 @@ export const api = {
     sceneId?: string;
     workspace?: string;
     checkIds?: string[];
+    forceRefresh?: boolean;
   }) =>
     req<StatusRun>("/api/codirector/status/check", {
       method: "POST",
@@ -2177,6 +2408,7 @@ export const api = {
       sceneId?: string;
       workspace?: string;
       checkIds?: string[];
+      forceRefresh?: boolean;
     },
   ) =>
     req<StatusRun>(`/api/codirector/status/check/${encodeURIComponent(checkId)}`, {
@@ -2242,6 +2474,9 @@ export const api = {
       providerId: string;
       suggestedPrompt?: string | null;
       sceneSetup?: SceneSetup | null;
+      fallbackUsed?: boolean;
+      fallbackReason?: string | null;
+      providerError?: ApiErrorDetailShape | null;
     }>("/api/codirector/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2876,6 +3111,20 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(prefs),
     }),
+  runtimeManagerEnableRecommended: (startWithWindows = true) =>
+    req<RuntimeActionResponse>("/api/runtime-manager/enable-recommended", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ startWithWindows }),
+    }),
+  runtimeManagerRestartApi: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/restart-api", { method: "POST" }),
+  runtimeManagerRestartComfy: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/restart-comfy", { method: "POST" }),
+  runtimeManagerRepair: () =>
+    req<RuntimeActionResponse>("/api/runtime-manager/repair", { method: "POST" }),
+  runtimeManagerValidateConfig: () =>
+    req<RuntimeConfigValidation>("/api/runtime-manager/validate-config"),
   // --- capability registry ------------------------------------------------
   // The truth source for "can this be used right now?". Read-only; `refreshCapabilities`
   // re-probes the environment and never installs or downloads anything.
@@ -3201,6 +3450,8 @@ export const api = {
       method: "POST",
     }),
   getJobPreview: (jobId: string) => req<any>(`/api/jobs/${jobId}/preview`),
+  clearJobPreview: (jobId: string) =>
+    req<{ ok: boolean; job_id: string }>(`/api/jobs/${jobId}/preview/clear`, { method: "POST" }),
   savePreviewFrame: (jobId: string, projectId: string, tag: string) => {
     const fd = new FormData();
     fd.append("project_id", projectId);
@@ -3549,11 +3800,13 @@ export const api = {
       instrumentation?: string | string[];
       category?: string;
       intensity?: string;
+      eventType?: string;
       loopRequired?: boolean;
       loop?: boolean;
       candidateCount?: number;
       preferredProvider?: string;
       allowProviderSwitch?: boolean;
+      allowCpuFallback?: boolean;
       brief?: Record<string, unknown>;
       asyncMode?: boolean;
     }
@@ -3577,10 +3830,12 @@ export const api = {
         instrumentation,
         category: body.category,
         intensity: body.intensity,
+        eventType: body.eventType,
         loopRequired: body.loopRequired ?? body.loop,
         candidateCount: body.candidateCount ?? 3,
         preferredProvider: body.preferredProvider,
         allowProviderSwitch: body.allowProviderSwitch ?? false,
+        allowCpuFallback: body.allowCpuFallback ?? false,
         brief: body.brief,
         asyncMode: body.asyncMode ?? true,
       }),
@@ -3663,6 +3918,19 @@ export const api = {
     req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/master`,
     ),
+  directorTimelinePutMaster: (
+    projectId: string,
+    sceneId: string,
+    master: import("./timelineMaster/contracts").SceneTimelineMaster,
+  ) =>
+    req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/master`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ master }),
+      },
+    ),
   directorTimelineDismissFailure: (projectId: string, sceneId: string, jobId: string) =>
     req<{ ok: boolean; master: import("./timelineMaster/contracts").SceneTimelineMaster; mock: boolean }>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/dismiss-failure`,
@@ -3680,6 +3948,21 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
       },
+    ),
+  directorTimelineStitchScene: (projectId: string, sceneId: string) =>
+    req<{
+      ok: boolean;
+      alreadyCurrent?: boolean;
+      incremental?: boolean;
+      sceneStitch?: import("./timelineMaster/contracts").SceneStitch;
+      master?: import("./timelineMaster/contracts").SceneTimelineMaster;
+      assetId?: string;
+      sourceBatchIds?: string[];
+      sourceAssetIds?: string[];
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/stitch`,
+      { method: "POST" },
     ),
   directorTimelineAddBatch: (
     projectId: string,
@@ -3730,6 +4013,34 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body || {}),
+      },
+    ),
+  directorTimelineReferenceTransport: (projectId: string, sceneId: string, batchId: string) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/reference-transport`,
+    ),
+  directorTimelineExportVideoToTimeline: (
+    projectId: string,
+    sceneId: string,
+    body: { assetId: string; label?: string; sourceSurface?: string },
+  ) =>
+    req<{
+      ok: boolean;
+      assetId: string;
+      sceneId: string;
+      mediaType: string;
+      visualClipId: string;
+      mediaMode: string;
+      sourceSurface?: string;
+      w46?: Record<string, unknown>;
+      message?: string;
+      mock: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/export-video-to-timeline`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       },
     ),
   directorTimelineAddClipToBatch: (
@@ -3842,6 +4153,58 @@ export const api = {
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/retake`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
     ),
+  directorTimelineExtractRepairFrame: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    repairId: string,
+    body?: { atSeconds?: number },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/repair-ranges/${encodeURIComponent(repairId)}/extract-frame`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+    ),
+  directorTimelineSubmitInpaint: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    repairId: string,
+    body: { prompt: string; maskPngBase64: string; atSeconds?: number; frameAssetId?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/repair-ranges/${encodeURIComponent(repairId)}/inpaint`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
+  directorTimelineApplyInpaint: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    repairId: string,
+    body?: { jobId?: string; repairedAssetId?: string },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/repair-ranges/${encodeURIComponent(repairId)}/apply-inpaint`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },
+    ),
+  directorTimelineRetakeRange: (
+    projectId: string,
+    sceneId: string,
+    batchId: string,
+    body: {
+      start: number;
+      length: number;
+      prompt: string;
+      spendApiCredits?: boolean;
+      maskPngBase64?: string;
+      referenceFrameTime?: number;
+      frameAssetId?: string;
+      removeBackground?: boolean;
+    },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/retake-range`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+    ),
   directorTimelineActivateTake: (projectId: string, sceneId: string, batchId: string, candidateId: string) =>
     req<Record<string, unknown>>(
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/batches/${encodeURIComponent(batchId)}/activate-take`,
@@ -3876,6 +4239,45 @@ export const api = {
       `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/keep-existing-downstream`,
       { method: "POST" },
     ),
+  directorTimelineExtend: (
+    projectId: string,
+    sceneId: string,
+    body: Record<string, unknown> = {},
+  ) =>
+    req<{
+      ok: boolean;
+      segmentId?: string | null;
+      batchBlockId?: string | null;
+      message?: string | null;
+      error?: string | null;
+      mock?: boolean;
+    }>(
+      `/api/director-timeline/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}/extend`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+  mediaIntelligenceAnalyze: (body: {
+    projectId: string;
+    assetId: string;
+    mode?: string;
+    surface?: string;
+    question?: string;
+    force?: boolean;
+    sceneId?: string;
+    executionId?: string;
+    rangeStartSec?: number;
+    rangeEndSec?: number;
+    playheadSec?: number;
+    createContext?: Record<string, unknown>;
+  }) =>
+    req<Record<string, unknown>>("/api/codirector/media-intelligence/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   knowledgebaseModels: () => req<any[]>("/api/knowledgebase/generation/models"),
   knowledgebaseModel: (id: string) => req<any>(`/api/knowledgebase/generation/models/${id}`),
   knowledgebaseDoc: (path: string) =>
@@ -4786,6 +5188,22 @@ export const api = {
   minimaxH3: {
     capability: (territory = resolveMiniMaxH3Territory()) =>
       req<Record<string, unknown>>(`/api/minimax-h3/capability?territory=${encodeURIComponent(territory)}`),
+    prewarm: (surface = "one-frame") =>
+      req<{ ok: boolean; message?: string; prewarm?: Record<string, unknown> }>(
+        "/api/minimax-h3/prewarm",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ surface }),
+        },
+      ),
+    prewarmCancel: () =>
+      req<{ ok: boolean; message?: string; prewarm?: Record<string, unknown> }>(
+        "/api/minimax-h3/prewarm/cancel",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      ),
+    prewarmStatus: () =>
+      req<{ ok: boolean; prewarm: Record<string, unknown> }>("/api/minimax-h3/prewarm"),
     readiness: () =>
       req<{
         ok: boolean;
@@ -5309,6 +5727,23 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    approveAs: (
+      projectId: string,
+      body: { asset_id: string; kind: "character" | "environment" | "prop" | "scene_frame"; scene_id?: string; character_id?: string },
+    ) =>
+      req<{
+        ok: boolean;
+        kind: string;
+        label: string;
+        assetId: string;
+        message: string;
+        displayToken?: string | null;
+        character?: { characterId: string; name: string; created: boolean; approvedSheetAssetId?: string; atTag?: string } | null;
+      }>(`/api/projects/${projectId}/references/approve-as`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     update: (projectId: string, bindingId: string, body: Record<string, unknown>) =>
       req<Record<string, unknown>>(`/api/projects/${projectId}/references/${bindingId}`, {
         method: "PATCH",
@@ -5581,18 +6016,23 @@ export const api = {
     getFinishingJob: (projectId: string, jobId: string) =>
       req<Record<string, unknown>>(`/api/magi/projects/${projectId}/jobs/${jobId}`),
   },
-  library: (projectId: string, opts?: { q?: string; scope?: string; folder?: string; system_key?: string }) => {
+  library: (projectId: string, opts?: { q?: string; scope?: string; folder?: string; system_key?: string; limit?: number; offset?: number }) => {
     const q = new URLSearchParams();
     if (opts?.q) q.set("q", opts.q);
     if (opts?.scope) q.set("scope", opts.scope);
     if (opts?.folder) q.set("folder", opts.folder);
     if (opts?.system_key) q.set("system_key", opts.system_key);
+    if (opts?.limit != null) q.set("limit", String(opts.limit));
+    if (opts?.offset != null) q.set("offset", String(opts.offset));
     const qs = q.toString();
     return req<{
       items: any[];
       tree: LibraryTreePayload;
       librarySchemaVersion: number;
       folderMap: Record<string, LibraryFolderMapEntry>;
+      totalMatches?: number;
+      limit?: number;
+      offset?: number;
     }>(`/api/projects/${projectId}/library${qs ? `?${qs}` : ""}`);
   },
   libraryMigrate: (projectId: string) =>
@@ -5653,7 +6093,7 @@ export const api = {
     fd.append("approved", approved ? "true" : "false");
     return req<any>(`/api/marketplace/${itemId}/install`, { method: "POST", body: fd });
   },
-  // ── Shared LoRA Registry (Adept UI LoRA support) ───────────────────────
+  // â”€â”€ Shared LoRA Registry (Adept UI LoRA support) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   loras: {
     list: () => req<{ loras: any[]; count: number }>(`/api/loras`),
     catalog: () => req<{ items: any[] }>(`/api/loras/catalog`),
@@ -5703,6 +6143,23 @@ export const api = {
       }),
     getMap: (projectId: string, documentId: string) =>
       req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}`),
+    classifyAtlasSource: (
+      projectId: string,
+      body: { assetId: string; intendedRoute?: string },
+    ) =>
+      req<{
+        kind: string;
+        action: string;
+        confidence: number;
+        message: string;
+        pixelsRead: boolean;
+        width: number;
+        height: number;
+      }>(`/api/spatial-map/projects/${projectId}/atlas-source/classify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     updateMap: (projectId: string, documentId: string, body: SpatialMapUpdateBody) =>
       req<SpatialMapDocumentResponse>(`/api/spatial-map/projects/${projectId}/maps/${documentId}`, {
         method: "PATCH",
@@ -6000,6 +6457,23 @@ export const api = {
           signal: perceptionAbortSignal(),
         },
       ),
+    removeBackground: (
+      projectId: string,
+      body: { assetId: string; saveToLibrary?: boolean; tag?: string; fillColor?: string },
+    ) =>
+      req<{
+        ok: boolean;
+        maskAssetId?: string;
+        resultAssetId?: string;
+        maskPngBase64?: string;
+        pngBase64?: string;
+        message?: string;
+      }>(`/api/perception/projects/${projectId}/remove-background`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: perceptionAbortSignal(),
+      }),
   },
   worldIntelligence: {
     status: () =>
@@ -7130,8 +7604,10 @@ export const api = {
     }
     return apiUrl(`/api/file?path=${encodeURIComponent(absPath)}`);
   },
-  assetUrl: (assetId: string, rev?: string | number | null) => {
-    const base = apiUrl(`/api/assets/${assetId}/file`);
+  assetUrl: (assetId: string, rev?: string | number | null, projectId?: string | null) => {
+    const pid = String(projectId || getBoundAssetProjectId() || "").trim();
+    if (!pid || !assetId) return "";
+    const base = apiUrl(`/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/file`);
     if (rev == null || String(rev).trim() === "") return base;
     const join = base.includes("?") ? "&" : "?";
     return `${base}${join}rev=${encodeURIComponent(String(rev))}`;
@@ -7768,6 +8244,10 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/design/generate`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  characterVoiceApprovedStatus: (projectId: string, characterId: string) =>
+    req<{ hasApprovedVoice: boolean; voiceProfileId?: string; previewAssetId?: string; voiceProfileName?: string }>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/approved-status`,
+    ),
   saveVoiceStudioDraft: (projectId: string, characterId: string, body: Record<string, unknown>) =>
     req<any>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/voice/studio-draft`,
@@ -7849,7 +8329,7 @@ export const api = {
     ),
   voiceApprovedStatus: (projectId: string) =>
     req<{ items: any[] }>(
-      `/api/projects/${encodeURIComponent(projectId)}/characters/voice/approved-status`,
+      `/api/projects/${encodeURIComponent(projectId)}/voice/approved-status`,
     ),
   voicePerformanceGate: () => req<any>("/api/voice-performance/gate/wave44"),
   voicePerformanceTags: () => req<any>("/api/voice-performance/tags"),
@@ -8108,6 +8588,39 @@ export const api = {
     req<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/cc-v2`,
     ),
+  listCharacterCreatorGenerators: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/cc-v2/generators`,
+    ),
+  adoptCharacterFront: (
+    projectId: string,
+    characterId: string,
+    body: { assetId: string; sourceType?: "upload" | "library" },
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/front/adopt`,
+      { method: "POST", body: JSON.stringify({ assetId: body.assetId, sourceType: body.sourceType || "library" }) },
+    ),
+  generateCharacterAngles: (projectId: string, characterId: string) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/generate`,
+      { method: "POST", body: "{}" },
+    ),
+  regenerateCharacterAngle: (projectId: string, characterId: string, angle: "side" | "three_quarter" | "back") =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/angles/${encodeURIComponent(angle)}/regenerate`,
+      { method: "POST", body: "{}" },
+    ),
+  approveCharacterAngle: (
+    projectId: string,
+    characterId: string,
+    angle: "side" | "three_quarter" | "back",
+    approved = true,
+  ) =>
+    req<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/multiview/angles/${encodeURIComponent(angle)}/approve`,
+      { method: "POST", body: JSON.stringify({ approved }) },
+    ),
   generateCharacterViewV2: (
     projectId: string,
     characterId: string,
@@ -8137,10 +8650,10 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/canon/retry-revision-2`,
       { method: "POST", body: "{}" },
     ),
-  composeCharacterSheetV2: (projectId: string, characterId: string) =>
+  composeCharacterSheetV2: (projectId: string, characterId: string, body?: { regenerate?: boolean }) =>
     req<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/characters/${encodeURIComponent(characterId)}/sheet/compose`,
-      { method: "POST", body: "{}" },
+      { method: "POST", body: JSON.stringify(body || {}) },
     ),
   startCharacterVisualSheet: (
     projectId: string,
@@ -8390,7 +8903,7 @@ export const api = {
     ),
   characterCreatorGate: () => req<Record<string, unknown>>("/api/m42-product/gate/wave43"),
 
-  /** M42 Wave 3 Image Product — generate, presets, collections, references, history */
+  /** M42 Wave 3 Image Product â€” generate, presets, collections, references, history */
   imageProductGate: () => req<Record<string, unknown>>("/api/image-product/gate"),
   imageProductRecommend: (body: Record<string, unknown>) =>
     req<any>("/api/image-product/recommend", {
@@ -8698,7 +9211,7 @@ export const api = {
       `${BASE}/api/knowledge-cards/project/${encodeURIComponent(projectId)}`,
     ),
 
-  // M42 W47 — Docker Runtime Extensions (all Docker ops via backend only)
+  // M42 W47 â€” Docker Runtime Extensions (all Docker ops via backend only)
   dockerRuntime: {
     platform: async () => {
       const raw = await req<{ ok: boolean; platform: import("./dockerRuntime/contracts").PlatformStatus }>(
@@ -8771,13 +9284,13 @@ export const api = {
     dockModels: () => req<{ models: Record<string, unknown>[] }>("/api/docker-runtime/dock-models"),
     gate: () => req<{ dockerRuntimeExtensionsGo: boolean; checks?: Record<string, unknown> }>("/api/docker-runtime/gate"),
   },
-  // Phase CK — Available video generators for project preferences
+  // Phase CK â€” Available video generators for project preferences
   videoGenerators: () => req<Array<{ id: string; label: string; available: boolean }>>(`${BASE}/api/knowledge-cards/video-generators`),
 };
 
-/** Standalone export for dynamic import — checks if any character in the project has an approved voice. */
+/** Standalone export for dynamic import â€” checks if any character in the project has an approved voice. */
 export async function voiceApprovedStatus(projectId: string): Promise<{ items: any[] }> {
   return req<{ items: any[] }>(
-    `/api/projects/${encodeURIComponent(projectId)}/characters/voice/approved-status`,
+    `/api/projects/${encodeURIComponent(projectId)}/voice/approved-status`,
   );
 }

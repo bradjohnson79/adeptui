@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { Button } from "./ui";
+import { ProviderCatalogAdmin } from "./ProviderCatalogAdmin";
 
 type ProviderCard = {
   providerId: string;
@@ -198,6 +199,13 @@ export function HostedProvidersPanel() {
         </p>
       )}
       {msg && <p className="muted">{msg}</p>}
+
+      <details data-testid="hosted-providers-advanced" style={{ marginTop: "1.5rem" }}>
+        <summary>
+          <strong>Advanced — Provider Catalog (developer)</strong>
+        </summary>
+        <ProviderCatalogAdmin />
+      </details>
     </div>
   );
 }
