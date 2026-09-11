@@ -1884,6 +1884,12 @@ class JobQueue:
         self, db: Session, job: Job, project: Project, *, batch: bool = False
     ) -> None:
         """Certified orchestration: director.timeline_render / director.batch_timeline."""
+        from .editor_mix import (
+            collect_timeline_mix_stems,
+            mix_stems_onto_video,
+            new_mix_output_path,
+            resolve_editor_path_factory,
+        )
         from .video_runtime.job_model import merge_video_runtime_history
         from .video_runtime.workflow_resolver import resolve_workflow
 
@@ -1953,7 +1959,45 @@ class JobQueue:
         out_dir = settings.data_dir / "projects" / project.id / "renders"
         final = out_dir / f"timeline_{uuid.uuid4().hex[:8]}.mp4"
         stitch_videos(outputs, final, fps=project.fps)
-        self._set_status(job.id, "done", 1.0, "Timeline render complete", str(final))
+
+        # Timeline music + SFX mix stage: only runs when the Director Timeline
+        # carries resolvable audio/sfx stems. Zero behavior change otherwise.
+        stems, skipped = collect_timeline_mix_stems(
+            db,
+            project,
+            list(scenes),
+            outputs,
+            resolve_editor_path_factory(db, project.id),
+        )
+        mix_meta: dict[str, Any] | None = None
+        if stems:
+            job.message = "Mixing timeline music/SFX"
+            job.progress = 0.96
+            db.commit()
+            mixed = new_mix_output_path(project.id, settings.data_dir)
+            mix_result = mix_stems_onto_video(
+                primary_video=final,
+                stems=stems,
+                out_path=mixed,
+            )
+            final = mixed
+            mix_meta = {
+                "timelineMix": {
+                    "stemsUsed": len(stems),
+                    "skipped": skipped,
+                    "filterComplex": mix_result.filter_complex,
+                    "output": str(final),
+                }
+            }
+
+        self._set_status(
+            job.id,
+            "done",
+            1.0,
+            "Timeline render complete",
+            str(final),
+            video_runtime_patch=mix_meta,
+        )
 
     async def _editor_mix(self, db: Session, job: Job, project: Project) -> None:
         """M3.2g Phase 6: mux Editor audio stems onto primary video; register Asset."""

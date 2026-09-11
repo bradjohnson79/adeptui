@@ -158,6 +158,7 @@ def migrate_director_to_master(
                 trimStart=clip.trim_start,
                 label=clip.label,
                 volume=clip.volume,
+                muted=clip.muted,
                 fade_in=clip.fade_in,
                 fade_out=clip.fade_out,
                 legacyClipId=clip.id,
@@ -174,6 +175,7 @@ def migrate_director_to_master(
                 trimStart=clip.trim_start,
                 label=clip.label,
                 volume=clip.volume,
+                muted=clip.muted,
                 legacyClipId=clip.id,
             )
             for clip in tl.sfx_clips

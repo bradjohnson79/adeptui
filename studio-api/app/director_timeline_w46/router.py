@@ -129,6 +129,7 @@ class AddClipBody(BaseModel):
     label: str = ""
     role: Optional[str] = None
     volume: float = 1.0
+    muted: bool = False
     fade_in: float = 0.0
     fade_out: float = 0.0
     motion_type: Optional[str] = None

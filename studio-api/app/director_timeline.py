@@ -31,6 +31,7 @@ class TimelineClip(BaseModel):
     trim_start: float = 0.0
     label: str = ""
     volume: float = 1.0
+    muted: bool = False
     fade_in: float = 0.0
     fade_out: float = 0.0
     reference_binding_id: Optional[str] = None

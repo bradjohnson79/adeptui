@@ -80,6 +80,31 @@ def probe_has_audio(video: Path) -> bool:
         return False
 
 
+def probe_duration(video: Path) -> float:
+    """Return video duration in seconds via ffprobe; 0.0 on failure."""
+    try:
+        proc = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0:
+            return float((proc.stdout or "").strip())
+    except Exception:
+        pass
+    return 0.0
+
+
 def _clip_gain(clip: dict[str, Any]) -> float:
     for key in ("gain", "volume", "vol"):
         if key in clip and clip[key] is not None:
@@ -232,24 +257,22 @@ def build_mix_plan(stems: list[MixStem], *, video_has_audio: bool) -> MixPlan:
     )
 
 
-def mix_editor_onto_video(
+def mix_stems_onto_video(
     *,
     primary_video: Path,
-    editor_data: dict[str, Any],
+    stems: list[MixStem],
     out_path: Path,
-    resolve_path: PathResolver,
     video_has_audio: Optional[bool] = None,
 ) -> MixResult:
-    """Mux Editor stems onto primary_video and write out_path.
+    """Mux pre-collected audio stems onto primary_video and write out_path.
 
-    If there are no usable stems, copies the primary video (bytes) so callers
-    still get a playable file. When the video has no audio track and stems
-    exist, the mix becomes the sole audio.
+    Reuses the same ffmpeg filter graph construction as Editor mix. If there
+    are no usable stems, copies the primary video (bytes) unchanged so callers
+    still get a playable file.
     """
     if not primary_video.is_file():
         raise FileNotFoundError(f"primary video not found: {primary_video}")
 
-    stems, skipped = collect_mix_stems(editor_data, resolve_path)
     has_audio = probe_has_audio(primary_video) if video_has_audio is None else bool(video_has_audio)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -257,17 +280,17 @@ def mix_editor_onto_video(
         # Nothing to mix — pass through video unchanged.
         out_path.write_bytes(primary_video.read_bytes())
         meta = {
-            "op": "editor_mix",
+            "op": "stem_mix",
             "primaryVideo": str(primary_video),
             "stems": [],
-            "skipped": skipped,
             "videoHasAudio": has_audio,
+            "filterComplex": "",
             "passthrough": True,
         }
         return MixResult(
             out_path=out_path,
             stems_used=[],
-            skipped=skipped,
+            skipped=[],
             video_has_audio=has_audio,
             filter_complex="",
             prompt_meta=meta,
@@ -298,7 +321,7 @@ def mix_editor_onto_video(
     run_ffmpeg(args)
 
     meta = {
-        "op": "editor_mix",
+        "op": "stem_mix",
         "primaryVideo": str(primary_video),
         "stems": [
             {
@@ -314,7 +337,6 @@ def mix_editor_onto_video(
             }
             for s in stems
         ],
-        "skipped": skipped,
         "videoHasAudio": has_audio,
         "filterComplex": plan.filter_complex,
         "passthrough": False,
@@ -322,11 +344,205 @@ def mix_editor_onto_video(
     return MixResult(
         out_path=out_path,
         stems_used=stems,
-        skipped=skipped,
+        skipped=[],
         video_has_audio=has_audio,
         filter_complex=plan.filter_complex,
         prompt_meta=meta,
     )
+
+
+def mix_editor_onto_video(
+    *,
+    primary_video: Path,
+    editor_data: dict[str, Any],
+    out_path: Path,
+    resolve_path: PathResolver,
+    video_has_audio: Optional[bool] = None,
+) -> MixResult:
+    """Mux Editor stems onto primary_video and write out_path.
+
+    If there are no usable stems, copies the primary video (bytes) so callers
+    still get a playable file. When the video has no audio track and stems
+    exist, the mix becomes the sole audio.
+    """
+    stems, skipped = collect_mix_stems(editor_data, resolve_path)
+    result = mix_stems_onto_video(
+        primary_video=primary_video,
+        stems=stems,
+        out_path=out_path,
+        video_has_audio=video_has_audio,
+    )
+    # Merge Editor-specific skip reasons into the shared result.
+    result.skipped = skipped
+    result.prompt_meta["skipped"] = skipped
+    result.prompt_meta["op"] = "editor_mix"
+    return result
+
+
+def _normalized_clip_fields(clip: Any) -> dict[str, Any]:
+    """Normalize BatchClip or legacy TimelineClip into a plain dict."""
+    asset_id = getattr(clip, "assetId", None) or getattr(clip, "asset_id", None)
+    trim_start = getattr(clip, "trimStart", None)
+    if trim_start is None:
+        trim_start = getattr(clip, "trim_start", 0.0)
+    raw_volume = getattr(clip, "volume", None)
+    volume = 1.0 if raw_volume is None else float(raw_volume)
+    return {
+        "id": getattr(clip, "id", ""),
+        "asset_id": asset_id,
+        "start": float(getattr(clip, "start", 0.0) or 0.0),
+        "length": float(getattr(clip, "length", 0.0) or 0.0),
+        "trim_start": float(trim_start or 0.0),
+        "label": getattr(clip, "label", "") or "",
+        "volume": volume,
+        "muted": bool(getattr(clip, "muted", False)),
+    }
+
+
+def _iter_timeline_audio_clips(
+    scene_director_json: str | None,
+    scene_id: str,
+    fallback_duration: float,
+    fallback_prompt: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Yield (track, normalized_clip) for a scene's audio/sfx clips.
+
+    Reads the legacy DirectorTimeline tracks first, then falls back to / appends
+    BatchBlock audioClips/sfxClips when they are not represented in the legacy
+    tracks. This follows the real W46 shape where either or both may hold
+    clip-level audio state.
+    """
+    from .director_timeline import parse_director_timeline
+    from .director_timeline_w46.migration import load_or_migrate_scene_master
+
+    out: list[tuple[str, dict[str, Any]]] = []
+    seen_ids: set[str] = set()
+
+    tl = parse_director_timeline(
+        scene_director_json,
+        fallback_duration=fallback_duration,
+        fallback_prompt=fallback_prompt,
+    )
+    for clip in tl.audio_clips:
+        seen_ids.add(str(clip.id))
+        out.append(("music", _normalized_clip_fields(clip)))
+    for clip in tl.sfx_clips:
+        seen_ids.add(str(clip.id))
+        out.append(("sfx", _normalized_clip_fields(clip)))
+
+    master, _, _ = load_or_migrate_scene_master(
+        scene_director_json,
+        scene_id=scene_id,
+        fallback_duration=fallback_duration,
+        fallback_prompt=fallback_prompt,
+    )
+    for batch in getattr(master, "batchBlocks", []) or []:
+        for clip in getattr(batch, "audioClips", []) or []:
+            legacy_id = str(getattr(clip, "legacyClipId", "") or "")
+            cid = str(getattr(clip, "id", ""))
+            # Migrated batch clips mirror legacy timeline clips; avoid duplicates.
+            if legacy_id and legacy_id in seen_ids:
+                continue
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                out.append(("music", _normalized_clip_fields(clip)))
+        for clip in getattr(batch, "sfxClips", []) or []:
+            legacy_id = str(getattr(clip, "legacyClipId", "") or "")
+            cid = str(getattr(clip, "id", ""))
+            if legacy_id and legacy_id in seen_ids:
+                continue
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                out.append(("sfx", _normalized_clip_fields(clip)))
+
+    return out
+
+
+def collect_timeline_mix_stems(
+    db: Any,
+    project: Any,
+    scenes: list[Any],
+    scene_outputs: list[Path],
+    resolve_path: PathResolver,
+) -> tuple[list[MixStem], list[dict[str, Any]]]:
+    """Collect music/SFX stems from scene DirectorTimelines for timeline export.
+
+    Each scene output is probed for duration; clip.start is offset by the
+    cumulative duration of all previous scene outputs. Muted or zero-volume
+    clips are skipped (documented as gain 0). Missing/unresolvable assets are
+    recorded in skipped rather than failing the render.
+    """
+    stems: list[MixStem] = []
+    skipped: list[dict[str, Any]] = []
+    cursor_sec = 0.0
+
+    for scene, output in zip(scenes, scene_outputs):
+        scene_duration = probe_duration(output) if output and output.is_file() else 0.0
+        fallback_duration = float(getattr(scene, "duration_sec", None) or 5.0)
+        fallback_prompt = getattr(scene, "prompt", "") or ""
+
+        for track, clip in _iter_timeline_audio_clips(
+            getattr(scene, "director_json", None),
+            getattr(scene, "id", ""),
+            fallback_duration,
+            fallback_prompt,
+        ):
+            clip_id = str(clip.get("id") or "")
+            asset_id = clip.get("asset_id")
+            label = str(clip.get("label") or track)
+            raw_volume = clip.get("volume")
+            volume = 1.0 if raw_volume is None else float(raw_volume)
+            muted = bool(clip.get("muted", False))
+
+            # 0-skip rule: muted or zero volume clips are omitted entirely.
+            if muted or volume <= 0:
+                skipped.append(
+                    {
+                        "track": track,
+                        "clip_id": clip_id,
+                        "reason": "muted_or_zero_gain",
+                        "label": label,
+                        "volume": volume,
+                        "muted": muted,
+                    }
+                )
+                continue
+
+            path = resolve_path(str(asset_id) if asset_id else None, None)
+            if path is None or not path.is_file():
+                skipped.append(
+                    {
+                        "track": track,
+                        "clip_id": clip_id,
+                        "reason": "missing_file",
+                        "asset_id": asset_id,
+                        "label": label,
+                    }
+                )
+                continue
+
+            start = float(clip.get("start") or 0.0)
+            length = float(clip.get("length") or 0.0)
+            trim_start = float(clip.get("trim_start") or 0.0)
+            gain = max(0.0, min(1.0, volume))
+
+            stems.append(
+                MixStem(
+                    track=track,
+                    clip_id=clip_id,
+                    path=path,
+                    start_sec=max(0.0, cursor_sec + start),
+                    length_sec=max(0.0, length),
+                    trim_start=max(0.0, trim_start),
+                    gain=gain,
+                    asset_id=str(asset_id) if asset_id else None,
+                    label=label,
+                )
+            )
+
+        cursor_sec += max(0.0, scene_duration)
+
+    return stems, skipped
 
 
 def resolve_editor_path_factory(db: Any, project_id: str) -> PathResolver:

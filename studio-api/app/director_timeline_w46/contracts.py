@@ -232,6 +232,7 @@ class BatchClip(BaseModel):
     label: str = ""
     role: Optional[str] = None  # e.g. image "start"/"middle"/"end"/"guide"
     volume: float = 1.0
+    muted: bool = False
     fade_in: float = 0.0
     fade_out: float = 0.0
     # Camera-specific fields (ignored for non-camera kinds)

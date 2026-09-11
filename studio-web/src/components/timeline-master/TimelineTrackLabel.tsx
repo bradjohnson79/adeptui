@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type React from "react";
 
 type TrackControl = "eye" | "lock" | "mute" | "solo";
 
@@ -47,12 +48,14 @@ export function TimelineTrackLabel({
   labelKey,
   testId,
   controls = ["eye", "lock"],
+  headerExtra,
   onAction,
 }: {
   label: string;
   labelKey?: string;
   testId?: string;
   controls?: TrackControl[];
+  headerExtra?: React.ReactNode;
   onAction?: () => void;
 }) {
   const { t } = useTranslation("timeline");
@@ -62,6 +65,9 @@ export function TimelineTrackLabel({
     <div className="timeline-v2__track-label" data-testid={testId || `timeline-v2-label-${slug}`}>
       <span className="timeline-v2__track-label-text">{text}</span>
       <div className="timeline-v2__track-label-tools">
+        {headerExtra ? (
+          <span className="timeline-v2__track-label-extra">{headerExtra}</span>
+        ) : null}
         {controls.map((control) => (
           <span key={control} className="timeline-v2__track-label-icon" aria-hidden>
             <TrackGlyph name={control} />

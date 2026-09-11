@@ -20,8 +20,14 @@ import {
 } from "./timeline-master/TimelineSettingsDrawer";
 import { TrackClipInteractive, type ClipDragMode, type ClipGeometry } from "./timeline-master/TrackClipInteractive";
 import { TimelineTrackLabel } from "./timeline-master/TimelineTrackLabel";
+import { TrackVolumeControl } from "./timeline-master/TrackVolumeControl";
 import type { SceneTimelineMaster } from "../timelineMaster/contracts";
 import { formatBatchStatus } from "../timelineMaster/contracts";
+import {
+  masterHasBatchOwnedAudio,
+  resolveDisplayAudioClips,
+  type DisplayBatchAudioClip,
+} from "../timelineMaster/batchOwnedAudioClips";
 import { ReferenceTokenAutocomplete } from "./sceneReferences/ReferenceTokenAutocomplete";
 // TS6133 unblock: JSX usage removed by in-progress refactor; keep symbol for re-wire.
 void ReferenceTokenAutocomplete;
@@ -52,6 +58,7 @@ export type TimelineClip = {
   /** Stable timeline tag e.g. @Image1 — never renumbered on delete/move. */
   display_tag?: string | null;
   volume?: number;
+  muted?: boolean;
   fade_in?: number;
   fade_out?: number;
   reference_binding_id?: string | null;
@@ -272,6 +279,7 @@ function TrackHeader({
   testId?: string;
   shellMode: boolean;
   controls?: Array<"eye" | "lock" | "mute" | "solo">;
+  headerExtra?: React.ReactNode;
   actionLabel?: string;
   onAction?: () => void;
 }) {
@@ -282,6 +290,7 @@ function TrackHeader({
         labelKey={labelKey}
         testId={testId}
         controls={controls}
+        headerExtra={headerExtra}
         onAction={onAction}
       />
     );
@@ -677,6 +686,12 @@ export function DirectorTracks({
   const videos = project.assets.filter((a) => a.kind === "video");
   const audios = project.assets.filter((a) => a.kind === "audio");
   const imageClips = freeImageClips(tl);
+  const displayAudioClips = resolveDisplayAudioClips(tl.audio_clips, master, "audio") as Array<
+    TimelineClip | DisplayBatchAudioClip
+  >;
+  const displaySfxClips = resolveDisplayAudioClips(tl.sfx_clips, master, "sfx") as Array<
+    TimelineClip | DisplayBatchAudioClip
+  >;
   const lipSyncTracks = normalizeLipSyncTracks(tl.lipsync?.tracks);
   const selectedImageClip =
     selectedClipKind === "imageClip"
@@ -2140,12 +2155,72 @@ export function DirectorTracks({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "audio")}
               >
-                <TrackHeader label="AUDIO" labelKey="tracks.audio" shellMode={shellMode} controls={["mute", "solo"]} />
+                <TrackHeader
+                  label="AUDIO"
+                  labelKey="tracks.audio"
+                  shellMode={shellMode}
+                  controls={["mute", "solo"]}
+                  headerExtra={
+                    <TrackVolumeControl
+                      trackLabel={t("musicTrackName", { defaultValue: "Music" })}
+                      volumePercent={Math.round((displayAudioClips[0]?.volume ?? 1) * 100)}
+                      muted={Boolean(displayAudioClips[0]?.muted)}
+                      disabled={displayAudioClips.length === 0}
+                      onChange={(pct) => {
+                        if (masterHasBatchOwnedAudio(master, "audio") && master) {
+                          void (async () => {
+                            for (const batch of master.batchBlocks || []) {
+                              if (!(batch.audioClips || []).length) continue;
+                              const next = (batch.audioClips || []).map((c) => ({
+                                ...c,
+                                volume: pct / 100,
+                                muted: false,
+                              }));
+                              await api.directorTimelinePatchBatch(project.id, scene.id, batch.id, {
+                                audioClips: next,
+                              });
+                            }
+                            await onChange();
+                          })().catch((e) =>
+                            setSaveError(e instanceof Error ? e.message : "Music volume update failed"),
+                          );
+                          return;
+                        }
+                        save({
+                          ...tl,
+                          audio_clips: tl.audio_clips.map((c) => ({ ...c, volume: pct / 100, muted: false })),
+                        });
+                      }}
+                      onToggleMute={() => {
+                        const nextMuted = !displayAudioClips[0]?.muted;
+                        if (masterHasBatchOwnedAudio(master, "audio") && master) {
+                          void (async () => {
+                            for (const batch of master.batchBlocks || []) {
+                              if (!(batch.audioClips || []).length) continue;
+                              const next = (batch.audioClips || []).map((c) => ({ ...c, muted: nextMuted }));
+                              await api.directorTimelinePatchBatch(project.id, scene.id, batch.id, {
+                                audioClips: next,
+                              });
+                            }
+                            await onChange();
+                          })().catch((e) =>
+                            setSaveError(e instanceof Error ? e.message : "Music mute update failed"),
+                          );
+                          return;
+                        }
+                        save({
+                          ...tl,
+                          audio_clips: tl.audio_clips.map((c) => ({ ...c, muted: nextMuted })),
+                        });
+                      }}
+                    />
+                  }
+                />
                 <div className={trackContentClass(shellMode)}>
-                  {tl.audio_clips.length === 0 && workspaceLayout.showEmptyHelp && (
+                  {displayAudioClips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Add ambience, score, or dialogue stems for this scene.</div>
                   )}
-                  {tl.audio_clips.map((clip) => (
+                  {displayAudioClips.map((clip) => (
                     <TrackClipInteractive
                       key={clip.id}
                       clipId={clip.id}
@@ -2206,12 +2281,72 @@ export function DirectorTracks({
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => onDropAsset(e, "sfx")}
               >
-                <TrackHeader label="SFX" labelKey="tracks.sfx" shellMode={shellMode} controls={["mute", "solo"]} />
+                <TrackHeader
+                  label="SFX"
+                  labelKey="tracks.sfx"
+                  shellMode={shellMode}
+                  controls={["mute", "solo"]}
+                  headerExtra={
+                    <TrackVolumeControl
+                      trackLabel={t("sfxTrackName", { defaultValue: "SFX" })}
+                      volumePercent={Math.round((displaySfxClips[0]?.volume ?? 1) * 100)}
+                      muted={Boolean(displaySfxClips[0]?.muted)}
+                      disabled={displaySfxClips.length === 0}
+                      onChange={(pct) => {
+                        if (masterHasBatchOwnedAudio(master, "sfx") && master) {
+                          void (async () => {
+                            for (const batch of master.batchBlocks || []) {
+                              if (!(batch.sfxClips || []).length) continue;
+                              const next = (batch.sfxClips || []).map((c) => ({
+                                ...c,
+                                volume: pct / 100,
+                                muted: false,
+                              }));
+                              await api.directorTimelinePatchBatch(project.id, scene.id, batch.id, {
+                                sfxClips: next,
+                              });
+                            }
+                            await onChange();
+                          })().catch((e) =>
+                            setSaveError(e instanceof Error ? e.message : "SFX volume update failed"),
+                          );
+                          return;
+                        }
+                        save({
+                          ...tl,
+                          sfx_clips: tl.sfx_clips.map((c) => ({ ...c, volume: pct / 100, muted: false })),
+                        });
+                      }}
+                      onToggleMute={() => {
+                        const nextMuted = !displaySfxClips[0]?.muted;
+                        if (masterHasBatchOwnedAudio(master, "sfx") && master) {
+                          void (async () => {
+                            for (const batch of master.batchBlocks || []) {
+                              if (!(batch.sfxClips || []).length) continue;
+                              const next = (batch.sfxClips || []).map((c) => ({ ...c, muted: nextMuted }));
+                              await api.directorTimelinePatchBatch(project.id, scene.id, batch.id, {
+                                sfxClips: next,
+                              });
+                            }
+                            await onChange();
+                          })().catch((e) =>
+                            setSaveError(e instanceof Error ? e.message : "SFX mute update failed"),
+                          );
+                          return;
+                        }
+                        save({
+                          ...tl,
+                          sfx_clips: tl.sfx_clips.map((c) => ({ ...c, muted: nextMuted })),
+                        });
+                      }}
+                    />
+                  }
+                />
                 <div className={trackContentClass(shellMode)}>
-                  {tl.sfx_clips.length === 0 && workspaceLayout.showEmptyHelp && (
+                  {displaySfxClips.length === 0 && workspaceLayout.showEmptyHelp && (
                     <div className="track-empty">Drop quick impact or spot effects here.</div>
                   )}
-                  {tl.sfx_clips.map((clip) => (
+                  {displaySfxClips.map((clip) => (
                     <TrackClipInteractive
                       key={clip.id}
                       clipId={clip.id}

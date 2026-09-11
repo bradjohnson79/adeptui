@@ -174,6 +174,7 @@ export interface BatchClip {
   label: string;
   role?: string | null;
   volume: number;
+  muted?: boolean;
   fade_in: number;
   fade_out: number;
   motion_type?: string | null;

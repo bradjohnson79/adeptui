@@ -170,3 +170,83 @@ def test_camera_prompt_hint_uses_catalog_labels():
     assert "Locked Off on Tripod" in hint
     assert "subject lock 0.95" in hint
     assert classify_camera_capability(motion_id="locked_off", rig_id="tripod") == "Workflow-Mapped"
+
+
+def test_muted_round_trips_director_timeline():
+    """Muted must survive legacy DirectorTimeline PUT/GET parse round-trip."""
+    raw = json.dumps(
+        {
+            "media_mode": "video",
+            "duration_sec": 5.0,
+            "image_clips": [],
+            "video_clips": [],
+            "prompt_segments": [],
+            "audio_clips": [
+                {
+                    "id": "a1",
+                    "asset_id": "music-asset",
+                    "start": 0.0,
+                    "length": 5.0,
+                    "volume": 0.4,
+                    "muted": True,
+                }
+            ],
+            "sfx_clips": [
+                {
+                    "id": "s1",
+                    "asset_id": "sfx-asset",
+                    "start": 1.0,
+                    "length": 2.0,
+                    "volume": 0.7,
+                    "muted": False,
+                }
+            ],
+        }
+    )
+    tl = parse_director_timeline(raw)
+    assert tl.audio_clips[0].muted is True
+    assert tl.audio_clips[0].volume == 0.4
+    assert tl.sfx_clips[0].muted is False
+    assert tl.sfx_clips[0].volume == 0.7
+
+    from app.director_timeline import dumps_director_timeline
+
+    dumped = json.loads(dumps_director_timeline(tl))
+    assert dumped["audio_clips"][0]["muted"] is True
+    assert dumped["sfx_clips"][0]["muted"] is False
+
+
+def test_migration_preserves_muted_on_audio_and_sfx():
+    """Migration from legacy DirectorTimeline must copy muted into BatchClip."""
+    raw = json.dumps(
+        {
+            "media_mode": "video",
+            "duration_sec": 5.0,
+            "image_clips": [],
+            "video_clips": [],
+            "prompt_segments": [{"id": "p1", "start": 0, "length": 5, "text": "scene"}],
+            "camera_clips": [],
+            "audio_clips": [
+                {"id": "a1", "asset_id": "music-asset", "start": 0, "length": 5, "volume": 0.4, "muted": True}
+            ],
+            "sfx_clips": [
+                {"id": "s1", "asset_id": "sfx-asset", "start": 1, "length": 2, "volume": 0.7, "muted": False}
+            ],
+        }
+    )
+    master = migrate_director_to_master(raw, scene_id="scene-1")
+    batch = master.batchBlocks[0]
+    audio = {c.legacyClipId: c for c in batch.audioClips}
+    sfx = {c.legacyClipId: c for c in batch.sfxClips}
+    assert audio["a1"].muted is True
+    assert audio["a1"].volume == 0.4
+    assert sfx["s1"].muted is False
+    assert sfx["s1"].volume == 0.7
+
+
+def test_batch_clip_muted_defaults_false():
+    from app.director_timeline_w46.contracts import BatchClip
+
+    clip = BatchClip(kind="audio", assetId="a")
+    assert clip.muted is False
+    assert clip.volume == 1.0

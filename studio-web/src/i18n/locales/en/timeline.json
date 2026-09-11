@@ -153,6 +153,14 @@
   "libraryPreviewHint": "Click to show in the Preview Monitor. Double-click for Quick Preview.",
   "removeFromLibrary": "Remove from Library",
   "removeFromLibraryTitle": "Remove from Timeline Library. File stays in Project Library.",
+  "musicTrackName": "Music",
+  "sfxTrackName": "SFX",
+  "muteTrack": "Mute {{track}}",
+  "unmuteTrack": "Unmute {{track}}",
+  "trackVolumeLabel": "{{track}} volume, {{percent}} percent",
+  "trackVolumeSliderLabel": "{{track}} volume, {{percent}} percent",
+  "trackVolumePopoverLabel": "{{track}} volume",
+  "trackVolumeDisabled": "Add a clip to set {{track}} volume",
   "resolutionLabel": "Resolution",
   "resolutionTip": "How sharp the picture is. Auto picks a good size for your speed setting. Higher numbers are sharper but slower."
 }
