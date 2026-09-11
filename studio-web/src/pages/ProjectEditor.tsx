@@ -464,6 +464,7 @@ export default function ProjectEditor() {
   const [workspaceProjectId, setWorkspaceProjectId] = useState<string>();
   const [lockedGate, setLockedGate] = useState(false);
   const [activeDocumentId, setActiveDocumentId] = useState<string | undefined>();
+  const [activeScriptSceneId, setActiveScriptSceneId] = useState<string | null>(null);
   const openCoDirector = useOpenCoDirector();
 
   const mountedRef = useRef(true);
@@ -664,6 +665,7 @@ export default function ProjectEditor() {
         sceneName={selectedSceneObj?.name}
         workspaceTab={tab}
         activeDocumentId={tab === "scriptwriter" ? activeDocumentId : undefined}
+        scriptwriterSceneId={tab === "scriptwriter" ? activeScriptSceneId : undefined}
         onGoTab={go}
         onApplyPrompt={applyPrompt}
         onAppliedSetup={refresh}
@@ -762,6 +764,7 @@ export default function ProjectEditor() {
           onChange={refresh}
           onGo={go}
           onActiveDocumentId={setActiveDocumentId}
+          onActiveSceneChange={setActiveScriptSceneId}
         />
       ) : tab === "brandstudio" ? (
         <BrandStudioWorkspace project={project} onChange={refresh} />
@@ -854,6 +857,7 @@ function ProjectCoDirectorBridge({
   sceneName,
   workspaceTab,
   activeDocumentId,
+  scriptwriterSceneId,
   onGoTab,
   onApplyPrompt,
   onAppliedSetup,
@@ -863,6 +867,7 @@ function ProjectCoDirectorBridge({
   sceneName?: string;
   workspaceTab: string;
   activeDocumentId?: string;
+  scriptwriterSceneId?: string | null;
   onGoTab: (tab: string, extra?: Record<string, string>) => void;
   onApplyPrompt: (prompt: string) => void;
   onAppliedSetup: () => void | Promise<void>;
@@ -875,6 +880,7 @@ function ProjectCoDirectorBridge({
     sceneName,
     workspaceTab,
     activeDocumentId,
+    scriptwriterSceneId: scriptwriterSceneId ?? undefined,
     onGoTab,
     onApplyPrompt,
     onAppliedSetup,

@@ -251,9 +251,33 @@ class OllamaProvider:
             )
         return model
 
+    @staticmethod
+    def _messages_with_project_context(request: ChatRequest) -> list[dict[str, Any]]:
+        """Merge ChatRequest.project_context into the system message.
+
+        The foundation conversation path replaces ChatRequest.messages with its
+        own DialoguePlan-grounded generation messages and carries the assembled
+        studio context (wiki, knowledge, attachments, live Story/Script state)
+        only in ``project_context``. The hosted provider already appends that
+        field to its system prompt; the local provider must do the same or the
+        model answers without any project state. Idempotent: skips injection
+        when the system message already embeds the context.
+        """
+        messages = [dict(m) for m in (request.messages or [])]
+        ctx = (request.project_context or "").strip()
+        if not ctx:
+            return messages
+        for m in messages:
+            if m.get("role") == "system":
+                content = str(m.get("content") or "")
+                if ctx not in content:
+                    m["content"] = (content + "\n\n" + ctx).strip()
+                return messages
+        return [{"role": "system", "content": ctx}] + messages
+
     def _chat_options(self, request: ChatRequest) -> dict[str, Any]:
         """Bound context window to prompt size — oversized num_ctx inflates prefill TTFT."""
-        chars = sum(len(str(m.get("content") or "")) for m in (request.messages or []))
+        chars = sum(len(str(m.get("content") or "")) for m in self._messages_with_project_context(request))
         # ~4 chars/token; pad for reply headroom but keep ordinary chat under 8k.
         approx_tokens = max(512, chars // 4)
         num_ctx = 2048 if approx_tokens < 1200 else 4096 if approx_tokens < 2800 else 8192
@@ -288,7 +312,7 @@ class OllamaProvider:
         model = self._resolve_model(request, health)
         payload = {
             "model": model,
-            "messages": request.messages,
+            "messages": self._messages_with_project_context(request),
             "stream": False,
             "keep_alive": self.keep_alive,
             "options": self._chat_options(request),
@@ -369,7 +393,7 @@ class OllamaProvider:
         model = self._resolve_model(request, health)
         payload = {
             "model": model,
-            "messages": request.messages,
+            "messages": self._messages_with_project_context(request),
             "stream": True,
             "keep_alive": self.keep_alive,
             "options": self._chat_options(request),
@@ -439,7 +463,7 @@ class OllamaProvider:
                         self.endpoint,
                         {
                             "model": model,
-                            "messages": request.messages,
+                            "messages": self._messages_with_project_context(request),
                             "stream": False,
                             "keep_alive": self.keep_alive,
                             "think": False,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -73,6 +74,8 @@ class ScriptRevisionRow(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     revision: Mapped[int] = mapped_column(Integer, default=1)
     elements_json: Mapped[str] = mapped_column(Text, default="[]")
+    content_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str] = mapped_column(String(16), default="elements")
     created_at: Mapped[str] = mapped_column(String(40), default="")
 
 
@@ -112,6 +115,7 @@ def ensure_scriptwriter_tables() -> None:
         ],
     )
     _ensure_content_html_columns()
+    _ensure_revision_html_columns()
 
 
 def _ensure_content_html_columns() -> None:
@@ -126,6 +130,21 @@ def _ensure_content_html_columns() -> None:
             conn.execute(text("ALTER TABLE script_documents_v2 ADD COLUMN content_html TEXT DEFAULT ''"))
         if "content_type" not in existing:
             conn.execute(text("ALTER TABLE script_documents_v2 ADD COLUMN content_type VARCHAR(16) DEFAULT 'elements'"))
+
+
+def _ensure_revision_html_columns() -> None:
+    """Revision snapshots capture the creator-visible content (CDX-051)."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    if not insp.has_table(ScriptRevisionRow.__tablename__):
+        return
+    existing = {c["name"] for c in insp.get_columns(ScriptRevisionRow.__tablename__)}
+    with engine.begin() as conn:
+        if "content_html" not in existing:
+            conn.execute(text("ALTER TABLE script_revision_snapshots ADD COLUMN content_html TEXT"))
+        if "content_type" not in existing:
+            conn.execute(text("ALTER TABLE script_revision_snapshots ADD COLUMN content_type VARCHAR(16) DEFAULT 'elements'"))
 
 
 def _row_to_doc(row: ScriptDocumentRow) -> ScriptDocument:
@@ -184,6 +203,33 @@ def save_document(db: Session, doc: ScriptDocument) -> ScriptDocument:
         pass
 
     return doc
+
+
+def update_document_title(db: Session, document_id: str, title: str) -> Optional[ScriptDocument]:
+    """Targeted title-only update.
+
+    Unlike ``save_document``, this touches ONLY ``title`` / ``updated_at`` —
+    it never writes ``content_html`` / ``elements_json`` / ``revision`` from
+    a possibly-stale in-memory document. A rename racing a debounced
+    autosave therefore cannot clobber freshly-saved content or regress the
+    revision counter (which would also trigger spurious SCRIPT_CONFLICTs on
+    the next autosave carrying ``expectedRevision``).
+    """
+    row = db.get(ScriptDocumentRow, document_id)
+    if not row:
+        return None
+    row.title = title
+    row.updated_at = _utc_now()
+    db.commit()
+
+    try:
+        from app.codirector.production_state.invalidation import invalidate_production_state
+
+        invalidate_production_state(db, row.project_id, affected_domains={"SCRIPT", "TIMELINE"})
+    except Exception:
+        logging.getLogger(__name__).exception("production-state invalidation failed after title update")
+
+    return _row_to_doc(row)
 
 
 def load_document(db: Session, document_id: str) -> Optional[ScriptDocument]:
@@ -268,6 +314,8 @@ def save_revision(db: Session, snap: ScriptRevisionSnapshot) -> ScriptRevisionSn
             note=snap.note,
             revision=snap.revision,
             elements_json=json.dumps([e.model_dump(mode="json") for e in snap.elements], ensure_ascii=False),
+            content_html=snap.contentHtml,
+            content_type=snap.contentType if snap.contentType in ("html", "elements") else "elements",
             created_at=snap.createdAt,
         )
     )
@@ -275,35 +323,7 @@ def save_revision(db: Session, snap: ScriptRevisionSnapshot) -> ScriptRevisionSn
     return snap
 
 
-def list_revisions(db: Session, document_id: str) -> list[ScriptRevisionSnapshot]:
-    rows = (
-        db.query(ScriptRevisionRow)
-        .filter(ScriptRevisionRow.document_id == document_id)
-        .order_by(ScriptRevisionRow.created_at.desc())
-        .all()
-    )
-    out: list[ScriptRevisionSnapshot] = []
-    for r in rows:
-        out.append(
-            ScriptRevisionSnapshot(
-                id=r.id,
-                documentId=r.document_id,
-                revisionSetId=r.revision_set_id,
-                name=r.name,
-                color=r.color,
-                note=r.note,
-                revision=r.revision,
-                elements=[ScriptElement.model_validate(e) for e in json.loads(r.elements_json or "[]")],
-                createdAt=r.created_at,
-            )
-        )
-    return out
-
-
-def load_revision(db: Session, revision_id: str) -> Optional[ScriptRevisionSnapshot]:
-    r = db.get(ScriptRevisionRow, revision_id)
-    if not r:
-        return None
+def _row_to_revision(r: ScriptRevisionRow) -> ScriptRevisionSnapshot:
     return ScriptRevisionSnapshot(
         id=r.id,
         documentId=r.document_id,
@@ -313,8 +333,27 @@ def load_revision(db: Session, revision_id: str) -> Optional[ScriptRevisionSnaps
         note=r.note,
         revision=r.revision,
         elements=[ScriptElement.model_validate(e) for e in json.loads(r.elements_json or "[]")],
+        contentHtml=r.content_html or None,
+        contentType=r.content_type if r.content_type in ("html", "elements") else "elements",  # type: ignore[arg-type]
         createdAt=r.created_at,
     )
+
+
+def list_revisions(db: Session, document_id: str) -> list[ScriptRevisionSnapshot]:
+    rows = (
+        db.query(ScriptRevisionRow)
+        .filter(ScriptRevisionRow.document_id == document_id)
+        .order_by(ScriptRevisionRow.created_at.desc())
+        .all()
+    )
+    return [_row_to_revision(r) for r in rows]
+
+
+def load_revision(db: Session, revision_id: str) -> Optional[ScriptRevisionSnapshot]:
+    r = db.get(ScriptRevisionRow, revision_id)
+    if not r:
+        return None
+    return _row_to_revision(r)
 
 
 def set_recovery(db: Session, document_id: str, payload: dict[str, Any]) -> None:

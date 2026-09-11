@@ -228,3 +228,12 @@
   padding: 0.75rem;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
 }
+
+/* Simplified Script Writer (screenplay-only surface) */
+.sw-nav__row { display: flex; align-items: stretch; gap: 4px; }
+.sw-nav__row .sw-nav__item { flex: 1; min-width: 0; }
+.sw-nav__reorder { display: flex; flex-direction: column; gap: 2px; }
+.sw-nav__reorder button { padding: 0 6px; font-size: 11px; line-height: 1.4; }
+.sw-revisions__list { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+.sw-revisions__list li { padding: 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.sw-inspector__toggle { width: 100%; text-align: left; font-weight: 600; }

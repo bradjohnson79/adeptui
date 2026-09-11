@@ -49,19 +49,15 @@ export type SaveState =
   | "recovery_available"
   | "save_failed";
 
+/**
+ * Script Writer is a screenplay surface: the script itself plus a first-class
+ * Revisions view (Compare is folded under Revisions). Story planning lives in
+ * the Story workspace — never duplicated here.
+ */
 export type StudioView =
   | "script"
-  | "outline"
-  | "cards"
-  | "beats"
-  | "compare"
-  | "production";
+  | "revisions";
 
 export type WritingMode =
   | "standard"
-  | "focus"
-  | "distraction-free"
-  | "dialogue"
-  | "scene"
-  | "revision"
-  | "production";
+  | "focus";

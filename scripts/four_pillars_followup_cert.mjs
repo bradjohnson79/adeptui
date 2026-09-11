@@ -176,15 +176,23 @@ const API_BASE = "https://api-beta.adeptui.org";
       console.log("  Storyboard button removed:", sbCount === 0 ? "PASS" : "FAIL");
       console.log("  Timeline button removed:", tlCount === 0 ? "PASS" : "FAIL");
 
-      // Verify remaining buttons
+      // Verify simplified screenplay-only toolbar (Script Writer simplification)
       const insertScene = page.getByTestId("scriptwriter-insert-scene");
+      const removeScene = page.getByTestId("scriptwriter-remove-scene");
       const undoBtn = page.getByTestId("scriptwriter-undo");
+      const redoBtn = page.getByTestId("scriptwriter-redo");
       const focusBtn = page.getByTestId("scriptwriter-focus");
+      const storyBtn = page.getByTestId("scriptwriter-story");
+      const revisionsBtn = page.getByTestId("scriptwriter-revisions");
       const commandBtn = page.getByTestId("scriptwriter-command");
-      console.log("  Insert scene:", await insertScene.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Add Scene:", await insertScene.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Remove Scene:", await removeScene.count() > 0 ? "FOUND" : "NOT FOUND");
       console.log("  Undo:", await undoBtn.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Redo:", await redoBtn.count() > 0 ? "FOUND" : "NOT FOUND");
       console.log("  Focus:", await focusBtn.count() > 0 ? "FOUND" : "NOT FOUND");
-      console.log("  Command:", await commandBtn.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Story:", await storyBtn.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Revisions:", await revisionsBtn.count() > 0 ? "FOUND" : "NOT FOUND");
+      console.log("  Command palette removed:", await commandBtn.count() === 0 ? "PASS" : "FAIL");
     }
   }
 

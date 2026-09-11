@@ -128,6 +128,11 @@ class ScriptRevisionSnapshot(BaseModel):
     note: str = ""
     revision: int
     elements: list[ScriptElement] = Field(default_factory=list)
+    # CDX-051 follow-up: a revision must capture what the creator actually
+    # sees. For HTML-canonical documents that is the typed HTML; ``elements``
+    # then carries the HTML-derived projection at snapshot time.
+    contentHtml: Optional[str] = None
+    contentType: Literal["html", "elements"] = "elements"
     createdAt: str = ""
     schemaVersion: str = SCRIPT_REVISION_SCHEMA
 

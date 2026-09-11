@@ -14,6 +14,7 @@ import {
   RECOVERY_RESTORE_FAILED_MESSAGE,
 } from "../../scriptwriter/recovery";
 import { api, ApiError } from "../../../api";
+import { ScriptTitleEditor } from "../../scriptwriter/ScriptTitleEditor";
 import "./ScriptwriterInline.css";
 
 type Props = {
@@ -162,6 +163,20 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     }
   };
 
+  // Rename the canonical script document title (click → edit → Enter/blur
+  // saves, Escape cancels). Renaming is an explicit creator action, so it may
+  // create the document on first save (CDX-054).
+  const renameTitle = useCallback(
+    async (next: string) => {
+      const id = await ensureDoc();
+      if (!id) throw new Error("save_failed");
+      const res = await api.scriptwriter.renameTitle(projectId, id, next);
+      const d = res.document as unknown as { id: string; title: string };
+      if (d.title) setTitle(d.title);
+    },
+    [ensureDoc, projectId],
+  );
+
   const isActive = useCallback(
     (name: string, attrs?: Record<string, unknown>) => editor?.isActive(name, attrs) ?? false,
     [editor],
@@ -173,7 +188,9 @@ export function ScriptwriterInlineEditor({ projectId, onOpenFull }: Props) {
     <div className="sw-inline" data-testid="scriptwriter-inline">
       <div className="sw-inline__header">
         <div>
-          <h3 className="sw-inline__title">{title || "Untitled Script"}</h3>
+          <h3 className="sw-inline__title">
+            <ScriptTitleEditor title={title} onRename={renameTitle} testId="sw-inline-title" />
+          </h3>
           <div className="sw-inline__stats">
             <span className="sw-inline__stat">{(stats.pagesEstimated ?? 0).toFixed(1)} pages</span>
             <span className="sw-inline__stat">{stats.scenes ?? 0} scenes</span>

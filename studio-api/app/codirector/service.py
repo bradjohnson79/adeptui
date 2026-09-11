@@ -29,6 +29,7 @@ from .context_enrichment import (
     compact_wiki_context,
     content_tab_hint_block,
     execution_result_context_block,
+    story_script_context_block,
 )
 from ..feature_flags import feature_flags
 from ..learning import adaptive_lessons_block, learning_context_block, parse_learning
@@ -584,6 +585,8 @@ async def _prepare_chat_request(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     active_content_tab: str | None = None,
+    active_document_id: str | None = None,
+    scriptwriter_scene_id: str | None = None,
 ) -> tuple[CoDirectorProvider, ChatRequest, ContextManifest]:
     request_id = request_id or new_request_id()
     context = ""
@@ -674,6 +677,24 @@ async def _prepare_chat_request(
     content_tab_hint = content_tab_hint_block(active_content_tab)
     if content_tab_hint:
         context = (context or "") + "\n\n" + content_tab_hint
+
+    # Live Story + Script state — read from the canonical stores on EVERY turn
+    # (never a cached snapshot), so Co-Director always answers from the current
+    # story and screenplay, including the scene the creator is editing right
+    # now. Bounded: summaries truncated, scene list capped, current scene only
+    # read out. Best-effort: a failure never breaks the chat turn.
+    if project_id:
+        try:
+            story_script_block = story_script_context_block(
+                db,
+                project_id,
+                active_document_id=active_document_id,
+                scriptwriter_scene_id=scriptwriter_scene_id,
+            )
+            if story_script_block:
+                context = (context or "") + "\n\n" + story_script_block
+        except Exception:
+            logger.debug("story/script context block failed", exc_info=True)
 
     chat_messages = [
         {"role": m.get("role", "user"), "content": m.get("content", "")}
@@ -1184,6 +1205,8 @@ async def chat_for_project(
     conversation_locale: str | None = None,
     attachment_ids: list[str] | None = None,
     active_content_tab: str | None = None,
+    active_document_id: str | None = None,
+    scriptwriter_scene_id: str | None = None,
 ) -> tuple[
     ChatResult,
     SceneSetupProposal | None,
@@ -1207,6 +1230,8 @@ async def chat_for_project(
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
         active_content_tab=active_content_tab,
+        active_document_id=active_document_id,
+        scriptwriter_scene_id=scriptwriter_scene_id,
     )
     # Sync chat shares the stream defer/budget path — Wiki is not on the critical path.
     core = run_conversation_core_turn(
@@ -1224,6 +1249,7 @@ async def chat_for_project(
             chat_request=chat_request,
             user_message=user_message,
             core=core,
+            allow_direct_answer=_is_project_content_question(user_message, project_id),
         )
         if project_id:
             try:
@@ -1372,6 +1398,41 @@ def _last_user_message(messages: list[dict[str, str]]) -> str:
         if message.get("role") == "user":
             return (message.get("content") or "").strip()
     return ""
+
+
+_PROJECT_CONTENT_Q = re.compile(
+    r"(?i)\b(this project|my (story|script|screenplay|scene|film|movie|dialogue)|"
+    r"our (story|script|hero|villain|protagonist)|"
+    r"the (hero|villain|protagonist|antagonist|screenplay|treatment|logline)|"
+    r"current scene|this scene|next scene|previous scene|before this scene|after this scene|"
+    r"the script|the story)\b"
+)
+
+
+_PLATFORM_HELP_Q = re.compile(
+    r"(?i)\b(how do i|how to|how does adept|how does the (app|platform|studio|script writer)|"
+    r"where do i|where is|where can i|what is adept|what'?s adept|what does adept|"
+    r"is there a (button|way|setting|tab|feature|menu)|"
+    r"use the (script writer|story tab|timeline|storyboard|voice))\b"
+)
+
+def _is_project_content_question(user_message: str, project_id: str | None) -> bool:
+    """True when a bound-project question targets the creator's own Story/Script
+    content rather than platform documentation. Such questions must reach the
+    LLM turn (which carries the live Story/Script context block and still
+    includes retrieved knowledge) instead of being short-circuited by a
+    canned platform reply.
+
+    Platform how-to questions ("How do I use the script writer?") can contain
+    content nouns like "the script"/"the story"; they must still reach the
+    curated platform-knowledge reply, so they are excluded first."""
+    if not (project_id and user_message):
+        return False
+    if _PLATFORM_HELP_Q.search(user_message):
+        return False
+    return bool(_PROJECT_CONTENT_Q.search(user_message))
+
+
 
 
 def _build_execution_context(
@@ -2126,6 +2187,7 @@ async def _foundation_llm_turn(
     chat_request: ChatRequest,
     user_message: str,
     core: Any,
+    allow_direct_answer: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """LLM-primary reply with grounding, one repair, then deterministic fallback.
 
@@ -2205,7 +2267,13 @@ async def _foundation_llm_turn(
             plan=dialogue,
             companion=companion_hints,
         )
-        if not grounding.ok:
+        if not grounding.ok and allow_direct_answer and reply:
+            # Factual project-content Q&A (live Story/Script state is injected
+            # into the provider turn): discovery-dialogue gates — LISTENING
+            # reflection, question budget, minimum length — do not apply to a
+            # direct factual answer grounded in canonical project state.
+            grounding_passed = True
+        elif not grounding.ok:
             repair_used = True
             repair_messages = build_generation_messages(
                 user_message=user_message,
@@ -2453,6 +2521,8 @@ async def stream_for_project(
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
     active_content_tab: str | None = None,
+    active_document_id: str | None = None,
+    scriptwriter_scene_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .inference_activity import begin_inference, end_inference
 
@@ -2471,6 +2541,8 @@ async def stream_for_project(
             attachment_ids=attachment_ids,
             origin_session_id=origin_session_id,
             active_content_tab=active_content_tab,
+            active_document_id=active_document_id,
+            scriptwriter_scene_id=scriptwriter_scene_id,
         ):
             yield event
     finally:
@@ -2491,6 +2563,8 @@ async def _stream_for_project_inner(
     attachment_ids: list[str] | None = None,
     origin_session_id: Optional[str] = None,
     active_content_tab: str | None = None,
+    active_document_id: str | None = None,
+    scriptwriter_scene_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     from .conversation import run_conversation_core_turn
 
@@ -2518,6 +2592,8 @@ async def _stream_for_project_inner(
         conversation_locale=conversation_locale,
         attachment_ids=attachment_ids,
         active_content_tab=active_content_tab,
+        active_document_id=active_document_id,
+        scriptwriter_scene_id=scriptwriter_scene_id,
     )
     timing.requestId = chat_request.request_id
     user_message = _last_user_message(messages)

@@ -54,6 +54,148 @@ def content_tab_hint_block(active_content_tab: str | None) -> str:
     )
 
 
+def story_script_context_block(
+    db: Session,
+    project_id: str | None,
+    *,
+    active_document_id: str | None = None,
+    scriptwriter_scene_id: str | None = None,
+) -> str:
+    """Live Story + Script state for this conversation turn.
+
+    Reads the canonical stores (``story_entries`` and the Script Writer
+    document's canonical content projection) on EVERY call — never a cached
+    or startup snapshot — so an edit the creator made seconds ago is what
+    Co-Director sees (no stale story/script context).
+
+    Bounded by design: story summaries are truncated, the scene list is
+    capped, and only the current scene (when known) is read out in full.
+    Deeper detail remains available through the read tools
+    (``project.read_context`` / ``script.scene_context``). Never raises.
+    """
+    if not project_id:
+        return ""
+    lines: list[str] = []
+
+    # ── Story (canonical story_entries; legacy freeform doc as fallback) ──
+    try:
+        from ..story_entries.store import list_entries
+
+        entries = list_entries(db, project_id)
+        if entries:
+            lines.append("Story (live from the Story workspace):")
+            for e in entries[:6]:
+                head = f"- [{e.entry_type}] {e.title or 'Untitled'}"
+                if e.logline:
+                    head += f" — {e.logline[:300]}"
+                lines.append(head)
+                if e.short_summary:
+                    lines.append(f"  Summary: {e.short_summary[:500]}")
+                if e.long_summary:
+                    lines.append(f"  Treatment: {e.long_summary[:800]}")
+    except Exception:
+        pass
+    if not any(l.startswith("Story (live") for l in lines):
+        try:
+            from ..story.store import load_document
+
+            row = load_document(db, project_id)
+            if row and row.content:
+                lines.append("Story (live from the Story workspace):")
+                lines.append(f"- {row.title or 'Story'}: {row.content[:900]}")
+        except Exception:
+            pass
+
+    # ── Script (canonical content projection — typed HTML aware) ─────────
+    try:
+        from ..scriptwriter.service import (
+            canonical_elements,
+            navigator_scenes,
+            scene_segment_readout,
+        )
+        from ..scriptwriter.store import list_documents, load_document
+
+        docs = list_documents(db, project_id)
+        doc = None
+        if active_document_id:
+            candidate = load_document(db, active_document_id)
+            if candidate and candidate.projectId == project_id:
+                doc = candidate
+        if doc is None and docs:
+            doc = load_document(db, docs[0].id)
+        if doc is not None:
+            elements = canonical_elements(doc)
+            scenes = navigator_scenes(doc)
+            lines.append(
+                f"Script (live): \"{doc.title or 'Untitled Script'}\" — "
+                f"{len(scenes)} scene(s), {sum(len((e.text or '').split()) for e in elements)} words, revision {doc.revision}."
+            )
+            if scenes:
+                lines.append("Scene list:")
+                for s in scenes[:40]:
+                    marker = " ← current" if scriptwriter_scene_id and s.get("sceneHeadingId") == scriptwriter_scene_id else ""
+                    lines.append(f"- {s.get('sceneNumber') or '—'}. {s.get('heading')}{marker}")
+            if scriptwriter_scene_id:
+                readout = scene_segment_readout(doc, scriptwriter_scene_id)
+                if readout:
+                    lines.append(f"Current scene the creator is editing: {readout.get('heading')}")
+                    action = (readout.get("action") or "")[:1200]
+                    dialogue = (readout.get("dialogue") or "")[:1200]
+                    if action:
+                        lines.append(f"  Action: {action}")
+                    if dialogue:
+                        speaker = readout.get("speaker") or ""
+                        lines.append(f"  Dialogue{f' ({speaker})' if speaker else ''}: {dialogue}")
+            # Bounded scene-content readout so dialogue/action questions are
+            # answerable even when no current scene is tagged. The current
+            # scene (already read out above) is skipped here; remaining scenes
+            # share a total character budget, in script order.
+            budget = 2600
+            content_lines: list[str] = []
+            for s in scenes[:40]:
+                sid = s.get("sceneHeadingId")
+                if not sid or sid == scriptwriter_scene_id:
+                    continue
+                if budget <= 0:
+                    break
+                try:
+                    readout = scene_segment_readout(doc, sid)
+                except Exception:
+                    continue
+                if not readout:
+                    continue
+                action = (readout.get("action") or "")[:400]
+                dialogue = (readout.get("dialogue") or "")[:400]
+                if not action and not dialogue:
+                    continue
+                chunk_lines = [f"Scene \"{readout.get('heading')}\":"]
+                if action:
+                    chunk_lines.append(f"  Action: {action}")
+                if dialogue:
+                    speaker = readout.get("speaker") or ""
+                    chunk_lines.append(f"  Dialogue{f' ({speaker})' if speaker else ''}: {dialogue}")
+                chunk = "\n".join(chunk_lines)
+                if len(chunk) > budget:
+                    chunk = chunk[:budget]
+                content_lines.append(chunk)
+                budget -= len(chunk)
+            if content_lines:
+                lines.append("Scene contents (live, bounded):")
+                lines.extend(content_lines)
+    except Exception:
+        pass
+
+    if not lines:
+        return ""
+    return "\n".join(
+        [
+            "Current project Story + Script state (read live for this turn — always up to date;",
+            "use script.scene_context / project.read_context tools for deeper detail):",
+            *lines,
+        ]
+    )
+
+
 def compact_wiki_context(db: Session, project_id: str, *, limit: int = 12) -> str:
     """Inject a short Project Wiki snapshot into chat/intelligence context.
 

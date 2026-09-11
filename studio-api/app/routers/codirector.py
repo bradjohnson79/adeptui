@@ -90,6 +90,10 @@ class CoDirectorChatBody(BaseModel):
     attachmentIds: list[str] = Field(default_factory=list)
     active_content_tab: Optional[str] = None
     activeContentTab: Optional[str] = None
+    # Script Writer current-scene awareness: the canonical script document and
+    # the selected scene (sceneHeadingId) the creator is editing right now.
+    active_document_id: Optional[str] = Field(default=None, alias="activeDocumentId")
+    scriptwriter_scene_id: Optional[str] = Field(default=None, alias="scriptwriterSceneId")
 
 
 class CoDirectorCancelBody(BaseModel):
@@ -296,6 +300,8 @@ async def chat(body: CoDirectorChatBody, db: Session = Depends(get_db)) -> dict[
             conversation_locale=body.conversation_locale or body.conversationLocale,
             attachment_ids=body.attachment_ids or body.attachmentIds,
             active_content_tab=body.active_content_tab,
+            active_document_id=body.active_document_id,
+            scriptwriter_scene_id=body.scriptwriter_scene_id,
         )
     except CoDirectorError as err:
         raise _http_error(err) from err
@@ -341,6 +347,8 @@ async def chat_stream(body: CoDirectorChatBody) -> StreamingResponse:
                 origin_session_id=body.origin_session_id,
                 attachment_ids=body.attachment_ids or body.attachmentIds,
                 active_content_tab=body.active_content_tab,
+                active_document_id=body.active_document_id,
+                scriptwriter_scene_id=body.scriptwriter_scene_id,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
                 if codirector_service.is_cancelled(request_id):

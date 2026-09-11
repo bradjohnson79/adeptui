@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { SplitPane } from "../ui";
 import { CoDirectorHeader } from "./CoDirectorHeader";
 import { CoDirectorConversation } from "./CoDirectorConversation";
@@ -99,6 +100,11 @@ export function CoDirectorShell({
   } = useCoDirectorSession();
   const [navOpen, setNavOpen] = useState(false);
   const [contentTabState, setContentTabState] = useState<ContentTab>(() => loadContentTab());
+  const [searchParams] = useSearchParams();
+  // Deep-link: /co-director?projectId=…&contentTab=story opens a specific
+  // Project Content tab (e.g. Script Writer's Story button). The URL param
+  // takes precedence over the default "wiki" landing tab.
+  const urlContentTab = searchParams.get("contentTab");
   const [layoutPreset, setLayoutPreset] = useState<CoDirectorLayoutPreset>(() => loadLayoutPreset());
   const [primarySizeRequest, setPrimarySizeRequest] = useState<{ size: number; token: number } | null>(
     null,
@@ -133,13 +139,27 @@ export function CoDirectorShell({
   useEffect(() => {
     if (!initializedContentTabRef.current) {
       initializedContentTabRef.current = true;
-      setContentTab("wiki");
+      setContentTab(urlContentTab ? normalizeContentTab(urlContentTab) : "wiki");
+      if (urlContentTab) setContextPanelOpen(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContentTab]);
 
   useEffect(() => {
-    setContentTab("wiki");
+    setContentTab(urlContentTab ? normalizeContentTab(urlContentTab) : "wiki");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiContext.projectId, setContentTab]);
+
+  // React to contentTab deep-link changes while mounted (e.g. Story clicked
+  // again from Script Writer for the same project).
+  const lastAppliedUrlTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (urlContentTab && urlContentTab !== lastAppliedUrlTabRef.current) {
+      lastAppliedUrlTabRef.current = urlContentTab;
+      setContentTab(normalizeContentTab(urlContentTab));
+      setContextPanelOpen(true);
+    }
+  }, [urlContentTab, setContentTab, setContextPanelOpen]);
 
   const contentTab = contentTabState;
 

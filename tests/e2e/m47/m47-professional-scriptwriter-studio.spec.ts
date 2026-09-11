@@ -28,8 +28,15 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
       const studio = await request.get(`${API}/api/projects/${project.id}/scriptwriter`);
       expect(studio.ok()).toBeTruthy();
       const studioBody = await studio.json();
-      const docId = studioBody.document.id as string;
       expect(studioBody.paginationMode).toBe("estimated");
+      // CDX-054: GET is side-effect free — the canonical document exists only
+      // after an explicit creator-triggered creation.
+      let docId = studioBody.document?.id as string | undefined;
+      if (!docId) {
+        const created = await request.post(`${API}/api/projects/${project.id}/scriptwriter/documents`);
+        expect(created.ok()).toBeTruthy();
+        docId = ((await created.json()).document.id as string);
+      }
 
       const fountain = [
         "Title: M47 Path",
@@ -77,19 +84,28 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
       const bibleBody = await bible.json();
       expect(bibleBody.appliesAutomatically).toBeFalsy();
 
-      // Scene link
+      // Scene link. The proposal apply above may resync the element
+      // projection to canonical navigator ids, so re-fetch the document and
+      // use the current scene-heading id rather than the import-time one.
+      const docFresh = await (
+        await request.get(`${API}/api/projects/${project.id}/scriptwriter`)
+      ).json();
+      const headingCurrent = (docFresh.document.elements as Array<{ id: string; type: string }>).find(
+        (e) => e.type === "scene_heading",
+      );
+      expect(headingCurrent?.id).toBeTruthy();
       const projectFresh = await (await request.get(`${API}/api/projects/${project.id}`)).json();
       const sceneId = projectFresh.scenes[0].id as string;
       const link = await request.post(
         `${API}/api/projects/${project.id}/scriptwriter/documents/${docId}/scenes/link`,
-        { data: { sceneHeadingId: heading!.id, projectSceneId: sceneId } },
+        { data: { sceneHeadingId: headingCurrent!.id, projectSceneId: sceneId } },
       );
       expect(link.ok()).toBeTruthy();
 
       // Timeline prep + metadata apply
       const prep = await request.post(
         `${API}/api/projects/${project.id}/scriptwriter/documents/${docId}/timeline/prepare`,
-        { data: { sceneHeadingId: heading!.id } },
+        { data: { sceneHeadingId: headingCurrent!.id } },
       );
       expect(prep.ok()).toBeTruthy();
       const prepBody = await prep.json();
@@ -98,7 +114,7 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
 
       const applyTl = await request.post(
         `${API}/api/projects/${project.id}/scriptwriter/documents/${docId}/timeline/apply-metadata`,
-        { data: { sceneHeadingId: heading!.id, metadata: prepBody.proposal } },
+        { data: { sceneHeadingId: headingCurrent!.id, metadata: prepBody.proposal } },
       );
       expect(applyTl.ok()).toBeTruthy();
       expect((await applyTl.json()).transaction.kind).toBe("apply_timeline_prep_metadata");
@@ -132,7 +148,9 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
       const data = envelope.data || envelope;
       expect(String(data.documentId || docId)).toBeTruthy();
 
-      // UI: studio shell
+      // UI: studio shell (simplified screenplay surface — Script/Story/Add/
+      // Remove Scene/Revisions/Undo/Redo; planning views removed; power tools
+      // behind More tools)
       await page.goto(`/project/${project.id}?workspace=scriptwriter`);
       await expect(page.getByTestId("scriptwriter-studio")).toBeVisible({ timeout: 45_000 });
       await expect(page.getByTestId("scriptwriter-toolbar")).toBeVisible();
@@ -141,12 +159,24 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
       await expect(page.getByTestId("scriptwriter-save-state")).toBeVisible();
       await expect(page.getByTestId("scriptwriter-status")).toContainText(/estimated/i);
 
+      // Editable canonical title (display affordance; click reveals the input)
+      await expect(page.getByTestId("scriptwriter-title-display")).toBeVisible();
+
+      // Story routes to the Story workspace (Co-Director story tab)
+      await expect(page.getByTestId("scriptwriter-story")).toBeVisible();
+
       await page.getByTestId("scriptwriter-insert-scene").click();
       await expect(page.getByTestId("scriptwriter-navigator")).toBeVisible();
 
-      await page.getByTestId("scriptwriter-command").click();
-      await expect(page.getByTestId("scriptwriter-command-palette")).toBeVisible();
-      await page.getByRole("button", { name: "Close" }).click();
+      // Revisions is a first-class view (Compare folded in)
+      await page.getByTestId("scriptwriter-revisions").click();
+      await expect(page.getByTestId("scriptwriter-revisions-view")).toBeVisible();
+      await expect(page.getByTestId("scriptwriter-compare")).toBeVisible();
+      await page.getByTestId("scriptwriter-view-script").click();
+
+      // Relocated power tools
+      await page.getByTestId("scriptwriter-more-tools").click();
+      await expect(page.getByTestId("scriptwriter-export-fountain")).toBeVisible();
 
       // Alias writer → studio
       await page.goto(`/project/${project.id}?workspace=writer`);
@@ -168,7 +198,13 @@ test.describe("@m47 @scriptwriter Professional Scriptwriter Studio", () => {
     const project = await createTempProject(request, `M47 Undo ${Date.now()}`);
     try {
       const studio = await (await request.get(`${API}/api/projects/${project.id}/scriptwriter`)).json();
-      const docId = studio.document.id as string;
+      // CDX-054: GET is side-effect free — create the document explicitly.
+      let docId = studio.document?.id as string | undefined;
+      if (!docId) {
+        const created = await request.post(`${API}/api/projects/${project.id}/scriptwriter/documents`);
+        expect(created.ok()).toBeTruthy();
+        docId = (await created.json()).document.id as string;
+      }
       const a = await request.post(
         `${API}/api/projects/${project.id}/scriptwriter/documents/${docId}/scenes/insert`,
         { data: { heading: "EXT. ROAD - DAY" } },

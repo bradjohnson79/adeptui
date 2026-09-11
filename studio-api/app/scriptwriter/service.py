@@ -25,7 +25,8 @@ from .models import (
     ScriptRevisionSnapshot,
     SceneSyncStatus,
 )
-from .htmltext import html_has_visible_text, html_scene_elements
+from .htmltext import document_html_for_display, elements_to_html, html_has_visible_text, html_scene_elements
+from .htmlscenes import delete_scene_html, insert_scene_html, move_scene_html
 from .stats import compute_stats
 from .store import (
     clear_recovery,
@@ -38,6 +39,7 @@ from .store import (
     save_document,
     save_revision,
     set_recovery,
+    update_document_title,
 )
 from .transactions import commit_transaction, history, undo_last
 from .transitions import cycle_type, next_on_enter
@@ -142,10 +144,53 @@ def autosave_html(
     return {"ok": True, "document": doc.model_dump(mode="json"), "transaction": tx.model_dump(mode="json"), "saveState": "saved"}
 
 
-def insert_scene(db: Session, document_id: str, *, after_order: int = -1, heading: str = "INT. LOCATION - DAY") -> dict[str, Any]:
+def rename_document(db: Session, document_id: str, title: str) -> dict[str, Any]:
+    """Rename the canonical script document title.
+
+    Title is document metadata, not screenplay content: it deliberately does
+    NOT consume a content revision (an in-flight autosave guarded by
+    ``expectedRevision`` must not spuriously conflict because the creator
+    renamed the script) and it is not part of the content transaction/undo
+    stream. Last writer wins across surfaces; every surface rehydrates the
+    title from the canonical document bundle.
+    """
+    cleaned = (title or "").strip()
+    # Creator-friendly: clearing the title falls back to the canonical
+    # default rather than erroring (the UI's Escape path cancels instead).
+    new_title = (cleaned or "Untitled Script")[:200]
+    # Title-only targeted UPDATE: never rewrites content/elements/revision
+    # from an in-memory snapshot, so a rename cannot clobber an in-flight
+    # autosave's content or regress the revision counter.
+    doc = update_document_title(db, document_id, new_title)
+    if doc is None:
+        raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Script document not found.", recovery_action="reload")
+    return {"ok": True, "document": doc.model_dump(mode="json")}
+
+
+def _sync_elements_to_html(d: ScriptDocument) -> None:
+    """After an HTML-level scene op, keep the stored element snapshot in sync
+    with the canonical HTML so legacy element readers never go stale."""
+    d.elements = html_scene_elements(d.contentHtml)
+    d.contentType = "html"
+
+
+def insert_scene(
+    db: Session,
+    document_id: str,
+    *,
+    after_order: int = -1,
+    heading: str = "INT. LOCATION - DAY",
+    after_scene_id: Optional[str] = None,
+) -> dict[str, Any]:
     doc = get_document(db, document_id)
 
     def mutate(d: ScriptDocument) -> list[str]:
+        if html_has_visible_text(d.contentHtml):
+            # HTML-canonical: operate on the canonical HTML so the new scene
+            # is actually visible and untouched scenes keep their formatting.
+            d.contentHtml = insert_scene_html(d.contentHtml, heading, after_scene_id=after_scene_id)
+            _sync_elements_to_html(d)
+            return [e.id for e in d.elements if e.type == "scene_heading"]
         els = sorted(d.elements, key=lambda e: e.order)
         insert_at = after_order + 1 if after_order >= 0 else len(els)
         scene_num = _next_scene_number(d)
@@ -167,8 +212,19 @@ def delete_scene(db: Session, document_id: str, scene_heading_id: str) -> dict[s
     doc = get_document(db, document_id)
 
     def mutate(d: ScriptDocument) -> list[str]:
+        resolved_id = _resolve_scene_heading_id(d, scene_heading_id)
+        if html_has_visible_text(d.contentHtml):
+            # HTML-canonical: cut the scene's raw HTML span (lossless for the
+            # rest of the document). Production-lock "omitted" marking is an
+            # elements-model concept and does not apply to typed HTML.
+            new_html = delete_scene_html(d.contentHtml, resolved_id)
+            if new_html is None:
+                raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene heading not found.")
+            d.contentHtml = new_html
+            _sync_elements_to_html(d)
+            return [resolved_id]
         els = sorted(d.elements, key=lambda e: e.order)
-        start = next((i for i, e in enumerate(els) if e.id == scene_heading_id), None)
+        start = next((i for i, e in enumerate(els) if e.id == resolved_id), None)
         if start is None:
             raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene heading not found.")
         end = len(els)
@@ -193,8 +249,16 @@ def move_scene(db: Session, document_id: str, scene_heading_id: str, *, to_index
     doc = get_document(db, document_id)
 
     def mutate(d: ScriptDocument) -> list[str]:
+        resolved_id = _resolve_scene_heading_id(d, scene_heading_id)
+        if html_has_visible_text(d.contentHtml):
+            new_html = move_scene_html(d.contentHtml, resolved_id, to_index)
+            if new_html is None:
+                raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene not found.")
+            d.contentHtml = new_html
+            _sync_elements_to_html(d)
+            return [resolved_id]
         blocks = _scene_blocks(d.elements)
-        idx = next((i for i, b in enumerate(blocks) if b[0].id == scene_heading_id), None)
+        idx = next((i for i, b in enumerate(blocks) if b[0].id == resolved_id), None)
         if idx is None:
             raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene not found.")
         block = blocks.pop(idx)
@@ -220,6 +284,8 @@ def create_revision_set(db: Session, document_id: str, *, name: str, color: str 
     doc.revisionSetId = set_id
     save_document(db, doc)
     color_final = color if color in DEFAULT_REVISION_COLORS else "Blue"
+    # Snapshot the creator-visible content: for HTML-canonical documents the
+    # typed HTML plus its element projection — never the stale elements store.
     snap = ScriptRevisionSnapshot(
         id=str(uuid.uuid4()),
         documentId=doc.id,
@@ -228,7 +294,9 @@ def create_revision_set(db: Session, document_id: str, *, name: str, color: str 
         color=color_final,
         note=note,
         revision=doc.revision,
-        elements=list(doc.elements),
+        elements=canonical_elements(doc),
+        contentHtml=doc.contentHtml if html_has_visible_text(doc.contentHtml) else None,
+        contentType="html" if html_has_visible_text(doc.contentHtml) else "elements",
     )
     save_revision(db, snap)
     doc.activeRevision = snap.id
@@ -236,13 +304,23 @@ def create_revision_set(db: Session, document_id: str, *, name: str, color: str 
     return {"ok": True, "revision": snap.model_dump(mode="json"), "document": doc.model_dump(mode="json")}
 
 
+def _revision_elements(snap: ScriptRevisionSnapshot) -> list[ScriptElement]:
+    """Canonical element view of a revision snapshot (HTML projection when the
+    snapshot captured typed HTML)."""
+    if snap.contentType == "html" and html_has_visible_text(snap.contentHtml):
+        return html_scene_elements(snap.contentHtml)
+    return snap.elements
+
+
 def compare_revisions(db: Session, document_id: str, revision_a: str, revision_b: str) -> dict[str, Any]:
     a = load_revision(db, revision_a)
     b = load_revision(db, revision_b)
     if not a or not b:
         raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Revision not found.")
-    map_a = {e.order: e for e in a.elements}
-    map_b = {e.order: e for e in b.elements}
+    els_a = _revision_elements(a)
+    els_b = _revision_elements(b)
+    map_a = {e.order: e for e in els_a}
+    map_b = {e.order: e for e in els_b}
     changed = []
     for order in sorted(set(map_a) | set(map_b)):
         ea, eb = map_a.get(order), map_b.get(order)
@@ -258,7 +336,16 @@ def restore_revision(db: Session, document_id: str, revision_id: str) -> dict[st
         raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Revision not found.")
 
     def mutate(d: ScriptDocument) -> list[str]:
-        d.elements = [e.model_copy(deep=True) for e in snap.elements]
+        d.elements = [e.model_copy(deep=True) for e in _revision_elements(snap)]
+        # Restore the creator-visible content, not just the element store:
+        # an HTML snapshot becomes the canonical HTML again; legacy element
+        # snapshots re-serialize so the editor shows the restored draft.
+        if snap.contentType == "html" and html_has_visible_text(snap.contentHtml):
+            d.contentHtml = snap.contentHtml
+            d.contentType = "html"
+        else:
+            d.contentHtml = elements_to_html(d.elements)
+            d.contentType = "html"
         d.activeRevision = revision_id
         return [e.id for e in d.elements]
 
@@ -273,6 +360,11 @@ def import_text(db: Session, document_id: str, text: str, *, fmt: str = "fountai
     def mutate(d: ScriptDocument) -> list[str]:
         d.elements = elements
         _assign_scene_numbers(d)
+        # The editors are HTML-canonical: an import replaces what the creator
+        # sees, so the canonical HTML must be replaced too — otherwise a prior
+        # typed draft would keep rendering and the import would be invisible.
+        d.contentHtml = elements_to_html(d.elements)
+        d.contentType = "html"
         return [e.id for e in d.elements]
 
     doc, tx = commit_transaction(db, doc, kind="import_document", source="import", mutate=mutate)
@@ -304,8 +396,16 @@ def apply_codirector_proposal(db: Session, document_id: str, proposal: dict[str,
     new_elements = proposal.get("elements")
 
     def mutate(d: ScriptDocument) -> list[str]:
+        html_canonical = html_has_visible_text(d.contentHtml)
+        if html_canonical:
+            # Fold the creator-visible HTML into the element store so the
+            # proposal addresses the same content the creator sees.
+            d.elements = canonical_elements(d)
         if new_elements and isinstance(new_elements, list):
             d.elements = [ScriptElement.model_validate(e) for e in new_elements]
+            if html_canonical:
+                d.contentHtml = elements_to_html(d.elements)
+                d.contentType = "html"
             return [e.id for e in d.elements]
         affected: list[str] = []
         if op == "replace" and element_id:
@@ -327,6 +427,9 @@ def apply_codirector_proposal(db: Session, document_id: str, proposal: dict[str,
         elif op == "delete" and element_id:
             d.elements = [e for e in d.elements if e.id != element_id]
             affected.append(element_id)
+        if html_canonical and affected:
+            d.contentHtml = elements_to_html(d.elements)
+            d.contentType = "html"
         return affected
 
     doc, tx = commit_transaction(db, doc, kind="apply_codirector_proposal", source="codirector", mutate=mutate)
@@ -338,6 +441,19 @@ def convert_outline_to_scenes(db: Session, document_id: str, beats: list[dict[st
 
     def mutate(d: ScriptDocument) -> list[str]:
         created: list[str] = []
+        if html_has_visible_text(d.contentHtml):
+            import html as _html_mod
+
+            source = d.contentHtml or ""
+            for beat in beats:
+                heading = str(beat.get("heading") or beat.get("title") or "INT. LOCATION - DAY")
+                if not heading.upper().startswith(("INT.", "EXT.", "I/E.")):
+                    heading = f"INT. {heading.upper()} - DAY"
+                desc = str(beat.get("description") or beat.get("notes") or "")
+                source += f"<h1>{_html_mod.escape(heading.upper())}</h1><p>{_html_mod.escape(desc)}</p>"
+            d.contentHtml = source
+            _sync_elements_to_html(d)
+            return [e.id for e in d.elements if e.type == "scene_heading"]
         order = max((e.order for e in d.elements), default=-1) + 1
         for beat in beats:
             heading = str(beat.get("heading") or beat.get("title") or "INT. LOCATION - DAY")
@@ -369,17 +485,25 @@ def link_scene(db: Session, document_id: str, scene_heading_id: str, project_sce
     doc = get_document(db, document_id)
 
     def mutate(d: ScriptDocument) -> list[str]:
+        resolved_id = _resolve_scene_heading_id(d, scene_heading_id)
+        if html_has_visible_text(d.contentHtml):
+            # HTML-canonical: per-element sceneId metadata has no HTML
+            # representation. The creator-visible link state lives in
+            # sceneSync, keyed by the stable heading-hash id the navigator
+            # shows — update exactly that and leave the typed HTML untouched.
+            d.sceneSync[resolved_id] = "linked"
+            return [resolved_id]
         affected: list[str] = []
         in_scene = False
         for e in sorted(d.elements, key=lambda x: x.order):
-            if e.id == scene_heading_id:
+            if e.id == resolved_id:
                 in_scene = True
             elif e.type == "scene_heading" and in_scene:
                 break
             if in_scene:
                 e.sceneId = project_scene_id
                 affected.append(e.id)
-        d.sceneSync[scene_heading_id] = "linked"
+        d.sceneSync[resolved_id] = "linked"
         return affected
 
     doc, tx = commit_transaction(db, doc, kind="edit_elements", source="creator", mutate=mutate)
@@ -389,6 +513,7 @@ def link_scene(db: Session, document_id: str, scene_heading_id: str, project_sce
 def prepare_timeline(db: Session, document_id: str, scene_heading_id: str) -> dict[str, Any]:
     """Build a Timeline preparation proposal (does not apply clips)."""
     doc = get_document(db, document_id)
+    scene_heading_id = _resolve_scene_heading_id(doc, scene_heading_id)
     block = _block_for_heading(canonical_elements(doc), scene_heading_id)
     if not block:
         raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene not found.")
@@ -452,11 +577,18 @@ def apply_timeline_prep_metadata(db: Session, document_id: str, scene_heading_id
     doc = get_document(db, document_id)
 
     def mutate(d: ScriptDocument) -> list[str]:
+        resolved_id = _resolve_scene_heading_id(d, scene_heading_id)
         for e in d.elements:
-            if e.id == scene_heading_id:
+            if e.id in (scene_heading_id, resolved_id):
                 e.metadata = {**(e.metadata or {}), "timelinePrep": metadata}
-                d.sceneSync[scene_heading_id] = "synced"
+                d.sceneSync[resolved_id] = "synced"
                 return [e.id]
+        if html_has_visible_text(d.contentHtml):
+            # HTML-canonical documents may no longer carry a stored element
+            # under either id once scene ops resync the element projection;
+            # the creator-visible sync state is still meaningful.
+            d.sceneSync[resolved_id] = "synced"
+            return [resolved_id]
         raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene heading not found.")
 
     doc, tx = commit_transaction(db, doc, kind="apply_timeline_prep_metadata", source="creator", mutate=mutate)
@@ -465,6 +597,7 @@ def apply_timeline_prep_metadata(db: Session, document_id: str, scene_heading_id
 
 def analyze_scene(db: Session, document_id: str, scene_heading_id: str) -> dict[str, Any]:
     doc = get_document(db, document_id)
+    scene_heading_id = _resolve_scene_heading_id(doc, scene_heading_id)
     block = _block_for_heading(canonical_elements(doc), scene_heading_id)
     action = " ".join(e.text for e in block if e.type == "action")
     dialogue = [e.text for e in block if e.type == "dialogue"]
@@ -811,6 +944,9 @@ def search_replace(
     types = set(element_types or [])
 
     def mutate(d: ScriptDocument) -> list[str]:
+        html_canonical = html_has_visible_text(d.contentHtml)
+        if html_canonical:
+            d.elements = canonical_elements(d)
         affected: list[str] = []
         for e in d.elements:
             if types and e.type not in types:
@@ -818,6 +954,9 @@ def search_replace(
             if find and find in (e.text or ""):
                 e.text = (e.text or "").replace(find, replace)
                 affected.append(e.id)
+        if html_canonical and affected:
+            d.contentHtml = elements_to_html(d.elements)
+            d.contentType = "html"
         return affected
 
     doc, tx = commit_transaction(db, doc, kind="search_replace", source="creator", mutate=mutate)
@@ -849,6 +988,32 @@ def _block_for_heading(elements: list[ScriptElement], heading_id: str) -> list[S
         if b and b[0].id == heading_id:
             return b
     return []
+
+
+def _resolve_scene_heading_id(d: ScriptDocument, scene_heading_id: str) -> str:
+    """Resolve a caller-supplied scene-heading id to the canonical navigator id.
+
+    HTML-canonical documents derive heading ids from the heading text
+    (``html-scene-<hash>``), while legacy callers may hold stored-element ids
+    from an import/parse response. Accept either; resolve stored ids by exact
+    normalized heading-text match, falling back to ordinal position among
+    scene headings when duplicate heading texts exist.
+    """
+    canon_headings = [e for e in canonical_elements(d) if e.type == "scene_heading"]
+    if scene_heading_id in {e.id for e in canon_headings}:
+        return scene_heading_id
+    stored = next((e for e in d.elements if e.id == scene_heading_id and e.type == "scene_heading"), None)
+    if stored is not None:
+        norm = " ".join(stored.text.split()).upper()
+        matches = [e for e in canon_headings if " ".join(e.text.split()).upper() == norm]
+        if len(matches) == 1:
+            return matches[0].id
+        stored_ids = [e.id for e in sorted(d.elements, key=lambda x: x.order) if e.type == "scene_heading"]
+        if scene_heading_id in stored_ids:
+            ordinal = stored_ids.index(scene_heading_id)
+            if ordinal < len(canon_headings):
+                return canon_headings[ordinal].id
+    raise ScriptwriterError(SCRIPT_LOAD_FAILED, "Scene heading not found.")
 
 
 def _next_scene_number(doc: ScriptDocument) -> str:

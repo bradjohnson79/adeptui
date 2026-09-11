@@ -32,6 +32,8 @@ export interface CoDirectorUIContext {
   activeGenerationId?: string;
   /** Active script/document id when known (session-context contract). */
   activeDocumentId?: string;
+  /** Selected Script Writer scene (sceneHeadingId) — current-scene awareness. */
+  scriptwriterSceneId?: string | null;
   /** Active Co-Director Project Content tab (wiki|notes|casting|library|...|scriptwriter). */
   activeContentTab?: string | null;
   /** Navigate to a project workspace tab. */
@@ -43,6 +45,8 @@ export interface CoDirectorSessionContext {
   projectId?: string | null;
   projectName?: string | null;
   activeDocumentId?: string | null;
+  /** Selected Script Writer scene (sceneHeadingId) — current-scene awareness. */
+  scriptwriterSceneId?: string | null;
   activeSceneId?: string | null;
   activeWorkspace?: string | null;
   /** Active Co-Director Project Content tab — lightweight pillar hint. */
@@ -340,6 +344,8 @@ export interface CoDirectorWorkspaceBindings {
   workspaceTab?: string;
   /** Active ScriptDocument id when Scriptwriter Studio is open. */
   activeDocumentId?: string;
+  /** Selected Script Writer scene (sceneHeadingId) when Scriptwriter Studio is open. */
+  scriptwriterSceneId?: string | null;
   onGoTab?: (tab: string, extra?: Record<string, string>) => void;
   onApplyPrompt?: (prompt: string) => void;
   onAppliedSetup?: () => void | Promise<void>;

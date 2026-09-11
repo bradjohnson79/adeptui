@@ -63,13 +63,43 @@ def retrieve_project_context(
 
 
 def _get_story(db: Session, project_id: str) -> Optional[dict[str, Any]]:
-    """Get story document content from the authoritative story store."""
+    """Get story content from the authoritative story store.
+
+    The canonical Story system is ``story_entries`` (the Story workspace the
+    creator actually edits). The legacy freeform ``app.story`` document is
+    read only as a fallback for projects that predate story entries — never
+    preferred over them.
+    """
+    try:
+        from app.story_entries.store import list_entries
+
+        entries = list_entries(db, project_id)
+        if entries:
+            return {
+                "source": "story_entries",
+                "entryCount": len(entries),
+                "entries": [
+                    {
+                        "id": e.id,
+                        "title": e.title,
+                        "entryType": e.entry_type,
+                        "logline": e.logline,
+                        "shortSummary": e.short_summary,
+                        "longSummary": e.long_summary,
+                        "updatedAt": e.updated_at.isoformat() if e.updated_at else None,
+                    }
+                    for e in entries
+                ],
+            }
+    except Exception:
+        pass
     try:
         from app.story.store import load_document
 
         row = load_document(db, project_id)
         if row and row.content:
             return {
+                "source": "legacy_story",
                 "id": row.id,
                 "title": row.title,
                 "content": row.content,
@@ -82,8 +112,14 @@ def _get_story(db: Session, project_id: str) -> Optional[dict[str, Any]]:
 
 
 def _get_script(db: Session, project_id: str) -> Optional[dict[str, Any]]:
-    """Get the most recently updated script document with its elements."""
+    """Get the most recently updated script document with its scenes.
+
+    Reads the CANONICAL content projection (typed HTML when present) via
+    ``canonical_elements`` — never the stale stored element list, which for
+    HTML-canonical documents still carries the default placeholder (CDX-051).
+    """
     try:
+        from app.scriptwriter.service import canonical_elements
         from app.scriptwriter.store import list_documents, load_document
 
         docs = list_documents(db, project_id)
@@ -92,14 +128,11 @@ def _get_script(db: Session, project_id: str) -> Optional[dict[str, Any]]:
         doc = load_document(db, docs[0].id)
         if not doc:
             return None
+        elements = canonical_elements(doc)
         scenes = [
             {"sceneNumber": e.sceneNumber, "type": e.type, "text": e.text}
-            for e in doc.elements
+            for e in elements
             if e.type == "scene_heading"
-        ]
-        elements = [
-            {"type": e.type, "text": e.text, "sceneNumber": e.sceneNumber}
-            for e in doc.elements
         ]
         return {
             "id": doc.id,
@@ -107,10 +140,13 @@ def _get_script(db: Session, project_id: str) -> Optional[dict[str, Any]]:
             "format": doc.format,
             "draftStatus": doc.draftStatus,
             "revision": doc.revision,
-            "elementCount": len(doc.elements),
+            "elementCount": len(elements),
             "sceneCount": len(scenes),
             "scenes": scenes,
-            "elements": elements,
+            "elements": [
+                {"type": e.type, "text": e.text, "sceneNumber": e.sceneNumber}
+                for e in elements
+            ],
             "updatedAt": doc.updatedAt or None,
         }
     except Exception:

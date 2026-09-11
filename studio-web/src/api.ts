@@ -6599,7 +6599,16 @@ export const api = {
         `/api/projects/${projectId}/scriptwriter/documents/${documentId}/recovery/restore`,
         { method: "POST" },
       ),
-    insertScene: (projectId: string, documentId: string, body?: { afterOrder?: number; heading?: string }) =>
+    renameTitle: (projectId: string, documentId: string, title: string) =>
+      req<{ ok: boolean; document: Record<string, unknown> }>(
+        `/api/projects/${projectId}/scriptwriter/documents/${documentId}/title`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        },
+      ),
+    insertScene: (projectId: string, documentId: string, body?: { afterOrder?: number; heading?: string; afterSceneId?: string }) =>
       req<{ ok: boolean; document: Record<string, unknown> }>(
         `/api/projects/${projectId}/scriptwriter/documents/${documentId}/scenes/insert`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) },

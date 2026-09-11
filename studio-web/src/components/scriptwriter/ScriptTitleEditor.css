@@ -1,0 +1,44 @@
+/* Shared editable script title (Script Writer Express + Standard) */
+.script-title-editor {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.script-title-editor__display {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  margin: 0;
+  cursor: text;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  border-radius: 6px;
+}
+.script-title-editor__display:hover {
+  outline: 1px dashed rgba(255, 255, 255, 0.25);
+}
+.script-title-editor__display:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.script-title-editor__pencil {
+  opacity: 0.45;
+  font-size: 0.85em;
+}
+.script-title-editor__input {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 2px 8px;
+  min-width: 260px;
+}
+.script-title-editor__input:focus {
+  outline: 2px solid rgba(120, 170, 255, 0.6);
+}
+.script-title-editor__error {
+  color: #ff9d9d;
+  font-size: 12px;
+}

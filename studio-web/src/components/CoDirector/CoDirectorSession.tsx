@@ -170,6 +170,8 @@ type SessionValue = {
   bindWorkspace: (bindings: CoDirectorWorkspaceBindings) => void;
   unbindWorkspace: () => void;
   setActiveContentTab: (tab: string | null) => void;
+  /** Lightweight Script Writer current-scene updates (no workspace rebind). */
+  setScriptwriterScene: (sceneId: string | null) => void;
   send: (text?: string, mode?: ChatMode) => Promise<void>;
   retryLastSend: () => void;
   cancelSend: () => void;
@@ -1236,6 +1238,18 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
     activeContentTabRef.current = uiContext.activeContentTab ?? null;
   }, [uiContext.activeContentTab]);
 
+  // Script Writer current-scene awareness: lightweight setter that does NOT
+  // rebind the workspace (rebinding on every navigator click would tear down
+  // an in-flight Co-Director stream via unbindWorkspace's cancel).
+  const scriptwriterSceneRef = useRef<string | null>(null);
+  const setScriptwriterScene = useCallback((sceneId: string | null) => {
+    const next = sceneId || null;
+    scriptwriterSceneRef.current = next;
+    setUiContext((prev) =>
+      (prev.scriptwriterSceneId ?? null) === next ? prev : { ...prev, scriptwriterSceneId: next },
+    );
+  }, []);
+
   const selectProject = useCallback(() => {
     navigate("/#projects-library");
   }, [navigate]);
@@ -2148,6 +2162,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
             active_content_tab: activeContentTabRef.current || undefined,
             workspace_tab: b.workspaceTab || undefined,
             workspaceTab: b.workspaceTab || undefined,
+            active_document_id: b.activeDocumentId || undefined,
+            scriptwriter_scene_id: scriptwriterSceneRef.current || undefined,
           },
           { signal: controller.signal, onEvent },
         );
@@ -2326,6 +2342,8 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
               active_content_tab: activeContentTabRef.current || undefined,
               workspace_tab: b.workspaceTab || undefined,
               workspaceTab: b.workspaceTab || undefined,
+              active_document_id: b.activeDocumentId || undefined,
+              scriptwriter_scene_id: scriptwriterSceneRef.current || undefined,
             },
             { signal: controller.signal },
           );
@@ -3165,6 +3183,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       projectId: uiContext.projectId ?? null,
       projectName: uiContext.projectName ?? null,
       activeDocumentId: uiContext.activeDocumentId ?? null,
+      scriptwriterSceneId: uiContext.scriptwriterSceneId ?? null,
       activeSceneId: uiContext.sceneId ?? null,
       activeWorkspace: uiContext.workspaceId ?? null,
       activeContentTab: uiContext.activeContentTab ?? null,
@@ -3268,6 +3287,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       bindWorkspace,
       unbindWorkspace,
       setActiveContentTab,
+      setScriptwriterScene,
       send,
       retryLastSend,
       cancelSend,
@@ -3375,6 +3395,7 @@ export function CoDirectorSessionProvider({ children }: { children: ReactNode })
       bindWorkspace,
       unbindWorkspace,
       setActiveContentTab,
+      setScriptwriterScene,
       send,
       retryLastSend,
       cancelSend,
@@ -3447,7 +3468,15 @@ export function useOpenCoDirector() {
 }
 
 export function useBindCoDirectorWorkspace(bindings: CoDirectorWorkspaceBindings) {
-  const { bindWorkspace, unbindWorkspace } = useCoDirectorSession();
+  const { bindWorkspace, unbindWorkspace, setScriptwriterScene } = useCoDirectorSession();
+  // Script Writer scene selection changes often (every navigator click). It
+  // must NOT join the bind/unbind cycle — unbind cancels in-flight chat — so
+  // it flows through a lightweight setter instead.
+  const scriptwriterSceneId = bindings.scriptwriterSceneId ?? null;
+  useEffect(() => {
+    setScriptwriterScene(scriptwriterSceneId);
+    return () => setScriptwriterScene(null);
+  }, [scriptwriterSceneId, setScriptwriterScene]);
   // Bind after paint so we never setState on CoDirectorSessionProvider during render.
   // Depend on stable binding fields — not the bindings object identity — to avoid rebinding every paint.
   useEffect(() => {

@@ -54,6 +54,11 @@ class AutosaveBody(BaseModel):
 class InsertSceneBody(BaseModel):
     afterOrder: int = -1
     heading: str = "INT. LOCATION - DAY"
+    afterSceneId: Optional[str] = None
+
+
+class TitleBody(BaseModel):
+    title: str = ""
 
 
 class DeleteSceneBody(BaseModel):
@@ -178,11 +183,21 @@ def recovery_restore(project_id: str, document_id: str, db: Session = Depends(ge
         raise _err(exc) from exc
 
 
+@router.post("/documents/{document_id}/title")
+def rename_title(project_id: str, document_id: str, body: TitleBody, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Rename the canonical script document (creator-visible title)."""
+    _scoped_document(db, project_id, document_id)
+    try:
+        return service.rename_document(db, document_id, body.title)
+    except ScriptwriterError as exc:
+        raise _err(exc) from exc
+
+
 @router.post("/documents/{document_id}/scenes/insert")
 def insert_scene(project_id: str, document_id: str, body: InsertSceneBody, db: Session = Depends(get_db)) -> dict[str, Any]:
     _scoped_document(db, project_id, document_id)
     try:
-        return service.insert_scene(db, document_id, after_order=body.afterOrder, heading=body.heading)
+        return service.insert_scene(db, document_id, after_order=body.afterOrder, heading=body.heading, after_scene_id=body.afterSceneId)
     except ScriptwriterError as exc:
         raise _err(exc) from exc
 
