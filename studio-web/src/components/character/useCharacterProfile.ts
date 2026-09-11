@@ -58,6 +58,48 @@ export type PendingCharacterPatch = {
   fields: Record<string, unknown>;
 };
 
+/**
+ * Instant saved-character dropdown refresh (Character Creator Express + Standard).
+ *
+ * When a profile is saved (create POST or rename PATCH), the hook dispatches
+ * this window event carrying the canonical saved profile. Every mounted
+ * saved-character dropdown listens and upserts in place — no refetch, no
+ * remount, no stale "New Character" label after a rename. The event also
+ * covers cross-surface updates when the Co-Director overlay and the
+ * standalone Character Creator are mounted at the same time.
+ */
+export const CHARACTER_PROFILE_SAVED_EVENT = "adept:character-profile-saved";
+
+export type CharacterProfileSavedDetail = {
+  projectId: string;
+  profile: CharacterProfile;
+};
+
+export function notifyCharacterProfileSaved(projectId: string, profile: CharacterProfile): void {
+  try {
+    window.dispatchEvent(
+      new CustomEvent<CharacterProfileSavedDetail>(CHARACTER_PROFILE_SAVED_EVENT, {
+        detail: { projectId, profile },
+      }),
+    );
+  } catch {
+    /* non-DOM environment (tests) — listeners simply never fire */
+  }
+}
+
+/**
+ * Upsert a saved profile into a dropdown list by id. Renames update the label
+ * in place (position preserved); a brand-new profile is appended. Never
+ * duplicates an id.
+ */
+export function upsertCharacterSummary<T extends { id: string }>(list: T[], saved: T): T[] {
+  const idx = list.findIndex((c) => c.id === saved.id);
+  if (idx === -1) return [...list, saved];
+  const next = list.slice();
+  next[idx] = { ...next[idx], ...saved };
+  return next;
+}
+
 /** Full replace: null/undefined form strings become "" so Load Character cannot leak the previous profile. */
 export function replaceCharacterProfile(raw: CharacterProfile | null | undefined): CharacterProfile | null {
   if (!raw) return null;
@@ -89,6 +131,69 @@ export function applyLoadedCharacterState(args: {
   };
 }
 
+const SAVE_FIELD_KEYS = [
+  "name",
+  "gender_presentation",
+  "visual_style",
+  "description",
+] as const;
+
+export type CharacterSaveIntent =
+  | { ok: false; error: string }
+  | { ok: true; method: "POST"; name: string; extra: Record<string, unknown> }
+  | { ok: true; method: "PATCH"; characterId: string; fields: Record<string, unknown> };
+
+function definedFields(raw: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!raw) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/** Decide POST vs PATCH vs visible error. Save never silently no-ops or fake-succeeds. */
+export function characterSaveIntent(args: {
+  projectId: string;
+  characterId: string | null;
+  fields?: Record<string, unknown>;
+  pending?: PendingCharacterPatch | null;
+  profile?: CharacterProfile | null;
+}): CharacterSaveIntent {
+  if (!args.projectId.trim()) {
+    return { ok: false, error: "This project is missing, so the character cannot be saved." };
+  }
+  const cid = (args.characterId || "").trim();
+  const pending = pendingPatchForCurrentCharacter(args.pending || null, cid || null);
+  const merged = {
+    ...definedFields(pending),
+    ...definedFields(args.fields),
+  };
+  if (args.profile) {
+    for (const key of SAVE_FIELD_KEYS) {
+      if (merged[key] === undefined && args.profile[key] != null) {
+        merged[key] = args.profile[key];
+      }
+    }
+  }
+  const name = String(merged.name ?? args.profile?.name ?? "").trim();
+  if (!cid) {
+    if (!name) {
+      return { ok: false, error: "Give the character a name, then Save Character." };
+    }
+    const extra = { ...merged };
+    delete extra.name;
+    return { ok: true, method: "POST", name, extra };
+  }
+  if (!Object.keys(merged).length) {
+    if (!name) {
+      return { ok: false, error: "Nothing to save yet. Add a name or profile, then Save Character." };
+    }
+    merged.name = name;
+  }
+  return { ok: true, method: "PATCH", characterId: cid, fields: merged };
+}
+
 export type UseCharacterProfileResult = {
   profile: CharacterProfile | null;
   references: CharacterReference[];
@@ -100,8 +205,12 @@ export type UseCharacterProfileResult = {
   create: (name: string, extra?: Record<string, unknown>) => Promise<string | null>;
   /** Patch a subset of fields, debounced (for live editing). */
   patchDebounced: (fields: Record<string, unknown>) => void;
-  /** Save immediately (flush pending + write). */
-  save: (fields?: Record<string, unknown>) => Promise<boolean>;
+  /**
+   * Save immediately (flush pending + write). Returns the canonical saved
+   * profile (created on POST, updated on PATCH) so callers can refresh
+   * saved-character dropdowns instantly; null on failure.
+   */
+  save: (fields?: Record<string, unknown>) => Promise<CharacterProfile | null>;
   reset: () => void;
   remove: () => Promise<boolean>;
   refresh: () => Promise<void>;
@@ -218,26 +327,61 @@ export function useCharacterProfile(
   );
 
   const save = useCallback(
-    async (fields?: Record<string, unknown>): Promise<boolean> => {
-      const cid = idRef.current;
-      if (!projectId || !cid) return false;
+    async (fields?: Record<string, unknown>): Promise<CharacterProfile | null> => {
+      const intent = characterSaveIntent({
+        projectId,
+        characterId: idRef.current,
+        fields,
+        pending: pendingRef.current,
+        profile,
+      });
+      if (!intent.ok) {
+        setError(intent.error);
+        return null;
+      }
       setSaving(true);
       setError("");
       try {
-        if (fields && cid) {
-          const prevFields = pendingPatchForCurrentCharacter(pendingRef.current, cid) || {};
-          pendingRef.current = { characterId: cid, fields: { ...prevFields, ...fields } };
+        if (intent.method === "POST") {
+          const created = await api.createCharacterProfile(projectId, {
+            name: intent.name,
+            ...intent.extra,
+          });
+          const p = created as CharacterProfile;
+          idRef.current = p.id;
+          setProfile(p);
+          pendingRef.current = null;
+          if (timerRef.current) clearTimeout(timerRef.current);
+          setSavedAt(new Date().toISOString());
+          notifyCharacterProfileSaved(projectId, p);
+          return p;
         }
-        await flushPending();
-        return true;
+        if (timerRef.current) clearTimeout(timerRef.current);
+        pendingRef.current = null;
+        const updated = (await api.patchCharacterProfile(
+          projectId,
+          intent.characterId,
+          intent.fields,
+        )) as CharacterProfile | null;
+        // Canonical saved profile for dropdown refresh: prefer the backend
+        // response, fall back to the local merge so id + name are always present.
+        const savedProfile = {
+          ...(profile || {}),
+          ...(updated || {}),
+          id: (updated as CharacterProfile | null)?.id || intent.characterId,
+        } as CharacterProfile;
+        setProfile(savedProfile);
+        setSavedAt(new Date().toISOString());
+        notifyCharacterProfileSaved(projectId, savedProfile);
+        return savedProfile;
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to save character.");
-        return false;
+        return null;
       } finally {
         setSaving(false);
       }
     },
-    [projectId, flushPending],
+    [projectId, profile],
   );
 
   const reset = useCallback(() => {

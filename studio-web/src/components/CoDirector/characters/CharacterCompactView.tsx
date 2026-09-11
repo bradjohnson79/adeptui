@@ -9,6 +9,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../../api";
 import { CharacterCore } from "../../character";
+import {
+  CHARACTER_PROFILE_SAVED_EVENT,
+  upsertCharacterSummary,
+  type CharacterProfileSavedDetail,
+} from "../../character/useCharacterProfile";
 import "./characterCompact.css";
 
 type CharacterProfile = {
@@ -85,6 +90,22 @@ export function CharacterCompactView({ projectId, onOpenFull }: Props) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Instant dropdown refresh: when the embedded CharacterCore saves (create
+  // or rename), upsert the saved profile into the Saved Characters list in
+  // place — no remount, no stale "New Character" label. Also covers saves
+  // made from the Standard workspace while this pane is mounted.
+  useEffect(() => {
+    const onSaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<CharacterProfileSavedDetail>).detail;
+      if (!detail || detail.projectId !== projectId || !detail.profile?.id) return;
+      const saved = detail.profile;
+      setCharacters((prev) => upsertCharacterSummary(prev, saved));
+      setSelectedId((prev) => prev || saved.id);
+    };
+    window.addEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
+  }, [projectId]);
 
   const handleCreate = useCallback(async () => {
     try {

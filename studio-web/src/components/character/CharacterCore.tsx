@@ -277,36 +277,37 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
     [projectId, characterId, cp],
   );
 
+  const [frontEpoch, setFrontEpoch] = useState(0);
   const handleUseAsIdentity = useCallback(
     async (assetId: string, sourceType: "upload" | "library") => {
       setNotice("");
       try {
-        await api.approveCharacterCandidate(projectId, characterId, {
-          assetId,
-          referenceRole: "hero_identity",
-          sourceType,
-          notes: "Used reference image as character identity (no AI generation).",
-          ownerConfirmed: true,
-        });
+        await api.adoptCharacterFront(projectId, characterId, { assetId, sourceType });
+        setFrontEpoch((n) => n + 1);
         await cp.refresh();
-        setNotice("Reference set as this character's look.");
+        setNotice("Front is ready to approve.");
       } catch (e) {
-        setNotice(e instanceof Error ? e.message : "Could not use as identity.");
+        setNotice(e instanceof Error ? e.message : "Could not use as Front.");
       }
     },
     [projectId, characterId, cp],
   );
 
   const handleSave = useCallback(async () => {
-    const ok = await cp.save({
+    // save() returns the canonical saved profile and dispatches
+    // adept:character-profile-saved, so every mounted saved-character
+    // dropdown (Express + Standard) upserts the profile instantly.
+    const savedProfile = await cp.save({
       name: profile?.name,
       gender_presentation: profile?.gender_presentation,
       visual_style: profile?.visual_style,
       description: profile?.description,
     });
-    if (ok) {
+    if (savedProfile) {
       setProfileDirty(false);
       setNotice("Character profile saved");
+    } else {
+      setNotice("");
     }
   }, [cp, profile]);
 
@@ -426,6 +427,7 @@ export function CharacterCore({ projectId, characterId, renderAdvanced, onDelete
           characterId={characterId}
           mode={mode}
           saved={saved}
+          frontEpoch={frontEpoch}
         />
         {resolvedCrs.showBoth && resolvedCrs.canon ? (
           <CharacterActiveCrsCard

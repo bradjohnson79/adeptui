@@ -8,6 +8,11 @@ import { useOpenCoDirector } from "./CoDirector";
 import { VoiceStudioWorkspace } from "./VoiceStudioWorkspace";
 import { IdentityRegistryWorkspace } from "./continuity/IdentityRegistryWorkspace";
 import { CharacterCore } from "./character";
+import {
+  CHARACTER_PROFILE_SAVED_EVENT,
+  upsertCharacterSummary,
+  type CharacterProfileSavedDetail,
+} from "./character/useCharacterProfile";
 import { PropsWorkspace } from "./character/PropsWorkspace";
 import { VariantsWorkspace } from "./character/VariantsWorkspace";
 
@@ -309,6 +314,23 @@ export function CharacterProfileWorkspace({
 
   useEffect(() => {
     refreshList().catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
+  }, [project.id]);
+
+  // Instant dropdown refresh: when CharacterCore saves (create or rename),
+  // upsert the saved profile into the Load Character list in place — no
+  // remount, no stale "Untitled Character" label. Also covers saves made
+  // from the Express surface while this workspace is mounted.
+  useEffect(() => {
+    const onSaved = (ev: Event) => {
+      const detail = (ev as CustomEvent<CharacterProfileSavedDetail>).detail;
+      if (!detail || detail.projectId !== project.id || !detail.profile?.id) return;
+      const saved = detail.profile;
+      setItems((prev) => upsertCharacterSummary(prev, saved));
+      setSelectedId((prev) => prev || saved.id);
+      setProfile((prev: any) => (prev && prev.id === saved.id ? { ...prev, ...saved } : prev));
+    };
+    window.addEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
+    return () => window.removeEventListener(CHARACTER_PROFILE_SAVED_EVENT, onSaved);
   }, [project.id]);
 
   useEffect(() => {

@@ -2,16 +2,27 @@
  * Phase 4 — Character approval truth (CDX-004) frontend units.
  * getHeroIdentity must return no hero for draft-only rows, and the candidate
  * grid label must not show "Selected" before canonical+approved.
+ *
+ * Instant saved-character dropdown refresh: upsertCharacterSummary is the
+ * shared in-place upsert both dropdowns (Express + Standard) apply when the
+ * adept:character-profile-saved event fires; source assertions pin the
+ * dispatch + listener wiring (no DOM render harness in this repo).
  */
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { candidateSelectionLabel } from "./types";
 import type { CharacterProfile, CharacterReference } from "./types";
 import {
+  CHARACTER_PROFILE_SAVED_EVENT,
   applyLoadedCharacterState,
+  characterSaveIntent,
   getHeroIdentity,
   getPendingHeroIdentity,
+  notifyCharacterProfileSaved,
   pendingPatchForCurrentCharacter,
   replaceCharacterProfile,
+  upsertCharacterSummary,
 } from "./useCharacterProfile";
 
 function ref(over: Partial<CharacterReference>): CharacterReference {
@@ -198,5 +209,160 @@ describe("Load Character atomic replace", () => {
     expect(empty).not.toBe("stale");
     if (empty === "stale") return;
     expect(empty.references).toEqual([]);
+  });
+});
+
+describe("characterSaveIntent", () => {
+  it("does not silently no-op when the character has no id and no name", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: "",
+      fields: { description: "orphan draft" },
+    });
+    expect(intent).toEqual({
+      ok: false,
+      error: "Give the character a name, then Save Character.",
+    });
+  });
+
+  it("creates from name-only when there is no character id", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: null,
+      fields: { name: "Anadriya" },
+    });
+    expect(intent).toEqual({
+      ok: true,
+      method: "POST",
+      name: "Anadriya",
+      extra: {},
+    });
+  });
+
+  it("does not fake-succeed when there is nothing to write", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: "char-1",
+      fields: {},
+      pending: null,
+      profile: null,
+    });
+    expect(intent.ok).toBe(false);
+    if (intent.ok) return;
+    expect(intent.error).toMatch(/nothing to save/i);
+  });
+
+  it("patches an existing character instead of returning a silent success", () => {
+    const intent = characterSaveIntent({
+      projectId: "proj-1",
+      characterId: "char-1",
+      fields: { name: "Anadriya", description: "Updated profile" },
+    });
+    expect(intent).toEqual({
+      ok: true,
+      method: "PATCH",
+      characterId: "char-1",
+      fields: { name: "Anadriya", description: "Updated profile" },
+    });
+  });
+});
+
+describe("upsertCharacterSummary (instant saved-character dropdown)", () => {
+  const list = [
+    { id: "char-a", name: "Korri" },
+    { id: "char-b", name: "New Character" },
+    { id: "char-c", name: "Mieke" },
+  ];
+
+  it("rename updates the label in place and preserves position", () => {
+    const next = upsertCharacterSummary(list, { id: "char-b", name: "Anadriya" });
+    expect(next.map((c) => c.id)).toEqual(["char-a", "char-b", "char-c"]);
+    expect(next[1].name).toBe("Anadriya");
+    expect(next).not.toBe(list);
+  });
+
+  it("a brand-new saved profile is appended, never duplicated", () => {
+    const next = upsertCharacterSummary(list, { id: "char-d", name: "Vex" });
+    expect(next.map((c) => c.id)).toEqual(["char-a", "char-b", "char-c", "char-d"]);
+    const again = upsertCharacterSummary(next, { id: "char-d", name: "Vex" });
+    expect(again.filter((c) => c.id === "char-d")).toHaveLength(1);
+  });
+
+  it("merge keeps existing row fields while applying saved ones", () => {
+    const withStatus: Array<{ id: string; name: string; status?: string }> = [
+      { id: "char-a", name: "Korri", status: "approved" },
+    ];
+    const next = upsertCharacterSummary(withStatus, { id: "char-a", name: "Korri V2" });
+    expect(next[0]).toEqual({ id: "char-a", name: "Korri V2", status: "approved" });
+  });
+
+  it("empty list becomes a one-row list (first save in a project)", () => {
+    const next = upsertCharacterSummary([], { id: "char-a", name: "Korri" });
+    expect(next).toEqual([{ id: "char-a", name: "Korri" }]);
+  });
+});
+
+describe("notifyCharacterProfileSaved", () => {
+  it("dispatches the window event with projectId + canonical profile", () => {
+    const seen: Array<{ type: string; detail: unknown }> = [];
+    vi.stubGlobal("window", { dispatchEvent: (ev: { type: string; detail: unknown }) => seen.push(ev) });
+    try {
+      notifyCharacterProfileSaved("proj-1", { id: "char-1", name: "Korri" } as CharacterProfile);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(seen).toHaveLength(1);
+    expect(seen[0].type).toBe(CHARACTER_PROFILE_SAVED_EVENT);
+    const detail = seen[0].detail as { projectId: string; profile: CharacterProfile };
+    expect(detail.projectId).toBe("proj-1");
+    expect(detail.profile).toEqual({ id: "char-1", name: "Korri" });
+  });
+
+  it("never throws outside a DOM environment", () => {
+    vi.stubGlobal("window", undefined);
+    try {
+      expect(() =>
+        notifyCharacterProfileSaved("proj-1", { id: "char-1", name: "Korri" } as CharacterProfile),
+      ).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("instant dropdown refresh wiring (source assertions)", () => {
+  const hookSrc = readFileSync(resolve(__dirname, "useCharacterProfile.ts"), "utf8");
+  const coreSrc = readFileSync(resolve(__dirname, "CharacterCore.tsx"), "utf8");
+  const standardSrc = readFileSync(resolve(__dirname, "../CharacterProfileWorkspace.tsx"), "utf8");
+  const expressSrc = readFileSync(resolve(__dirname, "../CoDirector/characters/CharacterCompactView.tsx"), "utf8");
+
+  it("save() returns the saved profile (not a bare boolean)", () => {
+    expect(hookSrc).toMatch(/save: \(fields\?: Record<string, unknown>\) => Promise<CharacterProfile \| null>/);
+  });
+
+  it("both POST (create) and PATCH (rename) branches dispatch the saved event", () => {
+    const dispatches = hookSrc.match(/notifyCharacterProfileSaved\(projectId,/g) || [];
+    expect(dispatches.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Standard workspace listens and upserts into the Load Character list", () => {
+    expect(standardSrc).toMatch(/addEventListener\(CHARACTER_PROFILE_SAVED_EVENT/);
+    expect(standardSrc).toMatch(/upsertCharacterSummary\(prev, saved\)/);
+    expect(standardSrc).toMatch(/detail\.projectId !== project\.id/);
+  });
+
+  it("Express compact view listens and upserts into the Saved Characters list", () => {
+    expect(expressSrc).toMatch(/addEventListener\(CHARACTER_PROFILE_SAVED_EVENT/);
+    expect(expressSrc).toMatch(/upsertCharacterSummary\(prev, saved\)/);
+    expect(expressSrc).toMatch(/detail\.projectId !== projectId/);
+  });
+
+  it("both listeners clean up on unmount", () => {
+    expect(standardSrc).toMatch(/removeEventListener\(CHARACTER_PROFILE_SAVED_EVENT/);
+    expect(expressSrc).toMatch(/removeEventListener\(CHARACTER_PROFILE_SAVED_EVENT/);
+  });
+
+  it("CharacterCore save path surfaces the saved profile (event flows from the hook)", () => {
+    expect(coreSrc).toMatch(/const savedProfile = await cp\.save\(/);
   });
 });
