@@ -847,6 +847,8 @@ class JobQueue:
                 await self._image_tool(db, job, project)
             elif job.kind == "dual_lipsync":
                 await self._dual_lipsync(db, job, project)
+            elif job.kind == "media_retake":
+                await self._media_retake(db, job, project)
             elif job.kind == "video_extend":
                 await self._video_extend_local(db, job, project)
             elif job.kind == "txt2vid":
@@ -2625,6 +2627,35 @@ class JobQueue:
             1.0,
             f"Dual lip sync complete ({len(enabled)} track(s)) with sticky mouth ROIs",
             str(current_video),
+        )
+
+    async def _media_retake(self, db: Session, job: Job, project: Project) -> None:
+        from .media_retake.executor import run_media_retake
+
+        params = self._job_params(job)
+        span = params.get("roomToneSpan") or {}
+        room_tone_span = None
+        if span.get("start") is not None and span.get("end") is not None:
+            room_tone_span = (float(span["start"]), float(span["end"]))
+
+        async def _progress(p: float, msg: str) -> None:
+            job.progress = p
+            job.message = (msg or "")[:4000]
+            db.commit()
+
+        out = await run_media_retake(
+            db,
+            job,
+            project,
+            room_tone_span=room_tone_span,
+            progress_cb=_progress,
+        )
+        self._set_status(
+            job.id,
+            "done",
+            1.0,
+            f"Media retake complete: {out.name}",
+            str(out),
         )
 
     def _job_params(self, job: Job) -> dict:

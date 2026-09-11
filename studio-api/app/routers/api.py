@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..director_references.tags import ensure_tags
@@ -1175,11 +1176,25 @@ def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(ge
     }
 
 
+class ApplyLipSyncBody(BaseModel):
+    mode: str = "legacy"
+    roomToneStart: float | None = None
+    roomToneEnd: float | None = None
+
+
 @router.post("/projects/{project_id}/scenes/{scene_id}/lipsync-tracks/apply", response_model=JobOut)
-async def apply_dual_lipsync(project_id: str, scene_id: str, db: Session = Depends(get_db)):
+async def apply_dual_lipsync(
+    project_id: str,
+    scene_id: str,
+    body: ApplyLipSyncBody | None = None,
+    db: Session = Depends(get_db),
+):
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
+    body = body or ApplyLipSyncBody()
+    mode = (body.mode or "").strip().lower()
+
     tracks = parse_lipsync_tracks(scene.lipsync_tracks_json)
     enabled = [t for t in tracks.tracks if t.enabled]
     if not enabled:
@@ -1195,21 +1210,53 @@ async def apply_dual_lipsync(project_id: str, scene_id: str, db: Session = Depen
         fallback_duration=float(scene.duration_sec or 5.0),
         fallback_prompt=scene.prompt or "",
     )
+    # Merge scene-column lip-sync tracks so the speaker gate sees real audio.
+    director = attach_scene_lipsync(director, scene.lipsync_tracks_json)
     if lipsync_speaker_errors(director):
         raise HTTPException(400, LIPSYNC_SPEAKER_REQUIRED)
     for t in enabled:
         if not t.audio_asset_id:
             raise HTTPException(400, f"{t.label} needs an audio asset")
+
     import json as _json
 
-    job = Job(
-        id=str(uuid.uuid4()),
-        project_id=project_id,
-        scene_id=scene_id,
-        kind="dual_lipsync",
-        status="queued",
-        message=_json.dumps({"scene_id": scene_id}),
-    )
+    if mode == "windowed":
+        scene_duration = float(scene.duration_sec or 0.0)
+        if body.roomToneStart is not None and body.roomToneEnd is not None:
+            start = float(body.roomToneStart)
+            end = float(body.roomToneEnd)
+            if start < 0 or end < 0 or start >= end or end > scene_duration:
+                raise HTTPException(400, "roomToneStart/roomToneEnd outside scene duration")
+        message_payload = {
+            "scene_id": scene_id,
+            "mode": "windowed",
+            "roomToneSpan": (
+                {"start": body.roomToneStart, "end": body.roomToneEnd}
+                if body.roomToneStart is not None and body.roomToneEnd is not None
+                else None
+            ),
+        }
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            scene_id=scene_id,
+            kind="media_retake",
+            status="queued",
+            message=_json.dumps(message_payload),
+            params_json=_json.dumps(message_payload),
+        )
+    elif mode == "legacy":
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            scene_id=scene_id,
+            kind="dual_lipsync",
+            status="queued",
+            message=_json.dumps({"scene_id": scene_id}),
+        )
+    else:
+        raise HTTPException(400, f"Unknown lip-sync mode: {body.mode}")
+
     db.add(job)
     scene.lipsync_enabled = 1
     db.commit()
