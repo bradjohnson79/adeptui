@@ -204,6 +204,7 @@ export interface BatchBlock {
   repairRanges: RepairRange[];
   references: Record<string, unknown>[];
   lora?: { loraId: string; name: string; strength: number } | null;
+  h3Resolution?: { mode: "auto" | "manual"; megapixels: number } | null;
   configFingerprint?: string | null;
   createdAt: string;
   updatedAt: string;

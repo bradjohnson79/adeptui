@@ -290,6 +290,10 @@ class BatchBlock(BaseModel):
     activeTakeId: Optional[str] = None
     incomingBridgeId: Optional[str] = None
     continuityAwareRetake: bool = False
+    # MiniMax H3 megapixel resolution control. None/absent = Auto (back-compat).
+    # Shape: {"mode": "auto" | "manual", "megapixels": float}.
+    # Width/height are never stored; always derived from the canonical grid.
+    h3Resolution: Optional[dict[str, Any]] = None
     downstreamStale: bool = False
     staleFromTakeId: Optional[str] = None
 

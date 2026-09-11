@@ -48,6 +48,7 @@ export function buildPreflightSignature(
     id: b.id,
     g: b.generatorId ?? null,
     d: b.duration?.plannedDuration ?? null,
+    h: b.h3Resolution ? [b.h3Resolution.mode, b.h3Resolution.megapixels] : null,
     p: (b.promptSegments ?? []).map((s) => [
       s.start,
       s.length,

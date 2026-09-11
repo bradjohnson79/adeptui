@@ -638,3 +638,111 @@ def preflight_spec(
         "canvas": canvas.to_dict(),
         "duration": duration,
     }
+
+
+#: Canonical MiniMax H3 megapixel → pixel grid for 16:9 /32 canvases.
+#: Width and height are multiples of 32 (VAE /16 then DiT patch 2).
+H3_MEGAPIXEL_GRID: tuple[tuple[float, tuple[int, int]], ...] = (
+    (0.2, (608, 352)),
+    (0.3, (736, 416)),
+    (0.4, (864, 480)),
+    (0.5, (960, 544)),
+    (0.6, (1056, 608)),
+    (0.7, (1152, 640)),
+    (0.8, (1216, 672)),
+    (0.9, (1280, 736)),
+    (0.98, (1344, 768)),
+    (1.0, (1376, 768)),
+    (1.2, (1504, 832)),
+    (1.5, (1664, 928)),
+    (1.8, (1824, 1024)),
+    (2.0, (1920, 1088)),
+)
+
+_H3_MEGAPIXEL_BY_VALUE: dict[float, tuple[int, int]] = dict(H3_MEGAPIXEL_GRID)
+
+
+def _format_h3_megapixels(value: float) -> str:
+    """Stable label like '0.7 MP' or '1.0 MP'."""
+    if value == int(value):
+        return f"{int(value)}.0 MP"
+    return f"{value} MP"
+
+
+H3_MEGAPIXEL_LABELS: list[str] = [_format_h3_megapixels(mp) for mp, _ in H3_MEGAPIXEL_GRID]
+
+
+#: Auto Fast = 0.4 MP (864×480) — the certified Scene5 release-gate H3
+#: template canvas. ``docs/release-gate/minimax-h3-comfy-parity/Scene5_H3_CanonicalTemplate_API.json``
+#: used megapixels 0.4.
+H3_AUTO_MEGAPIXEL_FAST = 0.4
+
+#: Auto Quality = 0.7 MP (1152×640) — the FM4/FM5 certified Timeline default
+#: (adapter ``finalResolution``). This preserves today's default behavior.
+H3_AUTO_MEGAPIXEL_QUALITY = 0.7
+
+
+def resolve_h3_megapixel_canvas(mp: float | int | str) -> tuple[str, int, int]:
+    """Return (label, width, height) for a canonical H3 megapixel value.
+
+    Unknown or unsupported MP raises :class:`SpecFidelityError` with honest
+    suggestions. Never snaps to a nearest value.
+    """
+    try:
+        mp_val = float(mp)
+    except (TypeError, ValueError):
+        raise SpecFidelityError(
+            f"MiniMax H3 megapixels must be a number (got {mp!r}).",
+            suggestions=H3_MEGAPIXEL_LABELS,
+            code="H3_ILLEGAL_MEGAPIXELS",
+        )
+    key = round(mp_val, 2)
+    dims = _H3_MEGAPIXEL_BY_VALUE.get(key)
+    if dims is None:
+        raise SpecFidelityError(
+            f"{mp_val} MP is not a supported MiniMax H3 canvas.",
+            suggestions=H3_MEGAPIXEL_LABELS,
+            code="H3_ILLEGAL_MEGAPIXELS",
+        )
+    return _format_h3_megapixels(mp_val), dims[0], dims[1]
+
+
+def resolve_h3_timeline_canvas(
+    batch_h3_resolution: dict[str, Any] | None,
+    *,
+    draft_mode: bool,
+) -> dict[str, Any]:
+    """Resolve a BatchBlock's H3 resolution intent to a canonical canvas.
+
+    Manual mode always uses the stored megapixel value. Auto or absent uses
+    the policy constant by draft_mode. Returns a provenance dict carrying
+    the resolved mode, megapixels, label, width, height, and whether the
+    choice was auto-derived.
+    """
+    mode = "auto"
+    auto = True
+    mp = H3_AUTO_MEGAPIXEL_FAST if draft_mode else H3_AUTO_MEGAPIXEL_QUALITY
+
+    if isinstance(batch_h3_resolution, dict):
+        stored_mode = str(batch_h3_resolution.get("mode") or "auto").strip().lower()
+        if stored_mode == "manual":
+            mode = "manual"
+            stored_mp = batch_h3_resolution.get("megapixels")
+            if stored_mp is None:
+                raise SpecFidelityError(
+                    "Manual MiniMax H3 resolution requires a megapixel value.",
+                    suggestions=H3_MEGAPIXEL_LABELS,
+                    code="H3_MANUAL_MISSING_MEGAPIXELS",
+                )
+            mp = float(stored_mp)
+            auto = False
+
+    label, width, height = resolve_h3_megapixel_canvas(mp)
+    return {
+        "mode": mode,
+        "megapixels": mp,
+        "label": label,
+        "width": width,
+        "height": height,
+        "auto": auto,
+    }

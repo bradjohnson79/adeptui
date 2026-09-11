@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.orm import Session
 
@@ -90,6 +93,12 @@ def _halt_adapter_jobs(halt_jobs: list[tuple[str, GenerationJobRef]]) -> None:
                 )
             )
         except Exception:
+            logger.warning(
+                "adapter cancel failed generator=%s job=%s",
+                generator_id,
+                job.id,
+                exc_info=True,
+            )
             continue
 
 
@@ -176,7 +185,12 @@ def _load_prompt_intelligence_record(
             if isinstance(dj, dict) and isinstance(dj.get("promptIntelligence"), dict):
                 return dj["promptIntelligence"]
     except Exception:
-        pass
+        logger.warning(
+            "promptIntelligence read failed project=%s scene=%s",
+            project_id,
+            scene_id,
+            exc_info=True,
+        )
     return None
 
 
@@ -276,11 +290,22 @@ def submit_batch_generation(
     from .capabilities import list_generators
 
     cap = next((g for g in list_generators() if g.id == batch.generatorId), None)
+    if cap is None:
+        from .capabilities import get_generator as _get_gen
+
+        cap = _get_gen(batch.generatorId)
     if cap and not cap.supportsTimelineGeneration:
         return {
             "ok": False,
             "error": "GENERATOR_UNSUPPORTED_FOR_TIMELINE",
-            "message": f"{cap.label} does not support Timeline batch generation yet.",
+            "message": cap.disabledReason or f"{cap.label} does not support Timeline batch generation yet.",
+            "mock": False,
+        }
+    if cap and not cap.executable:
+        return {
+            "ok": False,
+            "error": "GENERATOR_NOT_READY",
+            "message": cap.disabledReason or cap.readiness or f"{cap.label} is not ready.",
             "mock": False,
         }
 
@@ -295,7 +320,19 @@ def submit_batch_generation(
     except GeneratorNotFoundError as exc:
         return {"ok": False, "error": "GENERATOR_UNKNOWN", "message": str(exc), "mock": False}
 
-    dur_check = validate_duration(batch.generatorId, batch.duration.plannedDuration)
+    job_duration = float(batch.duration.plannedDuration)
+    range_rep = None
+    if isinstance(continuity, dict) and isinstance(continuity.get("rangeReplacement"), dict):
+        range_rep = continuity["rangeReplacement"]
+    elif precreated_snapshot_id:
+        staged = master.executionSnapshots.get(precreated_snapshot_id)
+        if staged and isinstance((staged.continuityState or {}).get("rangeReplacement"), dict):
+            range_rep = staged.continuityState["rangeReplacement"]
+    if range_rep:
+        marked = float(range_rep.get("length") or 0.0)
+        if marked > 0:
+            job_duration = marked
+    dur_check = validate_duration(batch.generatorId, job_duration)
     if not dur_check.get("ok") and dur_check.get("action") == "choose":
         return {"ok": False, "error": "DURATION_EXCEEDS_GENERATOR", **dur_check, "mock": False}
 
@@ -346,6 +383,10 @@ def submit_batch_generation(
         temporal_packet = ensure_temporal_packet_before_submit(
             db, project_id, scene_id, master, batch.id
         )
+        if director_timeline is not None:
+            from .reconcile import reconcile_legacy_to_master
+
+            reconcile_legacy_to_master(master, director_timeline)
         store.save_master(db, project_id, scene_id, master, touch_batches=False)
         if packet_blocks_submit(master, batch.id):
             return {
@@ -354,6 +395,21 @@ def submit_batch_generation(
                 "message": "Co-Director is still reviewing the previous shot. The next generation has not been sent.",
                 "mock": False,
             }
+        from .generation.direct_reference import (
+            build_direct_reference_payload,
+            delivery_error,
+        )
+
+        direct_refs = build_direct_reference_payload(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            batch=batch,
+            generator_id=adapter.id,
+        )
+        blocked = delivery_error(direct_refs)
+        if blocked is not None:
+            return blocked
         request = build_timeline_generation_request(
             project_id=project_id,
             scene_id=scene_id,
@@ -364,12 +420,18 @@ def submit_batch_generation(
             aspect_ratio=aspect_ratio,
             draft_mode=draft_mode,
             temporal_packet=temporal_packet,
+            turbo_lora=bool(getattr(master, "turboLora", False)),
+            direct_references=direct_refs,
         )
         if incoming and incoming.status == "Ready" and request.continuityStrategy:
             incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
             incoming.status = "Applied"
     except Exception as exc:
         return {"ok": False, "error": "REQUEST_BUILD_FAILED", "message": str(exc), "mock": False}
+
+    # Direct Reference Route is the only cast authority. Character-identity
+    # bind and approved-voice auto-attach stay in the repo for other features
+    # but must not inject or replace Timeline generation references.
 
     # Hard lock: never silently change generator
     if request.generatorId != adapter.id:
@@ -397,6 +459,13 @@ def submit_batch_generation(
             "generatorId": adapter.id,
             "mock": False,
         }
+
+    from .generation.runtime_dependency_preflight import preflight_generation_dependencies
+
+    ready = preflight_generation_dependencies(db, request)
+    if not ready.get("ok"):
+        return {**ready, "generatorId": adapter.id, "mock": False}
+    db.commit()
 
     draft_used = bool(request.providerOptions.get("draftMode"))
     st = dict(snap.continuityState or {})
@@ -746,6 +815,14 @@ def touch_batch_config(
         batch.generatorOverride = True
     if "lora" in patch:
         batch.lora = patch["lora"] if isinstance(patch["lora"], dict) and patch["lora"].get("loraId") else None
+    if "h3Resolution" in patch:
+        h3_res = patch["h3Resolution"]
+        if h3_res is None:
+            batch.h3Resolution = None
+        elif isinstance(h3_res, dict) and str(h3_res.get("mode") or "") in ("auto", "manual"):
+            batch.h3Resolution = dict(h3_res)
+        else:
+            batch.h3Resolution = None
     if "plannedDuration" in patch:
         batch.duration.plannedDuration = float(patch["plannedDuration"])
     if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
@@ -801,13 +878,55 @@ def touch_batch_config(
                 from ..director_timeline import dumps_director_timeline_preserving_embedded
 
                 projected = project_prompts_to_legacy(master)
-                tl.prompt_segments = [type(tl.prompt_segments[0])(**s) for s in projected] if projected else []
+                from ..director_timeline import PromptSegment as LegacyPromptSegment
+
+                segment_type = type(tl.prompt_segments[0]) if tl.prompt_segments else LegacyPromptSegment
+                tl.prompt_segments = [segment_type(**s) for s in projected] if projected else []
                 scene_row.director_json = dumps_director_timeline_preserving_embedded(tl, scene_row.director_json)
                 db.add(scene_row)
         except Exception:
-            # Projection is best-effort; the master is already saved by the
-            # caller and generation reads the master.
-            pass
+            logger.warning(
+                "legacy prompt projection failed project=%s scene=%s — timelineMaster remains authority",
+                project_id,
+                scene_id,
+                exc_info=True,
+            )
+
+    # AUDIO_SFX_PROJECTION_BACK_TO_LEGACY: keep Music/SFX lanes WYSIWYG with
+    # batch-owned clips (scene-absolute offsets for every batch window).
+    if any(f in patch for f in ("audioClips", "sfxClips")):
+        try:
+            from ..director_timeline import parse_director_timeline
+            from ..director_timeline_w46.reconcile import project_audio_sfx_to_legacy
+            from ..director_timeline import dumps_director_timeline_preserving_embedded
+            from .store import get_scene
+
+            scene_row = get_scene(db, project_id, scene_id)
+            if scene_row is not None:
+                tl = parse_director_timeline(
+                    scene_row.director_json,
+                    fallback_duration=float(scene_row.duration_sec or 5.0),
+                    fallback_prompt=scene_row.prompt or "",
+                )
+                projected = project_audio_sfx_to_legacy(master)
+                # Only replace the projected kind(s) that were patched; if one
+                # side is empty across all batches, clear that legacy lane so
+                # stale 0–N clips cannot outlive removed batch clips.
+                if "audioClips" in patch:
+                    tl.audio_clips = projected["audio_clips"]  # type: ignore[assignment]
+                if "sfxClips" in patch:
+                    tl.sfx_clips = projected["sfx_clips"]  # type: ignore[assignment]
+                scene_row.director_json = dumps_director_timeline_preserving_embedded(
+                    tl, scene_row.director_json
+                )
+                db.add(scene_row)
+        except Exception:
+            logger.warning(
+                "legacy audio/sfx projection failed project=%s scene=%s — timelineMaster remains authority",
+                project_id,
+                scene_id,
+                exc_info=True,
+            )
 
     # RECONCILE_ON_CONFIG_CHANGE: plannedDuration edits shift the batch time
     # windows, so legacy lane prompts/image clips are re-distributed before
@@ -827,7 +946,12 @@ def touch_batch_config(
             )
             reconcile_legacy_to_master(master, _tl)
     except Exception:
-        pass
+        logger.warning(
+            "legacy-to-master reconcile failed project=%s scene=%s — generation continues from timelineMaster",
+            project_id,
+            scene_id,
+            exc_info=True,
+        )
 
     new_fp = compute_config_fingerprint(batch)
     batch.configFingerprint = new_fp
@@ -1075,6 +1199,57 @@ def run_preflight(
                     fixProposal="Select a generator for this Batch in the Batch Inspector.",
                 )
             )
+        else:
+            gen = get_generator(batch.generatorId)
+            if gen and not gen.executable:
+                findings.append(
+                    PreflightFinding(
+                        severity="error",
+                        code="generator_not_ready",
+                        message=gen.disabledReason or gen.readiness or f"{gen.label} is not ready.",
+                        batchBlockId=batch.id,
+                        fixProposal="Choose a Ready engine, or finish Setup for this one.",
+                    )
+                )
+            # MiniMax H3 canvas disclosure: resolved from the canonical megapixel grid.
+            from ..video_runtime.legal_canvas import (
+                H3_AUTO_MEGAPIXEL_FAST,
+                is_minimax_h3_generator,
+                resolve_h3_timeline_canvas,
+            )
+
+            if batch.generatorId and is_minimax_h3_generator(batch.generatorId):
+                try:
+                    canvas = resolve_h3_timeline_canvas(batch.h3Resolution, draft_mode=False)
+                    if canvas["auto"]:
+                        mode_label = (
+                            "Auto Fast"
+                            if canvas["megapixels"] == H3_AUTO_MEGAPIXEL_FAST
+                            else "Auto Quality"
+                        )
+                    else:
+                        mode_label = "Manual"
+                    findings.append(
+                        PreflightFinding(
+                            severity="info",
+                            code="h3_canvas",
+                            message=(
+                                f"MiniMax H3 canvas: {canvas['width']}×{canvas['height']} "
+                                f"({canvas['label']} · {mode_label})"
+                            ),
+                            batchBlockId=batch.id,
+                        )
+                    )
+                except Exception as exc:
+                    findings.append(
+                        PreflightFinding(
+                            severity="error",
+                            code="h3_canvas",
+                            message=f"MiniMax H3 canvas error: {exc}",
+                            batchBlockId=batch.id,
+                            fixProposal="Choose a supported megapixel value from the MiniMax H3 resolution grid.",
+                        )
+                    )
         if not batch.promptSegments or not any(p.text.strip() for p in batch.promptSegments):
             findings.append(
                 PreflightFinding(
@@ -1094,6 +1269,31 @@ def run_preflight(
                     batchBlockId=batch.id,
                 )
             )
+        if getattr(master, "turboLora", False):
+            from ..production_control.generator_authority import supports_turbo_lora
+            from ..workflows.ltx_25_builder import TURBO_LORA_UNAVAILABLE, ltx_25_turbo_resource_gaps
+
+            turbo_gen = batch.generatorId or master.sceneGeneratorId
+            if not supports_turbo_lora(turbo_gen):
+                findings.append(
+                    PreflightFinding(
+                        severity="error",
+                        code="turbo_lora_unsupported",
+                        message=f"{batch.label}: Turbo LoRA is on, but this engine cannot use it.",
+                        batchBlockId=batch.id,
+                        fixProposal="Turn Turbo LoRA off, or choose a supported engine.",
+                    )
+                )
+            elif ltx_25_turbo_resource_gaps():
+                findings.append(
+                    PreflightFinding(
+                        severity="error",
+                        code="turbo_lora_resource_unavailable",
+                        message=TURBO_LORA_UNAVAILABLE,
+                        batchBlockId=batch.id,
+                        fixProposal="Install the required Turbo LoRA files, or turn Turbo LoRA off.",
+                    )
+                )
         for ref in batch.references or []:
             if not isinstance(ref, dict):
                 continue
@@ -1225,11 +1425,22 @@ def stage_batch_snapshot(
     from .generation.registry import GeneratorNotFoundError, get_registry
 
     cap = next((g for g in list_generators() if g.id == batch.generatorId), None)
+    if cap is None:
+        from .capabilities import get_generator as _get_gen
+
+        cap = _get_gen(batch.generatorId)
     if cap and not cap.supportsTimelineGeneration:
         return {
             "ok": False,
             "error": "GENERATOR_UNSUPPORTED_FOR_TIMELINE",
-            "message": f"{cap.label} does not support Timeline batch generation yet.",
+            "message": cap.disabledReason or f"{cap.label} does not support Timeline batch generation yet.",
+            "mock": False,
+        }
+    if cap and not cap.executable:
+        return {
+            "ok": False,
+            "error": "GENERATOR_NOT_READY",
+            "message": cap.disabledReason or cap.readiness or f"{cap.label} is not ready.",
             "mock": False,
         }
     try:
@@ -1367,6 +1578,11 @@ def generate_scene(
     ensure_policy(master, gid)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     director_timeline = _load_director_timeline(db, project_id, scene_id)
+    if director_timeline is not None:
+        from .reconcile import reconcile_legacy_to_master
+
+        if reconcile_legacy_to_master(master, director_timeline):
+            store.save_master(db, project_id, scene_id, master, touch_batches=False)
     findings = run_preflight(
         master, director_timeline=director_timeline, db=db, project_id=project_id
     )
@@ -1517,6 +1733,217 @@ def reject_temporal_continuation(
     master.coDirectorContinuityPolicy.rejectedPacketIds = rejected
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     return {"ok": True, "packet": found.model_dump(by_alias=True), "master": master.model_dump(), "mock": False}
+
+
+def retake_range(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    batch_id: str,
+    *,
+    start: float,
+    length: float,
+    prompt: str,
+    spend_api_credits: bool = False,
+    mask_png_base64: str | None = None,
+    reference_frame_time: float | None = None,
+    frame_asset_id: str | None = None,
+    remove_background: bool = False,
+) -> dict[str, Any]:
+    """Replace only a marked region. Uses the batch generator. Never MiniMax-by-default."""
+    if (mask_png_base64 or "").strip() or remove_background:
+        from .inpaint_repair import submit_video_retake
+
+        return submit_video_retake(
+            db,
+            project_id,
+            scene_id,
+            batch_id,
+            start=start,
+            length=length,
+            prompt=prompt,
+            mask_png_base64=mask_png_base64,
+            reference_frame_time=reference_frame_time,
+            frame_asset_id=frame_asset_id,
+            remove_background=remove_background,
+        )
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    batch = _batch_map(master).get(batch_id)
+    if not batch:
+        return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
+
+    replacement = str(prompt or "").strip()
+    if not replacement:
+        return {
+            "ok": False,
+            "error": "REPLACEMENT_PROMPT_REQUIRED",
+            "message": "Write what should happen in the marked part.",
+            "mock": False,
+        }
+    start = max(0.0, float(start))
+    length = float(length)
+    planned = float(batch.duration.plannedDuration or 0.0)
+    if planned > 0 and start + length > planned + 0.05:
+        length = max(0.15, planned - start)
+    if length < 0.15:
+        return {
+            "ok": False,
+            "error": "RANGE_TOO_SHORT",
+            "message": "Mark a longer region to replace.",
+            "mock": False,
+        }
+    if not batch.approvedClip or not batch.approvedClip.assetId:
+        return {
+            "ok": False,
+            "error": "APPROVED_TAKE_REQUIRED",
+            "message": "Approve a take first. Re-take replaces a marked part of the current take.",
+            "mock": False,
+        }
+    gid = batch.generatorId or master.sceneGeneratorId
+    if not gid:
+        return {
+            "ok": False,
+            "error": "GENERATOR_REQUIRED",
+            "message": "Select a generator for this shot — Adept will not pick MiniMax or any other engine silently.",
+            "mock": False,
+        }
+    gen = get_generator(gid)
+    supported = list(gen.inPaintStrategies) if gen else []
+    if "range_replacement" not in supported:
+        label = gen.label if gen else gid
+        return {
+            "ok": False,
+            "error": "RANGE_REPLACEMENT_UNSUPPORTED",
+            "message": (
+                f"{label} cannot replace a marked region. Use New take to remake the whole shot, "
+                "or choose a Ready engine that can."
+            ),
+            "generatorId": gid,
+            "mock": False,
+        }
+
+    from .continuity import generator_locality
+
+    paid = generator_locality(gid) == "api" or (gen is not None and gen.locality == "hosted")
+    if paid and not spend_api_credits:
+        return {
+            "ok": False,
+            "error": "API_CREDIT_CONFIRMATION_REQUIRED",
+            "message": (
+                f"{gen.label if gen else gid} uses paid credits. Bounded Re-take was not started. "
+                "Confirm spend before generating."
+            ),
+            "generatorId": gid,
+            "mock": False,
+        }
+    if gen and not gen.executable:
+        return {
+            "ok": False,
+            "error": "GENERATOR_NOT_READY",
+            "message": gen.disabledReason or gen.readiness or f"{gen.label} is not ready.",
+            "generatorId": gid,
+            "mock": False,
+        }
+
+    source_asset_id = batch.approvedClip.assetId
+    start_image_id = None
+    if start > 0.05:
+        from .generation.registry import get_registry
+
+        try:
+            adapter = get_registry().get(gid)
+            supports_i2v = bool(adapter.capabilities.supportsImageToVideo)
+        except Exception:
+            supports_i2v = bool(gen.supportsImageToVideo) if gen else False
+        if supports_i2v:
+            from .range_replacement import extract_cut_in_frame_asset
+
+            frame = extract_cut_in_frame_asset(
+                db,
+                project_id=project_id,
+                source_asset_id=source_asset_id,
+                at_seconds=start,
+            )
+            if not frame.get("ok"):
+                return {**frame, "mock": False}
+            start_image_id = frame.get("assetId")
+
+    repair = add_repair_range(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        {
+            "start": start,
+            "length": length,
+            "mode": "range",
+            "inPaintStrategy": "range_replacement",
+            "label": "Re-take",
+            "status": "generating",
+            "metadata": {"prompt": replacement, "sourceAssetId": source_asset_id},
+        },
+        policy="stack_advanced",
+    )
+    if not repair.get("ok"):
+        return repair
+    ranges = repair.get("ranges") or []
+    repair_id = ranges[-1]["id"] if ranges else None
+
+    result = submit_batch_generation(
+        db,
+        project_id,
+        scene_id,
+        batch_id,
+        continuity={
+            "reTakeReason": "range_replacement",
+            "userCorrection": {"prompt": replacement, "start": start, "length": length},
+            "rangeReplacement": {
+                "start": start,
+                "length": length,
+                "prompt": replacement,
+                "sourceAssetId": source_asset_id,
+                "repairId": repair_id,
+                "startImageAssetId": start_image_id,
+            },
+        },
+    )
+    result["retakeMode"] = "range"
+    result["rangeReplacement"] = {
+        "start": start,
+        "length": length,
+        "repairId": repair_id,
+        "generatorId": gid,
+    }
+    result["repairId"] = repair_id
+    result["jobId"] = result.get("queueJobId") or result.get("internalJobId")
+    result["priorSnapshotsPreserved"] = True
+    try:
+        from ..production_events import ACTOR_SYSTEM, record_production_event
+
+        record_production_event(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            event_type="timeline.range_retake_started",
+            actor=ACTOR_SYSTEM,
+            actor_detail="timeline:retake_range",
+            subject_kind="batch",
+            subject_id=batch_id,
+            summary=f"Bounded Re-take started for {batch.label} ({start:.2f}s + {length:.2f}s)",
+            payload={
+                "batchId": batch_id,
+                "start": start,
+                "length": length,
+                "generatorId": gid,
+                "repairId": repair_id,
+            },
+        )
+    except Exception:  # noqa: BLE001 - event recording never breaks the operation
+        pass
+    return result
 
 
 def retake_batch(

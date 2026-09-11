@@ -282,6 +282,34 @@ def parse_director_timeline(raw: str | None, *, fallback_duration: float = 5.0, 
         return DirectorTimeline.default(fallback_duration, fallback_prompt)
 
 
+def _lipsync_has_audio(tl: DirectorTimeline) -> bool:
+    for track in tl.lipsync.tracks or []:
+        if (track.audio_asset_id or "").strip():
+            return True
+        for clip in track.clips or []:
+            if (clip.audio_asset_id or "").strip():
+                return True
+    return False
+
+
+def attach_scene_lipsync(tl: DirectorTimeline, lipsync_tracks_json: str | None) -> DirectorTimeline:
+    """Prefer embedded director lipsync; fall back to scene.lipsync_tracks_json.
+
+    Walk/Dialogue keep Lip Sync on the scene column. Preflight and compile used to
+    read only director_json.lipsync (often empty) and then warn LIPSYNC_SPEAKER_REQUIRED
+    against a different store. One authority: the tracks with real audio.
+    """
+    if _lipsync_has_audio(tl) or not (lipsync_tracks_json or "").strip():
+        return tl
+    scene_ls = parse_lipsync_tracks(lipsync_tracks_json)
+    if any(
+        (track.audio_asset_id or "").strip() or any((clip.audio_asset_id or "").strip() for clip in track.clips or [])
+        for track in scene_ls.tracks or []
+    ):
+        tl.lipsync = scene_ls
+    return tl
+
+
 def dumps_director_timeline(tl: DirectorTimeline) -> str:
     return tl.model_dump_json()
 

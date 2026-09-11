@@ -116,6 +116,8 @@ class PatchBatchBody(BaseModel):
     audioClips: Optional[list[dict[str, Any]]] = None
     sfxClips: Optional[list[dict[str, Any]]] = None
     cameraInstructions: Optional[list[dict[str, Any]]] = None
+    # MiniMax H3 megapixel resolution intent ({mode: auto|manual, megapixels}).
+    h3Resolution: Optional[dict[str, Any]] = None
 
 
 class AddClipBody(BaseModel):

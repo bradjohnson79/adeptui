@@ -43,6 +43,7 @@ describe("buildPreflightSignature", () => {
       },
       { references: [{ assetId: "asset_1", required: true, role: "identity" }] },
       { sourceAnchors: [{ kind: "end_frame" }] },
+      { h3Resolution: { mode: "manual", megapixels: 1.0 } },
     ];
     for (const patch of variants) {
       const changed = masterWith({
@@ -66,6 +67,16 @@ describe("buildPreflightSignature", () => {
     expect(
       buildPreflightSignature({ batchBlocks: [], turboLora: true } as never, null),
     ).not.toBe(sig);
+  });
+
+  it("changes when H3 resolution changes", () => {
+    const base = masterWith({ generatorId: "minimax-h3" });
+    const sig = buildPreflightSignature(base, null);
+    const changed = masterWith({
+      generatorId: "minimax-h3",
+      h3Resolution: { mode: "manual", megapixels: 1.0 },
+    });
+    expect(buildPreflightSignature(changed, null)).not.toBe(sig);
   });
 });
 

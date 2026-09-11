@@ -152,5 +152,7 @@
   "addCameraTitle": "Add a Camera clip",
   "libraryPreviewHint": "Click to show in the Preview Monitor. Double-click for Quick Preview.",
   "removeFromLibrary": "Remove from Library",
-  "removeFromLibraryTitle": "Remove from Timeline Library. File stays in Project Library."
+  "removeFromLibraryTitle": "Remove from Timeline Library. File stays in Project Library.",
+  "resolutionLabel": "Resolution",
+  "resolutionTip": "How sharp the picture is. Auto picks a good size for your speed setting. Higher numbers are sharper but slower."
 }

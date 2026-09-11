@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+﻿import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   api,
@@ -6,11 +6,13 @@ import {
   type DirectorTimelineCameraCatalogEntry,
 } from "../../api";
 import type { Project, Scene } from "../../types";
-import type { BatchBlock, ReviewCadence, SceneTimelineMaster, TemporalContinuityPacket } from "../../timelineMaster/contracts";
+import type { BatchBlock, ExtendSegment, ReviewCadence, SceneTimelineMaster, TemporalContinuityPacket } from "../../timelineMaster/contracts";
 import { formatBatchStatus } from "../../timelineMaster/contracts";
 import { formatDurationSeconds } from "../../lib/formatDuration";
 import { useDirectorSelection } from "../DirectorSelectionContext";
 import {
+  dropTombstonedPrompts,
+  isPromptTombstoned,
   normalizeLipSyncTracks,
   type CameraClip,
   type DirectorTimeline,
@@ -19,7 +21,7 @@ import {
   type PromptSegment,
   type TimelineClip,
 } from "../DirectorTracks";
-import { HelpTip } from "../HelpTip";
+import { ActionWithHelp, HelpTip } from "../HelpTip";
 import { PromptIntelligencePanel } from "../CoDirector/PromptIntelligencePanel";
 import { PromptReferenceField } from "../sceneReferences/PromptReferenceField";
 import { ReferenceTokenAutocomplete } from "../sceneReferences/ReferenceTokenAutocomplete";
@@ -35,20 +37,46 @@ import {
 } from "../ui/SearchableGroupedSelect";
 import { useDraftField } from "./useDraftField";
 import { SceneProductionReadinessPanel } from "./SceneProductionReadinessPanel";
+import { TimedPromptReferenceBindingsEditor } from "./TimedPromptReferenceBindingsEditor";
+import {
+  getBoundShellTimeline,
+  subscribeShellTimelineSnapshot,
+} from "./timelineMutateBridge";
+import {
+  bindingIdsFromNameBindings,
+  hydrateTimedPromptNameBindings,
+  labelCharacterBindingFromIdentity,
+} from "../../timelineMaster/timedPromptNameBindings";
 import {
   draftPathwayCopy,
-  generatorOptionsFromPayload,
   promoteCopy,
   resolveGeneratorOption,
+  supportsTurboLora,
   supportsVideoMotionReferences,
+  usesFastQuality,
   type TimelineGeneratorOption,
 } from "../../timelineMaster/draftCapabilities";
+import { loadTimelineVideoGenerators } from "../../timelineMaster/useTimelineVideoGenerators";
+import { applyTimelineSceneGenerator, applyTimelineTurboLora } from "../../timelineMaster/applySceneGenerator";
+import { h3PrewarmOnGeneratorSelect } from "../minimax-h3/prewarmTrigger";
+import { creatorGeneratorLine, generatorMaxDurationSec } from "../../timelineMaster/generatorDuration";
 import { PRODUCTION_ASPECTS, normalizeProductionAspect } from "../../workspacePrefs";
 import { timelineActionError } from "../../timelineMaster/timelineErrors";
 import { LoRASelector, type LoraSelection } from "../lora/LoRASelector";
+import {
+  formatH3Megapixels,
+  H3_AUTO_MEGAPIXEL_FAST,
+  H3_AUTO_MEGAPIXEL_QUALITY,
+  H3_MEGAPIXEL_GRID,
+  resolveH3TimelineCanvas,
+} from "../../timelineMaster/legalCanvas";
 
 function executionLabel(engine: string) {
   return engine.startsWith("fal_") ? "Hosted" : engine === "auto" ? "Automatic" : "Local";
+}
+
+function isMiniMaxH3Generator(generatorId: string | null | undefined) {
+  return String(generatorId || "").toLowerCase().startsWith("minimax-h3");
 }
 
 const CAMERA_CAPABILITY_ORDER = {
@@ -148,9 +176,19 @@ function InspectorAccordion({
 function continuityChipLabel(status: string | undefined, stale?: boolean) {
   if (stale) return "Needs update";
   if (status === "Failed") return "Match failed";
-  if (status === "Waiting" || status === "Analyzing") return "Matching…";
+  if (status === "Waiting" || status === "Analyzing") return "Matchingâ€¦";
   if (status === "Ready" || status === "Applied") return "Matched";
   return null;
+}
+
+function extendStatusLabel(status: string | undefined) {
+  if (!status) return "Planned";
+  if (status === "generating") return "Generating the next shotâ€¦";
+  if (status === "approved") return "Approved and added to the scene";
+  if (status === "failed") return "Could not extend â€” try again or adjust the scene";
+  if (status === "cancelled") return "Cancelled";
+  if (status === "draft") return "Draft";
+  return status.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 export function TimelineInspector({
@@ -187,15 +225,17 @@ export function TimelineInspector({
   const [scenePromptDraftBase, setScenePromptDraftBase] = useState(scene.prompt || "");
   const [bindings, setBindings] = useState<ReferenceBindingView[]>([]);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [durationError, setDurationError] = useState<string | null>(null);
+  const [turboPending, setTurboPending] = useState<boolean | null>(null);
   const [speakerDraft, setSpeakerDraft] = useState("");
 
   useEffect(() => {
     let alive = true;
-    void api
-      .directorTimelineGenerators()
-      .then((payload) => {
+    void loadTimelineVideoGenerators()
+      .then((rows) => {
         if (!alive) return;
-        setGeneratorOptions(generatorOptionsFromPayload(payload));
+        setGeneratorOptions(rows);
       })
       .catch(() => {
         if (!alive) return;
@@ -211,26 +251,45 @@ export function TimelineInspector({
   }, [scene.id, scene.prompt]);
 
   useEffect(() => {
+    setTurboPending(null);
+  }, [master?.turboLora]);
+
+  useEffect(() => {
     let cancelled = false;
     void Promise.all([
       api.sceneReferences.list(project.id, { scopeType: "project", scopeId: project.id }),
       api.listCharacterProfiles(project.id).catch(() => ({ items: [] as { id: string; name?: string }[] })),
     ])
-      .then(([res, characters]) => {
+      .then(async ([res, characters]) => {
         if (cancelled) return;
-        const items = (res.items || []) as ReferenceBindingView[];
+        const profiles = new Map(
+          (characters.items || []).map((profile) => [profile.id, String(profile.name || "").trim()]),
+        );
+        const items = ((res.items || []) as ReferenceBindingView[]).map((binding) =>
+          labelCharacterBindingFromIdentity(binding, profiles.get(binding.identity_id || "")),
+        );
         const boundIdentities = new Set(items.map((item) => item.identity_id).filter(Boolean));
         const extra: ReferenceBindingView[] = [];
         for (const profile of characters.items || []) {
           if (boundIdentities.has(profile.id)) continue;
           const name = String(profile.name || "").trim();
           if (!name) continue;
-          const asset =
-            project.assets.find((a) => (a.tag || "").toLowerCase() === name.toLowerCase() && a.kind === "image") ||
-            project.assets.find((a) => a.kind === "image");
+          const refs = await api.listCharacterReferences(project.id, profile.id).catch(() => ({ items: [] as { asset_id?: string; reference_role?: string; approval_status?: string; canonical?: boolean }[] }));
+          const hero =
+            (refs.items || []).find(
+              (row) =>
+                (row.reference_role === "hero_identity" || row.reference_role === "hero_portrait") &&
+                String(row.approval_status || "").toLowerCase() === "approved" &&
+                row.canonical,
+            ) ||
+            (refs.items || []).find(
+              (row) =>
+                (row.reference_role === "hero_identity" || row.reference_role === "hero_portrait") &&
+                String(row.approval_status || "").toLowerCase() === "approved",
+            );
           extra.push({
             id: `character:${profile.id}`,
-            asset_id: asset?.id || "",
+            asset_id: hero?.asset_id || "",
             identity_id: profile.id,
             alias: name.replace(/\s+/g, ""),
             media_kind: "entity",
@@ -250,21 +309,16 @@ export function TimelineInspector({
   }, [project.assets, project.id, reloadKey]);
 
   useEffect(() => {
-    let alive = true;
-    void api.getDirector(project.id, scene.id).then((result) => {
-      if (!alive) return;
-      // Do not clobber local timeline while an inspector field is focused.
-      const active = document.activeElement as HTMLElement | null;
-      if (active && active.closest?.("[data-testid='timeline-inspector']")) {
-        const tag = active.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable) return;
-      }
-      setTimeline(result as DirectorTimeline);
-    });
-    return () => {
-      alive = false;
+    const apply = (incoming: DirectorTimeline | null) => {
+      if (!incoming) return;
+      setTimeline({
+        ...incoming,
+        prompt_segments: dropTombstonedPrompts(incoming.prompt_segments || []),
+      });
     };
-  }, [project.id, scene.id, reloadKey]);
+    apply(getBoundShellTimeline());
+    return subscribeShellTimelineSnapshot(apply);
+  }, [project.id, scene.id]);
 
   useEffect(() => {
     let alive = true;
@@ -298,7 +352,7 @@ export function TimelineInspector({
           .map((row) => ({
             id: row.id,
             segmentNumber: row.segmentNumber,
-            label: row.beatName ? `M${row.segmentNumber} — ${row.beatName}` : `Movement ${row.segmentNumber}`,
+            label: row.beatName ? `M${row.segmentNumber} â€” ${row.beatName}` : `Movement ${row.segmentNumber}`,
           })),
       );
     }).catch(() => {
@@ -350,6 +404,7 @@ export function TimelineInspector({
   );
   const draftPathway = selectedGenerator?.draftPathway || "none";
   const draftAvailable = draftPathway !== "none";
+  const fastQuality = usesFastQuality(selectedGenerator);
   const promptBindingCounts = useMemo(() => {
     const ids = [
       ...(timeline?.prompt_segments || []).flatMap((seg) => seg.reference_binding_ids || []),
@@ -388,6 +443,12 @@ export function TimelineInspector({
       packets[packets.length - 1]
     );
   }, [master?.temporalPackets, selectedBatch]);
+  const latestExtendSegment = useMemo<ExtendSegment | undefined>(() => {
+    const segments = master?.extendSegments || [];
+    if (!segments.length) return undefined;
+    return [...segments].sort((a, b) => (b.continuityRevision || 0) - (a.continuityRevision || 0))[0];
+  }, [master?.extendSegments]);
+  const longFormContinuity = master?.longFormContinuity;
   const staleDownstream = useMemo(
     () => (master?.batchBlocks || []).filter((batch) => batch.downstreamStale),
     [master],
@@ -565,8 +626,8 @@ export function TimelineInspector({
 
   const persistPromptSegText = useCallback(
     async (text: string) => {
-      if (!selectedPrompt) return;
-      await updatePrompt(selectedPrompt, { text }, { refresh: false });
+      if (!selectedPrompt || isPromptTombstoned(selectedPrompt.id)) return;
+      await updatePrompt(selectedPrompt, { text, production_prompt: null }, { refresh: false });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [selectedPrompt?.id],
@@ -712,14 +773,41 @@ export function TimelineInspector({
     identity: `scene-name-${scene.id}`,
     idleMs: 500,
   });
-  const sceneDurationField = useDraftField(
-    String(Number(scene.duration_sec.toFixed(2))),
-    (v) => {
+  const persistSceneDuration = useCallback(
+    async (v: string) => {
       const n = Number(v);
-      if (Number.isFinite(n) && n > 0) void updateScene({ duration_sec: n }, { refresh: false });
+      if (!Number.isFinite(n) || n <= 0) return;
+      const gen = resolveGeneratorOption(
+        generatorOptions,
+        master?.sceneGeneratorId,
+        master?.batchBlocks[0]?.generatorId,
+        scene.engine,
+      );
+      const isH3 = String(gen?.id || scene.engine || "").toLowerCase().startsWith("minimax-h3");
+      const cap = isH3 ? 15 : generatorMaxDurationSec(gen);
+      if (cap != null && n > cap + 1e-6) {
+        setDurationError(
+          `This shot is ${n}s. ${isH3 ? "MiniMax H3" : "The selected engine"} can run up to ${cap}s. Shorten it or split it into batches.`,
+        );
+        return;
+      }
+      setDurationError(null);
+      await updateScene({ duration_sec: n }, { refresh: false });
+      await mutateTimeline((current) => ({ ...current, duration_sec: n }), { refresh: false });
+      const batches = master?.batchBlocks || [];
+      const target = selectedBatch || (batches.length === 1 ? batches[0] : null);
+      if (target) {
+        await updateBatch(target, { plannedDuration: n }, { refresh: false });
+      }
+      await onRefresh();
     },
-    { identity: `scene-duration-${scene.id}`, idleMs: 500 },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [generatorOptions, master?.sceneGeneratorId, master?.batchBlocks, scene.engine, scene.id, selectedBatch?.id, project.id, onRefresh],
   );
+  const sceneDurationField = useDraftField(String(Number(scene.duration_sec.toFixed(2))), (v) => void persistSceneDuration(v), {
+    identity: `scene-duration-${scene.id}`,
+    idleMs: 500,
+  });
 
   return (
     <section className="timeline-inspector panel" data-testid="timeline-inspector">
@@ -755,6 +843,7 @@ export function TimelineInspector({
           <label className="field">
             <span>Name</span>
             <input
+              data-testid="timeline-inspector-scene-name"
               value={sceneNameField.value}
               onChange={(e) => sceneNameField.onChange(e.target.value)}
               onFocus={sceneNameField.onFocus}
@@ -802,17 +891,107 @@ export function TimelineInspector({
           <InspectorAccordion title="Generation" testId="timeline-inspector-generation" defaultOpen>
           <label className="field">
             <span>Generator</span>
-            <select value={scene.engine} onChange={(e) => void updateScene({ engine: e.target.value as Scene["engine"] })}>
-              <option value="auto">Auto Select</option>
-              <option value="minimax-h3">MiniMax H3 (Default)</option>
-              <option value="ltx">LTX 2.5</option>
-              <option value="wan">WAN 2.2</option>
-              <option value="fal_seedance">Seedance</option>
-              <option value="fal_kling">Kling</option>
-              <option value="fal_veo">Veo</option>
-              <option value="fal_runway">Runway</option>
+            <select
+              data-testid="timeline-inspector-generator"
+              value={
+                resolveGeneratorOption(
+                  generatorOptions,
+                  master?.sceneGeneratorId,
+                  master?.batchBlocks[0]?.generatorId,
+                  scene.engine,
+                )?.id || ""
+              }
+              onChange={(event) => {
+                const generatorId = event.target.value;
+                if (!generatorId) return;
+                setGeneratorError(null);
+                h3PrewarmOnGeneratorSelect(generatorId);
+                void applyTimelineSceneGenerator({
+                  projectId: project.id,
+                  scene,
+                  master,
+                  timeline,
+                  options: generatorOptions,
+                  generatorId,
+                  trim: false,
+                  mutateTimeline,
+                  onRefresh,
+                }).catch((err) => {
+                  setGeneratorError(
+                    err instanceof Error && err.message
+                      ? err.message
+                      : "Could not save the engine. Try again.",
+                  );
+                });
+              }}
+            >
+              <option value="">{generatorOptions.length ? "Choose an engine" : "No local engines ready"}</option>
+              {generatorOptions.map((option) => (
+                <option
+                  key={option.id}
+                  value={option.id}
+                  disabled={!option.executable}
+                  title={option.disabledReason || option.notes}
+                >
+                  {creatorGeneratorLine(option)}
+                </option>
+              ))}
             </select>
           </label>
+          {supportsTurboLora(
+            resolveGeneratorOption(
+              generatorOptions,
+              master?.sceneGeneratorId,
+              master?.batchBlocks[0]?.generatorId,
+              scene.engine,
+            ),
+          ) && master ? (
+            <div className="timeline-v2__turbo-lora" data-testid="timeline-inspector-turbo-lora">
+              <ActionWithHelp
+                help={{
+                  label: "What is Turbo LoRA?",
+                  content:
+                    "Turbo LoRA accelerates supported video generation while preserving the normal generator workflow as closely as possible. Available only on supported models.",
+                  text: "Turbo LoRA accelerates supported video generation while preserving the normal generator workflow as closely as possible. Available only on supported models.",
+                }}
+              >
+                <span className="timeline-v2__turbo-lora-label">
+                  Turbo LoRA: {(turboPending ?? master.turboLora) ? "On" : "Off"}
+                </span>
+              </ActionWithHelp>
+              <input
+                className="timeline-v2__turbo-lora-toggle"
+                type="checkbox"
+                role="switch"
+                data-testid="timeline-inspector-turbo-lora-toggle"
+                aria-label="Turbo LoRA"
+                checked={turboPending ?? Boolean(master.turboLora)}
+                onChange={(event) => {
+                  const enabled = event.target.checked;
+                  setTurboPending(enabled);
+                  setGeneratorError(null);
+                  void applyTimelineTurboLora({
+                    projectId: project.id,
+                    sceneId: scene.id,
+                    master,
+                    options: generatorOptions,
+                    enabled,
+                    onRefresh,
+                  }).catch((err) => {
+                    setTurboPending(null);
+                    setGeneratorError(
+                      err instanceof Error && err.message ? err.message : "Could not save Turbo LoRA.",
+                    );
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+          {generatorError ? (
+            <p className="scene-meta" role="alert" data-testid="timeline-inspector-generator-error">
+              {generatorError}
+            </p>
+          ) : null}
           <label className="field">
             <span>Picture Shape</span>
             <select
@@ -829,17 +1008,23 @@ export function TimelineInspector({
             <HelpTip text="How wide the picture is. 16:9 is standard. 21:9 is extra wide. Changing this updates the Viewer immediately." />
           </label>
           <label className="field">
-            <span>Duration</span>
+            <span>Duration <HelpTip text="How long this shot is. MiniMax H3 can go up to 15 seconds. The engine may adjust slightly to a legal frame count and will tell you. This control â€” not the engine menu â€” sets the length." /></span>
             <input
               type="number"
               min={0.1}
               max={120}
               step={0.1}
+              data-testid="timeline-inspector-duration"
               value={sceneDurationField.value}
               onChange={(e) => sceneDurationField.onChange(e.target.value)}
               onFocus={sceneDurationField.onFocus}
               onBlur={sceneDurationField.onBlur}
             />
+            {durationError ? (
+              <p className="scene-meta" data-testid="timeline-inspector-duration-error">
+                {durationError}
+              </p>
+            ) : null}
           </label>
           <div className="timeline-inspector__meta-grid">
             <div>
@@ -857,7 +1042,7 @@ export function TimelineInspector({
                   Override
                 </button>
               </div>
-              {showProjectStyle ? <p className="scene-meta">{project.global_prompt || "No project style prompt set."}</p> : null}
+              {showProjectStyle ? <p className="scene-meta">{(project as any).visual_style || project.global_prompt || "No project visual style set."}</p> : null}
             </div>
             <div id="timeline-focus-preflight" data-testid="timeline-preflight-status">
               <strong>Preflight</strong>
@@ -893,7 +1078,7 @@ export function TimelineInspector({
               <fieldset className="field" data-testid="timeline-cd-review-cadence">
                 <legend>
                   Review
-                  <HelpTip text="Automatic picks a review pace from the scene. 3 seconds is for fast action. 5 seconds is for slower shots. Every batch reviews once the shot finishes." />
+                  <HelpTip text="Automatic reviews the full approved shot (up to about 15 seconds) so early and mid-shot events carry into the next generation. 3 or 5 seconds reviews only the end of the shot. Every batch also reviews the full shot once it finishes." />
                 </legend>
                 {(
                   [
@@ -1008,7 +1193,7 @@ export function TimelineInspector({
                       .then(onRefresh);
                   }}
                 >
-                  Don’t use this continuation
+                  Donâ€™t use this continuation
                 </button>
               ) : null}
               <label className="field">
@@ -1034,7 +1219,11 @@ export function TimelineInspector({
               {cdPolicy?.showDebugState && latestPacket ? (
                 <p className="scene-meta" data-testid="timeline-cd-debug">
                   Review {latestPacket.availability}
-                  {latestPacket.reason ? ` · ${latestPacket.reason}` : ""}
+                  {latestPacket.reason ? ` Â· ${latestPacket.reason}` : ""}
+                  {latestPacket.source?.reviewCadence ? ` Â· ${latestPacket.source.reviewCadence}` : ""}
+                  {latestPacket.extras?.reviewWindowKind
+                    ? ` Â· ${String(latestPacket.extras.reviewWindowKind)}`
+                    : ""}
                 </p>
               ) : null}
             </div>
@@ -1060,14 +1249,31 @@ export function TimelineInspector({
               </label>
             ) : (
               <p className="scene-meta" data-testid="timeline-continuity-local-lock">
-                Auto Continuity is on. Adept uses the last 5 seconds of the previous shot — or the whole shot if it is shorter.
+                Auto Continuity is on. Adept uses the last 5 seconds of the previous shot â€” or the whole shot if it is shorter.
               </p>
+            )}
+            {(latestExtendSegment || longFormContinuity) && (
+              <div className="timeline-inspector__extend-status" data-testid="timeline-extend-status">
+                <strong>Next shot</strong>
+                {latestExtendSegment ? (
+                  <p className="scene-meta" data-testid="timeline-extend-segment-status">
+                    {extendStatusLabel(latestExtendSegment.status)}
+                    {latestExtendSegment.prompt ? ` Â· â€œ${latestExtendSegment.prompt}â€` : null}
+                  </p>
+                ) : null}
+                {longFormContinuity?.storyState ? (
+                  <p className="scene-meta" data-testid="timeline-extend-story-state">
+                    {longFormContinuity.stale ? "Scene state needs refresh â€” " : ""}
+                    {longFormContinuity.storyState}
+                  </p>
+                ) : null}
+              </div>
             )}
           </InspectorAccordion>
 
-          <InspectorAccordion title="Re-Take" testId="timeline-inspector-retake">
+          <InspectorAccordion title="Takes" testId="timeline-inspector-retake">
             <p className="scene-meta">
-              A new take keeps the scene, matching, and original intent. Your note is the change — not a rewrite.
+              A new take remakes the whole shot. To change only a part of the video, use Re-Take on the Preview Monitor.
             </p>
             {staleDownstream.length > 0 ? (
               <div className="timeline-inspector__stale" data-testid="timeline-downstream-stale">
@@ -1149,26 +1355,46 @@ export function TimelineInspector({
               </select>
             </label>
           ) : null}
+          <TimedPromptReferenceBindingsEditor
+            compact
+            projectId={project.id}
+            value={hydrateTimedPromptNameBindings({
+              nameBindings: selectedPrompt.reference_name_bindings,
+              bindingIds: selectedPrompt.reference_binding_ids,
+              bindings,
+            })}
+            bindings={bindings}
+            onChange={(rows, error) => {
+              setTokenError(error);
+              if (error) return;
+              void updatePrompt(
+                selectedPrompt,
+                {
+                  reference_name_bindings: rows,
+                  reference_binding_ids: bindingIdsFromNameBindings(rows),
+                },
+                { refresh: false },
+              );
+            }}
+          />
+          {tokenError ? (
+            <p className="scene-meta" data-testid="timeline-reference-type-error">
+              {tokenError}
+            </p>
+          ) : null}
           <label className="field">
-            <span>Instruction</span>
-            <PromptReferenceField
-              text={promptSegField.value}
-              bindingIds={selectedPrompt.reference_binding_ids || []}
-              bindings={bindings}
-              maxImages={selectedGenerator?.maximumReferenceImages}
-              maxVideos={selectedGenerator?.maximumReferenceVideos}
-              onTextChange={(next) => promptSegField.onChange(next)}
-              onTextFocus={promptSegField.onFocus}
-              onTextBlur={promptSegField.onBlur}
-              onBindingsChange={(ids) => void updatePrompt(selectedPrompt, { reference_binding_ids: ids })}
-              onReject={setTokenError}
-              ensureBinding={ensureBinding}
+            <span>Prompt (Timed Prompt / Input Text)</span>
+            <textarea
+              data-testid="timeline-prompt-instruction"
+              aria-label="Timed Prompt"
+              value={promptSegField.value}
+              onChange={(e) => promptSegField.onChange(e.target.value)}
+              onFocus={promptSegField.onFocus}
+              onBlur={promptSegField.onBlur}
             />
-            {tokenError ? (
-              <p className="scene-meta" data-testid="timeline-reference-type-error">
-                {tokenError}
-              </p>
-            ) : null}
+            <p className="scene-meta" data-testid="timed-prompt-authority-hint">
+              Canonical H3 Input Text. Autosaves to the same timeline store as the Timed Prompt editor.
+            </p>
             {imageRefBlocked || videoRefBlocked ? (
               <p className="scene-meta" data-testid="prompt-ref-capability-warning">
                 {videoRefBlocked
@@ -1386,6 +1612,56 @@ export function TimelineInspector({
               }
             />
           </label>
+          {isMiniMaxH3Generator(selectedGenerator?.id) && (
+            <label className="field" data-testid="timeline-batch-resolution">
+              <span>
+                {t("resolutionLabel")}
+                <HelpTip text={t("resolutionTip")} />
+              </span>
+              <select
+                value={
+                  selectedBatch.h3Resolution?.mode === "manual"
+                    ? String(selectedBatch.h3Resolution.megapixels)
+                    : ""
+                }
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === "") {
+                    void updateBatch(selectedBatch, {
+                      h3Resolution: {
+                        mode: "auto",
+                        megapixels: draftMode
+                          ? H3_AUTO_MEGAPIXEL_FAST
+                          : H3_AUTO_MEGAPIXEL_QUALITY,
+                      },
+                    });
+                  } else {
+                    void updateBatch(selectedBatch, {
+                      h3Resolution: { mode: "manual", megapixels: Number(value) },
+                    });
+                  }
+                }}
+              >
+                <option value="">Auto</option>
+                {H3_MEGAPIXEL_GRID.map(([mp, dims]) => (
+                  <option key={mp} value={String(mp)}>
+                    {formatH3Megapixels(mp)} · {dims[0]}×{dims[1]}
+                  </option>
+                ))}
+              </select>
+              {selectedBatch.h3Resolution?.mode !== "manual" ? (
+                (() => {
+                  const canvas = resolveH3TimelineCanvas(selectedBatch.h3Resolution, draftMode);
+                  const modeLabel = draftMode ? "Fast" : "Quality";
+                  return (
+                    <p className="scene-meta" data-testid="timeline-batch-resolution-auto-dims">
+                      Auto · {canvas.width}×{canvas.height} ({modeLabel})
+                    </p>
+                  );
+                })()
+              ) : null}
+            </label>
+          )}
           <label className="field">
             <span>Prompt</span>
             <textarea
@@ -1431,8 +1707,13 @@ export function TimelineInspector({
                   </option>
                 ))}
             </select>
-            <HelpTip text="Guide frame for this batch. With MiniMax H3 Image-to-Video, this picture shapes the motion. Text-to-video keeps it as a planning note only." />
+            <HelpTip text="Opening picture for this shot. Local generators treat the shot as Reference-to-Video: characters, place, and the previous take travel with it. They do not run as plain text-to-video or as a single start-frame image-to-video. Leave empty to continue from the previous take." />
           </label>
+          {!selectedBatch.sourceAnchors.find((a) => a.kind === "image")?.assetId ? (
+            <p className="scene-meta" data-testid="timeline-start-image-continuity-note">
+              No start picture selected. If the previous shot is matched, this one begins from that last frame.
+            </p>
+          ) : null}
           <label className="field">
             <span>Generator</span>
             <select
@@ -1446,10 +1727,9 @@ export function TimelineInspector({
                   key={g.id}
                   value={g.id}
                   disabled={!g.executable}
-                  title={g.executable ? g.notes : `${g.capabilityLabel || "Unavailable"} — ${g.notes || "not ready"}`}
+                  title={g.disabledReason || g.notes || g.readiness || g.capabilityLabel}
                 >
-                  {g.label}
-                  {g.capabilityLabel && g.capabilityLabel !== "Certified" ? ` (${g.capabilityLabel})` : ""}
+                  {creatorGeneratorLine(g)}
                 </option>
               ))}
               {/* Legacy/current value not in the registry stays selectable so
@@ -1463,7 +1743,7 @@ export function TimelineInspector({
             </select>
           </label>
           <label className="field">
-            <span>Draft Mode</span>
+            <span>{fastQuality ? "Fast" : "Draft Mode"}</span>
             <input
               type="checkbox"
               data-testid="timeline-draft-mode"
@@ -1471,11 +1751,32 @@ export function TimelineInspector({
               disabled={!draftAvailable}
               onChange={(e) => setDraftMode(e.target.checked)}
             />
-            <HelpTip text={draftPathwayCopy(draftPathway)} />
+            <HelpTip text={draftPathwayCopy(draftPathway, selectedGenerator)} />
           </label>
           <p className="scene-meta" data-testid="timeline-draft-pathway-copy">
-            {draftPathwayCopy(draftPathway)}
+            {draftPathwayCopy(draftPathway, selectedGenerator)}
           </p>
+          {/* Audio provenance: show whether the generator will produce native
+              audio or whether Timeline tracks own the audio path. */}
+          <div className="field" data-testid="timeline-batch-audio-provenance">
+            <span>Audio</span>
+            <span className="scene-meta">
+              {(() => {
+                const hasTimelineAudio =
+                  Boolean((timeline?.audio_clips || []).length) ||
+                  Boolean((timeline?.sfx_clips || []).length) ||
+                  Boolean(timeline?.lipsync?.tracks?.some((t) => t.enabled));
+                const supportsNative = Boolean(selectedGenerator?.audio_generation);
+                if (hasTimelineAudio) {
+                  return "Audio: Timeline (explicit tracks)";
+                }
+                if (supportsNative) {
+                  return "Audio: Generator Native";
+                }
+                return "Audio: None (generator has no native audio)";
+              })()}
+            </span>
+          </div>
           {videoRefBlocked ? (
             <p className="scene-meta" data-testid="timeline-video-ref-blocked">
               Selected model does not support video reference. The * video name stays, but this model will not use it.
@@ -1499,6 +1800,12 @@ export function TimelineInspector({
               type="button"
               className="primary"
               data-testid="timeline-generate-draft"
+              disabled={selectedGenerator?.executable !== true}
+              title={
+                selectedGenerator?.executable !== true
+                  ? `Generate is not available â€” ${selectedGenerator?.readiness || "generator not ready"}`
+                  : undefined
+              }
               onClick={() =>
                 void api
                   .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, {
@@ -1511,12 +1818,18 @@ export function TimelineInspector({
                   })
               }
             >
-              {draftAvailable ? "Generate Draft" : "Generate Final"}
+              {draftAvailable ? (fastQuality ? "Generate Fast" : "Generate Draft") : "Generate Final"}
             </button>
             {draftAvailable ? (
               <button
                 type="button"
                 data-testid="timeline-generate-final"
+                disabled={selectedGenerator?.executable !== true}
+                title={
+                  selectedGenerator?.executable !== true
+                    ? `Generate is not available â€” ${selectedGenerator?.readiness || "generator not ready"}`
+                    : undefined
+                }
                 onClick={() =>
                   void api
                     .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
@@ -1527,7 +1840,7 @@ export function TimelineInspector({
                     })
                 }
               >
-                Generate Final
+                {fastQuality ? "Generate Quality" : "Generate Final"}
               </button>
             ) : null}
           </div>
@@ -1555,7 +1868,7 @@ export function TimelineInspector({
                 ) : null}
                 {generating && !canStop ? (
                   <p className="scene-meta" data-testid="timeline-cancel-unavailable">
-                    Provider is rendering — cancellation unavailable
+                    Provider is rendering â€” cancellation unavailable
                   </p>
                 ) : null}
                 {isDraftTake && latest ? (
@@ -1565,7 +1878,7 @@ export function TimelineInspector({
                       className="primary"
                       data-testid="timeline-promote-final"
                       disabled={videoRefBlocked}
-                      title={promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false)}
+                      title={promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false, selectedGenerator)}
                       onClick={() =>
                         void api
                           .directorTimelineGenerateBatch(project.id, scene.id, selectedBatch.id, { draftMode: false })
@@ -1576,7 +1889,7 @@ export function TimelineInspector({
                           })
                       }
                     >
-                      Promote to Final
+                      {fastQuality ? "Generate Quality" : "Promote to Final"}
                     </button>
                     <button
                       type="button"
@@ -1589,7 +1902,7 @@ export function TimelineInspector({
                     >
                       Reject
                     </button>
-                    <p className="scene-meta">{promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false)}</p>
+                    <p className="scene-meta">{promoteCopy(selectedGenerator?.finalRequiresNewGeneration !== false, selectedGenerator)}</p>
                   </div>
                 ) : null}
               </>
@@ -1652,8 +1965,13 @@ export function TimelineInspector({
           >
             New take
           </button>
-          {selectedBatch.candidateVersions.length > 1 ? (
+          {selectedBatch.candidateVersions.length > 1
+          || selectedBatch.status === "CandidateReady"
+          || selectedBatch.status === "Failed" ? (
             <div className="timeline-inspector__takes" data-testid="timeline-batch-takes">
+              {selectedBatch.status === "CandidateReady" ? (
+                <p className="scene-meta">Use this take to place it on the scene.</p>
+              ) : null}
               {selectedBatch.candidateVersions.map((cand, index) => (
                 <button
                   key={cand.id}
@@ -1665,7 +1983,7 @@ export function TimelineInspector({
                   }
                 >
                   {cand.label || `Take ${String.fromCharCode(65 + index)}`}
-                  {cand.approved ? " (active)" : ""}
+                  {cand.approved ? " (active)" : selectedBatch.status === "CandidateReady" ? " â€” use this take" : ""}
                 </button>
               ))}
             </div>
@@ -1681,6 +1999,9 @@ export function TimelineInspector({
           <label className="field"><span>Start</span><input value={formatDurationSeconds(selectedRepair.repair.start)} readOnly /></label>
           <label className="field"><span>Length</span><input value={formatDurationSeconds(selectedRepair.repair.length)} readOnly /></label>
           <div className="scene-meta">Status: {selectedRepair.repair.status}</div>
+          <p className="scene-meta" data-testid="timeline-inspector-retake-status">
+            Use Re-Take on the Preview Monitor to change a video range. Shared Library assets stay in the project.
+          </p>
         </div>
       ) : null}
 
@@ -1868,10 +2189,11 @@ export function TimelineInspector({
         !timeline ? (
         <div className="timeline-inspector__stack">
           <p className="scene-meta" data-testid="timeline-inspector-loading">
-            Loading clip…
+            Loading clipâ€¦
           </p>
         </div>
       ) : null}
     </section>
   );
 }
+
