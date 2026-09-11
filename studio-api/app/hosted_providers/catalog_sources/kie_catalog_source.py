@@ -92,6 +92,24 @@ _YAML_BLOCK_RE = re.compile(r"```yaml\s*\n(?P<yaml>.*?)```", re.DOTALL)
 _CONTROL_PROPS = {"callBackUrl", "callback_url", "enableFallback", "webhookUrl"}
 
 
+def _looks_bogus(body: str | None) -> bool:
+    """Detect a bogus doc-page body (CDN challenge / interstitial / error page).
+
+    Kie doc pages are served as markdown (llms.txt convention) and start with
+    ``# Title``. An HTML body means the real markdown was not served — the
+    fetch must be retried, and if it stays bogus the page counts as FAILED
+    (never silently as "nospec", which would make a partial census look
+    complete). Checked tight — leading markup or a challenge title in the
+    first KB — so legit prose pages with HTML snippets in examples are never
+    misclassified.
+    """
+    stripped = (body or "").lstrip()
+    if not stripped:
+        return True
+    head = stripped[:4096].lower()
+    return stripped.startswith("<") or "just a moment" in head or "challenge-platform" in head
+
+
 def _classify_family(text: str) -> str:
     low = text.lower()
     for token, family in _FAMILY_TOKENS:
@@ -494,17 +512,25 @@ async def fetch_kie_catalog(
             semaphore = asyncio.Semaphore(max_concurrency)
 
             async def _fetch_page(entry: dict[str, str]) -> tuple[list[CatalogVideoRow], str]:
-                """Return (rows, outcome): ok | nospec | failed (after one retry)."""
+                """Return (rows, outcome): ok | nospec | failed (after retries).
+
+                A fetched body that looks like an HTML challenge/interstitial
+                is retried like a network error; a page that stays bogus is
+                ``failed`` so the census is honestly marked incomplete.
+                """
                 async with semaphore:
                     text: str | None = None
-                    for _attempt in range(2):
+                    for _attempt in range(3):
                         try:
                             resp = await client.get(entry["url"])
                         except Exception:
                             continue
-                        if resp.status_code < 400:
-                            text = resp.text
-                            break
+                        if resp.status_code >= 400:
+                            continue
+                        if _looks_bogus(resp.text):
+                            continue
+                        text = resp.text
+                        break
                     if text is None:
                         return [], "failed"
                     rows = parse_kie_market_page(entry, text)

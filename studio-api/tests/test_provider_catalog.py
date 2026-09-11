@@ -21,6 +21,9 @@ from app.hosted_providers.catalog_sources.wavespeed_catalog_source import (
     parse_wavespeed_models,
 )
 from app.hosted_providers.catalog_sources.kie_catalog_source import (
+    LLMS_INDEX_URL,
+    _looks_bogus,
+    fetch_kie_catalog,
     parse_kie_market_index,
     parse_kie_market_page,
 )
@@ -184,6 +187,103 @@ def test_kie_page_parse_market_shape():
 
 def test_kie_page_without_spec_returns_empty():
     assert parse_kie_market_page({"slug": "x", "title": "y"}, "prose only, no yaml") == []
+
+
+# ---------------------------------------------------------------------------
+# Kie bogus-body hardening (regression: 2026-09-11 idempotency proof found a
+# silent partial census — interstitial bodies counted as "nospec")
+# ---------------------------------------------------------------------------
+
+def test_kie_looks_bogus_detection():
+    assert _looks_bogus(None) is True
+    assert _looks_bogus("") is True
+    assert _looks_bogus("   \n  ") is True
+    assert _looks_bogus("<!DOCTYPE html><html><body>error</body></html>") is True
+    assert _looks_bogus("<html><head><title>Just a moment...</title></head></html>") is True
+    assert _looks_bogus("\n\n  <html>challenge-platform</html>") is True
+    # Legit markdown doc pages — never bogus.
+    assert _looks_bogus(KIE_PAGE_FIXTURE) is False
+    assert _looks_bogus("# Runway API Quickstart\n\nProse-only page, no spec.") is False
+    # Prose with an HTML snippet mid-body is still legit markdown.
+    assert _looks_bogus("# Guide\n\nEmbed <html><body>x</body></html> in your page.") is False
+
+
+class _StubResponse:
+    def __init__(self, text: str, status_code: int = 200):
+        self.text = text
+        self.status_code = status_code
+
+
+class _StubClient:
+    """Minimal httpx.AsyncClient stand-in: serves the index, delegates pages."""
+
+    def __init__(self, index_body: str, page_handler):
+        self._index_body = index_body
+        self._page_handler = page_handler
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def get(self, url: str):
+        if url == LLMS_INDEX_URL:
+            return _StubResponse(self._index_body)
+        return self._page_handler(url)
+
+
+_ONE_PAGE_INDEX = (
+    "--- Market [MiniMax H3 Text-to-Video]"
+    "(https://docs.kie.ai/market/minimax-h3/text-to-video.md)\n"
+)
+_BOGUS_HTML = "<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>cf</body></html>"
+
+
+def test_kie_fetch_retries_bogus_body_then_succeeds(monkeypatch):
+    import app.hosted_providers.catalog_sources.kie_catalog_source as kie_mod
+
+    calls = {"n": 0}
+
+    def page_handler(url: str):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            return _StubResponse(_BOGUS_HTML)
+        return _StubResponse(KIE_PAGE_FIXTURE)
+
+    monkeypatch.setattr(
+        kie_mod.httpx, "AsyncClient", lambda *a, **k: _StubClient(_ONE_PAGE_INDEX, page_handler)
+    )
+    import asyncio
+
+    result = asyncio.run(fetch_kie_catalog())
+    assert result["ok"] is True
+    assert calls["n"] == 3  # two bogus bodies retried, third served the real page
+    assert len(result["rows"]) == 1
+    assert result["rows"][0].endpoint == "minimax-h3/t2v"
+    assert result["complete"] is True
+    assert result["fetchFailures"] == []
+
+
+def test_kie_fetch_persistent_bogus_marks_census_incomplete(monkeypatch):
+    import app.hosted_providers.catalog_sources.kie_catalog_source as kie_mod
+
+    def page_handler(url: str):
+        return _StubResponse(_BOGUS_HTML)
+
+    monkeypatch.setattr(
+        kie_mod.httpx, "AsyncClient", lambda *a, **k: _StubClient(_ONE_PAGE_INDEX, page_handler)
+    )
+    import asyncio
+
+    result = asyncio.run(fetch_kie_catalog())
+    assert result["ok"] is True
+    assert result["rows"] == []
+    # Honestly incomplete: the page is a fetch failure, NOT a legit nospec —
+    # catalog_sync must not trust removals from this partial census.
+    assert result["complete"] is False
+    assert result["fetchFailures"] == ["https://docs.kie.ai/market/minimax-h3/text-to-video.md"]
+    assert result["unparsed"] == 0
 
 
 # ---------------------------------------------------------------------------
