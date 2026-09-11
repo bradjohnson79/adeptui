@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..hosted_providers import video_registry
 from .contracts import CapabilityLabel, LocalLifecycle, ModelDescriptor, Modality
 
 # Catalog-only families with no certified workflow — hide from ordinary pickers.
@@ -99,158 +100,11 @@ _CATALOG: list[ModelDescriptor] = [
         gpu=True,
         executable=True,
     ),
-    # Video — local
-    _desc(
-        id="ltx-local",
-        modality="video",
-        label="LTX 2.3 (Local)",
-        locality="local",
-        provider_id="comfy",
-        capability="Certified",
-        lifecycle="Installed",
-        supports=["text_to_video", "image_to_video", "continuation"],
-        vram=22.0,
-        gpu=True,
-        executable=True,
-    ),
-    _desc(
-        id="ltx-2.5-full",
-        modality="video",
-        label="LTX 2.5 Full",
-        locality="local",
-        provider_id="comfy",
-        capability="Testing",
-        lifecycle="Installed",
-        supports=["text_to_video", "image_to_video", "continuation", "native_multishot", "audio_generation", "auto_duration", "fast_generation"],
-        vram=24.0,
-        gpu=True,
-        executable=True,
-    ),
-    _desc(
-        id="ltx-2.5-distilled",
-        modality="video",
-        label="LTX 2.5 Distilled",
-        locality="local",
-        provider_id="comfy",
-        capability="Testing",
-        lifecycle="Installed",
-        supports=["text_to_video", "image_to_video", "continuation", "native_multishot", "audio_generation", "auto_duration", "fast_generation"],
-        vram=16.0,
-        gpu=True,
-        executable=True,
-    ),
-    _desc(
-        id="ltx-2.5-comfy",
-        modality="video",
-        label="LTX 2.5 Comfy INT8",
-        locality="local",
-        provider_id="comfy",
-        capability="Testing",
-        lifecycle="Installed",
-        supports=["text_to_video", "image_to_video", "continuation", "audio_generation"],
-        vram=12.0,
-        gpu=True,
-        executable=True,
-    ),
-    _desc(
-        id="wan-local",
-        modality="video",
-        label="WAN 2.2 I2V (Local)",
-        locality="local",
-        provider_id="comfy",
-        capability="Certified",
-        lifecycle="Installed",
-        supports=["image_to_video", "continuation", "start_end_frame"],
-        vram=14.0,
-        gpu=True,
-        executable=True,
-    ),
-    _desc(
-        id="hunyuan-video-1.5-local",
-        modality="video",
-        label="HunyuanVideo 1.5 (Local)",
-        locality="local",
-        provider_id="comfy",
-        capability="Requires Setup",
-        lifecycle=None,
-        supports=["text_to_video", "image_to_video", "timeline_batch"],
-        does_not_support=["start_end_frame"],
-        vram=24.0,
-        gpu=True,
-        executable=False,
-    ),
-    _desc(
-        id="hunyuan-video-13b-local",
-        modality="video",
-        label="HunyuanVideo 13B (Local Advanced)",
-        locality="local",
-        provider_id="comfy",
-        capability="Requires Setup",
-        lifecycle=None,
-        supports=["text_to_video", "image_to_video", "timeline_batch"],
-        does_not_support=["start_end_frame"],
-        vram=32.0,
-        gpu=True,
-        executable=False,
-    ),
-    _desc(
-        id="minimax-h3",
-        modality="video",
-        label="MiniMax H3",
-        locality="local",
-        provider_id=None,
-        capability="Requires Setup",
-        lifecycle=None,
-        supports=["text_to_video", "image_to_video", "start_end_frame", "native_audio"],
-        does_not_support=["native_three_keyframe", "three_frame_uses_adept_segmented_assembly"],
-        gpu=True,
-        executable=False,
-    ),
-    # Video — hosted
-    _desc(
-        id="kling-kie",
-        modality="video",
-        label="Kling (Kie)",
-        locality="hosted",
-        provider_id="kie",
-        capability="Testing",
-        supports=["text_to_video", "image_to_video"],
-        gpu=False,
-        executable=False,
-    ),
-    _desc(
-        id="kling-fal",
-        modality="video",
-        label="Kling (fal.ai)",
-        locality="hosted",
-        provider_id="fal",
-        capability="Unavailable",
-        supports=["text_to_video", "image_to_video"],
-        gpu=False,
-        executable=False,
-    ),
-    _desc(
-        id="seedance-fal",
-        modality="video",
-        label="Seedance (fal.ai)",
-        locality="hosted",
-        provider_id="fal",
-        capability="Unavailable",
-        supports=["text_to_video", "image_to_video"],
-        gpu=False,
-        executable=False,
-    ),
-    _desc(
-        id="veo-fal",
-        modality="video",
-        label="Veo (fal.ai)",
-        locality="hosted",
-        provider_id="fal",
-        capability="Unavailable",
-        supports=["text_to_video"],
-        gpu=False,
-        executable=False,
-    ),
+    # Video — derived from the canonical video registry
+    # (app.hosted_providers.video_registry.video_model_descriptors). Same list
+    # position, byte-identical to the former literals (parity-tested in
+    # tests/test_video_registry_parity.py). Image/LLM/audio rows stay static.
+    *[_desc(**row) for row in video_registry.video_model_descriptors()],
     # Image — local
     _desc(
         id="qwen-image-edit-2509-local",
@@ -574,6 +428,17 @@ _CATALOG: list[ModelDescriptor] = [
         executable=False,
     ),
     _desc(
+        id="gpt-image-2-fal",
+        modality="image",
+        label="GPT Image 2 (fal.ai)",
+        locality="hosted",
+        provider_id="fal",
+        capability="Available",
+        supports=["text_to_image", "edit", "reference_conditioning"],
+        gpu=False,
+        executable=True,
+    ),
+    _desc(
         id="seedream-kie",
         modality="image",
         label="Seedream (Kie)",
@@ -828,17 +693,21 @@ _IMAGE_VERIFY_CACHE: dict[str, tuple[float, str, bool]] = {}
 _IMAGE_VERIFY_CACHE_TTL_SEC = 5.0
 
 
+def invalidate_image_verify_cache() -> None:
+    """Drop live image install probes so the next list_models() re-verifies."""
+    _IMAGE_VERIFY_CACHE.clear()
+
+
 def _apply_setup_status(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
     # Derive capability/executable from runtime status WITHOUT calling
     # build_status(), which probes ALL components — including slow audio/avatar
     # subprocess probes (60s torch import) that block the image route AND hang
     # list_models() (which calls this on every modality). Image-modality
     # components verify with fast file checks, so they are live-verified here
-    # (fresh, fixes stale persisted entries like krea2). Non-image modalities
-    # read persisted setup state (instant file read); they are overridden by
-    # modality-specific refresh paths (e.g. _refresh_audio_executable) where
-    # relevant. On any exception we keep the static catalog (no override) so
-    # an unreachable runtime never silently downgrades a Certified model.
+    # (fresh, fixes stale persisted entries like krea2). Video uses the same
+    # live file check. Other non-image modalities read persisted setup state.
+    # On any exception we keep the static catalog (no override) so an
+    # unreachable runtime never silently downgrades a Certified model.
     try:
         from ..setup.state import load_state
     except Exception:
@@ -904,10 +773,24 @@ def _apply_setup_status(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
         if not component_id:
             updated.append(model)
             continue
-        if getattr(model, "modality", None) == "image":
-            result = _image_status(component_id)
+        ids = (component_id,) if isinstance(component_id, str) else tuple(component_id)
+        if getattr(model, "modality", None) in {"image", "video"}:
+            parts = [_image_status(cid) for cid in ids]
+            if any(part is None for part in parts):
+                result = None
+            else:
+                statuses = [part[0] for part in parts if part]
+                certified = all(bool(part[1]) for part in parts if part)
+                if all(status == "ready" for status in statuses):
+                    result = ("ready", certified)
+                elif any(status == "error" for status in statuses):
+                    result = ("error", False)
+                elif any(status == "checking" for status in statuses):
+                    result = ("checking", False)
+                else:
+                    result = ("not_installed", False)
         else:
-            result = _persisted_status(component_id)
+            result = _persisted_status(ids[0]) if ids else None
         if result is None:
             # Keep static catalog (don't override) when verification/persisted
             # state is unavailable — never silently downgrade a Certified model.
@@ -977,56 +860,13 @@ def _docker_dock_models() -> list[ModelDescriptor]:
 
 
 def _apply_private_owner_h3(models: list[ModelDescriptor]) -> list[ModelDescriptor]:
-    """Stamp the MiniMax H3 dock entry as Private Local · Experimental when the
-    private owner Route A path is ready; otherwise keep it disabled."""
-    try:
-        from ..minimax_h3.private_access import (
-            private_local_enabled,
-            public_creator_enabled,
-        )
-        from ..minimax_h3.route_a_adapter import RouteARuntimeAdapter
-    except Exception:
-        return models
-    if not private_local_enabled() or public_creator_enabled():
-        return models
-    ready = False
-    try:
-        ready = bool(RouteARuntimeAdapter().readiness().get("ready"))
-    except Exception:
-        ready = False
-    updated: list[ModelDescriptor] = []
-    for model in models:
-        if model.id != "minimax-h3":
-            updated.append(model)
-            continue
-        if ready:
-            updated.append(
-                model.model_copy(
-                    update={
-                        "capabilityLabel": "Testing",
-                        "lifecycle": "Installed",
-                        "executable": True,
-                        "supports": ["text_to_video", "native_audio"],
-                        "doesNotSupport": [
-                            "image_to_video",
-                            "native_three_keyframe",
-                            "three_frame_uses_adept_segmented_assembly",
-                            "start_end_frame",
-                        ],
-                    }
-                )
-            )
-        else:
-            updated.append(
-                model.model_copy(
-                    update={
-                        "capabilityLabel": "Requires Setup",
-                        "lifecycle": None,
-                        "executable": False,
-                    }
-                )
-            )
-    return updated
+    """Do not stamp Route A :8192 onto Timeline MiniMax product IDs.
+
+    Timeline MiniMax is Adept Comfy :8188 Reference-to-Video. Route A T2V/I2V
+    is a separate supervisor-owned adapter. Mixing them made Ready H3 look
+    like Text-to-Video and marked it Requires Setup when :8192 was down.
+    """
+    return models
 
 
 def _ollama_dock_models() -> list[ModelDescriptor]:
@@ -1132,7 +972,8 @@ _REGISTRY_WORKFLOW_BY_MODEL: dict[str, tuple[str, str]] = {
     "ltx-2.5-distilled": ("video", "ltx_25.t2v"),
     "ltx-2.5-comfy": ("video", "ltx_25.i2v"),
     "kling-fal": ("video", "fal.kling"),
-    "seedance-fal": ("video", "fal.seedance"),
+    "seedance-2.0": ("video", "fal.seedance-2.0"),
+    "seedance-2.5": ("video", "fal.seedance-2.5"),
     "veo-fal": ("video", "fal.veo"),
     "illustrious-local": ("image", "illustrious.txt2img"),
 }
@@ -1146,6 +987,7 @@ _NEVER_DEFAULT_ELIGIBLE = frozenset(
         "krea2-medium-fal",
         "krea2-large-fal",
         "minimax-h3",
+        "minimax-h3-i2v-local",
         "qwen-image-edit-2509-local",
     }
 )
@@ -1253,6 +1095,9 @@ def list_models(modality: Modality | None = None) -> list[ModelDescriptor]:
     stamped = _apply_private_owner_h3(stamped)
     stamped = _apply_certified_registry_honesty(stamped)
     stamped = _stamp_default_eligible(stamped)
+    from .generator_authority import apply_authority_to_descriptors
+
+    stamped = apply_authority_to_descriptors(stamped)
     if modality is None:
         return stamped
     return [m for m in stamped if m.modality == modality]
@@ -1313,10 +1158,12 @@ def filter_for_action(modality: Modality, action: str) -> list[dict[str, Any]]:
     """Return models for modality annotated with action compatibility."""
     tags = _ACTION_TAGS.get(action, {action})
     out: list[dict[str, Any]] = []
+    from .generator_authority import apply_authority_to_models
+
     for model in list_models(modality):
         action_match = not model.supports or bool(tags & set(model.supports))
         item = model.model_dump()
         item["actionMatch"] = action_match
         item["action"] = action
         out.append(item)
-    return out
+    return apply_authority_to_models(out)
