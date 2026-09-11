@@ -151,6 +151,50 @@ def resolve(body: ResolveBody):
     return {**resolution, "codirector": describe_for_codirector(resolution)}
 
 
+class CatalogReviewBody(BaseModel):
+    action: Literal["approved", "hidden", "pending_review"]
+
+
+class CatalogRefreshBody(BaseModel):
+    providers: Optional[list[str]] = None
+
+
+@router.get("/catalog")
+def get_provider_catalog(provider: Optional[str] = None, reviewStatus: Optional[str] = None):
+    """Stored provider video catalog + review flags. Reads disk only."""
+    from .catalog_sync import list_catalog
+
+    return {"ok": True, **list_catalog(provider=provider, review_status=reviewStatus), "mock": False}
+
+
+@router.post("/catalog/refresh")
+async def refresh_provider_catalog(body: Optional[CatalogRefreshBody] = None):
+    """Admin/developer: re-enumerate all keyed provider video catalogs.
+
+    Read-only against providers (catalog/schema reads only — never a
+    generation call). Newly discovered endpoints are flagged
+    ``pending_review`` and are never auto-exposed to creators.
+    """
+    from .catalog_sync import refresh_all
+
+    return await refresh_all(providers=(body.providers if body else None))
+
+
+@router.post("/catalog/review/{row_id:path}")
+def review_catalog_endpoint(row_id: str, body: CatalogReviewBody):
+    """Admin review decision for one catalog row (approve/hide).
+
+    Approval makes the row ELIGIBLE for registry merge; it never exposes
+    the endpoint to creators by itself.
+    """
+    from .catalog_sync import review_endpoint
+
+    row = review_endpoint(row_id, body.action)
+    if row is None:
+        raise HTTPException(404, f"Unknown catalog row: {row_id}")
+    return {"ok": True, "row": row, "mock": False}
+
+
 @router.get("/{provider_id}")
 def get_provider(provider_id: str):
     from .registry import PROVIDERS
