@@ -1561,3 +1561,106 @@ def test_retry_does_not_duplicate_bindings(retry_db) -> None:
     assert first["binding_id"] == second["binding_id"]
     bindings = ref_repo.list_bindings(retry_db, "proj-retry", scope_type="scene", scope_id="scene-1")
     assert len(bindings) == 1
+
+
+# ---------------------------------------------------------------------------
+# Round-8 live regressions (Scene 3 re-run after round-7 repairs)
+# ---------------------------------------------------------------------------
+
+
+def test_compiled_action_dedupes_sentence_leading_a_merged_beat() -> None:
+    """Live Scene 3 round-8 defect: the LLM emitted the beam event twice —
+    once standalone ("Suddenly, a concentrated red energy beam blasts …
+    door.") and once as the LEAD sentence of a merged beat ("A concentrated
+    red energy beam blasts … door. Hot fragments and sparks burst …").
+    Whole-description beat dedup cannot catch that (the merged description
+    differs), so the compiled ACTION staged the beam sentence twice. The
+    compiler must drop the later duplicate sentence while keeping the merged
+    beat's remaining content."""
+    message = (
+        "The sealed door buckles inward. Suddenly, a concentrated red energy "
+        "beam blasts through from the opposite side, violently blowing a "
+        "large jagged hole through the door. Hot fragments and sparks burst "
+        "into the corridor."
+    )
+    llm_payload = {
+        "scene_type": "action_reveal",
+        "environment": "Venture Corridor",
+        "characters": [],
+        "props": [],
+        "dialogue": [],
+        "camera": {"shot_type": "tracking", "movement": "slow dolly"},
+        "mood": "menacing",
+        "beats": [
+            {"kind": "impact", "description": "The sealed door buckles inward."},
+            {
+                "kind": "impact",
+                "description": (
+                    "Suddenly, a concentrated red energy beam blasts through "
+                    "from the opposite side, violently blowing a large jagged "
+                    "hole through the door."
+                ),
+            },
+            {
+                "kind": "impact",
+                "description": (
+                    "A concentrated red energy beam blasts through from the "
+                    "opposite side, violently blowing a large jagged hole "
+                    "through the door. Hot fragments and sparks burst into "
+                    "the corridor."
+                ),
+            },
+        ],
+    }
+    understanding, source, _ = extract_scene_understanding(
+        message, llm_fn=lambda _s, _u: json.dumps(llm_payload)
+    )
+    assert source == "llm"
+    spec = parse_scene_intent(message, project_id="proj")
+    spec.director_intent = build_director_scene_intent(
+        spec, [], understanding=understanding, understanding_source=source
+    )
+    prompt = compile_generator_prompt(spec, [])
+    action = extract_prompt_section(prompt, "ACTION").lower()
+    assert action.count("a concentrated red energy beam blasts") == 1, action
+    # The merged beat's remaining content survives.
+    assert "hot fragments and sparks burst into the corridor" in action
+
+
+def test_explicit_hold_duration_survives_vague_llm_beat() -> None:
+    """Live Scene 3 round-8 defect: the LLM kept the hold event but weakened
+    the staged duration to a vague "a brief hold" — the one-second timing was
+    silently dropped from the compiled prompt. An explicit source duration is
+    hard continuity: the covering beat must stage the same duration, else the
+    event is uncovered and re-staged verbatim."""
+    message = (
+        "The cargo door buckles inward from a massive impact. "
+        "Hold for one second on the punched dent. "
+        "A second impact strikes the door."
+    )
+    llm_payload = {
+        "scene_type": "suspense",
+        "environment": "corridor",
+        "characters": [],
+        "props": [],
+        "dialogue": [],
+        "camera": {"shot_type": "wide", "movement": "static"},
+        "mood": "tense",
+        "beats": [
+            {
+                "kind": "impact",
+                "description": "The cargo door buckles inward from a massive impact.",
+            },
+            {"kind": "hold", "description": "A brief hold on the punched dent."},
+            {"kind": "impact", "description": "A second impact strikes the door."},
+        ],
+    }
+    understanding, source, _ = extract_scene_understanding(
+        message, llm_fn=lambda _s, _u: json.dumps(llm_payload)
+    )
+    assert source == "llm"
+    descriptions = [b.description.lower() for b in understanding.beats]
+    assert any(
+        "for one second" in d or "for a second" in d or "one-second" in d
+        for d in descriptions
+    ), descriptions

@@ -934,6 +934,58 @@ def _cluster_multiplicity_capacity(blob: str, shared: set[str]) -> int | None:
                 return None if unbounded else _MULTIPLICITY_COUNTS[match.group(1).lower()]
     return 0
 
+
+# An explicit source duration ("hold for one second") is hard continuity.
+_DURATION_SOURCE_RE = re.compile(
+    r"\bfor\s+(a|an|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\d+(?:\.\d+)?)\s*(second|seconds|moment|moments|beat|beats)\b",
+    re.I,
+)
+_COUNT_EQUIVALENTS = {
+    "a": "1",
+    "an": "1",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
+
+
+def _duration_realized(source_sentence: str, beat_text: str) -> bool:
+    """True when the covering beat preserves the source event's explicit
+    duration. A beat that keeps the event but weakens the duration to a vague
+    "a brief hold" silently drops the staged timing (live Scene 3 defect:
+    "hold for one second" lost). Accepts equivalent phrasings — "a second" ~
+    "one second" ~ "1 second", hyphenated "one-second". "a"/"an" require a
+    "for"/hyphen context so the ordinal "a second brutal impact" does not
+    masquerade as a duration."""
+    match = _DURATION_SOURCE_RE.search(source_sentence or "")
+    if not match:
+        return True
+    count = _COUNT_EQUIVALENTS.get(match.group(1).lower(), match.group(1).lower())
+    unit = match.group(2).lower().rstrip("s")
+    beat = (beat_text or "").lower()
+    equivalents = [word for word, digit in _COUNT_EQUIVALENTS.items() if digit == count]
+    if count not in equivalents:
+        equivalents.append(count)
+    for word in equivalents:
+        if word in ("a", "an"):
+            pattern = (
+                r"\bfor\s+" + word + r"\s+" + unit + r"s?\b|"
+                r"\b" + word + r"\s*-\s*" + unit + r"s?\b"
+            )
+        else:
+            pattern = r"\b" + re.escape(word) + r"\s*-?\s*" + unit + r"s?\b"
+        if re.search(pattern, beat):
+            return True
+    return False
+
 # Trailing participial consequence clauses (", sending a wave across the
 # arcade") stage their own on-screen event. The gerund maps to the finite
 # third-person form used when the clause is re-staged as its own beat.
@@ -1282,6 +1334,16 @@ def _coverage_backfill(understanding: SceneUnderstanding, message: str) -> Scene
 
             for i in sorted(cluster, key=_drop_priority)[: len(cluster) - cap]:
                 coverage[i] = None
+
+    # Explicit-duration preservation: a staged duration ("hold for one
+    # second") is hard continuity. A covering beat that kept the event but
+    # dropped/weakened the duration ("a brief hold") silently loses the
+    # timing — uncover the event so the backfill re-stages it verbatim.
+    for i, sentence in enumerate(events):
+        if coverage[i] is None:
+            continue
+        if not _duration_realized(sentence, beats[coverage[i]].description or ""):
+            coverage[i] = None
 
     # Consequence-clause coverage: a trailing participial result clause
     # (", sending a wave across the arcade") stages its own on-screen event.

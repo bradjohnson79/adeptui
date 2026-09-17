@@ -56,6 +56,43 @@ def _clean_constraint_line(line: str) -> str:
 _IMAGE_TOKEN_RE = re.compile(r"\bImage\s*\d+\b", re.I)
 _FROM_IMAGE_TOKEN_RE = re.compile(r"\s*\bfrom\s+Image\s*\d+\b", re.I)
 
+# Leading discourse markers/adverbs are staging flavour, not content — two
+# sentences differing only by one of these stage the same event.
+_ACTION_LEADING_MARKER_RE = re.compile(
+    r"^(?:suddenly|slowly|then|next|finally|meanwhile|afterwards?|gradually|"
+    r"abruptly|quietly|quickly|immediately|instantly)[,\s]+",
+    re.I,
+)
+
+
+def _dedupe_action_sentences(action: str) -> str:
+    """No sentence may be staged twice inside one ACTION block.
+
+    Beats are whole-description deduped upstream, but a merged beat can still
+    LEAD with a sentence another beat states verbatim ("A concentrated red
+    energy beam blasts … door. Hot fragments …") — the compiled prose then
+    stages the event twice (live Scene 3 defect, peer round-7). Drop later
+    duplicates after normalization (leading discourse markers, case,
+    whitespace); first occurrence wins. Sentences are compared per ACTION
+    block (each batch window dedupes independently); separators are
+    preserved. Very short sentences (<= 12 normalized chars, e.g. "Silence.")
+    are exempt, matching the E2E duplicate guard's tolerance.
+    """
+    seen: set[str] = set()
+    out: list[str] = []
+    pieces = re.split(r"(?<=[.!?])(\s+)", action or "")
+    for index in range(0, len(pieces), 2):
+        sentence = pieces[index]
+        separator = pieces[index + 1] if index + 1 < len(pieces) else ""
+        key = _ACTION_LEADING_MARKER_RE.sub("", sentence.strip().lower())
+        key = re.sub(r"\s+", " ", key).strip(" .")
+        if key and len(key) > 12 and key in seen:
+            continue  # drop the duplicate sentence and its separator
+        seen.add(key)
+        out.append(sentence)
+        out.append(separator)
+    return "".join(out).strip()
+
 
 def _sanitize_image_tokens(line: str, references: list[ResolvedReference]) -> str:
     """Rewrite creator-prose picture ordinals ("from Image 1", "Image 2") to
@@ -156,7 +193,7 @@ def _action_text(intent: DirectorSceneIntent) -> str:
         action = re.sub(r"\s{2,}", " ", action).strip()
     if not action:
         raise PromptCompileError("Cinematic ACTION was empty after runtime-metadata stripping.")
-    return action
+    return _dedupe_action_sentences(action)
 
 
 def _batch_window(spec: SceneProductionSpec, batch_index: int, batch_count: int) -> tuple[float, float]:
@@ -204,7 +241,7 @@ def _scoped_action(intent: DirectorSceneIntent, beat_ids: list[int] | None) -> s
     action = strip_instruction_copy(synthesize_cinematic_action(scoped))
     if not action:
         action = _action_text(intent)
-    return action
+    return _dedupe_action_sentences(action)
 
 
 class MiniMaxH3PromptCompiler:
