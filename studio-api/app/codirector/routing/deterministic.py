@@ -1,4 +1,4 @@
-"""Deterministic classifier for the Co-Director 2.0 router — §8 of the Phase 3 contract."""
+"""Deterministic classifier for the Co-Director 2.0 router — Â§8 of the Phase 3 contract."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from .contracts import RouteActionClass, RouteDecision
+from .v11_spatial_shelf import classify_v11_spatial_shelf_intent, is_spatial_map_creator_execution_gated
 
 
 _NEGATION_PATTERN = re.compile(
@@ -16,8 +17,9 @@ _NEGATION_PATTERN = re.compile(
 _NAVIGATE_PATTERN = re.compile(
     r"(?:"
     r"\b(?:open|show|switch to|take me to|go to|bring up|launch|load)\b.*\b(?:"
-    r"script writer|timeline|audio studio|voice studio|magi|continuity|"
-    r"bible|posecraft|runtime manager|references|characters|casting|"
+    r"script writer|timeline|audio studio|voice creator|voice studio|magi|continuity|"
+    r"bible|runtime manager|references|characters|casting|"
+    r"environment creator|scene creator|"
     r"editor|workspace|studio|panel|view|mode"
     r")"
     r"|"
@@ -33,11 +35,11 @@ _APPROVE_PATTERN = re.compile(
     re.I,
 )
 
-# Execution-specific confirmation pattern (spec §4) — affirmative responses that
+# Execution-specific confirmation pattern (spec Â§4) — affirmative responses that
 # resolve a PENDING EXECUTION (not a Wiki/Bible proposal). Checked BEFORE generic
-# intent classification so the LLM cannot hijack a confirmation turn (spec §35).
+# intent classification so the LLM cannot hijack a confirmation turn (spec Â§35).
 _EXECUTION_CONFIRMATION_PATTERN = re.compile(
-    r"\b(?:yes|yep|yeah|sure|ok|okay|please|proceed|go ahead|do it|continue|start|generate it"
+    r"\b(?:yes|yep|yeah|sure|ok|okay|proceed|go ahead|do it|continue|start|generate it"
     r"|approved|sounds? good|let'?s do it|that'?s fine|alright|please proceed|please continue"
     r"|looks good|confirmed|perfect|that works|that'?ll do)\b",
     re.I,
@@ -122,7 +124,7 @@ _DISCUSS_SEEKING_PATTERN = re.compile(
 # only sets `RouteDecision.target` to a stable marker string. The unified
 # intent classifier (`routing.unified_intent._resolve_capability`) maps the
 # message text to the registered capability id (atlas.generate / ers.generate
-# / scene.generate). See `_CAPABILITY_PATTERNS` in `unified_intent.py`.
+# / image.generate). See `_CAPABILITY_PATTERNS` in `unified_intent.py`.
 
 # "create an atlas shot of X" / "generate atlas shot" / "make an atlas shot"
 _ATLAS_SHOT_PATTERN = re.compile(
@@ -157,11 +159,34 @@ _ERS_GENERATE_PATTERN = re.compile(
     re.I,
 )
 
+_CRS_CREATE_PATTERN = re.compile(
+    r"\b(?:create|generate|build|make|run)\b.+\b(?:character reference sheet|\bcrs\b|visual sheet)\b",
+    re.I,
+)
+_CRS_ADVICE_RE = re.compile(
+    r"^\s*(?:should we|should i|shall we|do you think|would creating|what if)\b",
+    re.I,
+)
+
 # "suggest a close-up" / "suggest a shot" — NOT an execution; a suggestion.
 # Returns READ_INSPECT (analysis) so the LLM proposes shots without firing
-# the scene.generate capability.
+# the image.generate capability.
 _SUGGEST_SHOT_PATTERN = re.compile(
     r"\b(?:suggest|propose|recommend)\s+(?:a\s+|an\s+|some\s+)?(?:close-?up|wide|medium|over[-\s]?the-?shoulder|two[-\s]?shot|insert|establishing|shot|shots|camera\s+angle|framing)\b",
+    re.I,
+)
+
+
+# "generate four images" / "create a batch of images" / "generate N images"
+# Image-batch generation. Must be checked BEFORE _GENERATE_N_SHOTS_PATTERN so
+# that image batches are not stolen by the production-still / image.generate route.
+_IMAGE_BATCH_PATTERN = re.compile(
+    r"\b(?:generate|create|make|render|build)\b\s+"
+    r"(?:"
+    r"(?:(\d+|one|two|three|four|five|six|seven|eight|nine|ten|a\s+batch\s+of|a\s+few|several|multiple)\s+)(?:images?|pictures?|stills?|frames?)"
+    r"|"
+    r"(?:a\s+batch\s+of\s+(?:images?|pictures?|stills?))"
+    r")\b",
     re.I,
 )
 
@@ -196,6 +221,15 @@ _REGENERATE_SHOT_PATTERN = re.compile(
 )
 
 # "send those to timeline" / "send to timeline" / "send these shots to the timeline"
+
+# Wave 4 Omni: deposit completed 1F/3F video → Timeline Visual (not Scene Creator send)
+_DEPOSIT_COMPLETED_VIDEO_PATTERN = re.compile(
+    r"\b(?:deposit|export|send)\b.+\b(?:completed|finished)?\s*(?:1\s*f(?:rame)?|3\s*f(?:rame)?|one[\s-]?frame|three[\s-]?frame)\b.+\b(?:timeline|visual)\b"
+    r"|\b(?:deposit|export|send)\b.+\b(?:completed|finished)\s+video\b.+\b(?:timeline(?:\s+visual)?|visual)\b"
+    r"|\bdeposit\b.+\b(?:video|take)\b.+\b(?:timeline|visual)\b",
+    re.I,
+)
+
 _SEND_TO_TIMELINE_PATTERN = re.compile(
     r"\bsend\s+(?:those|these|them|the\s+shots?|the\s+batch)?\s*(?:shots?|images?|frames?)?\s*to\s+(?:the\s+)?timeline\b",
     re.I,
@@ -204,7 +238,7 @@ _SEND_TO_TIMELINE_PATTERN = re.compile(
 # --- Production-orchestrator milestone: conversational production commands ---
 #
 # "create images from the ERS" / "generate images from the ers using the four saved cameras"
-# -> scene.generate grounded in the current ERS package + spatial cameras.
+# -> image.generate (v1.1 Image Generator production stills; Spatial Map shelved).
 _ERS_TO_SCENE_PATTERN = re.compile(
     r"\b(?:create|generate|make|render|build)\b.*\bimages?\b.*\bfrom\s+(?:the\s+)?(?:ers|environment\s+reference\s+(?:sheet|package))\b",
     re.I,
@@ -223,9 +257,9 @@ _TIMELINE_EDIT_PATTERN = re.compile(
     r"|\b(?:put|add|place|move)\b.*\b(?:at|near)\s+(?:the\s+)?(?:start|beginning|end|top|head)\s+of\s+(?:the\s+)?timeline\b"
     r"|\b(?:timed\s+prompt|prompt\s+clip|prompt\s+track)\b"
     r"|\b(?:create|make|add|build|start)\s+(?:a\s+|the\s+|another\s+|next\s+)?batch\b"
-    r"|\b(?:run|generate)\s+(?:this|the|that|it|batch\s*\d*)\s+(?:in|with)\s+(?:minimax|qwen|ltx|hunyuan)\b"
-    r"|\b(?:make|set)\s+(?:the\s+)?(?:clip|shot|batch|it|this)\s+\d+\s*seconds?\b"
-    r"|\b(?:16\s*:\s*9|21\s*:\s*9|9\s*:\s*16|1\s*:\s*1)\b",
+    r"|\b(?:run|generate)\s+(?:this|the|that|it|batch\s*\d*)\s+(?:in|with)\s+(?:minimax|qwen|ltx)\b"
+    r"|\b(?:make|set)\s+(?:the\s+)?(?:clip|shot|batch|it|this)\s+\d+\s*seconds?\b",
+
     re.I,
 )
 
@@ -237,17 +271,23 @@ NAVIGATION_TARGETS: dict[str, str] = {
     "timeline": "timeline",
     "audio studio": "audiostudio",
     "audio": "audiostudio",
+    "voice creator": "voice_creator",
     "voice studio": "voicestudio",
     "voice": "voicestudio",
     "magi": "magi",
     "continuity": "continuity",
     "bible": "bible",
-    "posecraft": "posecraft",
-    "pose craft": "posecraft",
+    "posecraft": "imagegen",
+    "pose craft": "imagegen",
     "runtime manager": "runtime_manager",
     "references": "references",
     "characters": "characters",
     "casting": "casting",
+    "environment creator": "environment_creator",
+    "image generator": "imagegen",
+    "image studio": "imagegen",
+    "cinematic image generator": "imagegen",
+    "scene creator": "imagegen",  # Standard retired -> Image Generator (v1.1)
     "editor": "editor",
 }
 
@@ -297,25 +337,40 @@ _ENTITY_TOOL_MAP: dict[str, list[str]] = {
 }
 
 
+_NEGATED_ACTION_VERB_RE = re.compile(
+    r"\b(?:don'?t|do\s+not|does\s+not|doesn'?t|won'?t|never|"
+    r"isn'?t|is\s+not|aren'?t|are\s+not|didn'?t|did\s+not|can'?t|cannot|not)\b"
+    r"[\s,]+(?:actually\s+|really\s+|please\s+|want\s+to\s+|going\s+to\s+|gonna\s+)*"
+    r"(?:open|switch|take|go|bring|launch|load|"
+    r"approve|accept|reject|decline|proceed|continue|"
+    r"add|update|change|put|save|write|set|"
+    r"delete|remove|destroy|erase|clear|trash|"
+    r"create|generate|render|build|execute|run|queue|start|begin|make|"
+    r"inspect|list|get|find|search|describe)\b",
+    re.I,
+)
+
+
 def _has_negated_action(message: str) -> bool:
-    if not _NEGATION_PATTERN.search(message):
-        return False
-    action_patterns = [
-        _NAVIGATE_PATTERN,
-        _APPROVE_PATTERN,
-        _REJECT_PATTERN,
-        _MODIFY_KNOWLEDGE_PATTERN,
-        _EXECUTE_DESTRUCTIVE_PATTERN,
-        _EXECUTE_GENERATE_PATTERN,
-        _READ_INSPECT_PATTERN,
-    ]
-    return any(p.search(message) for p in action_patterns)
+    """True only when the negation attaches to the production action verb.
+
+    "don't generate", "do not create a scene", "never run that" negate the
+    action itself -> the turn is a discussion, not an execution. Cinematic
+    exclusion constraints inside a scene spec ("Do not reveal Cade before the
+    blast", "Do not show the courier before the portal opens", "No additional
+    characters", "Cade is NOT yet visible", "He does not rush") negate story
+    events, not the request — they must not flip a production request to
+    DISCUSS. Visibility verbs ("show", "reveal") are cinematic reveal-gating
+    vocabulary, not production actions, so they are deliberately absent from
+    the verb list.
+    """
+    return bool(_NEGATED_ACTION_VERB_RE.search(message or ""))
 
 
 def is_execution_confirmation(message: str) -> bool:
     """Return True if `message` is an affirmative confirmation of a pending execution.
 
-    Spec §4 + §35: this is checked BEFORE generic intent classification so the LLM
+    Spec Â§4 + Â§35: this is checked BEFORE generic intent classification so the LLM
     cannot hijack a confirmation turn. Returns False for negated/reject responses.
     """
     if not message:
@@ -378,7 +433,7 @@ def classify_deterministic(
     to the semantic classifier.
     """
 
-    # 1. Negation detection (run FIRST — §8.7)
+    # 1. Negation detection (run FIRST — Â§8.7)
     if _has_negated_action(message):
         return RouteDecision(
             actionClass=RouteActionClass.DISCUSS,
@@ -394,12 +449,12 @@ def classify_deterministic(
     if _ERS_TO_SCENE_PATTERN.search(message) or _CAMERA_SHOTS_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
-            target="scene.generate",
+            target="image.generate",
             confidence=0.9,
             executionLane="proposal",
             writeAllowed=True,
             destructive=False,
-            evidence=["Matched ERS/scene-creator production pattern"],
+            evidence=["Matched ERS/camera production-still pattern -> Image Generator"],
         )
 
     if _TIMELINE_EDIT_PATTERN.search(message):
@@ -413,7 +468,32 @@ def classify_deterministic(
             evidence=["Matched timeline edit pattern"],
         )
 
-    # 2. NAVIGATE (§8.1)
+    # Adept UI v1.1 Spatial Map shelf; Environment Creator Express for create-environment.
+    shelf_kind = classify_v11_spatial_shelf_intent(message)
+    if shelf_kind == "open_environment_creator":
+        return RouteDecision(
+            actionClass=RouteActionClass.NAVIGATE,
+            target="environment_creator",
+            targetWorkspace="environment_creator",
+            confidence=0.94,
+            executionLane="operator",
+            writeAllowed=False,
+            destructive=False,
+            evidence=["Matched Environment Creator (v1.1 spatial/3D shelf)"],
+        )
+    if shelf_kind == "open_image_generator":
+        return RouteDecision(
+            actionClass=RouteActionClass.NAVIGATE,
+            target="imagegen",
+            targetWorkspace="imagegen",
+            confidence=0.94,
+            executionLane="operator",
+            writeAllowed=False,
+            destructive=False,
+            evidence=["Matched Image Generator (v1.1 spatial/3D shelf)"],
+        )
+
+    # 2. NAVIGATE (Â§8.1)
     nav_match = _NAVIGATE_PATTERN.search(message)
     if nav_match:
         target_ws, unresolved_target = _extract_navigate_target(message, available_workspaces)
@@ -437,7 +517,7 @@ def classify_deterministic(
             evidence=evidence,
         )
 
-    # 3. APPROVE (§8.4)
+    # 3. APPROVE (Â§8.4)
     if _APPROVE_PATTERN.search(message):
         if not pending_proposal_ids:
             return RouteDecision(
@@ -459,7 +539,7 @@ def classify_deterministic(
             evidence=["Matched approve pattern with pending proposals"],
         )
 
-    # 4. REJECT (§8.4)
+    # 4. REJECT (Â§8.4)
     if _REJECT_PATTERN.search(message):
         if not pending_proposal_ids:
             return RouteDecision(
@@ -481,7 +561,7 @@ def classify_deterministic(
             evidence=["Matched reject pattern with pending proposals"],
         )
 
-    # 5. READ_INSPECT (§8.2)
+    # 5. READ_INSPECT (Â§8.2)
     if _READ_INSPECT_PATTERN.search(message) and not _is_discussion_seeking(message):
         entity_tools = _detect_read_entity(message)
         return RouteDecision(
@@ -494,7 +574,7 @@ def classify_deterministic(
             evidence=["Matched read/inspect pattern"],
         )
 
-    # 6. DISCUSS (§8.3) — ordered sub-patterns
+    # 6. DISCUSS (Â§8.3) — ordered sub-patterns
     if _DISCUSS_FEEDBACK_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.DISCUSS,
@@ -541,7 +621,7 @@ def classify_deterministic(
             evidence=["Matched opinion-seeking discuss pattern"],
         )
 
-    # 7. MODIFY_KNOWLEDGE (§8.5)
+    # 7. MODIFY_KNOWLEDGE (Â§8.5)
     if _MODIFY_KNOWLEDGE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.MODIFY_KNOWLEDGE,
@@ -572,7 +652,7 @@ def classify_deterministic(
         )
 
     # "create an atlas shot of X" → atlas.generate
-    if _ATLAS_SHOT_PATTERN.search(message):
+    if _ATLAS_SHOT_PATTERN.search(message) and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
             target="atlas.generate",
@@ -588,7 +668,7 @@ def classify_deterministic(
     # tools path with the most recent atlas asset). Classified as EXECUTION so
     # the dispatcher acts rather than acknowledges (Law #13 — no fake
     # operation).
-    if _USE_AS_SPATIAL_MAP_PATTERN.search(message):
+    if _USE_AS_SPATIAL_MAP_PATTERN.search(message) and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
             target="spatial_map.use_as_background",
@@ -597,6 +677,17 @@ def classify_deterministic(
             writeAllowed=True,
             destructive=False,
             evidence=["Matched 'use as spatial map' pattern"],
+        )
+
+    if _CRS_CREATE_PATTERN.search(message) and not _CRS_ADVICE_RE.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="character.generate_visual_sheet",
+            confidence=0.93,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched Character Reference Sheet create pattern"],
         )
 
     # "generate the ers" → ers.generate
@@ -611,20 +702,67 @@ def classify_deterministic(
             evidence=["Matched ERS generation pattern"],
         )
 
-    # "generate four shots" / "generate N shots" → scene.generate
-    if _GENERATE_N_SHOTS_PATTERN.search(message):
+    # "generate four images" / "create a batch of images" \u2192 image.generate_batch
+    if _IMAGE_BATCH_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
-            target="scene.generate",
+            target="image.generate_batch",
+            confidence=0.88,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched image batch generation pattern"],
+        )
+
+# "repair/fix the ERS" -> ers.repair (Spatial Map not required)
+    # "edit this environment / remove plant beside couch" -> ers.edit (no auto-approve)
+    if re.search(
+        r"\b(?:edit|inpaint)\b.{0,60}\b(?:ers|environment\s+reference|this\s+environment|the\s+environment)\b"
+        r"|\bedit\s+this\s+environment\b"
+        r"|\bremove\s+(?:the\s+)?plant\b.{0,40}\b(?:couch|sofa)\b",
+        message,
+        re.I | re.S,
+    ):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="ers.edit",
             confidence=0.9,
             executionLane="proposal",
             writeAllowed=True,
             destructive=False,
-            evidence=["Matched scene shot generation pattern"],
+            evidence=["Matched ERS edit pattern (creator Approve still required for canon)"],
         )
 
 
-    # "regenerate shot 2" → scene.generate targeted regen (capability id
+    if re.search(
+        r"\b(?:repair|fix|rebuild|regenerate)\b.{0,40}\b(?:ers|environment\s+reference\s+(?:sheet|package))\b",
+        message,
+        re.I,
+    ):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="ers.repair",
+            confidence=0.9,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched ERS repair pattern (Spatial Map optional)"],
+        )
+
+    # "generate four shots" / "generate N shots" -> image.generate
+    if _GENERATE_N_SHOTS_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="image.generate",
+            confidence=0.9,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched production-still / shot generation pattern -> Image Generator"],
+        )
+
+
+# "regenerate shot 2" -> image.generate targeted regen (capability id
     # resolved downstream; the shot index is extracted by the LLM/curated
     # tools path from the message).
     if _REGENERATE_SHOT_PATTERN.search(message):
@@ -639,6 +777,18 @@ def classify_deterministic(
         )
 
     # "send those to timeline" → scene creator timeline handoff
+        # Wave 4: completed Omni video deposit (prefer over Scene Creator send)
+    if _DEPOSIT_COMPLETED_VIDEO_PATTERN.search(message):
+        return RouteDecision(
+            actionClass=RouteActionClass.EXECUTE_PRODUCTION,
+            target="timeline.deposit_video",
+            confidence=0.94,
+            executionLane="proposal",
+            writeAllowed=True,
+            destructive=False,
+            evidence=["Matched completed video → Timeline Visual deposit pattern"],
+        )
+
     if _SEND_TO_TIMELINE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
@@ -657,7 +807,7 @@ def classify_deterministic(
     # reasoning; the deterministic router extracts the @/# tag and the
     # location phrase but does not compute coordinates).
     place_char = _PLACE_CHARACTER_PATTERN.search(message)
-    if place_char:
+    if place_char and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
             target="spatial_map.place_character",
@@ -671,7 +821,7 @@ def classify_deterministic(
             ],
         )
     place_prop = _PLACE_PROP_PATTERN.search(message)
-    if place_prop:
+    if place_prop and not is_spatial_map_creator_execution_gated():
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
             target="spatial_map.place_prop",
@@ -685,7 +835,7 @@ def classify_deterministic(
             ],
         )
 
-    # 8. EXECUTE_PRODUCTION (§8.6)
+    # 8. EXECUTE_PRODUCTION (Â§8.6)
     if _EXECUTE_DESTRUCTIVE_PATTERN.search(message):
         return RouteDecision(
             actionClass=RouteActionClass.EXECUTE_PRODUCTION,
