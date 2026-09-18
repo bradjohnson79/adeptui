@@ -1246,63 +1246,12 @@ def touch_batch_config(
                 return {"ok": False, "error": "SAME_TRACK_OVERLAP", "message": str(exc), "mock": False}
             setattr(batch, _field, next_clips)
 
-    # WAVE3 FE_WYSIWYG_ONLY (not generation authority): when Master prompt
-    # segments are edited (Batch Inspector), project onto the legacy TIMED
-    # PROMPT lane for FE display until Timeline UX is master-native.
-    # Generation reads batch.promptSegments only (Wave 2). This writer is
-    # FE containment via reconcile.persist_prompt_projection_to_scene.
-    if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
-        try:
-            from ..director_timeline_w46.reconcile import persist_prompt_projection_to_scene
+    # WAVE5: ZERO Master→legacy prompt projection (FE must read Master / patch_batch).
 
-            persist_prompt_projection_to_scene(db, project_id, scene_id, master)
-        except Exception:
-            logger.warning(
-                "legacy prompt projection failed project=%s scene=%s — timelineMaster remains authority",
-                project_id,
-                scene_id,
-                exc_info=True,
-            )
+    # WAVE5: ZERO Master→legacy audio/sfx projection.
 
-    # AUDIO_SFX_PROJECTION_BACK_TO_LEGACY: keep Music/SFX lanes WYSIWYG with
-    # batch-owned clips (scene-absolute offsets for every batch window).
-    if any(f in patch for f in ("audioClips", "sfxClips")):
-        try:
-            from ..director_timeline import parse_director_timeline
-            from ..director_timeline_w46.reconcile import project_audio_sfx_to_legacy
-            from ..director_timeline import dumps_director_timeline_preserving_embedded
-            from .store import get_scene
-
-            scene_row = get_scene(db, project_id, scene_id)
-            if scene_row is not None:
-                tl = parse_director_timeline(
-                    scene_row.director_json,
-                    fallback_duration=float(scene_row.duration_sec or 5.0),
-                    fallback_prompt=scene_row.prompt or "",
-                )
-                projected = project_audio_sfx_to_legacy(master)
-                # Only replace the projected kind(s) that were patched; if one
-                # side is empty across all batches, clear that legacy lane so
-                # stale 0–N clips cannot outlive removed batch clips.
-                if "audioClips" in patch:
-                    tl.audio_clips = projected["audio_clips"]  # type: ignore[assignment]
-                if "sfxClips" in patch:
-                    tl.sfx_clips = projected["sfx_clips"]  # type: ignore[assignment]
-                scene_row.director_json = dumps_director_timeline_preserving_embedded(
-                    tl, scene_row.director_json
-                )
-                db.add(scene_row)
-        except Exception:
-            logger.warning(
-                "legacy audio/sfx projection failed project=%s scene=%s — timelineMaster remains authority",
-                project_id,
-                scene_id,
-                exc_info=True,
-            )
-
-    # WAVE2 dual-authority purge: touch_batch_config must NOT pull legacy lane
-    # back into master (that re-introduced dual prompt authority). Master→legacy
-    # projection still runs via project_prompts_to_legacy when segments change.
+    # WAVE5: touch_batch_config must NOT pull legacy→master nor project Master→legacy.
+    # Master batch.promptSegments is sole generation + Master write authority.
 
     new_fp = compute_config_fingerprint(batch)
     batch.configFingerprint = new_fp
@@ -1594,12 +1543,12 @@ def run_preflight(
     from .store import OPTIONAL_REFS_POLICY_NOTE, is_creator_supporting_reference
     from .generation.speech_compile import hydrate_spoken_dialogue_on_master, lipsync_speaker_errors
     from .generation.reference_compile import apply_compiled_references
-    from .reconcile import batch_inherits_scene_timed_prompt, persist_prompt_projection_to_scene
+    from .reconcile import batch_inherits_scene_timed_prompt
 
     if db is not None and project_id and scene_id:
         try:
             if hydrate_spoken_dialogue_on_master(master, db=db, project_id=project_id):
-                persist_prompt_projection_to_scene(db, project_id, scene_id, master)
+                # WAVE5: persist Master only — no legacy prompt projection writeback.
                 store.save_master(db, project_id, scene_id, master, touch_batches=False)
         except Exception:
             logger.warning(

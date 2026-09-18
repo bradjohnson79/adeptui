@@ -1092,34 +1092,10 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     # timelineMaster and load_master re-migrated to a single Batch 1,
     # destroying all other batches.
     scene.director_json = dumps_director_timeline_preserving_embedded(body, scene.director_json)
-    try:
-        from ..director_timeline_w46.migration import (
-            embed_master_into_director_dict,
-            load_or_migrate_scene_master,
-        )
-        # WAVE3 FE_SYNC_ONLY: put_director may sync FE Timed Prompt lane → master
-        # for creator edits (windowed). Contained dual-read for FE only.
-        # NOT generation authority — generate reads batch.promptSegments only.
-        # Prefer FE patch_batch when available. Do not use on generate path.
-        from ..director_timeline_w46.reconcile import reconcile_legacy_to_master
-
-        master, _tl, _data = load_or_migrate_scene_master(
-            scene.director_json,
-            scene_id=scene_id,
-            fallback_duration=float(scene.duration_sec or 5.0),
-            fallback_prompt=scene.prompt or "",
-        )
-        if master.batchBlocks and reconcile_legacy_to_master(master, body):
-            parsed = json.loads(scene.director_json or "{}")
-            if isinstance(parsed, dict):
-                scene.director_json = json.dumps(embed_master_into_director_dict(parsed, master))
-    except Exception:
-        logger.warning(
-            "put_director reconcile failed project=%s scene=%s — lane saved, master left as-is",
-            project_id,
-            scene_id,
-            exc_info=True,
-        )
+    # WAVE5: put_director saves legacy DirectorTimeline tracks only (migrate-only blob).
+    # It does NOT reconcile into timelineMaster / Master writeback.
+    # Master edits: patch_batch / Timeline Master APIs. Generate reads batch.promptSegments.
+    # dumps_director_timeline_preserving_embedded above keeps timelineMaster intact.
     legacy = sync_legacy_fields_from_director(body)
     for k, v in legacy.items():
         setattr(scene, k, v)

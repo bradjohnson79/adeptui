@@ -1,17 +1,16 @@
-"""Reconcile legacy DirectorTimeline NLE view with Timeline Master.
+"""Timeline Master ↔ legacy DirectorTimeline helpers (WAVE 5 demoted).
 
-WAVE 3 AUTHORITY LAW:
-  - Generation authority is Master batch.promptSegments ONLY (Wave 2).
-  - legacy -> master (reconcile_legacy_to_master) is FE put_director Timed Prompt
-    sync ONLY — not a generate-path authority (FE_SYNC_ONLY).
-  - master -> legacy projection (persist_prompt_projection_to_scene /
-    project_audio_sfx_to_legacy) is FE WYSIWYG containment until Timeline UX is
-    master-native — NOT generation authority (FE_WYSIWYG_ONLY).
-  - Do not restore generate-path reconcile_legacy_to_master.
-
-Canonical production state: scenes.director_json.timelineMaster (BatchBlocks).
-Legacy tracks remain a derived/flattened NLE view for FE sync only.
+WAVE 5 status:
+- Production callers of reconcile_legacy_to_master, persist_prompt_projection_to_scene,
+  and project_audio_sfx_to_legacy are REMOVED (put_director + touch_batch_config).
+- Master (`timelineMaster` via store.save_master) is sole runtime SoT for generation.
+- Legacy DirectorTimeline tracks in director_json are migrate-only / inert for gen.
+- These functions remain as migrate-only utilities (one-way legacy→Master tooling /
+  tests). Do NOT re-wire them into put_director, touch_batch_config, or generate.
+- Generate reads batch.promptSegments only (Wave 2). Never restore generate-path
+  reconcile_legacy_to_master.
 """
+
 
 from __future__ import annotations
 

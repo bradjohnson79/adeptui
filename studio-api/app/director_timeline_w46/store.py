@@ -1,4 +1,12 @@
-"""Persist Timeline Master state inside scenes.director_json.timelineMaster (COW)."""
+"""Timeline Master persistence (sole runtime SoT).
+
+WAVE 5: `scenes.director_json.timelineMaster` is the storage slot for Master —
+the sole runtime source of truth for generation and Timeline Master APIs.
+Legacy DirectorTimeline tracks in the same JSON blob are migrate-only / inert
+for generation. They must not be dual-written from Master (see orchestrator /
+put_director WAVE 5). COW embed preserves non-Master keys on save.
+"""
+
 
 from __future__ import annotations
 
@@ -27,6 +35,24 @@ OPTIONAL_REFS_POLICY_NOTE = (
     "Supporting references are optional and never block generation unless the selected "
     "generator technically requires them."
 )
+
+# Lineage / QC packets are not creator supporting-reference slots.
+DIAGNOSTIC_REFERENCE_KINDS = frozenset(
+    {
+        "timelinegenerationlineage",
+        "dialoguemanifest",
+        "dialogueqcdiagnostics",
+        "dialogueretakerepair",
+        "omnicontinuitydiagnostics",
+        "omniequipmentdiagnostics",
+    }
+)
+
+
+def is_creator_supporting_reference(ref: dict[str, Any]) -> bool:
+    """True for visual/cast/wardrobe slots; false for generation diagnostics."""
+    kind = str(ref.get("kind") or "").strip().lower()
+    return kind not in DIAGNOSTIC_REFERENCE_KINDS
 
 
 def normalize_timeline_workspace(raw: Any) -> dict[str, Any]:
@@ -94,7 +120,10 @@ def load_master(db: Session, project_id: str, scene_id: str) -> dict[str, Any]:
     # timelineMaster) cemented a collapsed single-Batch-1 migration. Now we
     # only persist if the blob has no embedded timelineMaster at all.
     existing_master = data.get("timelineMaster") if isinstance(data, dict) else None
-    if not existing_master:
+    from ..creator_scope.identity_converge import migrate_loaded_master
+
+    tag_repaired = migrate_loaded_master(db, project_id, master)
+    if not existing_master or tag_repaired:
         save_master(db, project_id, scene_id, master, director_tl=tl)
     return {
         "ok": True,
@@ -168,6 +197,15 @@ def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[st
     scene = get_scene(db, project_id, scene_id)
     if not scene:
         return {"ok": False, "error": "SCENE_NOT_FOUND", "mock": False}
-    master = SceneTimelineMaster.model_validate(payload)
+    incoming = dict(payload or {})
+    if not incoming.get("sceneTakes"):
+        existing = load_master(db, project_id, scene_id)
+        if existing.get("ok") and isinstance(existing.get("master"), dict):
+            prev = existing["master"]
+            if prev.get("sceneTakes"):
+                incoming["sceneTakes"] = prev["sceneTakes"]
+                incoming.setdefault("currentSceneTakeId", prev.get("currentSceneTakeId"))
+                incoming.setdefault("activeSceneTakeId", prev.get("activeSceneTakeId"))
+    master = SceneTimelineMaster.model_validate(incoming)
     save_master(db, project_id, scene_id, master)
     return {"ok": True, "master": master.model_dump(), "mock": False}
