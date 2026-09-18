@@ -1,7 +1,11 @@
 """Current generated take + scene generation progress for Timeline multi-batch.
 
-Retake/range/inpaint must use the CURRENT GENERATED take (latest candidate with
-assetId), never an approval-only gate. approvedClip is legacy fallback only.
+WAVE 3 FAIL-CLOSED: identity is the CURRENT Take only.
+- Prefer whole-scene Take membership when master is provided.
+- Else bind via batch.currentTakeId / activeTakeId to a candidate with assetId.
+- No latest-candidate fallback, no approvedClip fallback (those let Take N
+  bind Take A / stale approval assets).
+No asset -> None -> callers fail closed.
 """
 
 from __future__ import annotations
@@ -13,30 +17,26 @@ def _cand_asset(cand: Any) -> str:
     return str(getattr(cand, "assetId", None) or "").strip()
 
 
-def _latest_candidate_with_asset(batch: Any) -> Any | None:
-    cands = [c for c in (getattr(batch, "candidateVersions", None) or []) if _cand_asset(c)]
-    if not cands:
+def _candidate_for_take_id(batch: Any, take_id: str) -> Any | None:
+    tid = str(take_id or "").strip()
+    if not tid:
         return None
-    return max(
-        cands,
-        key=lambda c: (str(getattr(c, "createdAt", None) or ""), str(getattr(c, "id", None) or "")),
-    )
+    for cand in list(getattr(batch, "candidateVersions", None) or []):
+        if str(getattr(cand, "takeId", None) or "") == tid and _cand_asset(cand):
+            return cand
+    return None
 
 
 def resolve_current_take(batch: Any, master: Any | None = None) -> dict[str, Any] | None:
-    """Return {takeId, assetId, candidateId, source} for the current generated take.
+    """Return {takeId, assetId, candidateId, source} for the CURRENT take only.
 
-    Priority (GENERATED first — not approval):
+    Priority:
       0. current whole-scene Take membership when master is provided
-      1. latest candidateVersions entry with assetId
-      2. activeTakeId matching a candidate with assetId
-      3. approvedClip.assetId (legacy fallback only)
+      1. batch.currentTakeId matching a candidate with assetId
+      2. batch.activeTakeId matching a candidate with assetId
+      3. batch.currentTakeAssetId only when it belongs to currentTakeId/activeTakeId candidate
 
-    REBUILD LAW: identity must be explicit. There is no priority-4 "scan the
-    batch's visualClips and return any clip" fallback — a generic asset
-    lookup could surface a manual/foreign clip as the take's identity, and
-    downstream gates (require_current_take, inpaint source) would then derive
-    provenance from an unowned asset. No asset → None → callers fail closed.
+    FAIL CLOSED: no latest-candidate, no approvedClip, no visualClips scan.
     """
     if batch is None:
         return None
@@ -67,56 +67,38 @@ def resolve_current_take(batch: Any, master: Any | None = None) -> dict[str, Any
         except Exception:
             pass
 
-    candidates = list(getattr(batch, "candidateVersions", None) or [])
-
-    latest = _latest_candidate_with_asset(batch)
-    if latest is not None:
-        return {
-            "takeId": str(getattr(latest, "takeId", None) or "") or None,
-            "assetId": _cand_asset(latest),
-            "candidateId": str(getattr(latest, "id", None) or "") or None,
-            "source": "latest_candidate",
-            "candidate": latest,
-        }
-
+    current_id = str(getattr(batch, "currentTakeId", None) or "").strip()
     active_id = str(getattr(batch, "activeTakeId", None) or "").strip()
-    if active_id:
-        for cand in candidates:
-            if str(getattr(cand, "takeId", None) or "") == active_id and _cand_asset(cand):
-                return {
-                    "takeId": active_id,
-                    "assetId": _cand_asset(cand),
-                    "candidateId": str(getattr(cand, "id", None) or "") or None,
-                    "source": "active",
-                    "candidate": cand,
-                }
 
-    approved = getattr(batch, "approvedClip", None)
-    approved_asset = str(getattr(approved, "assetId", None) or "").strip() if approved else ""
-    if approved_asset:
-        cand_id = str(getattr(approved, "candidateId", None) or "").strip() or None
-        matched = None
-        if cand_id:
-            matched = next((c for c in candidates if str(getattr(c, "id", None) or "") == cand_id), None)
-        if matched is None:
-            matched = next((c for c in candidates if _cand_asset(c) == approved_asset), None)
-        take_id = None
+    for source, tid in (("current_take_id", current_id), ("active", active_id)):
+        matched = _candidate_for_take_id(batch, tid)
         if matched is not None:
-            take_id = str(getattr(matched, "takeId", None) or "") or None
-            cand_id = str(getattr(matched, "id", None) or "") or cand_id
-        return {
-            "takeId": take_id or active_id or None,
-            "assetId": approved_asset,
-            "candidateId": cand_id,
-            "source": "approved",
-            "candidate": matched,
-        }
+            return {
+                "takeId": tid,
+                "assetId": _cand_asset(matched),
+                "candidateId": str(getattr(matched, "id", None) or "") or None,
+                "source": source,
+                "candidate": matched,
+            }
+
+    stamped = str(getattr(batch, "currentTakeAssetId", None) or "").strip()
+    if stamped and (current_id or active_id):
+        for tid in (current_id, active_id):
+            matched = _candidate_for_take_id(batch, tid)
+            if matched is not None and _cand_asset(matched) == stamped:
+                return {
+                    "takeId": tid,
+                    "assetId": stamped,
+                    "candidateId": str(getattr(matched, "id", None) or "") or None,
+                    "source": "current_take_asset_id",
+                    "candidate": matched,
+                }
 
     return None
 
 
-def current_take_asset_id(batch: Any) -> str | None:
-    resolved = resolve_current_take(batch)
+def current_take_asset_id(batch: Any, master: Any | None = None) -> str | None:
+    resolved = resolve_current_take(batch, master)
     if not resolved:
         return None
     asset = str(resolved.get("assetId") or "").strip()
@@ -124,15 +106,16 @@ def current_take_asset_id(batch: Any) -> str | None:
 
 
 def require_current_take(batch: Any, *, action: str = "Re-Take", master: Any | None = None) -> dict[str, Any]:
-    """Gate helper: ok + resolved take, or structured error (no approval required)."""
+    """Gate helper: ok + resolved CURRENT take, or structured hard error."""
     resolved = resolve_current_take(batch, master)
     if resolved and resolved.get("assetId"):
         return {"ok": True, "take": resolved}
     return {
         "ok": False,
-        "error": "GENERATED_TAKE_REQUIRED",
+        "error": "CURRENT_TAKE_ASSET_REQUIRED",
         "message": (
-            f"Generate a take first. {action} replaces a marked part of the current take."
+            f"No current Take asset is bound for this batch. {action} requires the "
+            "current Take only - generate or select a current Take first."
         ),
         "mock": False,
     }
@@ -217,7 +200,7 @@ def _dialogue_qc_status_lines(batches: list[Any], *, completed: int, total: int,
                     break
 
     # Generation wave done when every batch is terminal for the sequential job
-    # (complete, dialogue-retake, or failed) — not only COMPLETE_STATUSES.
+    # (complete, dialogue-retake, or failed) ΓÇö not only COMPLETE_STATUSES.
     terminal = 0
     for batch in batches:
         status = str(getattr(batch, "status", "") or "")
@@ -237,18 +220,18 @@ def _dialogue_qc_status_lines(batches: list[Any], *, completed: int, total: int,
 
     # All generation batches reached successful completion statuses.
     if retake_idxs or qc_fail > 0:
-        lines.append("Dialogue QC — Failed")
+        lines.append("Dialogue QC ΓÇö Failed")
         lines.append("Scene Not Finished")
-        # Do NOT append "Repairing Batch K…" here — that implies an active
+        # Do NOT append "Repairing Batch KΓÇª" here ΓÇö that implies an active
         # repair cycle. attach_lifecycle_to_progress adds it when REPAIRING.
         return lines
 
     if locked_script_batches > 0 and qc_present < locked_script_batches and qc_fail == 0 and qc_pass < locked_script_batches:
-        lines.append("Dialogue QC — Checking…")
+        lines.append("Dialogue QC ΓÇö CheckingΓÇª")
         return lines
 
     if locked_script_batches > 0 and qc_pass >= locked_script_batches and qc_fail == 0:
-        lines.append("Dialogue QC — Passed")
+        lines.append("Dialogue QC ΓÇö Passed")
         lines.append("Scene Finished")
         return lines
 
@@ -292,7 +275,7 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
     derived = derive_scene_render_progress(master)
     # completedBatches from derive = QC-eligible complete (excludes NeedsDialogueRetake).
     # overallBatchesLabel counts RENDER completion (includes NeedsDialogueRetake):
-    # "N/N batches complete" means rendering finished — NOT Scene Finished.
+    # "N/N batches complete" means rendering finished ΓÇö NOT Scene Finished.
     completed = int(derived.get("completedBatches") or 0)
     total = int(derived.get("totalBatches") or len(batches))
     queue_active = bool(derived.get("queueActive"))
@@ -381,7 +364,7 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
         # Idle / Draft / Ready: no creator chrome message (statusLines stay empty below).
         message = ""
     else:
-        message = f"Render Batch {n}/{m} — {scene_status}"
+        message = f"Render Batch {n}/{m} ΓÇö {scene_status}"
 
     qc_lines = _dialogue_qc_status_lines(
         batches, completed=completed, total=total, queue_active=queue_active
@@ -392,7 +375,7 @@ def compute_generation_progress(master: Any) -> dict[str, Any]:
         if total > 1:
             status_lines.append(overall)
     elif total > 1 or completed > 0:
-        # Multi-batch complete / QC lines only — never idle draft chrome.
+        # Multi-batch complete / QC lines only ΓÇö never idle draft chrome.
         if overall:
             status_lines.append(overall)
         status_lines.extend(qc_lines)

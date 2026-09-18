@@ -24,7 +24,16 @@ from ..director_timeline import (
     parse_director_timeline,
     sync_legacy_fields_from_director,
 )
-from ..lipsync_tracks import LipSyncTracks, dumps_lipsync_tracks, parse_lipsync_tracks
+from ..lipsync_tracks import LipSyncClip, LipSyncTracks, dumps_lipsync_tracks, parse_lipsync_tracks
+from ..performance_retake.contracts import (
+    CharacterSheetRef,
+    PerformanceRetakeError,
+    PerformanceRetakeSpec,
+    RetakeBeat,
+    RetakeReferences,
+    RetakeWindow,
+    validate_spec,
+)
 from ..mouth_tracker import Roi, overlay_track_preview, track_mouth_rois
 from ..assistant import (
     SceneSetupProposal,
@@ -321,8 +330,9 @@ async def health():
         "comfy": "not_probed",
         "provider": {
             "id": None,
-            "status": "skipped",
-            "reachable": False,
+            "status": "not_probed",
+            "reachable": None,
+            "probed": False,
             "modelAvailable": False,
             "selectedModel": None,
         },
@@ -742,7 +752,7 @@ def get_execution_plan(
         aspect = getattr(scene, "aspect_ratio", None) or "16:9"
         fps_mode = getattr(scene, "fps_mode", None) or "auto"
         eng_warn = validate_engine_aspect(scene.engine, aspect)
-        caps = preview_bus.capabilities_for(scene.engine if scene.engine != "auto" else "ltx")
+        caps = preview_bus.capabilities_for(scene.engine if scene.engine != "auto" else "minimax-h3")
     else:
         width, height, fps = plan.width, plan.height, plan.fps
         clamped = plan.clamped
@@ -839,9 +849,9 @@ async def propose_timeline(
         "Reply with a short prose summary, then a fenced JSON block:\n"
         "```timeline_proposal\n"
         '{"summary":"...","scenes":[{"name":"...","prompt":"...","duration_sec":5,'
-        '"engine":"ltx","camera_note":"..."}]}\n'
+        '"engine":"minimax-h3","camera_note":"..."}]}\n'
         "```\n"
-        "Use engines: auto, ltx, wan, or fal_* only when cloud is appropriate. "
+        "Use engines: auto, minimax-h3, ltx-2.5, or fal_* only when cloud is appropriate. "
         "Keep durations between 3 and 10 seconds."
     )
     user = f"Project: {project.name}\nGlobal look: {project.global_prompt or '(none)'}\n\nBrief:\n{brief}"
@@ -906,7 +916,7 @@ async def apply_timeline(
         [
             {
                 "name": prop.name or "",
-                "engine": prop.engine or project.engine_default or "ltx",
+                "engine": prop.engine or project.engine_default or "minimax-h3",
                 "prompt": prop.prompt or "",
                 "duration_sec": float(prop.duration_sec or 5),
                 "camera_note": prop.camera_note or "",
@@ -1026,7 +1036,7 @@ def _scene_director(scene: Scene, db: Session | None = None) -> DirectorTimeline
         )
 
         catalog = load_scene_reference_catalog(db, scene.project_id, scene.id)
-        if hydrate_timeline_prompt_tokens(tl, catalog) and scene.director_json:
+        if hydrate_timeline_prompt_tokens(tl, catalog, db=db, project_id=scene.project_id) and scene.director_json:
             scene.director_json = dumps_director_timeline_preserving_embedded(tl, scene.director_json)
             db.add(scene)
             db.commit()
@@ -1046,13 +1056,34 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
+    from ..director_timeline_w46.same_track_no_overlap import (
+        SameTrackOverlapError,
+        assert_track_array_no_overlap,
+    )
+
+    try:
+        assert_track_array_no_overlap(body.audio_clips, "audio")
+        assert_track_array_no_overlap(body.sfx_clips, "sfx")
+        assert_track_array_no_overlap(getattr(body, "video_clips", None), "video")
+        assert_track_array_no_overlap(getattr(body, "image_clips", None), "image")
+        assert_track_array_no_overlap(getattr(body, "camera_clips", None), "camera")
+        lipsync = getattr(body, "lipsync", None)
+        for track in getattr(lipsync, "tracks", None) or []:
+            assert_track_array_no_overlap(getattr(track, "clips", None), "lipsync")
+    except SameTrackOverlapError as exc:
+        raise HTTPException(400, str(exc)) from exc
     body = hydrate_prompt_refs(ensure_tags(body))
     from ..director_timeline_w46.generation.prompt_token_bindings import (
         hydrate_timeline_prompt_tokens,
         load_scene_reference_catalog,
     )
 
-    hydrate_timeline_prompt_tokens(body, load_scene_reference_catalog(db, project_id, scene_id))
+    hydrate_timeline_prompt_tokens(
+        body,
+        load_scene_reference_catalog(db, project_id, scene_id),
+        db=db,
+        project_id=project_id,
+    )
     # PUT_DIRECTOR_PRESERVES_MASTER: never replace the entire director_json
     # blob. Merge the incoming DirectorTimeline fields over the existing blob
     # so embedded timelineMaster / timelineWorkspace (W46 batch state) and
@@ -1066,6 +1097,10 @@ def put_director(project_id: str, scene_id: str, body: DirectorTimeline, db: Ses
             embed_master_into_director_dict,
             load_or_migrate_scene_master,
         )
+        # WAVE3 FE_SYNC_ONLY: put_director may sync FE Timed Prompt lane → master
+        # for creator edits (windowed). Contained dual-read for FE only.
+        # NOT generation authority — generate reads batch.promptSegments only.
+        # Prefer FE patch_batch when available. Do not use on generate path.
         from ..director_timeline_w46.reconcile import reconcile_legacy_to_master
 
         master, _tl, _data = load_or_migrate_scene_master(
@@ -1126,7 +1161,7 @@ def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(ge
     scene = db.get(Scene, scene_id)
     if not scene or scene.project_id != project_id:
         raise HTTPException(404, "Scene not found")
-    video = scene.lipsync_output_path or scene.output_path
+    video = scene.output_path or scene.lipsync_output_path  # output_path first; lipsync demoted
     if not video or not Path(video).exists():
         raise HTTPException(400, "Render the scene first so mouth tracking has a video to follow")
 
@@ -1177,9 +1212,164 @@ def bake_lipsync_tracks(project_id: str, scene_id: str, db: Session = Depends(ge
 
 
 class ApplyLipSyncBody(BaseModel):
-    mode: str = "legacy"
+    mode: str = "performance_retake"
     roomToneStart: float | None = None
     roomToneEnd: float | None = None
+    retake: dict | None = None
+
+
+def _legacy_lipsync_allowed() -> bool:
+    return os.environ.get("ADEPT_LEGACY_LIPSYNC", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _derive_retake_beats_from_tracks(
+    tracks: LipSyncTracks,
+    scene_duration_sec: float,
+) -> list[RetakeBeat]:
+    """Draft beats from enabled lip-sync track clips: clips become dialogue,
+    gaps become explicit silence beats."""
+    clips: list[tuple[float, float, str, str, str, str]] = []
+    for track in tracks.tracks:
+        if not track.enabled:
+            continue
+        for clip in track.clips:
+            if not clip.audio_asset_id:
+                continue
+            character_id = (
+                (clip.character_id or "").strip()
+                or (track.character_id or "").strip()
+            )
+            character_name = (
+                (clip.character_name or "").strip()
+                or (track.character_name or "").strip()
+                or character_id
+                or None
+            )
+            clips.append(
+                (
+                    float(clip.start),
+                    float(clip.start + clip.length),
+                    character_id,
+                    character_name,
+                    str(clip.audio_asset_id),
+                    (clip.label or "").strip(),
+                )
+            )
+    clips.sort(key=lambda item: item[0])
+
+    beats: list[RetakeBeat] = []
+    cursor = 0.0
+    for start, end, character_id, character_name, audio_asset_id, label in clips:
+        if start > cursor:
+            beats.append(
+                RetakeBeat(kind="silence", startSec=cursor, endSec=start)
+            )
+        beats.append(
+            RetakeBeat(
+                kind="dialogue",
+                startSec=start,
+                endSec=end,
+                characterId=character_id or None,
+                characterName=character_name or None,
+                line=label or None,
+                voiceAssetId=audio_asset_id,
+            )
+        )
+        cursor = max(cursor, end)
+    if cursor < scene_duration_sec:
+        beats.append(
+            RetakeBeat(kind="silence", startSec=cursor, endSec=scene_duration_sec)
+        )
+    return beats
+
+
+def _build_performance_retake_params(
+    project_id: str,
+    scene_id: str,
+    scene: Scene,
+    body: ApplyLipSyncBody,
+    tracks: LipSyncTracks,
+) -> dict:
+    """Build and validate a PerformanceRetakeSpec, returning a queue-serializable dict."""
+    retake = (body.retake or {}) if body.retake else {}
+    scene_duration = float(scene.duration_sec or 0.0)
+
+    if retake.get("window"):
+        window = RetakeWindow(**retake["window"])
+    else:
+        window = RetakeWindow(
+            startSec=0.0, endSec=scene_duration, scope="whole_shot"
+        )
+
+    if retake.get("beats"):
+        beats = [RetakeBeat(**b) for b in retake["beats"]]
+    else:
+        beats = _derive_retake_beats_from_tracks(tracks, scene_duration)
+
+    refs = retake.get("references", {}) or {}
+    references = RetakeReferences(
+        characterSheets=[
+            CharacterSheetRef(**c) for c in refs.get("characterSheets", [])
+        ],
+        sourceVideo=refs.get("sourceVideo", True),
+        includeSourceAudio=refs.get("includeSourceAudio", False),
+    )
+
+    qwen = retake.get("qwen", {}) or {}
+    spec = PerformanceRetakeSpec(
+        projectId=project_id,
+        sceneId=scene_id,
+        window=window,
+        beats=beats,
+        references=references,
+        masterDurationSec=scene_duration,
+        generator=retake.get("generator", "minimax-h3-r2v-local"),
+        quality=retake.get("quality", "quality"),
+        qwenPreReview=qwen.get("preReview", True),
+        qwenPostReview=qwen.get("postReview", True),
+    )
+    validate_spec(spec)
+    return {
+        "projectId": spec.projectId,
+        "sceneId": spec.sceneId,
+        "window": {
+            "startSec": spec.window.startSec,
+            "endSec": spec.window.endSec,
+            "scope": spec.window.scope,
+            "boundarySource": spec.window.boundarySource,
+        },
+        "beats": [
+            {
+                "kind": b.kind,
+                "startSec": b.startSec,
+                "endSec": b.endSec,
+                "characterId": b.characterId,
+                "characterName": b.characterName,
+                "line": b.line,
+                "voiceAssetId": b.voiceAssetId,
+            }
+            for b in spec.beats
+        ],
+        "references": {
+            "characterSheets": [
+                {"characterId": c.characterId, "assetId": c.assetId}
+                for c in spec.references.characterSheets
+            ],
+            "sourceVideo": spec.references.sourceVideo,
+            "includeSourceAudio": spec.references.includeSourceAudio,
+        },
+        "masterDurationSec": spec.masterDurationSec,
+        "generator": spec.generator,
+        "quality": spec.quality,
+        "qwenPreReview": spec.qwenPreReview,
+        "qwenPostReview": spec.qwenPostReview,
+        "specVersion": spec.specVersion,
+    }
 
 
 @router.post("/projects/{project_id}/scenes/{scene_id}/lipsync-tracks/apply", response_model=JobOut)
@@ -1220,7 +1410,31 @@ async def apply_dual_lipsync(
 
     import json as _json
 
-    if mode == "windowed":
+    legacy_allowed = _legacy_lipsync_allowed()
+    if mode in ("legacy", "windowed") and not legacy_allowed:
+        raise HTTPException(
+            410,
+            "This older lip-sync tool has been replaced by Performance Retake. "
+            "Use mode 'performance_retake' or set ADEPT_LEGACY_LIPSYNC=1 to enable legacy modes.",
+        )
+
+    if mode == "performance_retake":
+        try:
+            params = _build_performance_retake_params(
+                project_id, scene_id, scene, body, tracks
+            )
+        except PerformanceRetakeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        job = Job(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            scene_id=scene_id,
+            kind="performance_retake",
+            status="queued",
+            message=_json.dumps({"scene_id": scene_id, "mode": "performance_retake"}),
+            params_json=_json.dumps(params),
+        )
+    elif mode == "windowed":
         scene_duration = float(scene.duration_sec or 0.0)
         if body.roomToneStart is not None and body.roomToneEnd is not None:
             start = float(body.roomToneStart)
@@ -1567,11 +1781,9 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
       - ``shot`` → job ``render_shot`` (requires ``scene_id``; certified shot render)
       - ``timeline`` → job ``render_timeline`` (reuse scene outputs when present, stitch)
       - ``batch_timeline`` → job ``batch_timeline`` (regenerate all scenes, stitch)
-      - ``editor_mix`` → job ``editor_mix`` — ffmpeg final mix of Editor
-        dialogue/sfx/ambience/music stems onto a primary video MP4.
-        Optional ``primary_video_path``; otherwise resolves latest timeline
-        output, Editor video clip, or scene lipsync/output. Result is a
-        project Asset (kind=video) with ``prompt_meta_json`` stem provenance.
+      - ``editor_mix`` → **DEPRECATED (P0)**: refused with 409. Use MAGI
+        ``POST /api/magi/projects/{id}/renders``; mix authority is
+        sequence finishing.audio, not legacy Editor tracks.
     """
     project = db.get(Project, project_id)
     if not project:
@@ -1584,6 +1796,9 @@ async def render_project(project_id: str, body: RenderRequest, db: Session = Dep
         "editor_mix": "editor_mix",
     }
     kind = kind_map.get(body.kind, "render_timeline")
+    if body.kind == "editor_mix" or kind == "editor_mix":
+        from ..magi.authority import editor_mix_deprecation_detail
+        raise HTTPException(status_code=409, detail=editor_mix_deprecation_detail(project_id))
     if kind in {"render_scene", "render_shot"} and not body.scene_id:
         raise HTTPException(400, "scene_id required for scene/shot render")
     params: dict = {}
@@ -1784,12 +1999,26 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/cancel")
-async def cancel_job(job_id: str, db: Session = Depends(get_db)):
+async def cancel_job(job_id: str, request: Request, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
     # Deep cancel: enter cancelling, interrupt+delete, confirm prompt stopped, then cancelled.
     # Does NOT mark cancelled until Comfy confirms the prompt is inactive (or timeout → cancel_failed).
+    # CANCEL_PROVENANCE_HTTP
+    try:
+        from fastapi import Request as _Unused  # noqa: F401
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "CANCEL_PROVENANCE_HTTP job_id=%s via POST /api/jobs/{id}/cancel",
+            job_id,
+        )
+        from pathlib import Path as _P
+        _P(r"C:\\AdeptFilmWorks\\AIVideoStudio\\data\\cancel_provenance.log").open("a", encoding="utf-8").write(
+            f"{__import__('datetime').datetime.utcnow().isoformat()}Z HTTP_CANCEL job={job_id} ua={request.headers.get('user-agent','')} referer={request.headers.get('referer','')} client={getattr(request.client,'host',None)}\n---\n"
+        )
+    except Exception:
+        pass
     result = await job_queue.cancel_and_halt(job_id)
     job = db.get(Job, job_id)
     status = (job.status if job else result.get("status")) or "cancelling"

@@ -78,17 +78,10 @@ def active_scene_take(master: SceneTimelineMaster | None) -> SceneTake | None:
     return next((t for t in (master.sceneTakes or []) if t.id == aid), None)
 
 
-def _batch_playable_asset(batch: Any) -> dict[str, Any]:
-    resolved = resolve_current_take(batch) or {}
+def _batch_playable_asset(batch: Any, master: SceneTimelineMaster | None = None) -> dict[str, Any]:
+    """WAVE 3 FAIL-CLOSED: current Take asset only — no approved/latest fallbacks."""
+    resolved = resolve_current_take(batch, master) or {}
     asset = str(resolved.get("assetId") or "").strip()
-    if not asset and getattr(batch, "approvedClip", None):
-        asset = str(getattr(batch.approvedClip, "assetId", None) or "").strip()
-    latest = None
-    cands = [c for c in (getattr(batch, "candidateVersions", None) or []) if str(getattr(c, "assetId", None) or "").strip()]
-    if cands:
-        latest = max(cands, key=lambda c: (str(getattr(c, "createdAt", None) or ""), str(getattr(c, "id", None) or "")))
-    if not asset and latest is not None:
-        asset = str(latest.assetId or "").strip()
     duration = None
     try:
         duration = float(
@@ -101,10 +94,13 @@ def _batch_playable_asset(batch: Any) -> dict[str, Any]:
         duration = None
     return {
         "assetId": asset or None,
-        "candidateId": resolved.get("candidateId") or (str(latest.id) if latest is not None else None),
+        "candidateId": resolved.get("candidateId"),
         "batchTakeId": resolved.get("takeId") or getattr(batch, "currentTakeId", None),
         "durationSec": duration,
         "status": str(getattr(batch, "status", "") or ""),
+        "ok": bool(asset),
+        "error": None if asset else "CURRENT_TAKE_ASSET_REQUIRED",
+        "source": resolved.get("source"),
     }
 
 
@@ -120,7 +116,7 @@ def _scene_has_complete_render(master: SceneTimelineMaster) -> bool:
 def capture_batch_members(master: SceneTimelineMaster) -> list[SceneTakeBatchMember]:
     rows: list[SceneTakeBatchMember] = []
     for batch in sorted(master.batchBlocks or [], key=lambda b: (int(getattr(b, "order", 0) or 0), str(b.id))):
-        info = _batch_playable_asset(batch)
+        info = _batch_playable_asset(batch, master)
         rows.append(
             SceneTakeBatchMember(
                 batchId=batch.id,

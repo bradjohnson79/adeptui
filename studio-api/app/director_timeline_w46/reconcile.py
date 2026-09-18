@@ -1,25 +1,16 @@
-"""Reconcile the legacy DirectorTimeline NLE view with the Timeline Master.
+"""Reconcile legacy DirectorTimeline NLE view with Timeline Master.
 
-Single canonical truth (Timeline certification Phase 2):
-  scenes.director_json.timelineMaster (BatchBlocks) is the production state.
-The legacy director_json tracks (prompt_segments, image_clips, ...) are the
-interactive NLE view and the flattened output view (BATCH_OWNED_CLIPS design:
-"legacy scene-global tracks remain as a derived/flattened view").
+WAVE 3 AUTHORITY LAW:
+  - Generation authority is Master batch.promptSegments ONLY (Wave 2).
+  - legacy -> master (reconcile_legacy_to_master) is FE put_director Timed Prompt
+    sync ONLY — not a generate-path authority (FE_SYNC_ONLY).
+  - master -> legacy projection (persist_prompt_projection_to_scene /
+    project_audio_sfx_to_legacy) is FE WYSIWYG containment until Timeline UX is
+    master-native — NOT generation authority (FE_WYSIWYG_ONLY).
+  - Do not restore generate-path reconcile_legacy_to_master.
 
-Directions:
-  legacy -> master  (put_director / Co-Director store.save_master with director_tl)
-      legacy prompt_segments -> batch.promptSegments   (upsert by
-          legacyPromptSegmentId, then by window-proximity; deletion propagates)
-      legacy image_clips     -> batch.sourceAnchors    (Wave 3A bleed-control:
-          do NOT silently inject Visual images as managed sourceAnchors;
-          only remove stale managed "legacy:<clipId>" anchors; user Start/End
-          anchors are never touched — prefer explicit selection / References)
-  master -> legacy  (orchestrator.touch_batch_config when promptSegments change)
-      batch.promptSegments -> flattened legacy prompt_segments projection
-
-Value-stable invariant: reconciling already-consistent state mutates nothing,
-so configFingerprint and staged ExecutionSnapshots never churn, and the
-reconciliation is idempotent (safe on every save).
+Canonical production state: scenes.director_json.timelineMaster (BatchBlocks).
+Legacy tracks remain a derived/flattened NLE view for FE sync only.
 """
 
 from __future__ import annotations
@@ -361,6 +352,10 @@ def reconcile_legacy_cameras(master: SceneTimelineMaster, legacy_camera_clips: l
 
 
 def reconcile_legacy_to_master(master: SceneTimelineMaster, director_tl: Any) -> bool:
+    """FE_SYNC_ONLY — put_director Timed Prompt lane → Master.
+
+    NOT generation authority. Generate reads batch.promptSegments only.
+    """
     """Reconcile the legacy NLE view into the master. Returns changed."""
     if not master.batchBlocks:
         return False

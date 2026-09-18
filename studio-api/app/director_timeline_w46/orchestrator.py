@@ -11,7 +11,69 @@ from sqlalchemy.orm import Session
 
 from ..director_timeline import DirectorTimeline, parse_director_timeline
 from .camera_catalog import detect_camera_contradictions, summarize_camera_strategy
-from .capabilities import disclose_inpaint_strategy, get_generator, validate_duration
+from .capabilities import (
+    disclose_inpaint_strategy,
+    get_generator,
+    timeline_visual_sufficient,
+    validate_duration,
+)
+
+
+def _log_extension_cycle(
+    *,
+    batch: Any,
+    request: Any,
+    incoming_bridge: Any,
+    temporal_packet: Any,
+) -> None:
+    """Debug-level evidence for each extension cycle (mission §14).
+
+    Not user-facing. Captures segment identity, continuity source, prompt
+    identity, and temporal review state so duplication regressions are traceable.
+    """
+    try:
+        bridge_id = ""
+        last_frame = ""
+        strategy = ""
+        if incoming_bridge is not None:
+            bridge_id = str(getattr(incoming_bridge, "bridgeId", "") or "")
+            last_frame = str(getattr(incoming_bridge, "lastFrameAssetId", "") or "")
+            strategy = str(getattr(incoming_bridge, "continuityStrategy", "") or "")
+        packet_id = ""
+        packet_avail = ""
+        if temporal_packet is not None:
+            packet_id = str(getattr(temporal_packet, "packetId", "") or "")
+            packet_avail = str(getattr(temporal_packet, "availability", "") or "")
+        r2v = {}
+        po = getattr(request, "providerOptions", None) or {}
+        if isinstance(po, dict):
+            r2v = po.get("r2v") or {}
+        slots = r2v.get("slots") if isinstance(r2v, dict) else None
+        slot_summary = []
+        if isinstance(slots, list):
+            for s in slots:
+                if isinstance(s, dict):
+                    slot_summary.append(
+                        f"{s.get('role')}:{s.get('assetId')}#{s.get('pictureIndex')}"
+                    )
+        logger.debug(
+            "EXTENSION CYCLE batch=%s order=%s root/extension=%s "
+            "bridge=%s lastFrame=%s strategy=%s "
+            "temporalPacket=%s/%s "
+            "promptLen=%s slots=%s",
+            getattr(batch, "id", "?"),
+            getattr(batch, "order", "?"),
+            "extension" if bridge_id else "root",
+            bridge_id or "none",
+            last_frame or "none",
+            strategy or "none",
+            packet_id or "none",
+            packet_avail or "none",
+            len(str(getattr(request, "prompt", "") or "")),
+            ",".join(slot_summary) or "none",
+        )
+    except Exception:
+        pass
 from .contracts import (
     ApprovedClip,
     BatchBlock,
@@ -58,13 +120,29 @@ def _bind_video_reference_anchor(
     director_timeline: DirectorTimeline | None,
     db: Session | None = None,
     project_id: str | None = None,
+    master: SceneTimelineMaster | None = None,
 ) -> list[dict[str, Any]]:
     """Bind Prompt-clip references by canonical ID. Never consume alias text."""
     from .generation.reference_compile import apply_compiled_references
     from .generation.speech_compile import apply_compiled_speech
+    from .reconcile import batch_time_windows
 
     warnings = apply_compiled_references(batch, director_timeline, db=db, project_id=project_id)
-    speech_errors = apply_compiled_speech(batch, director_timeline, db=db, project_id=project_id)
+    window_start = 0.0
+    window_end = None
+    if master is not None:
+        for owned, w0, w1 in batch_time_windows(master):
+            if owned.id == batch.id:
+                window_start, window_end = w0, w1
+                break
+    speech_errors = apply_compiled_speech(
+        batch,
+        director_timeline,
+        db=db,
+        project_id=project_id,
+        window_start=window_start,
+        window_end=window_end,
+    )
     return list(warnings or []) + list(speech_errors or [])
 
 
@@ -284,9 +362,8 @@ def submit_batch_generation(
         }
 
     # PROVIDER_CAPABILITY_GATING: reject Timeline generation for providers
-    # whose capabilities report supportsTimelineGeneration=False (e.g. WAN /
-    # Hunyuan until a Timeline adapter is registered). This makes future
-    # activation a capability flip, not a UI hardcode change.
+    # whose capabilities report supportsTimelineGeneration=False. Retired
+    # local generators are not Timeline products.
     from .capabilities import list_generators
 
     cap = next((g for g in list_generators() if g.id == batch.generatorId), None)
@@ -362,7 +439,9 @@ def submit_batch_generation(
     scene_row = store.get_scene(db, project_id, scene_id)
     aspect_ratio = getattr(scene_row, "aspect_ratio", None) if scene_row else None
     director_timeline = _load_director_timeline(db, project_id, scene_id)
-    bind_notes = _bind_video_reference_anchor(batch, director_timeline, db=db, project_id=project_id)
+    bind_notes = _bind_video_reference_anchor(
+        batch, director_timeline, db=db, project_id=project_id, master=master
+    )
     if any(n.get("code") == "LIPSYNC_SPEAKER_REQUIRED" for n in bind_notes):
         return {
             "ok": False,
@@ -383,10 +462,8 @@ def submit_batch_generation(
         temporal_packet = ensure_temporal_packet_before_submit(
             db, project_id, scene_id, master, batch.id
         )
-        if director_timeline is not None:
-            from .reconcile import reconcile_legacy_to_master
-
-            reconcile_legacy_to_master(master, director_timeline)
+        # WAVE2 dual-authority purge: do NOT reconcile legacy→master on generate.
+        # batch.promptSegments is sole generate prompt authority.
         store.save_master(db, project_id, scene_id, master, touch_batches=False)
         if packet_blocks_submit(master, batch.id):
             return {
@@ -426,12 +503,82 @@ def submit_batch_generation(
         if incoming and incoming.status == "Ready" and request.continuityStrategy:
             incoming.continuityStrategy = request.continuityStrategy  # type: ignore[assignment]
             incoming.status = "Applied"
+        # EXTENSION OBSERVABILITY (mission §14): debug-level evidence per cycle.
+        _log_extension_cycle(
+            batch=batch,
+            request=request,
+            incoming_bridge=incoming,
+            temporal_packet=temporal_packet,
+        )
     except Exception as exc:
         return {"ok": False, "error": "REQUEST_BUILD_FAILED", "message": str(exc), "mock": False}
 
-    # Direct Reference Route is the only cast authority. Character-identity
-    # bind and approved-voice auto-attach stay in the repo for other features
-    # but must not inject or replace Timeline generation references.
+    # Direct Reference Route remains the only *visual* cast authority.
+    # Do NOT re-enable apply_character_identity here (it must not replace DR
+    # picture refs). Approved project voices are attached as H3 ref_audios /
+    # characterVoice audio slots only — voice timbre conditioning, not
+    # exact-script TTS and not a prompt translation layer.
+    from .generation.voice_bind import apply_approved_voices
+
+    voices = apply_approved_voices(db, request, batch, caps=adapter.capabilities)
+    if voices.get("applied"):
+        try:
+            store.save_master(db, project_id, scene_id, master, touch_batches=False)
+        except Exception:
+            pass
+
+    # A-H / C: honest preflight — locked Manifest requires explicit spoken authority.
+    # Generator does not own words/language/speaker; post-gen Omni QC is mandatory.
+    # CRITICAL: do NOT wrap this gate in except Exception: pass.
+    # SPOKEN_LANGUAGE_AUTHORITY_MISSING must reach the caller; unexpected errors
+    # on locked script fail closed.
+    from .generation.dialogue_authority import (
+        compile_dialogue_authority_for_batch,
+        get_manifest_from_batch,
+        manifest_needs_authority_recompile,
+        submit_dialogue_authority_preflight,
+    )
+
+    manifest = None
+    compile_error = None
+    try:
+        manifest = get_manifest_from_batch(batch)
+        if manifest_needs_authority_recompile(manifest):
+            manifest = compile_dialogue_authority_for_batch(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                batch=batch,
+                master=master,
+            )
+            try:
+                store.save_master(db, project_id, scene_id, master, touch_batches=False)
+            except Exception:
+                pass
+    except Exception as _dlg_pre_exc:  # noqa: BLE001
+        compile_error = _dlg_pre_exc
+        try:
+            if manifest is None:
+                manifest = get_manifest_from_batch(batch)
+        except Exception:
+            pass
+    blocked = submit_dialogue_authority_preflight(
+        manifest, compile_error=compile_error, batch=batch
+    )
+    if blocked is not None:
+        return blocked
+    # Honesty: H3 cannot guarantee exact script at Comfy sockets — QC will verify.
+    if manifest and manifest.get("lockedScript") and manifest.get("lines"):
+        opts = dict(request.providerOptions or {})
+        opts["dialoguePreflight"] = {
+            "lockedScript": True,
+            "generatorOwnsDialogue": False,
+            "exactSpeechGuaranteedByGenerator": False,
+            "mandatoryPostGenOmniQc": True,
+            "spokenLanguage": manifest.get("language"),
+            "comfyLanguageWidget": "absent_on_h3",
+        }
+        request.providerOptions = opts
 
     # Hard lock: never silently change generator
     if request.generatorId != adapter.id:
@@ -521,6 +668,12 @@ def submit_batch_generation(
         apiUsed=submission.apiUsed,
         progress=0.0,
     )
+    try:
+        from .scene_takes import bind_generation_to_active_take
+
+        bind_generation_to_active_take(master, job)
+    except Exception:
+        pass
     batch.generationJobs.append(job)
     batch.status = "Generating"
     batch.pendingSnapshotId = None
@@ -596,6 +749,10 @@ def complete_batch_candidate(
     if not snap.immutable:
         return {"ok": False, "error": "SNAPSHOT_NOT_IMMUTABLE", "mock": False}
 
+    from .generation.comfy_release import release_comfy_after_timeline_generation
+
+    release_comfy_after_timeline_generation(reason=f"timeline-batch-complete:{batch_id}")
+
     from .continuity import active_bridge_for_target, compile_retake_memory
 
     incoming = active_bridge_for_target(master, batch_id)
@@ -614,12 +771,12 @@ def complete_batch_candidate(
     if isinstance(stashed.get("takeState"), dict) and stashed["takeState"]:
         memory["takeState"] = stashed["takeState"]
     parent = next((c for c in batch.candidateVersions if c.approved), None)
+    from .scene_takes import scene_take_candidate_label
+
     cand = CandidateVersion(
         executionSnapshotId=execution_snapshot_id,
         assetId=asset_id,
-        label=f"Take {chr(64 + min(len(batch.candidateVersions) + 1, 26))}"
-        if batch.candidateVersions
-        else "Take A",
+        label=scene_take_candidate_label(master),
         generatedDuration=generated_duration,
         parentTakeId=parent.takeId if parent else None,
         incomingBridgeId=(incoming.bridgeId if incoming else stashed.get("incomingBridgeId")),
@@ -631,15 +788,181 @@ def complete_batch_candidate(
         takeState=memory["takeState"],
         userCorrection=memory["userCorrection"],
     )
+    try:
+        from .scene_takes import active_scene_take, bind_generation_to_active_take
+
+        scene_take = active_scene_take(master)
+        if scene_take is not None:
+            cand.takeState = {**(cand.takeState or {}), "sceneTakeId": scene_take.id}
+        for job in batch.generationJobs:
+            if job.executionSnapshotId == execution_snapshot_id:
+                bind_generation_to_active_take(master, job, candidate_id=cand.id)
+    except Exception:
+        pass
     batch.candidateVersions.append(cand)
+    batch.currentTakeId = cand.takeId
+    batch.currentTakeAssetId = asset_id
     batch.duration.generatedDuration = generated_duration
     batch.duration.sourceMediaDuration = generated_duration
     # Visible duration: min(planned, generated) — no silent stretch
     batch.duration.timelineVisibleDuration = min(batch.duration.plannedDuration, generated_duration)
-    batch.status = "CandidateReady"
+    # CURRENT TAKE: media is viewable, but SCENE_FINISHED requires dialogue QC PASS.
+    batch.activeTakeId = cand.takeId
     for job in batch.generationJobs:
         if job.executionSnapshotId == execution_snapshot_id:
             job.status = "completed"
+
+    # --- Co-Director Dialogue Authority: Omni QC before SCENE_FINISHED ---
+    dialogue_qc = None
+    continuity_qc = None
+    equipment_qc = None
+    locked_scripted = False
+    seen_manifest = None
+    try:
+        from .generation.dialogue_authority import (
+            apply_qc_to_batch_status,
+            batch_has_locked_script_lines,
+            build_retake_repair_from_manifest,
+            compile_dialogue_authority_for_batch,
+            get_manifest_from_batch,
+            run_omni_dialogue_qc,
+        )
+
+        manifest = get_manifest_from_batch(batch)
+        if manifest is None:
+            manifest = compile_dialogue_authority_for_batch(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                batch=batch,
+                master=master,
+            )
+        seen_manifest = manifest
+        locked_scripted = batch_has_locked_script_lines(batch, manifest)
+        if manifest and manifest.get("lockedScript") and manifest.get("lines"):
+            locked_scripted = True
+            dialogue_qc = run_omni_dialogue_qc(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                asset_id=asset_id,
+                manifest=manifest,
+            )
+            new_status = apply_qc_to_batch_status(batch, dialogue_qc)
+            if new_status != "CandidateReady":
+                repair = build_retake_repair_from_manifest(manifest, dialogue_qc)
+                refs = [
+                    r
+                    for r in (batch.references or [])
+                    if not (isinstance(r, dict) and r.get("kind") == "dialogueRetakeRepair")
+                ]
+                refs.append(repair)
+                batch.references = refs
+        else:
+            batch.status = "CandidateReady"
+    except Exception as _dlg_exc:  # noqa: BLE001
+        # Fail closed for locked script: RENDER != FINISHED. Nested except
+        # must set NeedsDialogueRetake ONLY for locked script — never CandidateReady.
+        from .generation.dialogue_authority import (
+            STATUS_NEEDS_DIALOGUE_RETAKE,
+            apply_qc_exception_fail_closed,
+            batch_has_locked_script_lines,
+        )
+
+        if locked_scripted or batch_has_locked_script_lines(batch, seen_manifest):
+            try:
+                apply_qc_exception_fail_closed(batch, _dlg_exc, manifest=seen_manifest)
+            except Exception:
+                batch.status = STATUS_NEEDS_DIALOGUE_RETAKE
+        else:
+            batch.status = "CandidateReady"
+    if locked_scripted:
+        if batch.status not in ("CandidateReady", "NeedsDialogueRetake"):
+            from .generation.dialogue_authority import STATUS_NEEDS_DIALOGUE_RETAKE
+            batch.status = STATUS_NEEDS_DIALOGUE_RETAKE
+    elif batch.status not in ("CandidateReady", "NeedsDialogueRetake"):
+        batch.status = "CandidateReady"
+
+
+    # --- Omni Continuity + Unauthorized Equipment producers (Final Check ingest) ---
+    continuity_qc = None
+    equipment_qc = None
+    try:
+        from .generation.omni_continuity_qc import (
+            persist_continuity_qc_diagnostics,
+            run_omni_continuity_qc,
+        )
+        from .generation.omni_equipment_qc import (
+            persist_equipment_qc_diagnostics,
+            run_omni_equipment_qc,
+        )
+
+        continuity_qc = run_omni_continuity_qc(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            asset_id=asset_id,
+            batch=batch,
+            master=master,
+        )
+        persist_continuity_qc_diagnostics(batch, continuity_qc)
+        equipment_qc = run_omni_equipment_qc(
+            db,
+            project_id=project_id,
+            scene_id=scene_id,
+            asset_id=asset_id,
+        )
+        persist_equipment_qc_diagnostics(batch, equipment_qc)
+    except Exception as _vis_exc:  # noqa: BLE001
+        # Fail soft for visual producers — never invent PASS; leave not_run when no packet.
+        # Dialogue QC already owns finish gate for locked script.
+        try:
+            from ..production_events import ACTOR_SYSTEM, record_production_event
+
+            record_production_event(
+                db,
+                project_id=project_id,
+                scene_id=scene_id,
+                event_type="timeline.omni_visual_qc_error",
+                actor=ACTOR_SYSTEM,
+                actor_detail="timeline:complete_batch_candidate",
+                subject_kind="batch",
+                subject_id=batch_id,
+                summary=f"Omni continuity/equipment QC error: {str(_vis_exc)[:200]}",
+                payload={"batchId": batch_id, "error": str(_vis_exc)[:400]},
+            )
+        except Exception:
+            pass
+    from .continuity import prepare_outgoing_bridge
+
+    prepare_outgoing_bridge(db, project_id, scene_id, master, batch_id)
+
+    # Bounded Final Check reverify after repair take completes (local auto-loop).
+    try:
+        fc = getattr(master, "sceneFinalCheck", None)
+        if fc is not None:
+            life = str(getattr(fc, "lifecycleStatus", "") or "")
+            if life in ("REPAIRING", "REVERIFYING"):
+                from .scene_final_check import (
+                    auto_repair_eligible_findings,
+                    build_category_shell,
+                    collect_batch_qc_packets,
+                    mark_final_check_reverify,
+                )
+
+                packets = collect_batch_qc_packets(master)
+                categories = build_category_shell(
+                    packets["dialogue"],
+                    continuity_gate_seen=bool(packets["continuityGateSeen"]),
+                    equipment_gate_seen=bool(packets["equipmentGateSeen"]),
+                    continuity_findings=packets["continuity"],
+                    equipment_findings=packets["equipment"],
+                )
+                still_eligible = auto_repair_eligible_findings(categories)
+                mark_final_check_reverify(master, pass_reverify=not bool(still_eligible))
+    except Exception:
+        pass
+
     store.save_master(db, project_id, scene_id, master)
     try:
         from ..production_events import ACTOR_SYSTEM, record_production_event
@@ -659,6 +982,30 @@ def complete_batch_candidate(
         )
     except Exception:  # noqa: BLE001 - event recording never breaks the operation
         pass
+    # SEQUENTIAL QUEUE: CandidateReady is success — free the provider slot for
+    # the next Queued batch after continuity gates (no Approve required).
+    chain = submit_next_queued_batch(db, project_id, scene_id)
+    try:
+        from .scene_takes import assemble_take_result, sync_rendering_take
+
+        payload_take = store.load_master(db, project_id, scene_id)
+        if payload_take.get("ok"):
+            live_take = SceneTimelineMaster.model_validate(payload_take["master"])
+            if sync_rendering_take(live_take):
+                ready = next(
+                    (
+                        t
+                        for t in (live_take.sceneTakes or [])
+                        if t.status == "ready" and not t.resultAssetId and t.batches and all(m.assetId for m in t.batches)
+                    ),
+                    None,
+                )
+                if ready is not None:
+                    assemble_take_result(db, project_id, scene_id, ready)
+                store.save_master(db, project_id, scene_id, live_take, touch_batches=False)
+    except Exception:
+        logger.exception("scene take sync failed after batch complete")
+    scene_finished = batch.status == "CandidateReady"
     return {
         "ok": True,
         "candidate": cand.model_dump(),
@@ -669,6 +1016,12 @@ def complete_batch_candidate(
             "providerId": snap.providerId,
             "runtime": snap.runtime,
         },
+        "sequentialChain": chain,
+        "dialogueQc": dialogue_qc,
+        "continuityQc": continuity_qc,
+        "equipmentQc": equipment_qc,
+        "sceneFinished": scene_finished,
+        "status": batch.status,
         "mock": False,
     }
 
@@ -704,7 +1057,10 @@ def approve_candidate(
     )
     batch.status = "Approved"
     batch.activeTakeId = cand.takeId
+    batch.currentTakeId = cand.takeId
+    batch.currentTakeAssetId = cand.assetId
     batch.configFingerprint = compute_config_fingerprint(batch)
+
     from .continuity import prepare_outgoing_bridge, supersede_outgoing_bridges
 
     if was_other_approved:
@@ -738,6 +1094,23 @@ def approve_candidate(
         )
     except Exception:  # noqa: BLE001 - event recording never breaks the operation
         pass
+    try:
+        from .scene_takes import refresh_current_take_after_repair
+
+        payload_rep = store.load_master(db, project_id, scene_id)
+        if payload_rep.get("ok"):
+            live_rep = SceneTimelineMaster.model_validate(payload_rep["master"])
+            if refresh_current_take_after_repair(
+                live_rep,
+                batch_id,
+                asset_id=cand.assetId,
+                candidate_id=cand.id,
+                batch_take_id=cand.takeId,
+                retake_id=cand.takeId,
+            ):
+                store.save_master(db, project_id, scene_id, live_rep, touch_batches=False)
+    except Exception:
+        logger.exception("current scene take repair stamp failed")
     return {"ok": True, "approvedClip": batch.approvedClip.model_dump(), "batchStatus": batch.status, "placement": placement, "sequentialChain": chain, "mock": False}
 
 
@@ -823,6 +1196,21 @@ def touch_batch_config(
             batch.h3Resolution = dict(h3_res)
         else:
             batch.h3Resolution = None
+    if "ltxQuality" in patch:
+        raw_ltx = patch["ltxQuality"]
+        if raw_ltx is None:
+            batch.ltxQuality = None
+        else:
+            token = str(raw_ltx).strip()
+            aliases = {"720p": "720p", "1080p": "1080p", "2k": "2K", "4k": "4K"}
+            key = token.lower()
+            if key in aliases:
+                batch.ltxQuality = aliases[key]
+            elif token in {"720p", "1080p", "2K", "4K"}:
+                batch.ltxQuality = token
+            else:
+                # Unknown token — clear rather than silent-clamp to a wrong tier.
+                batch.ltxQuality = None
     if "plannedDuration" in patch:
         batch.duration.plannedDuration = float(patch["plannedDuration"])
     if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
@@ -847,43 +1235,27 @@ def touch_batch_config(
     # clip array never touches another batch's clips.
     from .contracts import BatchClip
 
+    from .same_track_no_overlap import SameTrackOverlapError, assert_track_array_no_overlap
+
     for _field in ("visualClips", "audioClips", "sfxClips", "cameraInstructions"):
         if _field in patch and isinstance(patch[_field], list):
-            setattr(
-                batch,
-                _field,
-                [BatchClip.model_validate(c) for c in patch[_field]],
-            )
+            next_clips = [BatchClip.model_validate(c) for c in patch[_field]]
+            try:
+                assert_track_array_no_overlap(next_clips, _field)
+            except SameTrackOverlapError as exc:
+                return {"ok": False, "error": "SAME_TRACK_OVERLAP", "message": str(exc), "mock": False}
+            setattr(batch, _field, next_clips)
 
-    # PROMPT_PROJECTION_BACK_TO_LEGACY (single canonical truth): when the
-    # master prompt side is edited (Batch Inspector), flatten the batch
-    # promptSegments back onto the legacy TIMED PROMPT lane so the visible
-    # track and the generation input never diverge.
+    # WAVE3 FE_WYSIWYG_ONLY (not generation authority): when Master prompt
+    # segments are edited (Batch Inspector), project onto the legacy TIMED
+    # PROMPT lane for FE display until Timeline UX is master-native.
+    # Generation reads batch.promptSegments only (Wave 2). This writer is
+    # FE containment via reconcile.persist_prompt_projection_to_scene.
     if "promptSegments" in patch and isinstance(patch["promptSegments"], list):
         try:
-            from ..director_timeline import parse_director_timeline
-            from ..director_timeline_w46.reconcile import project_prompts_to_legacy
+            from ..director_timeline_w46.reconcile import persist_prompt_projection_to_scene
 
-            from .store import get_scene
-
-            scene_row = get_scene(db, project_id, scene_id)
-            if scene_row is not None:
-                tl = parse_director_timeline(
-                    scene_row.director_json,
-                    fallback_duration=float(scene_row.duration_sec or 5.0),
-                    fallback_prompt=scene_row.prompt or "",
-                )
-                # Keep non-prompt legacy fields untouched; replace only the
-                # prompt_segments projection.
-                from ..director_timeline import dumps_director_timeline_preserving_embedded
-
-                projected = project_prompts_to_legacy(master)
-                from ..director_timeline import PromptSegment as LegacyPromptSegment
-
-                segment_type = type(tl.prompt_segments[0]) if tl.prompt_segments else LegacyPromptSegment
-                tl.prompt_segments = [segment_type(**s) for s in projected] if projected else []
-                scene_row.director_json = dumps_director_timeline_preserving_embedded(tl, scene_row.director_json)
-                db.add(scene_row)
+            persist_prompt_projection_to_scene(db, project_id, scene_id, master)
         except Exception:
             logger.warning(
                 "legacy prompt projection failed project=%s scene=%s — timelineMaster remains authority",
@@ -928,30 +1300,9 @@ def touch_batch_config(
                 exc_info=True,
             )
 
-    # RECONCILE_ON_CONFIG_CHANGE: plannedDuration edits shift the batch time
-    # windows, so legacy lane prompts/image clips are re-distributed before
-    # the master is persisted (value-stable when already consistent).
-    try:
-        from ..director_timeline import parse_director_timeline
-        from ..director_timeline_w46.reconcile import reconcile_legacy_to_master
-
-        from .store import get_scene
-
-        scene_row = get_scene(db, project_id, scene_id)
-        if scene_row is not None:
-            _tl = parse_director_timeline(
-                scene_row.director_json,
-                fallback_duration=float(scene_row.duration_sec or 5.0),
-                fallback_prompt=scene_row.prompt or "",
-            )
-            reconcile_legacy_to_master(master, _tl)
-    except Exception:
-        logger.warning(
-            "legacy-to-master reconcile failed project=%s scene=%s — generation continues from timelineMaster",
-            project_id,
-            scene_id,
-            exc_info=True,
-        )
+    # WAVE2 dual-authority purge: touch_batch_config must NOT pull legacy lane
+    # back into master (that re-introduced dual prompt authority). Master→legacy
+    # projection still runs via project_prompts_to_legacy when segments change.
 
     new_fp = compute_config_fingerprint(batch)
     batch.configFingerprint = new_fp
@@ -962,6 +1313,44 @@ def touch_batch_config(
         # Prior approved clip remains playable
         if batch.approvedClip:
             batch.approvedClip.playable = True
+
+    # REVISION AUTHORITY (Timeline source rebuild): a materially edited batch
+    # (fingerprint change) must create a new generation state. A CandidateReady
+    # batch carries an unapproved generated take — it is generation-authoritative
+    # for the OLD revision, so it is flagged RegenerationRecommended (the take
+    # stays playable as history). Outgoing continuity bridges sourced from this
+    # batch and temporal packets reviewing this batch's asset were derived from
+    # the OLD prompt intent — supersede/invalidate them so the next extension
+    # cannot weave prior-revision continuity into the new revision.
+    if prior_fp and new_fp != prior_fp and batch.status == "CandidateReady":
+        batch.status = "RegenerationRecommended"
+        invalidated = True
+    if invalidated or (prior_fp and new_fp != prior_fp and (batch.candidateVersions or batch.approvedClip)):
+        try:
+            from .continuity import supersede_outgoing_bridges
+
+            superseded = supersede_outgoing_bridges(master, batch.id, now=_now())
+            _ = superseded
+        except Exception:
+            logger.warning(
+                "bridge supersede on revision failed project=%s scene=%s batch=%s",
+                project_id,
+                scene_id,
+                batch.id,
+                exc_info=True,
+            )
+        try:
+            from ..codirector.video_intelligence.service import invalidate_packets_for_source_batch
+
+            invalidate_packets_for_source_batch(master, batch.id)
+        except Exception:
+            logger.warning(
+                "packet revision invalidation failed project=%s scene=%s batch=%s",
+                project_id,
+                scene_id,
+                batch.id,
+                exc_info=True,
+            )
 
     # STAGED_SNAPSHOT_INVALIDATION: a Queued batch's staged ExecutionSnapshot
     # was built from the pre-edit config. When the fingerprint changes, that
@@ -1027,17 +1416,23 @@ def add_clip_to_batch(
         from .contracts import _nid
 
         clip.id = _nid("clip_")
+    from .same_track_no_overlap import same_track_overlap_error
+
     kind = clip.kind
     if kind == "image" or kind == "video":
-        batch.visualClips.append(clip)
+        target = batch.visualClips
     elif kind == "audio":
-        batch.audioClips.append(clip)
+        target = batch.audioClips
     elif kind == "sfx":
-        batch.sfxClips.append(clip)
+        target = batch.sfxClips
     elif kind == "camera":
-        batch.cameraInstructions.append(clip)
+        target = batch.cameraInstructions
     else:
         return {"ok": False, "error": "UNKNOWN_CLIP_KIND", "mock": False}
+    overlap = same_track_overlap_error(target, clip, kind)
+    if overlap:
+        return {"ok": False, "error": "SAME_TRACK_OVERLAP", "message": overlap, "mock": False}
+    target.append(clip)
 
     batch.configFingerprint = compute_config_fingerprint(batch)
     store.save_master(db, project_id, scene_id, master)
@@ -1091,15 +1486,7 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
                 batch.pendingSnapshotId = None
                 affected.append(batch.id)
         elif body.action == "cancel_active_local_job":
-            for job in batch.generationJobs:
-                if job.status in ("queued", "running") and job.locality == "local":
-                    job.status = "cancelled"
-                    hosted = "supported"
-                    halt_jobs.append((batch.generatorId or "", job))
-            if batch.status == "Generating":
-                batch.status = "Cancelled"
-                batch.pendingSnapshotId = None
-                affected.append(batch.id)
+            continue
         elif body.action == "request_hosted_cancellation":
             for job in batch.generationJobs:
                 if job.status in ("queued", "running") and job.locality == "hosted":
@@ -1125,6 +1512,24 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
             elif batch.status in ("Approved", "CandidateReady"):
                 preserved.append(batch.id)
 
+    if body.action == "cancel_active_local_job":
+        from .scene_takes import cancel_active_render, iter_active_render_jobs
+
+        live = iter_active_render_jobs(master)
+        for batch, job in live:
+            halt_jobs.append((batch.generatorId or job.generatorId or "", job))
+            hosted = "supported"
+        report = cancel_active_render(master)
+        affected.extend(report.get("affectedBatchIds") or [])
+        cancelled_job_ids = list(report.get("cancelledJobIds") or [])
+        cancelled_take_id = report.get("cancelledTakeId")
+    else:
+        cancelled_job_ids = []
+        cancelled_take_id = None
+    if body.action == "stop_remaining_scene_jobs":
+        from .scene_takes import mark_active_take_stopped
+
+        mark_active_take_stopped(master)
     store.save_master(db, project_id, scene_id, master)
     if halt_jobs:
         _halt_adapter_jobs(halt_jobs)
@@ -1142,6 +1547,8 @@ def cancel_scene(db: Session, project_id: str, scene_id: str, body: CancelReques
         affectedBatchIds=affected,
         preservedCompletedBatchIds=list(dict.fromkeys(preserved)),
         hostedCancelSupport=hosted,
+        cancelledJobIds=cancelled_job_ids,
+        cancelledTakeId=cancelled_take_id,
         message=msg,
         mock=False,
     )
@@ -1181,11 +1588,26 @@ def run_preflight(
     director_timeline: DirectorTimeline | None = None,
     db: Session | None = None,
     project_id: str | None = None,
+    scene_id: str | None = None,
 ) -> list[dict[str, Any]]:
     from .contracts import PreflightFinding
-    from .store import OPTIONAL_REFS_POLICY_NOTE
-    from .generation.speech_compile import lipsync_speaker_errors
+    from .store import OPTIONAL_REFS_POLICY_NOTE, is_creator_supporting_reference
+    from .generation.speech_compile import hydrate_spoken_dialogue_on_master, lipsync_speaker_errors
     from .generation.reference_compile import apply_compiled_references
+    from .reconcile import batch_inherits_scene_timed_prompt, persist_prompt_projection_to_scene
+
+    if db is not None and project_id and scene_id:
+        try:
+            if hydrate_spoken_dialogue_on_master(master, db=db, project_id=project_id):
+                persist_prompt_projection_to_scene(db, project_id, scene_id, master)
+                store.save_master(db, project_id, scene_id, master, touch_batches=False)
+        except Exception:
+            logger.warning(
+                "timed prompt dialogue hydrate failed project=%s scene=%s",
+                project_id,
+                scene_id,
+                exc_info=True,
+            )
 
     findings: list[PreflightFinding] = []
     for batch in master.batchBlocks:
@@ -1251,15 +1673,16 @@ def run_preflight(
                         )
                     )
         if not batch.promptSegments or not any(p.text.strip() for p in batch.promptSegments):
-            findings.append(
-                PreflightFinding(
-                    severity="warning",
-                    code="missing_prompt",
-                    message=f"{batch.label} has no prompt text.",
-                    batchBlockId=batch.id,
-                    fixProposal="Add a Prompt Segment before generate.",
+            if not batch_inherits_scene_timed_prompt(master, batch):
+                findings.append(
+                    PreflightFinding(
+                        severity="warning",
+                        code="missing_prompt",
+                        message=f"{batch.label} has no prompt text.",
+                        batchBlockId=batch.id,
+                        fixProposal="Add a Prompt Segment before generate.",
+                    )
                 )
-            )
         if batch.duration.plannedDuration <= 0:
             findings.append(
                 PreflightFinding(
@@ -1296,6 +1719,8 @@ def run_preflight(
                 )
         for ref in batch.references or []:
             if not isinstance(ref, dict):
+                continue
+            if not is_creator_supporting_reference(ref):
                 continue
             asset_id = ref.get("assetId") or ref.get("asset_id")
             if asset_id:
@@ -1465,6 +1890,40 @@ def stage_batch_snapshot(
     }
 
 
+def halt_queued_batches_after_failure(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+) -> dict[str, Any]:
+    """On batch failure: cancel remaining Queued batches; preserve Complete.
+
+    Does not submit N+1. Creator resumes via resume_incomplete_only then
+    Generate Scene (Failed/Cancelled -> Ready; CandidateReady/Approved kept).
+    """
+    payload = store.load_master(db, project_id, scene_id)
+    if not payload.get("ok"):
+        return payload
+    master = SceneTimelineMaster.model_validate(payload["master"])
+    cancelled_ids: list[str] = []
+    for batch in master.batchBlocks:
+        if batch.status != "Queued":
+            continue
+        batch.status = "Cancelled"
+        batch.pendingSnapshotId = None
+        for job in batch.generationJobs:
+            if job.status in ("queued", "running", "pending"):
+                job.status = "cancelled"
+        cancelled_ids.append(batch.id)
+    if cancelled_ids:
+        store.save_master(db, project_id, scene_id, master)
+    return {
+        "ok": True,
+        "halted": True,
+        "cancelledBatchIds": cancelled_ids,
+        "mock": False,
+    }
+
+
 def submit_next_queued_batch(
     db: Session,
     project_id: str,
@@ -1567,24 +2026,44 @@ def generate_scene(
     scope: Literal["current", "selected", "ready", "full"] = "full",
     batch_ids: list[str] | None = None,
     draft_mode: bool | None = None,
+    force_all: bool = False,
+    scene_take_id: str | None = None,
+    take_intent: str | None = None,
 ) -> dict[str, Any]:
     payload = store.load_master(db, project_id, scene_id)
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
     from .continuity import ensure_policy
+    from .scene_takes import (
+        allocate_rendering_take,
+        ensure_scene_takes,
+    )
+
+    ensure_scene_takes(master)
+    intent = str(take_intent or "").strip().upper()
+    if scene_take_id:
+        master.activeSceneTakeId = scene_take_id
+    elif scope == "full" and intent not in {"RENDER_CURRENT_TAKE", "RETAKE_MARKED_RANGE"}:
+        from .scene_takes import active_scene_take
+
+        active = active_scene_take(master)
+        if active is None or active.status != "rendering":
+            allocate_rendering_take(master)
+    store.save_master(db, project_id, scene_id, master, touch_batches=False)
 
     gid = master.sceneGeneratorId or (master.batchBlocks[0].generatorId if master.batchBlocks else None)
     ensure_policy(master, gid)
     store.save_master(db, project_id, scene_id, master, touch_batches=False)
     director_timeline = _load_director_timeline(db, project_id, scene_id)
-    if director_timeline is not None:
-        from .reconcile import reconcile_legacy_to_master
-
-        if reconcile_legacy_to_master(master, director_timeline):
-            store.save_master(db, project_id, scene_id, master, touch_batches=False)
+    # WAVE2 dual-authority purge: generate_scene must not reconcile legacy→master.
+    # Master batch.promptSegments already own per-window prompts.
     findings = run_preflight(
-        master, director_timeline=director_timeline, db=db, project_id=project_id
+        master,
+        director_timeline=director_timeline,
+        db=db,
+        project_id=project_id,
+        scene_id=scene_id,
     )
     if master.preflightMode == "strict" and any(f["severity"] == "error" for f in findings):
         return {"ok": False, "error": "PREFLIGHT_STRICT", "findings": findings, "mock": False}
@@ -1600,8 +2079,9 @@ def generate_scene(
     # submits one immutable request per batch in order immediately (each
     # batch = its own request/snapshot — GENERATION_ISOLATION).
     mode = getattr(master, "orchestratorMode", "sequential_continuity") or "sequential_continuity"
-    # MULTI-BATCH GOVERNANCE LAW: Continuity ON forbids submitting N+1 before
-    # Batch N has been reviewed. Parallel enqueue is staged instead.
+    # MULTI-BATCH QUEUE: ordered B1..Bn. Sequential mode stages later batches
+    # (Queued) and advances after prior SUCCESS + continuity readiness — not
+    # after creator Approve. Parallel enqueue is still staged when Continuity ON.
     cd_policy = getattr(master, "coDirectorContinuityPolicy", None)
     if isinstance(cd_policy, dict):
         cd_enabled = bool(cd_policy.get("enabled", True))
@@ -1619,8 +2099,12 @@ def generate_scene(
             continue
         if scope == "current" and selected and batch.id not in selected:
             continue
-        # Skip completed unless explicitly selected for regeneration
-        if batch.status in ("Approved", "CandidateReady") and scope == "full":
+        # Skip completed unless New Take (force_all) or an explicit selected regen
+        if (
+            batch.status in ("Approved", "CandidateReady")
+            and scope == "full"
+            and not force_all
+        ):
             continue
         # Never double-submit an in-flight batch
         if batch.status == "Generating":
@@ -1735,6 +2219,36 @@ def reject_temporal_continuation(
     return {"ok": True, "packet": found.model_dump(by_alias=True), "master": master.model_dump(), "mock": False}
 
 
+def place_visual_image_range(
+    db: Session,
+    project_id: str,
+    scene_id: str,
+    *,
+    mark_in: float,
+    mark_out: float,
+    image_asset_id: str,
+    placement_id: str | None = None,
+    batch_id: str | None = None,
+    source_asset_id: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """FE entry: place still image into Visual A|imgclip_|B (shared splitter)."""
+    from .visual_range import place_visual_image_range as _place
+
+    return _place(
+        db,
+        project_id,
+        scene_id,
+        mark_in=mark_in,
+        mark_out=mark_out,
+        image_asset_id=image_asset_id,
+        placement_id=placement_id,
+        source_batch_id=batch_id,
+        source_asset_id=source_asset_id,
+        label=label,
+    )
+
+
 def retake_range(
     db: Session,
     project_id: str,
@@ -1775,7 +2289,13 @@ def retake_range(
     if not batch:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
 
-    replacement = str(prompt or "").strip()
+    # Manifest-driven dialogue Re-Take: consume dialogueRetakeRepair if present
+    # BEFORE requiring a freeform prompt. Manifest owns words/language — not ASR.
+    from .generation.dialogue_authority import consume_dialogue_retake_repair
+
+    repair_auth = consume_dialogue_retake_repair(batch, str(prompt or ""))
+    dialogue_repair = repair_auth if repair_auth.get("consumed") else None
+    replacement = str(repair_auth.get("delta") or "").strip()
     if not replacement:
         return {
             "ok": False,
@@ -1783,6 +2303,7 @@ def retake_range(
             "message": "Write what should happen in the marked part.",
             "mock": False,
         }
+
     start = max(0.0, float(start))
     length = float(length)
     planned = float(batch.duration.plannedDuration or 0.0)
@@ -1795,13 +2316,15 @@ def retake_range(
             "message": "Mark a longer region to replace.",
             "mock": False,
         }
-    if not batch.approvedClip or not batch.approvedClip.assetId:
-        return {
-            "ok": False,
-            "error": "APPROVED_TAKE_REQUIRED",
-            "message": "Approve a take first. Re-take replaces a marked part of the current take.",
-            "mock": False,
-        }
+    from .current_take import require_current_take
+
+    take_gate = require_current_take(batch, action="Re-Take", master=master)
+    if not take_gate.get("ok"):
+        return take_gate
+    current_take = take_gate["take"]
+    source_asset_id = str(current_take["assetId"])
+    if current_take.get("takeId") and not batch.activeTakeId:
+        batch.activeTakeId = current_take["takeId"]
     gid = batch.generatorId or master.sceneGeneratorId
     if not gid:
         return {
@@ -1848,16 +2371,62 @@ def retake_range(
             "mock": False,
         }
 
-    source_asset_id = batch.approvedClip.assetId
+    # source_asset_id resolved from current generated take above
     start_image_id = None
-    if start > 0.05:
-        from .generation.registry import get_registry
+    reference_image_asset_id = None
 
-        try:
-            adapter = get_registry().get(gid)
-            supports_i2v = bool(adapter.capabilities.supportsImageToVideo)
-        except Exception:
-            supports_i2v = bool(gen.supportsImageToVideo) if gen else False
+    # Image-frame Visual window: prefer imgclip_* / role=image_frame as I2V start.
+    from ..director_timeline import parse_director_timeline
+    from .visual_range import find_image_frame_asset_in_range
+
+    scene_row = store.get_scene(db, project_id, scene_id)
+    if scene_row is not None:
+        director_tl = parse_director_timeline(
+            scene_row.director_json,
+            fallback_duration=float(scene_row.duration_sec or planned or 5.0),
+            fallback_prompt=scene_row.prompt or "",
+        )
+        reference_image_asset_id = find_image_frame_asset_in_range(
+            director_tl.video_clips,
+            mark_in=start,
+            mark_out=start + length,
+            source_batch_id=batch_id,
+        )
+
+    from .generation.registry import get_registry
+
+    visual_caps = None
+    try:
+        adapter = get_registry().get(gid)
+        supports_i2v = bool(adapter.capabilities.supportsImageToVideo)
+        supports_r2v = bool(adapter.capabilities.supportsReferenceToVideo)
+        visual_caps = adapter.capabilities
+    except Exception:
+        supports_i2v = bool(gen.supportsImageToVideo) if gen else False
+        supports_r2v = bool(getattr(gen, "supportsReferenceToVideo", False)) if gen else False
+        visual_caps = gen
+
+    # Visual image-frame is valid for classic I2V OR Reference-to-Video (H3).
+    # Do NOT treat supportsImageToVideo=False as "text-to-video only" — H3 is R2V
+    # (supportsReferenceToVideo=True) and must reuse FM4/FM5 DR→ref_image_N, not
+    # flip supportsImageToVideo, not fall back to T2V / Seedance I2V.
+    if reference_image_asset_id:
+        if not timeline_visual_sufficient(visual_caps):
+            return {
+                "ok": False,
+                "error": "IMAGE_FRAME_I2V_UNSUPPORTED",
+                "message": (
+                    f"{gen.label if gen else gid} cannot use the Visual image frame "
+                    "(needs Image-to-Video or Reference-to-Video). "
+                    "This is not a silent Text-to-Video fallback — choose an "
+                    "I2V- or R2V-capable engine."
+                ),
+                "generatorId": gid,
+                "referenceImageAssetId": reference_image_asset_id,
+                "mock": False,
+            }
+        start_image_id = reference_image_asset_id
+    elif start > 0.05:
         if supports_i2v:
             from .range_replacement import extract_cut_in_frame_asset
 
@@ -1898,8 +2467,31 @@ def retake_range(
         scene_id,
         batch_id,
         continuity={
-            "reTakeReason": "range_replacement",
-            "userCorrection": {"prompt": replacement, "start": start, "length": length},
+            "reTakeReason": (
+                "dialogue_manifest_retake"
+                if dialogue_repair is not None
+                else "range_replacement"
+            ),
+            "userCorrection": (
+                {
+                    **(dialogue_repair.get("userCorrection") or {}),
+                    "delta": replacement,
+                    "prompt": replacement,
+                    "start": start,
+                    "length": length,
+                    "source": "dialogue_manifest",
+                    "language": (dialogue_repair or {}).get("language"),
+                    "exactScriptDialogue": True,
+                }
+                if dialogue_repair is not None
+                else {
+                    "delta": replacement,
+                    "prompt": replacement,
+                    "start": start,
+                    "length": length,
+                }
+            ),
+            "dialogueRetakeRepair": dialogue_repair,
             "rangeReplacement": {
                 "start": start,
                 "length": length,
@@ -1907,6 +2499,8 @@ def retake_range(
                 "sourceAssetId": source_asset_id,
                 "repairId": repair_id,
                 "startImageAssetId": start_image_id,
+                "referenceImageAssetId": reference_image_asset_id or start_image_id,
+                "dialogueManifestDriven": bool(dialogue_repair is not None),
             },
         },
     )
@@ -1916,7 +2510,11 @@ def retake_range(
         "length": length,
         "repairId": repair_id,
         "generatorId": gid,
+        "startImageAssetId": start_image_id,
+        "referenceImageAssetId": reference_image_asset_id or start_image_id,
     }
+    if reference_image_asset_id or start_image_id:
+        result["referenceImageAssetId"] = reference_image_asset_id or start_image_id
     result["repairId"] = repair_id
     result["jobId"] = result.get("queueJobId") or result.get("internalJobId")
     result["priorSnapshotsPreserved"] = True

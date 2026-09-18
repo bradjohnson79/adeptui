@@ -1,4 +1,4 @@
-"""Timeline Auto-Extend helpers.
+﻿"""Timeline Auto-Extend helpers.
 
 Extend = creator-facing Adept UI capability.
 ContinuityBridge = internal Timeline handoff.
@@ -9,8 +9,10 @@ performed last-frame I2V.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Literal
 
+from ..media_clip import extract_frame_png, ltx_latent_frame_count, probe_video_duration, shot_last_frame_seconds
 from .contracts import (
     CURRENT_CONTINUITY_CONTEXT_VERSION,
     ContinuityBridge,
@@ -144,23 +146,103 @@ def next_batch_after(master: SceneTimelineMaster, source_batch_id: str):
     return None
 
 
-def extract_last_frame_png(video_path: str, dest_path: str) -> None:
-    import shutil
-    import subprocess
+def extract_last_frame_png(
+    video_path: str,
+    dest_path: str,
+    *,
+    at_seconds: float | None = None,
+    at_frame: int | None = None,
+) -> None:
+    extract_frame_png(video_path, dest_path, at_seconds=at_seconds, at_frame=at_frame)
+
+
+def last_frame_extract_seconds(source: Any, video_path: str) -> float | None:
+    """Use the requested shot end when Ingredients appended the reference sheet."""
+    planned = None
+    if source is not None and getattr(source, "duration", None) is not None:
+        planned = (
+            getattr(source.duration, "plannedDuration", None)
+            or getattr(source.duration, "timelineVisibleDuration", None)
+        )
+    file_dur = probe_video_duration(video_path)
+    if planned and float(planned) > 0 and file_dur and file_dur > float(planned) + 0.35:
+        return shot_last_frame_seconds(float(planned))
+    return None
+
+
+def last_frame_extract_frame(source: Any, video_path: str) -> int | None:
+    planned = None
+    if source is not None and getattr(source, "duration", None) is not None:
+        planned = (
+            getattr(source.duration, "plannedDuration", None)
+            or getattr(source.duration, "timelineVisibleDuration", None)
+        )
+    file_dur = probe_video_duration(video_path)
+    if planned and float(planned) > 0 and file_dur and file_dur > float(planned) + 0.35:
+        return max(0, ltx_latent_frame_count(float(planned)) - 1)
+    return None
+
+
+def _source_take_asset_id(source: Any, master: Any | None = None) -> str | None:
+    """WAVE 3: CURRENT Take asset only for continuity prior_frame / lastFrame reads."""
+    from .current_take import current_take_asset_id
+
+    return current_take_asset_id(source, master)
+
+
+def _approved_video_path(db: Any, source: Any, master: Any | None = None) -> str | None:
     from pathlib import Path
 
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        raise RuntimeError("ffmpeg required to extract continuity last frame")
-    dest = Path(dest_path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [ffmpeg, "-y", "-sseof", "-0.05", "-i", video_path, "-frames:v", "1", str(dest)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0 or not dest.is_file():
-        cmd2 = [ffmpeg, "-y", "-i", video_path, "-frames:v", "1", str(dest)]
-        proc2 = subprocess.run(cmd2, capture_output=True, text=True)
-        if proc2.returncode != 0 or not dest.is_file():
-            raise RuntimeError(proc.stderr or proc2.stderr or "last-frame extract failed")
+    from ..db import Asset
+
+    asset_id = _source_take_asset_id(source, master)
+    if not asset_id:
+        return None
+    asset = db.get(Asset, asset_id) if db is not None else None
+    video_path = getattr(asset, "path", None) if asset is not None else None
+    if not video_path or not Path(str(video_path)).is_file():
+        return None
+    return str(video_path)
+
+
+def bridge_source_stale(bridge: ContinuityBridge, source: Any, master: Any | None = None) -> bool:
+    current_asset = str(_source_take_asset_id(source, master) or "").strip()
+    if not source or not current_asset:
+        return True
+    state = bridge.continuityState or {}
+    stored_asset = str(state.get("sourceAssetId") or "").strip()
+    if stored_asset and current_asset and stored_asset != current_asset:
+        return True
+    if bridge.sourceTakeId and source.activeTakeId and bridge.sourceTakeId != source.activeTakeId:
+        return True
+    return False
+
+
+def bridge_extract_stale(bridge: ContinuityBridge, source: Any, video_path: str | None) -> bool:
+    """True when an older last-frame used file EOF on a sheet-appended take."""
+    if not source or not getattr(source, "duration", None):
+        return False
+    planned = getattr(source.duration, "plannedDuration", None)
+    state = bridge.continuityState or {}
+    extracted = state.get("extractedAtSeconds")
+    file_dur = None
+    if video_path:
+        file_dur = probe_video_duration(video_path)
+    elif state.get("sourceMediaDuration"):
+        try:
+            file_dur = float(state["sourceMediaDuration"])
+        except (TypeError, ValueError):
+            file_dur = None
+    if not planned or not file_dur:
+        return False
+    if file_dur <= float(planned) + 0.35:
+        return False
+    if extracted is None:
+        return True
+    try:
+        return float(extracted) > float(planned)
+    except (TypeError, ValueError):
+        return True
 
 
 def analyze_bridge(db: Any, project_id: str, master: SceneTimelineMaster, bridge: ContinuityBridge) -> ContinuityBridge:
@@ -173,11 +255,12 @@ def analyze_bridge(db: Any, project_id: str, master: SceneTimelineMaster, bridge
 
     bridge.status = "Analyzing"
     source = next((b for b in master.batchBlocks if b.id == bridge.sourceBatchId), None)
-    if not source or not source.approvedClip or not source.approvedClip.assetId:
+    source_asset_id = _source_take_asset_id(source, master) if source else None
+    if not source or not source_asset_id:
         bridge.status = "Failed"
         bridge.error = "SOURCE_CLIP_MISSING"
         return bridge
-    asset = db.get(Asset, source.approvedClip.assetId) if db is not None else None
+    asset = db.get(Asset, source_asset_id) if db is not None else None
     video_path = getattr(asset, "path", None) if asset is not None else None
     if not video_path or not Path(str(video_path)).is_file():
         bridge.status = "Failed"
@@ -186,7 +269,18 @@ def analyze_bridge(db: Any, project_id: str, master: SceneTimelineMaster, bridge
     try:
         dest_dir = Path(settings.data_dir) / "assets" / project_id / "continuity"
         dest = dest_dir / f"{bridge.bridgeId}_last.png"
-        extract_last_frame_png(str(video_path), str(dest))
+        at_seconds = last_frame_extract_seconds(source, str(video_path))
+        at_frame = last_frame_extract_frame(source, str(video_path))
+        extract_last_frame_png(
+            str(video_path),
+            str(dest),
+            at_seconds=at_seconds,
+            at_frame=at_frame,
+        )
+        file_dur = probe_video_duration(str(video_path))
+        planned = None
+        if source.duration:
+            planned = source.duration.plannedDuration or source.duration.timelineVisibleDuration
         frame_id = uuid4().hex
         frame = Asset(
             id=frame_id,
@@ -202,10 +296,17 @@ def analyze_bridge(db: Any, project_id: str, master: SceneTimelineMaster, bridge
         bridge.lastFrameAssetId = frame_id
         bridge.status = "Ready"
         bridge.error = None
+        extracted = at_seconds
+        if extracted is None and file_dur:
+            extracted = max(0.0, float(file_dur) - 0.05)
         bridge.continuityState = {
             "contextVersion": bridge.contextVersion,
             "effectiveTailDuration": bridge.effectiveTailDuration,
             "lastFrameAssetId": frame_id,
+            "sourceAssetId": source_asset_id,
+            "sourceMediaDuration": file_dur,
+            "extractedAtSeconds": extracted,
+            "plannedDuration": planned,
         }
     except Exception as exc:
         bridge.status = "Failed"
@@ -233,7 +334,7 @@ def prepare_outgoing_bridge(
     if not should_prepare_bridge(policy, nxt.generatorId or source.generatorId):
         return None
     actual = None
-    if source.approvedClip:
+    if _source_take_asset_id(source, master):
         actual = source.duration.generatedDuration or source.duration.plannedDuration
     existing = [
         b
@@ -242,9 +343,15 @@ def prepare_outgoing_bridge(
     ]
     ready = next((b for b in existing if b.status in ("Ready", "Applied")), None)
     if ready:
-        nxt.incomingBridgeId = ready.bridgeId
-        _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
-        return ready
+        video_path = _approved_video_path(db, source, master)
+        if bridge_source_stale(ready, source, master) or bridge_extract_stale(ready, source, video_path):
+            ready.status = "Superseded"
+            ready.supersededAt = datetime.now(timezone.utc).isoformat()
+            ready = None
+        else:
+            nxt.incomingBridgeId = ready.bridgeId
+            _run_temporal_review(db, project_id, scene_id, master, source, nxt.id)
+            return ready
     pending = next((b for b in existing if b.status in ("Waiting", "Analyzing")), None)
     if pending:
         nxt.incomingBridgeId = pending.bridgeId
@@ -398,12 +505,57 @@ def compile_retake_memory(
         "batchOrder": batch.order,
         "priorTakeId": prior.takeId if prior else None,
     }
+    # Freeze temporal packet / directives from the prior APPROVED predecessor only.
+    # Rejected takes and creator-rejected packets must not contaminate accepted state.
+    temporal_freeze: dict[str, Any] = {}
+    try:
+        from ..codirector.video_intelligence.service import find_packet_for_handoff, previous_batch
+
+        pred = previous_batch(master, batch.id)
+        if pred is not None and getattr(getattr(pred, "approvedClip", None), "assetId", None):
+            pkt = find_packet_for_handoff(master, pred.id, batch.id)
+            if (
+                pkt is not None
+                and pkt.availability in ("ready", "low_confidence")
+                and not getattr(pkt.continuation, "creatorRejected", False)
+            ):
+                temporal_freeze = {
+                    "packetId": pkt.packetId,
+                    "availability": pkt.availability,
+                    "nextBatchDirectives": list(pkt.continuation.nextBatchDirectives or []),
+                    "preserve": list(pkt.continuation.preserve or []),
+                    "continue": list(pkt.continuation.continue_ or []),
+                    "avoid": list(pkt.continuation.avoid or []),
+                    "importantEvents": [
+                        e.model_dump(mode="json") if hasattr(e, "model_dump") else e
+                        for e in (pkt.importantEvents or [])[:8]
+                    ],
+                    "reviewWindowKind": (pkt.extras or {}).get("reviewWindowKind"),
+                    "rollingSceneDigest": (
+                        pkt.rollingSceneDigest.model_dump(mode="json", by_alias=True)
+                        if pkt.rollingSceneDigest is not None
+                        else getattr(master, "coDirectorRollingSceneDigest", None)
+                    ),
+                }
+    except Exception:
+        temporal_freeze = {}
+    if temporal_freeze:
+        incoming_payload["temporalContinuity"] = temporal_freeze
+        sequence["temporalPacketId"] = temporal_freeze.get("packetId")
+        sequence["temporalDirectivesFrozen"] = True
+    uc = dict(user_correction or {})
+    delta = str(uc.get("delta") or uc.get("prompt") or "").strip()
+    if delta:
+        uc["delta"] = delta
+        uc.setdefault("prompt", delta)
+    authored = str(original_intent.get("prompt") or prompt or "").strip()
     return {
         "sequenceMemory": sequence,
         "incomingContinuity": incoming_payload,
         "originalTakeIntent": original_intent,
         "takeState": take_state,
-        "userCorrection": dict(user_correction or {}),
+        "userCorrection": uc,
+        "authoredPrompt": authored,
     }
 
 
