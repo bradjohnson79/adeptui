@@ -1,0 +1,33 @@
+{
+  "profileId": "ltx-2.5",
+  "displayName": "LTX 2.5",
+  "productionControlIds": [
+    "ltx-2.5",
+    "ltx-2.5-full",
+    "ltx-2.5-distilled",
+    "ltx-2.5-comfy",
+    "ltx_2_5_full",
+    "ltx_2_5_distilled",
+    "ltx_2_5_comfy"
+  ],
+  "supportsTextToVideo": true,
+  "supportsImageToVideo": true,
+  "supportsStartFrame": true,
+  "supportsEndFrame": false,
+  "supportsNegativePrompt": true,
+  "supportsSeed": true,
+  "nativeAudio": true,
+  "nativeThreeKeyframe": false,
+  "durationsSec": [
+    5.0417,
+    8.0417
+  ],
+  "resolution": "1280x704",
+  "notes": [
+    "LTX 2.5 is a current v1.1 local family. Execution identity is ltx-2.5-distilled, never ltx-local.",
+    "Local Text-to-Video uses ltx_25.t2v when that workflow is installed.",
+    "1 Frame uses ltx_25.i2v and requires exactly one start image.",
+    "3 Frame is not Ready. Ordinary I2V optional_cond_images is not a first+middle+last contract.",
+    "Knowledge: knowledgebase/video-generators/ltx-2.5.md."
+  ]
+}

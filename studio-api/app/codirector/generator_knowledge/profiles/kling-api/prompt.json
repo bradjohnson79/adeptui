@@ -1,0 +1,12 @@
+{
+  "dialect": "kling_named",
+  "sourcePack": null,
+  "inheritPromptFromPack": null,
+  "positiveAppend": [],
+  "negativeBase": ["blurry", "low quality", "watermark"],
+  "frameRoles": [],
+  "subjectTags": false,
+  "nativeThreeKeyframe": false,
+  "disclosure": "Kling conditions one start image. Extra @ # % sheets stay named. Never emit MiniMax or Seedance tokens. See knowledgebase/video-generators/kling.md.",
+  "supportsNegativePrompt": true
+}

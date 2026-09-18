@@ -1,0 +1,15 @@
+adapterId: minimax-h3-t2v-local
+engineId: minimax-h3
+aliases:
+  - minimax-h3
+  - minimax-h3-local
+  - minimax-h3-t2v-local
+  - minimax-h3-i2v-local
+versionNotes:
+  minimax-h3-t2v-local:
+    notes:
+      - T2V max 0 images.
+  minimax-h3-i2v-local:
+    notes:
+      - I2V first_frame WIRED.
+      - last_frame + ref_images becoming wired (Bot 2 now).

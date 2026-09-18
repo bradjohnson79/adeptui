@@ -1,0 +1,62 @@
+{
+  "adapterId": "ltx-2.5-distilled",
+  "engineId": "ltx-2.5",
+  "aliases": [
+    "ltx-2.5",
+    "ltx-2.5-full",
+    "ltx-2.5-distilled",
+    "ltx-2.5-comfy",
+    "ltx_2_5_full",
+    "ltx_2_5_distilled",
+    "ltx_2_5_comfy"
+  ],
+  "versionNotes": {
+    "ltx-2.5-full": {
+      "requiredComponents": [
+        "ltx_2_5_checkpoint",
+        "ltx_2_5_text_encoder",
+        "ltx_2_5_video_vae",
+        "ltx_2_5_audio_vae"
+      ],
+      "submitParams": [
+        "fast_mode",
+        "generate_audio",
+        "variant"
+      ],
+      "notes": [
+        "Execution adapter is ltx-2.5-distilled. Never bind ltx-local / LTX 2.3."
+      ]
+    },
+    "ltx-2.5-distilled": {
+      "requiredComponents": [
+        "ltx_2_5_checkpoint",
+        "ltx_2_5_text_encoder",
+        "ltx_2_5_video_vae",
+        "ltx_2_5_audio_vae"
+      ],
+      "submitParams": [
+        "fast_mode",
+        "generate_audio",
+        "variant"
+      ],
+      "notes": [
+        "Execution adapter is ltx-2.5-distilled. Never bind ltx-local / LTX 2.3."
+      ]
+    },
+    "ltx-2.5-comfy": {
+      "requiredComponents": [
+        "ltx_2_5_checkpoint",
+        "ltx_2_5_text_encoder",
+        "ltx_2_5_video_vae"
+      ],
+      "submitParams": [
+        "fast_mode",
+        "generate_audio",
+        "variant"
+      ],
+      "notes": [
+        "Execution adapter is ltx-2.5-distilled. Never bind ltx-local / LTX 2.3."
+      ]
+    }
+  }
+}

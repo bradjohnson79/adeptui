@@ -1,0 +1,35 @@
+{
+  "profileId": "minimax-h3",
+  "displayName": "MiniMax H3",
+  "productionControlIds": [
+    "minimax-h3",
+    "minimax-h3-local",
+    "minimax-h3-t2v-local",
+    "minimax-h3-i2v-local"
+  ],
+  "supportsTextToVideo": false,
+  "supportsImageToVideo": false,
+  "supportsStartFrame": false,
+  "supportsEndFrame": false,
+  "supportsNegativePrompt": false,
+  "supportsSeed": true,
+  "nativeAudio": true,
+  "nativeThreeKeyframe": false,
+  "durationsSec": [],
+  "resolution": "1280x704",
+  "maxImagesTextToVideo": 0,
+  "maxImagesImageToVideo": 9,
+  "imageSlots": {
+    "first_frame": "I2V_ONLY",
+    "last_frame": "WIRED_PRIOR_FRAME",
+    "ref_images": "WIRED"
+  },
+  "notes": [
+    "Timeline MiniMax H3 is Reference-to-Video.",
+    "CRS / ERS / PRS bind through ref_images. Front stills are I2V only.",
+    "Live graph tokens are <Picture N> and compiled <Subject N> (Subject N = Picture N).",
+    "Prior-frame last take is continuity, not a subject or place.",
+    "No decorative lowercase <subject N> from creator prose.",
+    "Knowledge: knowledgebase/video-generators/minimax-h3.md"
+  ]
+}

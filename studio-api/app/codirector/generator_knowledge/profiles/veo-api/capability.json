@@ -1,0 +1,27 @@
+{
+  "profileId": "veo-api",
+  "displayName": "Veo 3.1 (Kie)",
+  "productionControlIds": ["veo-api", "veo-kie"],
+  "supportsTextToVideo": true,
+  "supportsImageToVideo": true,
+  "supportsStartFrame": true,
+  "supportsEndFrame": false,
+  "supportsNegativePrompt": true,
+  "supportsSeed": true,
+  "nativeAudio": true,
+  "nativeThreeKeyframe": false,
+  "durationsSec": [5.0, 8.0, 10.0],
+  "resolution": "1280x720",
+  "maxImagesTextToVideo": 0,
+  "maxImagesImageToVideo": 1,
+  "imageSlots": {
+    "start_image": "ONE",
+    "referenceImages": "OFFICIAL_THREE_NOT_WIRED"
+  },
+  "notes": [
+    "Official Veo 3.1: up to 3 reference images of one person/character/product.",
+    "Adept Timeline adapter currently maximumReferenceImages=1 and does not POST referenceImages.",
+    "veo-fal is a PC row without a Timeline alias.",
+    "Knowledge: knowledgebase/video-generators/veo-3.1.md"
+  ]
+}

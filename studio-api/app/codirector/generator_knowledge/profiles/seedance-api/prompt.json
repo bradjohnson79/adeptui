@@ -1,0 +1,12 @@
+{
+  "dialect": "seedance_at_tokens",
+  "sourcePack": null,
+  "inheritPromptFromPack": null,
+  "positiveAppend": [],
+  "negativeBase": [],
+  "frameRoles": ["crs", "ers", "prs", "motion"],
+  "subjectTags": false,
+  "nativeThreeKeyframe": false,
+  "disclosure": "Seedance R2V tokens are @ImageN and @Video1 matching uploaded URLs. No MiniMax <Picture N>. No @Audio — Adept does not send audio_urls. See knowledgebase/video-generators/seedance-2.0.md.",
+  "supportsNegativePrompt": false
+}

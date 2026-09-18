@@ -1,0 +1,11 @@
+{
+  "dialect": "pack_rules",
+  "sourcePack": "",
+  "inheritPromptFromPack": "",
+  "positiveAppend": [],
+  "negativeBase": [],
+  "frameRoles": [],
+  "subjectTags": false,
+  "nativeThreeKeyframe": false,
+  "supportsNegativePrompt": true
+}

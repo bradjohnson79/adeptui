@@ -1,0 +1,15 @@
+dialect: h3_frame_roles
+sourcePack: null
+inheritPromptFromPack: null
+positiveAppend: []
+negativeBase: []
+frameRoles:
+  - crs
+  - ers
+  - prs
+  - prior_frame
+subjectTags: true
+nativeThreeKeyframe: false
+threeFrameStrategy: r2v-sheets
+disclosure: "Timeline H3 R2V: @ CRS, # ERS, % PRS. Live Comfy MiniMaxH3ReferenceToVideo binds <Picture N> to ref_images. Subject N = Picture N. Front stills are I2V only. Last frame is continuity, not a subject. See knowledgebase/video-generators/minimax-h3.md."
+supportsNegativePrompt: false

@@ -1,0 +1,6 @@
+{
+  "adapterId": "kling-api",
+  "engineId": "fal_kling",
+  "aliases": ["kling-api", "kling-fal", "kling-kie"],
+  "versionNotes": {}
+}

@@ -1,0 +1,25 @@
+{
+  "profileId": "kling-api",
+  "displayName": "Kling (Hosted API)",
+  "productionControlIds": ["kling-api", "kling-fal", "kling-kie"],
+  "supportsTextToVideo": true,
+  "supportsImageToVideo": true,
+  "supportsStartFrame": true,
+  "supportsEndFrame": false,
+  "supportsNegativePrompt": true,
+  "supportsSeed": true,
+  "nativeAudio": false,
+  "nativeThreeKeyframe": false,
+  "durationsSec": [5.0, 10.0],
+  "resolution": "1280x720",
+  "maxImagesTextToVideo": 0,
+  "maxImagesImageToVideo": 1,
+  "imageSlots": {
+    "image_url": "ONE"
+  },
+  "notes": [
+    "Official fal Kling 2.5 Turbo Pro I2V is one image_url plus optional tail_image_url.",
+    "Not multi-image R2V. Timeline adapter may be in-memory until live submit is wired.",
+    "Knowledge: knowledgebase/video-generators/kling.md"
+  ]
+}

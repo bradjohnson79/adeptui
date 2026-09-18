@@ -1,0 +1,6 @@
+{
+  "adapterId": "veo-api",
+  "engineId": "kie_veo",
+  "aliases": ["veo-api", "veo-kie"],
+  "versionNotes": {}
+}

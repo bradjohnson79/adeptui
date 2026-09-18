@@ -1,0 +1,12 @@
+{
+  "adapterId": "seedance-api",
+  "engineId": "fal_seedance",
+  "aliases": ["seedance-api", "seedance-fal"],
+  "versionNotes": {
+    "seedance-fal": {
+      "notes": [
+        "R2V model bytedance/seedance-2.0/reference-to-video only when video_urls is present."
+      ]
+    }
+  }
+}

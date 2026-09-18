@@ -1,0 +1,23 @@
+{
+  "adapterId": "minimax-h3-t2v-local",
+  "engineId": "minimax-h3",
+  "aliases": [
+    "minimax-h3",
+    "minimax-h3-local",
+    "minimax-h3-t2v-local",
+    "minimax-h3-i2v-local"
+  ],
+  "versionNotes": {
+    "minimax-h3-t2v-local": {
+      "notes": [
+        "T2V max 0 images."
+      ]
+    },
+    "minimax-h3-i2v-local": {
+      "notes": [
+        "Timeline R2V: CRS / ERS / PRS through MiniMaxH3ReferenceToVideo ref_images.",
+        "Live prompt token is <Picture N>."
+      ]
+    }
+  }
+}

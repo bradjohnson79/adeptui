@@ -1,0 +1,12 @@
+{
+  "dialect": "veo_named",
+  "sourcePack": null,
+  "inheritPromptFromPack": null,
+  "positiveAppend": [],
+  "negativeBase": ["blurry", "low quality", "watermark"],
+  "frameRoles": [],
+  "subjectTags": false,
+  "nativeThreeKeyframe": false,
+  "disclosure": "Official Veo 3.1 is 3 images of one subject. Adept currently sends one start image. No MiniMax or Seedance tokens. See knowledgebase/video-generators/veo-3.1.md.",
+  "supportsNegativePrompt": true
+}
