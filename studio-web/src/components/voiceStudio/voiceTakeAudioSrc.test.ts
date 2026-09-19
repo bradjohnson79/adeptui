@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api";
-import { bindAssetProjectId } from "../../runtime/assetProjectBind";
+import { projectIdFromApiPath } from "../../projectSecurity";
+import { bindAssetUrlProject } from "../../runtime/assetProjectBind";
 import { voiceTakeAudioSrc } from "./voiceTakeAudioSrc";
 
 afterEach(() => {
-  bindAssetProjectId("");
+  bindAssetUrlProject("");
 });
 
 describe("voiceTakeAudioSrc", () => {
@@ -16,6 +17,7 @@ describe("voiceTakeAudioSrc", () => {
     expect(spy).toHaveBeenCalledWith(audioAssetId, undefined, projectId);
     expect(src).toBe(`/api/projects/${projectId}/assets/${audioAssetId}/file`);
     expect(src.length).toBeGreaterThan(0);
+    expect(src.includes("/api/assets/")).toBe(false);
     spy.mockRestore();
   });
 
@@ -32,18 +34,30 @@ describe("voiceTakeAudioSrc", () => {
 });
 
 describe("api.assetUrl", () => {
-  it("builds only project-scoped file URLs when projectId is passed", () => {
+  it("is the live (assetId, rev?, projectId?) helper, not GitHub beta's one-arg form", () => {
+    expect(api.assetUrl.length).toBeGreaterThanOrEqual(1);
     expect(api.assetUrl("asset-1", undefined, "proj-9")).toBe(
       "/api/projects/proj-9/assets/asset-1/file",
     );
   });
 
-  it("returns empty when pid is missing and nothing is bound", () => {
+  it("returns empty only when ids are truly missing", () => {
+    expect(api.assetUrl("")).toBe("");
     expect(api.assetUrl("asset-1")).toBe("");
+    expect(api.assetUrl("asset-1", undefined, "")).toBe("");
   });
 
-  it("uses the bound project id when callers omit projectId", () => {
-    bindAssetProjectId("bound-proj");
+  it("uses bindAssetUrlProject when callers omit projectId", () => {
+    api.bindAssetUrlProject("bound-proj");
     expect(api.assetUrl("asset-1")).toBe("/api/projects/bound-proj/assets/asset-1/file");
+  });
+});
+
+describe("project-scoped unlock path", () => {
+  it("extracts pid from project-scoped asset file URLs so fetch unlock header can attach", () => {
+    const pid = "beffd3d8-791d-4adf-9c4d-681ec9d4efb0";
+    const aid = "aa000000-0000-4000-8000-000000000001";
+    expect(projectIdFromApiPath(`/api/projects/${pid}/assets/${aid}/file`)).toBe(pid);
+    expect(projectIdFromApiPath(`/api/assets/${aid}/file`)).toBe(null);
   });
 });

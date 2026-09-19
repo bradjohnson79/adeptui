@@ -76,7 +76,9 @@ import type { StatusRegistryCheck, StatusRun } from "./codirector/status/types";
  * VITE_API_BASE is a PUBLIC, client-visible configuration value (never secrets).
  */
 import { API_BASE as BASE, apiUrl } from "./runtime/apiBase";
-import { getBoundAssetProjectId } from "./runtime/assetProjectBind";
+import { bindAssetUrlProject, getBoundAssetUrlProject } from "./runtime/assetProjectBind";
+
+export { bindAssetUrlProject, getBoundAssetUrlProject } from "./runtime/assetProjectBind";
 
 export { apiUrl };
 
@@ -920,9 +922,15 @@ function withJsonContentType(init?: RequestInit): RequestInit | undefined {
   return { ...init, headers };
 }
 
+const LEGACY_ASSET_PATH = /^\/api\/assets\/([0-9a-fA-F-]{36})(\/|$)/;
+
+function unlockProjectIdForPath(path: string): string {
+  return projectIdFromApiPath(path) || (LEGACY_ASSET_PATH.test(path) ? getBoundAssetUrlProject() : "");
+}
+
 function withProjectUnlock(path: string, init?: RequestInit): RequestInit {
   const headers = new Headers(init?.headers);
-  const pid = projectIdFromApiPath(path);
+  const pid = unlockProjectIdForPath(path);
   if (pid) {
     const token = getProjectUnlockToken(pid);
     if (token && !headers.has("X-Adept-Project-Unlock")) {
@@ -6795,15 +6803,20 @@ export const api = {
     }
     return apiUrl(`/api/file?path=${encodeURIComponent(absPath)}`);
   },
+  bindAssetUrlProject,
   /**
-   * Project-scoped media URL. Live contract:
-   * `/api/projects/{pid}/assets/{aid}/file`
-   * Returns "" when projectId and getBoundAssetProjectId() are both empty —
-   * mounting `<audio src="">` is the Ready+duration / 0:00/0:00 pattern.
+   * Project-scoped media URL — live contract, not GitHub beta's one-arg
+   * `/api/assets/{id}/file` helper.
+   *
+   * `(assetId, rev?, projectId?)` → `/api/projects/{pid}/assets/{id}/file`
+   * pid = explicit projectId or bindAssetUrlProject(). Returns "" only when
+   * assetId or pid is truly missing (the Ready+duration / 0:00/0:00 pattern).
+   * Native `<audio>` cannot send X-Adept-Project-Unlock; the project-scoped
+   * path lets the unlock cookie apply. Fetch still attaches the header.
    */
   assetUrl: (assetId: string, rev?: string | number | null, projectId?: string) => {
     const pid =
-      (typeof projectId === "string" ? projectId.trim() : "") || getBoundAssetProjectId();
+      (typeof projectId === "string" ? projectId.trim() : "") || getBoundAssetUrlProject();
     if (!assetId || !pid) return "";
     const url = apiUrl(
       `/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/file`,

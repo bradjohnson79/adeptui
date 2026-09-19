@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, isAbortError, isNavigationFetchFailure } from "../api";
-import { bindAssetProjectId } from "../runtime/assetProjectBind";
+import { bindAssetUrlProject } from "../runtime/assetProjectBind";
 import type { Asset, Project } from "../types";
 import { UnlockProjectModal } from "../components/ProjectPasswordModals";
 import { goHome } from "../navigation/projectLibrary";
@@ -480,8 +480,8 @@ export default function ProjectEditor() {
   }, []);
 
   useEffect(() => {
-    bindAssetProjectId(id);
-    return () => bindAssetProjectId("");
+    bindAssetUrlProject(id);
+    return () => bindAssetUrlProject("");
   }, [id]);
 
   const refresh = useCallback(async () => {

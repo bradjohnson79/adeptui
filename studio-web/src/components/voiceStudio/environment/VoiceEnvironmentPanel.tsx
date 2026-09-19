@@ -22,6 +22,7 @@ import {
   WALLA_PRESETS,
   type PresetOption,
 } from "./presets";
+import { voiceTakeAudioSrc } from "../voiceTakeAudioSrc";
 
 type VoiceIdentitySummary = {
   id: string;
@@ -656,8 +657,12 @@ export function VoiceEnvironmentPanel({
             <p className="muted">
               Dialogue stays dry for timing. Environment processing wraps around this take without shifting the spoken start.
             </p>
-            {approvedTake?.audioAssetId ? (
-              <audio controls src={api.assetUrl(approvedTake.audioAssetId)} data-testid="voice-environment-dry-player" />
+            {voiceTakeAudioSrc(projectId, approvedTake?.audioAssetId) ? (
+              <audio
+                controls
+                src={voiceTakeAudioSrc(projectId, approvedTake?.audioAssetId)}
+                data-testid="voice-environment-dry-player"
+              />
             ) : null}
           </article>
 
@@ -668,8 +673,12 @@ export function VoiceEnvironmentPanel({
                 ? `${optionLabel(SPACE_PRESETS, draft.spacePreset)} · ${optionLabel(DISTANCE_PRESETS, draft.distancePreset)} · ${optionLabel(DIRECTION_PRESETS, draft.directionPreset)}`
                 : "Save a profile, then preview or render the environment to hear the scene acoustic."}
             </p>
-            {currentRender?.processedAudioAssetId ? (
-              <audio controls src={api.assetUrl(currentRender.processedAudioAssetId)} data-testid="voice-environment-processed-player" />
+            {voiceTakeAudioSrc(projectId, currentRender?.processedAudioAssetId) ? (
+              <audio
+                controls
+                src={voiceTakeAudioSrc(projectId, currentRender?.processedAudioAssetId)}
+                data-testid="voice-environment-processed-player"
+              />
             ) : (
               <div className="voice-studio-empty-player">No environment pass yet.</div>
             )}
@@ -783,7 +792,9 @@ export function VoiceEnvironmentPanel({
                   <p className="muted">
                     {optionLabel(SPACE_PRESETS, draft.spacePreset)} · {optionLabel(DISTANCE_PRESETS, draft.distancePreset)}
                   </p>
-                  {render.processedAudioAssetId ? <audio controls src={api.assetUrl(render.processedAudioAssetId)} /> : null}
+                  {voiceTakeAudioSrc(projectId, render.processedAudioAssetId) ? (
+                    <audio controls src={voiceTakeAudioSrc(projectId, render.processedAudioAssetId)} />
+                  ) : null}
                   <Button type="button" onClick={() => setSelectedRenderId(render.id)}>
                     Use This Pass
                   </Button>

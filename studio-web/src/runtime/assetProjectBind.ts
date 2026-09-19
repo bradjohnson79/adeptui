@@ -1,11 +1,16 @@
-/** Optional fallback project id for `api.assetUrl` when callers omit projectId. */
+/** Bound project id used by live `api.assetUrl` when callers omit projectId. */
 
-let boundAssetProjectId = "";
+let boundAssetUrlProject = "";
 
-export function bindAssetProjectId(projectId?: string | null) {
-  boundAssetProjectId = typeof projectId === "string" ? projectId.trim() : "";
+export function bindAssetUrlProject(projectId?: string | null) {
+  boundAssetUrlProject = typeof projectId === "string" ? projectId.trim() : "";
 }
 
-export function getBoundAssetProjectId(): string {
-  return boundAssetProjectId;
+export function getBoundAssetUrlProject(): string {
+  return boundAssetUrlProject;
 }
+
+/** @deprecated Use bindAssetUrlProject */
+export const bindAssetProjectId = bindAssetUrlProject;
+/** @deprecated Use getBoundAssetUrlProject */
+export const getBoundAssetProjectId = getBoundAssetUrlProject;
