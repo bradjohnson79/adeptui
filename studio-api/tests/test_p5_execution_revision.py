@@ -84,3 +84,37 @@ def test_begin_execution_revision_direct():
     t = begin_execution_revision(master, reason="generator_switch")
     assert master.currentSceneTakeId == t.id
     assert len(master.sceneTakes) == 2
+
+def test_cd_handoff_flags_match_mint_contract():
+    """CD build_generator_switch_handoff requiresNewSceneTake → Systems mint path."""
+    from app.codirector.production.orchestrator import build_generator_switch_handoff
+
+    handoff = build_generator_switch_handoff(
+        previous_generator_id="minimax-h3",
+        new_generator_id="ltx-2.5",
+        duration_seconds=30.0,
+        previous_windows=[{"start": 0.0, "end": 15.0}, {"start": 15.0, "end": 30.0}],
+    )
+    assert handoff["requiresNewSceneTake"] is True
+    assert handoff["requiresRevisionBump"] is True
+    old = SceneTake(id="stk_oldchain", label="A", letterIndex=1, status="ready")
+    master = SceneTimelineMaster(
+        sceneGeneratorId="ltx-2.5",
+        batchBlocks=[_batch("b0", 0)],
+        sceneTakes=[old],
+        currentSceneTakeId=old.id,
+    )
+    prev = SceneTimelineMaster(
+        sceneGeneratorId="minimax-h3",
+        batchBlocks=[_batch("b0", 0)],
+        sceneTakes=[old],
+        currentSceneTakeId=old.id,
+    )
+    minted = begin_execution_revision(master, reason=str(handoff["reason"]))
+    assert minted.id != old.id
+    assert master.currentSceneTakeId == minted.id
+    assert master.activeSceneTakeId is None
+    keys = resolve_continuity_keys_from_batch(
+        project_id="p1", scene_id="sc1", master=master, batch=master.batchBlocks[0]
+    )
+    assert keys["take_id"] == minted.id

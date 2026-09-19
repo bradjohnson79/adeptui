@@ -193,12 +193,69 @@ def stash_removed_item(workspace: dict[str, Any], *, kind: str, item_id: str, pa
     return ws
 
 
+def _batch_windows_from_master_payload(master_obj: Any) -> list[dict[str, float]]:
+    """Cumulative start/end windows from batch planned durations (CD handoff input)."""
+    if master_obj is None:
+        return []
+    if isinstance(master_obj, dict):
+        blocks = list(master_obj.get("batchBlocks") or [])
+
+        def _order(b: dict) -> tuple:
+            return (int(b.get("order") or 0), str(b.get("id") or ""))
+
+        def _dur(b: dict) -> float:
+            d = b.get("duration") or {}
+            try:
+                return float(d.get("plannedDuration") or d.get("timelineVisibleDuration") or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        ordered = sorted(blocks, key=_order)
+    else:
+        blocks = list(getattr(master_obj, "batchBlocks", None) or [])
+        ordered = sorted(
+            blocks,
+            key=lambda b: (int(getattr(b, "order", 0) or 0), str(getattr(b, "id", "") or "")),
+        )
+
+        def _dur(b: Any) -> float:
+            dur = getattr(b, "duration", None)
+            try:
+                return float(
+                    getattr(dur, "plannedDuration", None)
+                    or getattr(dur, "timelineVisibleDuration", None)
+                    or 0.0
+                )
+            except (TypeError, ValueError):
+                return 0.0
+
+    out: list[dict[str, float]] = []
+    t = 0.0
+    for b in ordered:
+        length = max(0.0, _dur(b))
+        out.append({"start": t, "end": t + length})
+        t += length
+    return out
+
+
+def _scene_duration_seconds(master_obj: Any, scene: Any = None) -> float:
+    wins = _batch_windows_from_master_payload(master_obj)
+    if wins:
+        return float(wins[-1]["end"])
+    if scene is not None:
+        try:
+            return float(getattr(scene, "duration_sec", None) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
 def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Persist Master. Generator / window-topology changes mint a fresh SceneTake.
 
-    Systems P5 fail-closed: same ``stk_`` must NOT keep VCM/continuity across a
-    changed generator or batch window topology. Mint happens BEFORE rematerialize
-    consumers read the new master (save after mint).
+    Systems P5 fail-closed: honor CD ``build_generator_switch_handoff`` — mint NEW
+    SceneTake + revision BEFORE rematerialize; same ``stk_`` must NOT keep VCM
+    continuity across changed window topology.
     """
     scene = get_scene(db, project_id, scene_id)
     if not scene:
@@ -214,35 +271,64 @@ def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[st
             incoming.setdefault("activeSceneTakeId", prev_master.get("activeSceneTakeId"))
     master = SceneTimelineMaster.model_validate(incoming)
     from .scene_takes import (
+        begin_execution_revision,
         enforce_execution_boundary_if_topology_changed,
         window_execution_fingerprint,
     )
 
     boundary = None
     bump = False
+    handoff: dict[str, Any] | None = None
     if prev_master is not None:
+        prev_gen = str((prev_master or {}).get("sceneGeneratorId") or "").strip()
+        next_gen = str(getattr(master, "sceneGeneratorId", None) or "").strip()
         prev_fp = window_execution_fingerprint(prev_master)
         next_fp = window_execution_fingerprint(master)
-        if prev_fp != next_fp:
-            prev_gen = str((prev_master or {}).get("sceneGeneratorId") or "").strip()
-            next_gen = str(getattr(master, "sceneGeneratorId", None) or "").strip()
-            reason = (
-                "generator_switch"
-                if prev_gen != next_gen
-                else "window_topology_change"
-            )
-            # Keep history takes from disk authority, then mint on the NEW topology.
+        must_mint = False
+        reason = "window_topology_change"
+
+        if prev_gen != next_gen:
+            # CD projection law owns windows; Systems honors handoff mint flags.
+            try:
+                from ..codirector.production.orchestrator import build_generator_switch_handoff
+
+                duration_sec = _scene_duration_seconds(master, scene) or _scene_duration_seconds(
+                    prev_master, scene
+                )
+                handoff = build_generator_switch_handoff(
+                    previous_generator_id=prev_gen,
+                    new_generator_id=next_gen,
+                    duration_seconds=float(duration_sec or 0.0),
+                    previous_windows=_batch_windows_from_master_payload(prev_master),
+                )
+                must_mint = bool(handoff.get("requiresNewSceneTake"))
+                reason = str(handoff.get("reason") or "generator_switch_window_topology_change")
+            except Exception:
+                # Fail-closed: generator id changed → always mint even if CD import fails.
+                must_mint = True
+                reason = "generator_switch"
+                handoff = {
+                    "requiresNewSceneTake": True,
+                    "requiresRevisionBump": True,
+                    "reason": reason,
+                    "previousGeneratorId": prev_gen,
+                    "newGeneratorId": next_gen,
+                    "note": "fallback_mint_cd_handoff_unavailable",
+                }
+        elif prev_fp != next_fp:
+            must_mint = True
+            reason = "window_topology_change"
+
+        if must_mint:
             if prev_master.get("sceneTakes") and not (
                 incoming.get("sceneTakes") and incoming.get("_replaceSceneTakes")
             ):
-                # Prefer server history when FE echoes stale takes with old current id.
                 try:
                     from .contracts import SceneTake as _SceneTake
 
                     server_takes = [
                         _SceneTake.model_validate(t) for t in (prev_master.get("sceneTakes") or [])
                     ]
-                    # Merge: server list wins as base; incoming may add nothing for switch.
                     by_id = {t.id: t for t in server_takes}
                     for t in list(master.sceneTakes or []):
                         if t.id not in by_id:
@@ -250,10 +336,29 @@ def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[st
                     master.sceneTakes = list(by_id.values())
                 except Exception:
                     pass
-            boundary = enforce_execution_boundary_if_topology_changed(
-                prev_master, master, reason=reason
-            )
-            bump = boundary is not None
+            if prev_fp != next_fp:
+                boundary = enforce_execution_boundary_if_topology_changed(
+                    prev_master, master, reason=reason
+                )
+            else:
+                # Generator changed but batch id fingerprint unchanged (Gen rematerialize pending).
+                boundary = begin_execution_revision(master, reason=reason)
+            if handoff and boundary is not None:
+                snap = dict(boundary.generationSnapshot or {})
+                snap["cdGeneratorSwitchHandoff"] = {
+                    "requiresNewSceneTake": handoff.get("requiresNewSceneTake"),
+                    "requiresRevisionBump": handoff.get("requiresRevisionBump"),
+                    "reason": handoff.get("reason"),
+                    "previousGeneratorId": handoff.get("previousGeneratorId"),
+                    "newGeneratorId": handoff.get("newGeneratorId"),
+                    "newBatchCount": handoff.get("newBatchCount"),
+                    "newWindows": handoff.get("newWindows"),
+                }
+                boundary.generationSnapshot = snap
+            bump = boundary is not None or bool((handoff or {}).get("requiresRevisionBump"))
+            if bump and boundary is None and handoff and handoff.get("requiresNewSceneTake"):
+                boundary = begin_execution_revision(master, reason=reason)
+                bump = True
     save_master(db, project_id, scene_id, master, bump_revision=bump)
     out: dict[str, Any] = {"ok": True, "master": master.model_dump(), "mock": False}
     if boundary is not None:
@@ -263,4 +368,6 @@ def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[st
             "supersedesSceneTakeId": (boundary.generationSnapshot or {}).get("supersedesSceneTakeId"),
             "timelineRevisionBumped": True,
         }
+    if handoff is not None:
+        out["generatorSwitchHandoff"] = handoff
     return out
