@@ -6794,7 +6794,26 @@ export const api = {
     }
     return apiUrl(`/api/file?path=${encodeURIComponent(absPath)}`);
   },
-  assetUrl: (assetId: string) => apiUrl(`/api/assets/${assetId}/file`),
+  /**
+   * Media URL for an asset file.
+   *
+   * When `projectId` is provided, emit the project-scoped file path used by
+   * Voice Performance take/compare players. Without projectId, keep the
+   * legacy global `/api/assets/{id}/file` URL so existing callers stay valid.
+   * Never return "" solely because projectId is missing — that mounts a dead
+   * `<audio>` while take `durationMs` still renders.
+   */
+  assetUrl: (assetId: string, rev?: string | number | null, projectId?: string) => {
+    if (!assetId) return "";
+    const pid = typeof projectId === "string" ? projectId.trim() : "";
+    const path = pid
+      ? `/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/file`
+      : `/api/assets/${encodeURIComponent(assetId)}/file`;
+    const url = apiUrl(path);
+    if (rev == null || String(rev) === "") return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}rev=${encodeURIComponent(String(rev))}`;
+  },
   m28Status: () => req<Record<string, boolean>>("/api/codirector/m28/status"),
   m28RadarDiscover: (source: "huggingface" | "github") =>
     req<any>("/api/codirector/m28/radar/discover", {

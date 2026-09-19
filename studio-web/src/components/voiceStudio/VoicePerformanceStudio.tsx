@@ -21,6 +21,7 @@ import {
   VOICE_PERFORMANCE_EMOTION_PRESETS,
   VOICE_PERFORMANCE_EMOTION_PRESET_LABELS,
 } from "./emotionPresets";
+import { voiceTakeAudioSrc } from "./voiceTakeAudioSrc";
 
 const DEFAULT_DIALOGUE = `Light circuitry, not tattoos, doofus.
 I developed them with my sister in the Abode.`;
@@ -1134,7 +1135,9 @@ export function VoicePerformanceStudio({
               ) : null}
 
               <div className="voice-performance-studio__take-list">
-                {visibleTakes.map((take) => (
+                {visibleTakes.map((take) => {
+                  const takeAudioSrc = voiceTakeAudioSrc(projectId, take.audioAssetId);
+                  return (
                   <article key={take.id} className="voice-studio-candidate-card" data-testid="vp-take-card">
                     <div className="voice-performance-studio__take-header">
                       <strong>{take.label}</strong>
@@ -1143,7 +1146,13 @@ export function VoicePerformanceStudio({
                         {take.durationMs ? ` · ${Math.round(take.durationMs / 10) / 100}s` : ""}
                       </span>
                     </div>
-                    {take.audioAssetId ? <audio controls src={api.assetUrl(take.audioAssetId)} /> : null}
+                    {takeAudioSrc ? (
+                      <audio
+                        controls
+                        src={takeAudioSrc}
+                        data-testid="vp-take-audio"
+                      />
+                    ) : null}
                     {take.errorMessage ? <p className="muted">{take.errorMessage}</p> : null}
                     <div className="voice-studio-actions">
                       <Button
@@ -1157,7 +1166,8 @@ export function VoicePerformanceStudio({
                       </Button>
                     </div>
                   </article>
-                ))}
+                  );
+                })}
               </div>
 
               {comparison ? (
@@ -1165,7 +1175,9 @@ export function VoicePerformanceStudio({
                   <strong>Comparison</strong>
                   <p className="muted">{comparison.comparison.dialogueText}</p>
                   <div className="voice-studio-compare-slots">
-                    {comparison.comparison.takes.map((take) => (
+                    {comparison.comparison.takes.map((take) => {
+                      const compareAudioSrc = voiceTakeAudioSrc(projectId, take.audioAssetId);
+                      return (
                       <div key={take.id}>
                         <strong>{take.label}</strong>
                         <p className="muted">
@@ -1173,8 +1185,16 @@ export function VoicePerformanceStudio({
                           {take.durationMs ? ` · ${Math.round(take.durationMs / 10) / 100}s` : ""}
                           {take.isApproved ? " · approved" : ""}
                         </p>
+                        {compareAudioSrc ? (
+                          <audio
+                            controls
+                            src={compareAudioSrc}
+                            data-testid="vp-compare-audio"
+                          />
+                        ) : null}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               ) : null}

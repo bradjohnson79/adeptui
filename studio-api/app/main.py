@@ -642,8 +642,13 @@ async def root_health():
     return await api_health()
 
 
-@app.get("/api/assets/{asset_id}/file")
-def get_asset_file(asset_id: str):
+def _asset_file_response(asset_id: str, project_id=None):
+    """Serve an asset file for GET and HEAD.
+
+    HEAD must succeed with Content-Type + Content-Length and no body so
+    browsers that probe media before GET do not leave <audio> at 0:00/0:00.
+    FileResponse already honors Range on GET.
+    """
     from fastapi import HTTPException
 
     from .db import SessionLocal, Asset
@@ -653,6 +658,11 @@ def get_asset_file(asset_id: str):
         asset = db.get(Asset, asset_id)
         if not asset:
             raise HTTPException(status_code=404, detail={"error": "ASSET_NOT_FOUND", "assetId": asset_id})
+        if project_id and getattr(asset, "project_id", None) != project_id:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "ASSET_NOT_FOUND", "assetId": asset_id, "projectId": project_id},
+            )
         if not asset.path:
             raise HTTPException(status_code=404, detail={"error": "ASSET_FILE_MISSING", "assetId": asset_id, "reason": "Asset record exists but file path is not set."})
         p = Path(asset.path)
@@ -665,6 +675,16 @@ def get_asset_file(asset_id: str):
         raise HTTPException(status_code=500, detail={"error": "ASSET_STORAGE_ERROR", "assetId": asset_id, "type": type(exc).__name__, "message": str(exc)[:200]})
     finally:
         db.close()
+
+
+@app.api_route("/api/assets/{asset_id}/file", methods=["GET", "HEAD"])
+def get_asset_file(asset_id: str):
+    return _asset_file_response(asset_id)
+
+
+@app.api_route("/api/projects/{project_id}/assets/{asset_id}/file", methods=["GET", "HEAD"])
+def get_project_asset_file(project_id: str, asset_id: str):
+    return _asset_file_response(asset_id, project_id)
 
 
 @app.get("/api/assets/{asset_id}/thumb")
