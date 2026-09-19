@@ -12,6 +12,10 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..character_identity.models import VoiceProfileRow
+from ..character_identity.spoken_pronunciation import (
+    apply_spoken_pronunciations,
+    merge_spoken_pronunciations,
+)
 from ..db import Asset, Job, Project, Scene
 from ..scriptwriter.store import load_document
 from .emotion_presets import SUPPORTED_VECTORS, get_preset, list_presets, normalize_mix
@@ -423,13 +427,17 @@ def create_takes(db: Session, record_id: str, body: GenerateTakesBody) -> dict[s
             emo_asset = db.get(Asset, row.emotional_reference_asset_id)
             if emo_asset and emo_asset.path and Path(emo_asset.path).is_file():
                 emotion_ref_path = str(emo_asset.path)
+        spoken_dialogue = apply_spoken_pronunciations(
+            row.dialogue_text,
+            merge_spoken_pronunciations(_loads(voice.lineage_json, {}).get("pronunciations") or []),
+        )
         queued = index_tts2.generate_take(
             db,
             project_id=row.project_id,
             scene_id=row.scene_id,
             record_id=row.id,
             take_id=take.id,
-            dialogue_text=row.dialogue_text,
+            dialogue_text=spoken_dialogue,
             language=row.language,
             voice_identity_id=voice.id,
             performance_plan=_loads(row.performance_plan_json, {}),

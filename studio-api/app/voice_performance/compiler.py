@@ -11,6 +11,10 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from ..character_identity import service as ci
+from ..character_identity.spoken_pronunciation import (
+    apply_spoken_pronunciations,
+    merge_spoken_pronunciations,
+)
 from .parser import parse_markup
 from .schemas import ParseResultOut, PerformanceSegmentOut, PlanOut, ValidationIssue
 
@@ -106,6 +110,8 @@ def apply_pronunciations(
     issues: list[ValidationIssue] = []
     entries = (voice or {}).get("pronunciations") or []
     words = {str(e.get("word") or "").lower(): e for e in entries if isinstance(e, dict) and e.get("word")}
+    spoken_pairs = merge_spoken_pronunciations(entries)
+    resolved = {word.lower() for word, phonetic in spoken_pairs if word and phonetic}
     out = []
     for seg in segments:
         data = seg.model_dump()
@@ -122,13 +128,16 @@ def apply_pronunciations(
                 )
         if found:
             data["pronunciationOverrides"] = (data.get("pronunciationOverrides") or []) + found
+        if seg.segmentType == "speech" and text:
+            # TTS-only respell. Stored source_text / scripts stay unchanged.
+            data["text"] = apply_spoken_pronunciations(text, spoken_pairs)
         # Heuristic: Capitalized fictional-looking terms without entry
         for token in text.split():
             clean = token.strip(".,!?;:\"'")
             if len(clean) > 3 and clean[0].isupper() and clean.lower() not in words and clean.isalpha():
                 # only warn for uncommon proper nouns heuristic — Handari etc.
                 if clean.lower() in ("korri", "anadriya", "handari", "abode"):
-                    if clean.lower() not in words:
+                    if clean.lower() not in words and clean.lower() not in resolved:
                         issues.append(
                             ValidationIssue(
                                 code="UNRESOLVED_PRONUNCIATION",
