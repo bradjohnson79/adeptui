@@ -148,6 +148,24 @@ function takeSort(a: VoicePerformanceTake, b: VoicePerformanceTake) {
   return a.takeNumber - b.takeNumber || a.createdAt.localeCompare(b.createdAt);
 }
 
+function TakeAudioPlayer({ src, testId }: { src: string; testId: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+  if (!src) return null;
+  return (
+    <>
+      <audio controls src={src} data-testid={testId} onError={() => setFailed(true)} />
+      {failed ? (
+        <p className="muted" data-testid={`${testId}-error`}>
+          This take is ready, but playback isn’t available yet.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 export function VoicePerformanceStudio({
   projectId,
   characterId,
@@ -1146,13 +1164,7 @@ export function VoicePerformanceStudio({
                         {take.durationMs ? ` · ${Math.round(take.durationMs / 10) / 100}s` : ""}
                       </span>
                     </div>
-                    {takeAudioSrc ? (
-                      <audio
-                        controls
-                        src={takeAudioSrc}
-                        data-testid="vp-take-audio"
-                      />
-                    ) : null}
+                    <TakeAudioPlayer src={takeAudioSrc} testId="vp-take-audio" />
                     {take.errorMessage ? <p className="muted">{take.errorMessage}</p> : null}
                     <div className="voice-studio-actions">
                       <Button
@@ -1185,13 +1197,7 @@ export function VoicePerformanceStudio({
                           {take.durationMs ? ` · ${Math.round(take.durationMs / 10) / 100}s` : ""}
                           {take.isApproved ? " · approved" : ""}
                         </p>
-                        {compareAudioSrc ? (
-                          <audio
-                            controls
-                            src={compareAudioSrc}
-                            data-testid="vp-compare-audio"
-                          />
-                        ) : null}
+                        <TakeAudioPlayer src={compareAudioSrc} testId="vp-compare-audio" />
                       </div>
                       );
                     })}

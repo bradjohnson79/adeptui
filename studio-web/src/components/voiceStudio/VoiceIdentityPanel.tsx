@@ -225,7 +225,7 @@ export function VoiceIdentityPanel({ projectId, characterId, characterName, onMs
       const items: GeneratedSample[] = (res?.candidates || res?.items || []).map((c: any) => ({
         id: c.id,
         status: c.status || "ready",
-        audioUrl: c.assetId ? api.assetUrl(c.assetId) : undefined,
+        audioUrl: c.assetId ? api.assetUrl(c.assetId, undefined, projectId) : undefined,
       }));
       setSamples(items);
       setGenerationState("done");

@@ -76,6 +76,7 @@ import type { StatusRegistryCheck, StatusRun } from "./codirector/status/types";
  * VITE_API_BASE is a PUBLIC, client-visible configuration value (never secrets).
  */
 import { API_BASE as BASE, apiUrl } from "./runtime/apiBase";
+import { getBoundAssetProjectId } from "./runtime/assetProjectBind";
 
 export { apiUrl };
 
@@ -6795,21 +6796,18 @@ export const api = {
     return apiUrl(`/api/file?path=${encodeURIComponent(absPath)}`);
   },
   /**
-   * Media URL for an asset file.
-   *
-   * When `projectId` is provided, emit the project-scoped file path used by
-   * Voice Performance take/compare players. Without projectId, keep the
-   * legacy global `/api/assets/{id}/file` URL so existing callers stay valid.
-   * Never return "" solely because projectId is missing — that mounts a dead
-   * `<audio>` while take `durationMs` still renders.
+   * Project-scoped media URL. Live contract:
+   * `/api/projects/{pid}/assets/{aid}/file`
+   * Returns "" when projectId and getBoundAssetProjectId() are both empty —
+   * mounting `<audio src="">` is the Ready+duration / 0:00/0:00 pattern.
    */
   assetUrl: (assetId: string, rev?: string | number | null, projectId?: string) => {
-    if (!assetId) return "";
-    const pid = typeof projectId === "string" ? projectId.trim() : "";
-    const path = pid
-      ? `/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/file`
-      : `/api/assets/${encodeURIComponent(assetId)}/file`;
-    const url = apiUrl(path);
+    const pid =
+      (typeof projectId === "string" ? projectId.trim() : "") || getBoundAssetProjectId();
+    if (!assetId || !pid) return "";
+    const url = apiUrl(
+      `/api/projects/${encodeURIComponent(pid)}/assets/${encodeURIComponent(assetId)}/file`,
+    );
     if (rev == null || String(rev) === "") return url;
     const sep = url.includes("?") ? "&" : "?";
     return `${url}${sep}rev=${encodeURIComponent(String(rev))}`;
