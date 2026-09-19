@@ -194,18 +194,73 @@ def stash_removed_item(workspace: dict[str, Any], *, kind: str, item_id: str, pa
 
 
 def replace_master(db: Session, project_id: str, scene_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist Master. Generator / window-topology changes mint a fresh SceneTake.
+
+    Systems P5 fail-closed: same ``stk_`` must NOT keep VCM/continuity across a
+    changed generator or batch window topology. Mint happens BEFORE rematerialize
+    consumers read the new master (save after mint).
+    """
     scene = get_scene(db, project_id, scene_id)
     if not scene:
         return {"ok": False, "error": "SCENE_NOT_FOUND", "mock": False}
     incoming = dict(payload or {})
-    if not incoming.get("sceneTakes"):
-        existing = load_master(db, project_id, scene_id)
-        if existing.get("ok") and isinstance(existing.get("master"), dict):
-            prev = existing["master"]
-            if prev.get("sceneTakes"):
-                incoming["sceneTakes"] = prev["sceneTakes"]
-                incoming.setdefault("currentSceneTakeId", prev.get("currentSceneTakeId"))
-                incoming.setdefault("activeSceneTakeId", prev.get("activeSceneTakeId"))
+    existing = load_master(db, project_id, scene_id)
+    prev_master: dict[str, Any] | None = None
+    if existing.get("ok") and isinstance(existing.get("master"), dict):
+        prev_master = existing["master"]
+        if not incoming.get("sceneTakes") and prev_master.get("sceneTakes"):
+            incoming["sceneTakes"] = prev_master["sceneTakes"]
+            incoming.setdefault("currentSceneTakeId", prev_master.get("currentSceneTakeId"))
+            incoming.setdefault("activeSceneTakeId", prev_master.get("activeSceneTakeId"))
     master = SceneTimelineMaster.model_validate(incoming)
-    save_master(db, project_id, scene_id, master)
-    return {"ok": True, "master": master.model_dump(), "mock": False}
+    from .scene_takes import (
+        enforce_execution_boundary_if_topology_changed,
+        window_execution_fingerprint,
+    )
+
+    boundary = None
+    bump = False
+    if prev_master is not None:
+        prev_fp = window_execution_fingerprint(prev_master)
+        next_fp = window_execution_fingerprint(master)
+        if prev_fp != next_fp:
+            prev_gen = str((prev_master or {}).get("sceneGeneratorId") or "").strip()
+            next_gen = str(getattr(master, "sceneGeneratorId", None) or "").strip()
+            reason = (
+                "generator_switch"
+                if prev_gen != next_gen
+                else "window_topology_change"
+            )
+            # Keep history takes from disk authority, then mint on the NEW topology.
+            if prev_master.get("sceneTakes") and not (
+                incoming.get("sceneTakes") and incoming.get("_replaceSceneTakes")
+            ):
+                # Prefer server history when FE echoes stale takes with old current id.
+                try:
+                    from .contracts import SceneTake as _SceneTake
+
+                    server_takes = [
+                        _SceneTake.model_validate(t) for t in (prev_master.get("sceneTakes") or [])
+                    ]
+                    # Merge: server list wins as base; incoming may add nothing for switch.
+                    by_id = {t.id: t for t in server_takes}
+                    for t in list(master.sceneTakes or []):
+                        if t.id not in by_id:
+                            by_id[t.id] = t
+                    master.sceneTakes = list(by_id.values())
+                except Exception:
+                    pass
+            boundary = enforce_execution_boundary_if_topology_changed(
+                prev_master, master, reason=reason
+            )
+            bump = boundary is not None
+    save_master(db, project_id, scene_id, master, bump_revision=bump)
+    out: dict[str, Any] = {"ok": True, "master": master.model_dump(), "mock": False}
+    if boundary is not None:
+        out["executionRevision"] = {
+            "mintedSceneTakeId": boundary.id,
+            "reason": (boundary.generationSnapshot or {}).get("executionBoundaryReason"),
+            "supersedesSceneTakeId": (boundary.generationSnapshot or {}).get("supersedesSceneTakeId"),
+            "timelineRevisionBumped": True,
+        }
+    return out

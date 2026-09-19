@@ -410,6 +410,113 @@ def reclaim_misallocated_take_a(master: SceneTimelineMaster) -> bool:
     return True
 
 
+
+def window_execution_fingerprint(master: SceneTimelineMaster | dict[str, Any] | None) -> tuple[Any, ...]:
+    """Generator + ordered batch window topology. Changes mint a new stk_ boundary."""
+    if master is None:
+        return ("", ())
+    if isinstance(master, dict):
+        gen = str(master.get("sceneGeneratorId") or "").strip()
+        blocks = list(master.get("batchBlocks") or [])
+        ordered = tuple(
+            (
+                str(b.get("id") or "").strip(),
+                int(b.get("order") or 0),
+            )
+            for b in sorted(blocks, key=lambda x: (int(x.get("order") or 0), str(x.get("id") or "")))
+        )
+        return (gen, ordered)
+    gen = str(getattr(master, "sceneGeneratorId", None) or "").strip()
+    blocks = list(getattr(master, "batchBlocks", None) or [])
+    ordered = tuple(
+        (
+            str(getattr(b, "id", "") or "").strip(),
+            int(getattr(b, "order", 0) or 0),
+        )
+        for b in sorted(blocks, key=lambda x: (int(getattr(x, "order", 0) or 0), str(getattr(x, "id", "") or "")))
+    )
+    return (gen, ordered)
+
+
+def begin_execution_revision(
+    master: SceneTimelineMaster,
+    *,
+    reason: str,
+) -> SceneTake:
+    """Mint a fresh SceneTake BEFORE window rematerialize / generate.
+
+    Fail-closed ownership (Systems P5):
+    - New ``stk_`` becomes ``currentSceneTakeId`` (VCM continuity key).
+    - ``activeSceneTakeId`` cleared until a real render allocates.
+    - Old ``stk_`` remains in history but is NOT the live continuity chain —
+      VCM resolve prefers active/current, so writes go to the new folder only.
+    - Does NOT start generate. Projection law stays Co-Director's.
+    """
+    prev_id = str(
+        getattr(master, "activeSceneTakeId", None)
+        or getattr(master, "currentSceneTakeId", None)
+        or ""
+    ).strip() or None
+    current = current_scene_take(master)
+    if current is not None and current.status == "ready":
+        _freeze_take_from_live(master, current)
+    active = active_scene_take(master)
+    if active is not None and active.status == "rendering":
+        # Sever mid-flight take from the new topology; do not keep rendering on old stk_.
+        if not take_render_is_live(master, active):
+            active.status = "incomplete"
+            active.completedAt = active.completedAt or _now()
+        else:
+            # Live jobs still bound to old take — mark incomplete for topology break;
+            # cancel remains Gen/Chief owned. Systems only severs continuity keys.
+            active.status = "incomplete"
+            active.completedAt = active.completedAt or _now()
+    index = next_scene_take_index(master)
+    snap = snapshot_generation_config(master)
+    snap["executionBoundaryReason"] = str(reason or "execution_revision")
+    snap["invalidatesContinuityChain"] = True
+    if prev_id:
+        snap["supersedesSceneTakeId"] = prev_id
+    take = SceneTake(
+        id=_nid("stk_"),
+        label=scene_take_letter(index),
+        letterIndex=index,
+        status="incomplete",
+        createdAt=_now(),
+        generationSnapshot=snap,
+        quality=snapshot_quality(master),
+        batches=[
+            SceneTakeBatchMember(batchId=b.id, order=int(b.order or 0), status="pending")
+            for b in sorted(master.batchBlocks or [], key=lambda x: int(x.order or 0))
+        ],
+    )
+    master.sceneTakes = list(master.sceneTakes or [])
+    master.sceneTakes.append(take)
+    master.currentSceneTakeId = take.id
+    master.activeSceneTakeId = None
+    logger.info(
+        "execution_revision minted take=%s supersedes=%s reason=%s",
+        take.id,
+        prev_id,
+        reason,
+    )
+    return take
+
+
+def enforce_execution_boundary_if_topology_changed(
+    previous: SceneTimelineMaster | dict[str, Any] | None,
+    master: SceneTimelineMaster,
+    *,
+    reason: str,
+) -> SceneTake | None:
+    """If generator or batch window topology changed, mint a new stk_ boundary."""
+    if previous is None:
+        return None
+    if window_execution_fingerprint(previous) == window_execution_fingerprint(master):
+        return None
+    return begin_execution_revision(master, reason=reason)
+
+
 def allocate_rendering_take(master: SceneTimelineMaster) -> SceneTake:
     """Mint the next whole-scene Take and make it the active render target."""
     current = current_scene_take(master)

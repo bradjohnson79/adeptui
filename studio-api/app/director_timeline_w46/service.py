@@ -46,6 +46,14 @@ def put_master(db: Session, project_id: str, scene_id: str, payload: dict[str, A
     return store.replace_master(db, project_id, scene_id, payload)
 
 
+def _mint_if_window_topology_changed(prev_master, master, *, reason: str):
+    """Systems P5: batch window CRUD changes execution topology → new stk_."""
+    from .scene_takes import enforce_execution_boundary_if_topology_changed
+
+    return enforce_execution_boundary_if_topology_changed(prev_master, master, reason=reason)
+
+
+
 def dismiss_failure(db: Session, project_id: str, scene_id: str, job_id: str) -> dict[str, Any]:
     """Creator acknowledgment of a terminal failure: record the job id on the
     master so the Preview Monitor stops pinning the scene to that failure.
@@ -95,6 +103,7 @@ def add_batch(
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    prev_fp_master = master.model_copy(deep=True)
     resolved_generator = generator_id or master.sceneGeneratorId
     if planned_duration is None:
         # Caller did not choose -> seed by generator law (H3/blank/auto -> 15s).
@@ -129,7 +138,8 @@ def add_batch(
     ]
     if previous:
         prepare_outgoing_bridge(db, project_id, scene_id, master, max(previous, key=lambda item: item.order).id)
-    store.save_master(db, project_id, scene_id, master)
+    _mint_if_window_topology_changed(prev_fp_master, master, reason="window_topology_change")
+    store.save_master(db, project_id, scene_id, master, bump_revision=True)
     try:
         from ..production_events import ACTOR_USER, record_production_event
 
@@ -156,6 +166,7 @@ def duplicate_batch(db: Session, project_id: str, scene_id: str, batch_id: str) 
     if not payload.get("ok"):
         return payload
     master = SceneTimelineMaster.model_validate(payload["master"])
+    prev_fp_master = master.model_copy(deep=True)
     src = next((b for b in master.batchBlocks if b.id == batch_id), None)
     if not src:
         return {"ok": False, "error": "BATCH_NOT_FOUND", "mock": False}
@@ -180,7 +191,8 @@ def duplicate_batch(db: Session, project_id: str, scene_id: str, batch_id: str) 
     clone.configFingerprint = compute_config_fingerprint(clone)
     master.batchBlocks.append(clone)
     master.batchBlocks.sort(key=lambda b: b.order)
-    store.save_master(db, project_id, scene_id, master)
+    _mint_if_window_topology_changed(prev_fp_master, master, reason="window_topology_change")
+    store.save_master(db, project_id, scene_id, master, bump_revision=True)
     try:
         from ..production_events import ACTOR_USER, record_production_event
 
@@ -208,6 +220,7 @@ def delete_batch(db: Session, project_id: str, scene_id: str, batch_id: str) -> 
     if not bundle.get("ok"):
         return {"ok": False, "error": bundle.get("error") or "NOT_FOUND", "mock": False}
     master: SceneTimelineMaster = bundle["master"]
+    prev_fp_master = master.model_copy(deep=True)
     workspace = bundle["workspace"]
     batch = next((b for b in master.batchBlocks if b.id == batch_id), None)
     if not batch:
@@ -222,6 +235,7 @@ def delete_batch(db: Session, project_id: str, scene_id: str, batch_id: str) -> 
         item_id=batch_id,
         payload=batch.model_dump(),
     )
+    _mint_if_window_topology_changed(prev_fp_master, master, reason="window_topology_change")
     store.save_master(
         db,
         project_id,

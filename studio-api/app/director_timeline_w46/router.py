@@ -12,6 +12,7 @@ from ..db import get_db
 from . import orchestrator, service
 from .contracts import CancelRequest
 from .production_gate import evaluate_director_timeline_gate
+from .creator_batch_surface import INTERNAL_RUNTIME_ONLY
 
 router = APIRouter(prefix="/director-timeline", tags=["director-timeline-w46"])
 
@@ -73,7 +74,11 @@ class AddBatchBody(BaseModel):
     atOrder: Optional[int] = None
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def add_batch(project_id: str, scene_id: str, body: AddBatchBody, db: Session = Depends(get_db)):
     return service.add_batch(
         db,
@@ -86,7 +91,11 @@ def add_batch(project_id: str, scene_id: str, body: AddBatchBody, db: Session = 
     )
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/duplicate")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/duplicate",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def duplicate_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
     result = service.duplicate_batch(db, project_id, scene_id, batch_id)
     if not result.get("ok"):
@@ -94,7 +103,11 @@ def duplicate_batch(project_id: str, scene_id: str, batch_id: str, db: Session =
     return result
 
 
-@router.delete("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}")
+@router.delete(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def delete_batch(project_id: str, scene_id: str, batch_id: str, db: Session = Depends(get_db)):
     result = service.delete_batch(db, project_id, scene_id, batch_id)
     if not result.get("ok"):
@@ -151,7 +164,11 @@ def add_clip_to_batch(
     return orchestrator.add_clip_to_batch(db, project_id, scene_id, batch_id, body.model_dump())
 
 
-@router.patch("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}")
+@router.patch(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def patch_batch(
     project_id: str,
     scene_id: str,
@@ -282,7 +299,11 @@ def generate_scene(project_id: str, scene_id: str, body: GenerateBody, db: Sessi
     )
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/generate")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/generate",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def generate_batch(
     project_id: str,
     scene_id: str,
@@ -347,7 +368,11 @@ class CompleteBody(BaseModel):
     executionSnapshotId: str
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/complete")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/complete",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def complete_batch(
     project_id: str,
     scene_id: str,
@@ -370,7 +395,11 @@ class ApproveBody(BaseModel):
     candidateId: str
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/approve")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/approve",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def approve_batch(
     project_id: str,
     scene_id: str,
@@ -385,7 +414,11 @@ class RejectBody(BaseModel):
     candidateId: str
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/reject")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/reject",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def reject_batch(
     project_id: str,
     scene_id: str,
@@ -410,7 +443,11 @@ class RepairBody(BaseModel):
     policy: Optional[str] = None
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/repair-ranges")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/repair-ranges",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def add_repair(
     project_id: str,
     scene_id: str,
@@ -490,7 +527,11 @@ class RetakeBody(BaseModel):
     continuityAware: Optional[bool] = None
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def retake_batch(
     project_id: str,
     scene_id: str,
@@ -537,7 +578,11 @@ class RepairInpaintApplyBody(BaseModel):
     repairedAssetId: Optional[str] = None
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake-range")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/retake-range",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def retake_range(
     project_id: str,
     scene_id: str,
@@ -718,7 +763,11 @@ class ActivateTakeBody(BaseModel):
     candidateId: str
 
 
-@router.post("/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/activate-take")
+@router.post(
+    "/projects/{project_id}/scenes/{scene_id}/batches/{batch_id}/activate-take",
+    deprecated=True,
+    summary=INTERNAL_RUNTIME_ONLY,
+)
 def activate_take(
     project_id: str,
     scene_id: str,
